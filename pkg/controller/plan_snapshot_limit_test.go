@@ -45,7 +45,7 @@ func TestUpdatePlanSnapshot_BodyLimit(t *testing.T) {
 	if got := postPlanSnapshot(t, srv.URL, "run-plan", 1<<10); got != http.StatusNoContent {
 		t.Fatalf("small snapshot status=%d want 204", got)
 	}
-	if got := postPlanSnapshot(t, srv.URL, "run-plan", store.MaxNodeDispatchEnvelope+1); got != http.StatusBadRequest {
+	if got := postPlanSnapshot(t, srv.URL, "run-plan", store.MaxPlanBytes+1); got != http.StatusBadRequest {
 		t.Errorf("over-cap snapshot status=%d want 400", got)
 	}
 

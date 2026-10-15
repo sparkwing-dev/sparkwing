@@ -154,7 +154,7 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 		}
 		c, cancel := context.WithCancel(ctx)
 		return c, cancel, nil
-	}, Mask: func(string) string { return "masked" }}
+	}, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") }}
 	return input, s, deps, &processes
 }
 

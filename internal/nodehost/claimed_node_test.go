@@ -215,6 +215,10 @@ func TestClaimedNodeHostReportsSetupFailuresThroughTheClaim(t *testing.T) {
 			if change.Actor.Holder != input.Authority.Holder || change.Actor.Generation != input.Generation || change.Extra.Result.Outcome != store.NodeFailed || strings.Contains(change.Extra.Result.MaskedError, "private") {
 				t.Fatalf("report = %+v", change)
 			}
+			failure := change.Extra.Result.Failure
+			if failure == nil || failure.Job != input.NodeID || failure.Stage != "action" || failure.Error == nil || failure.Error.Message != change.Extra.Result.MaskedError {
+				t.Fatalf("setup failure was not recorded: %+v", failure)
+			}
 		})
 	}
 }

@@ -55,7 +55,7 @@ func TestTrigger_ClaimAndReadReturnTheOwningTeam(t *testing.T) {
 	}
 }
 
-// A trigger's idempotency key, webhook delivery id and replay digest are
+// A trigger's idempotency key and signed replay digest are
 // unique within its team, so one team holding a value neither refuses another
 // team the same value nor tells it the value is taken. A repeat inside one
 // team is still refused.
@@ -79,7 +79,6 @@ func TestCreateTriggerKeysReplayAndIdempotencyPerTeam(t *testing.T) {
 		want error
 	}{
 		{"idempotency key", func(tr *store.Trigger) { tr.IdempotencyKey = "k-1" }, store.ErrDuplicateIdempotencyKey},
-		{"webhook delivery", func(tr *store.Trigger) { tr.WebhookDelivery = "d-1" }, store.ErrDuplicateWebhookDelivery},
 		{"replay key", func(tr *store.Trigger) { tr.WebhookReplayKey = "r-1" }, store.ErrDuplicateWebhookDelivery},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

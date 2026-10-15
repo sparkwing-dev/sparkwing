@@ -24,6 +24,9 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	}
 	body := controllerwire.ReconcileRequest{Policy: string(request.Policy), MaterializeOnly: request.MaterializeOnly}
 	if request.Source != nil {
+		if request.Source.Result != nil {
+			return store.ReconciledNode{}, errors.New("controller wire cannot represent a terminal result source")
+		}
 		if request.Policy != request.Source.Kind {
 			return store.ReconciledNode{}, errors.New("reconciliation source policy differs from its read edge")
 		}

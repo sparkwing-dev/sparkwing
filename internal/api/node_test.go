@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -28,14 +27,11 @@ func TestPublicNodeIsIdempotent(t *testing.T) {
 }
 
 func TestPublicNodeScrubsInternalExecutionIdentity(t *testing.T) {
-	avoidUntil := time.Now().Add(time.Minute)
 	raw := &store.Node{
 		RunID: "run", NodeID: "node", ClaimedBy: "private-holder",
 		ClaimWorkerID: "desktop", ClaimExecutorKind: "agent", ClaimReservationID: "claim-reservation",
 		CoordinatorID: "coordinator", ClaimGeneration: 9, ClaimMembershipID: "membership",
-		ExecutorKind: "agent", ExecutorID: "executor", RequiredCoordinatorID: "required-coordinator",
-		ReservationID: "reservation", AvoidCoordinatorID: "avoid-coordinator",
-		AvoidExecutorKind: "gateway", AvoidExecutorID: "avoid-executor", AvoidUntil: &avoidUntil,
+		ExecutorKind: "agent", ExecutorID: "executor", ReservationID: "reservation",
 		ExecutionAttempts: []store.ExecutionAttempt{{
 			RunID: "run", NodeID: "node", Attempt: 1, ClaimGeneration: 9,
 			CoordinatorID: "coordinator", MembershipID: "membership", ExecutorID: "executor",
@@ -48,9 +44,7 @@ func TestPublicNodeScrubsInternalExecutionIdentity(t *testing.T) {
 	}
 	if got.ClaimedBy != "" || got.ClaimWorkerID != "" || got.ClaimExecutorKind != "" ||
 		got.ClaimReservationID != "" || got.CoordinatorID != "" || got.ClaimGeneration != 0 ||
-		got.ClaimMembershipID != "" || got.ExecutorID != "" || got.RequiredCoordinatorID != "" ||
-		got.ReservationID != "" || got.AvoidCoordinatorID != "" || got.AvoidExecutorKind != "" ||
-		got.AvoidExecutorID != "" || got.AvoidUntil != nil {
+		got.ClaimMembershipID != "" || got.ExecutorID != "" || got.ReservationID != "" {
 		t.Fatalf("projected node exposed internal identity: %+v", got)
 	}
 	if len(got.ExecutionAttempts) != 1 {

@@ -13,7 +13,7 @@ func TestNodeForClaimResponseRestoresOnlyRunnerFence(t *testing.T) {
 		RunID: "run", NodeID: "node", ClaimedBy: "holder", ClaimWorkerID: "helper",
 		ClaimExecutorKind: "private-claim-kind", ClaimReservationID: "private-claim-reservation",
 		CoordinatorID: "private-coordinator", ClaimGeneration: 7, ClaimMembershipID: "membership",
-		ExecutorKind: "agent", ExecutorID: "private-executor", RequiredCoordinatorID: "private-required-coordinator",
+		ExecutorKind: "agent", ExecutorID: "private-executor",
 		ReservationID: "reservation",
 		ExecutionAttempts: []store.ExecutionAttempt{{
 			Attempt: 1, ClaimGeneration: 7, CoordinatorID: "private-attempt-coordinator", MembershipID: "private-attempt-membership",
@@ -30,7 +30,7 @@ func TestNodeForClaimResponseRestoresOnlyRunnerFence(t *testing.T) {
 		t.Fatalf("claim response executor_name = %q, want helper", got.ExecutorName)
 	}
 	if got.ClaimWorkerID != "" || got.ClaimExecutorKind != "" || got.ClaimReservationID != "" ||
-		got.CoordinatorID != "" || got.ExecutorID != "" || got.RequiredCoordinatorID != "" {
+		got.CoordinatorID != "" || got.ExecutorID != "" {
 		t.Fatalf("claim response exposed unrelated internal identity: %+v", got)
 	}
 	if attempt := got.ExecutionAttempts[0]; attempt.ClaimGeneration != 0 || attempt.CoordinatorID != "" ||
@@ -58,8 +58,7 @@ func TestNodeForClaimResponseRestoresOnlyRunnerFence(t *testing.T) {
 	}
 	for _, key := range []string{
 		"claim_worker_id", "claim_executor_kind", "claim_reservation_id", "coordinator_id",
-		"executor_id", "required_coordinator_id", "avoid_coordinator_id", "avoid_executor_kind",
-		"avoid_executor_id", "claim_token_prefix", "token_prefix", "principal",
+		"executor_id", "claim_token_prefix", "token_prefix", "principal",
 	} {
 		if _, ok := object[key]; ok {
 			t.Fatalf("claim response exposed %q: %s", key, encoded)

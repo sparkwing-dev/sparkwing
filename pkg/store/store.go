@@ -87,26 +87,33 @@ const (
 	FailureSourceFetch = "source_fetch"
 )
 
-// RetrySource values for runs.retry_source.
-const (
-	RetrySourceManual = "manual"
-	RetrySourceAuto   = "auto"
-)
+// RetrySourceManual identifies an explicitly retried run.
+const RetrySourceManual = "manual"
 
 // Store is the persistent state layer. One instance per process; safe
 // for concurrent use by multiple orchestrator goroutines. The
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	db             *sql.DB
-	dialect        Dialect
-	cleanup        func() error
-	csrfKeyMu      sync.Mutex
-	csrfKey        []byte
-	launchResumeMu sync.Mutex
-	launchResume   *launchCursor
-	outputDir      string
-	githubCheckMu  sync.Mutex
+	resultRecords    nodeResultRecords
+	materializations materializationRecords
+	claimProfiles    ClaimProfileResolver
+	intake           intakeContracts
+	intakePolicy     IntakePolicy
+	plans            planContracts
+	planSecretOpener PlanSecretOpener
+	delegation       delegationContracts
+	sourcePolicy     sourceReleaseContracts
+	clock            func() time.Time
+	db               *sql.DB
+	dialect          Dialect
+	cleanup          func() error
+	csrfKeyMu        sync.Mutex
+	csrfKey          []byte
+	launchResumeMu   sync.Mutex
+	launchResume     *launchCursor
+	outputDir        string
+	githubCheckMu    sync.Mutex
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -665,17 +672,8 @@ type Run struct {
 	// RetryOf points at the source run; RetriedAs is the reverse.
 	RetryOf   string `json:"retry_of,omitempty"`
 	RetriedAs string `json:"retried_as,omitempty"`
-	// RetrySource is RetrySourceManual or RetrySourceAuto.
-	RetrySource             string     `json:"retry_source,omitempty"`
-	RetryCauseNodeID        string     `json:"retry_cause_node_id,omitempty"`
-	RetryAvoidCoordinatorID string     `json:"-"`
-	RetryAvoidExecutorKind  string     `json:"-"`
-	RetryAvoidExecutorID    string     `json:"-"`
-	RetryAvoidUntil         *time.Time `json:"-"`
-	RetryCauseNodeIDs       []string   `json:"retry_cause_node_ids,omitempty"`
-	RetryAvailableAt        *time.Time `json:"retry_available_at,omitempty"`
-	RetryDeadlineAt         *time.Time `json:"retry_deadline_at,omitempty"`
-	AgentLossRetryCount     int        `json:"agent_loss_retry_count,omitempty"`
+	// RetrySource is RetrySourceManual for a manually retried run.
+	RetrySource string `json:"retry_source,omitempty"`
 	// Replay lineage; independent of retry chain.
 	ReplayOfRunID  string `json:"replay_of_run_id,omitempty"`
 	ReplayOfNodeID string `json:"replay_of_node_id,omitempty"`
@@ -812,8 +810,8 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	// primary key on id; a (team, id) target would race that key's own
 	// violation on a same-team re-create.
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -832,11 +830,6 @@ ON CONFLICT(id) DO UPDATE SET
     retry_of        = excluded.retry_of,
     retried_as      = excluded.retried_as,
     retry_source    = excluded.retry_source,
-    retry_cause_node_id = excluded.retry_cause_node_id,
-    retry_avoid_coordinator_id = excluded.retry_avoid_coordinator_id,
-    retry_avoid_executor_kind = excluded.retry_avoid_executor_kind,
-    retry_avoid_executor_id = excluded.retry_avoid_executor_id,
-    retry_avoid_until = excluded.retry_avoid_until,
     replay_of_run_id  = excluded.replay_of_run_id,
     replay_of_node_id = excluded.replay_of_node_id,
     invocation_json   = excluded.invocation_json,
@@ -846,8 +839,7 @@ WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`' AND run
 		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
 		r.DeclaredRepo, r.RepoURL, r.GithubOwner, r.GithubRepo,
-		r.RetryOf, r.RetriedAs, r.RetrySource, r.RetryCauseNodeID,
-		r.RetryAvoidCoordinatorID, r.RetryAvoidExecutorKind, r.RetryAvoidExecutorID, nullableTimeNS(r.RetryAvoidUntil),
+		r.RetryOf, r.RetriedAs, r.RetrySource,
 		r.ReplayOfRunID, r.ReplayOfNodeID,
 		invocationJSON, heartbeat, creatingPrincipal(ctx),
 	)
@@ -1041,7 +1033,7 @@ func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error {
 
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
-const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission, ` + runAttentionColumn
+const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission, ` + runAttentionColumn
 
 // GetRun fetches a single default-team run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
@@ -1108,9 +1100,8 @@ func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
 // by f. The cursor clause depends on that order.
 //
-// Scope: this reads every team. A tenant caller wants [Tenant.ListRuns]
-// and a maintenance caller wants [Operator.ListRunsAcrossTeams]; this
-// twin exists because pkg/storage.StateStoreOld still names it.
+// Scope: this reads every team. Tenant callers use [Tenant.ListRuns].
+// The raw method remains part of pkg/storage.StateStoreOld.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
 	return s.listRuns(ctx, allTeams(), f)
 }
@@ -1432,15 +1423,13 @@ func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
 	var argsJSON, planJSON, invocationJSON, annotationsJSON []byte
 	var createdNS, startedNS int64
-	var finishedNS, heartbeatNS, retryAvoidUntilNS sql.NullInt64
+	var finishedNS, heartbeatNS sql.NullInt64
 	var parent sql.NullString
 	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
 		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
 		&createdNS, &startedNS, &finishedNS, &parent,
 		&r.DeclaredRepo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
-		&r.RetryCauseNodeID, &r.RetryAvoidCoordinatorID, &r.RetryAvoidExecutorKind,
-		&r.RetryAvoidExecutorID, &retryAvoidUntilNS,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
 		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
 		&heartbeatNS, &r.Admission, &r.NeedsAttention)
@@ -1463,10 +1452,6 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if heartbeatNS.Valid {
 		t := time.Unix(0, heartbeatNS.Int64)
 		r.LastHeartbeatAt = &t
-	}
-	if retryAvoidUntilNS.Valid {
-		t := time.Unix(0, retryAvoidUntilNS.Int64)
-		r.RetryAvoidUntil = &t
 	}
 	if parent.Valid {
 		r.ParentRunID = parent.String
@@ -1497,45 +1482,38 @@ type Node struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
 	// Warm-pool dispatch; zero on laptop / K8sRunner paths.
-	ReadyAt                  *time.Time         `json:"ready_at,omitempty"`
-	ClaimedBy                string             `json:"claimed_by,omitempty"`
-	Claimed                  bool               `json:"claimed,omitempty"`
-	LeaseExpiresAt           *time.Time         `json:"lease_expires_at,omitempty"`
-	OfferStartedAt           *time.Time         `json:"offer_started_at,omitempty"`
-	OfferPriorityTarget      int                `json:"offer_priority_target,omitempty"`
-	ClaimBasePriority        int                `json:"claim_base_priority,omitempty"`
-	ClaimPriority            int                `json:"claim_priority,omitempty"`
-	ClaimWorkerID            string             `json:"claim_worker_id,omitempty"`
-	ClaimExecutorKind        string             `json:"claim_executor_kind,omitempty"`
-	ClaimReservationID       string             `json:"claim_reservation_id,omitempty"`
-	CoordinatorID            string             `json:"coordinator_id,omitempty"`
-	ClaimGeneration          int64              `json:"claim_generation,omitempty"`
-	ClaimMembershipID        string             `json:"claim_membership_id,omitempty"`
-	ExecutorKind             string             `json:"executor_kind,omitempty"`
-	ExecutorName             string             `json:"executor_name,omitempty"`
-	ExecutorID               string             `json:"executor_id,omitempty"`
-	ExecutorLocation         string             `json:"executor_location,omitempty"`
-	ExecutionSite            string             `json:"execution_site,omitempty"`
-	ExecutionSiteName        string             `json:"execution_site_name,omitempty"`
-	RequiredCoordinatorID    string             `json:"required_coordinator_id,omitempty"`
-	RequiredExecutorLocation string             `json:"required_executor_location,omitempty"`
-	ExecutionStartedAt       *time.Time         `json:"execution_started_at,omitempty"`
-	ReservationID            string             `json:"reservation_id,omitempty"`
-	AttemptsConsumed         int                `json:"attempts_consumed,omitempty"`
-	RetryRootRunID           string             `json:"retry_root_run_id,omitempty"`
-	ExecutionAttempts        []ExecutionAttempt `json:"execution_attempts,omitempty"`
-	AvoidCoordinatorID       string             `json:"-"`
-	AvoidExecutorKind        string             `json:"-"`
-	AvoidExecutorID          string             `json:"-"`
-	AvoidUntil               *time.Time         `json:"-"`
+	ReadyAt             *time.Time         `json:"ready_at,omitempty"`
+	ClaimedBy           string             `json:"claimed_by,omitempty"`
+	Claimed             bool               `json:"claimed,omitempty"`
+	LeaseExpiresAt      *time.Time         `json:"lease_expires_at,omitempty"`
+	OfferStartedAt      *time.Time         `json:"offer_started_at,omitempty"`
+	OfferPriorityTarget int                `json:"offer_priority_target,omitempty"`
+	ClaimBasePriority   int                `json:"claim_base_priority,omitempty"`
+	ClaimPriority       int                `json:"claim_priority,omitempty"`
+	ClaimWorkerID       string             `json:"claim_worker_id,omitempty"`
+	ClaimExecutorKind   string             `json:"claim_executor_kind,omitempty"`
+	ClaimReservationID  string             `json:"claim_reservation_id,omitempty"`
+	CoordinatorID       string             `json:"coordinator_id,omitempty"`
+	ClaimGeneration     int64              `json:"claim_generation,omitempty"`
+	ClaimMembershipID   string             `json:"claim_membership_id,omitempty"`
+	ExecutorKind        string             `json:"executor_kind,omitempty"`
+	ExecutorName        string             `json:"executor_name,omitempty"`
+	ExecutorID          string             `json:"executor_id,omitempty"`
+	ExecutorLocation    string             `json:"executor_location,omitempty"`
+	ExecutionSite       string             `json:"execution_site,omitempty"`
+	ExecutionSiteName   string             `json:"execution_site_name,omitempty"`
+	ExecutionStartedAt  *time.Time         `json:"execution_started_at,omitempty"`
+	ReservationID       string             `json:"reservation_id,omitempty"`
+	AttemptsConsumed    int                `json:"attempts_consumed,omitempty"`
+	RetryRootRunID      string             `json:"retry_root_run_id,omitempty"`
+	ExecutionAttempts   []ExecutionAttempt `json:"execution_attempts,omitempty"`
 
 	// PlacementReason names why the claiming runner got this node:
 	// "preference", "fallback" after the local-first hold window, or "none"
 	// when it carried no preference. Empty on a node no claim path decided.
 	PlacementReason string `json:"placement_reason,omitempty"`
 	// PlacementHoldFrom is when the node became claimable, which the
-	// local-first hold runs from. It survives the ready_at bump a
-	// label-mismatched claim applies, so the hold expires on schedule.
+	// local-first hold runs from.
 	PlacementHoldFrom *time.Time `json:"placement_hold_from,omitempty"`
 
 	// CreditCPUClassCores is the cpu class the claim billed this node at,
@@ -1659,26 +1637,6 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		requestedSlots = 1
 	}
 	n.RequestedSlots = requestedSlots
-	retrySource, isAgentLossRetry, err := s.requiredAgentLossRetryNodeSourceTx(ctx, tx, n.RunID, n.NodeID)
-	if err != nil {
-		return err
-	}
-	if isAgentLossRetry {
-		n.Deps = slices.Clone(retrySource.Record.Deps)
-		n.NeedsLabels = slices.Clone(retrySource.Record.NeedsLabels)
-		n.PrefersLabels = slices.Clone(retrySource.Record.PrefersLabels)
-		n.RequestedCores = retrySource.Record.RequestedCores
-		n.RequestedMemoryBytes = retrySource.Record.RequestedMemoryBytes
-		n.RequestedSlots = retrySource.Record.RequestedSlots
-		n.RequiredCoordinatorID = retrySource.Record.RequiredCoordinatorID
-		n.RequiredExecutorLocation = retrySource.Record.RequiredExecutorLocation
-		n.AvoidCoordinatorID = retrySource.Record.AvoidCoordinatorID
-		n.AvoidExecutorKind = retrySource.Record.AvoidExecutorKind
-		n.AvoidExecutorID = retrySource.Record.AvoidExecutorID
-		n.AvoidUntil = retrySource.Record.AvoidUntil
-		n.AttemptsConsumed = retrySource.Record.AttemptsConsumed
-		requestedSlots = n.RequestedSlots
-	}
 	depsJSON, _ := json.Marshal(n.Deps)
 	var generatedJSON []byte
 	if n.Generated != nil {
@@ -1694,59 +1652,17 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if len(n.PrefersLabels) > 0 {
 		prefersJSON, _ = json.Marshal(n.PrefersLabels)
 	}
-	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON []byte
-	var policyHash, supervisorRequirementsHash, bodyRequirementsHash string
-	var policyVersion, bodyProtocol int
-	if isAgentLossRetry {
-		persisted, persistErr := nodeExecutionPolicyPersistence(&retrySource.Record)
-		if persistErr != nil {
-			return persistErr
-		}
-		policyJSON, policyHash = persisted.PolicyJSON, persisted.PolicyHash
-		policyVersion, bodyProtocol = persisted.PolicyVersion, persisted.BodyProtocol
-		supervisorRequirementsJSON = persisted.SupervisorRequirementsJSON
-		supervisorRequirementsHash = persisted.SupervisorRequirementsHash
-		bodyRequirementsJSON = persisted.BodyRequirementsJSON
-		bodyRequirementsHash = persisted.BodyRequirementsHash
-	}
-	// safety: the lineage root keys the attempt history this node is shown
-	// and numbers its attempts against, so only the server's own retry record
-	// names it; a root carried on the node would let its creator adopt any
-	// run's history.
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefers_labels,
                    requested_cores, requested_memory_bytes, requested_slots,
-			       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
-			       attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
-			       execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
-			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
-			       execution_body_requirements_json, execution_body_requirements_hash,
+			       attempts_consumed, retry_root_run_id,
 			       spec_hash, generated_json, seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE team = ? AND id = ?), ''),
-		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE team = ? AND id = ?), ''),
-		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_id FROM runs WHERE team = ? AND id = ?), ''),
-		COALESCE(?, (SELECT retry_avoid_until FROM runs WHERE team = ? AND id = ?)),
-		?,
-		COALESCE((SELECT root_run_id FROM agent_loss_retries WHERE team = ? AND run_id = ?), ?),
-		?,
-		?,
-		?, ?, ?, ?, ?, ?, ?, ?,
-		?, ?,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE team = ? AND run_id = ?))`,
 		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
-		n.AvoidCoordinatorID, string(team), n.RunID,
-		n.AvoidExecutorKind, string(team), n.RunID,
-		n.AvoidExecutorID, string(team), n.RunID,
-		nullableUnixNano(n.AvoidUntil), string(team), n.RunID,
 		n.AttemptsConsumed,
-		string(team), n.RunID, n.RunID,
-		n.RequiredCoordinatorID,
-		n.RequiredExecutorLocation,
-		policyJSON, policyHash, policyVersion, bodyProtocol,
-		supervisorRequirementsJSON, supervisorRequirementsHash,
-		bodyRequirementsJSON, bodyRequirementsHash,
+		n.RunID,
 		n.SpecHash, generatedJSON,
 		string(team), n.RunID)
 	if err != nil {
@@ -1835,7 +1751,7 @@ func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps 
 	depsJSON, _ := json.Marshal(deps)
 	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
 		`UPDATE nodes SET deps_json = ?
-		  WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NULL AND `+nodeExecutionUnsealed,
+		  WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NULL`,
 		depsJSON, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
@@ -1843,7 +1759,7 @@ func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps 
 	if affected, err := res.RowsAffected(); err != nil {
 		return err
 	} else if affected != 1 {
-		return errExecutionPolicyConflict
+		return ErrLockHeld
 	}
 	return fencedRows(res, fenced)
 }
@@ -2073,11 +1989,11 @@ func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	defer func() { _ = rows.Close() }()
 	var out []*Node
 	for rows.Next() {
-		record := &nodeRecord{}
+		record := &Node{}
 		if err := scanNodeRow(rows, record); err != nil {
 			return nil, err
 		}
-		out = append(out, &record.Node)
+		out = append(out, record)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -2105,7 +2021,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 	row := t.s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
  WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID)
-	record := &nodeRecord{}
+	record := &Node{}
 	if err := scanNodeRow(row, record); err != nil {
 		return nil, err
 	}
@@ -2114,7 +2030,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 		return nil, err
 	}
 	record.ExecutionAttempts = attempts
-	return &record.Node, nil
+	return record, nil
 }
 
 const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
@@ -2130,22 +2046,15 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
 	   artifact_manifest, cpu_nanos, max_rss_bytes, process_wall_nanos,
 	   coordinator_id, claim_generation, claim_membership_id,
 	   executor_kind, executor_id, executor_location, execution_started_at, reservation_id,
-	   attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
-	   execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
-	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
-	   execution_body_requirements_json, execution_body_requirements_hash,
-	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
-	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash, generated_json,
-	   (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id)`
+	   attempts_consumed, retry_root_run_id,
+	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash, generated_json`
 
-func scanNodeRow(rs rowScanner, n *nodeRecord) error {
+func scanNodeRow(rs rowScanner, n *Node) error {
 	var depsJSON, labelsJSON, prefersJSON, annotationsJSON []byte
 	var outputKey, outputSHA sql.NullString
 	var outputSize sql.NullInt64
-	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON, generatedJSON []byte
-	var policyHash, supervisorRequirementsHash, bodyRequirementsHash, pipeline string
-	var policyVersion, bodyProtocol int
-	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
+	var generatedJSON []byte
+	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS sql.NullInt64
 	var holdFromNS sql.NullInt64
 	var claimedBy sql.NullString
 	var exitCode sql.NullInt64
@@ -2160,12 +2069,8 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
 		&n.CoordinatorID, &n.ClaimGeneration, &n.ClaimMembershipID,
 		&n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executionStartedNS, &n.ReservationID,
-		&n.AttemptsConsumed, &n.RetryRootRunID, &n.RequiredCoordinatorID, &n.RequiredExecutorLocation,
-		&policyJSON, &policyHash, &policyVersion, &bodyProtocol,
-		&supervisorRequirementsJSON, &supervisorRequirementsHash,
-		&bodyRequirementsJSON, &bodyRequirementsHash,
-		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
-		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &generatedJSON, &pipeline)
+		&n.AttemptsConsumed, &n.RetryRootRunID,
+		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &generatedJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
 	}
@@ -2187,13 +2092,6 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	}
 	if len(prefersJSON) > 0 {
 		_ = json.Unmarshal(prefersJSON, &n.PrefersLabels)
-	}
-	if err := restoreNodeExecutionPolicySeal(n, policyJSON, policyHash, policyVersion, bodyProtocol,
-		supervisorRequirementsJSON, supervisorRequirementsHash, bodyRequirementsJSON, bodyRequirementsHash); err != nil {
-		return err
-	}
-	if err := validateNodeExecutionPolicy(n, pipeline); err != nil {
-		return err
 	}
 	n.CreditCPUClassMemoryBytes = CPUClassMemoryBytes(n.CreditCPUClassCores)
 	if startedNS.Valid {
@@ -2227,10 +2125,6 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	if executionStartedNS.Valid {
 		t := time.Unix(0, executionStartedNS.Int64)
 		n.ExecutionStartedAt = &t
-	}
-	if avoidUntilNS.Valid {
-		t := time.Unix(0, avoidUntilNS.Int64)
-		n.AvoidUntil = &t
 	}
 	if heartbeatNS.Valid {
 		t := time.Unix(0, heartbeatNS.Int64)
@@ -2621,100 +2515,17 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 
 // MarkNodeReady is [Store.MarkNodeReady] confined to t's team.
 func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	return t.markNodeReady(ctx, runID, nodeID, nil)
-}
-
-func (s *Store) markNodeReadyWithExecutionPolicy(ctx context.Context, runID, nodeID string, policy nodeExecutionPolicy) error {
-	t, err := s.runTenant(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return t.markNodeReady(ctx, runID, nodeID, &policy)
-}
-
-func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy *nodeExecutionPolicy) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	node := &nodeRecord{}
+	node := &Node{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
 		return err
 	}
-	var pipeline string
-	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE team = ? AND id = ?`, string(t.team), runID).Scan(&pipeline); errors.Is(err, sql.ErrNoRows) {
-		return notFound("node", runID+"/"+nodeID)
-	} else if err != nil {
-		return err
-	}
 	opened := node.OfferStartedAt != nil
-	retrySource, isAgentLossRetry, err := t.s.requiredAgentLossRetryNodeSourceTx(ctx, tx, runID, nodeID)
-	if err != nil {
-		return err
-	}
-	if isAgentLossRetry && !agentLossRetrySourceMatchesMaterialized(retrySource, node) {
-		return fmt.Errorf("%w: retry node no longer matches durable source", errExecutionPolicyInvalid)
-	}
-	if policy == nil {
-		if err := validateNodeExecutionPolicy(node, pipeline); err != nil {
-			return err
-		}
-		if nodeHasExecutionPolicy(node) {
-			return errExecutionPolicyConflict
-		}
-		if isAgentLossRetry && nodeHasExecutionPolicy(&retrySource.Record) {
-			return errExecutionPolicyConflict
-		}
-	} else {
-		candidate := *node
-		copyNodeExecutionPolicy(&candidate, node)
-		if err := setNodeExecutionPolicy(&candidate, *policy); err != nil {
-			return err
-		}
-		if err := validateNodeExecutionPolicy(&candidate, pipeline); err != nil {
-			return err
-		}
-		if isAgentLossRetry {
-			if !nodeExecutionPoliciesEqual(&candidate, &retrySource.Record) {
-				return errExecutionPolicyConflict
-			}
-		}
-		if err := validateNodeExecutionPolicy(node, pipeline); err != nil {
-			return err
-		}
-		if nodeHasExecutionPolicy(node) {
-			if !nodeExecutionPoliciesEqual(node, &candidate) {
-				return errExecutionPolicyConflict
-			}
-		} else {
-			if opened {
-				return errExecutionPolicyConflict
-			}
-			persisted, persistErr := nodeExecutionPolicyPersistence(&candidate)
-			if persistErr != nil {
-				return persistErr
-			}
-			result, err := tx.ExecContext(ctx, `UPDATE nodes
-			   SET execution_policy_json = ?, execution_policy_hash = ?, execution_policy_version = ?, execution_body_protocol = ?,
-       execution_supervisor_requirements_json = ?, execution_supervisor_requirements_hash = ?,
-       execution_body_requirements_json = ?, execution_body_requirements_hash = ?
-			 WHERE team = ? AND run_id = ? AND node_id = ? AND offer_started_at IS NULL
-			   AND `+nodeExecutionUnsealed,
-				persisted.PolicyJSON, persisted.PolicyHash, persisted.PolicyVersion, persisted.BodyProtocol,
-				persisted.SupervisorRequirementsJSON, persisted.SupervisorRequirementsHash,
-				persisted.BodyRequirementsJSON, persisted.BodyRequirementsHash, string(t.team), runID, nodeID)
-			if err != nil {
-				return err
-			}
-			if changed, err := result.RowsAffected(); err != nil {
-				return err
-			} else if changed != 1 {
-				return errExecutionPolicyConflict
-			}
-		}
-	}
 	var summary claimRoundSummary
 	if !opened {
 		summary, err = claimRoundSummaryTx(ctx, tx, runID, nodeID)
@@ -2771,108 +2582,6 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 	return tx.Commit()
 }
 
-// ResetNodeForAutoRetry returns a failed node to pending so it runs again.
-// A node whose holder was lost (agent_lost) resets only for its run's
-// trigger holder, resuming the run, only while no agent-loss retry run took
-// the run over, and never once the run finished or a cancel was requested.
-func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
-	return s.defaultTenant().ResetNodeForAutoRetry(ctx, runID, nodeID)
-}
-
-// ResetNodeForAutoRetry is [Store.ResetNodeForAutoRetry] confined to t's team.
-func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
-		return ErrLockHeld
-	}
-	_, triggerClaim := TriggerClaimFenceFromContext(ctx)
-	if triggerClaim {
-		if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
-			return err
-		}
-	}
-	var status, outcome, failureReason string
-	var claimedBy sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT status, outcome, failure_reason, claimed_by
-  FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+t.s.forUpdate(), string(t.team), runID, nodeID).Scan(
-		&status, &outcome, &failureReason, &claimedBy); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return notFound("node", runID+"/"+nodeID)
-		}
-		return err
-	}
-	if status == nodeStatusPending && outcome == "" && !claimedBy.Valid {
-		return tx.Commit()
-	}
-	// safety: a node whose holder was lost stays failed when an agent-loss retry run took its run over;
-	// otherwise the run's own trigger holder, resuming the run, may run it again.
-	lostReset := ""
-	if failureReason == FailureAgentLost {
-		var retried int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_loss_retries WHERE team = ? AND source_run_id = ?`,
-			string(t.team), runID).Scan(&retried); err != nil {
-			return err
-		}
-		var runStatus string
-		var cancelRequested sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT r.status, t.cancel_requested_at FROM runs r
-  LEFT JOIN triggers t ON t.team = r.team AND t.id = r.id
- WHERE r.team = ? AND r.id = ?`, string(t.team), runID).Scan(&runStatus, &cancelRequested); err != nil {
-			return err
-		}
-		// safety: a cancelled or finished run, or one with a cancel requested, never reopens a node.
-		if !triggerClaim || retried > 0 || isTerminalRunStatus(runStatus) || cancelRequested.Valid {
-			return ErrLockHeld
-		}
-		lostReset = FailureAgentLost
-	}
-	if status != nodeStatusDone || outcome != "failed" {
-		return ErrLockHeld
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
-		return err
-	}
-	// safety: the reset puts the claim generation back to 0, so a token from
-	// the reset attempt would authorize again once a later claim reaches its
-	// generation.
-	team := t.team
-	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_tokens WHERE team = ? AND run_id = ? AND node_id = ?`,
-		string(team), runID, nodeID); err != nil {
-		return err
-	}
-	if err := clearNodeOutputTx(ctx, tx, team, runID, nodeID); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE nodes
-   SET status = ?, outcome = '', error = '',
-       started_at = NULL, finished_at = NULL, ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL,
-       offer_priority_target = 0, claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-       claim_base_priority = 0, claim_priority = 0, claim_worker_id = '', claim_executor_kind = '',
-       claim_reservation_id = '', claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL, claim_generation = 0,
-       coordinator_id = '', claim_membership_id = '', executor_kind = '', executor_id = '',
-       executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
-       credit_charged_through = 0,
-       failure_reason = '', exit_code = NULL, annotations_json = '[]', summary = '', artifact_manifest = ''
- WHERE team = ? AND run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND (failure_reason != ? OR failure_reason = ?)`,
-		nodeStatusPending, string(t.team), runID, nodeID, nodeStatusDone, "failed", FailureAgentLost, lostReset)
-	if err != nil {
-		return err
-	}
-	changed, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return ErrLockHeld
-	}
-	return tx.Commit()
-}
-
 // RevokeNodeReady cancels an unclaimed offer round.
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
 	return s.defaultTenant().RevokeNodeReady(ctx, runID, nodeID)
@@ -2914,8 +2623,6 @@ func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 // a fresh lease, bound to principal. Claimable = ready_at set,
 // unclaimed, !done, and every needs_labels entry appears in
 // runnerLabels. ErrNotFound when no candidate matches.
-// Label-mismatched candidates have their ready_at bumped 1us so they
-// don't starve the FIFO queue.
 //
 // A [ClaimPlacement] on ctx adds the local-first hold: a candidate whose
 // preference runnerLabels does not satisfy is passed over while a live runner
@@ -2924,8 +2631,7 @@ func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 // [PlacementPreferred], [PlacementFallback], or [PlacementNone].
 //
 // claimant is the authenticated token the claim answers to;
-// [Store.PrincipalHoldsNodeClaim] and [Store.HeartbeatNodeClaim] admit
-// only that token afterwards. Pass the zero value when the caller is
+// [Store.HeartbeatNodeClaim] admits only that token afterwards. Pass the zero value when the caller is
 // unauthenticated, which leaves the claim unbound. lease is clamped to
 // [MaxLeaseDuration].
 //
@@ -2958,11 +2664,8 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, 
 	}
 
 	for range maxClaimAttempts {
-		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, profile, runnerLabels, placement, warm, scope)
+		target, err := s.scanClaimCandidates(ctx, profile, runnerLabels, placement, warm, scope)
 		if err != nil {
-			return nil, err
-		}
-		if err := s.bumpMismatchedNodes(ctx, scope, mismatched); err != nil {
 			return nil, err
 		}
 		if target == nil {
@@ -3079,30 +2782,28 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 
 // safety: walks the queue outside any transaction, so a poll that takes nothing
 // writes nothing and holds no lock.
-func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, profile match.Profile, runnerLabels []string,
+func (s *Store) scanClaimCandidates(ctx context.Context, profile match.Profile, runnerLabels []string,
 	placement ClaimPlacement, warm warmClassFilter, scope teamScope,
-) (*claimCandidate, []nodeKey, error) {
-	var mismatched []nodeKey
+) (*claimCandidate, error) {
 	var cursor *claimCandidate
 	ghScope, scoped := GitHubRunnerScopeFrom(ctx)
 	admitted := map[string]bool{}
 	needRepo := profile.Accept != nil || placement.needsRunRepository()
 	repos := map[string]match.Repository{}
 	for range claimScanRounds {
-		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
+		batch, err := s.readClaimCandidates(ctx, cursor, warm, scope)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for i := range batch {
 			n := &batch[i]
-			if !match.EvaluateOld(profile, match.Demand{Selector: n.needs}).OK() {
-				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
+			if !match.Evaluate(profile, match.Demand{Selector: n.needs}).OK() {
 				continue
 			}
 			if scoped {
 				ok, err := ghScope.admitsRun(ctx, s, n.runID, admitted)
 				if err != nil {
-					return nil, nil, err
+					return nil, err
 				}
 				if !ok {
 					continue
@@ -3114,19 +2815,19 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 			if needRepo {
 				repo, err := s.runRepositoryOf(ctx, scope, n.runID, repos)
 				if err != nil {
-					return nil, nil, err
+					return nil, err
 				}
 				demand.Repo = &repo
 			}
 			// safety: the node stays queued for a runner whose list admits its
 			// repository and whose capacity holds it, so passing over it writes
 			// nothing.
-			if !match.EvaluateOld(profile, demand).OK() {
+			if !match.Evaluate(profile, demand).OK() {
 				continue
 			}
 			refused, err := warm.refuses(ctx, storeRowQuerier{s}, n.runID, n.nodeID)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			// safety: the node is waiting for a Kubernetes node of its own,
 			// which claims it by name, so passing over it writes nothing: a
@@ -3139,25 +2840,24 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 			if n.decision.hold {
 				continue
 			}
-			return n, mismatched, nil
+			return n, nil
 		}
 		if len(batch) < claimScanBatch {
-			return nil, mismatched, nil
+			return nil, nil
 		}
 		cursor = &batch[len(batch)-1]
 	}
-	return nil, mismatched, nil
+	return nil, nil
 }
 
 func (s *Store) readClaimCandidates(
-	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter, scope teamScope,
+	ctx context.Context, after *claimCandidate, warm warmClassFilter, scope teamScope,
 ) ([]claimCandidate, error) {
 	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
 	if err != nil {
 		return nil, err
 	}
-	args := []any{time.Now().UnixNano(), coordinatorID, "", ""}
-	args = append(args, teamArgs...)
+	args := teamArgs
 	// safety: the stamped class keeps a queue of large nodes out of the scan
 	// window, so a small node behind thousands of them is still reachable.
 	classClause := ""
@@ -3182,10 +2882,7 @@ func (s *Store) readClaimCandidates(
  FROM nodes
 	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
 	AND `+nodeRunActiveSQL("nodes.")+`
-	AND required_coordinator_id = '' AND required_executor_location = ''
-	AND `+nodeExecutionUnsealed+` AND `+nodeTriggerDispatched+`
-   AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+scopeClause+keyset+`
+	AND `+nodeTriggerDispatched+teamClause+classClause+scopeClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
 	 LIMIT ?`, args...)
 	if err != nil {
@@ -3251,36 +2948,6 @@ func decodeCandidateLabels(runID, nodeID string, raw []byte, out *[]string) bool
 		return false
 	}
 	return true
-}
-
-// safety: moves the nodes this runner's labels rule out behind the clock so
-// they do not starve the queue behind them.
-func (s *Store) bumpMismatchedNodes(ctx context.Context, scope teamScope, keys []nodeKey) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
-	if err != nil {
-		return err
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	for _, key := range keys {
-		args := []any{time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID}
-		args = append(args, teamArgs...)
-		if _, err := tx.ExecContext(
-			ctx,
-			`UPDATE nodes SET ready_at = `+s.greatest()+`(?, ready_at + ?)
-			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`+teamClause,
-			args...,
-		); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 // safety: returns nil when another runner took the node between the scan and
@@ -3350,9 +3017,7 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 		        credit_charged_through = 0,
 		        placement_reason = ?, claim_generation = claim_generation + 1
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
-		    AND `+nodeNotDone+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+`
-		    AND required_coordinator_id = '' AND required_executor_location = ''
-		    AND `+nodeExecutionUnsealed+teamClause,
+		    AND `+nodeNotDone+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+teamClause,
 		awardArgs...,
 	)
 	if err != nil {
@@ -3380,12 +3045,12 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 			return nil, err
 		}
 	}
-	n := &nodeRecord{}
+	n := &Node{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
  FROM nodes WHERE run_id = ? AND node_id = ?`, candidate.runID, candidate.nodeID), n); err != nil {
 		return nil, err
 	}
-	return &n.Node, nil
+	return n, nil
 }
 
 // UpdateNodeActivity sets status_detail and bumps last_heartbeat.
@@ -3555,26 +3220,6 @@ func (t *Tenant) TriggerClaimant(ctx context.Context, triggerID string) (ClaimId
 	return claimant, nil
 }
 
-// PrincipalHoldsNodeClaim reports whether claimant holds the node's
-// unexpired claim. An unbound claimant holds nothing, so an
-// unauthenticated caller never passes this check.
-func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error) {
-	if !claimant.bound() {
-		return false, nil
-	}
-	var held int
-	err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM nodes
-		  WHERE run_id = ? AND node_id = ? AND claim_principal = ?
-		    AND claim_token_prefix = ?
-		    AND `+nodeClaimLiveSQL(""),
-		runID, nodeID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
-	if err != nil {
-		return false, err
-	}
-	return held > 0, nil
-}
-
 // PrincipalHoldsRunClaim reports whether claimant holds an unexpired
 // claim on any node of the run. An unbound claimant holds nothing.
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error) {
@@ -3700,64 +3345,6 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err
 	return pairs, nil
 }
 
-func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
-	recoveries, err := s.recoverExpiredNodeClaims(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pairs := make([][2]string, 0, len(recoveries))
-	for _, recovery := range recoveries {
-		pairs = append(pairs, [2]string{recovery.RunID, recovery.NodeID})
-	}
-	return pairs, nil
-}
-
-func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.QueryContext(ctx,
-		`SELECT node_id FROM nodes WHERE run_id = ? AND `+nodeNotDone, runID)
-	if err != nil {
-		return nil, err
-	}
-	var nodeIDs []string
-	for rows.Next() {
-		var nid string
-		if err := rows.Scan(&nid); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		nodeIDs = append(nodeIDs, nid)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(nodeIDs) == 0 {
-		return nil, nil
-	}
-	now := time.Now().UnixNano()
-	for _, nid := range nodeIDs {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE nodes
-   SET `+nodeFailSet+`,
-       error = ?, failure_reason = ?, finished_at = ?,
-       ready_at = NULL
- WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
-			errMsg, failureReason, now, runID, nid); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return nodeIDs, nil
-}
-
 // Event is one audit/wire record for a run; Seq is per-run monotonic.
 type Event struct {
 	RunID   string          `json:"run_id"`
@@ -3860,12 +3447,8 @@ func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, k
 	if err != nil {
 		return 0, err
 	}
-	if err := lockEventSequenceTx(ctx, tx, team, runID); err != nil {
-		return 0, err
-	}
 	var seq int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE team = ? AND run_id = ?`, string(team), runID).Scan(&seq); err != nil {
+	if err := tx.QueryRowContext(ctx, `UPDATE runs SET event_bytes=event_bytes+?,event_count=event_count+1 WHERE team=? AND id=? RETURNING event_count`, eventBytes(kind, raw), team, runID).Scan(&seq); err != nil {
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `
@@ -3874,9 +3457,6 @@ VALUES (?,?,?,?,?,?,?)`, string(team), runID, seq, nodeID, kind, at.UnixNano(), 
 	if err != nil {
 		return 0, err
 	}
-	_, err = tx.ExecContext(ctx,
-		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE team = ? AND id = ?`,
-		eventBytes(kind, raw), string(team), runID)
 	return seq, err
 }
 
@@ -4097,7 +3677,7 @@ type Trigger struct {
 	RepoInherited bool `json:"repo_inherited,omitempty"`
 	// RetryOf is threaded into the persisted Run row.
 	RetryOf string `json:"retry_of,omitempty"`
-	// RetrySource is "manual" or "auto".
+	// RetrySource is "manual" for a retried run.
 	RetrySource string `json:"retry_source,omitempty"`
 	// ParentNodeID: which parent node spawned this; for retry-lineage
 	// chaining across nested spawns.
@@ -4142,30 +3722,11 @@ type Trigger struct {
 	// claim token that reads the run's declared secrets while the claim
 	// lives.
 	ClaimToken string `json:"claim_token,omitempty"`
-	// WebhookDelivery is the provider's delivery id for the webhook that
-	// created this trigger, empty for every other submission path. At
-	// most one trigger may carry any given non-empty value across the
-	// whole store -- a partial unique index enforces it -- so replaying
-	// a signed delivery, whether at the pipeline it was sent to or at
-	// another one, is refused instead of producing a second run.
-	//
-	// The scope is global and not the pipeline because a delivery id
-	// names one event at the provider, not one caller's intent: the same
-	// id arriving at two pipelines is a replay, not two requests.
+	// WebhookDelivery records the provider's delivery header for audit.
+	// One delivery can start several pipelines. WebhookReplayKey owns deduplication.
 	WebhookDelivery string `json:"webhook_delivery,omitempty"`
-	// WebhookReplayKey is a digest of the material the webhook's
-	// signature covered -- the pipeline and the request body -- and it
-	// carries the replay decision. At most one trigger may hold any
-	// given non-empty value, so re-sending a body that was already
-	// accepted is refused however its delivery id reads.
-	//
-	// WebhookDelivery cannot carry that decision alone: it is a header
-	// the sender picks and the HMAC does not cover, so anyone who
-	// captured one delivery could re-send it under an id of their own.
-	//
-	// The store writes this field and never reads it back: it exists for
-	// the unique constraint, and [Tenant.FindTriggerByWebhookReplay]
-	// resolves a collision to the trigger that won it.
+	// WebhookReplayKey identifies verified delivery material and its pipeline.
+	// It is unique within the team, regardless of the unsigned delivery header.
 	WebhookReplayKey string `json:"webhook_replay_key,omitempty"`
 	// Team owns the trigger and the run it becomes. A claim and a read
 	// return it so the runner that executes the run can place its work
@@ -4303,9 +3864,6 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		if t.WebhookReplayKey != "" && strings.Contains(err.Error(), triggerWebhookReplayKeyColumn) {
 			return fmt.Errorf("%w: replay key %q", ErrDuplicateWebhookDelivery, t.WebhookReplayKey)
 		}
-		if t.WebhookDelivery != "" && strings.Contains(err.Error(), triggerWebhookDeliveryColumn) {
-			return fmt.Errorf("%w: delivery %q", ErrDuplicateWebhookDelivery, t.WebhookDelivery)
-		}
 		if t.IdempotencyKey != "" && strings.Contains(err.Error(), "idempotency_key") {
 			return fmt.Errorf("%w: idempotency key %q", ErrDuplicateIdempotencyKey, t.IdempotencyKey)
 		}
@@ -4319,10 +3877,8 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 // and the caller resolves it with [Store.FindTriggerByIdempotencyKey].
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 
-// ErrDuplicateWebhookDelivery reports that a trigger insert carried a
-// webhook delivery id an earlier trigger already holds. The delivery is
-// a replay of work the store has already accepted, so the caller
-// refuses it rather than starting a second run.
+// ErrDuplicateWebhookDelivery reports a signed replay key already accepted
+// by a trigger in the same team. The caller returns that original run.
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 
 func isUniqueViolation(err error) bool {
@@ -4399,34 +3955,6 @@ func (t *Tenant) endTriggerClaim(ctx context.Context, id string, refundAll bool,
 	return true, nil
 }
 
-// FinishLapsedClaim closes out a claimed trigger whose lease expired and whose
-// run ended under that same claim, reporting false without writing when it did
-// not. A re-dispatch inherits the previous attempt's terminal run row, so a run
-// that ended before this claim began says nothing about the dispatch holding it.
-func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) {
-	var team string
-	err := s.queryRow(ctx, `SELECT team FROM triggers WHERE id = ?`, id).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return (&Tenant{s: s, team: Team(team)}).endTriggerClaim(ctx, id, false,
-		`UPDATE triggers SET status = CASE WHEN EXISTS
-		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
-		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
-		  WHERE id = ? AND status = ?
-		    AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
-		    AND claimed_at IS NOT NULL
-		    AND EXISTS (SELECT 1 FROM runs
-		                 WHERE runs.id = triggers.id
-		                   AND runs.finished_at IS NOT NULL
-		                   AND runs.finished_at > triggers.claimed_at
-		                   AND `+runTerminalIn+`)`,
-		id, triggerStatusClaimed, time.Now().UnixNano())
-}
-
 // FinishRunAtGeneration writes a run's terminal status only while seq is
 // still its trigger's current claim generation.
 //
@@ -4471,36 +3999,6 @@ func (t *Tenant) FinishRunAtGeneration(ctx context.Context, runID string, seq in
 		return false, err
 	}
 	return true, nil
-}
-
-// ListExpiredClaims returns the ids of claimed triggers whose lease has
-// lapsed, without changing anything.
-//
-// It is deliberately a read. ReapExpiredTriggers flips every lapsed
-// claim straight back to pending, which is the right move for a cluster
-// worker but not for a local consumer: a lapsed lease there can mean a
-// dead dispatch or merely a suspended laptop, and the caller has to look
-// at the run row -- and at what it is executing itself -- before
-// deciding. Separating the observation from the action is what lets that
-// judgment happen.
-func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
-	rows, err := s.query(ctx,
-		`SELECT id FROM triggers
-		  WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?`,
-		triggerStatusClaimed, time.Now().UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }
 
 // RequeueUnstartedClaim returns a lapsed claim to the pending queue only
@@ -4758,9 +4256,6 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now()
-	if err := s.expirePendingAgentLossRetriesTx(ctx, tx, now); err != nil {
-		return nil, err
-	}
 	if err := cancelRequeuedCancelledTriggersTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
@@ -4772,12 +4267,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        idempotency_key, claim_seq, webhook_delivery, team, webhook_replay_key
   FROM triggers
  WHERE status = ? AND available_at <= ? AND cancel_requested_at IS NULL
-   AND credit_reserved_at = 0 AND runner_pin = ''
-   AND NOT EXISTS (
-       SELECT 1 FROM agent_loss_retries alr
-       JOIN runs source_run ON source_run.id = alr.source_run_id
-       WHERE alr.run_id = triggers.id
-         AND source_run.status NOT IN ('success','failed','cancelled'))` + teamClause
+   AND credit_reserved_at = 0 AND runner_pin = ''` + teamClause
 	args := []any{triggerStatusPending, now.UnixNano()}
 	args = append(args, teamArgs...)
 	if len(pipelines) > 0 {
@@ -4844,7 +4334,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 				}
 			}
 			repo := triggerRunRepository(&row.t, row.envJSON)
-			if filtered && !match.EvaluateOld(profile, match.Demand{Repo: &repo, Trigger: true}).OK() {
+			if filtered && !match.Evaluate(profile, match.Demand{Repo: &repo, Trigger: true}).OK() {
 				continue
 			}
 			t, argsJSON, envJSON, createdNS, found = row.t, row.argsJSON, row.envJSON, row.createdNS, true
@@ -5113,344 +4603,6 @@ func (t *Tenant) FinishTrigger(ctx context.Context, id string) error {
 	return ErrLockHeld
 }
 
-func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) {
-	now := time.Now()
-	nowNS := now.UnixNano()
-	controlled, err := s.timeOutControllerApprovals(ctx, now)
-	if err != nil {
-		return controlled, err
-	}
-
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT run_id, node_id FROM approvals
-		WHERE resolved_at IS NULL
-		  AND timeout_ms > 0
-		  AND requested_at + (timeout_ms * 1000000) < ?
-		  AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team = approvals.team
-		      AND n.run_id = approvals.run_id AND n.node_id = approvals.node_id AND n.kind = ?)
-	`, nowNS, nodeKindApproval)
-	if err != nil {
-		return nil, err
-	}
-	var pairs [][2]string
-	for rows.Next() {
-		var rid, nid string
-		if err := rows.Scan(&rid, &nid); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		pairs = append(pairs, [2]string{rid, nid})
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(pairs) == 0 {
-		return controlled, nil
-	}
-
-	for _, p := range pairs {
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE approvals
-			   SET resolved_at = ?,
-			       resolution  = ?,
-			       approver    = ?,
-			       comment     = ?
-			 WHERE run_id = ? AND node_id = ?
-			   AND resolved_at IS NULL
-		`,
-			nowNS,
-			ApprovalResolutionTimedOut,
-			"controller-reaper",
-			"timeout enforced by controller (orchestrator silent past timeout_ms)",
-			p[0], p[1],
-		); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return append(controlled, pairs...), nil
-}
-
-func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
-	cutoff := time.Now().Add(-grace).UnixNano()
-	now := time.Now().UnixNano()
-
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT r.id FROM runs r
-		WHERE r.status = ?
-		  AND r.dispatch = ''
-		  AND r.started_at > 0
-		  AND r.started_at < ?
-		  AND EXISTS (
-		      SELECT 1 FROM triggers t
-		       WHERE t.id = r.id AND t.status IN (?, ?)
-		  )
-	`, runStatusPending, cutoff, triggerStatusDone, triggerStatusFailed)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
-	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE runs SET status = ?, error = ?, finished_at = ?
-			  WHERE id = ? AND status = ?`,
-			runStatusFailed, reason, now, id, runStatusPending); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return ids, nil
-}
-
-func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
-	cutoff := time.Now().Add(-grace).UnixNano()
-	now := time.Now().UnixNano()
-
-	rows, err := s.query(ctx, `
-SELECT id, team FROM runs
- WHERE status = ?
-   AND last_heartbeat_at IS NOT NULL
-   AND last_heartbeat_at < ?
-   AND NOT EXISTS (
-       SELECT 1 FROM triggers t
-        WHERE t.id = runs.id AND `+triggerRequeuedSQL("t.")+`)`,
-		runStatusRunning, cutoff)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	teams := map[string]Team{}
-	for rows.Next() {
-		var id, team string
-		if err := rows.Scan(&id, &team); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-		teams[id] = Team(team)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	for _, id := range ids {
-		if err := s.cascadeOrphanedNodes(ctx, id, reason, now); err != nil {
-			return nil, err
-		}
-		if err := (&Tenant{s: s, team: teams[id]}).FinishRun(ctx, id, runStatusFailed, reason); err != nil {
-			return nil, err
-		}
-	}
-	return ids, nil
-}
-
-// safety: this is the deadline the requeued-trigger exclusions answer to, or a
-// queue no runner serves would hold a run open for good. An executing run
-// answers only to the heartbeat the stale-running sweep reads, because the
-// claimant that spawned the work can die while the work runs on.
-func (s *Store) reapQueueExpiredRuns(ctx context.Context, deadline, staleHeartbeat time.Duration, reason string) ([]string, error) {
-	now := time.Now()
-	cutoff := now.Add(-deadline).UnixNano()
-	heartbeatCutoff := now.Add(-staleHeartbeat).UnixNano()
-	nowNS := now.UnixNano()
-
-	rows, err := s.query(ctx, `
-SELECT r.id, r.team
-  FROM runs r
-  JOIN triggers t ON t.id = r.id
- WHERE r.finished_at IS NULL
-   AND r.status IN (?, ?)
-   AND `+triggerRequeuedSQL("t.")+`
-   AND r.started_at > 0
-   AND r.started_at < ?
-   AND t.available_at < ?
-   AND (r.status = ?
-        OR (r.last_heartbeat_at IS NOT NULL AND r.last_heartbeat_at < ?))`,
-		runStatusPending, runStatusRunning, cutoff, cutoff,
-		runStatusPending, heartbeatCutoff)
-	if err != nil {
-		return nil, err
-	}
-	var candidates []string
-	teams := map[string]Team{}
-	for rows.Next() {
-		var id, team string
-		if err := rows.Scan(&id, &team); err != nil {
-			closeRowsOrLog(rows)
-			return nil, err
-		}
-		candidates = append(candidates, id)
-		teams[id] = Team(team)
-	}
-	closeRowsOrLog(rows)
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	var ids []string
-	for _, id := range candidates {
-		// safety: a claimant can take the run between the select and this write,
-		// so the status the select read is re-asserted rather than trusted.
-		res, err := s.exec(ctx, `
-UPDATE runs SET status = ?, error = ?, finished_at = ?
- WHERE id = ? AND finished_at IS NULL AND status IN (?, ?)`,
-			runStatusFailed, reason, nowNS, id, runStatusPending, runStatusRunning)
-		if err != nil {
-			return nil, err
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return nil, err
-		}
-		if affected == 0 {
-			continue
-		}
-		if err := s.cascadeOrphanedNodes(ctx, id, reason, nowNS); err != nil {
-			return nil, err
-		}
-		// safety: the trigger outlives the run it names, so a late claimant would
-		// compile and execute a child for a run this sweep already failed.
-		if err := (&Tenant{s: s, team: teams[id]}).FinishTrigger(ctx, id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, nil
-}
-
-func (s *Store) cascadeOrphanedNodes(ctx context.Context, runID, errMsg string, nowNS int64) error {
-	return s.inTx(ctx, func(tx *storeTx) error {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE nodes
-   SET `+nodeFailSet+`,
-       error          = ?,
-       failure_reason = 'orphaned',
-       finished_at    = ?
- WHERE run_id = ? AND status = ?`,
-			errMsg, nowNS, runID, nodeStatusRunning); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `
-UPDATE nodes
-   SET status         = ?,
-       outcome        = 'cancelled',
-       error          = 'orphaned: orchestrator process exited before this node ran',
-       failure_reason = 'orphaned',
-       finished_at    = ?
- WHERE run_id = ? AND status = ?`,
-			nodeStatusDone, nowNS, runID, nodeStatusPending)
-		return err
-	})
-}
-
-func (s *Store) orphanedRunsQuery() string {
-	return `
-SELECT r.id, r.team
-  FROM runs r
- WHERE r.status = ?
-   AND r.started_at < ?
-   AND ` + s.greatest() + `(
-         COALESCE((SELECT MAX(last_heartbeat) FROM nodes n WHERE n.run_id = r.id), 0),
-         COALESCE(r.last_heartbeat_at, 0),
-         r.started_at
-       ) < ?`
-}
-
-func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
-	cutoff := time.Now().Add(-threshold).UnixNano()
-
-	rows, err := s.query(ctx, s.orphanedRunsQuery(), runStatusRunning, cutoff, cutoff)
-	if err != nil {
-		return 0, err
-	}
-	var orphanIDs []string
-	teams := map[string]Team{}
-	for rows.Next() {
-		var id, team string
-		if err := rows.Scan(&id, &team); err != nil {
-			_ = rows.Close()
-			return 0, err
-		}
-		orphanIDs = append(orphanIDs, id)
-		teams[id] = Team(team)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
-	for _, id := range orphanIDs {
-		now := time.Now().UnixNano()
-		errMsg := fmt.Sprintf("orphaned: no heartbeat for >%s; orchestrator process is no longer running", threshold)
-		if err := s.cascadeOrphanedNodes(ctx, id, errMsg, now); err != nil {
-			return 0, err
-		}
-		if err := (&Tenant{s: s, team: teams[id]}).FinishRun(ctx, id, runStatusFailed, errMsg); err != nil {
-			return 0, err
-		}
-	}
-	// safety: a local dispatch failure whose run finish did not land leaves
-	// the run pending under a finished trigger, and only this pass can close it.
-	pendingIDs, err := s.reapStalePendingRuns(ctx, 5*DefaultLeaseDuration,
-		"reaped: trigger finished without recording its run")
-	if err != nil {
-		return len(orphanIDs), err
-	}
-	orphanIDs = append(orphanIDs, pendingIDs...)
-
-	if err := s.inTx(ctx, func(tx *storeTx) error {
-		_, err := tx.ExecContext(ctx, `
-UPDATE nodes
-   SET status         = ?,
-       outcome        = 'cancelled',
-       error          = COALESCE(NULLIF(error, ''), 'orphaned: run terminated before this node ran'),
-       failure_reason = COALESCE(NULLIF(failure_reason, ''), 'orphaned'),
-       finished_at    = ?
- WHERE status = ?
-   AND run_id IN (SELECT id FROM runs WHERE `+runTerminalIn+`)`,
-			nodeStatusDone, time.Now().UnixNano(), nodeStatusPending)
-		return err
-	}); err != nil {
-		return len(orphanIDs), err
-	}
-
-	return len(orphanIDs), nil
-}
-
 // ListPendingTriggersForParent returns every pending trigger whose
 // parent_run_id matches parentRunID, oldest first. Used by the
 // laptop-local trigger loop to scope its claim queue to the run
@@ -5463,17 +4615,9 @@ func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID st
 // ListPendingTriggersForParent is [Store.ListPendingTriggersForParent] confined to t's team.
 func (t *Tenant) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
 	now := time.Now()
-	if err := t.s.expirePendingAgentLossRetries(ctx, now); err != nil {
-		return nil, err
-	}
 	rows, err := t.s.query(ctx, `
 SELECT id FROM triggers
  WHERE team = ? AND status = ? AND parent_run_id = ? AND available_at <= ?
-	AND NOT EXISTS (
-	    SELECT 1 FROM agent_loss_retries alr
-	    JOIN runs source_run ON source_run.team = alr.team AND source_run.id = alr.source_run_id
-	    WHERE alr.team = triggers.team AND alr.run_id = triggers.id
-	      AND source_run.status NOT IN ('success','failed','cancelled'))
 	ORDER BY created_at ASC`, string(t.team), triggerStatusPending, parentRunID, now.UnixNano())
 	if err != nil {
 		return nil, err
@@ -5525,9 +4669,6 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now()
-	if err := s.expirePendingAgentLossRetriesTx(ctx, tx, now); err != nil {
-		return nil, err
-	}
 	if err := cancelRequeuedCancelledTriggersTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
@@ -5548,12 +4689,7 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		        claim_principal = ?, claim_token_prefix = ?
 		  WHERE id = ? AND status = ? AND (runner_pin = '' OR (runner_pin = ? AND claim_seq = 0 AND created_at >= ?))
 		    AND available_at <= ? AND cancel_requested_at IS NULL
-		    AND credit_reserved_at = 0
-		    AND NOT EXISTS (
-		        SELECT 1 FROM agent_loss_retries alr
-		        JOIN runs source_run ON source_run.id = alr.source_run_id
-		        WHERE alr.run_id = triggers.id
-		          AND source_run.status NOT IN ('success','failed','cancelled'))`+teamClause,
+		    AND credit_reserved_at = 0`+teamClause,
 		append(append(args, now.UnixNano()), teamArgs...)...)
 	if err != nil {
 		return nil, err
@@ -6303,24 +5439,9 @@ func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error) {
 	return v, nil
 }
 
-const nodeExecutionUnsealed = `COALESCE(execution_policy_hash, '') = ''
-   AND COALESCE(LENGTH(execution_policy_json), 0) = 0
-   AND COALESCE(execution_policy_version, 0) = 0
-   AND COALESCE(execution_body_protocol, 0) = 0
-   AND COALESCE(LENGTH(execution_supervisor_requirements_json), 0) = 0
-   AND COALESCE(execution_supervisor_requirements_hash, '') = ''
-   AND COALESCE(LENGTH(execution_body_requirements_json), 0) = 0
-   AND COALESCE(execution_body_requirements_hash, '') = ''`
-
 // TriggerIdempotencyIndexName is the unique index enforcing at most one
 // trigger per (pipeline, idempotency key).
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
-
-// TriggerWebhookDeliveryIndexName is the unique index enforcing at most
-// one trigger per webhook delivery id.
-const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
-
-const triggerWebhookDeliveryColumn = "webhook_delivery"
 
 // TriggerWebhookReplayKeyIndexName is the unique index enforcing at most
 // one trigger per digest of the signed material a webhook delivery
@@ -6427,4 +5548,8 @@ func databaseEmpty(ctx context.Context, tx *storeTx) (bool, error) {
 	var n int
 	err := tx.QueryRowContext(ctx, q).Scan(&n)
 	return n == 0, err
+}
+
+func isTerminalRunStatus(status string) bool {
+	return status == "success" || status == runStatusFailed || status == runStatusCancelled
 }

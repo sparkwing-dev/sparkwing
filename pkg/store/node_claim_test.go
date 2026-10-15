@@ -249,7 +249,8 @@ func TestNodeClaim_PrincipalBindingGatesClaimOwnership(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_runner-a"}, "pod-1", time.Minute, nil); err != nil {
+	node, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_runner-a"}, "pod-1", time.Minute, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -268,12 +269,12 @@ func TestNodeClaim_PrincipalBindingGatesClaimOwnership(t *testing.T) {
 		{"claiming token after the lease expires", claimant, now.Add(2 * time.Minute), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			held, err := s.PrincipalHoldsNodeClaim(ctx, "run-1", "node-a", tc.claimant, tc.at)
+			held, err := s.NodeClaimFenceIsLive(ctx, "run-1", "node-a", store.NodeClaimFence{Claimant: tc.claimant, HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID, ReservationID: node.ReservationID, ClaimGeneration: node.ClaimGeneration}, tc.at)
 			if err != nil {
-				t.Fatalf("PrincipalHoldsNodeClaim: %v", err)
+				t.Fatalf("NodeClaimFenceIsLive: %v", err)
 			}
 			if held != tc.want {
-				t.Errorf("PrincipalHoldsNodeClaim(%+v) = %v, want %v", tc.claimant, held, tc.want)
+				t.Errorf("NodeClaimFenceIsLive(%+v) = %v, want %v", tc.claimant, held, tc.want)
 			}
 			held, err = s.PrincipalHoldsRunClaim(ctx, "run-1", tc.claimant, tc.at)
 			if err != nil {
@@ -510,7 +511,7 @@ func TestNodeClaim_LeaseIsClampedToTheServerCap(t *testing.T) {
 	if err := s.HeartbeatNodeClaim(heartbeatCtx, "run-1", "node-a", claimant, "pod-1", day); err != nil {
 		t.Fatalf("HeartbeatNodeClaim: %v", err)
 	}
-	held, err := s.PrincipalHoldsNodeClaim(ctx, "run-1", "node-a", claimant,
+	held, err := s.NodeClaimFenceIsLive(ctx, "run-1", "node-a", store.NodeClaimFence{Claimant: claimant, HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID, ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration},
 		time.Now().Add(store.MaxLeaseDuration).Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -57,7 +58,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if err != nil {
 		return err
 	}
-	actor := store.Actor{Kind: store.ActorHolder, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
+	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
 	ref := store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
@@ -161,6 +162,7 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, ref store.NodeRef, a
 	if ctx.Err() != nil {
 		result.Outcome, result.Reason = store.NodeCancelled, string(apierr.ReasonCancelled)
 	}
+	result = recordNodeFailure(ref.NodeID, result, h.Mask)
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
 	_, err := h.Store.TransitionNode(reportCtx, store.NodeTransition{Ref: ref, Actor: actor, To: result.Outcome, Cause: store.CauseReport, Extra: store.TransitionExtra{Result: &result}})

@@ -205,3 +205,14 @@ func TestRemoteOperationsPreserveTransportErrors(t *testing.T) {
 		t.Fatal("lost structured expansion failure")
 	}
 }
+
+func TestRemoteReconciliationRefusesUnrepresentableResultSource(t *testing.T) {
+	f := &ownerOperationWire{}
+	_, err := (&RemoteOwnerStore{Controller: f}).ReconcileNode(t.Context(), store.ReconcileRequest{
+		Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Policy: store.SourceManualRetry,
+		Source: &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: store.NodeRef{RunID: "previous", NodeID: "job"}, StateSeq: 9}},
+	})
+	if err == nil || f.run != "" {
+		t.Fatal("sent a result source after silently dropping its identity")
+	}
+}

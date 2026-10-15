@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -43,7 +44,7 @@ func (s *claimedHostStore) TransitionNode(_ context.Context, transition store.No
 
 func (s *claimedHostStore) RenewNodeClaim(_ context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
 	row := s.snapshot.Nodes[0]
-	if ref != row.Ref || actor.Kind != store.ActorHolder || actor.Holder != row.ClaimedBy || actor.CapabilityPrefix != row.CapabilityPrefix || actor.Generation != row.Generation {
+	if ref != row.Ref || actor.Kind != store.ActorHolder || actor.Holder != row.ClaimedBy || actor.CapabilityPrefix != row.CapabilityPrefix || actor.Generation != row.Generation || actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) {
 		return store.LeaseBeat{}, errors.New("renewal changed claim authority")
 	}
 	beats := s.beats.Add(1)
@@ -142,5 +143,40 @@ func CheckClaimedNodeLifecycle(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// CheckClaimedAwardFence generates award mismatches that must fail before renewal or acquisition.
+func CheckClaimedAwardFence(t *testing.T, field uint8, value string) {
+	t.Helper()
+	var trace []string
+	var processes []*executionSDK
+	input, storage, host := executionHostFixture(t, "success", &trace, &processes)
+	foreign := "foreign:" + value
+	switch field % 8 {
+	case 0:
+		input.Authority.Holder = foreign
+	case 1:
+		input.Authority.CapabilityPrefix = foreign
+	case 2:
+		input.Generation++
+	case 3:
+		input.Attempt++
+	case 4:
+		input.SpecHash = foreign
+	case 5:
+		input.Accepted.RunID = foreign
+	case 6:
+		input.NodeID = foreign
+	case 7:
+		input.Execution.NoProgressTimeout.Value++
+	}
+	acquired := false
+	host.Acquire = func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
+		acquired = true
+		return &source.Entry{}, nil
+	}
+	if err := host.Execute(t.Context(), input); err == nil || acquired || len(processes) != 0 || len(storage.reports) != 0 || storage.beats.Load() != 0 {
+		t.Fatal("changed award crossed the claim fence")
 	}
 }

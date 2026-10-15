@@ -24,15 +24,16 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	var process ExecutorProcess
 	var session *executorSession
 	afterRun := false
+	stage := "action"
 	defer func() {
 		timeout := executorAttemptTimeout(ctx)
 		stopIdle()
 		cancel()
 		if timeout != nil {
-			result = h.failure(timeout)
+			result = h.failureAt(timeout, stage)
 			var cleanupErr *executorCleanupError
 			if errors.As(err, &cleanupErr) {
-				result = h.failure(errors.Join(timeout, cleanupErr))
+				result = h.failureAt(errors.Join(timeout, cleanupErr), stage)
 			} else {
 				err = nil
 			}
@@ -143,11 +144,13 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		result = h.failure(timeout)
 	}
 	if bodyErr == nil && timeout == nil && job.Closures.Verify != "" {
+		stage = "verify"
 		if _, verifyErr := h.eval(ctx, session, input, job.Closures.Verify, nil); verifyErr != nil {
-			result = h.failure(verifyErr)
+			result = h.failureAt(verifyErr, stage)
 		}
 	}
 	if executorAttemptTimeout(ctx) == nil && (result.Outcome != store.NodeFailed || !retryAllowed) {
+		stage = "action"
 		afterRun = true
 		if afterErr := h.afterRun(ctx, session, input, job, result); afterErr != nil {
 			return h.failure(afterErr), afterErr

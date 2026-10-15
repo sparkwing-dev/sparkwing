@@ -17,7 +17,7 @@ func TestConsumerRefusesUncapturedRetriesBeforeDispatch(t *testing.T) {
 		t.Error("retry reached dispatch without its execution environment")
 		return nil
 	}
-	for _, source := range []string{store.RetrySourceManual, store.RetrySourceAuto} {
+	for _, source := range []string{store.RetrySourceManual} {
 		t.Run(source, func(t *testing.T) {
 			home := t.TempDir()
 			st := consumerTestStore(t, home)

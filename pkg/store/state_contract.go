@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -23,6 +24,7 @@ type RunRow struct {
 	Dispatch          string
 	AllowedPools      []string
 	Owner             *OwnerLeaseRef
+	CreatedAt         time.Time
 	CancelRequestedAt *time.Time
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
@@ -88,6 +90,7 @@ type ReconciledNode struct {
 	Node   NodeRow
 	Claim  *ClaimAward
 	Source *MaterializeSource
+	// Bearer is delivered only to the executing host after the self-claim commits.
 	Bearer []byte `json:"-"`
 }
 
@@ -113,41 +116,67 @@ type StateEvent struct {
 
 // ReadRun returns only the Tenant's run, including both seals and the stable team number.
 func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error) {
-	panic("unimplemented: c1-data")
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return RunRow{}, err
+	}
+	defer rollbackOrLog(tx)
+	return readRunTx(ctx, tx, t.team, runID)
 }
 
 // ReadNode returns persisted state without interpreting an elapsed lease as an implicit requeue.
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error) {
-	panic("unimplemented: c1-data")
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return NodeRow{}, err
+	}
+	defer rollbackOrLog(tx)
+	return readNodeTx(ctx, tx, t.team, ref)
 }
 
 // ReadSnapshot prevents scheduling from a mix of states observed in different transactions.
 func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (RunSnapshot, error) {
-	panic("unimplemented: c1-data")
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return RunSnapshot{}, err
+	}
+	defer rollbackOrLog(tx)
+	return readSnapshotTx(ctx, tx, t.team, runID)
 }
 
 // ReadStateEvents resumes strictly after the caller's sequence; state transitions own lifecycle event writes.
 func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64, limit int) ([]StateEvent, error) {
-	panic("unimplemented: c1-data")
+	if after < 0 || limit <= 0 {
+		return nil, errors.New("invalid event cursor or limit")
+	}
+	rows, err := t.s.query(ctx, `SELECT seq,state_seq,node_id,kind,ts,payload FROM events WHERE team=? AND run_id=? AND seq>? ORDER BY seq LIMIT ?`, t.team, runID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StateEvent
+	for rows.Next() {
+		v := StateEvent{RunID: runID}
+		var at int64
+		var payload []byte
+		if err := rows.Scan(&v.Seq, &v.StateSeq, &v.NodeID, &v.Kind, &at, &payload); err != nil {
+			return nil, err
+		}
+		v.Payload = payload
+		v.At = time.Unix(0, at).UTC()
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 // ReconcileNode decides and self-claims atomically; WaitHolder callers reconcile again after requeue.
 // Materialization reads outcome and authorized result edges from persisted source state,
 // never from a caller assertion. Source.Kind must match Policy; SourceNone forbids Source.
 func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error) {
-	panic("unimplemented: c1-data")
+	return t.reconcileNode(ctx, request)
 }
 
 // RenewOwner also renews self-claimed jobs and continuously live plan and job concurrency holders atomically.
-func (t *Tenant) RenewOwner(ctx context.Context, actor Actor) (LeaseBeat, error) {
-	panic("unimplemented: c1-data")
-}
-
-// RenewNodeClaim renews the exact live claim and its bound concurrency holders using the store clock.
-func (t *Tenant) RenewNodeClaim(ctx context.Context, ref NodeRef, actor Actor) (LeaseBeat, error) {
-	panic("unimplemented: c1-data")
-}
-
 // StateEventRule makes every lifecycle event name store-owned on customer surfaces.
 type StateEventRule struct {
 	RequestOnly bool
@@ -193,5 +222,12 @@ func LockOrder() []LockClass {
 
 // safety: one advisory-lock spelling must serve all dialects to keep the declared lock order reviewable.
 func advisoryLockTx(ctx context.Context, tx *storeTx, name string) error {
-	panic("unimplemented: c1-data")
+	if name == "" {
+		return errors.New("empty lock name")
+	}
+	if tx.dialect == DialectPostgres {
+		_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(?,0))`, name)
+		return err
+	}
+	return nil
 }

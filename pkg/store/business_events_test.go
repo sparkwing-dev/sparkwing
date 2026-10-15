@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -32,21 +31,9 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	}
 	signIn(t, st, "ev-owner", "ev@example.com")
 
-	open := func(session string) string {
-		t.Helper()
-		id, err := tn.OpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := tn.AttachCreditCheckout(ctx, id, session, now.Add(time.Hour)); err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	open("cs_paid")
 	if _, err := tn.RecordCreditGrant(ctx, store.CreditGrantRequest{
 		Kind: store.CreditGrantPaid, AmountMicro: 10 * store.MicroCreditsPerCredit,
-		Reference: "pi_1", CreatedBy: "checkout", Checkout: "cs_paid",
+		Reference: "pi_1", CreatedBy: "checkout",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -54,31 +41,6 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		t.Fatal(err)
 	}
 	if _, err := tn.GrantCredits(ctx, store.CreditGrantFree, store.MicroCreditsPerCredit, "promo", "operator"); err != nil {
-		t.Fatal(err)
-	}
-	expired := open("cs_gone")
-	for i, want := range []bool{true, false} {
-		closed, err := tn.CloseCreditCheckout(ctx, "cs_gone", store.BusinessEventCheckoutExpired, "checkout", now)
-		if err != nil || closed != want {
-			t.Fatalf("close #%d = %v, %v; want %v", i+1, closed, err, want)
-		}
-	}
-	if closed, err := tn.CloseCreditCheckout(ctx, "cs_paid", store.BusinessEventCheckoutFailed, "checkout", now); err != nil || closed {
-		t.Fatalf("closing a paid checkout = %v, %v; want unchanged", closed, err)
-	}
-	if _, err := tn.CloseCreditCheckout(ctx, "cs_nobody", store.BusinessEventCheckoutFailed, "checkout", now); !errors.Is(err, store.ErrCheckoutNotFound) {
-		t.Fatalf("closing a session with no checkout = %v, want ErrCheckoutNotFound", err)
-	}
-	stranger := signIn(t, st, "ev-stranger", "stranger@example.com")
-	if _, err := tenant(t, st, stranger.Account.ActiveTeam).CloseCreditCheckout(
-		ctx, "cs_paid", store.BusinessEventCheckoutFailed, "checkout", now); !errors.Is(err, store.ErrCheckoutNotFound) {
-		t.Fatalf("another team closing this team's session = %v, want ErrCheckoutNotFound", err)
-	}
-	if _, err := tn.CloseCreditCheckout(ctx, "cs_x", "checkout.lost", "checkout", now); !errors.Is(err, store.ErrInvalidInput) {
-		t.Fatalf("an unknown checkout outcome = %v, want ErrInvalidInput", err)
-	}
-	dropped := open("")
-	if err := tn.DropCreditCheckout(ctx, dropped); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.HoldTeamForDispute(ctx, team, "dp_1", "pi_1", "card holder says fraud", now); err != nil {
@@ -100,10 +62,9 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		got[ev.Kind] = append(got[ev.Kind], ev)
 	}
 	for kind, want := range map[string]int{
-		store.BusinessEventTeamCreated: 1, store.BusinessEventCheckoutOpened: 3,
+		store.BusinessEventTeamCreated:  1,
 		store.BusinessEventCheckoutPaid: 1, store.BusinessEventCreditReversed: 1,
-		store.BusinessEventCreditGranted: 1, store.BusinessEventCheckoutExpired: 1,
-		store.BusinessEventCheckoutFailed: 1, store.BusinessEventTeamFrozen: 1,
+		store.BusinessEventCreditGranted: 1, store.BusinessEventTeamFrozen: 1,
 		store.BusinessEventTeamUnfrozen: 1,
 	} {
 		if len(got[kind]) != want {
@@ -111,14 +72,8 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		}
 	}
 	if paid := got[store.BusinessEventCheckoutPaid]; len(paid) == 1 &&
-		(paid[0].Actor != "checkout" || paid[0].Attrs["session_id"] != "cs_paid") {
-		t.Errorf("paid event = %+v, want actor checkout and its session", paid[0])
-	}
-	if ev := got[store.BusinessEventCheckoutExpired]; len(ev) == 1 && (ev[0].SubjectID != expired || ev[0].Attrs["session_id"] != "cs_gone") {
-		t.Errorf("expired event = %+v, want checkout %s and session cs_gone", ev[0], expired)
-	}
-	if ev := got[store.BusinessEventCheckoutFailed]; len(ev) == 1 && ev[0].SubjectID != dropped {
-		t.Errorf("failed event = %+v, want the dropped checkout %s", ev[0], dropped)
+		(paid[0].Actor != "checkout" || paid[0].Attrs["reference"] != "pi_1") {
+		t.Errorf("paid event = %+v, want actor checkout and its payment", paid[0])
 	}
 	if ev := got[store.BusinessEventTeamFrozen]; len(ev) == 1 && ev[0].Attrs["reason"] != nil {
 		t.Errorf("frozen event copies the free-form reason: %+v", ev[0])

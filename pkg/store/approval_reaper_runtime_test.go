@@ -1,0 +1,206 @@
+package store
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+)
+
+func approvalReaperFixture(t *testing.T, policy string) (*Tenant, NodeRef, *time.Time, SingletonLease, NodeTransition) {
+	t.Helper()
+	timeout := int64(1000)
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "gate", Approval: &nodeproto.ApprovalSpec{TimeoutMS: &timeout, OnTimeout: policy}},
+		{ID: "after", Needs: []string{"gate"}},
+	}}
+	tenant, request, now := planFixture(t, runspec.DispatchController)
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Seal.Plan = raw
+	execution, err := (fakeIntakeContracts{}).ResolvePlan(settings.PlanInputs{Request: request.Seal.Request, Plan: plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := execution.Jobs["gate"]
+	gate.ApprovalWait = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Second}}
+	execution.Jobs["gate"] = gate
+	tenant.s.intake = fakeIntakeContracts{resolve: func(settings.PlanInputs) (runspec.ExecutionSettings, error) { return execution, nil }}
+	request.Seal.Resolved.Settings = execution
+	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approver := authorityRoot("approver", "a")
+	approver.Grants = []capability.Grant{capability.Grant("approvals.write")}
+	authorityPersist(t, tenant.s, approver)
+	ref := NodeRef{request.RunID, "gate"}
+	resolve := NodeTransition{Ref: ref, To: NodeFailed, Cause: CauseApprovalResolve,
+		Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: approver.Prefix}},
+		Extra: TransitionExtra{Approval: &ApprovalResolution{Decision: "denied", Comment: "declined"}},
+	}
+	return tenant, ref, now, lease, resolve
+}
+
+func TestApprovalReaperUsesDeadlineAndPolicyOnce(t *testing.T) {
+	for _, policy := range []string{"approve", "deny", "fail", ""} {
+		t.Run(policy, func(t *testing.T) {
+			tenant, ref, now, lease, _ := approvalReaperFixture(t, policy)
+			*now = now.Add(time.Second - time.Nanosecond)
+			if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
+				t.Fatalf("before deadline: %+v, %v", got, err)
+			}
+			*now = now.Add(time.Nanosecond)
+			for pass := range 2 {
+				got, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+				if err != nil || len(got) != 1-pass {
+					t.Fatalf("pass %d: %+v, %v", pass, got, err)
+				}
+			}
+			gate, err := tenant.ReadNode(t.Context(), ref)
+			if err != nil || gate.StateSeq != 2 || gate.FinishedAt == nil {
+				t.Fatalf("gate: %+v, %v", gate, err)
+			}
+			after, err := tenant.ReadNode(t.Context(), NodeRef{ref.RunID, "after"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if policy == "approve" {
+				if gate.Outcome != NodeSuccess || after.ReadyAt == nil || after.Status != StatusPending {
+					t.Fatalf("approved gate/dependent: %+v, %+v", gate, after)
+				}
+			} else if gate.Outcome != NodeFailed || after.Outcome != NodeCancelled {
+				t.Fatalf("failed gate/dependent: %+v, %+v", gate, after)
+			}
+			var resolved int64
+			var resolution, approver string
+			if err := tenant.s.db.QueryRow(`SELECT resolved_at,resolution,approver FROM approvals WHERE team=? AND run_id=? AND node_id=?`, tenant.team, ref.RunID, ref.NodeID).Scan(&resolved, &resolution, &approver); err != nil || resolved != now.UnixNano() || resolution != "timed_out" || approver != lease.Holder {
+				t.Fatalf("resolution: %d %s by %q, %v", resolved, resolution, approver, err)
+			}
+		})
+	}
+}
+
+func TestApprovalReaperLeavesIndefiniteAndResolvedGates(t *testing.T) {
+	for _, mode := range []string{"indefinite", "resolved"} {
+		t.Run(mode, func(t *testing.T) {
+			tenant, ref, now, lease, resolve := approvalReaperFixture(t, "approve")
+			if mode == "indefinite" {
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE approvals SET timeout_ms=0`)
+			} else if _, err := tenant.TransitionNode(t.Context(), resolve); err != nil {
+				t.Fatal(err)
+			}
+			before, err := tenant.ReadNode(t.Context(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			*now = now.Add(time.Minute)
+			if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
+				t.Fatalf("reaped %s gate: %+v, %v", mode, got, err)
+			}
+			after, err := tenant.ReadNode(t.Context(), ref)
+			if err != nil || after.Status != before.Status || after.Outcome != before.Outcome || after.StateSeq != before.StateSeq {
+				t.Fatalf("gate changed: %+v, %v", after, err)
+			}
+		})
+	}
+}
+
+func TestApprovalReaperRecordsLeaseIdentity(t *testing.T) {
+	tenant, ref, now, lease, _ := approvalReaperFixture(t, "approve")
+	*now = now.Add(time.Second)
+	actor := Actor{Kind: ActorReaper, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "forged"}, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, To: NodeSuccess, Cause: CauseApprovalTimeout, Actor: actor}); err != nil {
+		t.Fatal(err)
+	}
+	var approver string
+	if err := tenant.s.db.QueryRow(`SELECT approver FROM approvals WHERE team=? AND run_id=? AND node_id=?`, tenant.team, ref.RunID, ref.NodeID).Scan(&approver); err != nil || approver != lease.Holder {
+		t.Fatalf("resolver identity %q, %v", approver, err)
+	}
+}
+
+func TestApprovalResolutionAndReaperHaveOneWinner(t *testing.T) {
+	for range 6 {
+		tenant, ref, now, lease, resolve := approvalReaperFixture(t, "approve")
+		*now = now.Add(time.Second)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var resolveErr, reapErr error
+		var reaped []ReapedUnit
+		wg.Go(func() { <-start; _, resolveErr = tenant.TransitionNode(t.Context(), resolve) })
+		wg.Go(func() { <-start; reaped, reapErr = tenant.s.ReapUnits(t.Context(), lease, 10) })
+		close(start)
+		wg.Wait()
+		if reapErr != nil {
+			t.Fatal(reapErr)
+		}
+		humanWon := resolveErr == nil
+		var illegal *ErrIllegalTransition
+		if !humanWon && (!errors.As(resolveErr, &illegal) || illegal.Reason != ReasonTerminal) {
+			t.Fatalf("resolution: %v", resolveErr)
+		}
+		if (len(reaped) == 1) == humanWon {
+			t.Fatalf("resolution %v, reaper %+v: expected one winner", resolveErr, reaped)
+		}
+		gate, err := tenant.ReadNode(t.Context(), ref)
+		if err != nil || gate.StateSeq != 2 {
+			t.Fatalf("gate: %+v, %v", gate, err)
+		}
+		want := NodeSuccess
+		if humanWon {
+			want = NodeFailed
+		}
+		if gate.Outcome != want {
+			t.Fatalf("outcome %s, expected %s", gate.Outcome, want)
+		}
+	}
+}
+
+func TestApprovalReaperRollsBackResolutionWithLifecycle(t *testing.T) {
+	for _, table := range []string{"approvals", "nodes", "events", "run_effects"} {
+		t.Run(table, func(t *testing.T) {
+			tenant, ref, now, lease, _ := approvalReaperFixture(t, "deny")
+			before, err := tenant.ReadStateEvents(t.Context(), ref.RunID, 0, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verb := "UPDATE"
+			if table == "events" || table == "run_effects" {
+				verb = "INSERT"
+			}
+			rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_timeout BEFORE `+verb+` ON `+table+` BEGIN SELECT RAISE(ABORT,'persistence unavailable'); END`)
+			*now = now.Add(time.Second)
+			if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err == nil || len(got) != 0 {
+				t.Fatalf("failed persistence: %+v, %v", got, err)
+			}
+			gate, err := tenant.ReadNode(t.Context(), ref)
+			if err != nil || gate.Status != StatusApprovalPending || gate.StateSeq != 1 || gate.FinishedAt != nil {
+				t.Fatalf("partial gate: %+v, %v", gate, err)
+			}
+			var resolved sql.NullInt64
+			if err := tenant.s.db.QueryRow(`SELECT resolved_at FROM approvals WHERE team=? AND run_id=? AND node_id=?`, tenant.team, ref.RunID, ref.NodeID).Scan(&resolved); err != nil || resolved.Valid {
+				t.Fatalf("partial resolution: %+v, %v", resolved, err)
+			}
+			after, err := tenant.ReadStateEvents(t.Context(), ref.RunID, 0, 100)
+			if err != nil || len(after) != len(before) {
+				t.Fatalf("partial events: %+v, %v", after, err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `DROP TRIGGER refuse_timeout`)
+			if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 1 {
+				t.Fatalf("retry: %+v, %v", got, err)
+			}
+		})
+	}
+}

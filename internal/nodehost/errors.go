@@ -43,7 +43,7 @@ func maskHostError(err error, mask func(string) string) error {
 	var canonical *apierr.Error
 	if errors.As(err, &canonical) {
 		// safety: structured renderers must not expose the original SDK error or its details.
-		masked.canonical = &apierr.Error{Code: canonical.Code, Message: masked.text}
+		masked.canonical = &apierr.Error{Code: maskedFailureCode(canonical.Code, mask), Message: masked.text}
 		if canonical.Hint != "" {
 			masked.canonical.Hint = boundedNodeErrText(mask(canonical.Hint))
 		}

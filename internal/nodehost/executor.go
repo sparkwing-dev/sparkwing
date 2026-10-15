@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -285,7 +286,11 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause st
 	if err := context.Cause(ctx); err != nil {
 		return store.Applied{}, err
 	}
-	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: store.Actor{Kind: store.ActorHolder, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: input.Generation}, Extra: extra})
+	if extra.Result != nil {
+		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Mask)
+		extra.Result = &result
+	}
+	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: input.Generation}, Extra: extra})
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
 	}
@@ -319,14 +324,21 @@ func (e *executorTransitionError) Error() string { return e.err.Error() }
 func (e *executorTransitionError) Unwrap() error { return e.err }
 
 func (h *nodeExecutor) failure(err error) store.NodeResult {
+	return h.failureAt(err, "action")
+}
+
+func (h *nodeExecutor) failureAt(err error, stage string) store.NodeResult {
 	result := store.NodeResult{Outcome: store.NodeFailed}
 	if err != nil {
 		result.MaskedError = limits.Error(h.deps.Mask(err.Error()))
 	}
 	var failure *apierr.Error
+	code := apierr.SDKError
 	if errors.As(err, &failure) {
-		result.Reason = string(failure.Code)
+		code = maskedFailureCode(failure.Code, h.deps.Mask)
+		result.Reason = string(code)
 	}
+	result.Failure = &nodeproto.JobFailure{Stage: stage, Error: &apierr.Error{Code: code, Message: result.MaskedError}}
 	return result
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -30,7 +31,7 @@ type executionHostStore struct {
 
 func (s *executionHostStore) TransitionNode(_ context.Context, change store.NodeTransition) (store.Applied, error) {
 	row := s.snapshot.Nodes[0]
-	if change.Ref != row.Ref || change.Actor.Kind != store.ActorHolder || change.Actor.Holder != row.ClaimedBy || change.Actor.CapabilityPrefix != row.CapabilityPrefix || change.Actor.Generation != row.Generation {
+	if change.Ref != row.Ref || change.Actor.Kind != store.ActorHolder || change.Actor.Holder != row.ClaimedBy || change.Actor.CapabilityPrefix != row.CapabilityPrefix || change.Actor.Generation != row.Generation || change.Actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) {
 		return store.Applied{}, errors.New("transition changed claim authority")
 	}
 	s.reports = append(s.reports, change)
@@ -60,12 +61,15 @@ func (p *executionSDK) Request(ctx context.Context, request nodeproto.Request) (
 		return p.expansionSDK.Request(ctx, request)
 	case nodeproto.OpEval:
 		*p.trace = append(*p.trace, request.Closure)
-		if request.Closure != "before" && request.Closure != "after" {
+		if request.Closure != "before" && request.Closure != "after" && request.Closure != "verify" {
 			return nodeproto.Reply{}, errors.New("executor evaluated an owner closure")
 		}
 		result = nodeproto.EvalResult{Value: json.RawMessage("null")}
 		if p.mode == "before_refused" && request.Closure == "before" {
 			result = nodeproto.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "private hook refused", Hint: "private fix", Details: map[string]any{"output": "private source bytes"}}}
+		}
+		if p.mode == "verify_refused" && request.Closure == "verify" {
+			result = nodeproto.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "private verification refused", Hint: "private fix", Details: map[string]any{"output": "private source bytes"}}}
 		}
 	case nodeproto.OpRunStep:
 		if request.Job != p.input.NodeID || int64(request.Attempt) != p.input.Attempt {
@@ -102,6 +106,9 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	job := nodeproto.JobSpec{
 		ID: "job", Steps: []nodeproto.StepSpec{{ID: "body", Risks: []string{"prod"}}},
 		Closures: nodeproto.ClosureSpec{SkipIf: []string{"owner_skip"}, MemoKey: "owner_key", BeforeRun: []string{"before"}, AfterRun: []string{"after"}},
+	}
+	if mode == "verify_refused" {
+		job.Closures.Verify = "verify"
 	}
 	if mode == "output_refused" {
 		job.ResultStep = "body"

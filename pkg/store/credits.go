@@ -327,9 +327,6 @@ type CreditGrantRequest struct {
 	CreatedBy   string
 	// Reason is why an operator made the grant, recorded on its business event.
 	Reason string
-	// Checkout names the payment session a paid grant settles, so the
-	// checkout it opened stops counting against the balance cap.
-	Checkout string
 }
 
 // CreditGrantResult is the row the ledger holds for a request together with
@@ -447,7 +444,7 @@ func (s *Store) recordCreditGrant(
 	if err != nil {
 		return CreditGrantResult{}, err
 	}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	grant := CreditGrant{
 		ID: id, Team: team, Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses,
@@ -464,14 +461,15 @@ func (s *Store) recordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	if req.Reference != "" {
-		// safety: a payment id is the processor's, so one already paid to
-		// another team is a caller mistake and must not pay this team too; any
-		// other reference is the team's own name for its grant.
-		lookup := team
+		var existing CreditGrant
+		var found bool
+		var err error
 		if req.Kind == CreditGrantPaid {
-			lookup = ""
+			// safety: checkout and card grants share a provider payment identity.
+			existing, found, err = paidGrantForPaymentTx(ctx, tx, req.Reference)
+		} else {
+			existing, found, err = creditGrantByReferenceTx(ctx, tx, team, req.Kind, req.Reference)
 		}
-		existing, found, err := creditGrantByReferenceTx(ctx, tx, lookup, req.Kind, req.Reference)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
@@ -524,13 +522,8 @@ func (s *Store) recordCreditGrant(
 		req.CreatedBy, now.UnixNano()); err != nil {
 		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
 	}
-	if err := recordGrantEventTx(tx, grant, req.Checkout, req.Reason); err != nil {
+	if err := recordGrantEventTx(tx, grant, "", req.Reason); err != nil {
 		return CreditGrantResult{}, err
-	}
-	if req.Kind == CreditGrantPaid {
-		if err := markCreditCheckoutPaidTx(ctx, tx, team, req.Checkout, now.UnixNano()); err != nil {
-			return CreditGrantResult{}, err
-		}
 	}
 	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil {
@@ -874,13 +867,6 @@ func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
 }
 
-// CreditMaxChargeSeconds returns the most seconds one charge may bill, which
-// is what keeps a controller outage or a stalled heartbeat loop from billing
-// the gap it left behind.
-func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
-}
-
 // CreditSettings are the values the ledger prices work with. Every one of
 // them is the deployment's, so a controller serving many teams prices them
 // all the same way.
@@ -1024,12 +1010,9 @@ func (s *Store) beginCreditSettingsTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.dialect == DialectPostgres {
-		if _, err := tx.ExecContext(ctx,
-			`SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/credit-settings"); err != nil {
-			rollbackOrLog(tx)
-			return nil, err
-		}
+	if err := advisoryLockTx(ctx, tx, "sparkwing/credit-settings"); err != nil {
+		rollbackOrLog(tx)
+		return nil, err
 	}
 	return tx, nil
 }
@@ -1045,8 +1028,7 @@ func writeCreditSettingsTx(
 	// safety: Postgres locks metadata rows as it updates them, so overlapping
 	// batches use one key order and cannot wait on each other in reverse.
 	for _, key := range keys {
-		if _, err := tx.ExecContext(ctx, upsertCreditSettingSQL,
-			key, writes[key], time.Now().UnixNano()); err != nil {
+		if err := setCreditSettingTx(ctx, tx, key, writes[key]); err != nil {
 			return CreditSettings{}, err
 		}
 	}
@@ -1220,30 +1202,6 @@ func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) 
 	return out, nil
 }
 
-func (s *Store) creditSetting(ctx context.Context, key string, fallback int64) (int64, error) {
-	var raw string
-	err := s.queryRow(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, key).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fallback, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return parseCreditSetting(raw, fallback), nil
-}
-
-func creditSettingTx(ctx context.Context, tx *storeTx, key string, fallback int64) (int64, error) {
-	var raw string
-	err := tx.QueryRowContext(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, key).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fallback, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return parseCreditSetting(raw, fallback), nil
-}
-
 // safety: a settings row nothing can parse must not break reading a balance,
 // so the default stands and the unusable value is named in the log.
 func parseCreditSetting(raw string, fallback int64) int64 {
@@ -1256,38 +1214,11 @@ func parseCreditSetting(raw string, fallback int64) int64 {
 	return v
 }
 
-func setCreditSettingTx(ctx context.Context, tx *storeTx, key, value string) error {
-	_, err := tx.ExecContext(ctx, upsertCreditSettingSQL, key, value, time.Now().UnixNano())
-	return err
-}
-
 const upsertCreditSettingSQL = `
         INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
         ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
 
 func formatCreditSetting(v int64) string { return strconv.FormatInt(v, 10) }
-
-// safety: a setting the store has never held reads as the empty string, which
-// is what lets a caller tell "never set" from a value it cannot parse.
-func (s *Store) creditSettingRaw(ctx context.Context, key string) (string, error) {
-	var raw string
-	err := s.queryRow(ctx, selectCreditSettingSQL, key).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	return raw, err
-}
-
-func creditSettingRawTx(ctx context.Context, tx *storeTx, key string) (string, error) {
-	var raw string
-	err := tx.QueryRowContext(ctx, selectCreditSettingSQL, key).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	return raw, err
-}
-
-const selectCreditSettingSQL = `SELECT value FROM sparkwing_meta WHERE key = ?`
 
 func (s *Store) creditExhaustedAt(ctx context.Context, team Team) (*time.Time, error) {
 	var ns int64

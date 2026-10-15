@@ -421,6 +421,29 @@ The source reports describe residual failures that their committed tests do not 
 | storage report: presence checks charge the object's full size against download caps | `storage_test.go:TestStorage/storage-hasmany-read-set/presence_query`. `HasMany` is a metadata query limited to the read set and transfers no object bytes. |
 | storage report: reused/copied bytes can race collection | `storage_test.go:TestStorage/storage-reachability-and-retention-tails/reference_and_gc`. Keep referenced records, apply the 24-hour reachability/tombstone rule, and fail loudly or miss if bytes are gone. Do not require power-loss durability beyond §1.11. |
 
+## W3 recovery port after amendment integration
+
+`lifecycle-dependency-verdicts/hermetic-recovery-graph` ports
+`TestRecoveryWaitsOnItsOwnDeps`, `TestRecoveryIsCancelledByAFailedDepOfItsOwn`
+and reverses `TestRecoveryWaitsOnItsParentAlone`. The remote host projects the
+wire snapshot and calls the real shared store decider. Recovery waits for its
+ordinary prerequisites and complete generated groups. A failed prerequisite
+settles it as cancelled with `upstream_failed`. Only the failed recovery parent
+is exempt from ordinary failure propagation. Empty accepted groups release it.
+These close the component findings in rows 101, 102 and 117. Native placement
+and transactional lifecycle cells remain open.
+
+The 89-line `internal/nodehost/onfailure_test.go` is deleted. Its cancelled-parent
+and optional-recovery verdict checks move into the same acceptance fixture.
+The obsolete assertion that recovery ignores its own dependencies is reversed.
+The legacy recovery implementation remains until the native host cut.
+
+`hermetic-recorded-failure` and `TestNodeExecutorRecordsVerifyTimeoutStage` cover
+persisted action/verify failures, retry failures and successful clearing.
+`FuzzExecutorFailureMask` generates hostile text and error codes before persistence.
+`FuzzClaimedAwardFence` mutates claim identity and sealed settings and requires
+rejection before renewal, source acquisition, SDK startup or result writes.
+
 ## Open questions for the lead
 
 1. **Short secret values in identifiers.** The old `below the floor` case accepts a two-character registered value. Decision 90 and §6.3 name no length exemption. The proposed port refuses every registered nonempty value in an ID. If the final registry excludes short values, the test must distinguish an unregistered value from an exemption in validation.

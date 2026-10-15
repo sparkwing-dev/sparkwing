@@ -219,26 +219,6 @@ func (s *Server) handleDownloadCharge(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleEgressTotals(w http.ResponseWriter, r *http.Request) {
-	if !s.counterCaller(w, r) {
-		return
-	}
-	var req store.EgressTotals
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	got, err := s.store.RecordEgressTotals(r.Context(), req)
-	switch {
-	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-	case err != nil:
-		s.writeInternalError(w, r, "record egress totals", err)
-	default:
-		writeJSON(w, http.StatusOK, got)
-	}
-}
-
 // safety: a signed-up team reads its own standing and nothing of any other
 // team's; the operator's team has no free tier to report.
 func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, error) {

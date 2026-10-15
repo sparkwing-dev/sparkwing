@@ -1,5 +1,31 @@
 # Migrating to the next release
 
+## Rate-table presence uses the settings snapshot
+
+`Store.CreditRateTableSet` is removed. Read `CreditSettings.RateTableSet` so the
+presence flag and prices come from the same settings snapshot.
+
+## Abandoned logs use tagged streams
+
+`Store.AbandonedNodeLogs` and the controller's old periodic node-log sweep are
+removed. `Operator.SealAbandonedLogStreams` closes existing execution streams as
+incomplete under the maintenance lease. Job attempts keep their 60-second final
+tail grace. Trigger, plan and eval streams use their own persisted unit fences.
+Sealing preserves committed segments and job outcomes. Published logs still
+require the publisher's final commit because they have no execution lease.
+
+## Source bundles use record reachability
+
+`Store.ClaimExpiredSourceBundles`, `Store.DeleteSourceBundleRows`,
+`Store.PruneExpiredUploads`, `store.DirectCacheMaxAge` and
+`controller.CacheObjectMaxAge` are removed. Cache listings no longer expire bytes
+by object age. Keep source bytes through blob records. Run
+`Operator.MaintainRetention` under the maintenance lease to expire records and
+release upload-ticket quota holds. Use `Operator.MarkBlobTombstones` and
+`Operator.CollectBlobTombstones` with the verified object backend for physical
+collection after the 24-hour grace. Rebuild pre-launch stores from the final
+schema. There is no old-row migration or compatibility adapter.
+
 ## Node logs reach the controller as segments
 
 - **Before:** a Kubernetes Job, warm runner, self-hosted agent, GitHub

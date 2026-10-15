@@ -678,6 +678,26 @@ terminal record references. ExecutorDependencies.ReadFailure carries the source
 generation and requires the recorded masked failure. Its native authenticated
 adapter remains an integration point.
 
+Executor retry and terminal transitions now populate `NodeResult.Failure` with
+the bound job ID, action/verify stage and the same masked, bounded message as
+the result. Source setup failures use action. Verify timeouts retain verify.
+Hints and details are discarded before persistence. Unknown error codes survive
+unless masking changes them, in which case the error uses `sdk_error`.
+Successful and cancelled results carry no failure. Holder renewal and reporting
+also carry the awarded capability's `Actor.Authority` reference, not just its fence.
+
+The remote wire still omits `JobResult.Failure` and
+`MaterializeSource.Result`. W3 refuses the latter before calling the controller
+because dropping its terminal state sequence would change the proposed source.
+Both fields need W9 contract declarations before remote adapters can carry them.
+
+`lifecycle-dependency-verdicts/hermetic-recorded-failure` checks retry and final
+failure records through the common claim host and executor with contract fakes.
+`hermetic-recovery-graph` checks the remote host projection and real shared
+decider against ordinary and generated prerequisites, failed/nonfailed parents
+and optional recovery verdicts. These do not prove native placement or store
+transactions. The remaining work is listed in [the merge continuation](w3-merge-continuation.md).
+
 `StateFollower.Wait` and `WaitNode` supply the shared state follower for
 `OwnerHost.Wait` and `WaitNodeChange`. Each wait arms its run subscription before
 reading persistence because a holder can finish between reconciliation and
