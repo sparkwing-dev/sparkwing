@@ -251,7 +251,6 @@ func TestAdminTokenReachesNoOperatorPower(t *testing.T) {
 		{"POST", "/api/v1/credits/grants"},
 		{"POST", "/api/v1/credits/reversals"},
 		{"POST", "/api/v1/credits/freezes"},
-		{"POST", "/api/v1/credits/checkouts/closed"},
 		{"POST", "/api/v1/credits/cards"},
 		{"POST", "/api/v1/credits/card-payments"},
 		{"POST", "/api/v1/credits/warnings"},

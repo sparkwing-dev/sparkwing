@@ -35,7 +35,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/credits/card-payments` | `credits.grant` |
 | `POST` | `/api/v1/credits/card-refunds` | `credits.grant` |
 | `POST` | `/api/v1/credits/cards` | `credits.grant` |
-| `POST` | `/api/v1/credits/checkouts/closed` | `credits.grant` |
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `POST` | `/api/v1/credits/grants` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
@@ -131,7 +130,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/annotations` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | `claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | `claim` |
@@ -182,8 +180,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/signups` | `admin` |
 | `PUT` | `/api/v1/signups` | `admin` |
 | `GET` | `/api/v1/storage` | `runs.read` |
-| `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
-| `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
+| `PUT` | `/api/v1/storage/quotas/{team}` | `admin` |
+| `PUT` | `/api/v1/storage/quotas/{team}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
@@ -242,7 +240,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
 | `POST` | `/internal/downloads/charge` | `public` |
-| `POST` | `/internal/egress/totals` | `public` |
 | `POST` | `/internal/storage/commit` | `public` |
 | `POST` | `/internal/storage/release` | `public` |
 | `POST` | `/internal/storage/reserve` | `public` |
