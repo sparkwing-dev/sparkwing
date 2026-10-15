@@ -466,3 +466,41 @@ while reporting its installed binary behind source. Worker Git writes are
 prohibited, so the lead must finish the already-resolved working-file merge.
 No deployment or release ran. Git config has no local user identity or
 core.worktree override. Check processes finished and worker scratch was removed.
+
+## Continuation: merged baseline verification
+
+The worktree starts clean at 71f20e0a3. The lead committed the previous
+cancellation continuation and finished its merge. The integration merge changes
+no W8 runtime file. Both approved pending-claim designs remain implemented.
+The policy-denial, arbitrary-cause and pending-outcome regressions pass.
+
+All 26 assigned amendment rows and the W8 handoffs retain their recorded status.
+Existing components exercise the declared foreign interfaces with fakes.
+The remaining contract requests still need their owners:
+
+- W3 must declare run/plan/eval identity inputs, shared host/process constructors,
+  delegated node routes and generator replay construction.
+- W9 must resolve launcher's image/deadline grammar and allow plan bootstrap
+  commands without a job. The source-init/runtime handoff also needs a declaration.
+- W3/W7 must expose workspace-off binary-cache hashing for selected-engine installs.
+
+Production integration still needs W3 source and keeper implementations, W9
+HTTP/data clients and final CLI factories, W1/W2 local-controller services,
+plan/eval resource awards and SyncLauncher. Cloud enforcement and cleanup,
+Windows/macOS execution, actual SDK hello, native placement cells and real-repo
+QA remain unverified. Missing foreign contract shapes prevent completing those
+W8 compositions. No new contract request or product decision is introduced.
+
+Whole-repository build, W8/acceptance vet, full runner/launcher/engine/service
+suites, both acceptance packages, focused local lifecycle/managed-unit suites
+and commentcheck pass. Acceptance took 70.894 seconds. Commentcheck covered
+1,176 files. Cluster passes with its socket-based metrics test excluded.
+Commands retain GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8.
+
+This continuation changes only this report. Runtime changes, deleted production
+lines/files, new T1 ports, activated native cells and foreign caller migrations
+are all zero. Overwing discovery works but reports an outdated installed binary.
+No Sparkwing binary, pipeline, Git write, deployment or release ran. Local Git
+config has no identity or core.worktree override. The lead retains committing
+and native verification. Worker scratch is removed after the final file check.
