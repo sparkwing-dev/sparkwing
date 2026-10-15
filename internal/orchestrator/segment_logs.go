@@ -51,7 +51,7 @@ func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID
 	}
 	nodeCtx := context.WithoutCancel(ctx)
 	n = &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger}
-	opts := logseg.Options{Run: runID, Node: nodeID, Logger: logger}
+	opts := logseg.Options{Subject: up.Subject(), Logger: logger}
 	if live {
 		n.live = startLivePusher(nodeCtx, ctrl, runID, nodeID, up.LiveAttempt(), logger)
 		opts.Live = n.live.push

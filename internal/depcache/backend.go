@@ -2,67 +2,82 @@ package depcache
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
-// safety: a client-side skip, not the server's cap. It saves uploading an
-// archive the cache service would refuse, and the service's own
-// --max-cache-archive-bytes is the bound that actually holds; an operator who
-// lowers that will see refusals here rather than skips.
-var remoteMaxBytes = int64(500 << 20)
-
-const httpTimeout = 10 * time.Minute
-
-type backend interface {
-	label() string
-	exists(ctx context.Context, key string) (bool, error)
-
-	fetch(ctx context.Context, key, dir string) (int64, error)
-
-	store(ctx context.Context, key, dir string) (int64, error)
+// Reader restores archives without granting permission to publish them.
+type Reader interface {
+	Exists(context.Context, string) (bool, error)
+	Fetch(context.Context, string, string) (int64, error)
 }
 
-func selectBackend(ctx context.Context) backend {
-	if url := strings.TrimRight(os.Getenv("SPARKWING_CACHE_URL"), "/"); url != "" {
-		return &remoteBackend{baseURL: url, token: cacheToken(ctx)}
+// Backend stores dependency archives. Hosts supply remote implementations explicitly.
+type Backend interface {
+	Reader
+	Label() string
+	Store(context.Context, string, string) (int64, error)
+}
+
+type backendKey struct{}
+
+// WithBackend binds a host-provided backend to one run without ambient credentials.
+func WithBackend(ctx context.Context, backend Backend) context.Context {
+	return context.WithValue(ctx, backendKey{}, backend)
+}
+
+// WithRemoteReader lets a local run restore an opted-in remote cache after a
+// local miss. Saves remain local; the remote binding has no write method.
+func WithRemoteReader(ctx context.Context, remote Reader) context.Context {
+	if remote == nil {
+		return ctx
 	}
-	if url := strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/"); url != "" {
-		return &remoteBackend{baseURL: url, token: cacheToken(ctx)}
+	return WithBackend(ctx, &localWithRemote{remote: remote})
+}
+
+type localWithRemote struct {
+	localBackend
+	remote Reader
+}
+
+func (b localWithRemote) Label() string { return "local+remote" }
+
+func (b localWithRemote) Exists(ctx context.Context, key string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if found, err := b.localBackend.Exists(ctx, key); err != nil || found {
+		return found, err
+	}
+	return b.remote.Exists(ctx, key)
+}
+
+func (b localWithRemote) Fetch(ctx context.Context, key, dir string) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if found, err := b.localBackend.Exists(ctx, key); err != nil {
+		return 0, err
+	} else if found {
+		return b.localBackend.Fetch(ctx, key, dir)
+	}
+	return b.remote.Fetch(ctx, key, dir)
+}
+
+func selectBackend(ctx context.Context) Backend {
+	if backend, ok := ctx.Value(backendKey{}).(Backend); ok {
+		return backend
 	}
 	return &localBackend{}
 }
 
-type cacheGrantKey struct{}
-
-// WithCacheGrant makes the caches restored and saved under ctx authenticate
-// with grant, the grant of the node's own run, instead of the process's.
-func WithCacheGrant(ctx context.Context, grant string) context.Context {
-	return context.WithValue(ctx, cacheGrantKey{}, grant)
-}
-
-// safety: a host serving several runs at once names each node's grant on its
-// context, so one run's caches never authenticate with another run's grant.
-func cacheToken(ctx context.Context) string {
-	if grant, ok := ctx.Value(cacheGrantKey{}).(string); ok {
-		return grant
-	}
-	return authwire.CacheBearerFromEnv()
-}
-
 type localBackend struct{}
 
-func (l *localBackend) label() string { return "local" }
+func (l *localBackend) Label() string { return "local" }
 
 func (l *localBackend) archivePath(key string) (string, error) {
 	p, err := paths.DefaultPaths()
@@ -72,7 +87,7 @@ func (l *localBackend) archivePath(key string) (string, error) {
 	return filepath.Join(p.Root, "depcache", key+".tar.gz"), nil
 }
 
-func (l *localBackend) exists(_ context.Context, key string) (bool, error) {
+func (l *localBackend) Exists(_ context.Context, key string) (bool, error) {
 	p, err := l.archivePath(key)
 	if err != nil {
 		return false, err
@@ -86,7 +101,7 @@ func (l *localBackend) exists(_ context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-func (l *localBackend) fetch(_ context.Context, key, dir string) (int64, error) {
+func (l *localBackend) Fetch(ctx context.Context, key, dir string) (int64, error) {
 	p, err := l.archivePath(key)
 	if err != nil {
 		return 0, err
@@ -100,13 +115,13 @@ func (l *localBackend) fetch(_ context.Context, key, dir string) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
-	if err := extractArchiveStaged(f, dir); err != nil {
+	if err := ExtractArchiveStaged(ctx, f, dir); err != nil {
 		return 0, err
 	}
 	return fi.Size(), nil
 }
 
-func (l *localBackend) store(_ context.Context, key, dir string) (int64, error) {
+func (l *localBackend) Store(_ context.Context, key, dir string) (int64, error) {
 	p, err := l.archivePath(key)
 	if err != nil {
 		return 0, err
@@ -123,7 +138,7 @@ func (l *localBackend) store(_ context.Context, key, dir string) (int64, error) 
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if err := writeArchive(tmp, dir); err != nil {
+	if err := WriteArchive(tmp, dir); err != nil {
 		tmp.Close()
 		return 0, err
 	}
@@ -138,132 +153,4 @@ func (l *localBackend) store(_ context.Context, key, dir string) (int64, error) 
 		return 0, err
 	}
 	return size, nil
-}
-
-type remoteBackend struct {
-	baseURL string
-	token   string
-}
-
-func (r *remoteBackend) label() string { return "cluster" }
-
-func (r *remoteBackend) client() *http.Client {
-	return &http.Client{Timeout: httpTimeout}
-}
-
-func (r *remoteBackend) newRequest(ctx context.Context, method, key string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, method, r.baseURL+"/cache/"+key, body)
-	if err != nil {
-		return nil, err
-	}
-	if r.token != "" {
-		req.Header.Set("Authorization", "Bearer "+r.token)
-	}
-	return req, nil
-}
-
-func (r *remoteBackend) exists(ctx context.Context, key string) (bool, error) {
-	req, err := r.newRequest(ctx, http.MethodHead, key, nil)
-	if err != nil {
-		return false, err
-	}
-	resp, err := r.client().Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	switch resp.StatusCode {
-	case http.StatusOK:
-		return true, nil
-	case http.StatusNotFound:
-		return false, nil
-	default:
-		return false, fmt.Errorf("HEAD /cache/%s: %s", key, resp.Status)
-	}
-}
-
-func (r *remoteBackend) fetch(ctx context.Context, key, dir string) (int64, error) {
-	req, err := r.newRequest(ctx, http.MethodGet, key, nil)
-	if err != nil {
-		return 0, err
-	}
-	resp, err := r.client().Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return 0, fmt.Errorf("GET /cache/%s: %s", key, resp.Status)
-	}
-	counted := &countingReader{r: resp.Body}
-	if err := extractArchiveStaged(counted, dir); err != nil {
-		return 0, err
-	}
-	return counted.n, nil
-}
-
-func (r *remoteBackend) store(ctx context.Context, key, dir string) (int64, error) {
-	// safety: the service bounds PUT bodies; archiving to a temp file
-	// first makes oversize a cheap client-side skip, not a mid-flight
-	// failure.
-	tmp, err := os.CreateTemp("", "sparkwing-depcache-*.tar.gz")
-	if err != nil {
-		return 0, err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if err := writeArchive(tmp, dir); err != nil {
-		tmp.Close()
-		return 0, err
-	}
-	size, err := tmp.Seek(0, io.SeekCurrent)
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return 0, err
-	}
-	if size > remoteMaxBytes {
-		return 0, fmt.Errorf("archive is %s, over the %s this client uploads; not uploading. "+
-			"The cache service's own limit is --max-cache-archive-bytes",
-			tarsafe.HumanBytes(size), tarsafe.HumanBytes(remoteMaxBytes))
-	}
-
-	f, err := os.Open(tmpPath)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	req, err := r.newRequest(ctx, http.MethodPut, key, f)
-	if err != nil {
-		return 0, err
-	}
-	req.ContentLength = size
-	req.Header.Set("Content-Type", "application/gzip")
-
-	resp, err := r.client().Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("PUT /cache/%s: %s", key, resp.Status)
-	}
-	return size, nil
-}
-
-type countingReader struct {
-	r io.Reader
-	n int64
-}
-
-func (c *countingReader) Read(p []byte) (int, error) {
-	n, err := c.r.Read(p)
-	c.n += int64(n)
-	return n, err
 }

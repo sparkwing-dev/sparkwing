@@ -80,7 +80,8 @@ allowance returns `429` with `Retry-After`. Private backend errors return
 `GET /api/v1/services` announces the download route only when its authority,
 read-set, metadata, signing and charging adapters are configured. Signed
 URLs work through the backend selected by the controller. Cache grants and
-`{kind,key}` download requests are removed. Logs use the controller's log routes.
+`{kind,key}` download requests are removed. There is no cache-service fallback.
+Logs use controller-proxied reads, separate from byte-storage downloads.
 
 ## Webhooks
 

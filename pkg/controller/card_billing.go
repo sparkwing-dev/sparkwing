@@ -102,7 +102,7 @@ func (s *Server) handleTeamBillingPay(w http.ResponseWriter, r *http.Request) {
 		"amount_cents": work.AmountCents, "customer": work.Customer,
 	})
 	if err != nil {
-		if failErr := s.store.DropCardAttempt(ctx, work.AttemptID, time.Now()); failErr != nil {
+		if failErr := s.store.AsOperator().DropCardAttempt(ctx, work.AttemptID, time.Now()); failErr != nil {
 			s.logger.Warn("closing an unopened recovery attempt failed", "attempt", work.AttemptID, "err", failErr)
 		}
 		s.logger.Error("opening a recovery checkout failed", "team", string(t.Team()), "err", err)
@@ -155,7 +155,7 @@ func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error 
 	now := time.Now()
 	switch req.Status {
 	case cardChargeSucceeded:
-		created, warned, err := s.store.SettleCardPayment(ctx, store.CardPayment{
+		created, warned, err := s.store.AsOperator().SettleCardPayment(ctx, store.CardPayment{
 			Team: store.Team(req.Team), ChargeID: req.ChargeID, AttemptID: req.AttemptID,
 			PaymentIntent: req.PaymentIntent, AmountCents: req.AmountCents, Fingerprint: req.Fingerprint,
 		}, now)
@@ -179,7 +179,7 @@ func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error 
 		if req.AttemptID == "" {
 			return fmt.Errorf("%w: a failed payment names its attempt", store.ErrInvalidInput)
 		}
-		team, first, err := s.store.FailCardAttempt(ctx, req.AttemptID, req.PaymentIntent, req.DeclineCode, now)
+		team, first, err := s.store.AsOperator().FailCardAttempt(ctx, req.AttemptID, req.PaymentIntent, req.DeclineCode, now)
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func (s *Server) runCardBilling(ctx context.Context, every time.Duration) {
 // and the next pass asks Stripe for it by the same id instead of charging
 // again.
 func (s *Server) cardBillingPass(ctx context.Context) {
-	work, alerts, err := s.store.DueCardCharges(ctx, time.Now())
+	work, alerts, err := s.store.AsOperator().DueCardCharges(ctx, time.Now())
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logger.Error("card billing pass", "err", err)
@@ -262,7 +262,7 @@ func (s *Server) chargeCard(ctx context.Context, wk store.CardChargeWork) (cardC
 		if err != nil || res.Status != cardChargeCreated {
 			return res, err
 		}
-		if err := s.store.RecordAttemptIntent(ctx, wk.AttemptID, res.PaymentIntent, time.Now()); err != nil {
+		if err := s.store.AsOperator().RecordAttemptIntent(ctx, wk.AttemptID, res.PaymentIntent, time.Now()); err != nil {
 			return res, err
 		}
 		wk.PaymentIntent = res.PaymentIntent
@@ -274,7 +274,7 @@ func (s *Server) chargeCard(ctx context.Context, wk store.CardChargeWork) (cardC
 // retry, so a repeated pass repeats the same refund and a retry after a
 // failed one makes a new one; the refund's success reverses its grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
-	due, err := s.store.DueCardRefunds(ctx, time.Now())
+	due, err := s.store.AsOperator().DueCardRefunds(ctx, time.Now())
 	if err != nil {
 		s.logger.Error("listing queued card refunds", "err", err)
 		return
@@ -286,7 +286,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 				"payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		if err := s.store.MarkCardRefundMade(ctx, d.Team, d.Key, refund, status, time.Now()); err != nil {
+		if err := s.store.AsOperator().MarkCardRefundMade(ctx, d.Team, d.Key, refund, status, time.Now()); err != nil {
 			s.logger.Error("recording a card refund failed", "payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}

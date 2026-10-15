@@ -24,7 +24,7 @@ func TestReportQueuedUsesCanonicalNodeID(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	delegate := &admitFailSink{}
 	la := &LocalAdmission{Out: io.Discard, Delegate: delegate}
-	backends := LocalBackends(PathsAt(t.TempDir()), st, nil)
+	backends := LocalBackends(PathsAt(t.TempDir()), st)
 
 	for _, tc := range []struct {
 		name, participant, requestID, want string

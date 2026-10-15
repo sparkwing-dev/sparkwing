@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Card workers use Operator
+
+Replace `st.DueCardCharges(ctx, now)` with
+`st.AsOperator().DueCardCharges(ctx, now)`. The same handle change applies to
+`RecordAttemptIntent`, `SettleCardPayment`, `RecordPaymentWarning`,
+`DueCardRefunds`, `MarkCardRefundMade`, `ReportCardRefund`, `FailCardAttempt`
+and `DropCardAttempt`. The raw Store methods are removed.
+
+Tenant card setup, spend policy and recovery checkout keep their existing
+handles. Provider request and response payloads keep their existing shape.
+
 ## Legacy binary lookups
 
 `Store.BinaryObject`, `Store.CommittedObjectFor` and `Store.SourceBoundToRun`
@@ -116,6 +127,112 @@ for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetentio
 require the current maintenance lease. Bucket listings no longer replace usage
 counters. Log retention follows the run's persisted class. Allowance-driven
 physical eviction still requires the final storage adapter.
+## Memo copies use transactional blob records
+
+`AttemptReport.OutputFrom`, its `output_from` payload and
+`Store.FinishNodeCopyingOutput` are removed. Use `blob.RecordStore.CopyMemo`
+for authorized output and manifest materialization. The host memo layer
+already calls it. Requests carrying `output_from` now fail strict decoding.
+No alias or conversion of stored output pointers is provided.
+
+The unused `backend.StoreBackend.GetNodeOutput` and
+`backend.ClientBackend.GetNodeOutput` methods are also removed.
+
+## Filesystem object writes use signed transfers
+
+`fs.ArtifactStore`, `fs.NewArtifactStore` and the sharded filesystem object
+layout are removed. Use the shared signed-data backend for byte transfers and
+the controller for log deletion. Use `fs.NewUsageReporter` for deployment usage
+totals. It exposes no object reads or writes. No object conversion is provided.
+
+Run deletion and team purge/recheck use the configured common backend to remove
+logs across stored retention classes. They leave CAS objects to reachability
+collection. Authenticated log and host bindings remain integration work.
+
+## Filesystem transfers use the shared data backend
+
+The standalone controller opens its filesystem data backend under its home
+when no S3 bucket is configured. Signed transfers use
+`/api/v1/data/uploads/{upload}`, `/api/v1/data/objects/{key...}` and
+`/api/v1/log-segments/{key...}`. They use the same verified physical objects
+as the record-backed maintenance pass.
+
+Removed `Server.WithOutputSignKey`, the older `/api/v1/outputs` handlers,
+filesystem output moves and the raw filesystem log adapter. No data conversion
+or fallback is provided. The legacy S3 output/log adapters still require their
+final authenticated cutover. Local-controller construction and authenticated
+data/host bindings remain separate integration work.
+
+## Log readers expose only reads
+
+`storage.LogStore` provides `Read`, `ReadRun` and `Stream`. Its unused
+`Append` and `DeleteRun` methods and the corresponding `client.NodeLogs`
+methods are removed. Writers publish tagged segments with `logseg.Sink`.
+Delete a run through the controller's run API to remove its logs.
+
+```go
+// Before
+logs.Append(ctx, runID, jobID, data)
+logs.DeleteRun(ctx, runID)
+
+// After
+sink.Append(data, "", 0, 0)
+controllerClient.DeleteRun(ctx, runID)
+```
+
+`storage.SafeLogIDs`, `SafeRelPath` and `SafeArtifactKey` are removed with
+unused raw storage surfaces. Use `blob.LogObjectKey` for tagged log slots and
+`blob.RecordNamespace` for record namespaces. Those helpers validate their
+structured inputs.
+
+## Filesystem logs use tagged segments
+
+`fs.LogStore` and `fs.NewLogStore` are removed. Log writers use a tagged
+`logseg.Sink` with the host's bound `logseg.SubjectUploader`. Filesystem and S3
+storage use the same immutable segment format.
+
+`conformance.TestLogStore` is removed.
+Tagged-log coverage lives in `pkg/storage/logseg` and the storage acceptance
+cells, including verified offset reads and physical retention.
+
+Daemon handshake and status responses drop `artifact_store_error`, which
+described a cache backend the daemon no longer opens. Remove that field from
+status consumers. API binding faults still use `api_ready` and `api_error`.
+
+## Log identities use tagged subjects
+
+- **Before:** log manifests carried separate run, node, attempt and generation
+  fields. `logseg.AttemptPrefix` built an attempt-only key.
+- **After:** manifests require `subject`, which identifies a job attempt or a
+  trigger, plan or eval unit. Job keys include `/jobs/`. Owner keys include
+  `/units/`. Readers reject a manifest whose subject differs from its key.
+- **Upgrade steps:** pass `Options.Subject` when creating a log sink and use
+  `blob.LogObjectKey` for signed slots and `blob.LogSubjectPrefix` for prefixes.
+  The former `logseg` key helpers are removed. Update readers and writers together. Existing
+  untagged manifests require a fresh run. There is no old-format reader.
+
+## Direct source fetches own their Git objects
+
+- **Before:** direct fetches reused a bare mirror per remote and checked out
+  linked worktrees. Runner cleanup swept idle mirrors.
+- **After:** each checkout fetches from upstream and owns its Git objects.
+  Fetches need upstream access even for a commit an earlier run fetched.
+  Failed fetches remove their checkout. Existing destinations remain untouched.
+- **Upgrade steps:** stop older runners and their active runs before removing
+  unused `source-direct` directories under the Sparkwing home. The new runner
+  leaves these directories untouched.
+
+## Local binary caches use one layout
+
+- **Before:** cache status counted binaries in older directories, and pruning
+  quarantined those entries before deleting them after a grace period.
+- **After:** status and pruning use `cache/pipelines/v1/entries` in the Sparkwing
+  home. Older directories are left untouched. The CLI's JSON cache report drops
+  `legacy_entries` and `legacy_bytes`.
+- **Upgrade steps:** update report consumers to use `entries` and `total_bytes`.
+  Pipelines without a current cache entry compile on their next run. Stop older
+  Sparkwing processes before removing their unused cache directories.
+
 ## Node state writes use transitions
 
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
@@ -186,92 +303,6 @@ lease. `Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency`
 are removed. The elected pass cleans terminal capacity in every scope. Doctor's
 `dead_concurrency_holders` and `dead_concurrency_waiters` fields are removed with
 its independent repair path.
-
-## Egress accounting uses tenant and replica counters
-
-`Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`
-are removed. Write additive bytes with `Tenant.AddUsage` using `egress_bytes`,
-a UTC day and the controller's trusted replica ID. Read day or month totals with
-`Tenant.EgressUsage`. Deployment reports use `Operator.EgressUsageAcrossTeams`.
-Pruning uses `Operator.PruneEgressUsage` with the maintenance lease.
-
-The controller records delivered successful-response bytes at request completion,
-including partial transfers and reads served without an in-memory meter. Logs
-consume egress while remaining exempt from download caps. Alarm reload uses team
-totals. A failed counter write emits an error. A controller crash before request
-completion can lose that request's egress sample. Thirteen months of reports stay
-available. There is no principal-based persistence or periodic flush.
-
-## Event charges use tenant handles and replica identity
-
-`Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,
-then call `Tenant.AppendEventCharged(ctx, replicaID, runID, nodeID, kind, payload)`.
-The replica ID is the controller's trusted identity. The caller no longer
-selects a charged principal. The tenant supplies the team and the store owns time.
-
-Event writes, retained run counters, shared storage quotas and replica usage
-commit together. Pending uploads and events share monthly and run byte capacity.
-Events consume no object capacity. Usage is recorded without a configured quota.
-The existing event limits and free-tier policy keep their meaning. The HTTP
-request and response shapes stay the same.
-
-## Download charges use tenant handles and replica identity
-
-`Store.ChargeDownload` is removed. Obtain a tenant with `Store.ForTeam`, then
-call `Tenant.ChargeDownload`. `DownloadCharge.ReplicaID` identifies the trusted
-controller replica. The request no longer accepts `Team` or `Now`. The store
-selects the current UTC day under its shared quota lock.
-
-Admission and replica usage commit together. Free and funded caps keep their
-existing behavior, including finishing the download that crosses the cap and
-recording already delivered bytes. Logs stay exempt. Controller integrations
-use their existing lease-holder identity and require no new configuration.
-
-## Paid credit requires verified checkout settlement
-
-`POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
-`Tenant.RecordCreditGrant` refuse `paid` grants.
-Free operator grants keep their console path. Payment reversals require a
-verified provider event.
-
-Checkout integrations must supply C2's verified provider event to
-`Store.SettlePayment`. The committed checkout supplies the team and credit
-amount. The event must match its session, payment, amount, currency and test/live
-mode. Actionable fraud warnings refuse settlement before any credit or event
-receipt commits. Replayed events grant once. Provider verification and its
-controller adapter remain integration work.
-
-## Storage counters use verified upload tickets
-
-The `/internal/storage/reserve`, `/internal/storage/commit`,
-`/internal/storage/release` and `/internal/downloads/charge` endpoints are removed.
-Remove cache `controller-token` credentials and service-counter integrations.
-`Store.RenewStorage` and its rolling block receipts are removed.
-
-The final storage adapter reserves quota with `Tenant.ReserveBlobUpload`, verifies
-physical bytes, then commits with `Tenant.CommitBlobUpload`. Signing or transfer
-failure uses `Tenant.AbortBlobUpload`. The ticket binds the exact uploader and
-retains immutable replay state. The signed-data controller adapter remains an
-integration dependency. There is no service-token fallback.
-
-`SetFreeTeamSlots` writes the final settings table and refuses sealed values.
-Its slot count and signup behavior keep their existing meaning.
-
-## Storage maintenance uses committed inventory
-
-Remove `Server.WithStoragePass` and `Server.RunStoragePass` calls. The controller's
-existing maintenance timer runs leased retention, tagged-log sealing and storage
-billing. An embedding that serves `Handler` directly calls `Server.MaintainStorage`.
-`StoragePassEvery` is removed. `StorageMaintenanceInterval` names the timer period.
-
-`Store.StorageMarks`, `ReconcileStorage`, `TeamsOverFreeLogShare`,
-`PrunableNodeLogs`, `PruneStorageCommitReceipts` and `PruneDownloadDays` are removed.
-Use `Tenant.StorageRetainedBytes` for retained inventory and `Tenant.StorageUsageFor`
-for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetention`
-require the current maintenance lease. Bucket listings no longer replace usage
-counters. Log retention follows the run's persisted class. Allowance-driven
-physical eviction still requires the final storage adapter.
-
 
 ## OAuth browser callbacks
 
@@ -1075,67 +1106,19 @@ To upgrade:
 
 ## The cache's static operator token is removed
 
-- **Before:** one static secret had two names. The cache read it as the file
-  `cache-token` under `--credentials-dir` (the runner-bundle chart's
-  `cache.tokenSecret`) and accepted it on every route; the controller read it
-  as `SPARKWING_CACHE_TOKEN`, sent it on its git-cache proxy and team purges,
-  and accepted it on the storage counter routes
-  (`/internal/storage/reserve`, `commit`, `release`,
-  `/internal/downloads/charge` and `/internal/egress/totals`), where the cache
-  sent it back. An operator could also send it to the cache from a shell, and
-  the CLI, git clones, `.CacheDir` and the artifact store fell back to
-  `SPARKWING_CACHE_TOKEN` when no `SPARKWING_CACHE_GRANT` was set.
-- **After:** the cache accepts cache grants only, signed with
-  `cache-grant-key`. For its own calls (the git-cache proxy, team purges, and
-  the new `POST /api/v1/cache/store-ceiling/measure` and `thaw` routes) the
-  controller signs a five-minute operator grant with its own
-  `cache-grant-key` credential. The controller's service-token storage and
-  download counter routes are removed. Remove the cache's `controller-token`
-  credential. A cache refuses to start without `cache-grant-key` unless
-  `--allow-unauthenticated` is set. The controller ignores
-  `SPARKWING_CACHE_TOKEN`, and so does every client. The runner-bundle chart
-  drops `cache.tokenSecret`, refuses to render while it is set, and requires
-  `cache.grantKeySecret` for a cache-enabled install unless
-  `cache.allowUnauthenticated=true`. A person reaches the cache only through
-  the controller with an `admin` bearer.
-- **Operator steps:**
-  1. Remove the cache's `controller-token` credential.
-  2. Make sure the cache and the controller hold the same grant key:
-     `cache.grantKeySecret` in the runner-bundle chart (the full chart mounts
-     it into the controller's credentials directory too), or the
-     `cache-grant-key` file in both services' `--credentials-dir` in your own
-     manifests.
-     An install that had only the cache token creates one:
+Remove `SPARKWING_CACHE_TOKEN`, the `cache-token` credential and
+`cache.tokenSecret` from older installations. The separate cache service,
+its grant-key replacement and the controller's cache proxy are now removed.
+Do not provision a replacement cache token or grant key. Remove the cache
+deployment and use the controller's authenticated data routes for byte storage.
 
-     ```bash
-     kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
-       --from-literal=key="$(openssl rand -hex 32)"
-     ```
+## Cache-service accounting is removed
 
-  3. Unset `cache.tokenSecret` (or
-     `sparkwing-runner-bundle.cache.tokenSecret` in the full chart), set
-     `cache.grantKeySecret.name`, and upgrade the cache and controller
-     together, since an older controller sends the cache a token it no longer
-     takes.
-  4. Remove `SPARKWING_CACHE_TOKEN` from the controller's environment and from
-     operators' shells, remove the `cache-token` file from the cache's
-     credentials, and delete the old Secret:
-     `kubectl -n sparkwing delete secret sparkwing-cache-token`.
-  5. Replace any `curl` against the cache with the controller's routes and an
-     `admin` bearer: `POST /api/v1/gitcache/git/register` to register a
-     mirror, and `POST /api/v1/cache/store-ceiling/measure` or `thaw` for the
-     store ceiling.
-- **Edge cases:** rotating the counter token is minting a new one, swapping
-  the Secret and revoking the old prefix with
-  `sparkwing cluster tokens revoke`. A single-team controller without a grant
-  key calls the cache with no bearer, which only a cache started with
-  `--allow-unauthenticated` serves. `sparkwing spark` and a laptop's compile
-  no longer upload binaries to a cache with an operator's token; only a run's
-  grant writes there. Every authenticated cache now has a grant key, so two
-  rules that applied only to a cache with one now apply to all: a cache with
-  `--blob-store` needs `--controller` and its `controller-token`, and the
-  daily egress alarm defaults to 200 GiB unless `--egress-daily-alarm-bytes`
-  is set (the alarm reports in `/health` and the metrics and refuses nothing).
+The cache service and its accounting client have been deleted. Remove the
+cache deployment and its `controller-token` credential. The controller no longer
+registers the cache's storage-reserve, commit, release, download-charge or
+egress-total routes. The `storage.count` service scope has been removed.
+Storage and download accounting stays in the controller's database.
 
 ## The source-token route is removed
 
@@ -1321,6 +1304,48 @@ script that called the binary directly moves to the CLI:
 [{"name": ..., "required": true}]}` (or `"optional": true`), read from
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
+
+## Cache grants are removed
+
+The `swcg` protocol, `cache-grant-key` controller credential and
+`POST /api/v1/runs/{id}/cache-grant` route are gone. Data upload, commit,
+download and capability requests now use live controller capabilities.
+Replace grant authentication and `{kind,key}` downloads with the requests in
+[Data storage](../data-uploads.md) and [Data downloads](../api.md#data-downloads).
+
+Byte-storage consumers use the `blob.Store`, `DataSigner` and `RecordStore`
+contracts. Controller embedders configure their authenticated adapters with
+`WithDataController`. Services advertise data transfers only when those adapters
+are configured. There is no compatibility endpoint or cache-service fallback.
+Existing output and job-log handlers keep their separate transfer setup until
+their own cutover.
+
+## Raw artifact plug-ins are removed
+
+`storage.ArtifactStore`, `storage.ErrListNotSupported` and
+`conformance.TestArtifactStore` are removed. The unused raw
+`s3.ArtifactStore.Delete` method is also removed. Use the common signed-data
+backend and authorized records. A digest or a raw object existence check does
+not establish read access or an upload receipt.
+
+Deployment usage reporting remains separate through `storage.UsageReporter`.
+Its filesystem constructor is `fs.NewUsageReporter`.
+
+## Storage uses record-backed maintenance
+
+`Store.PrunableNodeLogs` and `Store.DeleteRunNodeLogs` are removed. Run and team
+deletion use the controller APIs and the shared backend. Retention uses the
+store's leased maintenance pass.
+
+`Server.WithDataObjects` also installs the backend's verified manifest reader
+for result attachment. Configure it before serving or sharing the store.
+
+Remove calls to `WithStoragePass` and `RunStoragePass`, references to
+`StoragePassEvery`, and readers of the `storage_pass` health field. No forwarding
+API remains. Controller embedders supply the physical backend with
+`WithDataObjects`. Leased retained-data maintenance marks unreachable blobs,
+collects eligible tombstones and expires filesystem logs. Bucket listings no
+longer replace tenant usage counts. Log lifetime follows retention classes.
 
 ## Storage standing uses retained inventory
 

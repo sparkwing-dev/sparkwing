@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -29,7 +28,6 @@ const (
 	credBillingToken           = "billing-token"
 	credStripeAPIKey           = "stripe-api-key"
 	credStripeWebhookSecret    = "stripe-webhook-secret"
-	credCacheGrantKey          = authwire.CacheGrantKeyCredential
 )
 
 func readPaymentAuthenticator(dir, mode string) (capability.PaymentAuthenticator, error) {
@@ -68,7 +66,6 @@ type controllerCredentials struct {
 	GitHubAppWebhookSecret string
 	CloudFrontKey          string
 	BillingToken           string
-	CacheGrantKey          string
 }
 
 func readCredentials(path string) (controllerCredentials, error) {
@@ -87,7 +84,6 @@ func readCredentials(path string) (controllerCredentials, error) {
 		credGitHubAppWebhookSecret: &c.GitHubAppWebhookSecret,
 		credCloudFrontKey:          &c.CloudFrontKey,
 		credBillingToken:           &c.BillingToken,
-		credCacheGrantKey:          &c.CacheGrantKey,
 	} {
 		if *dst, err = readCredential(dir, name); err != nil {
 			return c, err

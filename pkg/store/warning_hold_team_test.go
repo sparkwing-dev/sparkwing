@@ -24,7 +24,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				trustWithCard(t, teams[name], now)
 				spend(t, s, string(name), "charge_"+string(name), 10000)
 			}
-			work, _, err := s.DueCardCharges(ctx, now)
+			work, _, err := s.AsOperator().DueCardCharges(ctx, now)
 			if err != nil || len(work) != 2 {
 				t.Fatalf("charges=%v error=%v", work, err)
 			}
@@ -33,19 +33,19 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				payments[w.Team] = store.CardPayment{Team: w.Team, ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_" + string(w.Team), AmountCents: w.AmountCents, Fingerprint: "fp_1"}
 			}
 			if order == "payment-first" {
-				if paid, _, err := s.SettleCardPayment(ctx, payments["first"], now); err != nil || !paid {
+				if paid, _, err := s.AsOperator().SettleCardPayment(ctx, payments["first"], now); err != nil || !paid {
 					t.Fatalf("first payment=%v error=%v", paid, err)
 				}
 			}
 			warning := store.PaymentWarning{WarningID: "issfr_shared", PaymentIntent: "pi_first", Fingerprint: "fp_1", Actionable: true}
-			if _, err := s.RecordPaymentWarning(ctx, warning, now); err != nil {
+			if _, err := s.AsOperator().RecordPaymentWarning(ctx, warning, now); err != nil {
 				t.Fatal(err)
 			}
 			settle := func(team store.Team) error {
 				if order == "payment-first" && team == "first" {
 					return nil
 				}
-				paid, _, err := s.SettleCardPayment(ctx, payments[team], now)
+				paid, _, err := s.AsOperator().SettleCardPayment(ctx, payments[team], now)
 				if err != nil {
 					return fmt.Errorf("team %s: %w", team, err)
 				}
@@ -107,7 +107,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 			if ids["first"] == ids["second"] {
 				t.Fatal("teams share a freeze identity")
 			}
-			if _, err := s.RecordPaymentWarning(ctx, warning, now); err != nil {
+			if _, err := s.AsOperator().RecordPaymentWarning(ctx, warning, now); err != nil {
 				t.Fatal(err)
 			}
 			if order == "payment-first" {
@@ -127,7 +127,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 			if err := settle("first"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.RecordPaymentWarning(ctx, warning, now); err != nil {
+			if _, err := s.AsOperator().RecordPaymentWarning(ctx, warning, now); err != nil {
 				t.Fatal(err)
 			}
 			a, _ := teams["first"].CreditFreeze(ctx)
@@ -135,7 +135,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 			if a.Frozen || !b.Frozen || len(b.Disputes) != 1 {
 				t.Fatalf("release/replay first=%+v second=%+v", a, b)
 			}
-			refunds, err := s.DueCardRefunds(ctx, now)
+			refunds, err := s.AsOperator().DueCardRefunds(ctx, now)
 			if err != nil || len(refunds) != 0 {
 				t.Fatalf("hold created unexpected refund work=%v error=%v", refunds, err)
 			}
@@ -154,7 +154,7 @@ func TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute(t *testing.T) {
 				trustWithCard(t, teams[name], now)
 				spend(t, s, string(name), "charge_"+string(name), 10000)
 			}
-			work, _, err := s.DueCardCharges(ctx, now)
+			work, _, err := s.AsOperator().DueCardCharges(ctx, now)
 			if err != nil || len(work) != 2 {
 				t.Fatalf("work=%v error=%v", work, err)
 			}
@@ -172,12 +172,12 @@ func TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute(t *testing.T) {
 				}
 			}
 			warning := store.PaymentWarning{WarningID: "issfr_legacy", PaymentIntent: "pi_first", Fingerprint: "fp_1", Actionable: true}
-			if _, err := s.RecordPaymentWarning(ctx, warning, now); err != nil {
+			if _, err := s.AsOperator().RecordPaymentWarning(ctx, warning, now); err != nil {
 				t.Fatal(err)
 			}
 			for repeat := 0; repeat < 2; repeat++ {
 				for _, w := range work {
-					if paid, _, err := s.SettleCardPayment(ctx, store.CardPayment{Team: w.Team, ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_" + string(w.Team), AmountCents: w.AmountCents, Fingerprint: "fp_1"}, now); err != nil || paid {
+					if paid, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{Team: w.Team, ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_" + string(w.Team), AmountCents: w.AmountCents, Fingerprint: "fp_1"}, now); err != nil || paid {
 						t.Fatalf("team=%s paid=%v error=%v", w.Team, paid, err)
 					}
 				}

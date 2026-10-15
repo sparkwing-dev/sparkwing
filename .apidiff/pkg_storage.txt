@@ -1,43 +1,18 @@
 # pkg/storage
 
-type ArtifactStore interface {
-	Get(ctx context.Context, key string) (io.ReadCloser, error)
-
-	Put(ctx context.Context, key string, r io.Reader) error
-
-	Has(ctx context.Context, key string) (bool, error)
-
-	Delete(ctx context.Context, key string) error
-
-	List(ctx context.Context, prefix string) ([]string, error)
-}
-func Conditional(store ArtifactStore) (ConditionalWriter, bool)
-type ConditionalWriter interface {
-	GetWithETag(ctx context.Context, key string) (io.ReadCloser, ETag, error)
-
-	PutIfAbsent(ctx context.Context, key string, r io.Reader) (ETag, error)
-
-	PutIfMatch(ctx context.Context, key string, r io.Reader, expect ETag) (ETag, error)
-
-	ConditionalWritesSupported(ctx context.Context) (bool, error)
-}
-type ETag string
+type BlobManifests struct{ Objects blob.ObjectBackend }
+func (m BlobManifests) ReadBlobManifest(ctx context.Context, team store.Team, digest blob.Digest) ([]blob.Member, error)
 var ErrBadCursor = errors.New("storage: log stream cursor is not valid here")
-var ErrListNotSupported = errors.New("storage: list not supported")
 var ErrNotFound = errors.New("storage: not found")
 var ErrNotSupported = errors.New("storage: operation not supported")
 var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
 func LogCursor(ctx context.Context) string
 type LogStore interface {
-	Append(ctx context.Context, runID, nodeID string, data []byte) error
-
 	Read(ctx context.Context, runID, nodeID string, opts ReadOpts) ([]byte, error)
 
 	ReadRun(ctx context.Context, runID string) ([]byte, error)
 
 	Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
-
-	DeleteRun(ctx context.Context, runID string) error
 }
 type ReadOpts struct {
 	Tail  int
@@ -46,9 +21,6 @@ type ReadOpts struct {
 	Grep  string
 }
 func (o ReadOpts) Apply(data []byte) ([]byte, error)
-func SafeArtifactKey(key string) error
-func SafeLogIDs(runID, nodeID string) error
-func SafeRelPath(id string) error
 func SafeSegment(id string) error
 type StateStore interface {
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
@@ -118,7 +90,6 @@ type StoreUsage struct {
 
 	Partial bool
 }
-func Usage(ctx context.Context, store ArtifactStore) (StoreUsage, bool, error)
 type UsageReporter interface {
 	Usage(ctx context.Context) (StoreUsage, error)
 }

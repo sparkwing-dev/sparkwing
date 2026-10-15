@@ -1,0 +1,113 @@
+package blob
+
+import (
+	"fmt"
+	"slices"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+)
+
+func validAttempt(a runspec.AttemptIdentity) bool {
+	return a.Team != "" && a.RunID != "" && a.NodeID != "" && a.Attempt > 0 && a.Generation > 0
+}
+
+func validUpload(i UploadIdentity) bool {
+	if i.Team == "" || i.RunID == "" || i.Principal == "" || i.CapabilityRef == "" {
+		return false
+	}
+	if i.Attempt.Set && (!validAttempt(i.Attempt.Value) || i.Attempt.Value.Team != i.Team || i.Attempt.Value.RunID != i.RunID) {
+		return false
+	}
+	switch i.Kind {
+	case UploadJob:
+		return i.Attempt.Set && !i.Unit.Set
+	case UploadPublication:
+		return !i.Unit.Set
+	case UploadOwnerUnit:
+		if i.Attempt.Set || !i.Unit.Set || i.Unit.Value.ID == "" || i.Unit.Value.Generation <= 0 {
+			return false
+		}
+		u := i.Unit.Value
+		switch u.Kind {
+		case UploadTriggerUnit, UploadPlanUnit:
+			return !u.Source.Set
+		case UploadEvalUnit:
+			return u.Source.Set && validAttempt(u.Source.Value) && u.Source.Value.Team == i.Team && u.Source.Value.RunID == i.RunID
+		}
+	}
+	return false
+}
+
+func authorizeUpload(a Authority, i UploadIdentity, kind Kind) error {
+	if !validUpload(i) || a.Principal != i.Principal || a.CapabilityRef != i.CapabilityRef {
+		return ErrDigestNotReadable
+	}
+	if a.Attempt.Set != i.Attempt.Set || (a.Attempt.Set && a.Attempt.Value != i.Attempt.Value) {
+		return ErrDigestNotReadable
+	}
+	// safety: a matching principal alone cannot transfer an owner or publication fence.
+	if (a.Upload.Set && a.Upload.Value != i) || (i.Kind != UploadJob && !a.Upload.Set) {
+		return ErrDigestNotReadable
+	}
+	for _, rule := range UploadRules {
+		if rule.IdentityKind == i.Kind && rule.RequiresAttempt == i.Attempt.Set && rule.RequiresUnit == i.Unit.Set && slices.Contains(rule.RecordKinds, kind) {
+			return nil
+		}
+	}
+	return ErrDigestNotReadable
+}
+
+func authorizeEdge(r EdgeRequest) error {
+	if !validDigest(r.Digest) || !slices.Contains(Kinds, r.TargetKind) {
+		return ErrDigestNotReadable
+	}
+	if r.OwnReceipt.Set && r.OwnReceipt.Value.Digest == r.Digest && AuthorizeUpload(r.Authority, r.OwnReceipt.Value.Identity, r.TargetKind) == nil {
+		return nil
+	}
+	a := r.Authority
+	if a.Principal == "" || a.CapabilityRef == "" {
+		return ErrDigestNotReadable
+	}
+	if a.Attempt.Set {
+		if !validAttempt(a.Attempt.Value) || r.ReadSet.Reader != a.Attempt.Value {
+			return ErrDigestNotReadable
+		}
+	} else if a.Upload.Set || a.Repo == "" || r.ReadSet.Reader != (runspec.AttemptIdentity{}) {
+		return ErrDigestNotReadable
+	}
+	for _, edge := range r.ReadSet.Edges {
+		if edge.Reader != r.ReadSet.Reader || edge.Digest != r.Digest || !slices.Contains(EdgeKinds, edge.Kind) {
+			continue
+		}
+		if a.Attempt.Set {
+			return nil
+		}
+		key := edge.Record
+		if edge.Kind == EdgeMemoScope && cacheReadKind(r.TargetKind) && cacheReadKind(key.Kind) && key.Team != "" && key.Scope.Repo == a.Repo && key.Scope.Ref.Verified {
+			return nil
+		}
+	}
+	return ErrDigestNotReadable
+}
+
+func cacheReadKind(kind Kind) bool {
+	return kind == KindOutput || kind == KindManifest || kind == KindMemo || kind == KindDepcache
+}
+
+func checkBinaryExecution(e BinaryExecution) error {
+	if !validDigest(e.Digest) || e.Digest != e.Record.Digest {
+		return ErrIntegrity
+	}
+	if e.Trust.Team == "" || e.Trust.Team != e.Record.Key.Team || e.Record.Key.Kind != KindBinary {
+		return ErrDigestNotReadable
+	}
+	switch e.Record.Provenance {
+	case ProvenanceCloud:
+		return nil
+	case ProvenanceLocal:
+		if e.Trust.TrustLocalBuilds {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: binary provenance requires trust_local_builds", ErrDigestNotReadable)
+}

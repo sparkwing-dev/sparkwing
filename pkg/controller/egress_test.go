@@ -343,47 +343,6 @@ func TestHealthReportsTheAlarmWithoutUsage(t *testing.T) {
 	}
 }
 
-// safety: the gitcache proxy is the checkout path every node takes and a
-// whole pool shares one bearer, so a concurrency cap there refuses the
-// clone rather than the download it was meant to bound. It stays
-// byte-metered.
-func TestTheGitcacheProxyIsByteMeteredButHoldsNoSlot(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("packfile-bytes"))
-	}))
-	t.Cleanup(upstream.Close)
-
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	meter := egress.New(egress.Config{MaxDownloadsPerPrincipal: 1})
-	srv := httptest.NewServer(controller.New(st, nil).
-		EnableAuthFromStore().WithCacheURL(upstream.URL).WithEgressMeter(meter).Handler())
-	t.Cleanup(srv.Close)
-	f := egressFixture{url: srv.URL, store: st, meter: meter, adminToken: admin}
-
-	// safety: the cap of one would refuse the second of these if the proxy
-	// took a slot, even though neither overlaps the other.
-	for i := range 4 {
-		got := f.get(t, "/api/v1/gitcache/git/widgets/info/refs?service=git-upload-pack", f.adminToken)
-		if got.status != http.StatusOK {
-			t.Fatalf("gitcache fetch %d = %d, body %q", i, got.status, got.body)
-		}
-	}
-	if state := meter.State(); state.GlobalMonthBytes == 0 {
-		t.Fatal("the gitcache proxy metered no bytes")
-	}
-	if state := meter.State(); state.Refused != 0 {
-		t.Fatalf("the gitcache proxy refused %d requests, want none", state.Refused)
-	}
-}
-
 // safety: the pod header is the caller's to write, so a slot keyed on it
 // let one bearer open as many downloads as it invented pod names.
 func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {

@@ -1,26 +1,7 @@
 # pkg/storage/fs
 
-type ArtifactStore struct {
+func NewUsageReporter(root string) (*UsageReporter, error)
+type UsageReporter struct {
 	Root string
 }
-func (s *ArtifactStore) ConditionalWritesSupported(ctx context.Context) (bool, error)
-func (s *ArtifactStore) Delete(_ context.Context, key string) error
-func (s *ArtifactStore) Get(_ context.Context, key string) (io.ReadCloser, error)
-func (s *ArtifactStore) GetWithETag(_ context.Context, key string) (io.ReadCloser, storage.ETag, error)
-func (s *ArtifactStore) Has(_ context.Context, key string) (bool, error)
-func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
-func (s *ArtifactStore) Put(_ context.Context, key string, r io.Reader) error
-func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) (storage.ETag, error)
-func (s *ArtifactStore) PutIfMatch(ctx context.Context, key string, r io.Reader, expect storage.ETag) (storage.ETag, error)
-func (s *ArtifactStore) Usage(ctx context.Context) (storage.StoreUsage, error)
-type LogStore struct {
-	Root string
-}
-func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) error
-func (s *LogStore) DeleteRun(_ context.Context, runID string) error
-func (s *LogStore) Read(_ context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
-func (s *LogStore) ReadRun(_ context.Context, runID string) ([]byte, error)
-func (s *LogStore) RunDir(runID string) string
-func (s *LogStore) Stream(context.Context, string, string) (io.ReadCloser, error)
-func NewArtifactStore(root string) (*ArtifactStore, error)
-func NewLogStore(root string) (*LogStore, error)
+func (s *UsageReporter) Usage(ctx context.Context) (storage.StoreUsage, error)

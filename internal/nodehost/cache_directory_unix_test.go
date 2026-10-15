@@ -14,7 +14,7 @@ import (
 )
 
 func TestCacheDirectoryQueriesToolsWithSealedJobEnvironment(t *testing.T) {
-	for _, resolver := range []string{"gomod", "npm"} {
+	for _, resolver := range []string{"go-modules", "npm"} {
 		t.Run(resolver, func(t *testing.T) {
 			input, state, _, _ := executorFixture(t)
 			input.Entry.Directory = t.TempDir()

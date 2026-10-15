@@ -24,6 +24,7 @@ type RunSource struct {
 	RepoURL       string
 	Branch        string
 	SHA           string
+	Ref           string
 	WorkDir       string
 	// OwnerCredentials marks a runner its owner fenced with --allow-repo: it
 	// may fetch with the machine's own git credentials when the controller
@@ -51,6 +52,7 @@ func FetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 	return fetchRunSourceDirect(ctx, src, logger, func(cred DirectCredential) (string, error) {
 		fetchOpts := opts
 		fetchOpts.cred = cred
+		fetchOpts.sourceRef = src.Ref
 		return fetchPipelineSourceDirect(ctx, src.RepoURL, src.Branch, src.SHA, src.WorkDir, fetchOpts)
 	}, func(checkout string, cred DirectCredential) error {
 		return directSubmodules(ctx, checkout, "https://"+cred.Host+"/", cred, opts, true)
@@ -60,19 +62,9 @@ func FetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 func fetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logger,
 	fetch func(DirectCredential) (string, error), submodules func(string, DirectCredential) error,
 ) (string, error) {
-	if logger == nil {
-		logger = slog.New(slog.DiscardHandler)
-	}
-	cred, err := RequestDirectCredential(ctx, src.ControllerURL, src.ClaimToken, src.RunID)
+	cred, err := runSourceCredential(ctx, src, logger)
 	if err != nil {
-		// safety: a runner its owner did not fence has no credentials of its
-		// own to offer, so it fails rather than fetch as whoever runs it.
-		if !src.OwnerCredentials {
-			return "", fmt.Errorf("direct source: %w", err)
-		}
-		logger.Info("direct source: the controller released no credential; fetching with this machine's own",
-			"run_id", src.RunID, "reason", err.Error())
-		cred = DirectCredential{}
+		return "", err
 	}
 	sparkwingDir, err := fetch(cred)
 	if err != nil || cred.Empty() || len(cred.ExtraRepositories) == 0 {
@@ -86,6 +78,24 @@ func fetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 		return "", err
 	}
 	return sparkwingDir, nil
+}
+
+func runSourceCredential(ctx context.Context, src RunSource, logger *slog.Logger) (DirectCredential, error) {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	cred, err := RequestDirectCredential(ctx, src.ControllerURL, src.ClaimToken, src.RunID)
+	if err != nil {
+		// safety: a runner its owner did not fence has no credentials of its
+		// own to offer, so it fails rather than fetch as whoever runs it.
+		if !src.OwnerCredentials {
+			return DirectCredential{}, fmt.Errorf("direct source: %w", err)
+		}
+		logger.Info("direct source: the controller released no credential; fetching with this machine's own",
+			"run_id", src.RunID, "reason", err.Error())
+		cred = DirectCredential{}
+	}
+	return cred, nil
 }
 
 // safety: A released credential may authenticate only its bound host and transport.

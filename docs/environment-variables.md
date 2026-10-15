@@ -23,8 +23,7 @@ Kinds:
 - **undecided**: an operator knob without a page yet; each one waits on a
   decision to document it or remove it.
 
-The services (`sparkwing-controller`, `sparkwing-cache`,
-`sparkwing-runner`) read their settings from flags and their secrets from
+The services (`sparkwing-controller`, `sparkwing-runner`) read their settings from flags and their secrets from
 the files in `--credentials-dir`, so no service configuration appears here.
 
 
@@ -39,7 +38,6 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 | `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
 | `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
-| `SPARKWING_GITCACHE_URL` | [caching](caching.md), [gitcache](gitcache.md), [self-hosting](self-hosting.md) |
 
 ## Configuration: the `sparkwing` CLI and local runs
 
@@ -79,7 +77,7 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_RUNNER_TYPE` | [architecture](architecture.md) |
 | `SPARKWING_RUNNER_LABELS` | [architecture](architecture.md) |
 | `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
-| `SPARKWING_CACHE_GRANT` | [gitcache](gitcache.md) |
+| `SPARKWING_CACHE_GRANT` | Legacy binary and source transfers. This transport is being replaced by the [storage contract](storage.md). |
 | `SPARKWING_SOURCE_DIR` | [git-credentials](git-credentials.md) |
 | `SPARKWING_STANDALONE_REASON` | [local-execution](local-execution.md) |
 | `SPARKWING_STATE_DB` | [local-execution](local-execution.md) |

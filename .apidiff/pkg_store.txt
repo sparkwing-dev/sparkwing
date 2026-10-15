@@ -168,8 +168,6 @@ type AttemptReport struct {
 
 	Output *OutputRef
 
-	OutputFrom *ClaimInputRequest
-
 	Failure          json.RawMessage
 	ArtifactManifest string
 }
@@ -932,7 +930,7 @@ type EgressUsage struct {
 }
 const EgressUsageRetentionMonths = 13
 var ErrAccountExists = errors.New("store: an account with this email already exists")
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, credits.grant, claims.launch or storage.count scope")
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, credits.grant, or claims.launch scope")
 var ErrAgentNameTaken = errors.New("store: another live machine token of this team carries that agent name; revoke it before minting a new one")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
@@ -1440,7 +1438,6 @@ type LogSegmentGrant struct {
 
 	Watched bool
 }
-func LogSegmentObjectKey(subject blob.LogSubject, retention string, index int64) (string, error)
 type LogSegmentRequest struct {
 	Attempt    int64
 	Generation int64
@@ -1814,8 +1811,14 @@ func (o *Operator) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, 
 func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (o *Operator) CreditSettings(ctx context.Context) (_ CreditSettings, err error)
 func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error)
+func (o *Operator) DropCardAttempt(ctx context.Context, attemptID string, now time.Time) error
+func (o *Operator) DueCardCharges(ctx context.Context, now time.Time) (_ []CardChargeWork, _ []BudgetAlert, err error)
+func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error)
 func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
 func (o *Operator) EgressUsageAcrossTeams(ctx context.Context, period string) (_ []EgressUsage, err error)
+func (o *Operator) FailCardAttempt(
+	ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time,
+) (team Team, first bool, err error)
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error
 func (o *Operator) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation int64) (GitHubAppInstallation, error)
@@ -1826,14 +1829,20 @@ func (o *Operator) ListWaitingNodes(ctx context.Context, readyBefore time.Time, 
 func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
 func (o *Operator) MaintainRetention(ctx context.Context, request RetentionRequest) (RetentionResult, error)
 func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease, limit int) (int64, error)
+func (o *Operator) MarkCardRefundMade(
+	ctx context.Context, team Team, key, refundID, status string, now time.Time,
+) error
 func (o *Operator) PaymentTeam(ctx context.Context, paymentID string) (Team, error)
 func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error)
 func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (int64, error)
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error
 func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonLease, after string, limit int) ([]ControllerRun, error)
+func (o *Operator) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
 func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error
+func (o *Operator) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error)
+func (o *Operator) ReportCardRefund(ctx context.Context, key, refundID, status string, now time.Time) (bool, error)
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
 func (o *Operator) ReversePayment(
 	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
@@ -1849,6 +1858,7 @@ func (o *Operator) SetOperatorCreditSettings(
 	ctx context.Context, up CreditSettingsUpdate,
 ) (_ CreditSettings, err error)
 func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) error
+func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error)
 func (o *Operator) StorageSettings(ctx context.Context) (StorageSettings, error)
 func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
@@ -2108,7 +2118,6 @@ type RepoFilter = match.RepoFilter
 func RepoIdentityFromPath(repoPath string) string
 func RepoIdentityFromURL(remote string) string
 func RepoKey(owner, name string) string
-func ResultBlobKey(attempt runspec.AttemptIdentity, repo runspec.RepoKey, ref blob.RefScope, pipeline string, kind blob.Kind) blob.RecordKey
 type RetentionRequest struct {
 	Lease SingletonLease
 	Limit int
@@ -2706,7 +2715,6 @@ type StorageChargeSweep struct {
 
 	ChargedMicro int64
 }
-const StorageCountScope = "storage.count"
 type StorageKind string
 func (k StorageKind) Valid() bool
 const StorageLimitBytesPerMonth = "bytes_per_month"
@@ -2858,24 +2866,16 @@ func (s *Store) DB() *sql.DB
 func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error)
 func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
-func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) Dialect() Dialect
-func (s *Store) DropCardAttempt(ctx context.Context, attemptID string, now time.Time) error
-func (s *Store) DueCardCharges(ctx context.Context, now time.Time) (_ []CardChargeWork, _ []BudgetAlert, err error)
-func (s *Store) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error)
 func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int64, t Trigger, now time.Time) (childID string, err error)
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExchangeCapability(ctx context.Context, spec capability.ExchangeSpec) (capability.Issued, error)
-func (s *Store) FailCardAttempt(
-	ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time,
-) (team Team, first bool, err error)
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
-func (s *Store) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason, srcRun, srcNode string) error
 func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error
@@ -2932,9 +2932,6 @@ func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session,
 func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
-func (s *Store) MarkCardRefundMade(
-	ctx context.Context, team Team, key, refundID, status string, now time.Time,
-) error
 func (s *Store) MarkNodeLogSealed(ctx context.Context, l NodeLog, storedBytes int64, now time.Time) error
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID string, generation int64,
@@ -2963,10 +2960,8 @@ func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.Creden
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error)
 func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error)
 func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error
-func (s *Store) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
-func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
@@ -2974,7 +2969,6 @@ func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPref
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error
 func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, report AttemptReport, now time.Time) (replayed bool, err error)
-func (s *Store) ReportCardRefund(ctx context.Context, key, refundID, status string, now time.Time) (bool, error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error)
 func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error)
@@ -3012,7 +3006,6 @@ func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignU
 func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setBy string, now time.Time) (SignUpGate, error)
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
-func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error)
 func (s *Store) SettlePayment(ctx context.Context, proof capability.VerifiedPaymentEvent) (PaymentSettlement, error)
 func (s *Store) SignNodeLogSegment(ctx context.Context, l NodeLog, seg NodeLogSegment, capBytes int64, charge bool, now time.Time) (err error)
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)

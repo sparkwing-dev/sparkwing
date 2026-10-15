@@ -297,8 +297,8 @@ func TestRestoreNeverLowersWhatThisProcessCounted(t *testing.T) {
 
 func TestAnonymousBytesShareOneCount(t *testing.T) {
 	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
-	m.Record("", egress.ClassGit, 60)
-	m.Record("", egress.ClassGit, 40)
+	m.Record("", egress.ClassArtifact, 60)
+	m.Record("", egress.ClassArtifact, 40)
 	if got := monthBytes(m, egress.AnonymousPrincipal); got != 100 {
 		t.Fatalf("anonymous bytes = %d, want 100 under %q", got, egress.AnonymousPrincipal)
 	}
@@ -399,7 +399,7 @@ func TestServeForwardsHijack(t *testing.T) {
 	m := egress.New(egress.Config{})
 	hijacked := make(chan error, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		out := m.Serve(w, r, "alice", egress.ClassGit)
+		out := m.Serve(w, r, "alice", egress.ClassArtifact)
 		h, ok := out.(http.Hijacker)
 		if !ok {
 			hijacked <- errors.New("the counting writer dropped http.Hijacker")

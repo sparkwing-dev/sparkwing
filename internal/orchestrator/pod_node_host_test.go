@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"context"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -31,16 +33,27 @@ func podFixture(t *testing.T) string {
 // A log that lost lines seals as incomplete, so readers never take the prefix
 // for the whole log.
 func TestPodNodeLog_SealsIncompleteAfterALoss(t *testing.T) {
-	ctrl, tok := newSegmentController(t)
+	up := &podLogUpload{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	nlog := &podNodeLog{sink: openNodeLogSink(t.Context(), client.NewWithToken(ctrl.url, nil, tok), "run-s", "a", logger), logger: logger}
-	if nlog.sink == nil {
-		t.Fatal("the controller issued no segment URLs")
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "acme", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "acme", RunID: "run", NodeID: "job", Attempt: 1, Generation: 1}}
+	sink, err := logseg.NewSink(t.Context(), up, logseg.Options{Subject: subject, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
 	}
+	nlog := &podNodeLog{sink: &nodeLogSink{sink: sink, logger: logger}, logger: logger}
 	nlog.Emit(sparkwing.LogRecord{Msg: "kept"})
 	nlog.RecordLoss(2)
 	nlog.seal(t.Context(), false)
-	if m := ctrl.log(t).Manifest; m == nil || m.Status != logseg.StatusIncomplete || m.DroppedLines != 2 {
+	if m := up.manifest; m.Status != logseg.StatusIncomplete || m.DroppedLines != 2 {
 		t.Fatalf("manifest = %+v, want incomplete with 2 dropped lines", m)
 	}
+}
+
+type podLogUpload struct{ manifest logseg.Manifest }
+
+func (*podLogUpload) PutSegment(context.Context, logseg.Segment, []byte) error { return nil }
+
+func (u *podLogUpload) PutManifest(_ context.Context, m logseg.Manifest) error {
+	u.manifest = m
+	return nil
 }

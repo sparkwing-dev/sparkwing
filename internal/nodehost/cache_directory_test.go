@@ -12,7 +12,7 @@ import (
 )
 
 func TestCacheDirectoryUsesPersistedBodyEnvironment(t *testing.T) {
-	for _, resolver := range []string{"gomod", "npm"} {
+	for _, resolver := range []string{"go-modules", "npm"} {
 		t.Run(resolver, func(t *testing.T) {
 			input, state, _, _ := executorFixture(t)
 			input.Entry.Directory = t.TempDir()
@@ -37,7 +37,7 @@ func TestCacheDirectoryDefaultsUseCapturedHome(t *testing.T) {
 	input.Entry.Directory = t.TempDir()
 	home := t.TempDir()
 	environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{"HOME=" + home, "USERPROFILE=" + home, "PATH="}, Masker: secrets.NewMasker()}}
-	for _, resolver := range []string{"gomod", "npm"} {
+	for _, resolver := range []string{"go-modules", "npm"} {
 		got, err := environments.CacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
 		want := filepath.Join(home, "go", "pkg", "mod")
 		if resolver == "npm" {

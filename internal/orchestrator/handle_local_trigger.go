@@ -174,7 +174,7 @@ func localTriggerBackends(ctx context.Context, paths Paths, admission *LocalAdmi
 			slog.Default().Warn("close local store", "err", err)
 		}
 	}
-	return LocalBackends(paths, st, nil), selection, closeStore, nil
+	return LocalBackends(paths, st), selection, closeStore, nil
 }
 
 // safety: the parent names the file, and a child never derives a standalone

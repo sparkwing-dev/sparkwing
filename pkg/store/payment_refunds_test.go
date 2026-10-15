@@ -155,7 +155,7 @@ func TestPaymentWarningFindsCheckoutTeam(t *testing.T) {
 	}
 	warning := PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: true}
 	for range 2 {
-		team, err := s.RecordPaymentWarning(t.Context(), warning, s.now())
+		team, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, s.now())
 		if err != nil || team != "a" {
 			t.Fatalf("warning team=%q: %v", team, err)
 		}
@@ -171,7 +171,7 @@ func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
 	for _, actionable := range []bool{false, true} {
 		t.Run(map[bool]string{false: "informational", true: "actionable"}[actionable], func(t *testing.T) {
 			s, event := paymentFixture(t, capability.PaymentTest)
-			if _, err := s.RecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: actionable}, s.now()); err != nil {
+			if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: actionable}, s.now()); err != nil {
 				t.Fatal(err)
 			}
 			_, err := s.settlePaymentFacts(t.Context(), event)

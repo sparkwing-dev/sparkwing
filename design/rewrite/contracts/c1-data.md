@@ -2,6 +2,28 @@
 
 <!-- design:begin -->
 
+## Controller result verification
+
+`Server.WithDataObjects` installs `storage.BlobManifests{Objects: objects}` through
+`Store.SetResultBlobRecords` before serving or sharing the store. Terminal
+output and manifest attachments use that backend inside the live tenant
+transaction. The controller property test drives real claim/start, upload
+reservation/settlement, record commit and terminal transitions. Corrupt physical
+manifest bytes refuse completion. Restoring them allows completion and exact
+replay. Authenticated data binding remains C2's separate contract.
+
+The legacy `AttemptReport.OutputFrom`, `Store.FinishNodeCopyingOutput` and
+their `node_outputs` copy branches are removed. Host memo materialization
+uses the existing transactional `blob.RecordStore.CopyMemo` contract. The
+unused backend output-read forwarding methods are removed too.
+
+`RecordStore.CopyMemo` is implemented, but the state machine's private
+`CopyMaterializedRecords` seam remains assigned only by tests. Removing that
+fixture assignment makes manual-retry, memo and coalesced reconciliation fail
+with `transactional materialization records are not configured`. W1 must bind
+the copier inside its state transaction. Calling the public copy method before
+reconciliation would commit the records separately from the terminal state.
+
 `Tenant.StorageStanding` reports the selected team's policy, retained event,
 blob and tagged-log bytes, and live upload reservation bytes from one snapshot.
 The controller and retained-storage billing share the same blob/log inventory
@@ -439,6 +461,66 @@ client-selected field. The ticket ID also binds the persisted quota reservation.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
 leased retention releases uncommitted reservations without deleting a live blob.
 
+`blob.ObjectBackend` owns signed physical transfers, verified immutable publication
+and deletion. Both filesystem and S3 implementations consume stored bytes through
+verified EOF and successful close. S3 fences its copy to the verified source ETag,
+creates the final key only if absent, and verifies final bytes before returning.
+A physical commit grants no record, existence row or receipt. Those remain W1's
+transactional responsibility after the controller repeats authorization.
+
+`ObjectBackend.ReadManifest(ctx, team, digest)` derives the tenant CAS key and
+returns file members only after verifying the full stored length, digest and
+successful close. `storage.BlobManifests` implements W1's `BlobManifestReader`
+with that physical reader. The record transaction authorizes the manifest before
+reading it and independently authorizes every returned member. This adapter opens
+no store transaction or authenticated data request, so it can run inside W1's
+existing transaction. Controller binding must supply it to `Tenant.BlobRecords`.
+
+`ObjectBackend.DeleteBlob` implements W1's existing `BlobDeleter` interface for
+filesystem and S3 collection. It derives the tenant CAS key from the selected
+blob. Missing bytes are an idempotent success. The leased collector owns the
+reachability recheck and tombstone grace, including references added after
+marking. The controller's age-based output pruner and the bucket measurement
+expiry callback are removed. The maintenance coordinator must bind the final
+physical backend before collecting objects.
+
+`blob.LogDeleter.DeleteLogs(ctx, team, run)` removes physical logs in the selected
+tenant across stored retention classes. An empty run selects that tenant's logs.
+Both common backends implement it and return the removed byte count. Invalid
+selectors fail before I/O. Filesystem traversal follows no symlink. S3 deletion
+checks each listed key against the selected prefix and rejects stalled pages.
+Neither backend removes CAS objects through this operation. Run deletion and
+the team's leased purge/recheck call it through the configured data backend
+before removing rows. Listings establish no record or read authority.
+This is a W7-local contract addition. Authenticated log bindings remain with W2.
+
+`internal/teamblob` retains scoped key construction and team validation for
+legacy S3 output reads. Its cache byte/multipart APIs, prefix deletion,
+directory listing, measurement and write breaker are removed. Deployment
+measurement remains separate from authoritative tenant accounting.
+
+The standalone filesystem backend uses the controller URL as its signing base.
+It signs the C2 data upload, object download and log-segment paths. Method,
+exact object path, declared byte checks and expiry remain bound to the signed
+token. An external URL prefix belongs to the proxy, while verification uses
+the registered controller route.
+`Filesystem.VerifyTransfer` supplies C2's external endpoint proof callback.
+The common controller mounts these signed transfers without bearer middleware.
+Authenticated binding and new local-controller construction remain separate.
+Legacy filesystem output and raw log paths have been removed.
+The sharded filesystem ArtifactStore, generic raw storage.ArtifactStore contract
+and portable conformance package are also removed. Filesystem deployment
+measurement uses fs.NewUsageReporter. It exposes totals without an object-read
+or write API. S3's remaining raw log reader/writer still needs its authenticated
+cutover. Physical CAS reads and writes stay with the common object backend.
+
+`CommitObject` requires verified bytes at the exact ticket's staging key even
+when the final CAS object already exists. An absent staging key returns
+`ErrNotFound`; a digest and another uploader's final object cannot establish an
+own-upload receipt. Retries before settlement retain staging. After settlement,
+the authenticated adapter replays the persisted receipt under current authority
+without repeating physical publication. Staging cleanup follows settlement.
+
 The `storage-cas-integrity/store-data-sqlite` proof refuses mismatched verified
 size, digest and tenant evidence. It reopens an expired interrupted upload,
 reserves a replacement under the same capacity, rolls back a receipt failure,
@@ -783,9 +865,29 @@ execution lease, so execution tail grace does not govern its uploads. Normal
 segment integrity, retention and seal rules still apply. Owner-unit publication
 needs an imported unit identity contract before it can bypass a live unit lease.
 `LogTransport.SignSegments` derives object keys and retention from the authorized
-subject and run. `ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
+subject and run. Each segment URL includes its required `Headers`; the final
+manifest uses `ManifestURL` and `ManifestHeaders`. Storage transports must send
+those headers, including S3's signed create-only condition. HTTP 412 proves only
+that the key exists and cannot authorize a commit or an identical replay.
+`LogTransport.VerifyUpload` recovers an uncertain PUT by reauthorizing the exact
+writer and verifying the stored bytes. `LogUploadCheck` carries the subject,
+index, stored size and SHA-256. Index zero selects the final manifest. Positive
+indexes select segments. The controller derives the key from the subject and
+the run's persisted retention class. `logseg.UploadVerifier.Verify` consumes and
+closes that object before confirming its exact size and digest. Verification
+returns no bytes or read URL and creates no record edge. The subsequent
+`RecordSegments` transaction repeats writer authorization. Cancellation remains
+an error. A changed payload, missing object or failed close cannot recover.
+`ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
 subject, proxy bytes through the controller, meter egress and apply the log
 exception to download caps. Persisted segments fill gaps or stalls in the ring.
+
+`blob.LogObjectKey(subject, class, index)` owns the physical key for every signed
+log slot. Index zero names the final manifest. Physical segment slots start at
+one in signing and verification.
+`LogSubjectPrefix`, `LogSegmentKey` and `LogManifestKey` are its shared key builders.
+The physical layout is `logs/<class>/teams/<team>/runs/<run>/`, followed by the
+tagged job or unit fence. Persisted references must name those physical objects.
 
 The `storage-hasmany-read-set/store-data-sqlite` proof uses exact imported job
 attempts under a preseeded publication capability. It checks hidden unrelated and
@@ -869,7 +971,9 @@ local publication transport and physical bytes remain integration obligations.
 | `blob.LogSubjectKind`, `blob.LogUnitKind` | Select attempt versus unit logs and the persisted owner-unit kind. |
 | `blob.LogSubject`, `blob.LogUnit`, `blob.LogSource`, `blob.LogSubject.Validate` | Carry and validate one fenced log identity. |
 | `blob.LogSigningRequest`, `blob.LogUploadURL`, `blob.LogUploadBatch` | Request and return bounded segment PUT slots for that identity. |
-| `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads and proxy authenticated reads through the controller. |
+| `blob.LogUploadCheck`, `blob.LogTransport.VerifyUpload` | Verify the exact stored payload after an uncertain PUT under current writer authority. |
+| `logseg.UploadVerifier` | Derive one authorized object's key and check its stored size and digest after successful close. |
+| `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads, verify uncertain writes and proxy authenticated reads through the controller. |
 | `SegmentCommit`, `LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
 | `Operator.SealAbandonedLogStreams` | Seal abandoned execution streams under the maintenance lease without changing execution results. |
 
@@ -930,6 +1034,16 @@ associations fail instead of choosing a team. Caller-directed checkout closure
 is removed. Verified failure and expiry events own those outcomes.
 `CreditGrantRequest` carries no checkout session. Only verified payment
 settlement writes the checkout's paid timestamp and grant association.
+
+`Operator` owns deployment card collection and refund workers: `DueCardCharges`,
+`RecordAttemptIntent`, `SettleCardPayment`, `RecordPaymentWarning`,
+`DueCardRefunds`, `MarkCardRefundMade`, `ReportCardRefund`, `FailCardAttempt`
+and `DropCardAttempt`. Their raw Store methods are removed. Provider workers
+select Operator before operating on persisted attempt and payment identities.
+Tenant card setup, spend policy and recovery checkout keep their tenant handles.
+The collection worker and webhook settlement retain their ledger lock,
+persisted payer attribution, replay rules and refund queue. This handle cut
+adds no provider verification contract. C2 still owns verified event delivery.
 
 `Operator.ReversePayment` and `Operator.PaymentTeam` resolve provider payment
 identity across teams. Their raw Store methods are removed. The unused public
@@ -1199,6 +1313,27 @@ or an exact permitted uploader receipt in the transaction. HasMany answers only
 inside the read set; absent and unauthorized are indistinguishable. A download
 must reach a verified EOF; early Close does not establish success.
 
+Repo-bound user cache readers have no job attempt or upload identity. Their
+server-derived `memo_scope` read edges use an empty reader attempt and carry the
+authorized repository and verified record ref. `AuthorizeEdge` accepts these
+only for output, manifest, memo and depcache. The transaction checks the user's
+live repo grant and verified-default evidence before constructing those edges.
+
+`blob.OutputData` applies the shared output cap to writes and reads using
+`Store` and `RecordStore`. `blob.ResultRecordKey` supplies W1's persisted
+output and manifest layout. `Name` is `result`. `Scope.Key` is
+`<run>/<attempt>/<generation>`, alongside the authorized repo/ref/pipeline/job.
+The exact uploader also stays in `Record.Source`. `ResolveWriteKey` derives this
+layout from the bound attempt and refuses another run/job or a supplied scope
+key. Empty output has an explicit blob and record. Required reads verify EOF and
+successful close. Memo copies use the same destination layout.
+
+`blob.MemoRecordName` is `output` for memo writers and exact-key readers.
+A manifest-only memo retains W1's separate `manifest` name.
+Read-only remote memo hits verify bounded output, manifest/member agreement
+and member bytes before granting artifact access. Failed lookups or verification
+produce a miss. Caller cancellation remains an error.
+
 Job receipts retain team, run, job, attempt and generation. Owner-unit and
 non-job publication receipts authorize only binary/source bundles. Imported
 publication attempts may attach output/manifests only for the bound published
@@ -1215,6 +1350,13 @@ separate signed upload path and controller-proxied reads. Cloud binary execution
 checks committed digest and cloud provenance unless trust_local_builds is set.
 Local remote-cache opt-in uses the user's repo-bound read grant and returns only
 verified default-branch memo, artifacts and depcache, with no writes or binaries.
+
+`depcacheblob.NewRemoteReader` adapts that `blob.RemoteCache` to `depcache.Reader`
+with an explicit repository and lookup budget. `depcache.WithRemoteReader`
+keeps local archives first and saves locally. The remote interface has no write
+method. Both dependency-archive backends use the same verified-download and staged
+extraction path. A copied memo without an explicit output digest is a miss,
+including for followers. Explicit empty output remains a valid hit.
 
 Memo and depcache default-branch fallback apply `VerifiedDefaultOnly` before
 reading bytes or member metadata. A verified ref without default-branch evidence
@@ -1568,6 +1710,8 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `NewSignedStore` | NewSignedStore verifies transferred bytes and never falls back to cache-service routes. |
 | `ObjectKey` | ObjectKey produces teams/<team>/cas/<sha256> after validating both components. |
 | `MemoKey` | MemoKey cannot share an unclaimed result across pipelines. |
+| `MemoRecordName` | Names the persisted memo output consistently for writers and exact-key readers. |
+| `ResultRecordKey` | Names output and manifest records for an exact persisted attempt. |
 | `MemoNamespace` | MemoNamespace reserves manual:<ref> for submitter-vouched writes. |
 | `MemoLookup` | MemoLookup uses the authority's server-derived scope and verified default fallback. |
 | `CopyMemoRequest` | CopyMemoRequest creates output and manifest edges atomically with the hit. |
@@ -1606,6 +1750,14 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `UploadRule` | UploadRule distinguishes non-job byte intake from job-owned output edges. |
 | `UploadRules` | UploadRules is the complete identity/record-kind policy, rechecked at commit. Publication with an imported attempt follows the final row rather than non-job publication. |
 | `AuthorizeUpload` | AuthorizeUpload checks the C2-resolved identity and target kind in the write transaction. It requires a live owner fence or publication authority, verifies imported job identity, and rejects identity/principal/capability mismatches with the authenticated authority. |
+
+### internal/blob/output.go
+
+| Export | Purpose |
+|---|---|
+| `OutputData` | Binds output bytes and records to reader authority and an exact uploader. |
+| `OutputData.Put` | Checks the output cap and uploader binding, obtains a verified receipt, then commits the output record. |
+| `OutputData.Read` | Looks up the authorized output record and consumes bounded bytes through verified EOF and successful close. |
 
 ### pkg/storage/state_contract.go
 

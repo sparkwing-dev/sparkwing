@@ -30,17 +30,17 @@ var reviewedUnscopedSQL = map[string]string{
 	"paymentWarningTeamTx":                "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
 	"(*Store).settlePaymentFacts":         "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
-	"(*Store).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
+	"(*Operator).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
 		"under the ledger lock",
 	"startDueAttemptsTx": "the payment worker starts the due attempts of every team's open charges; " +
 		"each row it touches is named by its global id",
-	"(*Store).SettleCardPayment": "a payment names its charge by global id, and the charge row it reads " +
+	"(*Operator).SettleCardPayment": "a payment names its charge by global id, and the charge row it reads " +
 		"is checked against the team the payment names",
-	"(*Store).FailCardAttempt":     "a decline names its attempt by global id; the team is read from that row",
-	"(*Store).DropCardAttempt":     "an attempt that never reached Stripe is closed by its global id",
-	"(*Store).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
-	"(*Store).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
-	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
+	"(*Operator).FailCardAttempt":     "a decline names its attempt by global id; the team is read from that row",
+	"(*Operator).DropCardAttempt":     "an attempt that never reached Stripe is closed by its global id",
+	"(*Operator).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
+	"(*Operator).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
+	"(*Operator).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
 		"the queued row says",
 	"globalRunnerRefusal":               "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":          "the global hourly cap counts runs from every team",
