@@ -53,7 +53,8 @@ key, reads bounded bytes and requires successful close, exact size and SHA-256.
 It returns no bytes or read URL and creates no reference edge. `RecordSegments`
 rechecks the writer before committing that edge. The verifier works with both
 object backends. Its controller route remains an integration point.
-`blob.S3.LogClassReady` supplies the lifecycle callback for the S3 bucket.
+`LogClassReady` is part of the controller's physical log binding. S3 validates
+the bucket lifecycle. Filesystem validates the class handled by its expiry pass.
 The controller runs filesystem expiry after renewing its maintenance lease.
 
 `CommittedReader` calls `ReadLogSegments` before each segment. It checks the returned
@@ -96,8 +97,9 @@ retention has separate expiry tests.
 Filesystem and S3 acceptance proofs join the physical components to the store's
 transactional log records. Authenticated controller routes, egress settlement
 and host bindings remain integration work.
-Authenticated signing, verification and segment-commit adapters remain W2
-integration work. Hosts consume `blob.LogTransport` and `SegmentRecorder`.
+Hosts consume `blob.LogTransport` and `SegmentRecorder`. The authenticated
+signing and commit routes use the configured physical backend and real tenant
+transactions. Upload verification and host transport adapters remain W2 work.
 
 `internal/blob` owns physical log keys. `LogObjectKey` reserves index zero for
 the final manifest and positive indexes for segments. Signing, verification and
@@ -124,7 +126,9 @@ fallback. Closing a dashboard stream cancels its pending reads.
 filesystem upload, segment commit, exact-offset read and SSE resume.
 `TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors` generates payloads
 against the real tenant and verifies that ended authority emits no bytes.
-Authenticated log signing and commit routes remain W2 integration work.
+`TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject` drives an
+authenticated claim through signing, filesystem PUTs, segment commits and a
+controller GET. It checks exact bytes and generated foreign-subject refusals.
 
 `TestCommittedDashboardLogsRecheckAuthorityBetweenSegments` revokes a real
 SQLite capability after the first segment is written. The next segment is

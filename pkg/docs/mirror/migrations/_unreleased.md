@@ -1714,8 +1714,8 @@ have no forwarding aliases. Keep provider retries enabled until settlement can
 commit their outcomes.
 
 Replace `swu_` bootstrap credentials with a `swk_` controller capability
-presentation. `EnsureBootstrapAdminToken` now takes a context, transactional
-issuer and raw presentation. It requires `BootstrapAdminIssuer` and forwards a
+presentation. `EnsureBootstrapAdminToken` takes a context, `BootstrapAdminIssuer`
+and raw presentation. It forwards a
 trusted `ProvisionSpec.Seed` to its once-only transaction. It no longer calls
 `CreateTokenIfNoneExist` or accepts a caller clock. The transaction must use
 `Store.Issue`, keep only the digest, close the gate after the first admin

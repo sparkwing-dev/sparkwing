@@ -100,6 +100,9 @@ func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, act
 }
 
 func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string, now time.Time) error {
+	if deletionActor(tx, team, actor) {
+		return nil
+	}
 	switch actor.Kind {
 	case ActorController, ActorRunHost:
 		return checkOwnerTx(ctx, tx, team, actor, runID, now)
@@ -130,6 +133,9 @@ func lockStateRunTx(ctx context.Context, tx *storeTx, team Team, id string) erro
 }
 
 func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor, now time.Time) error {
+	if deletionActor(tx, team, actor) {
+		return nil
+	}
 	if actor.Kind == ActorReaper {
 		return checkReaperTx(ctx, tx, actor, now)
 	}
@@ -158,4 +164,8 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 		}
 	}
 	return nil
+}
+
+func deletionActor(tx *storeTx, team Team, actor Actor) bool {
+	return team != "" && tx.deletingTeam == team && actor == (Actor{Kind: ActorOperator})
 }

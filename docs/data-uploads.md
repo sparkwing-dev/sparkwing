@@ -38,6 +38,9 @@ job B authority to reference the same bytes.
 fail with `bad_request`. A miss returns `{"found":false,"members":[]}`.
 A hit returns public record metadata and authorized member metadata. It omits
 private authority references, uploader identities and read-set snapshots.
+The `ref` selector and response metadata use `manual:<ref>` for submitter-vouched
+records and the plain ref for verified records. Each lookup requires the matching
+read grant. Selecting a plain ref never inherits a manual write's scope.
 
 `POST /api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
 RFC3339 `deadline`. `POST /api/v1/data/depcache/lookup` takes `name`, `key`

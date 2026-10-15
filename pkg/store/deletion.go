@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Team deletion states. A deletion is pending from the request until the
@@ -239,7 +241,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE team = ?`, string(t.team)); err != nil {
 		return nil, err
 	}
-	revoked, err := t.revokeAllTokensTx(ctx, tx, at)
+	revoked, err := revokeSelectedCapabilitiesTx(ctx, tx, `team=?`, t.team)
 	if err != nil {
 		return nil, err
 	}
@@ -271,10 +273,8 @@ func (t *Tenant) memberIDsTx(ctx context.Context, tx *storeTx) (_ []string, err 
 	return ids, rows.Err()
 }
 
-func (t *Tenant) revokeAllTokensTx(ctx context.Context, tx *storeTx, at int64) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT prefix FROM tokens WHERE team = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		string(t.team), at)
+func revokeSelectedCapabilitiesTx(ctx context.Context, tx *storeTx, where string, args ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT prefix FROM capabilities WHERE (`+where+`) AND (revoked_at IS NULL OR revoked_at>?) ORDER BY prefix`, append(args, tx.now().UnixNano())...)
 	if err != nil {
 		return nil, err
 	}
@@ -282,38 +282,40 @@ func (t *Tenant) revokeAllTokensTx(ctx context.Context, tx *storeTx, at int64) (
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE tokens SET revoked_at = ? WHERE team = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		at, string(t.team), at); err != nil {
-		return nil, err
+	for _, prefix := range prefixes {
+		if err := revokeAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+			return nil, err
+		}
 	}
 	return prefixes, nil
 }
 
-// safety: a queued trigger is finished here the way CancelPendingTrigger
-// finishes one, so no claimant takes it; a claimed one gets the cancel request
-// its runner already watches for.
 func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.Time) error {
-	ns := now.UnixNano()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE runs SET status = ?, finished_at = ?, error = ?
-		WHERE team = ? AND status = ?
-		  AND id IN (SELECT id FROM triggers WHERE team = ? AND status = ?)`,
-		runStatusCancelled, ns, "cancelled: the team is being deleted",
-		string(t.team), runStatusPending, string(t.team), triggerStatusPending); err != nil {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM runs WHERE team=? AND finished_at IS NULL ORDER BY id`, t.team)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE triggers SET status = ?, cancel_requested_at = COALESCE(cancel_requested_at, ?)
-		WHERE team = ? AND status = ?`,
-		triggerStatusDone, ns, string(t.team), triggerStatusPending); err != nil {
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `
-		UPDATE triggers SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
-		WHERE team = ? AND status = ?`,
-		ns, string(t.team), triggerStatusClaimed)
-	return err
+	previous := tx.deletingTeam
+	tx.deletingTeam = t.team
+	defer func() { tx.deletingTeam = previous }()
+	for _, id := range ids {
+		if _, err := transitionRunTx(ctx, tx, t.team, RunTransition{RunID: id, To: RunCancelled, Actor: Actor{Kind: ActorOperator}, Cause: RunCancel, Reason: "team_deleted"}, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const teamDeletionSelect = `SELECT slug, state, requested_at, finished_at, attempts, last_error, recheck_at FROM team_deletions`
@@ -523,35 +525,16 @@ func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cau
 // AccountByEmail finds the account an address names: the one holding it
 // verified, or the only one holding it at all.
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error) {
-	rows, err := s.query(ctx, accountSelect+` WHERE email = ? ORDER BY email_verified DESC, created_at`, NormalizeEmail(email))
+	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return Account{}, err
 	}
-	defer closeRowsInto(rows, &err)
-	var found []Account
-	for rows.Next() {
-		var a Account
-		var verified int
-		var active string
-		var created, waitlisted int64
-		if err := rows.Scan(&a.ID, &a.Email, &verified, &a.Name, &active, &created, &waitlisted); err != nil {
-			return Account{}, err
-		}
-		a.EmailVerified, a.ActiveTeam, a.CreatedAt = verified == 1, Team(active), time.Unix(created, 0).UTC()
-		a.Waitlisted = waitlisted != 0
-		found = append(found, a)
-	}
-	if err := rows.Err(); err != nil {
+	defer rollbackOrLog(tx)
+	out, err := accountByEmailTx(ctx, tx, email)
+	if err != nil {
 		return Account{}, err
 	}
-	switch {
-	case len(found) == 0:
-		return Account{}, ErrNotFound
-	case found[0].EmailVerified || len(found) == 1:
-		return found[0], nil
-	default:
-		return Account{}, ErrAmbiguousAccount
-	}
+	return out, tx.Commit()
 }
 
 // DeleteAccount removes an account and everything that identifies it: its
@@ -570,6 +553,14 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		return AccountDeletion{}, err
 	}
 	defer rollbackOrLog(tx)
+	out, err := s.deleteAccountTx(ctx, tx, accountID, now)
+	if err != nil {
+		return AccountDeletion{}, err
+	}
+	return out, tx.Commit()
+}
+
+func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (AccountDeletion, error) {
 	acct, err := accountTx(ctx, tx, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
@@ -606,13 +597,7 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE account_id = ?`, accountID); err != nil {
 		return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 	}
-	at := now.UTC().Unix()
-	rows, err := tx.QueryContext(ctx, `
-		SELECT prefix FROM tokens WHERE created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`, accountID, at)
-	if err != nil {
-		return AccountDeletion{}, err
-	}
-	minted, err := scanPrefixes(rows)
+	minted, err := revokeSelectedCapabilitiesTx(ctx, tx, `created_by=? OR (subject_kind='account' AND subject_id=?)`, accountID, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
 	}
@@ -626,13 +611,11 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 			return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 		}
 	}
-	label := DeletedUserLabel
 	for _, stmt := range []struct {
 		sql  string
 		args []any
 	}{
-		{`UPDATE tokens SET revoked_at = ? WHERE created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`, []any{at, accountID, at}},
-		{`UPDATE tokens SET principal = ?, created_by = '' WHERE created_by = ?`, []any{label, accountID}},
+		{`UPDATE capabilities SET created_by='' WHERE created_by=?`, []any{accountID}},
 		{`DELETE FROM sessions WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identities WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identity_unlinks WHERE account_id = ?`, []any{accountID}},
@@ -643,7 +626,7 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		{`UPDATE github_runner_bindings SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE teams SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE team_deletions SET requested_by = '' WHERE requested_by = ?`, []any{accountID}},
-		{`DELETE FROM business_events WHERE team = '' AND account = ?`, []any{accountID}},
+		{`DELETE FROM business_events WHERE team IS NULL AND account = ?`, []any{accountID}},
 		{`UPDATE business_events SET account = '' WHERE account = ?`, []any{accountID}},
 		{`UPDATE business_events SET actor = '' WHERE actor IN (?, ?)`, []any{accountID, acct.Email}},
 		{`DELETE FROM accounts WHERE id = ?`, []any{accountID}},
@@ -652,7 +635,7 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 			return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
 		}
 	}
-	return res, tx.Commit()
+	return res, nil
 }
 
 func ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Team, blocked []TeamInfo, err error) {
@@ -712,7 +695,7 @@ type principalName struct {
 }
 
 func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []principalName, err error) {
-	names := []principalName{{name: acct.Email}}
+	names := []principalName{{name: acct.Email}, {name: acct.ID}}
 	add := func(n principalName) {
 		if n.name != "" && n.name != DeletedUserLabel && !slices.Contains(names, n) &&
 			!slices.Contains(names, principalName{name: n.name}) {
@@ -720,8 +703,7 @@ func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ 
 		}
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT email, '' FROM identities WHERE account_id = ? AND linked = 0
-		UNION SELECT principal, team FROM tokens WHERE created_by = ?`, acct.ID, acct.ID)
+		SELECT email, '' FROM identities WHERE account_id = ? AND linked = 0`, acct.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -744,7 +726,6 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 	}
 	for _, col := range []struct{ table, column string }{
 		{"runs", "created_principal"},
-		{"triggers", "trigger_user"},
 		{"triggers", "claim_principal"},
 		{"approvals", "approver"},
 		{"cron_schedules", "armed_by"},
@@ -843,4 +824,36 @@ func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, n
 func invitationEmailKey(email string) string {
 	sum := sha256.Sum256([]byte(NormalizeEmail(email)))
 	return hex.EncodeToString(sum[:])
+}
+
+func accountByEmailTx(ctx context.Context, tx *storeTx, email string) (_ Account, err error) {
+	rows, err := tx.QueryContext(ctx, accountSelect+` WHERE email = ? ORDER BY email_verified DESC, created_at`, NormalizeEmail(email))
+	if err != nil {
+		return Account{}, err
+	}
+	defer closeRowsInto(rows, &err)
+	var found []Account
+	for rows.Next() {
+		var a Account
+		var verified int
+		var active string
+		var created, waitlisted int64
+		if err := rows.Scan(&a.ID, &a.Email, &verified, &a.Name, &active, &created, &waitlisted); err != nil {
+			return Account{}, err
+		}
+		a.EmailVerified, a.ActiveTeam, a.CreatedAt = verified == 1, Team(active), time.Unix(created, 0).UTC()
+		a.Waitlisted = waitlisted != 0
+		found = append(found, a)
+	}
+	if err := rows.Err(); err != nil {
+		return Account{}, err
+	}
+	switch {
+	case len(found) == 0:
+		return Account{}, ErrNotFound
+	case found[0].EmailVerified || len(found) == 1:
+		return found[0], nil
+	default:
+		return Account{}, ErrAmbiguousAccount
+	}
 }

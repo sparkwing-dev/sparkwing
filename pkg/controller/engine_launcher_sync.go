@@ -6,12 +6,15 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // LauncherSyncReader rechecks launcher ancestry and resolves current awards in one transaction.
 type LauncherSyncReader interface {
 	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 }
+
+var _ LauncherSyncReader = (*store.Operator)(nil)
 
 func (s *EngineController) syncLauncher(ctx context.Context, a capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 	reader := s.Launcher

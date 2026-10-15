@@ -14,10 +14,14 @@ func authenticationBindingTx(ctx context.Context, tx *storeTx, c capability.Capa
 		return out, nil
 	}
 	var cancel, finished sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT cancel_requested_at,finished_at FROM runs WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&cancel, &finished); err != nil {
+	var reason string
+	if err := tx.QueryRowContext(ctx, `SELECT cancel_requested_at,cancel_reason,finished_at FROM runs WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&cancel, &reason, &finished); err != nil {
 		return out, err
 	}
 	out.RunCancelled, out.RunFinished = cancel.Valid, finished.Valid
+	if cancel.Valid {
+		out.CancelReason = reason
+	}
 	switch c.Binding.Kind {
 	case capability.BindingTrigger:
 		if err := authenticationOwnerTx(ctx, tx, c, &out); err != nil {
@@ -67,12 +71,16 @@ func authenticationOwnerTx(ctx context.Context, tx *storeTx, c capability.Capabi
 
 func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capability, out *capability.BindingState) error {
 	var lease, finished, cancelled sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation,attempt,lease_expires_at,finished_at,cancel_requested_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`, c.Team, c.Binding.RunID, c.Binding.NodeID).Scan(&out.Current.Holder, &out.Current.Generation, &out.Current.Attempt, &lease, &finished, &cancelled)
+	var reason string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation,attempt,lease_expires_at,finished_at,cancel_requested_at,cancel_reason FROM nodes WHERE team=? AND run_id=? AND node_id=?`, c.Team, c.Binding.RunID, c.Binding.NodeID).Scan(&out.Current.Holder, &out.Current.Generation, &out.Current.Attempt, &lease, &finished, &cancelled, &reason)
 	if err != nil {
 		return err
 	}
 	out.FinishedAt = stateTime(finished)
 	out.RunCancelled = out.RunCancelled || cancelled.Valid
+	if cancelled.Valid {
+		out.CancelReason = reason
+	}
 	if lease.Valid {
 		out.LeaseExpiresAt = *stateTime(lease)
 	}

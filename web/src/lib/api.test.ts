@@ -190,7 +190,7 @@ describe("triggerRun", () => {
       dispatch: "host",
       requested_args: { tag: "nightly" },
       git: { repository: { display: "https://github.com/acme/app" }, ref: "main" },
-      source: { ref: "https://github.com/acme/app" },
+      source: { ref: "main", location: { remote_url: "https://github.com/acme/app", pipeline_dir: ".sparkwing" } },
     });
   });
 

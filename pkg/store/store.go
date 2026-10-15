@@ -1262,39 +1262,6 @@ func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 	return t.s.getLatestRun(ctx, oneTeam(t.team), pipeline, statuses, maxAge)
 }
 
-func (s *Store) getLatestRun(ctx context.Context, scope teamScope, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
-	if pipeline == "" {
-		return nil, errors.New("GetLatestRun: pipeline is required")
-	}
-	where := "WHERE pipeline = ?"
-	args := []any{pipeline}
-	if !scope.all {
-		if scope.team == "" {
-			return nil, ErrNoTeam
-		}
-		where += " AND team = ?"
-		args = append(args, string(scope.team))
-	}
-	if len(statuses) > 0 {
-		ph := make([]string, len(statuses))
-		for i, st := range statuses {
-			ph[i] = "?"
-			args = append(args, st)
-		}
-		where += " AND status IN (" + strings.Join(ph, ",") + ")"
-	}
-	if maxAge > 0 {
-		where += " AND COALESCE(finished_at, started_at) >= ?"
-		args = append(args, time.Now().Add(-maxAge).UnixNano())
-	}
-	q := `
-SELECT ` + runColumns + `
-  FROM runs ` + where + `
- ORDER BY started_at DESC
- LIMIT 1`
-	return scanRun(s.queryRow(ctx, q, args...))
-}
-
 // DeleteRun removes the run, its trigger and its memo entries;
 // CASCADE handles children.
 //

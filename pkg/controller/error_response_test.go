@@ -1,14 +1,18 @@
 package controller
 
 import (
+	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestWriteErrorMasksInternalDetails(t *testing.T) {
@@ -29,32 +33,38 @@ func TestWriteErrorMasksInternalDetails(t *testing.T) {
 	}
 }
 
-func TestAgentRoutesMaskStoreFailures(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(st, nil).Handler()
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	tests := []struct {
-		name, method, path, body string
+func TestRunnerRoutesMaskDependencyFailuresProperty(t *testing.T) {
+	inventory := &runnerInventoryFake{team: "a"}
+	runners, member := runnerInventoryFixture(t, inventory)
+	engine, claims, machine := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	for _, tc := range []struct {
+		method, path, body, raw string
+		handler                 http.Handler
+		fail                    func(error)
 	}{
-		{name: "agents", method: http.MethodGet, path: "/api/v1/agents"},
-		{name: "claim", method: http.MethodPost, path: "/api/v1/nodes/claim", body: `{"holder_id":"private-url.invalid"}`},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, req)
-			if rec.Code != http.StatusInternalServerError {
-				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		{"GET", "/api/v1/runners", "", member, runners, func(err error) { inventory.err = err }},
+		{"POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, machine, claims, func(err error) {
+			engine.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return err })
+		}},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			property := func(input []byte) bool {
+				private := "private-dependency-" + hex.EncodeToString(input)
+				tc.fail(errors.New(private))
+				r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+				r.Header.Set("Content-Type", "application/json")
+				r.Header.Set("Authorization", "Bearer "+tc.raw)
+				w := httptest.NewRecorder()
+				tc.handler.ServeHTTP(w, r)
+				var body apierr.Envelope
+				if w.Code != http.StatusInternalServerError || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != apierr.Internal || strings.Contains(w.Body.String(), private) {
+					t.Logf("dependency failure: %d %s", w.Code, w.Body)
+					return false
+				}
+				return w.Header().Get("Cache-Control") == "no-store"
 			}
-			if body := rec.Body.String(); body != "{\"error\":\"internal server error\"}\n" {
-				t.Fatalf("body = %q", body)
+			if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

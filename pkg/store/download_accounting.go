@@ -55,6 +55,17 @@ func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (_ Downlo
 		return DownloadCharged{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	out, err := t.chargeDownloadTx(ctx, tx, c)
+	if err != nil {
+		return DownloadCharged{}, err
+	}
+	return out, tx.Commit()
+}
+
+func (t *Tenant) chargeDownloadTx(ctx context.Context, tx *storeTx, c DownloadCharge) (DownloadCharged, error) {
+	if c.ReplicaID == "" || c.Bytes < 0 || c.FreeCapBytes < 0 || c.FundedCapBytes < 0 {
+		return DownloadCharged{}, fmt.Errorf("%w: invalid download charge", ErrInvalidInput)
+	}
 	now := tx.now()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,'download',?,?) ON CONFLICT(team,quota) DO NOTHING`, t.team, now.Format("2006-01-02"), now.UnixNano()); err != nil {
 		return DownloadCharged{}, err
@@ -111,8 +122,5 @@ WHERE team_download_day.bytes<=9223372036854775807-excluded.bytes`, t.team, day,
 		}
 	}
 	out.DayBytes = used + c.Bytes
-	if err := tx.Commit(); err != nil {
-		return DownloadCharged{}, err
-	}
 	return out, nil
 }

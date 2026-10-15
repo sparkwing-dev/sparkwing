@@ -29,8 +29,9 @@ import (
 
 // Server serves controller HTTP requests.
 type Server struct {
-	store  *store.Store
-	logger *slog.Logger
+	resolveQueuePriorityWriter func(context.Context, store.Team) (QueuePriorityWriter, error)
+	store                      *store.Store
+	logger                     *slog.Logger
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
@@ -376,6 +377,7 @@ func (s *Server) registeredRouters() *registeredMux {
 	endpoints = append(endpoints, s.teamReadEndpoints()...)
 	endpoints = append(endpoints, s.scheduleEndpoints()...)
 	endpoints = append(endpoints, s.runControlEndpoints()...)
+	endpoints = append(endpoints, s.missingOperationEndpoints()...)
 	endpoints = append(endpoints, s.teamWriteEndpoints()...)
 	endpoints = append(endpoints, s.githubAppEndpoints()...)
 	endpoints = append(endpoints, s.billingEndpoints()...)

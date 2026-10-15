@@ -26,6 +26,15 @@ func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal
 
 // CheckBinding implements relational authorization within the transaction owning a write.
 func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
+	if principal.Class == capability.CredentialPeer {
+		if principal.Capability.Subject.Kind != capability.SubjectLocal || principal.Capability.Subject.ID == "" || principal.Capability.Team != string(DefaultTeam) || target.Team != "" && target.Team != string(DefaultTeam) || rule != capability.BindNone {
+			return bindingRefusal()
+		}
+		if target.RunID != "" {
+			return bindingRunExistsTx(ctx, tx, string(DefaultTeam), target.RunID)
+		}
+		return nil
+	}
 	current, err := tx.ResolveAuthority(ctx, principal.Authority)
 	if err != nil {
 		return err
@@ -146,8 +155,23 @@ func bindingChildTx(ctx context.Context, tx *storeTx, c capability.Capability, t
 	if b.Kind != capability.BindingNode || b.Expansion != nil || b.RunID == "" || b.NodeID == "" || b.Generation <= 0 || target.RunID != b.RunID || target.ChildRunID == "" {
 		return bindingRefusal()
 	}
-	var child string
-	return tx.QueryRowContext(ctx, `SELECT child_run_id FROM child_invocations WHERE team=? AND parent_run_id=? AND parent_node_id=? AND generation=? AND child_run_id=?`, c.Team, b.RunID, b.NodeID, b.Generation, target.ChildRunID).Scan(&child)
+	child, err := readRunTx(ctx, tx, Team(c.Team), target.ChildRunID)
+	if err != nil {
+		return err
+	}
+	lineage := child.Request.Request.Lineage
+	if lineage.ParentRunID != b.RunID || lineage.ParentJobID != b.NodeID || child.Request.AuthorityRef.Kind != capability.AuthorityCapability {
+		return bindingRefusal()
+	}
+	issuer, err := loadCapabilityTx(ctx, tx, child.Request.AuthorityRef.ID)
+	if err != nil {
+		return err
+	}
+	parent := issuer.Binding
+	if issuer.Team != c.Team || parent.Kind != capability.BindingNode || parent.RunID != b.RunID || parent.NodeID != b.NodeID || parent.Holder != b.Holder || parent.Generation != b.Generation {
+		return bindingRefusal()
+	}
+	return nil
 }
 
 func bindingSelectionTx(ctx context.Context, tx *storeTx, c capability.Capability, target capability.Target) error {
