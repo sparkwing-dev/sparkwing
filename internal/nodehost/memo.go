@@ -287,7 +287,7 @@ func (r *memoRun) save(ctx context.Context, output []byte) error {
 	if int64(len(output)) > limits.NodeOutputBytes {
 		return fmt.Errorf("memo output exceeds %d bytes", limits.NodeOutputBytes)
 	}
-	key, err := blob.ResolveWriteKey(data.Authority, blob.WriteScopeIntent{Kind: blob.KindMemo, Pipeline: data.Pipeline, Job: r.n.Plan.ID, Key: r.g.memoHash, Name: "result"})
+	key, err := blob.ResolveWriteKey(data.Authority, blob.WriteScopeIntent{Kind: blob.KindMemo, Pipeline: data.Pipeline, Job: r.n.Plan.ID, Key: r.g.memoHash, Name: blob.MemoRecordName})
 	if err != nil {
 		return err
 	}

@@ -3,12 +3,14 @@ package blob_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -23,14 +25,16 @@ func (r records) LookupRecord(ctx context.Context, q blob.RecordLookup) (blob.Re
 
 func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 	d := digest("bytes")
-	manifest, member := digest("manifest"), digest("artifact")
+	member := digest("artifact")
+	manifestBody := fmt.Sprintf(`{"entries":[{"path":"out","digest":"%s","size":8,"mode":420}]}`, member)
+	manifest := digest(manifestBody)
 	key := blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}
 	result := blob.RecordLookupResult{Found: true, Record: blob.Record{
-		Key:    blob.RecordKey{Team: "team", Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: blob.RefScope{Ref: "main", Verified: true}, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}},
+		Key:    blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: "result", Scope: blob.Scope{Repo: key.Repo, Ref: blob.RefScope{Ref: "main", Verified: true}, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}},
 		Digest: d, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest},
 		RefFacts: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Verified: true}, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "verified-delivery", SHA: "sealed-sha"},
-	}, Members: []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "out", Size: 8}}}
-	bodies := map[blob.Digest]string{d: "bytes", manifest: "manifest", member: "artifact"}
+	}, Members: []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "out", Size: 8, Mode: 0o644}}}
+	bodies := map[blob.Digest]string{d: "bytes", manifest: manifestBody, member: "artifact"}
 	s := &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
 		body, ok := bodies[q.Digest]
 		if !ok {
@@ -42,6 +46,9 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 		return io.NopCloser(strings.NewReader(bodies[tr.Digest])), nil
 	})})
 	r := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
+		if q.Key.Name != "result" {
+			t.Fatalf("memo lookup cannot find the committed result record: %+v", q.Key)
+		}
 		if !q.VerifiedDefaultOnly || q.Authority.CapabilityRef != "user-repo-read" || q.Authority.Repo != key.Repo || q.Key.Scope.Ref.Ref != "" {
 			t.Fatal("lookup did not request a server-derived default branch")
 		}
@@ -88,7 +95,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 	if _, err = cache.Artifact(t.Context(), digest("foreign")); !errors.Is(err, blob.ErrDigestNotReadable) {
 		t.Fatal("unrelated artifact was readable")
 	}
-	for _, mutation := range []string{"manual", "false_default", "foreign_repo", "foreign_pipeline", "foreign_job", "foreign_hash", "missing_delivery", "different_default", "foreign_member", "corrupt"} {
+	for _, mutation := range []string{"manual", "false_default", "foreign_repo", "foreign_pipeline", "foreign_job", "foreign_hash", "foreign_name", "missing_delivery", "different_default", "foreign_member", "member_size", "member_path", "member_mode", "manifest_members", "corrupt"} {
 		t.Run(mutation, func(t *testing.T) {
 			bad := result
 			bad.Members = append([]blob.Member(nil), result.Members...)
@@ -105,12 +112,22 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 				bad.Record.Key.Scope.Job = "other"
 			case "foreign_hash":
 				bad.Record.Key.Scope.Key = string(digest("other"))
+			case "foreign_name":
+				bad.Record.Key.Name = "other"
 			case "missing_delivery":
 				bad.Record.RefFacts.AppDeliveryKey = ""
 			case "different_default":
 				bad.Record.RefFacts.DefaultBranch = "release"
 			case "foreign_member":
 				bad.Members[0].Team = "other"
+			case "member_size":
+				bad.Members[0].Size++
+			case "member_path":
+				bad.Members[0].Path = "other"
+			case "member_mode":
+				bad.Members[0].Mode = 0o755
+			case "manifest_members":
+				bad.Members = nil
 			case "corrupt":
 				bad.Record.Digest = digest("other")
 			}
@@ -133,6 +150,66 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 func TestRemoteCacheRequiresOptIn(t *testing.T) {
 	if _, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{}, nil); err == nil {
 		t.Fatal("implicit remote cache")
+	}
+}
+
+type remoteBody struct {
+	io.Reader
+	closed bool
+	err    error
+}
+
+func (b *remoteBody) Close() error { b.closed = true; return b.err }
+
+func TestRemoteMemoVerifiesBeforeGrantingArtifacts(t *testing.T) {
+	for _, fault := range []string{"output_limit", "close", "lookup_cancelled", "read_cancelled"} {
+		t.Run(fault, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			output := "result"
+			if fault == "output_limit" {
+				output = strings.Repeat("x", int(limits.NodeOutputBytes)+1)
+			}
+			d := digest(output)
+			body := &remoteBody{Reader: strings.NewReader(output)}
+			if fault == "close" {
+				body.err = errors.New("close failed")
+			}
+			bytes := blob.NewSignedStore(blob.SignedStoreOptions{
+				Signer: &signer{transfer: blob.SignedTransfer{Digest: d, Size: int64(len(output))}},
+				HTTPClient: transfer(func(context.Context, blob.SignedTransfer, io.Reader) (io.ReadCloser, error) {
+					if fault == "read_cancelled" {
+						cancel()
+					}
+					return body, nil
+				}),
+			})
+			records := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
+				if fault == "lookup_cancelled" {
+					cancel()
+					return blob.RecordLookupResult{}, ctx.Err()
+				}
+				key := q.Key
+				key.Team, key.Scope.Ref = "team", blob.RefScope{Ref: "main", Verified: true}
+				return blob.RecordLookupResult{Found: true, Record: blob.Record{Key: key, Digest: d, RefFacts: blob.RefFacts{
+					Scope: key.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "delivery", SHA: "sha",
+				}}}, nil
+			}}
+			cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", AuthorityRef: "user", Repo: "gh:123", Records: records}, bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hit, err := cache.Memo(ctx, blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, blob.Budget{Deadline: time.Now().Add(time.Minute)})
+			if hit.Found || (ctx.Err() != nil && !errors.Is(err, context.Canceled)) || (ctx.Err() == nil && err != nil) {
+				t.Fatalf("failed memo = %+v, %v", hit, err)
+			}
+			if fault != "lookup_cancelled" && !body.closed {
+				t.Fatal("download was not closed")
+			}
+			if _, err := cache.Artifact(t.Context(), d); !errors.Is(err, blob.ErrDigestNotReadable) {
+				t.Fatalf("failed memo granted artifacts: %v", err)
+			}
+		})
 	}
 }
 

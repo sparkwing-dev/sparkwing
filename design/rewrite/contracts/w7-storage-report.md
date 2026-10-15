@@ -1,122 +1,107 @@
 # W7 storage handoff
 
-W7 remains incomplete. This session implements S3 tagged-log PUT signing and
-carries required signed headers through log batches and uploads. Earlier blob,
-artifact, memo, depcache, binary, source-bundle, tagged-log and direct-Git work
-remains committed on this branch. Do not redo those cuts.
+W7 remains incomplete. This session adds the output-record component and fixes
+remote memo lookup and verification. Earlier blob, artifact, memo, depcache,
+binary, source-bundle, tagged-log, S3 signing and direct-Git work remains on this
+branch. Continue from that implementation.
 
-## Implemented and deleted
+Implemented:
 
-- `blob.S3.SignLogPut` signs one log key with `If-None-Match: *` and the shared
-  fifteen-minute lifetime. Invalid keys, expiry and cancellation fail before
-  signing. Presigning makes no object-store request.
-- Segment slots carry `Headers`. The manifest carries `ManifestHeaders`.
-  `BatchSigner` and `SubjectUploader` propagate them through the real signed
-  HTTP transport. Filesystem signing uses the same header-bearing interface.
-- S3 data and log signing share header extraction. Host remains in the URL.
-  Future log slots carry no fabricated empty-body checksum or content length.
-- Conflicting segments and manifests remain unchanged. Lost PUT responses and
-  failed record commits cannot turn an HTTP 412 into a successful segment or
-  final commit. This is failure evidence, not completed replay recovery.
-- Removed the URL-only `LogPutSigner` signature and migrated every caller.
-  No old subsystem was deleted this session. The Go diff replaces **72 lines**
-  and adds **379 lines**, including tests. Runtime code replaces **26 lines**
-  and adds **70 lines**, a net increase of **44**. Markdown is excluded.
+- `blob.OutputData.Put` enforces the existing 16 MiB output cap, checks the exact
+  job or imported-publication binding, obtains a verified upload receipt and
+  commits the output record. Empty output has an explicit blob and record.
+- `OutputData.Read` resolves the authorized record and consumes bounded bytes
+  under the lookup deadline. Missing records/objects, corrupt or truncated
+  bytes, unverified EOF and close failures return errors without output bytes.
+- Output records use the run ID as `Name`, the authorized repo/ref/pipeline/job
+  scope and an empty scope key. Attempt and generation remain in `Source`.
+  The host must attach the record key through its result transition.
+- Memo materialization shares the bounded output reader. Remote memo reads
+  verify manifest/member agreement and member sizes before granting artifact
+  access. A rejected lookup grants no artifact access.
+- Remote memo lookup uses `MemoRecordName` (`result`), matching the writer.
+  It previously requested an empty name. Remote memo/depcache keep caller
+  cancellation as an error while applying their miss/cold policy to failures.
 
-## Local contract repair
+Deleted the separate remote-cache byte verifier and the duplicate memo-output
+read logic. No old subsystem was deleted. The Go diff adds **441 lines** and
+removes **53**, including tests. Runtime adds **144** and removes **48**, net
+**+96**. Untracked output files are included. Markdown is excluded.
 
-W7 changes its own `internal/blob/log_contract.go`: add
-`LogUploadURL.Headers` and `LogUploadBatch.ManifestHeaders`. The storage-owned
-`LogPutSigner.SignLogPut` returns `(string, map[string]string, error)` instead
-of `(string, error)`. `c1-data.md` records the header and HTTP 412 semantics.
-There is no compatibility signature or alternate transport.
+The new W7-local surface is `OutputData` plus the shared memo record name.
+It uses the existing `Store` and `RecordStore` contracts. A separate output
+component is needed because the final output record path had no implementation.
+The smaller alternative, copying output checks into each host, duplicates the
+size/EOF/close policy. The component shares that reader with memo instead.
+No setting, limit, environment variable, dependency, service or retry loop was
+added. Reverting this session removes the additions and restores the prior reads.
 
-The decision is to carry signed headers because S3's create-only condition
-cannot survive a URL-only response. It assumes the controller sends these maps
-unchanged after authorization. Undo is a revert of this session. No new option,
-limit, environment variable, dependency, service or retry loop was introduced.
+Verification passed with `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `-p 4`, and
+`GOCACHE`, `GOTMPDIR` and `TMPDIR` below `/tmp/sw-astra-W7`:
 
-## Verification
-
-All Go commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `-p 2`, and
-`GOCACHE`, `GOTMPDIR` and `TMPDIR` below `/tmp/sw-astra-W7`.
-
-Passed:
-
-- Whole-repository `go build -p 2 ./...`.
-- `go vet -p 2 ./internal/blob/... ./pkg/storage/logseg`.
+- Whole-repository `go build -p 4 ./...`.
+- `go vet -p 4 ./internal/blob/... ./internal/nodehost`.
 - Full tests for `internal/blob/...`, `internal/artifacts`, `internal/depcache`
   and `pkg/storage/logseg`.
-- The new S3-signing tests first failed to compile because the S3 signer did
-  not implement log signing. They pass with its implementation.
+- Full race tests for `internal/blob/...`, followed by a race run covering all
+  output and remote-cache tests after the imported-publication test was added.
+- `internal/nodehost/TestMemoMaterializationRunsOnRefusal`.
 - Acceptance catalog, invariant and port-inventory checks.
-- Storage acceptance enumeration: **0 passing, 424 skipped, 0 failing target
-  cells**. `acceptance.New` and `Run` remain stubs. No cell was unskipped and
-  no fake-backed component proof counts as native acceptance.
-- Changed-line commentcheck and sleepcheck, including new untracked Go files.
-  Formatting and `git diff --check` pass. Shared Git config has no test identity
-  or `core.worktree` override.
+- Changed-line commentcheck and sleepcheck, including untracked files.
+  Formatting and `git diff --check` pass. Shared Git configuration has no
+  test identity or `core.worktree` override.
 
-Full race tests pass for `internal/blob/...` and `pkg/storage/logseg`.
+Tests came first. The remote-key test failed for the empty lookup name. After
+that fix, four manifest/member mismatch cases failed. The cancellation cases
+also failed before their fix. Output tests initially failed to compile because
+`OutputData` was absent. All now pass. Five new test functions cover output
+round trips at the exact cap, refused writes, imported publication, required-read
+failures and remote memo failure policy. Persistence, authority and object HTTP
+responses are fakes. New T1 inventory ports: **0**.
 
-Five new regression functions cover S3 header signing and refusals, signed-header
-transport, tagged S3 round trips and conflict/uncertain-write refusal. Round trips
-cover job, trigger, plan and eval subjects through the real presigner, transfer
-client, uploader and committed reader. Object responses, controller transport,
-authorization and record persistence are fakes. The filesystem round trips still
-pass. New T1 inventory ports: **0**.
+Storage acceptance remains **0 passing, 424 skipped, 0 failing target cells**.
+`acceptance.New` and `Run` remain stubs. No native cell was unskipped or claimed
+from component evidence.
 
-## Contract changes needed in other areas
+Contract changes needed in other areas remain:
 
-The signed-header gap is repaired locally. These earlier gaps remain:
+1. W1 must define immutable upload-ticket creation, atomic commit/replay and
+   expiry release. Commit must reauthorize the uploader and publish the live
+   blob/receipt with unique-byte quota settlement.
+2. W1/W2/W9 must define working-tree upload authority before run creation and
+   when execution may observe the sealed source digest.
+3. W1/W2 must expose stored log retention class with current writer authority
+   for signing. Standing must not be recomputed for an existing run.
+4. W1/W2/storage must define digest-verified S3 log replay after uncertain PUTs
+   or failed record commits, plus payload admission for future slots. HTTP 412
+   proves no byte match. The existing create-only PUT/header work remains.
 
-1. **W1: atomic upload lifecycle.** Define immutable ticket creation,
-   commit/replay and expiry release. Commit must reauthorize the exact uploader,
-   publish the live blob/receipt and settle unique-byte quota together.
-2. **W1/W2/W9: working-tree submission.** Define upload authority before a run
-   exists and when execution may observe its sealed source digest.
-3. **W1/W2: log signing projection.** Expose the immutable stored retention class
-   with current writer authority. BatchSigner consumes that projection and
-   lifecycle readiness without recomputing standing.
-4. **W1/W2/storage: S3 log replay and admission.** Define digest-verified replay
-   after uncertain PUTs and a failed record commit. A 412 grants no matching-byte
-   proof. Future slots still lack admitted payload size/digest metadata. S3 PUT
-   signing cannot enforce the filesystem's upload-size bound without those facts.
+Real integration and remaining cuts:
 
-## Real integration and remaining cuts
+- W1 implements RecordStore, read sets, receipts, live blobs, upload tickets,
+  quota, memo-copy transactions, pins, retention and tombstones. Memo copies
+  must create destination output/manifest records using the documented layouts.
+- W2 binds capability-aware data/record and tagged-log routes, reauthorizes at
+  commit, meters partial log reads, and wires lifecycle readiness and expiry.
+- W3/W8 bind output, artifact, memo, depcache, binary, source and log components
+  to fresh attempt authority. OutputData has component tests but no runtime
+  binding yet. W4 completes Cache integration and declaration linting.
+- Replace/delete old controller/client data and output handlers, cache grants
+  and service-token accounting. Replace/delete attempt-only log signing,
+  sealing, stream/ring authority and orchestrator paths, then remove
+  AttemptPrefix and legacy manifest fields. Native acceptance remains open.
 
-- W1 must implement RecordStore, read sets, memo-copy transactions, live blobs,
-  upload tickets, unique-byte quota, retention and tombstones. Storage components
-  remain tested against those interfaces with fakes.
-- W2 must bind capability-aware data/record routes and tagged log signing,
-  commits and proxied reads. Reauthorize after bodies and at commit. Meter
-  emitted read bytes on success and failure with the log-cap exemption.
-  Wire S3 lifecycle/read methods and leased filesystem expiry.
-- W1/W2 must enforce exact persisted writers, final-job grace, live ancestry
-  and membership, and no newer claim. Eval keeps its own lease rules.
-- W3/W8 must provide fresh attempt bindings for artifacts, memo, depcache,
-  binaries, source bundles and tagged logs, including retries and reconstruction.
-  W4 must finish Cache integration and declaration linting.
-- Replace/delete the old controller/client attempt-only signer, sealing,
-  stream/ring authority and orchestrator log paths. Remove AttemptPrefix and
-  legacy manifest fields after callers move.
-- Replace/delete old data handlers, cache grants and service-token accounting
-  after final routes bind. Native acceptance drivers remain open.
+No new product question or cross-area type change arose. Shared runtime file
+changed: `internal/nodehost/memo.go`, one line using the shared record name.
+Shared contract prose changed in `design/rewrite/contracts/c1-data.md`.
+Storage documentation changed in `internal/blob/README.md`. These pages have no
+generated mirrors. The component tests are their behavior checks.
 
-No new product question arose. S3 conflict recovery and upload admission remain
-explicit integration work. This session does not claim working Cloud log replay.
-
-## Shared files and friction
-
-No runtime caller outside W7 needed a change. The shared contract prose changed
-in `design/rewrite/contracts/c1-data.md`. Storage documentation changed in
-`internal/blob/README.md` and `pkg/storage/logseg/README.md`, plus this report.
-Those files have no generated documentation mirrors.
-
-The brief reserves pipelines, native execution and independent review for the
-lead. No Sparkwing binary, daemon, service, Git write, landing or release ran.
-The sandbox's socket restriction prevents native HTTP/service evidence, so S3
-uses injected responses. Cross-area contracts and bindings above remain open.
-`/tmp/sw-astra-W7` is deleted. All check processes finished before cleanup.
+Friction: the shared native driver and store implementation remain stubs.
+The missing upload lifecycle and log-authority projections still need contract
+work by their owners. Existing interfaces were exercised with fakes. The lead
+retains pipelines, native checks, independent review, committing and landing.
+No Sparkwing binary, daemon, service or Git write ran. All check processes
+finished before scratch cleanup. `/tmp/sw-astra-W7` is deleted.
 
 STATUS: CONTINUE

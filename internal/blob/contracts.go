@@ -296,6 +296,9 @@ func NewSignedStore(options SignedStoreOptions) Store { return newSignedStore(op
 // safety: ObjectKey produces teams/<team>/cas/<sha256> after validating both components.
 func ObjectKey(team string, digest Digest) (string, error) { return objectKey(team, digest) }
 
+// MemoRecordName identifies the result within a scoped memo key.
+const MemoRecordName = "result"
+
 // safety: MemoKey cannot share an unclaimed result across pipelines.
 type MemoKey struct {
 	Repo     runspec.RepoKey

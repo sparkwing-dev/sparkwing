@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // MaterializedMemo contains output verified after the store authorized and copied
@@ -47,21 +45,10 @@ func MaterializeMemo(ctx context.Context, bytes Store, records RecordStore, requ
 func readMemoBytes(ctx context.Context, bytes Store, authority Authority, team string, hit MemoHit) ([]byte, error) {
 	var output []byte
 	if hit.Output.Set {
-		r, err := bytes.Get(ctx, GetRequest{Authority: authority, Digest: hit.Output.Value})
+		var err error
+		output, err = readOutputBytes(ctx, bytes, authority, hit.Output.Value)
 		if err != nil {
 			return nil, err
-		}
-		output, err = io.ReadAll(io.LimitReader(r, limits.NodeOutputBytes+1))
-		verified := r.Verified()
-		closeErr := r.Close()
-		if err != nil {
-			return nil, err
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		if !verified || int64(len(output)) > limits.NodeOutputBytes {
-			return nil, ErrIntegrity
 		}
 	}
 	if !hit.Manifest.Set {

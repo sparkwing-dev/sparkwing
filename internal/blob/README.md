@@ -12,6 +12,19 @@ of bytes and closing is insufficient. Consumers must read EOF and check errors.
 `HasMany` carries the caller's deadline and rejects unsolicited result digests.
 The controller remains responsible for filtering its results by the live read set.
 
+`OutputData.Put` checks the shared 16 MiB output cap and the exact job or imported
+publication binding before upload. It creates a `KindOutput` record after the
+verified receipt. The record uses the run ID as `Name`, with repo, ref, pipeline
+and producer job in `Scope` and an empty `Scope.Key`. Empty output is an explicit
+blob and record. The store still rechecks liveness and reference authority in
+the record transaction.
+
+`OutputData.Read` requires an authorized output record lookup and consumes its
+bytes under the lookup budget. It returns bytes only after EOF verification and
+successful close. Missing records and missing objects both fail. Memo reads use
+the same bounded output reader. Hosts must attach the resulting record key in
+their result transition. Controller and host output bindings remain pending.
+
 `AuthorizeUpload` and `AuthorizeEdge` operate on server-resolved facts. They do
 not authenticate a bearer or query the store. Call them inside the transaction
 that checks liveness, blob existence and receipt ownership. Owner and publication
@@ -28,6 +41,9 @@ store and a record store. Its lookups set `VerifiedDefaultOnly`, which requires
 the record owner to resolve the verified default branch from sealed evidence.
 The client also checks returned evidence and verifies the bytes. A memo lookup
 failure becomes a miss. A depcache failure returns `ErrNotFound` for a cold start.
+Caller cancellation remains an error. Memo lookups use `MemoRecordName`, shared
+with the writer. A hit must pass output-size and manifest/member agreement
+checks before it grants artifact access.
 Artifact reads are limited to the output, manifest, member and depcache digests
 of accepted cache lookups.
 

@@ -276,6 +276,19 @@ or an exact permitted uploader receipt in the transaction. HasMany answers only
 inside the read set; absent and unauthorized are indistinguishable. A download
 must reach a verified EOF; early Close does not establish success.
 
+`blob.OutputData` applies the shared output cap to writes and reads using
+`Store` and `RecordStore`. Output records use kind `output`, the run ID as
+`name`, and the authorized repo/ref/pipeline/producer-job scope with an empty
+scope key. Attempt and generation stay in `Record.Source`. Empty output has an
+explicit blob and record. Reads fail for missing records or bytes and return
+data only after EOF verification and successful close. A memo copy creates its
+destination output record under this same layout.
+
+`blob.MemoRecordName` is `result` for memo writers and exact-key readers.
+Read-only remote memo hits verify bounded output, manifest/member agreement
+and member bytes before granting artifact access. Failed lookups or verification
+produce a miss. Caller cancellation remains an error.
+
 Job receipts retain team, run, job, attempt and generation. Owner-unit and
 non-job publication receipts authorize only binary/source bundles. Imported
 publication attempts may attach output/manifests only for the bound published
@@ -600,6 +613,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `NewSignedStore` | NewSignedStore verifies transferred bytes and never falls back to cache-service routes. |
 | `ObjectKey` | ObjectKey produces teams/<team>/cas/<sha256> after validating both components. |
 | `MemoKey` | MemoKey cannot share an unclaimed result across pipelines. |
+| `MemoRecordName` | Names the memo result consistently for writers and exact-key readers. |
 | `MemoNamespace` | MemoNamespace reserves manual:<ref> for submitter-vouched writes. |
 | `MemoLookup` | MemoLookup uses the authority's server-derived scope and verified default fallback. |
 | `CopyMemoRequest` | CopyMemoRequest creates output and manifest edges atomically with the hit. |
@@ -638,6 +652,14 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `UploadRule` | UploadRule distinguishes non-job byte intake from job-owned output edges. |
 | `UploadRules` | UploadRules is the complete identity/record-kind policy, rechecked at commit. Publication with an imported attempt follows the final row rather than non-job publication. |
 | `AuthorizeUpload` | AuthorizeUpload checks the C2-resolved identity and target kind in the write transaction. It requires a live owner fence or publication authority, verifies imported job identity, and rejects identity/principal/capability mismatches with the authenticated authority. |
+
+### internal/blob/output.go
+
+| Export | Purpose |
+|---|---|
+| `OutputData` | Binds output bytes and records to reader authority and an exact uploader. |
+| `OutputData.Put` | Checks the output cap and uploader binding, obtains a verified receipt, then commits the output record. |
+| `OutputData.Read` | Looks up the authorized output record and consumes bounded bytes through verified EOF and successful close. |
 
 ### pkg/storage/state_contract.go
 

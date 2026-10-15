@@ -3,9 +3,9 @@ package blob
 import (
 	"context"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"io"
 	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type remoteCache struct {
@@ -60,44 +60,30 @@ func (c *remoteCache) lookup(ctx context.Context, key RecordKey, budget Budget) 
 		}
 		digests = append(digests, m.Digest)
 	}
-	seen := make(map[Digest]bool, len(digests))
-	for _, d := range digests {
-		if seen[d] {
-			continue
+	if key.Kind == KindMemo {
+		_, err = readMemoBytes(ctx, c.store, c.authority(), r.Key.Team, MemoHit{
+			Found: true, Output: runspec.Optional[Digest]{Set: true, Value: r.Digest},
+			Manifest: r.ManifestDigest, Members: result.Members,
+		})
+	} else {
+		for _, d := range digests {
+			if _, err = verifyMemoBlob(ctx, c.store, c.authority(), d); err != nil {
+				break
+			}
 		}
-		seen[d] = true
-		if err := c.verify(ctx, d); err != nil {
-			return RecordLookupResult{}, err
-		}
+	}
+	if err != nil {
+		return RecordLookupResult{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return RecordLookupResult{}, budgetError(err)
 	}
 	c.mu.Lock()
-	for d := range seen {
+	for _, d := range digests {
 		c.readable[d] = true
 	}
 	c.mu.Unlock()
 	return result, nil
-}
-
-func (c *remoteCache) verify(ctx context.Context, d Digest) error {
-	r, err := c.store.Get(ctx, GetRequest{Authority: c.authority(), Digest: d})
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(io.Discard, r)
-	cerr := r.Close()
-	if err != nil {
-		return err
-	}
-	if cerr != nil {
-		return cerr
-	}
-	if !r.Verified() {
-		return ErrIntegrity
-	}
-	return nil
 }
 
 func (c *remoteCache) Memo(ctx context.Context, key MemoKey, budget Budget) (MemoHit, error) {
@@ -107,9 +93,9 @@ func (c *remoteCache) Memo(ctx context.Context, key MemoKey, budget Budget) (Mem
 	if _, err := MemoNamespace(key); err != nil {
 		return MemoHit{}, err
 	}
-	result, err := c.lookup(ctx, RecordKey{Kind: KindMemo, Scope: Scope{Repo: key.Repo, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}}, budget)
+	result, err := c.lookup(ctx, RecordKey{Kind: KindMemo, Name: MemoRecordName, Scope: Scope{Repo: key.Repo, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}}, budget)
 	if err != nil || !result.Found {
-		return MemoHit{}, nil
+		return MemoHit{}, ctx.Err()
 	}
 	return MemoHit{Found: true, Output: runspec.Optional[Digest]{Set: true, Value: result.Record.Digest}, Manifest: result.Record.ManifestDigest, Members: result.Members, ReadSet: result.ReadSet}, nil
 }
@@ -123,6 +109,9 @@ func (c *remoteCache) Depcache(ctx context.Context, key DepcacheKey, budget Budg
 	}
 	result, err := c.lookup(ctx, RecordKey{Kind: KindDepcache, Scope: Scope{Repo: key.Repo, Key: key.Key}, Name: key.Name}, budget)
 	if err != nil || !result.Found {
+		if err := ctx.Err(); err != nil {
+			return Record{}, err
+		}
 		return Record{}, ErrNotFound
 	}
 	return result.Record, nil
