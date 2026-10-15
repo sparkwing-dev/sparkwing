@@ -14,11 +14,13 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.ts\"",
+    "test": "node --test \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
     "test:native": "go test -p 4 ./test/nativehost -run TestNative",
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
-    "prepack": "npm run build && node native/check-package.mjs"
+    "prepack": "npm run build && node native/check-package.mjs",
+    "release:native": "node native/release.mjs bridge",
+    "release:pack": "node native/release.mjs pack"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -31,7 +33,9 @@
     "index.d.ts",
     "README.md",
     "native/win32-x64/protocol.node",
-    "native/win32-arm64/protocol.node"
+    "native/win32-arm64/protocol.node",
+    "native/win32-x64/verification.json",
+    "native/win32-arm64/verification.json"
   ],
   "publishConfig": {
     "access": "public"

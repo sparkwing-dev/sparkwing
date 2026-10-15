@@ -1,4 +1,5 @@
 import type { Level, Logger } from "../index.d.ts";
+import { writeFrame } from "./protocol.ts";
 export interface LineSink {
   write(line: string): unknown;
 }
@@ -40,6 +41,6 @@ export class LogWriter implements Logger {
     this.#emit({ ts: this.#now().toISOString(), level, msg, ...(attrs ? { attrs } : {}) });
   }
   #emit(record: LogRecord): void {
-    this.#sink.write(JSON.stringify({ ...record, ...(this.#step === undefined ? {} : { step: this.#step }) }) + "\n");
+    writeFrame(this.#sink, { ...record, ...(this.#step === undefined ? {} : { step: this.#step }) });
   }
 }

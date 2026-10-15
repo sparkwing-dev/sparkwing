@@ -2,6 +2,7 @@ import { posix } from "node:path";
 import type * as API from "../index.d.ts";
 import { failure, SDKError } from "./errors.ts";
 import { resolveArgs, validateArgSpecs } from "./args.ts";
+import { PlanningDiagnostics } from "./diagnostics.ts";
 import type { ClosureSpec, ConcurrencySpec, JobSpec, PlanDoc, ResourceSpec, StepSpec } from "./plan-wire.ts";
 
 function identifier(kind: string, value: string): void {
@@ -363,6 +364,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
   }
   withArgs(...args: readonly API.ArgSpec[]): this {
     this.assertMutable();
+    this.owner.diagnostics.declare(args);
     const all = [...this.#args, ...args];
     validateArgSpecs(all);
     this.#args = structuredClone(all);
@@ -620,10 +622,14 @@ class JobGroup implements API.JobGroup {
 }
 
 export class Plan implements API.Plan {
+  readonly diagnostics: PlanningDiagnostics;
   protected declarations: Declaration[] = [];
   protected settings: Omit<PlanDoc, "jobs"> = {};
   #groups = new Set<string>();
   #sealed = false;
+  constructor(diagnostics = new PlanningDiagnostics()) {
+    this.diagnostics = diagnostics;
+  }
   assertMutable(): void {
     if (this.#sealed) throw failure("plan_drift", "declarations cannot change after planning");
   }
@@ -724,7 +730,7 @@ export class Generated extends Plan implements API.Generated {
   readonly source: Job<unknown>;
   readonly generatorID: string;
   constructor(source: Job<unknown>, generatorID: string, parent: Plan) {
-    super();
+    super(parent.diagnostics);
     this.parent = parent;
     this.source = source;
     this.generatorID = generatorID;
@@ -733,6 +739,7 @@ export class Generated extends Plan implements API.Generated {
   }
   protected override add<T extends Declaration>(job: T): T {
     job.needs(this.source).addGroup(this.generatorID);
+    for (const group of this.source.toSpec().groups ?? []) job.addGroup(group);
     return super.add(job);
   }
   override toDoc(): PlanDoc {

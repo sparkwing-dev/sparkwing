@@ -46,7 +46,7 @@ static napi_value open_handles(napi_env env, napi_callback_info info) {
     return NULL;
   }
   for (size_t i = 0; i < 2; i++) {
-    // safety: Imported handles must stop inheriting before author code can spawn tools.
+    // safety: Clear inheritance before SDK tools spawn; independent imports may run before SDK initialization.
     if (!SetHandleInformation(handles[i], HANDLE_FLAG_INHERIT, 0)) {
       return fail(env, "clear protocol handle inheritance", GetLastError());
     }

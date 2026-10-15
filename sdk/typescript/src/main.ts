@@ -20,7 +20,7 @@ function initialize(): { descriptors?: { requestFd: number; frameFd: number }; e
     return { error };
   }
 }
-// safety: Conversion clears Windows handle inheritance before author module code runs.
+// safety: Conversion clears Windows handle inheritance before SDK tools spawn; independent imports may run earlier.
 const inherited = process.argv.includes("--sw-node-protocol") ? initialize() : undefined;
 export async function main(): Promise<void> {
   let descriptors: { requestFd: number; frameFd: number };

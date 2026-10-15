@@ -6,6 +6,7 @@ import { delimiter, join } from "node:path";
 import { docker, services } from "../src/index.ts";
 import { runScope } from "../src/scope.ts";
 import { registerCommandContext } from "../src/command.ts";
+import { runInNewContext } from "node:vm";
 import { fakeContext, commandFailure } from "./helper-context.ts";
 
 test("Docker build and push preserve local and registry refs and use only manifest digests", async () => {
@@ -103,20 +104,39 @@ test("Docker buildx pushes only remote tags and reads the pushed manifest metada
   assert.equal(build.includes("registry.test/app:v1"), true);
 });
 
-test("local multi-platform Docker builds request a loaded image and propagate unsupported image-store errors", async () => {
-  const fake = fakeContext(({ argv }) => (argv[2] === "inspect" ? "Platforms: linux/amd64, linux/arm64" : ""));
-  await docker.build(fake.ctx, { image: "app", tags: ["v1"], platforms: ["linux/amd64", "linux/arm64"] });
-  assert.equal(fake.calls.find((call) => call.argv[2] === "build")!.argv.includes("--load"), true);
-  const failure = commandFailure("Docker image store cannot load multiple platforms");
-  const unavailable = fakeContext(({ argv }) => {
+test("local buildx loads a single platform and retains multiple platforms in BuildKit", async () => {
+  const fake = fakeContext(({ argv }) => {
     if (argv[2] === "inspect") return "Platforms: linux/amd64, linux/arm64";
-    if (argv[2] === "build") throw failure;
+    if (argv[2] === "build" && argv.includes("--load") && argv.includes("linux/amd64,linux/arm64"))
+      throw commandFailure("Docker image store cannot load multiple platforms");
     return "";
   });
-  await assert.rejects(
-    docker.build(unavailable.ctx, { image: "app", tags: ["v1"], platforms: ["linux/amd64", "linux/arm64"] }),
-    (error) => error === failure,
+  await docker.build(fake.ctx, { image: "app", tags: ["v1"], platforms: ["linux/amd64", "linux/arm64"] });
+  await docker.build(fake.ctx, { image: "app", tags: ["v1"], platforms: ["linux/amd64"] });
+  assert.deepEqual(
+    fake.calls.filter((call) => call.argv[2] === "build").map((call) => call.argv.includes("--load")),
+    [false, true],
   );
+});
+
+test("service creation is registered for host cleanup before a lost Docker response", async () => {
+  const controller = new AbortController();
+  const cancelled = new Error("Docker client lost its response");
+  const fake = fakeContext(({ argv }) => {
+    if (argv[1] === "create") {
+      assert.equal(fake.registrations.length, 1, "daemon allocation must already have host cleanup");
+      assert.ok(argv.includes("--label"));
+      controller.abort(cancelled);
+      throw cancelled;
+    }
+    return "";
+  }, controller.signal);
+  await assert.rejects(
+    services.withServices(fake.ctx, [{ image: "db", name: "db", port: 1234 }], () => {}),
+    (error) => error === cancelled,
+  );
+  assert.equal(fake.registrations.length, 1);
+  assert.equal(fake.calls.at(-1)!.signal.aborted, false);
 });
 
 test("Docker run uses API file transfer and registered cleanup", async (t) => {
@@ -359,7 +379,7 @@ test("services without a readiness command wait the retained two seconds using t
   assert.equal(fake.calls.at(-1)!.argv[1], "rm");
 });
 
-test("service create collisions never register or remove another container", async () => {
+test("service create collisions never remove another container", async () => {
   const collision = new Error("container name already exists");
   const fake = fakeContext(() => {
     throw collision;
@@ -368,9 +388,65 @@ test("service create collisions never register or remove another container", asy
     services.withServices(fake.ctx, [{ image: "db", name: "existing", port: 1234 }], () => {}),
     (error) => error === collision,
   );
-  assert.equal(fake.registrations.length, 0);
-  assert.equal(fake.calls.length, 1);
+  assert.equal(fake.registrations.length, 1);
+  assert.equal(fake.calls.length, 2);
   assert.equal(fake.calls[0]!.argv[1], "create");
+});
+
+test("registered service cleanup recovers unacknowledged containers and preserves colliding names", async () => {
+  let seed = 104;
+  const labels = new Set<string>();
+  for (let n = 0; n < 16; n++) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const name = `caller-${seed}`;
+    const unrelated = { name, id: "b".repeat(64), label: `other=${seed}` };
+    const owned = { name, id: "a".repeat(64), label: "" };
+    let containers: (typeof owned)[] = [];
+    const lost = new Error("lost create response");
+    const executeCleanup = (argv: readonly string[]) => {
+      assert.equal(argv[0], process.execPath);
+      runInNewContext(argv[2]!, {
+        process: { argv: [argv[0], argv[3]] },
+        require(module: string) {
+          assert.equal(module, "node:child_process");
+          return {
+            execFileSync(command: string, args: string[]) {
+              assert.equal(command, "docker");
+              if (args[0] === "ps") {
+                assert.ok(args.includes("--all"));
+                const filter = args[args.indexOf("--filter") + 1]!.slice("label=".length);
+                return containers
+                  .filter((entry) => entry.label === filter)
+                  .map((entry) => entry.id)
+                  .join("\n");
+              }
+              assert.equal(args[0], "rm");
+              assert.equal(args[1], "-f");
+              containers = containers.filter((entry) => !args.slice(2).includes(entry.id));
+              return "";
+            },
+          };
+        },
+      });
+      return "";
+    };
+    const fake = fakeContext(({ argv }) => {
+      if (argv[1] !== "create") return executeCleanup(argv);
+      owned.label = argv[argv.indexOf("--label") + 1]!;
+      labels.add(owned.label);
+      containers = n % 2 ? [unrelated] : [unrelated, owned];
+      assert.equal(fake.registrations.length, 1);
+      executeCleanup(fake.registrations[0]!);
+      assert.deepEqual(containers, [unrelated]);
+      throw lost;
+    });
+    await assert.rejects(
+      services.withServices(fake.ctx, [{ image: "db", name, port: 1234 }], () => {}),
+      (error) => error === lost,
+    );
+    assert.deepEqual(containers, [unrelated]);
+  }
+  assert.equal(labels.size, 16);
 });
 
 test("service startup failure cleans earlier services and stops later startup", async () => {

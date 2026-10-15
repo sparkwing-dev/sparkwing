@@ -117,7 +117,7 @@ async function build(ctx: Context, config: DockerAPI.BuildConfig, push: boolean)
   const remote = registries.flatMap((registry) => config.tags.map((tag) => `${registry}/${config.image}:${tag}`));
   const args = multi ? ["buildx", "build", "--platform", platforms.join(",")] : ["build"];
   if (multi && push && remote.length) args.push("--push");
-  else if (multi) args.push("--load");
+  else if (platforms.length === 1) args.push("--load");
   args.push("-f", config.dockerfile || "Dockerfile");
   if (!(multi && push && remote.length)) for (const ref of local) args.push("-t", ref);
   if (multi) for (const ref of remote) args.push("-t", ref);

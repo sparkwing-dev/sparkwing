@@ -9,13 +9,13 @@ func TypeScriptTests(scenario string) []string {
 	case "protocol-version-and-hard-cut", "protocol-envelope-transcripts":
 		return []string{"protocol-v2.test.ts", "amendments.test.ts"}
 	case "protocol-additive-fields-and-child-handles":
-		return []string{"protocol-v2.test.ts", "transport.test.ts", "native-package.test.ts"}
+		return []string{"protocol-v2.test.ts", "transport.test.ts", "native-package.test.ts", "native-results.test.mjs", "initialization-docs.test.ts"}
 	case "protocol-strict-plan-parity":
 		return []string{"plan.test.ts", "describe.test.ts", "amendments.test.ts"}
 	case "protocol-errors-and-frame-identity":
 		return []string{"log.test.ts", "routes.test.ts"}
 	case "protocol-sdk-secrets-mask-annotations", "protocol-job-closures-and-skip":
-		return []string{"runner.test.ts", "settlement.test.ts"}
+		return []string{"runner.test.ts", "settlement.test.ts", "diagnostics.test.ts"}
 	case "protocol-mask-acknowledgement":
 		return []string{"runner.test.ts", "routes.test.ts"}
 	case "protocol-sdk-artifacts-references-children":

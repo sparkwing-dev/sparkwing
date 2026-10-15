@@ -74,21 +74,33 @@ export function repoFiles(...options: readonly RepoFilesOption[]): MemoKeyFn {
   return tracked((file) => !matches.some((match) => match(file)));
 }
 
-async function hashFiles(root: string, names: readonly string[], ctx: Context): Promise<string> {
+async function hashFiles(root: string, names: readonly string[], ctx: Context, tracked = true): Promise<string> {
   const hash = createHash("sha256");
+  const part = (bytes: Uint8Array): void => {
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(bytes.length));
+    hash.update(length).update(bytes);
+  };
   for (const name of names) {
     ctx.signal.throwIfAborted();
-    const bytes = await fs.readFile(paths.join(root, name));
-    hash.update(`${Buffer.byteLength(name)}\0${name}\0${bytes.length}\0`).update(bytes);
+    const file = paths.join(root, name);
+    const info = await fs.lstat(file);
+    if (!tracked && !info.isFile()) throw new Error(`Tree entry is not a regular file: ${name}`);
+    if (!info.isSymbolicLink() && !info.isFile()) throw new Error(`Unsupported memo entry: ${name}`);
+    const bytes = info.isSymbolicLink() ? await fs.readlink(file, { encoding: "buffer" }) : await fs.readFile(file);
+    part(Buffer.from(name));
+    if (tracked) part(Buffer.from([info.isSymbolicLink() ? 1 : 0]));
+    part(bytes);
   }
-  return "mk:" + hash.digest("hex");
+  return "memo:" + hash.digest("hex");
 }
 
 export function tree(root: string): MemoKeyFn {
   return async (ctx) => {
     assertExecution();
-    const absolute = path(root);
-    return hashFiles(absolute, await regularFiles(absolute, ctx.signal), ctx);
+    const absolute = paths.resolve(path(root));
+    if ((await fs.realpath(absolute)) !== absolute) throw new Error(`Tree root traverses a symlink: ${root}`);
+    return hashFiles(absolute, await regularFiles(absolute, ctx.signal), ctx, false);
   };
 }
 

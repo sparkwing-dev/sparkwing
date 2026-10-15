@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { digest, nativeTests, sourceDigest } from "./verification.mjs";
 
 const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const lock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url), "utf8"));
@@ -40,4 +42,31 @@ for (const [arch, machine] of [
     pe + 24 + headerSize + sections * 40 > bytes.length
   )
     throw invalid();
+}
+
+let source;
+for (const arch of ["x64", "arm64"]) {
+  let receipt;
+  try {
+    receipt = JSON.parse(await readFile(new URL(`win32-${arch}/verification.json`, import.meta.url), "utf8"));
+  } catch {
+    throw new Error(
+      `Windows ${arch} needs native verification: node native/release.mjs bridge --version ${manifest.version} --arch ${arch} --headers <node-headers> --node-lib <node.lib>`,
+    );
+  }
+  source ??= await sourceDigest(fileURLToPath(new URL("..", import.meta.url)));
+  const bytes = await readFile(new URL(`win32-${arch}/protocol.node`, import.meta.url));
+  const node = /^v(\d+)\.(\d+)\.\d+/.exec(receipt?.node ?? "");
+  if (
+    !receipt ||
+    receipt.platform !== "win32" ||
+    receipt.arch !== arch ||
+    receipt.version !== manifest.version ||
+    receipt.source !== source ||
+    receipt.sha256 !== digest(bytes) ||
+    !node ||
+    !(Number(node[1]) > 22 || (Number(node[1]) === 22 && Number(node[2]) >= 18)) ||
+    JSON.stringify(receipt.tests) !== JSON.stringify(nativeTests)
+  )
+    throw new Error(`Windows ${arch} verification does not match the package; rerun native/release.mjs bridge`);
 }

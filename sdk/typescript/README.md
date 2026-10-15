@@ -73,26 +73,46 @@ Requests and frames use private pipes. Standard output and error remain author
 output. No preload or environment bearer is used. The SDK does not filter debug
 logs or assign job identity to log frames.
 
+Every encoded frame must fit the 17 MiB wire limit. Oversized logs fail before
+writing. Typed job and step outputs also have a separate 16 MiB limit.
+Generated declarations use the frame budget. Planning diagnostics mask declared
+secret argument defaults and supplied values in messages, hints and nested
+details, including keys. Execution masking belongs to the host.
+
+Tracked memo inputs encode each path, entry type and file bytes or symlink
+target. They never read a symlink's target bytes. Tree inputs hash regular files,
+skip symlink entries and reject roots that traverse symlinks.
+
 On Windows, the host supplies decimal handles through
 `--sw-protocol-handles <request>,<frame>`. A packaged native bridge converts them
-to Node descriptors and clears inheritance. Build the x64 and arm64 bridges in
-the matching Windows MSVC environments with:
+to Node descriptors and clears inheritance before SDK tools spawn. Independently
+imported modules may execute before SDK initialization.
+
+Build and verify each bridge in its matching native Windows MSVC environment,
+with Node and Go running on that architecture:
 
 ```sh
-node native/build.mjs --headers <node-headers/include/node> --node-lib <node.lib> --arch x64
+npm run release:native -- --version <engine-version> --headers <node-headers/include/node> --node-lib <node.lib> --arch x64
 ```
 
-Before packaging, stamp the engine release version in both npm manifests:
+Repeat with `--arch arm64` on native Windows arm64. The command stamps both npm
+manifests, builds the bridge and runs `TestNativeProtocol` and
+`TestNativeConformance`. Missing, skipped or failed native tests stop the build.
+Each output directory contains `protocol.node` and a `verification.json` record
+bound to the engine version, bridge bytes and SDK sources.
+
+Build both architectures from the same source and version. Transfer their output
+directories to the package checkout, then assemble the package:
 
 ```sh
-npm version <engine-version-without-v> --no-git-tag-version
+npm run release:pack -- --version <engine-version> --destination <output-directory>
 ```
 
 The release package must contain `native/win32-x64/protocol.node` and
 `native/win32-arm64/protocol.node`. `npm pack` refuses the development version
 and inconsistent lockfile versions. It also checks both bridge files and their
-architecture and DLL headers. Native tests must also pass on each architecture
-because header checks cannot prove that Node can load and use the bridge.
+architecture and DLL headers. Both matching native verification records are
+required because header checks cannot prove that Node can load and use a bridge.
 The bridge source is in [native/protocol.c](native/protocol.c). End users need
 no compiler.
 

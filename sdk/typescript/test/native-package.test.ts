@@ -15,6 +15,7 @@ test("package preflight rejects missing, truncated and mislabeled Windows bridge
   mkdirSync(join(root, "native"));
   const nativeCheck = join(root, "native", "check-package.mjs");
   copyFileSync(new URL("../native/check-package.mjs", import.meta.url), nativeCheck);
+  copyFileSync(new URL("../native/verification.mjs", import.meta.url), join(root, "native", "verification.mjs"));
   function bridge(arch: string, machine: number, flags = 0x2002): Buffer {
     const bytes = Buffer.alloc(512);
     bytes.write("MZ");
@@ -39,7 +40,8 @@ test("package preflight rejects missing, truncated and mislabeled Windows bridge
     bridge("arm64", 0xaa64, 2);
     assert.notEqual(run().status, 0, "an executable is not a loadable addon");
     bridge("arm64", 0xaa64);
-    assert.equal(run().status, 0);
+    assert.notEqual(run().status, 0, "a fabricated PE header is not native Windows verification");
+    assert.match(run().stderr, /native verification/);
     for (const bytes of [Buffer.alloc(0), Buffer.from("not an addon"), bridge("arm64", 0xaa64).subarray(0, 160)]) {
       writeFileSync(join(root, "native/win32-arm64/protocol.node"), bytes);
       assert.notEqual(run().status, 0, "a truncated bridge must not pass preflight");
@@ -54,6 +56,7 @@ test("package preflight requires npm's engine version stamp in both manifests", 
   const native = join(root, "native");
   mkdirSync(native);
   copyFileSync(new URL("../native/check-package.mjs", import.meta.url), join(native, "check-package.mjs"));
+  copyFileSync(new URL("../native/verification.mjs", import.meta.url), join(native, "verification.mjs"));
   const write = (version: string, lockVersion = version, rootVersion = lockVersion) => {
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@sparkwing/sdk", version, type: "module" }));
     writeFileSync(

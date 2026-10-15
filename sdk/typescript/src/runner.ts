@@ -8,12 +8,13 @@ import type { JobSpec } from "./plan-wire.ts";
 import { Git } from "./helpers/git.ts";
 import { noMemo } from "./helpers/memo.ts";
 import { makeContext } from "./context.ts";
-import { SDKError, decodeError, errorFields, failure, messageOf, object, string } from "./errors.ts";
+import { decodeError, errorFields, failure, messageOf, object, string } from "./errors.ts";
 import type { LineSink } from "./log.ts";
-import { jsonOutput, readRequests, stringMap, validateRequest, writeReply, type Request } from "./protocol.ts";
+import { jsonOutput, jsonValue, readRequests, stringMap, validateRequest, writeReply, type Request } from "./protocol.ts";
 import { NodeRoutes, type HostServices, type ProcessRoutes } from "./routes.ts";
 import { runScope } from "./scope.ts";
 import { StepState } from "./step-state.ts";
+import { PlanningDiagnostics } from "./diagnostics.ts";
 
 export interface ServeOptions {
   input: Readable;
@@ -189,11 +190,11 @@ class Session {
     const definition = lookupPipeline(String(req.pipeline));
     if (!definition) throw failure("unknown_pipeline", "pipeline is not registered");
     const rawArgs = stringMap(req.args, "args");
-    const args = resolvedArgs(definition.args ?? [], rawArgs, true);
-    const run = this.#run(object(req.run, "run"), args);
-    if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
-    const plan = new Plan();
-    try {
+    const plan = new Plan(new PlanningDiagnostics(definition.args, rawArgs));
+    return plan.diagnostics.run(async () => {
+      const args = resolvedArgs(definition.args ?? [], rawArgs, true);
+      const run = this.#run(object(req.run, "run"), args);
+      if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
       await runScope({ phase: "plan", root: this.#root() }, () => definition.plan(plan, run));
       const doc = plan.toDoc();
       const allSpecs = [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())];
@@ -201,10 +202,7 @@ class Session {
       plan.seal();
       this.#planned = { plan, run, definition, rawArgs };
       return doc;
-    } catch (error) {
-      if (error instanceof SDKError) throw error;
-      throw failure("plan_failed", messageOf(error));
-    }
+    });
   }
   #current(): Planned {
     if (!this.#planned) throw failure("no_plan", "operation requires a successful plan");
@@ -316,9 +314,10 @@ class Session {
         throw failure("protocol_error", "job closure cannot carry step state");
       const ctx = this.#context(req, spec, signal, closure.step?.id, closure.kind === "generate");
       try {
-        return { value: jsonOutput(await runScope({ phase: "execute", root: this.#root() }, () => this.#call(closure, ctx, req))) ?? null };
+        const value = await runScope({ phase: "execute", root: this.#root() }, () => this.#call(closure, ctx, req));
+        return { value: jsonValue(value) ?? null };
       } catch (error) {
-        return { value: null, error: errorFields(error) };
+        return { value: null, error: errorFields(closure.kind === "generate" ? plan.diagnostics.error(error) : error) };
       }
     } finally {
       if (stepStarted) this.#state(spec.id).finish(closure.step!.id, false);
@@ -332,7 +331,7 @@ class Session {
       const generated = new Generated(closure.generator.source, closure.id, this.#current().plan);
       await closure.fn(generated, req.input ?? null, ctx);
       ctx.signal.throwIfAborted();
-      const jobs = jsonOutput(generated.toDoc().jobs);
+      const jobs = generated.toDoc().jobs;
       const { definition, plan, rawArgs } = this.#current();
       resolvedArgs(
         [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],

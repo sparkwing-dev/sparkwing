@@ -165,3 +165,54 @@ test("environment keys sort names and distinguish unset from empty", async (t) =
   process.env.SPARKWING_TEST_MEMO_HELPER = "";
   assert.notEqual(unset, await env("SPARKWING_TEST_MEMO_HELPER", "PATH")(ctx));
 });
+
+test("tracked memo identity preserves link type and target without reading target bytes", async (t) => {
+  const root = await fixture(t);
+  const ctx = fakeContext(({ argv }) => (argv[1] === "rev-parse" ? root : "entry\0")).ctx;
+  for (let n = 0; n < 12; n++) {
+    const target = `target-${n}-秘密`;
+    await fs.writeFile(paths.join(root, target), `content-${n}`);
+    await fs.symlink(target, paths.join(root, "entry"));
+    const link = await files("entry")(ctx);
+    assert.equal(link, await repoFiles()(ctx));
+    await fs.writeFile(paths.join(root, target), `changed-${n}`);
+    assert.equal(link, await files("entry")(ctx));
+    await fs.unlink(paths.join(root, target));
+    assert.equal(link, await repoFiles()(ctx));
+    await fs.unlink(paths.join(root, "entry"));
+    await fs.writeFile(paths.join(root, "entry"), target);
+    assert.notEqual(link, await files("entry")(ctx));
+    await fs.unlink(paths.join(root, "entry"));
+    await fs.symlink(target + "-other", paths.join(root, "entry"));
+    assert.notEqual(link, await repoFiles()(ctx));
+    await fs.unlink(paths.join(root, "entry"));
+  }
+});
+
+test("tree refuses roots and ancestors that traverse symlinks", async (t) => {
+  const root = await fixture(t);
+  const ctx = fakeContext(() => "").ctx;
+  await fs.symlink(paths.join(root, "nested"), paths.join(root, "alias"), process.platform === "win32" ? "junction" : "dir");
+  await fs.mkdir(paths.join(root, "nested", "child"));
+  await runScope({ phase: "execute", root }, async () => {
+    await assert.rejects(async () => tree("alias")(ctx), /symlink/);
+    await assert.rejects(async () => tree("alias/child")(ctx), /symlink/);
+  });
+});
+
+test("shared Go and TypeScript memo entry vectors preserve type, Unicode and framing", async (t) => {
+  const vectors = JSON.parse(await fs.readFile(new URL("./fixtures/helper-vectors.json", import.meta.url), "utf8"));
+  const root = await fs.realpath(await fixture(t));
+  const directory = paths.join(root, "vectors");
+  await fs.mkdir(directory);
+  const ctx = fakeContext(({ argv }) => (argv[1] === "rev-parse" ? directory : "entry\0")).ctx;
+  for (const vector of vectors.memo) {
+    const entry = paths.join(directory, "entry");
+    if (vector.kind === "file") await fs.writeFile(entry, vector.content);
+    else await fs.symlink(vector.content, entry);
+    assert.equal(await files("entry")(ctx), vector.key);
+    assert.equal(await repoFiles()(ctx), vector.key);
+    if (vector.treeKey) assert.equal(await tree(directory)(ctx), vector.treeKey);
+    await fs.unlink(entry);
+  }
+});

@@ -150,6 +150,12 @@ export function stringMap(value: unknown, label: string): Record<string, string>
   return values as Record<string, string>;
 }
 export function jsonOutput(value: unknown): unknown {
+  const output = jsonValue(value);
+  if (output !== undefined && Buffer.byteLength(JSON.stringify(output)) > MAX_OUTPUT_BYTES)
+    throw failure("sdk_error", `output exceeds ${MAX_OUTPUT_BYTES} bytes`);
+  return output;
+}
+export function jsonValue(value: unknown): unknown {
   if (value === undefined) return undefined;
   const json = JSON.stringify(value, (_key, child: unknown) => {
     if (
@@ -162,12 +168,29 @@ export function jsonOutput(value: unknown): unknown {
     return child;
   });
   if (json === undefined) throw failure("sdk_error", "output must be JSON serializable");
-  if (Buffer.byteLength(json) > MAX_OUTPUT_BYTES) throw failure("sdk_error", `output exceeds ${MAX_OUTPUT_BYTES} bytes`);
   return JSON.parse(json);
 }
-export function writeReply(out: LineSink, reply: Reply): void {
-  let line = JSON.stringify(reply) + "\n";
-  if (Buffer.byteLength(line) > MAX_FRAME_BYTES)
-    line = JSON.stringify({ reply: reply.reply, ok: false, error: { code: "sdk_error", message: "reply exceeds frame limit" } }) + "\n";
+function frameLine(frame: unknown): string {
+  const json = JSON.stringify(frame);
+  if (json === undefined) throw failure("sdk_error", "frame must be JSON serializable");
+  const line = json + "\n";
+  if (Buffer.byteLength(line) > MAX_FRAME_BYTES) throw failure("sdk_error", "encoded frame exceeds frame limit");
+  return line;
+}
+export function writeFrame(out: LineSink, frame: unknown, fallback?: unknown): void {
+  let line: string;
+  try {
+    line = frameLine(frame);
+  } catch (error) {
+    if (fallback === undefined) throw error;
+    line = frameLine(fallback);
+  }
   out.write(line);
+}
+export function writeReply(out: LineSink, reply: Reply): void {
+  writeFrame(out, reply, {
+    reply: reply.reply,
+    ok: false,
+    error: { code: "sdk_error", message: "reply exceeds frame limit or is not JSON serializable" },
+  });
 }

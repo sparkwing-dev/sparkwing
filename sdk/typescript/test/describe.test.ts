@@ -125,3 +125,24 @@ test("describe failures are pipeline-attributed and cannot expose secret default
     }
   }
 });
+
+test("describe diagnostics protect secrets discovered in other pipeline declarations", async () => {
+  const secret = "private-from-another-declaration";
+  definePipeline({
+    name: "a",
+    plan(plan) {
+      plan.job("source", () => null).withArgs({ name: "token", type: "string", secret: true, default: secret });
+    },
+  });
+  definePipeline({
+    name: "b",
+    plan() {
+      throw new Error(secret);
+    },
+  });
+  await assert.rejects(describe(run), (error: Error) => {
+    assert.equal(error.message.includes(secret), false);
+    assert.match(error.message, /describe pipeline "b"/);
+    return true;
+  });
+});

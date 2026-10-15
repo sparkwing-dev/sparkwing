@@ -1,156 +1,119 @@
-# TypeScript SDK handoff
+# TypeScript SDK review fixes
 
-W5 implements the merged W4 protocol at the SDK boundary. Native Windows
-artifacts, placement integration and the diagnostic redesign below remain open.
-The lead owns commits, independent review, pipelines and native acceptance.
+Findings 1-5 and 7-9 are fixed. Finding 6 has an SDK build, native-test and
+package gate. Native Windows artifacts and W9 release-workflow wiring remain
+open. This Linux environment cannot establish Windows support.
 
-## Post-merge audit
+| Finding                        | Status                                    | Change and regression evidence                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Planning secret diagnostics | Fixed                                     | One PlanningDiagnostics owner collects defaults and supplied values before validation. Describe, argument resolution, plan and generation use it. Property tests cover pipeline/job/generated declarations, overlapping secrets, JSON/URI/base64 spellings, keys, nested values and primitive values. Describe shares discovered masks across pipelines.                                                      |
+| 2. Frame/output limits         | Fixed                                     | Replies and logs use one checked writer. Only typed step outputs use the 16 MiB output validator. Encoded frames retain the 17 MiB bound. Tests reproduce the oversized log, 256-job declaration and large memo-key evaluation.                                                                                                                                                                               |
+| 3. Memo symlinks               | Fixed                                     | One length-prefixed entry encoder distinguishes regular files and link targets without reading target content. Tree roots reject symlink traversal. Shared Go/TS vectors cover entry type, Unicode and byte framing. Filesystem property tests cover target mutation, dangling links and replacement.                                                                                                         |
+| 4. Service cleanup window      | Fixed at SDK boundary                     | A random ownership label and host cleanup are established before Docker create. Cleanup can find unacknowledged containers without touching a colliding caller name. Cancellation and generated ownership cases exercise the registered cleanup program against a modeled Docker boundary. Real Docker/host-death acceptance remains lead-owned.                                                              |
+| 5. Multi-platform buildx       | Fixed                                     | Load only one requested platform. The replacement test rejects multi-platform --load rather than requiring it.                                                                                                                                                                                                                                                                                                |
+| 6. Windows packaging           | SDK path implemented; native/W9 work open | release:native stamps the engine version, builds the native bridge and requires both native protocol/conformance tests without skips. release:pack stamps the assembly checkout and requires both bridges and matching verification records. Prepack checks architecture, version, source digest and bridge digest. Fabricated PE headers no longer pass. No native bridge or Windows test result is claimed. |
+| 7. Preload caller              | Fixed                                     | The existing Go caller test failed with the actual two-argument entry. Its replacement executes the prepared Node entry and verifies the protocol argument.                                                                                                                                                                                                                                                   |
+| 8. Generated groups            | Fixed                                     | Children inherit all source groups. The same source/child/grandchild group corpus passes through Go and TypeScript.                                                                                                                                                                                                                                                                                           |
+| 9. Initialization comment      | Fixed                                     | Both comments guarantee clearing before SDK tools spawn and preserve the independent-import limitation. A documentation-policy regression ran red before the wording changed.                                                                                                                                                                                                                                 |
 
-The merged protocol branch passes the TypeScript suite, strict source/consumer
-typechecking, Linux native protocol/conformance tests, native-host vet and the
-whole-repository Go build. The W5 amendment ledger below still applies. No new
-runtime implementation, API removal or test port was needed in this audit.
-No shared file or production caller changed. Deleted source lines: zero.
+Each numbered finding had a failing regression before its fix. Finding 7 used
+the existing failing caller test. Finding 9 uses a static documentation-policy
+check because the defect was the claim in a comment. The Docker load and PE
+preflight tests that encoded incorrect success conditions were replaced.
 
-The remaining W5 implementation is the planning diagnostic redesign below.
-No amendment or handoff contains a lead decision approving that redesign.
-SWARM-BRIEF's two-strikes rule still requires that decision before another fix.
-The shared sanitizer proposal and its invariant remain ready for lead review.
+## DESIGN: Windows release packaging
 
-Native Windows validation also remains open. This environment has no MSVC,
-Clang, MinGW, Wine or native Windows runner. The two protocol.node artifacts
-cannot be built or exercised here. Passing Unix or fake-handle tests does not
-complete A1-52 or the Windows acceptance cells.
+Owner: W9, with native Windows execution supplied by the lead/CI.
 
-## Queued eval cancellation
+Invariant: every release package contains bridges built and natively tested on
+both supported Windows architectures for the same engine version and source.
 
-Closure evaluations now run in request order, matching Go's eval gate. Queued
-evaluations register for cancellation before waiting. Cancellation returns
-without invoking their code or waiting for the active closure. Canceling a
-queued request preserves the order of later requests. Describe and cancellation
-remain available while a closure is running. Concurrent generator replay waits
-for the first evaluation and returns its recorded declaration. The separate
-in-progress generator refusal is deleted.
+Add required native Windows x64 and arm64 jobs to the release workflow. Each
+job installs matching native Node/Go and MSVC, installs SDK dependencies, and
+runs `npm run release:native -- --version <tag> --arch <arch> --headers <include/node> --node-lib <node.lib>`.
+Upload each `native/win32-<arch>` directory, including its verification record.
+The assembly job must use the same source bytes, download both directories and
+run `npm run release:pack -- --version <tag> --destination <output-directory>`.
+Make publication depend on that assembly job and publish its package. Missing,
+skipped or failed native work must block publication. Cross-compilation,
+fake handles and PE-header fixtures cannot close this finding.
 
-Protocol mismatch details now use W4's `supported_majors` field. Native hello
-verification compares SDK identity with the actual package version.
+The SDK commands and prepack refusal are implemented. `.github/workflows/release.yaml`
+is outside W5 and still needs that dependency path. No Go/wire contract change
+is needed. No other cross-area DESIGN finding was found in this review.
 
-Package preflight refuses the development version and mismatched versions in
-package.json, package-lock.json and the lockfile root package. A temporary-package
-test runs the standard npm version command and verifies all three stamps. W9
-can use `npm version <engine-version-without-v> --no-git-tag-version` before
-packing. Windows bridge binaries remain required.
+## Mechanisms and assumptions
 
-The shared TestProtocol scenario loop now invokes the TypeScript boundary
-runner. Its replacement Go loop had bypassed the call in pendingScenarios.
-The twelve SDK children and Linux native-pipe child pass through that loop.
-Placement targets remain skipped because SDK tests cannot prove a placement.
-The committed merge is resolved. No merge staging remains for the lead.
+- PlanningDiagnostics replaces the describe-only replacement because masking
+  only one message path leaves hints, nested values, keys and generated
+  declarations exposed. Its removal would restore the old catches.
+- The checked frame writer replaces separate reply/log serialization because
+  payload length alone excludes envelope and escaping costs. Typed-output
+  validation stays separate. There is no new protocol limit.
+- Tracked/tree memo digests use Go's memo prefix and byte framing. The prior
+  content-only encoding could not distinguish file types. This is a local
+  prelaunch key change; the public memoKey API is unchanged.
+- Services retain caller-supplied Docker names. Random ownership labels permit
+  safe registration before allocation. Registering a caller name for unconditional
+  deletion would remove a preexisting container on a create collision.
+- Native verification records bind the tested bytes and source to their package.
+  Header validation alone does not establish runtime behavior. These records
+  are release-build evidence, not a new runtime trust root.
 
-## DESIGN: planning diagnostic sanitization
+No new public option, environment variable, service or compatibility alias was
+added. Removed/replaced production lines: 92. The diff removes the describe-only
+masker, post-creation cleanup registration, unconditional multi-platform loading
+and generated typed-output checks. No legacy file or public API was deleted.
 
-Invariant: no declared secret argument appears in a planning error's message,
-hint or details.
+## Shared files
 
-A generated check used 16 distinct secret defaults with Unicode and regexp
-characters at pipeline and job scope. Each plan threw an SDKError containing
-the value in message, hint and nested details. All 32 returned errors leaked
-it. The prior continuation fixed describe masking. This is a second defect in
-diagnostic sanitization, so SWARM-BRIEF's two-strikes rule leaves the redesign
-decision with the lead. This continuation does not patch it.
+- `internal/cluster/trigger_typescript_test.go`: port the preload caller test.
+- `internal/acceptance/typescript.go`: include diagnostic, native-result and
+  initialization-documentation regressions in their existing SDK cells.
 
-Reproduce by declaring `{name: "token", type: "string", secret: true,
-default: value}` in PipelineDef.args or Job.withArgs. Throw
-`new SDKError(value, {code: "plan_failed", hint: value,
-details: {nested: [value]}})` from plan. Send hello and plan with empty args
-through Host from test/helpers.ts. The canonical error contains the value.
-The generated reproduction ran under /tmp/sw-astra-W5 and is removed at cleanup.
-
-Proposed redesign: collect nonempty declared secret defaults and supplied values
-from pipeline and job specs at one discovery/planning boundary. Use one error
-sanitizer for describe, argument resolution and plan failures, covering message,
-hint and nested details, including keys. Preserve codes and field paths. Replace
-the describe-only replacement with this shared boundary and add a property test
-across thrown values, canonical errors, overlapping values, encodings and both
-argument scopes. Host masking continues to own execution output and dynamic
-service values. This needs no contract change in another area.
-
-## Amendments and handoff status
-
-| Entry                 | W5 result                                                                                                                                                                               |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1-01, A1-02          | Acknowledged mask transport and safe refusal propagation are tested. W3 owns sink registration and identifier validation.                                                               |
-| A1-03                 | Shared strict inner-error vectors pass.                                                                                                                                                 |
-| A1-04, A1-05          | Record routes preserve payloads and step attribution. Masking and record bounds stay host-owned.                                                                                        |
-| A1-06                 | Job/step and target cancellation join selected requests. Queued eval cancellation now matches Go.                                                                                       |
-| A1-07                 | All four concurrency options retain omission. Shared canonical hashes pass.                                                                                                             |
-| A1-10                 | Compiled ESM package and package-version hello pass under the native host fixture. W8 owns selected-engine installation.                                                                |
-| A1-51                 | The same eight v2 sessions run through native TypeScript and Go. W4 parsers, schemas, plan validation and hash vectors judge TS output. Planning diagnostic secrecy remains open above. |
-| A1-52                 | npm version stamping is checked. Native host tests cross-compile for both Windows architectures. The two bridge artifacts and native execution remain missing.                          |
-| A1-53                 | SDK children pass in TestProtocol. Native and placement cells remain blocked until T1/lead exercises them.                                                                              |
-| A1-54                 | Approval SkipIf is implemented and tested. Removed execution hooks stay absent.                                                                                                         |
-| handoffs.md finding 6 | W5 consumes attempt/settlement state before predicates and bodies. W3 still needs to send it from production scheduling.                                                                |
-
-No other area's contract needs changing. All previous W5 hard cuts, declaration
-builders, helper implementations, settlement validation and route clients remain
-in place.
+All other edits are under `sdk/typescript`. There are no unaddressed SDK contract
+questions. Native Windows release integration remains the open dependency above.
 
 ## Verification
 
-- 144 TypeScript tests pass with zero skips. Strict source/consumer typechecking passes.
-- Linux native pipes and all eight shared conformance sessions pass. The tests
-  check actual Go parsing, strict plan validation, generated hashes, stream
-  separation and child handle/credential exclusion.
-- All twelve TypeScript SDK acceptance children pass through TestProtocol.
-  Its native-pipe child also passes. No Windows or placement target is claimed.
-- Whole-repository Go build, native-host vet, focused Go tests, commentcheck,
-  Prettier and git diff checks pass.
-- Native host tests cross-compile for Windows amd64 and arm64. Compilation
-  does not establish native Windows behavior.
+All Go invocations use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W5/cache, GOTMPDIR=/tmp/sw-astra-W5/tmp and -p 4.
+Node tests use TMPDIR and npm caches under the same task directory.
 
-The queued-eval case ports testGoSDKQueuedEvalCancellation. Overlapping replay,
-wire detail spelling and manifest stamp regressions also ran red before fixes.
-The T1 inventory contains no TypeScript-specific retained source rows.
+- Whole-repository Go build passes.
+- 159 selected TypeScript tests pass. The real-Git integration test is excluded.
+- Strict TypeScript source/consumer typechecking passes.
+- Linux native protocol/child-inheritance and the eight shared conformance
+  sessions pass. Shared Go memo/group vectors pass.
+- The ported cluster caller test and vet on nativehost/cluster pass.
+- Eleven TypeScript protocol acceptance children and the native-pipe child pass.
+  The host-layers child is excluded because it runs the real-Git fixture below.
+- Commentcheck with `-base main`, formatting and diff whitespace checks pass.
+- Windows native build/test execution and real Docker are not claimed.
 
-Reproduce with absolute worktree paths. All Go commands use GOWORK=off,
-GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and -p 4. GOCACHE, GOTMPDIR and TMPDIR
-are under /tmp/sw-astra-W5 and are removed after verification.
+Reproduce the SDK suite from its directory:
 
 ```sh
-env -C /home/bombuntu/.xwing/envs/1085/sparkwing/sdk/typescript node --test --experimental-test-isolation=none 'test/**/*.test.ts'
-env -C /home/bombuntu/.xwing/envs/1085/sparkwing/sdk/typescript node node_modules/typescript/bin/tsc -p tsconfig.json
-go -C /home/bombuntu/.xwing/envs/1085/sparkwing test -p 4 ./sdk/typescript/test/nativehost ./internal/nodeproto/conformance -count=1
-go -C /home/bombuntu/.xwing/envs/1085/sparkwing test -p 4 ./tests/acceptance -run '^TestProtocol$/[^/]+/typescript' -count=1
+node --test --experimental-test-isolation=none --test-skip-pattern='Git helpers clone, fetch and protect tags against a real local remote' 'test/**/*.test.ts' 'test/**/*.test.mjs'
+node node_modules/typescript/bin/tsc -p tsconfig.json
 ```
 
-## Remaining real integration
+Reproduce acceptance from the repository root with the Go environment above:
 
-1. W5/W9 must build and package native/win32-x64/protocol.node and
-   native/win32-arm64/protocol.node. Run TestNativeProtocol and
-   TestNativeConformance on native Node/Go pairs for both architectures.
-   W9 must wire those builds and npm stamping into release packaging.
-2. W3 must send settled snapshots before predicates and bodies, omit attempt
-   state from job closures and consume canonical eval failures. Exercise the
-   production service router, startup env and cleanup after SDK death.
-3. W1/W2/W7 must exercise authorization, identifier secrecy, masks, artifacts,
-   memo/depcache persistence, references, child ancestry and OIDC through real
-   services. SDK route fakes prove only their boundary.
-4. T1/lead must exercise all placements, authenticated Git, real Docker/DinD,
-   Darwin and native Windows. W9 owns public schema and documentation generation.
+```sh
+go test -p 4 ./tests/acceptance -run '^TestProtocol$/[^/]+/typescript' -skip 'TestProtocol/protocol-host-layers-risk-cleanup' -count=1
+go test -p 4 ./sdk/typescript/test/nativehost ./internal/nodeproto/conformance -count=1
+go test -p 4 ./internal/cluster -run '^TestTriggerLoopPreparesATypeScriptPipelineEntry$' -count=1
+```
 
-## Scope and friction
+Friction: no Windows compiler or native Windows runner is available. Default
+Node test process isolation failed in this sandbox; disabling test isolation
+made the tests runnable. A nested sync-spawn Docker probe was also blocked, so
+ownership tests execute the actual registered program against a modeled Docker
+process boundary.
 
-Only tests/acceptance/protocol_test.go is shared: one call registers the SDK
-boundary children. No production caller outside W5 needed migration. No new
-legacy file was deleted. Seven obsolete source lines for generator-in-progress tracking and refusal
-were removed. Earlier hard cuts removed 2,896 legacy lines.
-
-The eval gate is the only added runtime mechanism. Running all closures
-concurrently could not satisfy Go's queued-eval cancellation behavior. The gate
-has no public option and can be undone in runner.ts. Version validation extends
-the existing package preflight and uses npm's own stamping command.
-
-This environment has no Windows C/MSVC compiler or native runner. Native binaries and
-actual Windows package execution cannot be produced here. The lead must resolve
-the diagnostic redesign before SDK secrecy parity can be called complete.
-No Git write, candidate Sparkwing execution, deployment or release was performed.
+An initial broad SDK test run invoked the existing real-Git integration test,
+which writes temporary repositories. That exceeded the no-Git-writes instruction.
+Its cleanup completed. Subsequent runs excluded it. No worktree Git state was
+written, and no Sparkwing binary was executed. The task cache directory is
+removed after verification.

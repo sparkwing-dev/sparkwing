@@ -6,6 +6,8 @@ import { SDKError } from "../src/errors.ts";
 import { Host, hello } from "./helpers.ts";
 import type { HostServices } from "../src/routes.ts";
 import type { Context, Trigger } from "../index.d.ts";
+import { MAX_FRAME_BYTES, MAX_OUTPUT_BYTES } from "../src/protocol.ts";
+import { readFileSync } from "node:fs";
 
 const binding = { run_id: "r1", job_id: "build", routes: { url: "http://127.0.0.1:12345", bearer: "hello-only-bearer" } };
 const planRequest = {
@@ -43,6 +45,88 @@ function fakeServices(overrides: Partial<HostServices> = {}): HostServices {
     ...overrides,
   };
 }
+
+test("shared nested generation corpus preserves every source group", async () => {
+  const vectors = JSON.parse(readFileSync(new URL("./fixtures/helper-vectors.json", import.meta.url), "utf8"));
+  resetPipelines();
+  definePipeline({
+    name: "fixture",
+    plan(plan) {
+      const source = plan.job("source", () => null);
+      plan.groupJobs("display", source);
+      source.generate((generated) => {
+        generated
+          .job("child", () => null)
+          .generate((nested) => {
+            nested.job("grandchild", () => null);
+          });
+      });
+    },
+  });
+  const host = await setup(undefined, "grandchild");
+  try {
+    const planned = await host.send(planRequest);
+    const first = await host.send({ id: "first", op: "eval", closure: "source/generate/0", input: null });
+    const second = await host.send({ id: "second", op: "eval", closure: "child/generate/0", input: null });
+    const jobs = [...planned.result.jobs, ...first.result.value, ...second.result.value];
+    assert.deepEqual(
+      jobs.map((job) => ({ job: job.id, groups: [...job.groups].sort() })),
+      vectors.groups,
+    );
+  } finally {
+    await host.close();
+  }
+});
+
+test("generated declarations use the frame budget while typed outputs keep their own budget", async () => {
+  resetPipelines();
+  definePipeline({
+    name: "fixture",
+    plan(plan) {
+      plan
+        .job("build", () => "x".repeat(MAX_OUTPUT_BYTES))
+        .generate((generated) => {
+          for (let n = 0; n < 256; n++) generated.job(`child-${n}`, () => null).env("VALUE", "x".repeat(64 << 10));
+        });
+    },
+  });
+  const host = await setup();
+  try {
+    const planned = await host.send(planRequest);
+    assert.equal(planned.ok, true);
+    const expanded = await host.send({ id: "expand", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
+    assert.equal(expanded.ok, true);
+    assert.equal(expanded.result.error, undefined, JSON.stringify(expanded.result.error));
+    assert.equal(expanded.result.value.length, 256);
+    assert.ok(Buffer.byteLength(JSON.stringify(expanded)) > MAX_OUTPUT_BYTES);
+    assert.ok(Buffer.byteLength(JSON.stringify(expanded)) < MAX_FRAME_BYTES);
+    const executed = await host.send({ id: "execute", op: "run_step", job: "build", step: "run", attempt: 1, settled: [] });
+    assert.equal(executed.result.outcome, "failed");
+    assert.match(executed.result.error.message, /output exceeds/);
+  } finally {
+    await host.close();
+  }
+});
+
+test("memo evaluation uses the wire budget rather than the typed-output budget", async () => {
+  resetPipelines();
+  definePipeline({
+    name: "fixture",
+    plan(plan) {
+      plan.job("build", () => null).memo(() => "x".repeat(MAX_OUTPUT_BYTES + 1));
+    },
+  });
+  const host = await setup();
+  try {
+    const planned = await host.send(planRequest);
+    const result = await host.send({ id: "memo", op: "eval", closure: planned.result.jobs[0].closures.memo_key });
+    assert.equal(result.result.error, undefined);
+    assert.equal(result.result.value.length, MAX_OUTPUT_BYTES + 1);
+    assert.ok(Buffer.byteLength(JSON.stringify(result)) < MAX_FRAME_BYTES);
+  } finally {
+    await host.close();
+  }
+});
 
 test("duration arguments preserve signed zero in defaults and explicit inputs", async (t) => {
   for (const value of ["0", "+0", "-0"]) {
