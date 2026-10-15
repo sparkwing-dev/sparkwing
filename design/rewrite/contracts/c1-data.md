@@ -246,6 +246,11 @@ persisted finish time plus `limits.LogSealGrace`. C1 rechecks the recorded write
 attempt, generation, current credential ancestry/expiry/membership and absence
 of a newer claim. After sealing, only an identical final commit may replay.
 Owner-unit liveness stays separate; eval gains no job-attempt grace exception.
+Published job logs use live run-bound `data.write` publisher authority and the
+exact imported terminal attempt in a publish-mode run. Publication has no
+execution lease, so execution tail grace does not govern its uploads. Normal
+segment integrity, retention and seal rules still apply. Owner-unit publication
+needs an imported unit identity contract before it can bypass a live unit lease.
 `LogTransport.SignSegments` derives object keys and retention from the authorized
 subject and run. `ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
 subject, proxy bytes through the controller, meter egress and apply the log
@@ -278,6 +283,13 @@ failure-handler dependencies grant edges. Unrelated, foreign-team and missing
 digests stay hidden. These metadata checks consume no egress or download budget.
 Accepted-plan intake, manifest byte verification, record commits and native
 routes remain separate integration obligations.
+
+The `storage-publish-one-way/store-data-sqlite` proof commits published job logs
+after local completion, reopens their segments and incomplete seal, and checks
+retained bytes, immutable replay, credential revocation and unchanged job results.
+It creates no executable unit or billable interval. Publisher authority and
+terminal imported attempts are preseeded. Run/result import, owner-unit logs,
+local publication transport and physical bytes remain integration obligations.
 
 | Export | Purpose |
 |---|---|

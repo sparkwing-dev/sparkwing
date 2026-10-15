@@ -81,6 +81,8 @@ func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 // flush after result completion without reopening execution. After final sealing,
 // only the identical final commit replays. Owner units retain their own liveness
 // rules; eval does not inherit the job-attempt grace exception.
+// A live run-bound publisher with data.write may import logs for an exact terminal
+// job attempt in its publish-mode run, without an execution lease or tail grace.
 // The run owns RetentionClass; incomplete logs never change the unit's result.
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
 	return t.recordSegments(ctx, commit)

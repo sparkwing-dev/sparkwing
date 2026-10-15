@@ -136,6 +136,7 @@ unlock.
 
 ### Fixed
 
+- **store:** Published job logs use the live run-bound publisher and exact imported terminal attempt. Segment commits preserve their seal and retention without requiring a local execution lease or changing the job result.
 - **store:** Persisted log reads recheck the trigger owner's current lease and the job reader's final-attempt grace. Historical reads remain available through live run/log read authority.
 - **store:** Published job data checks preserve the selected run, job, attempt and generation when rechecking upload and read authority. A job's receipt grants no access to another published job.
 - **store:** Cache read sets enforce memo and depcache fallback provenance for presence checks, downloads and new references. A PR-base grant permits depcache reads only; default fallback requires matching verified default-branch evidence.

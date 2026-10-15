@@ -224,6 +224,9 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 		return err
 	}
 	c := p.Capability
+	if c.Data != nil && c.Data.Use == capability.DataPublish {
+		return checkPublishedLogWriterTx(ctx, tx, team, subject, c)
+	}
 	if c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder {
 		return holderRefusal()
 	}
