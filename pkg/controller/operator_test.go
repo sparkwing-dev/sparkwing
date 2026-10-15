@@ -248,7 +248,6 @@ func TestAdminTokenReachesNoOperatorPower(t *testing.T) {
 	admin := "Bearer " + f.admin
 	cent := int64(store.MicroCreditsPerCent)
 	for _, route := range [][2]string{
-		{"POST", "/api/v1/credits/grants"},
 		{"POST", "/api/v1/credits/reversals"},
 		{"POST", "/api/v1/credits/freezes"},
 		{"POST", "/api/v1/credits/checkouts/closed"},

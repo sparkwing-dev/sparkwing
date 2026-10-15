@@ -8,7 +8,8 @@ interfaces. The policy evaluator, authentication verifier, HTTP policy router,
 delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
 signing boundary. Persistent issuance and authentication reads still need the
-store implementation. The existing controller has not switched to this table.
+store implementation. The Stripe callback uses this table in the existing controller. Its remaining
+routes have not switched to it.
 
 ## Ownership
 
@@ -117,6 +118,7 @@ All capability names below are in `internal/capability`.
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
 | `controller.NewFilesystemDataSigner`, `FilesystemDataSigner.Sign`, `FilesystemDataSigner.Verify` | Sign and verify exact filesystem transfer constraints. The blob owner verifies uploaded bytes before recording a receipt. |
 | `controller.NewS3DataSigner`, `S3DataSigner.Sign` | Sign one configured bucket's GET or checksum/size-bound PUT without making a storage request. |
+| `controller.PaymentSettler`, `Server.WithPayments` | Supply C1 settlement to the signed Stripe callback. The server registers `/webhooks/stripe` through `PolicyRouter` and passes only verified events to the store. |
 | `controller.RouteAuthorization`, `controller.Endpoint`, `controller.PolicyRouter` | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
 | `controller.NewPolicyRouter`, `PolicyRouter.Register`, `PolicyRouter.Validate`, `PolicyRouter.Registrations` | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
 
@@ -386,6 +388,14 @@ uses `PaymentConfig.Mode`, `APIKeyFile` and `WebhookSecretFile`. The private
 files are loaded through C4's credential delivery boundary. Both modes use
 the same implementation, callback path, event inventory and C1 settlement.
 
+Controller startup selects `PaymentConfig.Mode` with `--payment-mode` and loads
+`stripe-api-key` and `stripe-webhook-secret` from its credentials directory.
+A mode without both private files, or files without an explicit mode, refuses
+startup. Unconfigured callbacks return `unavailable`. The callback uses the
+existing JSON body limit and acknowledges only after settlement returns.
+Repeated deliveries reach C1 so its durable deduplication owns the verdict.
+The caller-selected paid-grant HTTP route and its request type are deleted.
+
 The sole automatic settlement callback is `POST /webhooks/stripe`, classified
 as `AuthPaymentWebhook`. The verifier authenticates the exact body and the
 `Stripe-Signature` header, checks the signature timestamp and configured mode,
@@ -538,6 +548,14 @@ exercise only available contract data and functions.
    old auth stack and handler authorization. Final route-inventory and
    handler-policy lint checks must cover those actual registrations. W3/W4
    must provide node-host process facts through the same verifier boundary.
+
+6. **Card and dispute events.** The existing card setup, off-session charge,
+   refund, fraud warning and dispute callback routes are outside the four
+   checkout-only `PaymentEventPolicies`. C1 has no verified-event contract for
+   those outcomes. Extend that contract before replacing those remaining
+   service-bearer routes. No new event kinds or settlement semantics were
+   inferred here. The old external checkout service also needs to send paid
+   callbacks to `/webhooks/stripe` and commit checkout mode/currency through C1.
 
 ## Cross-area assumptions
 

@@ -59,7 +59,7 @@ func run(args []string) error {
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
 				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-				credBillingToken, credCreditsToken, credCacheGrantKey,
+				credBillingToken, credCreditsToken, credCacheGrantKey, credStripeAPIKey, credStripeWebhookSecret,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	cachePodURL := fs.String("cache-pod-url", "",
@@ -74,6 +74,7 @@ func run(args []string) error {
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with the "+
 			credBillingToken+" credential. Empty sells no credits.")
+	paymentMode := fs.String("payment-mode", "", "Stripe callback mode: test or live. Requires stripe-api-key and stripe-webhook-secret in --credentials-dir. Empty disables settlement.")
 	operatorAccounts := fs.String("operator-accounts", "",
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
 			"operator console. No token reaches the console. Empty leaves it off.")
@@ -297,6 +298,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	paymentVerifier, err := readPaymentAuthenticator(*credentialsDir, *paymentMode)
+	if err != nil {
+		return fmt.Errorf("payment configuration: %w", err)
+	}
 	egressCfg, egressNamed, err := readEgress()
 	if err != nil {
 		return err
@@ -456,6 +461,7 @@ func run(args []string) error {
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
+		WithPayments(paymentVerifier, st).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
 		WithCacheURL(*cacheURL).
 		WithCacheGrantKey(creds.CacheGrantKey).

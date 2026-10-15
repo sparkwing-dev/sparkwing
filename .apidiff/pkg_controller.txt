@@ -103,9 +103,36 @@ type DirectUploadResponse struct {
 const DisputeConflictCode = "dispute_conflict"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
+type Endpoint struct {
+	Method         string
+	Pattern        string
+	Authentication capability.Authentication
+	Decode         func(*http.Request) (capability.RequestEvidence, error)
+	Verify         func(*http.Request) error
+	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
+}
+type EngineController struct{ Store *store.Store }
+func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
+func (s *EngineController) AcceptPlan(ctx context.Context, authorized capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
+func (s *EngineController) Cancel(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
+func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
+func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error)
+func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
+func (s *EngineController) Finish(ctx context.Context, authorized capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error)
+func (s *EngineController) ReconcileJob(ctx context.Context, authorized capability.Authorized, body controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
+func (s *EngineController) Renew(ctx context.Context, authorized capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
+func (s *EngineController) Retry(ctx context.Context, authorized capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
+func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error)
+func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error)
+func (s *EngineController) TransitionJob(ctx context.Context, authorized capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
 func EnsureCheckoutToken(ctx context.Context, st *store.Store, raw string, now time.Time) (bool, error)
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
+func ExpansionForStore(authorized capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error)
+type FilesystemDataSigner struct {
+}
+func (s *FilesystemDataSigner) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
+func (s *FilesystemDataSigner) Verify(r *http.Request) (capability.ObjectToSign, error)
 type FloodPolicy struct {
 	RunsPerPrincipalHour int
 
@@ -146,6 +173,7 @@ type GitCredentialReleaseJSON struct {
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
 const IdleClaimPollJitterFactor = 1.25
+func IntakeForStore(authorized capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error)
 type LegacyCipher interface {
 	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
 }
@@ -189,6 +217,9 @@ const MaxHonoredIdleClaimPoll = 8 * time.Second
 const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
+func NewFilesystemDataSigner(baseURL string, key []byte) (*FilesystemDataSigner, error)
+func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter
+func NewS3DataSigner(client *s3.Client, bucket string) (*S3DataSigner, error)
 const NoPayableChargeCode = "no_payable_charge"
 type OIDCTokenRequest struct {
 	Audience string
@@ -215,7 +246,16 @@ type ObjectStoreBreakerResponse struct {
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
 func OperatorReason(reason string) (string, error)
 const PaidGrantLookupCapability = "paid-grant-lookup-v1"
+type PaymentSettler interface {
+	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
+}
 const PaymentWarnedCode = "payment_warned"
+type PolicyRouter struct {
+}
+func (router *PolicyRouter) Register(endpoint Endpoint) (err error)
+func (router *PolicyRouter) Registrations() []string
+func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request)
+func (router *PolicyRouter) Validate() error
 type Principal struct {
 	Name        string
 	Kind        string
@@ -241,6 +281,15 @@ type RequestBudget struct {
 	RunnersPerToken     int
 }
 const RequestIDHeader = "X-Request-Id"
+type RouteAuthorization struct {
+	Authenticator capability.Authenticator
+	Bindings      capability.BindingChecker
+	Identify      func(*http.Request) (capability.Presentation, error)
+	CheckCSRF     func(*http.Request, capability.Principal) error
+}
+type S3DataSigner struct {
+}
+func (s *S3DataSigner) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
@@ -308,6 +357,7 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithOutputSignKey(key []byte) *Server
+func (s *Server) WithPayments(verifier capability.PaymentAuthenticator, ledger PaymentSettler) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server

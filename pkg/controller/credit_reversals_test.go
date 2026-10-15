@@ -35,28 +35,14 @@ func (f *identityFixture) creditsGrantToken() string {
 
 var muxRoute = regexp.MustCompile(`mux\.Handle\("([A-Z]+) ([^"]+)"`)
 
-// The checkout service's credential records a paid grant, reverses a payment,
-// holds the team a payment funded and reads the ledger's units, and every
-// other route refuses it.
+// safety: the card and dispute service cannot reach ordinary tenant operations.
 func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
 	grant := f.creditsGrantToken()
 	cent := int64(store.MicroCreditsPerCent)
 
-	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
-		"kind": "paid", "amount_micro": 500 * cent, "reference": "pi_1", "team": owner.team,
-	}, nil); code != http.StatusCreated {
-		t.Fatalf("a paid grant = %d want 201", code)
-	}
-	for _, body := range []map[string]any{
-		{"kind": "free", "amount_micro": 500 * cent, "team": owner.team},
-		{"kind": "reversal", "amount_micro": -100 * cent, "reference": "re_1", "reverses": "pi_1"},
-	} {
-		if code := f.call("POST", "/api/v1/credits/grants", grant, body, nil); code != http.StatusBadRequest {
-			t.Errorf("a %s grant with credits.grant = %d want 400", body["kind"], code)
-		}
-	}
+	f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 500*cent)
 	if code := f.call("POST", "/api/v1/credits/freezes", grant,
 		map[string]any{"team": owner.team, "dispute_id": "dp_x"}, nil); code != http.StatusBadRequest {
 		t.Errorf("freezing a named team with credits.grant = %d want 400", code)
@@ -70,7 +56,6 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 	}
 
 	allowed := map[string]bool{
-		"POST /api/v1/credits/grants":              true,
 		"POST /api/v1/credits/reversals":           true,
 		"POST /api/v1/credits/freezes":             true,
 		"POST /api/v1/credits/checkouts/closed":    true,
@@ -122,11 +107,7 @@ func TestPaidGrantLookupAnswersThePayingTeam(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
 	grant := f.creditsGrantToken()
-	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
-		"kind": "paid", "amount_micro": 500 * int64(store.MicroCreditsPerCent), "reference": "pi_1", "team": owner.team,
-	}, nil); code != http.StatusCreated {
-		t.Fatalf("grant = %d", code)
-	}
+	f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 500*store.MicroCreditsPerCent)
 	var before teamBilling
 	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &before)
 	var found struct {
@@ -301,7 +282,6 @@ func TestServiceRoutesRefuseAnAnonymousCaller(t *testing.T) {
 	srv := httptest.NewServer(ctrl.Handler())
 	t.Cleanup(srv.Close)
 	for _, route := range [][2]string{
-		{"POST", "/api/v1/credits/grants"},
 		{"POST", "/api/v1/credits/reversals"},
 		{"POST", "/api/v1/credits/freezes"},
 		{"POST", "/api/v1/credits/warnings"},
@@ -331,11 +311,7 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	f.srv.WithOperatorAccounts([]string{operator.id})
 	grant := f.creditsGrantToken()
 	cent := int64(store.MicroCreditsPerCent)
-	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
-		"kind": "paid", "amount_micro": 400 * cent, "reference": "pi_1", "team": owner.team,
-	}, nil); code != http.StatusCreated {
-		t.Fatalf("grant = %d", code)
-	}
+	f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 400*cent)
 
 	type freezeResp struct {
 		Team     string   `json:"team"`
@@ -353,11 +329,7 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	if len(frozen.Disputes) != 2 {
 		t.Fatalf("holds = %v, want one per dispute", frozen.Disputes)
 	}
-	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
-		"kind": "paid", "amount_micro": 100 * cent, "reference": "pi_other", "team": other.team,
-	}, nil); code != http.StatusCreated {
-		t.Fatalf("other grant = %d", code)
-	}
+	f.grantTo(other.team, store.CreditGrantPaid, "pi_other", 100*cent)
 	var conflict struct {
 		Code string `json:"code"`
 	}
@@ -446,11 +418,10 @@ func TestCheckoutClosedClosesOnlyTheTeamsOpenUnpaidSession(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
-		"kind": "paid", "amount_micro": 10 * store.MicroCreditsPerCredit, "reference": "pi_1",
-		"team": owner.team, "checkout": "cs_paid",
-	}, nil); code != http.StatusCreated {
-		t.Fatalf("paid grant = %d", code)
+	if _, err := tn.RecordCreditGrant(ctx, store.CreditGrantRequest{
+		Kind: store.CreditGrantPaid, AmountMicro: 10 * store.MicroCreditsPerCredit, Reference: "pi_1", Checkout: "cs_paid", CreatedBy: "test",
+	}); err != nil {
+		t.Fatal(err)
 	}
 	var lastCode string
 	closeCheckout := func(auth, team, session, outcome string) (int, bool) {

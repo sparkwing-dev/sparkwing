@@ -109,7 +109,8 @@ that keep the logs service running.
   `credits.grant` route.
 - **After:** those powers answer only a listed operator's own signed-in
   console session (`--operator-accounts`). The four admin routes above are
-  removed. `POST /api/v1/credits/grants` records `paid` grants only and
+  removed. Paid checkout events use the signed `/webhooks/stripe` callback.
+  `POST /api/v1/credits/grants` is removed.
   `POST /api/v1/credits/freezes` holds by `payment_id` and `dispute_id`
   only; the `reverses`, `team` and `release` fields are gone and are
   refused as unknown. Every `credits.grant` route answers `403` to an

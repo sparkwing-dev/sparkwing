@@ -92,8 +92,8 @@ const (
 	// ScopeAdmin is the deployment operator's scope. No team membership
 	// grants it.
 	ScopeAdmin = "admin"
-	// ScopeCreditsGrant is the hosted checkout service's scope. It records a
-	// paid grant for a verified payment, reverses a payment, holds the team a
+	// ScopeCreditsGrant is the card and dispute service's scope. It records card
+	// outcomes, reverses a payment, holds the team a
 	// payment funded, and reads the ledger's units, and reaches nothing else.
 	// Only the operator mints it; no team's token may carry it, and the admin
 	// scope does not stand in for it.

@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -139,9 +140,11 @@ type Server struct {
 
 	githubRunners githubRunnerConfig
 
-	githubApp *githubAppState
-	checkout  *billingCheckout
-	operators atomic.Pointer[map[string]bool]
+	githubApp       *githubAppState
+	checkout        *billingCheckout
+	paymentVerifier capability.PaymentAuthenticator
+	paymentLedger   PaymentSettler
+	operators       atomic.Pointer[map[string]bool]
 
 	dashboard *Dashboard
 }
@@ -1061,7 +1064,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("PUT /api/v1/team/billing/budget", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingBudget)))
 	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
 	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
-	mux.Handle("POST /api/v1/credits/grants", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
 	mux.Handle("POST /api/v1/credits/reversals", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
 	mux.Handle("POST /api/v1/credits/freezes", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
 	mux.Handle("POST /api/v1/credits/checkouts/closed", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCheckoutClosed)))
@@ -1119,6 +1121,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
+	router.Handle("POST /webhooks/stripe", s.paymentHandler())
 	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
 	router.Handle("POST /api/v1/runners/github/exchange", noStore(http.HandlerFunc(s.handleGitHubRunnerExchange)))
 	router.HandleFunc("GET /.well-known/openid-configuration", s.handleOIDCDiscovery)
