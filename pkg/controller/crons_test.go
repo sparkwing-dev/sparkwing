@@ -41,17 +41,17 @@ func newCronsFixture(t *testing.T) *cronsFixture {
 
 	now := time.Now().UTC()
 	writer, _, err := st.CreateToken("pusher", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead, controller.ScopeRunsControl}, 0, now)
+		[]string{"runs.read", "runs.control"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken writer: %v", err)
 	}
 	reader, _, err := st.CreateToken("viewer", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead}, 0, now)
+		[]string{"runs.read"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken reader: %v", err)
 	}
 	none, _, err := st.CreateToken("stranger", store.TokenKindUser,
-		[]string{controller.ScopeTriggersRead}, 0, now)
+		[]string{"triggers.read"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}

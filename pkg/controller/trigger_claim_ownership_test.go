@@ -34,12 +34,12 @@ func newTriggerOwnershipFixture(t *testing.T) triggerOwnershipFixture {
 
 	now := time.Now().UTC()
 	holder, _, err := st.CreateToken("worker-a", store.TokenKindRunner,
-		[]string{controller.ScopeTriggersClaim}, 0, now)
+		[]string{"triggers.claim"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken holder: %v", err)
 	}
 	stranger, _, err := st.CreateToken("worker-b", store.TokenKindRunner,
-		[]string{controller.ScopeTriggersClaim}, 0, now)
+		[]string{"triggers.claim"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}

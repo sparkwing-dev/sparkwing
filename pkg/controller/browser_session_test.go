@@ -38,11 +38,11 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
-	token, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	token, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliceToken, alice, err := st.CreateToken("alice", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	aliceToken, alice, err := st.CreateToken("alice", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}

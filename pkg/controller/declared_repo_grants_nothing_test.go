@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -69,7 +68,7 @@ func TestDeclaredRepo_ARunnerCannotRetryAnotherPrincipalsRun(t *testing.T) {
 	}
 
 	submitter, _, err := f.store.CreateToken("submitter", store.TokenKindService,
-		[]string{controller.ScopeRunsWrite}, 0, time.Now().UTC())
+		[]string{"runs.write"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken submitter: %v", err)
 	}
@@ -78,7 +77,7 @@ func TestDeclaredRepo_ARunnerCannotRetryAnotherPrincipalsRun(t *testing.T) {
 	}
 
 	operator, _, err := f.store.CreateToken("operator", store.TokenKindUser,
-		[]string{controller.ScopeRunsControl}, 0, time.Now().UTC())
+		[]string{"runs.control"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken operator: %v", err)
 	}

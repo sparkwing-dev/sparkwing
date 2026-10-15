@@ -24,7 +24,7 @@ func TestFloodPolicy_ATeamsTokensShareOneCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
+	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now); err != nil {
 		t.Fatal(err)
 	}
 	srv := controller.New(st, nil).WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 2})
@@ -40,7 +40,7 @@ func TestFloodPolicy_ATeamsTokensShareOneCap(t *testing.T) {
 	var tokens []string
 	for _, name := range []string{"one", "two", "three"} {
 		raw, _, err := acme.CreateToken(ctx, name, store.TokenKindUser,
-			[]string{controller.ScopeRunsWrite, controller.ScopeRunsControl, controller.ScopeRunsRead}, 0, now)
+			[]string{"runs.write", "runs.control", "runs.read"}, 0, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -79,7 +79,7 @@ func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
+	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now); err != nil {
 		t.Fatal(err)
 	}
 	srv := controller.New(st, nil).WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
@@ -95,7 +95,7 @@ func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw, _, err := tenant.CreateToken(ctx, "ci", store.TokenKindUser,
-			[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, now)
+			[]string{"runs.write", "runs.read"}, 0, now)
 		if err != nil {
 			t.Fatal(err)
 		}

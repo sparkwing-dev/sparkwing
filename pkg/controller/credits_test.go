@@ -49,18 +49,18 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("admin token: %v", err)
 	}
 	runner, runnerTok, err := st.CreateTokenWith(context.Background(), "pool", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim, controller.ScopeTriggersClaim, controller.ScopeRunsState, controller.ScopeRunsRead},
+		[]string{"nodes.claim", "triggers.claim", "runs.state", "runs.read"},
 		0, now, store.TokenOptions{Metered: metered})
 	if err != nil {
 		t.Fatalf("runner token: %v", err)
 	}
 	readonly, _, err := st.CreateToken("viewer", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead}, 0, now)
+		[]string{"runs.read"}, 0, now)
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}

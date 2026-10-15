@@ -39,7 +39,7 @@ func newAuthedTestServer(t *testing.T) (baseURL, admin string, st *store.Store, 
 		t.Fatalf("open store: %v", err)
 	}
 	admin, _, err = s.CreateToken("test-admin", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+		[]string{"admin"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestMetrics_RequiresAdminWithAuthEnabled(t *testing.T) {
 	base, admin, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
 	member, _, err := st.CreateToken("member", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead}, 0, time.Now().UTC())
+		[]string{"runs.read"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestMetrics_AuthTokenCacheAndHashingBudget(t *testing.T) {
 	defer cleanup()
 
 	raw, _, err := st.CreateToken("pool", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim}, 0, time.Now().UTC())
+		[]string{"nodes.claim"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

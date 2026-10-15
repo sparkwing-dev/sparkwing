@@ -149,17 +149,13 @@ type DataBinding struct {
 	Records   blob.RecordStore
 }
 type DataController struct {
-	Store   *store.Store
-	Objects blob.ObjectBackend
-
-	ResolveTenant func(context.Context, store.Team) (DataTransactions, error)
-
+	Store            *store.Store
+	Objects          blob.ObjectBackend
+	ResolveTenant    func(context.Context, store.Team) (DataTransactions, error)
 	ResolveAuthority func(context.Context, capability.Authorized) (blob.Authority, error)
-
-	ReadBlob func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error)
-
-	ChargeDownload func(context.Context, blob.Authority, blob.Blob) error
-	Access         capability.DataAccessChecker
+	ReadBlob         func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error)
+	ChargeDownload   func(context.Context, blob.Authority, blob.Blob) error
+	Access           capability.DataAccessChecker
 }
 func (s *DataController) BindData(ctx context.Context, authorized capability.Authorized) (DataBinding, error)
 func (s *DataController) DataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error)
@@ -186,34 +182,26 @@ const DefaultRunnersPerToken = 64
 const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 const DefaultTeamDailyDownloadFreeBytes int64 = 5 << 30
 const DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
-const EgressDownloadLimitCode = "egress_download_limit"
-const EgressStreamLimitCode = "egress_stream_limit"
 type Endpoint struct {
 	Method         string
 	Pattern        string
 	Authentication capability.Authentication
 	Decode         func(*http.Request) (capability.RequestEvidence, error)
-
-	ResolveTarget func(capability.Principal, capability.Target) (capability.Target, error)
-	Verify        func(*http.Request) error
-	Handle        func(http.ResponseWriter, *http.Request, capability.Authorized) error
+	ResolveTarget  func(capability.Principal, capability.Target) (capability.Target, error)
+	Verify         func(*http.Request) error
+	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }
 type EngineController struct {
-	Store         *store.Store
-	RunnerPolicy  RunnerAdmissionPolicy
-	VersionPolicy *SignedEngineVersionPolicy
-	Units         UnitRenewer
-	Launcher      LauncherSyncReader
-
-	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
-
-	ResolveRunTeam func(context.Context, string) (store.Team, error)
-
-	ResolveOperator func(context.Context) (AuthorityRevoker, error)
-
+	Store             *store.Store
+	RunnerPolicy      RunnerAdmissionPolicy
+	VersionPolicy     *SignedEngineVersionPolicy
+	Units             UnitRenewer
+	Launcher          LauncherSyncReader
+	ResolveTenant     func(context.Context, store.Team) (RunTransactions, error)
+	ResolveRunTeam    func(context.Context, string) (store.Team, error)
+	ResolveOperator   func(context.Context) (AuthorityRevoker, error)
 	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
-
-	ReadRunStatus func(context.Context, store.Team, string) (RunStatusFacts, error)
+	ReadRunStatus     func(context.Context, store.Team, string) (RunStatusFacts, error)
 }
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
@@ -336,18 +324,14 @@ type LimitsProfileValues struct {
 
 	EnforceIdleClaimPoll bool
 }
-type LiveLogRead struct {
-	Start int64
-
-	Next int64
-
-	Data string
-
-	Done bool
-}
 const LiveLogWatchLease = 30 * time.Second
 func LongestHonoredIdlePoll(d time.Duration) time.Duration
 const MaxHonoredIdleClaimPoll = 8 * time.Second
+type MetricWriter interface {
+	Team() store.Team
+	WriteMetric(context.Context, capability.Authorized, store.MetricSample) error
+	WriteUsage(context.Context, capability.Authorized, store.NodeUsage) error
+}
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewFilesystemDataSigner(baseURL string, key []byte) (*FilesystemDataSigner, error)
 func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter
@@ -381,6 +365,13 @@ type ObjectStoreBreakerResponse struct {
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
 func OperatorReason(reason string) (string, error)
+type OperatorSettingsWriter interface {
+	WriteComputeLimits(context.Context, capability.Authorized, map[string]int64) (store.ComputeLimits, error)
+	WriteSignUpSettings(context.Context, capability.Authorized, SignUpSettingsChange) error
+	WriteStorageSettings(context.Context, capability.Authorized, store.StorageSettings) error
+	WriteStorageQuota(context.Context, capability.Authorized, store.StorageQuota) (store.StorageQuota, error)
+	WriteStorageAllowance(context.Context, capability.Authorized, int64) (store.StorageQuota, error)
+}
 type PaymentSettler interface {
 	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
 }
@@ -391,23 +382,6 @@ func (router *PolicyRouter) Register(endpoint Endpoint) (err error)
 func (router *PolicyRouter) Registrations() []string
 func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (router *PolicyRouter) Validate() error
-type Principal struct {
-	Name        string
-	Kind        string
-	Scopes      []string
-	TokenPrefix string
-	Authed      time.Time
-
-	Team store.Team
-
-	Role string
-
-	AccountID string
-
-	Expires time.Time
-}
-func (p *Principal) HasScope(s string) bool
-func PrincipalFromContext(ctx context.Context) (*Principal, bool)
 func PullRequestForTrigger(env map[string]string) *sparkwing.PullRequest
 const PurchaseLimitCode = "purchase_limit"
 type QueueReader interface {
@@ -476,19 +450,6 @@ type ScheduleWriter interface {
 	RunAuthorizedSchedule(context.Context, capability.Authorized, string, string) (string, string, bool, error)
 	DeleteAuthorizedSchedule(context.Context, capability.Authorized, string) (string, bool, error)
 }
-const ScopeAdmin = "admin"
-const ScopeApprovalsWrite = store.ScopeApprovalsWrite
-const ScopeClaimsLaunch = store.LaunchScope
-const ScopeLogsRead = store.ScopeLogsRead
-const ScopeNodesClaim = store.ScopeNodesClaim
-const ScopeRunsControl = store.ScopeRunsControl
-const ScopeRunsRead = store.ScopeRunsRead
-const ScopeRunsState = store.ScopeRunsState
-const ScopeRunsWrite = store.ScopeRunsWrite
-const ScopeSecretsRead = store.ScopeSecretsRead
-const ScopeTeamAdmin = store.ScopeTeamAdmin
-const ScopeTriggersClaim = store.ScopeTriggersClaim
-const ScopeTriggersRead = store.ScopeTriggersRead
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)
 type SecretReader interface {
 	Team() store.Team
@@ -549,11 +510,13 @@ func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes 
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
 func (s *Server) WithLogRetention(days map[store.Team]int) *Server
 func (s *Server) WithMailer(m mailer.Mailer) *Server
+func (s *Server) WithMetricWriter(resolve func(context.Context, store.Team) (MetricWriter, error)) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithOIDCReader(resolve func(context.Context, store.Team) (OIDCReader, error)) *Server
 func (s *Server) WithOperatorAccounts(ids []string) *Server
+func (s *Server) WithOperatorSettingsWriter(writer OperatorSettingsWriter) *Server
 func (s *Server) WithPayments(verifier capability.PaymentAuthenticator, ledger PaymentSettler) *Server
 func (s *Server) WithPeerIdentity(fn func(*http.Request) capability.Subject) *Server
 func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
@@ -583,6 +546,15 @@ type ServicesResponse struct {
 	MultiTeam bool
 
 	DirectData bool
+}
+type SignUpSettingsChange struct {
+	Mode                 *string
+	Reason               string
+	HourlyLimit          *int
+	DailyLimit           *int
+	HourlyWarn           *int
+	GitHubMinAccountDays *int
+	FreeTeamMembers      *int
 }
 type SignedEngineVersionPolicy struct {
 	Resolver *engine.Resolver
@@ -715,4 +687,3 @@ func (sharedEngineVersionContracts) Index(ctx context.Context, resolver *engine.
 func (sharedEngineVersionContracts) Policy(index engine.VerifiedIndex) engine.VersionIndex
 func (r *statusRecorder) Unwrap() http.ResponseWriter
 func (r *statusRecorder) WriteHeader(code int)
-func (s storeOperatorSettings) StorageTenant(ctx context.Context, team store.Team) (storageQuotaStore, error)

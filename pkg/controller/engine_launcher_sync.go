@@ -14,10 +14,14 @@ type LauncherSyncReader interface {
 }
 
 func (s *EngineController) syncLauncher(ctx context.Context, a capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-	if s.Launcher == nil {
+	reader := s.Launcher
+	if reader == nil && s.Store != nil {
+		reader, _ = any(s.Store.AsOperator()).(LauncherSyncReader)
+	}
+	if reader == nil {
 		return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
 	}
-	response, err := s.Launcher.ReadLauncherSync(ctx, a.Principal.Authority, slices.Clone(body.Observed))
+	response, err := reader.ReadLauncherSync(ctx, a.Principal.Authority, slices.Clone(body.Observed))
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}

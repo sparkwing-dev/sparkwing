@@ -67,10 +67,10 @@ func TestGoogleSignInCreatesAnAccountAndItsPersonalSpace(t *testing.T) {
 		t.Fatalf("me = %+v", me)
 	}
 	w := f.whoami(sessionAuth(out.SessionID))
-	if w.Team != "alice-smith" || w.Role != "owner" || !slices.Contains(w.Scopes, controller.ScopeTeamAdmin) {
+	if w.Team != "alice-smith" || w.Role != "owner" || !slices.Contains(w.Scopes, "team.admin") {
 		t.Fatalf("whoami = %+v", w)
 	}
-	if slices.Contains(w.Scopes, controller.ScopeAdmin) {
+	if slices.Contains(w.Scopes, "admin") {
 		t.Fatal("a team owner holds the deployment admin scope")
 	}
 }
@@ -272,7 +272,7 @@ func TestAnUnknownSessionIsRefused(t *testing.T) {
 // Session header the same as through the cookie.
 func TestTokenSessionAuthenticatesWithItsTokensScopes(t *testing.T) {
 	f := newIdentityFixture(t)
-	_, tok, err := f.store.CreateToken("ops", store.TokenKindUser, []string{controller.ScopeRunsRead}, 0, time.Now().UTC())
+	_, tok, err := f.store.CreateToken("ops", store.TokenKindUser, []string{"runs.read"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestTokenSessionAuthenticatesWithItsTokensScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := f.whoami(sessionAuth(session))
-	if w.Team != string(store.DefaultTeam) || !slices.Equal(w.Scopes, []string{controller.ScopeRunsRead}) {
+	if w.Team != string(store.DefaultTeam) || !slices.Equal(w.Scopes, []string{"runs.read"}) {
 		t.Fatalf("whoami = %+v", w)
 	}
 	if code := f.call("GET", "/api/v1/runs", sessionAuth(session), nil, nil); code != http.StatusOK {

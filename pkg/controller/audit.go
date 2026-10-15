@@ -25,22 +25,12 @@ const (
 	maxAuditValue   = 128
 )
 
-// safety: a claim poll that found no work is almost all write traffic and
-// changes nothing; the route counters already count it. An executor offer
-// on the node claim route also answers 204 while it records a pending offer,
-// so that answer is audited.
-var auditSkippedEmptyPolls = map[string]bool{
-	"/api/v1/nodes/claim":    true,
-	"/api/v1/triggers/claim": true,
-}
-
-const claimOfferStateHeader = "X-Sparkwing-Claim-Offer-State"
-
 // safety: only these path wildcards, and the identity targets below, reach the
 // audit record. Other wildcards can carry values a log must not hold.
 var auditPathIDs = map[string]string{
-	"nodeID": "node_id",
-	"team":   "target_team",
+	"job":  "job_id",
+	"run":  "run_id",
+	"team": "target_team",
 }
 
 type auditTarget struct {
@@ -96,7 +86,8 @@ type auditRecord struct {
 	principalID, kind, team string
 	targets                 []any
 	// safety: a GET that changes who can act, such as a sign-in callback, is audited like a write.
-	write bool
+	write     bool
+	emptyPoll bool
 }
 
 type auditCtxKey struct{}
@@ -104,12 +95,6 @@ type auditCtxKey struct{}
 func withAuditRecord(ctx context.Context, id, route string) (context.Context, *auditRecord) {
 	rec := &auditRecord{id: id, route: route}
 	return context.WithValue(ctx, auditCtxKey{}, rec), rec
-}
-
-func noteAuditPrincipal(ctx context.Context, p *Principal) {
-	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok && p != nil {
-		rec.principalID, rec.kind, rec.team = auditPrincipalID(p), p.Kind, string(p.Team)
-	}
 }
 
 func notePolicyPrincipal(ctx context.Context, p capability.Principal) {
@@ -142,25 +127,6 @@ func requestLogAttrs(r *http.Request) []any {
 		return []any{"method", r.Method, "route", otherLabel}
 	}
 	return []any{"request_id", rec.id, "method", r.Method, "route", rec.route}
-}
-
-// safety: a signed-in principal's name is its email address, so the record
-// names the account by its opaque id and a token by its prefix.
-func auditPrincipalID(p *Principal) string {
-	switch {
-	case p.AccountID != "":
-		return p.AccountID
-	case p.TokenPrefix != "":
-		return p.TokenPrefix
-	case strings.Contains(p.Name, "@"):
-		return ""
-	default:
-		return clip(p.Name)
-	}
-}
-
-func stampPrincipal(ctx context.Context, p *Principal) {
-	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: auditPrincipalID(p)})
 }
 
 var sparkwingAgent = regexp.MustCompile(`^(sparkwing-[a-z]{1,24})(?:/(v?[0-9][0-9A-Za-z.+-]{0,31}))?(?:[ ;(]|$)`)
@@ -213,15 +179,15 @@ func readOnlyMethod(method string) bool {
 // safety: neither line carries the raw path, query, headers, body or
 // credential, because a path can name a secret.
 func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *auditRecord,
-	answer http.Header, status int, elapsed time.Duration, clientIP string,
+	status int, elapsed time.Duration, clientIP string,
 ) {
+	if rec.emptyPoll {
+		return
+	}
 	denied := status == http.StatusUnauthorized || status == http.StatusForbidden
 	if readOnlyMethod(r.Method) && !denied && !rec.write && !auditedRead(rec.route) {
 		logger.InfoContext(ctx, "http", "request_id", rec.id, "method", r.Method, "route", rec.route,
 			"status", status, "dur_ms", elapsed.Milliseconds())
-		return
-	}
-	if status == http.StatusNoContent && auditSkippedEmptyPolls[rec.route] && answer.Get(claimOfferStateHeader) != "pending" {
 		return
 	}
 	attrs := []any{

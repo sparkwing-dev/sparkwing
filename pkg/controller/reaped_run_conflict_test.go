@@ -126,7 +126,7 @@ func TestCreateNode_StrangerTokenLearnsNothingAboutTheRun(t *testing.T) {
 		t.Fatalf("FinishRun: %v", err)
 	}
 	raw, _, err := st.CreateToken("runner-stranger", store.TokenKindRunner,
-		[]string{controller.ScopeRunsState, controller.ScopeNodesClaim}, 0, time.Now().UTC())
+		[]string{"runs.state", "nodes.claim"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

@@ -118,7 +118,7 @@ func (c *Client) postProfile(ctx context.Context, pipeline, nodeID, leaf string,
 // AddNodeUsage folds one finished process's accounting into a node's row.
 // Mirrors store.AddNodeUsage.
 func (c *Client) AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/usage",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/usage",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path, nodeUsageBody{
 		CPUTimeNanos: u.CPUTime.Nanoseconds(),
@@ -136,7 +136,7 @@ type nodeUsageBody struct {
 // ListNodeMetrics returns a node's resource samples oldest-first, following
 // the route's pages to the end. Mirrors store.ListNodeMetrics.
 func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error) {
-	base := fmt.Sprintf("%s/api/v1/runs/%s/nodes/%s/metrics?limit=%d", c.baseURL,
+	base := fmt.Sprintf("%s/api/v1/runs/%s/jobs/%s/metrics?limit=%d", c.baseURL,
 		url.PathEscape(runID), url.PathEscape(nodeID), store.MaxNodeMetricSamples)
 	var out []store.MetricSample
 	cursor := ""

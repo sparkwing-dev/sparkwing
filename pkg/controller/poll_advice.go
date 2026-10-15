@@ -111,7 +111,7 @@ func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
 
 // safety: a refusal is written here, so a caller that gets false must return
 // without writing its own answer.
-func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request) bool {
+func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, key string) bool {
 	if s.idlePolls == nil {
 		return true
 	}
@@ -122,10 +122,6 @@ func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request) bool
 	// arrives, this refuses nothing.
 	if s.claimPollAdvice(now.Add(-s.idleClaimPoll)) < s.idleClaimPoll {
 		return true
-	}
-	key, ok := s.runnerBudgetKey(w, r)
-	if !ok {
-		return false
 	}
 	if s.idlePolls.Allow(key, now) {
 		return true

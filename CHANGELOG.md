@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** Remove legacy Principal helpers and use final job metric routes
+  Metric and deployment-setting writes require authority-bearing transactions. Runner budgets use authenticated holders, and egress concurrency refusals use the canonical error envelope. See [migration guide](docs/migrations/_unreleased.md#final-credential-helpers-and-reporting-writes).
+
 - **controller (Breaking):** GitHub connection and console writes require authority-bearing transactions
   Browser connections use the shared policy router. Embedded controllers supply `WithGitHubConnectWriter` and `WithConsoleWriter`. Waitlist approval requires a replay key. See [migration guide](docs/migrations/_unreleased.md#browser-connection-and-console-transactions).
 

@@ -71,9 +71,11 @@ type Server struct {
 
 	loginLimit *loginLimiter
 
-	flood         *floodControl
-	requestBudget *principalBudget
-	tokenBudget   *tokenBudget
+	flood                  *floodControl
+	operatorSettingsWrites OperatorSettingsWriter
+	resolveMetricWriter    func(context.Context, store.Team) (MetricWriter, error)
+	requestBudget          *principalBudget
+	tokenBudget            *tokenBudget
 
 	idleClaimPoll     time.Duration
 	idlePolls         *ratelimit.Limiter
@@ -392,6 +394,7 @@ func (s *Server) routers() *http.ServeMux {
 	endpoints = append(endpoints, s.sessionEndpoints()...)
 	endpoints = append(endpoints, s.accountEndpoints()...)
 	endpoints = append(endpoints, s.reportingEndpoints()...)
+	endpoints = append(endpoints, s.metricEndpoints()...)
 	endpoints = append(endpoints, s.teamReadEndpoints()...)
 	endpoints = append(endpoints, s.scheduleEndpoints()...)
 	endpoints = append(endpoints, s.runControlEndpoints()...)
@@ -746,7 +749,7 @@ func withRequestLog(
 		finish := func(status int) {
 			elapsed := time.Since(start)
 			observeHTTPRequest(rec.route, r.Method, status, elapsed)
-			logRequest(ctx, logger, r, rec, w.Header(), status, elapsed, clientIP(r))
+			logRequest(ctx, logger, r, rec, status, elapsed, clientIP(r))
 		}
 		// safety: a handler that panics still made its write attempt, so it is
 		// logged as a 500 before the panic continues to the server.

@@ -124,7 +124,7 @@ func TestEscapedChildEventSecretsStayMaskedInStoreAndReaderHTTP(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertPayloads(events)
-			raw, _, err := st.CreateToken("reader", store.TokenKindUser, []string{controller.ScopeRunsRead}, 0, time.Now())
+			raw, _, err := st.CreateToken("reader", store.TokenKindUser, []string{"runs.read"}, 0, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}

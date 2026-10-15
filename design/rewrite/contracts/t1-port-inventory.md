@@ -1282,3 +1282,46 @@ TestMeteredUnitStaleReportCannotSettleReplacementProperty pass against the final
 store and retain its award-billing, settlement rollback and stale-report fencing.
 An anonymous/unmetered HTTP request no longer finalizes another claim's window.
 No native credential-matrix cell is newly completed by this continuation.
+
+
+## W2 final credential helper and reporting cut
+
+The remaining legacy Principal API, Scope exports, tenant fallback, unused
+metering wrappers and live-log HTTP handlers are deleted. TestRequestTenantRefusesACallerWithNoRegisteredTeam
+and TestRunTeamRefusesAnotherTeamsRun retire with those helpers. Final route
+properties retain the authenticated-tenant boundary. Tenant cache expiry remains.
+TestMetricTimestamp is ported to the final HTTP path with a fake committing
+writer, preserving malformed, omitted and explicit timestamp coverage and adding
+nanosecond-range refusal. TestMetricsHTTPAuthorityProperty, ValidationAndLimit
+cover live authority, selected job/tenant, committing conflicts, canonical errors,
+missing/foreign adapters and invalid metric/usage bodies. The client transport
+port is TestMetricAndUsageClientsUseFinalJobRoutes. It does not prove persistence.
+
+The old socket-based request-budget tests and claim-budget test are ported to
+real authenticated /runners/claim HTTP with SQLite. The ports cover empty-poll
+charges, free awards, independent runner names, name caps, an unlimited default,
+fleet cadence and the existing idle-advice/enforcement cases. The heartbeat
+property varies headers while retaining one authenticated holder. The obsolete
+trigger-schema fixture is removed. The advice-reset test calls the queue-activity
+edge directly. Production admission integration stays covered by its owner.
+
+The old audit identity fixtures and pending-offer test are removed. Final-policy
+HTTP ports cover credential/secret-path privacy with generated inputs, sensitive
+reads, authenticated denials, forged credentials, run/job path identifiers,
+request-ID replacement and successful empty-poll suppression. The existing span
+and budget-key tests use capability.Principal. The final log-concurrency test
+checks the canonical rate_limited envelope before the handler runs.
+
+The retired direct-download wrapper test is removed. TestDataReadHTTPDownload
+and DownloadFailures retain signed-data charge-before-sign behavior, and the
+store's download-charge tests retain tenant/replica accounting. No real download
+charging adapter or native placement matrix is newly proved by this cut.
+
+Five operator settings writes use a fake committing writer in their existing
+round-trip, invalid-body and private-failure tests. CommitAuthorityProperty adds
+current-authority/target forwarding and missing-writer refusal. The signup fake
+now commits one request once, rather than treating mode and limits as separate
+writes. TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate uses real
+SQLite session and CSRF persistence through the production console adapter and a
+fake committing writer. The roleless-session and durable transaction gates remain
+W1 work. No new scenario catalog or harness cell was added.

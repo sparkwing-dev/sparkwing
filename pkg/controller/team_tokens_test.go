@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -302,10 +301,10 @@ func TestMemberTokenMintUsesCommittedMembershipAuthority(t *testing.T) {
 			owner, editor, reader := teamOf(f)
 			for who, role := range map[signedIn]store.Role{owner: store.RoleOwner, editor: store.RoleEditor, reader: store.RoleReader} {
 				token := mintCLI(f, who, role)
-				if slices.Contains(token.Scopes, controller.ScopeTeamAdmin) {
+				if slices.Contains(token.Scopes, "team.admin") {
 					t.Fatal("member token carries team administration")
 				}
-				if got := slices.Contains(token.Scopes, controller.ScopeRunsWrite); got != (who.id != reader.id) {
+				if got := slices.Contains(token.Scopes, "runs.write"); got != (who.id != reader.id) {
 					t.Fatalf("ordinary member authority mismatch: write=%v", got)
 				}
 			}
@@ -324,14 +323,14 @@ func TestMemberTokenMintUsesCommittedMembershipAuthority(t *testing.T) {
 			if !slices.Equal(stale, original) {
 				t.Fatal("mint mutated caller scopes")
 			}
-			raw, tok, err := tenant.CreateMemberToken(context.Background(), "reader-subset", []string{controller.ScopeLogsRead}, editor.id, time.Now())
-			if err != nil || !slices.Equal(tok.Scopes, []string{controller.ScopeLogsRead}) {
+			raw, tok, err := tenant.CreateMemberToken(context.Background(), "reader-subset", []string{"logs.read"}, editor.id, time.Now())
+			if err != nil || !slices.Equal(tok.Scopes, []string{"logs.read"}) {
 				t.Fatalf("requested subset widened: %v error=%v", tok, err)
 			}
 			if code := f.call("DELETE", "/api/v1/team/members/"+editor.id, owner.auth, nil, nil); code != http.StatusNoContent {
 				t.Fatalf("remove=%d", code)
 			}
-			if raw, tok, err := tenant.CreateMemberToken(context.Background(), "pending-removed", []string{controller.ScopeRunsRead}, editor.id, time.Now()); err == nil || raw != "" || tok != nil {
+			if raw, tok, err := tenant.CreateMemberToken(context.Background(), "pending-removed", []string{"runs.read"}, editor.id, time.Now()); err == nil || raw != "" || tok != nil {
 				t.Fatal("removed member minted a token")
 			}
 			if code := f.call("GET", "/api/v1/runs", "Bearer "+raw, nil, nil); code != http.StatusUnauthorized {

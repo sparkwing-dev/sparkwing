@@ -459,7 +459,7 @@ func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, pa
 
 // AddNodeMetricSample POSTs a single resource sample for a node.
 func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/metrics",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/metrics",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	body := map[string]any{
 		"ts":             sample.TS.UTC().Format("2006-01-02T15:04:05.000000000Z07:00"),

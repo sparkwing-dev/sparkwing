@@ -19,10 +19,10 @@ import (
 )
 
 var runnerScopes = []string{
-	controller.ScopeNodesClaim,
-	controller.ScopeTriggersClaim,
-	controller.ScopeRunsState,
-	controller.ScopeSecretsRead,
+	"nodes.claim",
+	"triggers.claim",
+	"runs.state",
+	"secrets.read",
 }
 
 type scopedFixture struct {
@@ -40,7 +40,7 @@ func newScopedFixture(t *testing.T, scopes []string) (scopedFixture, string) {
 
 	now := time.Now().UTC()
 	if _, _, err := st.CreateToken("root", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, now); err != nil {
+		[]string{"admin"}, 0, now); err != nil {
 		t.Fatalf("CreateToken admin: %v", err)
 	}
 	raw, _, err := st.CreateToken("pool", store.TokenKindRunner, scopes, 0, now)
@@ -195,7 +195,7 @@ func TestRunnerScopes_TriggerHolderControlsReadiness(t *testing.T) {
 		t.Fatalf("CreateToken other-pool: %v", err)
 	}
 	adminRaw, _, err := f.store.CreateToken("ops", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, now)
+		[]string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken ops: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
 		t.Fatalf("CreateToken other-pool: %v", err)
 	}
 	adminRaw, _, err := f.store.CreateToken("ops", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, now)
+		[]string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken ops: %v", err)
 	}
@@ -905,7 +905,7 @@ func TestRunnerScopes_ClaimScopedReadsExpireAndKeepSecretsNodeOnly(t *testing.T)
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	t.Run("trigger claim", func(t *testing.T) {
-		f, raw := newScopedFixture(t, []string{controller.ScopeTriggersClaim})
+		f, raw := newScopedFixture(t, []string{"triggers.claim"})
 		ctx := context.Background()
 		c := client.NewWithToken(f.url, nil, raw)
 
@@ -950,7 +950,7 @@ func TestRunnerScopes_ClaimScopedReadsExpireAndKeepSecretsNodeOnly(t *testing.T)
 	})
 
 	t.Run("node claim", func(t *testing.T) {
-		f, raw := newScopedFixture(t, []string{controller.ScopeNodesClaim})
+		f, raw := newScopedFixture(t, []string{"nodes.claim"})
 		ctx := context.Background()
 		c := client.NewWithToken(f.url, nil, raw)
 
@@ -1199,7 +1199,7 @@ func TestRunnerScopes_CoordinationWritesNeedAClaimOnThatPipeline(t *testing.T) {
 // a trigger-owned attempt only through the fence that check would attach, so
 // an admin runner's every node answered 400 until the fence survived.
 func TestRunnerScopes_AdminRunnerAcknowledgesATriggerOwnedAttempt(t *testing.T) {
-	f, raw := newScopedFixture(t, []string{controller.ScopeAdmin})
+	f, raw := newScopedFixture(t, []string{"admin"})
 	ctx := context.Background()
 	c := client.NewWithToken(f.url, nil, raw)
 	seedRepoTrigger(t, f.store, "run-admin", "acme/web")

@@ -240,7 +240,7 @@ func writePolicyError(w http.ResponseWriter, err error) {
 func (s *Server) registerControllerEndpoints(mux *http.ServeMux, endpoints []Endpoint) {
 	policy := NewPolicyRouter(s.authorization)
 	for _, endpoint := range endpoints {
-		if err := policy.Register(endpoint); err != nil {
+		if err := policy.Register(s.budgetEndpoint(endpoint)); err != nil {
 			panic(err)
 		}
 	}

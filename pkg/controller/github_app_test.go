@@ -50,7 +50,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

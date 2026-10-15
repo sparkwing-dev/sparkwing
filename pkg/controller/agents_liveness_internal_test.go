@@ -27,7 +27,7 @@ func TestBusyRunnerHeartbeatUpdatesObservedLivenessWithoutPolling(t *testing.T) 
 	defer st.Close()
 	ctx := context.Background()
 	now := time.Now()
-	raw, identity, err := st.CreateToken("runner", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, now)
+	raw, identity, err := st.CreateToken("runner", store.TokenKindRunner, []string{"nodes.claim"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}

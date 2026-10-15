@@ -29,25 +29,25 @@ func storeDataServer(t *testing.T) *Server {
 			t.Fatal(err)
 		}
 	}
-	return New(s, nil)
+	return New(s, nil).WithOperatorSettingsWriter(storeSettingsWriterFake{store: s})
 }
 
-func storeDataRequest(t *testing.T, s *Server, method, path, body string, principal Principal) *http.Request {
+func storeDataRequest(t *testing.T, s *Server, method, path, body string, operator bool) *http.Request {
 	t.Helper()
 	_, _, authority := newOperatorSettingsFixture(t)
-	if !principal.HasScope(ScopeAdmin) {
+	if !operator {
 		authority.principal.Capability.Grants = []capability.Grant{capability.RunsRead}
 	}
 	s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(authority), Bindings: authority})
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	r.Header.Set("Authorization", "Bearer "+authority.raw)
 	r.Header.Set("Content-Type", "application/json")
-	return r.WithContext(contextWithPrincipal(r.Context(), &principal))
+	return r
 }
 
 func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 	s := storeDataServer(t)
-	admin := Principal{Name: "operator", Scopes: []string{ScopeAdmin}, Team: store.DefaultTeam}
+	admin := true
 	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/a", `{"max_bytes_per_month":123}`, admin)
 	r.SetPathValue("team", "a")
 	w := httptest.NewRecorder()
@@ -81,7 +81,7 @@ func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 			}
 		}
 	}
-	r = storeDataRequest(t, s, http.MethodGet, "/api/v1/storage?team=b", "", Principal{Name: "same-name", Team: "a", Scopes: []string{ScopeRunsRead}})
+	r = storeDataRequest(t, s, http.MethodGet, "/api/v1/storage?team=b", "", false)
 	w = httptest.NewRecorder()
 	if err := s.handleStorageShow(w, r, capability.Authorized{Target: capability.Target{Team: "a"}}); err != nil {
 		t.Fatal(err)
@@ -114,14 +114,14 @@ func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 func TestStoreDataStorageRoutesRefuseMissingTeamAndNonOperator(t *testing.T) {
 	s := storeDataServer(t)
 	for _, tc := range []struct {
-		team   string
-		scopes []string
-		want   int
+		team     string
+		operator bool
+		want     int
 	}{
-		{"a", []string{ScopeRunsRead}, http.StatusForbidden},
-		{"missing", []string{ScopeAdmin}, http.StatusNotFound},
+		{"a", false, http.StatusForbidden},
+		{"missing", true, http.StatusNotFound},
 	} {
-		r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/"+tc.team, `{"max_bytes_per_month":123}`, Principal{Team: "a", Scopes: tc.scopes})
+		r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/"+tc.team, `{"max_bytes_per_month":123}`, tc.operator)
 		r.SetPathValue("team", tc.team)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
@@ -132,7 +132,7 @@ func TestStoreDataStorageRoutesRefuseMissingTeamAndNonOperator(t *testing.T) {
 	if quotas, err := s.store.AsOperator().ListStorageQuotas(t.Context()); err != nil || len(quotas) != 0 {
 		t.Fatalf("refusal wrote quota=%+v: %v", quotas, err)
 	}
-	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/a/allowance", `{"storage_allowance_bytes":-1}`, Principal{Team: store.DefaultTeam, Scopes: []string{ScopeAdmin}})
+	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/a/allowance", `{"storage_allowance_bytes":-1}`, true)
 	r.SetPathValue("team", "a")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
@@ -143,7 +143,7 @@ func TestStoreDataStorageRoutesRefuseMissingTeamAndNonOperator(t *testing.T) {
 
 func TestStoreDataStorageSettingsRouteUsesFinalPolicy(t *testing.T) {
 	s := storeDataServer(t)
-	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/settings", `{"run_retention_days":90,"node_metric_retention_days":7,"database_alarm_bytes":123,"default_tier":"paid"}`, Principal{Team: store.DefaultTeam, Scopes: []string{ScopeAdmin}})
+	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/settings", `{"run_retention_days":90,"node_metric_retention_days":7,"database_alarm_bytes":123,"default_tier":"paid"}`, true)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {

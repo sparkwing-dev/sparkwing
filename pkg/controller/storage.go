@@ -297,7 +297,7 @@ func (s *Server) appendAdminStorage(ctx context.Context, out *storageStateJSON, 
 	return nil
 }
 
-func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	var body storageSettingsJSON
 	if err := decodeJSON(r, &body); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid storage settings request"}
@@ -311,7 +311,11 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 	if body.RunRetentionDays < 0 || body.NodeMetricRetentionDays < 0 || body.DatabaseAlarmBytes < 0 || !validStorageTier(body.DefaultTier) {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "storage settings require nonnegative limits and a known tier"}
 	}
-	if err := s.operatorSettings.SetStorageSettings(r.Context(), settings); err != nil {
+	writer, err := s.settingsWriter()
+	if err != nil {
+		return err
+	}
+	if err := writer.WriteStorageSettings(r.Context(), authorized, settings); err != nil {
 		return operatorSettingsError(err)
 	}
 	s.logger.Info("storage settings updated",
@@ -328,7 +332,7 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request, a
 	if team == "" {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid quota team"}
 	}
-	tenant, err := s.operatorSettings.StorageTenant(r.Context(), team)
+	writer, err := s.settingsWriter()
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -345,12 +349,9 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request, a
 	if body.MaxBytesPerRun < 0 || body.MaxBytesPerMonth < 0 || body.MaxObjectsPerRun < 0 || !validStorageTier(body.Tier) {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "storage quota requires nonnegative limits and a known tier"}
 	}
-	if err := tenant.SetStorageQuota(r.Context(), quota); err != nil {
-		return operatorSettingsError(err)
-	}
-	stored, err := tenant.StorageQuota(r.Context())
+	stored, err := writer.WriteStorageQuota(r.Context(), authorized, quota)
 	if err != nil {
-		return err
+		return operatorSettingsError(err)
 	}
 	s.logger.Info("storage quota updated", "team", team, "tier", stored.Tier,
 		"max_bytes_per_run", stored.MaxBytesPerRun, "max_bytes_per_month", stored.MaxBytesPerMonth,
@@ -385,7 +386,7 @@ func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Reques
 	if team == "" {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid quota team"}
 	}
-	tenant, err := s.operatorSettings.StorageTenant(r.Context(), team)
+	writer, err := s.settingsWriter()
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -396,7 +397,7 @@ func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Reques
 	if body.StorageAllowanceBytes < 0 {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "storage allowance must not be negative"}
 	}
-	stored, err := tenant.SetStorageAllowance(r.Context(), body.StorageAllowanceBytes)
+	stored, err := writer.WriteStorageAllowance(r.Context(), authorized, body.StorageAllowanceBytes)
 	if err != nil {
 		return operatorSettingsError(err)
 	}

@@ -2,9 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -46,33 +43,6 @@ func (c *tenantCache) put(team store.Team, t *store.Tenant, now time.Time) {
 	c.entries[team] = tenantCacheEntry{tenant: t, expires: now.Add(tenantCacheTTL)}
 }
 
-// safety: no principal, or a teamless peer or pre-team token, acts for the default team every such
-// row was migrated into; a signed-in account never falls back, so one that lost its team
-// reaches no team's rows.
-func requestTeam(r *http.Request) (store.Team, error) {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok {
-		return store.DefaultTeam, nil
-	}
-	if p.Team != "" {
-		return p.Team, nil
-	}
-	if p.AccountID != "" {
-		return "", store.ErrNoTeam
-	}
-	return store.DefaultTeam, nil
-}
-
-// safety: every tenant-owned read and write goes through here, and the team never comes from the
-// request body, path or query.
-func (s *Server) tenantFor(r *http.Request) (*store.Tenant, error) {
-	team, err := requestTeam(r)
-	if err != nil {
-		return nil, err
-	}
-	return s.tenantForTeam(r.Context(), team)
-}
-
 func (s *Server) tenantForTeam(ctx context.Context, team store.Team) (*store.Tenant, error) {
 	team = store.NormalizeTeam(team)
 	now := time.Now()
@@ -85,54 +55,6 @@ func (s *Server) tenantForTeam(ctx context.Context, team store.Team) (*store.Ten
 	}
 	s.tenants.put(team, t, now)
 	return t, nil
-}
-
-func (s *Server) requestTenant(w http.ResponseWriter, r *http.Request) (*store.Tenant, bool) {
-	t, err := s.tenantFor(r)
-	if err == nil {
-		return t, true
-	}
-	if errors.Is(err, store.ErrNoTeam) || errors.Is(err, store.ErrUnknownTeam) {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code:    "no_team",
-			Message: "the credential acts for no registered team",
-		})
-		return nil, false
-	}
-	s.writeInternalError(w, r, "team handle", err)
-	return nil, false
-}
-
-func runNotFound(runID string) error {
-	return fmt.Errorf("run %q: %w", runID, store.ErrNotFound)
-}
-
-func writeClaimTeamRefusal(w http.ResponseWriter, err error) bool {
-	if !errors.Is(err, store.ErrClaimantHasNoTeam) {
-		return false
-	}
-	writeAuthError(w, http.StatusForbidden, authErrorBody{
-		Code:    "claim_no_team",
-		Message: "this credential carries no team, so it can claim no work; use a token minted for a team",
-	})
-	return true
-}
-
-// safety: repeats the team boundary's check because a grant it feeds opens that team's namespace
-// in the shared cache.
-func (s *Server) runTeam(r *http.Request) (store.Team, error) {
-	t, err := s.tenantFor(r)
-	if err != nil {
-		return "", err
-	}
-	owned, err := t.OwnsRun(r.Context(), r.PathValue("id"))
-	if err != nil {
-		return "", err
-	}
-	if !owned {
-		return "", runNotFound(r.PathValue("id"))
-	}
-	return t.Team(), nil
 }
 
 // safety: a sweep names a trigger id with no request behind it, so the trigger

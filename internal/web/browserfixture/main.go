@@ -127,7 +127,7 @@ func main() {
 		}
 	}()
 	now := time.Now().UTC()
-	token, _, err := st.CreateToken("browser-fixture", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	token, _, err := st.CreateToken("browser-fixture", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -73,7 +73,6 @@ func TestRunControlHTTPAuthorityProperty(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer "+f.raw)
 			r.Header.Set("Content-Type", "application/json")
 			r.Header.Set("Idempotency-Key", key)
-			r = r.WithContext(contextWithPrincipal(r.Context(), &Principal{Team: "foreign", AccountID: "forged", Scopes: []string{ScopeAdmin}}))
 			w := httptest.NewRecorder()
 			f.s.Handler().ServeHTTP(w, r)
 			if w.Code != want || writer.seen.Target.Team != string(store.DefaultTeam) || writer.seen.Target.RunID != "bound-run" || writer.seen.Principal.Capability.Subject.ID != "pusher" {

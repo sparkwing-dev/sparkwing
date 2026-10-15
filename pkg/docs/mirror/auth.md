@@ -10,6 +10,20 @@ verification remain separate from client transport tests. See
 
 ## Controller authorization
 
+Embedded controllers supply `WithMetricWriter` for job metric and usage writes,
+and `WithOperatorSettingsWriter` for deployment setting changes. Each writer
+receives the verified authority and resource target and rechecks them in its
+committing transaction. Signup mode and limit changes commit together. Missing
+writers return `policy_missing`.
+
+Job metrics use `GET` and `POST /api/v1/runs/{run}/jobs/{job}/metrics`. Process
+usage uses `POST /api/v1/runs/{run}/jobs/{job}/usage`. The former `/nodes/` paths
+are removed. Request budgets run after policy authorization and use the
+credential's team and authenticated holder. A successful empty claim response
+spends the polling budget. An award does not. Log concurrency refusals use the
+canonical error envelope with `rate_limited` and a reason in `error.details`.
+
+
 The controller's shared policy routes use the store's authentication snapshot
 and binding checker by default. Each request reads current capability ancestry
 and account membership. Browser writes use the session-bound CSRF verifier by default. The header

@@ -62,8 +62,8 @@ func newHostedTriggerWith(t *testing.T, args map[string]string, shape func(*stor
 	t.Cleanup(func() { _ = st.Close() })
 	h.st = st
 	h.token, _, err = st.CreateToken("trigger-runner", store.TokenKindRunner, []string{
-		controller.ScopeTriggersClaim, controller.ScopeTriggersRead, controller.ScopeRunsState,
-		controller.ScopeRunsRead, controller.ScopeNodesClaim, controller.ScopeLogsRead,
+		"triggers.claim", "triggers.read", "runs.state",
+		"runs.read", "nodes.claim", "logs.read",
 	}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
@@ -423,7 +423,7 @@ func TestDispatchedNode_WithoutASourceIsRefused(t *testing.T) {
 func TestTriggerHost_ASecretBackedSkipIfSkipsTheNode(t *testing.T) {
 	guard := filepath.Join(t.TempDir(), "deployed")
 	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "guard": guard})
-	admin, _, err := h.st.CreateToken("secrets-owner", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now())
+	admin, _, err := h.st.CreateToken("secrets-owner", store.TokenKindUser, []string{"admin"}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

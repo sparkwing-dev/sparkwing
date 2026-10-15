@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -277,7 +276,7 @@ func TestRunnerTokenIsBoundToTheTeamThatMintedIt(t *testing.T) {
 	if w.Team != a.team || w.Principal != "agent:a-box" {
 		t.Fatalf("runner whoami = %+v", w)
 	}
-	for _, s := range []string{controller.ScopeAdmin, controller.ScopeTeamAdmin, controller.ScopeRunsWrite} {
+	for _, s := range []string{"admin", "team.admin", "runs.write"} {
 		for _, have := range w.Scopes {
 			if have == s {
 				t.Fatalf("runner token carries %s", s)

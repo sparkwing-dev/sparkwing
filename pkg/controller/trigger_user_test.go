@@ -24,7 +24,7 @@ func newTriggerUserServer(t *testing.T) (*store.Store, *httptest.Server, string)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	raw, _, err := st.CreateToken("alice", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite}, 0, time.Now().UTC())
+		[]string{"runs.write"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

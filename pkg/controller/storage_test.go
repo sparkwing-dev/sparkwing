@@ -40,10 +40,10 @@ func newStorageFixture(t *testing.T, quotas ...store.StorageQuota) storageFixtur
 	ctx := context.Background()
 	now := time.Now().UTC()
 	runnerScopes := []string{
-		controller.ScopeNodesClaim, controller.ScopeRunsState,
-		controller.ScopeRunsRead,
+		"nodes.claim", "runs.state",
+		"runs.read",
 	}
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("admin token: %v", err)
 	}

@@ -3,8 +3,6 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -43,7 +44,6 @@ func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
 		team := []store.Team{"alpha", "beta"}[random.IntN(2)]
 		query := fmt.Sprintf("/api/v1/sizing?team=%s&pipeline=%s", []string{"default", "alpha", "beta", "_%", "' OR 1=1 --"}[random.IntN(5)], []string{"default-only", "alpha-only", "beta-only"}[random.IntN(3)])
 		req := httptest.NewRequest(http.MethodGet, strings.ReplaceAll(query, " ", "%20"), nil)
-		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{AccountID: "account", Team: store.DefaultTeam}))
 		rec := httptest.NewRecorder()
 		if err := handler(rec, req, capability.Authorized{Target: capability.Target{Team: string(team)}}); err != nil {
 			writePolicyError(rec, err)
@@ -64,7 +64,6 @@ func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
 	}{{"", http.StatusInternalServerError, apierr.PolicyMissing}, {"missing", http.StatusNotFound, apierr.NotFound}} {
 		team := tc.team
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/sizing", nil)
-		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{AccountID: "account", Team: team}))
 		rec := httptest.NewRecorder()
 		if err := handler(rec, req, capability.Authorized{Target: capability.Target{Team: string(team)}}); err != nil {
 			writePolicyError(rec, err)

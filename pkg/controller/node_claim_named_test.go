@@ -73,7 +73,7 @@ func newNamedClaimFixture(t *testing.T, opts store.TokenOptions) namedClaimFixtu
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	token, record, err := st.CreateTokenWith(context.Background(), "pool", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeRunsRead},
+		[]string{"nodes.claim", "runs.state", "runs.read"},
 		0, time.Now().UTC(), opts)
 	if err != nil {
 		t.Fatalf("CreateTokenWith: %v", err)
@@ -152,7 +152,7 @@ func TestClaimNodeByID_NeedsTheClaimScope(t *testing.T) {
 	f := newNamedClaimFixture(t, store.TokenOptions{})
 	f.readyNode(t, "run-1", "build")
 	reader, _, err := f.store.CreateToken("reader", store.TokenKindRunner,
-		[]string{controller.ScopeRunsRead}, 0, time.Now().UTC())
+		[]string{"runs.read"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

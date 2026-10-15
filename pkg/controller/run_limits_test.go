@@ -10,13 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestAnnotationAndMetricBoundsAnswerWithTheirStatus(t *testing.T) {
-	f := newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim, controller.ScopeRunsState})
+	f := newOwnershipFixtureWithScopes(t, []string{"nodes.claim", "runs.state"})
 	big, err := json.Marshal(map[string]string{"message": strings.Repeat("x", store.MaxAnnotationBytes+1)})
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +44,7 @@ func TestAnnotationAndMetricBoundsAnswerWithTheirStatus(t *testing.T) {
 }
 
 func TestNodeMetricReadsArePaged(t *testing.T) {
-	f := newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim, controller.ScopeRunsState})
+	f := newOwnershipFixtureWithScopes(t, []string{"nodes.claim", "runs.state"})
 	seedNodeMetrics(t, f.store, 2500)
 	get := func(query string) (int, struct {
 		Points     []json.RawMessage `json:"points"`

@@ -80,12 +80,16 @@ func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
-func (s *Server) handleComputeLimitsSet(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+func (s *Server) handleComputeLimitsSet(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	var req setComputeLimitsReq
 	if err := decodeJSON(r, &req); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid limits request"}
 	}
-	limits, err := s.operatorSettings.SetComputeLimits(r.Context(), req.Limits)
+	writer, err := s.settingsWriter()
+	if err != nil {
+		return err
+	}
+	limits, err := writer.WriteComputeLimits(r.Context(), authorized, req.Limits)
 	if errors.Is(err, store.ErrInvalidComputeLimitSetting) {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "limits must name valid guards with nonnegative values"}
 	}

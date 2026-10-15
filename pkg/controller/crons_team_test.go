@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -46,7 +45,7 @@ func teamToken(t *testing.T, tenant *store.Tenant, scopes ...string) string {
 func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
-	writerB := teamToken(t, tenantB, controller.ScopeRunsRead, controller.ScopeRunsControl)
+	writerB := teamToken(t, tenantB, "runs.read", "runs.control")
 
 	var pushed map[string]any
 	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, &pushed)
@@ -136,7 +135,7 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
-	writerB := teamToken(t, tenantB, controller.ScopeRunsRead, controller.ScopeRunsControl)
+	writerB := teamToken(t, tenantB, "runs.read", "runs.control")
 	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, nil)
 
 	var launched controllerwire.ScheduleRun
@@ -157,7 +156,7 @@ func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 
 func TestControllerCrons_ATeamsSchedulesAreCapped(t *testing.T) {
 	f := newCronsFixture(t)
-	writerB := teamToken(t, teamTenant(t, f.store, teamB), controller.ScopeRunsRead, controller.ScopeRunsControl)
+	writerB := teamToken(t, teamTenant(t, f.store, teamB), "runs.read", "runs.control")
 
 	many := cronPushBody()
 	var entries []map[string]any

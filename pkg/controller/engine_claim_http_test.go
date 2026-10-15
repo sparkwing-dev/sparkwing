@@ -178,11 +178,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 		t.Fatalf("renewal: %+v, %v", renewal, err)
 	}
 	for _, path := range []string{"/api/v1/triggers/claim", "/api/v1/nodes/claim", "/api/v1/triggers/run/claim"} {
-		status := http.StatusNotFound
-		if path == "/api/v1/triggers/claim" {
-			status = http.StatusMethodNotAllowed
-		}
-		engineClaimHTTP(t, h, raw, "POST", path, `{}`, status)
+		engineClaimHTTP(t, h, raw, "POST", path, `{}`, http.StatusNotFound)
 	}
 }
 

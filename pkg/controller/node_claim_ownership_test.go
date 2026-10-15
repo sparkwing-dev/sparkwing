@@ -27,7 +27,7 @@ type ownershipFixture struct {
 }
 
 func newOwnershipFixture(t *testing.T) ownershipFixture {
-	return newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim})
+	return newOwnershipFixtureWithScopes(t, []string{"nodes.claim"})
 }
 
 func newOwnershipFixtureWithScopes(t *testing.T, scopes []string) ownershipFixture {
@@ -172,7 +172,7 @@ func TestNodeClaimOwnership_HeartbeatRefusesAnotherPrincipalsHolderID(t *testing
 }
 
 func TestNodeClaimOwnership_ExpiredClaimStopsAdmittingWrites(t *testing.T) {
-	f := newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim, controller.ScopeRunsState})
+	f := newOwnershipFixtureWithScopes(t, []string{"nodes.claim", "runs.state"})
 	if _, err := f.store.DB().Exec(
 		`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`,
 		time.Now().Add(-time.Minute).UnixNano(), "run-1", "only",
@@ -194,7 +194,7 @@ func TestNodeClaimOwnership_ExpiredClaimStopsAdmittingWrites(t *testing.T) {
 }
 
 func TestNodeClaimOwnership_TerminalEventKeepsExactAttribution(t *testing.T) {
-	f := newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim, controller.ScopeRunsState})
+	f := newOwnershipFixtureWithScopes(t, []string{"nodes.claim", "runs.state"})
 	if got := f.post(t, f.owner, "/api/v1/runs/run-1/nodes/only/finish", `{"outcome":"success"}`); got != http.StatusNoContent {
 		t.Fatalf("POST finish = %d, want 204", got)
 	}
@@ -341,7 +341,7 @@ func TestNodeClaimOwnership_TwoTokensSharingAPrincipalNameDoNotCrossAuthorize(t 
 	f := newOwnershipFixture(t)
 	now := time.Now().UTC()
 	twin, _, err := f.store.CreateToken("runner-a", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim}, 0, now)
+		[]string{"nodes.claim"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken twin: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestNodeClaimOwnership_CrossRunReadsAndHeartbeatNeedAClaim(t *testing.T) {
 }
 
 func TestNodeReadResponsesHideClaimHolderAndReservations(t *testing.T) {
-	f := newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim, controller.ScopeRunsRead})
+	f := newOwnershipFixtureWithScopes(t, []string{"nodes.claim", "runs.read"})
 	now := time.Now().UnixNano()
 	if _, err := f.store.DB().Exec(`UPDATE nodes SET reservation_id = ?, claim_reservation_id = ?,
 coordinator_id = ?, claim_membership_id = ?, executor_kind = 'agent', executor_id = ?,

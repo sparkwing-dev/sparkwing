@@ -40,7 +40,7 @@ func TestTriggerHost_AHereRunnerHostsItsPinnedRunUnderItsOwnCredential(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	admin, _, err := st.CreateToken("secrets-owner", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	admin, _, err := st.CreateToken("secrets-owner", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}

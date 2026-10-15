@@ -101,17 +101,17 @@ type tenancyFixture struct {
 }
 
 var everyScope = []string{
-	controller.ScopeRunsRead, controller.ScopeRunsWrite, controller.ScopeRunsControl,
-	controller.ScopeNodesClaim, controller.ScopeLogsRead,
-	controller.ScopeTriggersRead, controller.ScopeTriggersClaim, controller.ScopeRunsState,
-	controller.ScopeSecretsRead, controller.ScopeApprovalsWrite, controller.ScopeTeamAdmin,
+	"runs.read", "runs.write", "runs.control",
+	"nodes.claim", "logs.read",
+	"triggers.read", "triggers.claim", "runs.state",
+	"secrets.read", "approvals.write", "team.admin",
 }
 
 func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
+	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now); err != nil {
 		t.Fatal(err)
 	}
 	raw, pub := multiTeamLicense(t)
@@ -137,7 +137,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	}
 	f.everyScopeB = "Bearer " + raw
 	raw, _, err = f.teamB.CreateToken(ctx, "b-runner", store.TokenKindRunner, []string{
-		controller.ScopeRunsState, controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
+		"runs.state", "nodes.claim", "triggers.claim",
 	}, 0, now)
 	if err != nil {
 		t.Fatal(err)
@@ -579,8 +579,8 @@ func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 	for _, role := range []store.Role{store.RoleReader, store.RoleEditor, store.RoleOwner} {
 		for _, s := range store.ScopesForRole(role) {
 			switch s {
-			case controller.ScopeAdmin, controller.ScopeSecretsRead, controller.ScopeNodesClaim,
-				controller.ScopeTriggersClaim, controller.ScopeRunsState:
+			case "admin", "secrets.read", "nodes.claim",
+				"triggers.claim", "runs.state":
 				t.Errorf("role %s carries the %s scope", role, s)
 			}
 		}

@@ -30,8 +30,8 @@ func newParentClaimFixture(t *testing.T) parentClaimFixture {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	scopes := []string{
-		controller.ScopeRunsWrite, controller.ScopeRunsState,
-		controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
+		"runs.write", "runs.state",
+		"nodes.claim", "triggers.claim",
 	}
 	now := time.Now().UTC()
 	ownerRaw, ownerToken, err := st.CreateToken("tenant-a", store.TokenKindRunner, scopes, 0, now)
@@ -46,7 +46,7 @@ func newParentClaimFixture(t *testing.T) parentClaimFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adminRaw, _, err := st.CreateToken("ops", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	adminRaw, _, err := st.CreateToken("ops", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}

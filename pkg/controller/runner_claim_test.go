@@ -33,7 +33,7 @@ func newRunnerClaimFixture(t *testing.T) runnerClaimFixture {
 	ctx := context.Background()
 	now := time.Now()
 	runner, _, err := st.CreateToken("runner-a", store.TokenKindRunner, []string{
-		controller.ScopeNodesClaim, controller.ScopeTriggersClaim, controller.ScopeRunsState,
+		"nodes.claim", "triggers.claim", "runs.state",
 	}, 0, now)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestSecrets_ABearerReadsByNameOnlyAsOperatorOrTeamAdmin(t *testing.T) {
 	f := newRunnerClaimFixture(t)
 	now := time.Now()
 	legacy, _, err := f.st.CreateToken("runner-legacy", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim, controller.ScopeSecretsRead}, 0, now)
+		[]string{"nodes.claim", "secrets.read"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,14 +233,14 @@ func TestSecrets_ABearerReadsByNameOnlyAsOperatorOrTeamAdmin(t *testing.T) {
 	if got, body := f.do(t, "GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-1", n.ClaimToken, ""); got != http.StatusOK || body["value"] != "v-DEPLOY_TOKEN" {
 		t.Fatalf("the claim's token = %d %v, want the declared secret", got, body)
 	}
-	admin, _, err := f.st.CreateToken("operator", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	admin, _, err := f.st.CreateToken("operator", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, body := f.do(t, "GET", "/api/v1/secrets/UNDECLARED?pipeline=demo", admin, ""); got != http.StatusOK || body["value"] != "v-UNDECLARED" {
 		t.Fatalf("an operator read by name = %d %v", got, body)
 	}
-	owner, _, err := f.st.CreateToken("owner", store.TokenKindUser, []string{controller.ScopeTeamAdmin}, 0, now)
+	owner, _, err := f.st.CreateToken("owner", store.TokenKindUser, []string{"team.admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}

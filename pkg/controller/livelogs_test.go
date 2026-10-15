@@ -18,18 +18,18 @@ import (
 func newLiveLogFixture(t *testing.T) ownershipFixture {
 	t.Helper()
 	return newOwnershipFixtureWithScopes(t, []string{
-		controller.ScopeNodesClaim,
-		controller.ScopeRunsState,
-		controller.ScopeRunsRead,
+		"nodes.claim",
+		"runs.state",
+		"runs.read",
 	})
 }
 
 func newLiveLogFixtureWithLimits(t *testing.T, perNode int, total int64, maxNodes int, idle time.Duration) ownershipFixture {
 	t.Helper()
 	return newOwnershipFixtureWith(t, []string{
-		controller.ScopeNodesClaim,
-		controller.ScopeRunsState,
-		controller.ScopeRunsRead,
+		"nodes.claim",
+		"runs.state",
+		"runs.read",
 	}, func(s *controller.Server) *controller.Server {
 		return s.WithLiveLogLimits(perNode, total, maxNodes, idle)
 	})

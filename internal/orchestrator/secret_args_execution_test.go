@@ -43,7 +43,7 @@ func execControllerWithSecretRun(t *testing.T, runID string) (*store.Store, *cli
 		t.Fatalf("CreateRun: %v", err)
 	}
 	raw, _, err := st.CreateToken("pod", store.TokenKindRunner,
-		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+		[]string{"admin"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

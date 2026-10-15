@@ -383,7 +383,7 @@ Every nonempty registered value participates, including short values. Annotation
 and summary writes validate step membership, mask before limits.Record, and
 propagate delivery errors. No secret crosses a log frame as a registration message.
 
-`authentication_contract.go` declares AuthenticationReader and the authority,
+`authentication_types.go` declares AuthenticationReader and the authority,
 binding, expansion and result snapshots used by NewAuthenticator. Persistence
 receives the SHA-256 presentation digest, never the raw bearer. Presentation.Evidence
 carries decoded selectors and the exact body digest. Route matching supplies the
@@ -1600,7 +1600,7 @@ The expansion cut touches shared `internal/apiroutes` code/tests so generated
 references discover the actual engine endpoint declaration. It updates
 `api/openapi.yaml`, `docs/api-reference.md`, `docs/auth.md`, `CHANGELOG.md`
 and their embedded copies. The five replaced adapter stub bodies and their
-comments remove 31 lines from `engine_contract.go`. No legacy credential
+comments remove 31 lines from `engine.go`. No legacy credential
 subsystem was deleted in this slice.
 
 Expansion/delegation verification passes the whole-repository build, scoped
@@ -2744,5 +2744,72 @@ The old TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher is retired w
 its dead helper. Store's TestMeteredUnitNodeLifecycleUsesImmutableAward,
 SettlementFailureRollsBackResult and StaleReportCannotSettleReplacementProperty
 retain the immutable-billing, atomic-finalization and stale-holder invariants.
+
+## Final credential helper and reporting cut
+
+The legacy controller Principal, context accessor, HasScope and Scope constants
+are deleted. No production handler reads the old context. Tenant, egress and
+runner-budget wrappers that depended on it are removed. Policy-authorized
+handlers receive Authorized, and internal lifecycle reads select their team
+explicitly. Live-log append/read HTTP handlers and LiveLogRead are deleted.
+Dashboard log streaming retains its in-memory reader.
+
+The final metrics GET and POST routes and usage POST route are registered.
+MetricWriter declares Team, WriteMetric(ctx, Authorized, MetricSample) and
+WriteUsage(ctx, Authorized, NodeUsage). W1 implements it on Tenant. Each write
+rechecks ancestry, current membership, exact tenant/job and the selected route
+alternative inside its transaction. Claim and owner reports must retain their
+current holder/generation and attempt fences. Publication cannot write to another
+run. Metric kinds, nonnegative resource values, interval CPU-time constraints,
+timestamps and bounded usage values are validated before calling the writer.
+Metric-limit errors return the canonical rate_limited code. Missing or foreign
+writer adapters return policy_missing. The raw metric and usage writers are not
+HTTP fallbacks. The handler and client tests use explicit transaction/transport
+fakes. The production transaction and replay integration remain W1 work.
+
+The usage report contract still needs W9/W1 coordination: the retained client
+sends one additive observation per completed process, but the body has no process
+report identity. Two legitimate identical observations cannot be distinguished
+from exact-body retries by the WriteUsage inputs. W2 has not changed that foreign
+wire shape or claimed durable replay safety. W9 and W1 must settle the identity
+contract before connecting a production usage writer. Omitted metric timestamps
+also need a persisted receipt-time/replay rule. The default path refuses missing
+writers rather than using the legacy additive writes.
+
+OperatorSettingsWriter declares WriteComputeLimits, WriteSignUpSettings,
+WriteStorageSettings, WriteStorageQuota and WriteStorageAllowance. Every method
+receives Authorized. W1 supplies these methods on Operator. Recheck current
+ancestry, deployment grants or the configured direct-console-session gate inside
+the committing transaction. Never accept an actor from the body. Derive target
+teams from Authorized and resolve team existence inside quota transactions.
+WriteSignUpSettings takes SignUpSettingsChange, preserving omitted patch fields.
+It validates and commits all supplied mode/limit changes and their audit together,
+using the store clock. Quota writes preserve allowance and return the committed
+projection. Allowance writes preserve other quota fields. Any failed validation,
+authority check or write rolls back the whole request. Missing adapters return
+policy_missing. The raw settings methods are no longer HTTP fallbacks.
+
+Request budgets wrap actual policy handlers after authorization. Their keys use
+the verified team/authority and holder. Only the initial root request may supply
+a runner identity header. A bound holder cannot multiply its heartbeat budget by
+changing headers. Empty final claim responses spend the polling budget, and an
+award clears idle advice without spending it. No new limit or default was added.
+Egress concurrency failures use the canonical rate_limited envelope and a named
+reason in error.details. Audit identifiers use the final run/job path names, and
+successful empty claims are skipped without the retired offer header.
+
+TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate exercises the default
+console adapter with a real hashed SQLite account session, encrypted CSRF key,
+current reader membership, configured operator account and a fake committing
+writer. Its property varies selectors, operator configuration, CSRF, explicit
+presentation and origin. Roleless console sessions and the production commit gate
+remain W1 integrations. Existing peer transport properties remain fake-backed.
+ReadAuthentication still refuses CredentialPeer, and C1 has no trusted local
+mutation-authority representation. W2 has not fabricated a persisted credential
+or a permissive local fallback.
+
+The implemented declarations now live in capability/authentication_types.go,
+capability/management.go and controller/policy.go, engine.go and data.go. Their
+former *_contract.go files are deleted. W9's client declarations are unchanged.
 
 <!-- design:end -->

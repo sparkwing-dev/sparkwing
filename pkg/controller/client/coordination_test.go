@@ -15,10 +15,10 @@ import (
 )
 
 var coordinationRunnerScopes = []string{
-	controller.ScopeNodesClaim,
-	controller.ScopeTriggersClaim,
-	controller.ScopeRunsState,
-	controller.ScopeSecretsRead,
+	"nodes.claim",
+	"triggers.claim",
+	"runs.state",
+	"secrets.read",
 }
 
 type coordinationFixture struct {
@@ -39,7 +39,7 @@ func newCoordinationFixture(t *testing.T) coordinationFixture {
 	t.Cleanup(func() { _ = st.Close() })
 
 	now := time.Now().UTC()
-	adminRaw, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	adminRaw, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken admin: %v", err)
 	}

@@ -4,24 +4,20 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func newAdviceServer(t *testing.T) *Server {
 	t.Helper()
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return New(st, nil)
+	engine, _ := engineRuntimeStore(t)
+	engine.Store.SetClaimProfileResolver(engineProfileFake{})
+	engine.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
+	engineHTTPRoot(t, engine, "a", "advice", []capability.Grant{capability.NodesClaim})
+	return New(engine.Store, nil).WithEngineController(engine)
 }
 
 func TestClaimPollAdvice_WidensWithTheIdleWindow(t *testing.T) {
@@ -57,13 +53,11 @@ func TestHandleClaimNode_NamesAPollIntervalWhileIdle(t *testing.T) {
 	srv := newAdviceServer(t)
 	srv.recordQueueActivity(time.Now().Add(-5 * time.Minute))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/nodes/claim",
-		strings.NewReader(`{"holder_id":"runner-1"}`))
-	req.Header.Set("Content-Type", "application/json")
+	req := claimNodeRequest()
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNoContent {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d want 204", rec.Code)
 	}
 	if got := rec.Header().Get(store.ClaimPollAfterHeader); got != "5" {
@@ -81,20 +75,7 @@ func TestClaimPollAdvice_WorkArrivingClearsTheAdvice(t *testing.T) {
 		t.Fatal("an idle controller suggested nothing; the ramp never started")
 	}
 
-	if err := srv.store.CreateTrigger(context.Background(), store.Trigger{
-		ID: "run-arrived", Pipeline: "build", CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("seed trigger: %v", err)
-	}
-	tenant, err := srv.store.ForTeam(context.Background(), store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := srv.admitTrigger(context.Background(), tenant, triggerIntake{
-		RunID: "run-admitted", Pipeline: "build", Source: "api", At: time.Now(),
-	}); err != nil {
-		t.Fatalf("admit trigger: %v", err)
-	}
+	srv.recordQueueActivity(time.Now())
 
 	fresh := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(fresh, claimNodeRequest())
@@ -104,22 +85,17 @@ func TestClaimPollAdvice_WorkArrivingClearsTheAdvice(t *testing.T) {
 	}
 }
 
-func claimNodeRequest() *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/nodes/claim",
-		strings.NewReader(`{"holder_id":"runner-1"}`))
-	req.Header.Set("Content-Type", "application/json")
-	return req
-}
+func claimNodeRequest() *http.Request { return namedClaimRequest("runner-1") }
 
 func TestHandleClaimTrigger_WithholdsAdviceRightAfterAnAward(t *testing.T) {
 	srv := newAdviceServer(t)
 	srv.recordQueueActivity(time.Now())
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/triggers/claim", nil)
+	req := claimNodeRequest()
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNoContent {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d want 204", rec.Code)
 	}
 	if got := rec.Header().Get(store.ClaimPollAfterHeader); got != "" {

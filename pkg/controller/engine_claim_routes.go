@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -14,10 +15,10 @@ func (s *Server) claimEndpoints() []Endpoint {
 		e = &EngineController{Store: s.store}
 	}
 	return []Endpoint{
-		{Method: "POST", Pattern: "/api/v1/runners/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: e.handleClaim},
-		{Method: "POST", Pattern: "/api/v1/launcher/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: e.handleClaim},
+		{Method: "POST", Pattern: "/api/v1/runners/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
+		{Method: "POST", Pattern: "/api/v1/launcher/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
 		{Method: "POST", Pattern: "/api/v1/launcher/sync", Authentication: capability.AuthCapability, Decode: launcherSyncTarget, Handle: e.handleSyncLauncher},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: e.handleClaim},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
 		{Method: "POST", Pattern: "/api/v1/claims/exchange", Authentication: capability.AuthCapability, Decode: authorityTarget, ResolveTarget: ownUnitTarget, Handle: e.handleExchange},
 		{Method: "POST", Pattern: "/api/v1/claims/{claim}/heartbeat", Authentication: capability.AuthCapability, Decode: claimIDTarget, ResolveTarget: ownUnitTarget, Handle: e.handleRenewal},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/reconcile", Authentication: capability.AuthCapability, Decode: e.runTarget, Handle: e.handleReconcile},
@@ -78,17 +79,36 @@ func decodeClaimRequest(r *http.Request) (controllerwire.ClaimRequest, error) {
 	return body, nil
 }
 
-func (s *EngineController) handleClaim(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	body, err := decodeClaimRequest(r)
-	if err != nil {
-		return err
+func (s *Server) claimHandler(engine *EngineController) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+	return func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+		body, err := decodeClaimRequest(r)
+		if err != nil {
+			return err
+		}
+		key, ok := s.admitRunnerRequest(w, r, a, budgetClassClaim)
+		if !ok {
+			return nil
+		}
+		response, err := engine.Claim(r.Context(), a, body)
+		if response.Claim != nil {
+			s.recordQueueActivity(time.Now())
+		} else {
+			if limiter := s.requestBudget.limiter(budgetClassClaim); limiter != nil {
+				limiter.Penalize(key, time.Now())
+			}
+			s.writeClaimPollAdvice(w)
+		}
+		if err != nil {
+			return engineLookupError(err)
+		}
+		if response.Claim == nil {
+			if record, ok := r.Context().Value(auditCtxKey{}).(*auditRecord); ok {
+				record.emptyPoll = true
+			}
+		}
+		writeJSON(w, http.StatusOK, response)
+		return nil
 	}
-	response, err := s.Claim(r.Context(), a, body)
-	if err != nil {
-		return engineLookupError(err)
-	}
-	writeJSON(w, http.StatusOK, response)
-	return nil
 }
 
 func (s *EngineController) handleExchange(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

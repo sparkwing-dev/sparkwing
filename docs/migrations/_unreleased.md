@@ -1776,3 +1776,31 @@ Console clients read failures from `error.message` in the canonical envelope.
 
 The unused token-table metering and HTTP billing-finalization helpers are removed.
 Claim billing and settlement belong to the store's immutable award lifecycle.
+
+
+## Final credential helpers and reporting writes
+
+The controller `Principal`, `PrincipalFromContext`, `HasScope` and `Scope*`
+exports are removed. Embedded handlers receive `capability.Authorized` from the
+shared policy router. Team selection comes from that value. An absent credential
+no longer selects the default team through a legacy helper.
+
+Replace `/api/v1/runs/{id}/nodes/{nodeID}/metrics` and `/usage` with
+`/api/v1/runs/{run}/jobs/{job}/metrics` and `/usage`. The Go client's metric and
+usage methods use the final paths. Embedded controllers supply `WithMetricWriter`
+for committing writes. A missing adapter returns `policy_missing`.
+
+Deployment settings writes require `WithOperatorSettingsWriter`. Its transactions
+recheck deployment authority, and a signup request commits its mode and limits
+in one transaction. Raw settings methods are no longer HTTP write fallbacks.
+
+Runner budgets use the verified team and holder after shared policy authorization.
+Empty claims spend the polling budget. Awarded work does not. Empty polls are not
+audited. Job path identifiers appear as `run_id` and `job_id` in audit records.
+The unused live-log HTTP handlers and their `LiveLogRead` type are removed.
+Dashboard log reads retain the shared policy routes and in-memory live reader.
+
+Egress concurrency refusals use `error.code=rate_limited`, with
+`egress_download_limit` or `egress_stream_limit` in `error.details.reason`.
+The exported `EgressDownloadLimitCode` and `EgressStreamLimitCode` constants are
+removed. Read the canonical error object instead of a top-level code.

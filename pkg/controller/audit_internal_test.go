@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func auditHarness(t *testing.T, route string, h http.HandlerFunc) (http.Handler, *bytes.Buffer) {
@@ -57,34 +59,16 @@ func TestAuditRecordsAPanickedWrite(t *testing.T) {
 	}
 }
 
-// An executor offer answers the node claim route with 204 while it records
-// a pending offer, so that answer is audited; an empty poll is not.
-func TestAuditKeepsAPendingExecutorOffer(t *testing.T) {
-	h, logs := auditHarness(t, "/api/v1/nodes/claim", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("offer") != "" {
-			w.Header().Set(claimOfferStateHeader, "pending")
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/nodes/claim", nil))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/nodes/claim?offer=1", nil))
-	if records := auditLines(t, logs, "audit"); len(records) != 1 {
-		t.Fatalf("audit records = %v, want only the pending offer", records)
-	}
-}
-
-// The partial principal a data route builds to key its request budget does
-// not replace the credential the caller authenticated with.
 func TestAuditNamesTheCredentialNotTheBudgetKey(t *testing.T) {
 	s := New(nil, slog.New(slog.DiscardHandler))
 	h, logs := auditHarness(t, "/api/v1/data/uploads", func(w http.ResponseWriter, r *http.Request) {
-		noteAuditPrincipal(r.Context(), &Principal{Name: "pat@example.com", Kind: "user", AccountID: "acct-1", Team: "acme"})
+		notePolicyPrincipal(r.Context(), capability.Principal{Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "acct-1"}, Team: "acme"}})
 		s.allowDataRequest(w, r, "acme", "swk_budget")
 		w.WriteHeader(http.StatusCreated)
 	})
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/data/uploads", nil))
 	records := auditLines(t, logs, "audit")
-	if len(records) != 1 || records[0]["principal_id"] != "acct-1" || records[0]["principal_kind"] != "user" {
+	if len(records) != 1 || records[0]["principal_id"] != "acct-1" || records[0]["principal_kind"] != "account" {
 		t.Fatalf("audit = %v, want the authenticated account", records)
 	}
 	if strings.Contains(logs.String(), "pat@example.com") {

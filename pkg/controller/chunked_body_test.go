@@ -101,12 +101,12 @@ func TestRotateToken_ChunkedBodyKeepsTheGrace(t *testing.T) {
 
 	now := time.Now().UTC()
 	admin, _, err := st.CreateToken("root", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, now)
+		[]string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken admin: %v", err)
 	}
 	_, worker, err := st.CreateToken("worker", store.TokenKindRunner,
-		[]string{controller.ScopeTriggersClaim}, 0, now)
+		[]string{"triggers.claim"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken worker: %v", err)
 	}

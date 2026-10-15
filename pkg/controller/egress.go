@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -25,63 +26,6 @@ func (s *Server) WithEgressMeter(m *egress.Meter) *Server {
 // EgressMeter returns the meter this controller counts downloads
 // against, or nil when it was given none.
 func (s *Server) EgressMeter() *egress.Meter { return s.egress }
-
-// safety: the error member carries the whole reason, because that is the
-// member a client prints when a request fails.
-type egressRefusalBody struct {
-	Error     string `json:"error"`
-	Code      string `json:"code"`
-	Principal string `json:"principal,omitempty"`
-}
-
-// EgressStreamLimitCode is the `code` member of the 429 body a live log
-// stream past the per-principal concurrency cap answers with.
-const EgressStreamLimitCode = "egress_stream_limit"
-
-// EgressDownloadLimitCode is the `code` member of the 429 body a
-// download past the per-principal concurrency cap answers with.
-const EgressDownloadLimitCode = "egress_download_limit"
-
-// safety: the meter keys on the team and the name the bearer resolved to,
-// because a token's name is free text two teams may share; a controller
-// serving with auth off counts every download in one bucket.
-func egressPrincipal(r *http.Request) string {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok || p == nil || p.Name == "" {
-		return egress.AnonymousPrincipal
-	}
-	return egress.TeamPrincipal(string(p.Team), p.Name)
-}
-
-func (s *Server) metered(class egress.Class, next http.Handler) http.Handler {
-	return s.meterOn(class, egress.SlotDownload, next)
-}
-
-// safety: one browser tab per node multiplies a live stream without
-// limit, so the stream surface counts its own slot; a stream lasts as
-// long as its node and a download does not.
-func (s *Server) meteredStream(class egress.Class, next http.Handler) http.Handler {
-	return s.meterOn(class, egress.SlotLogStream, next)
-}
-
-func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler) http.Handler {
-	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		team, err := requestTeam(r)
-		if err != nil {
-			writePolicyError(w, err)
-			return
-		}
-		s.meterResponse(w, r, class, slot, next, egressPrincipal(r), team)
-	})
-	// safety: viewing a run's logs is never charged to its team, so a team
-	// past its download cap can still read why its run failed.
-	if class == egress.ClassLog || class == egress.ClassLogStream {
-		return counted
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.chargeTeamDownload(w, r, counted)
-	})
-}
 
 func (s *Server) meterResponse(w http.ResponseWriter, r *http.Request, class egress.Class, slot egress.Slot, next http.Handler, principal string, team store.Team) {
 	// safety: a response the server discards holds no slot and
@@ -120,65 +64,19 @@ func (s *Server) meterResponse(w http.ResponseWriter, r *http.Request, class egr
 	}
 }
 
-// safety: the team is the credential's, so a download is charged to the team
-// that asked for it; the operator's team and a single-team controller are
-// never capped and write no row.
-func (s *Server) chargeTeamDownload(w http.ResponseWriter, r *http.Request, next http.Handler) {
-	p, ok := PrincipalFromContext(r.Context())
-	if !s.MultiTeam() || !ok || p == nil {
-		next.ServeHTTP(w, r)
-		return
-	}
-	team := store.NormalizeTeam(p.Team)
-	if team == "" || team == store.DefaultTeam {
-		next.ServeHTTP(w, r)
-		return
-	}
-	tenant, err := s.store.ForTeam(r.Context(), team)
-	if err != nil {
-		s.writeInternalError(w, r, "resolve download team", err)
-		return
-	}
-	charge := func(ctx context.Context, n int64, record bool) error {
-		_, err := tenant.ChargeDownload(ctx, store.DownloadCharge{
-			ReplicaID: s.leaseHolder, Bytes: n, Record: record,
-			FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded,
-		})
-		return err
-	}
-	refuse := func(w http.ResponseWriter, err error) {
-		var capErr *store.DownloadCapError
-		if errors.As(err, &capErr) {
-			s.logger.Warn("team download refused", append(requestLogAttrs(r), "team", string(team))...)
-			w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds(capErr.RetryAfter), 10))
-			writeError(w, http.StatusTooManyRequests, err)
-			return
-		}
-		s.writeInternalError(w, r, "charge team download", err)
-	}
-	egress.ChargeTeam(w, r, charge, refuse, next)
-}
-
 func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, class egress.Class, err error) {
-	body := egressRefusalBody{Error: err.Error(), Code: EgressDownloadLimitCode}
+	reason := "egress_download_limit"
 	retryAfter := egress.SlotRetryAfter
 	var concurrency *egress.ConcurrencyError
 	if errors.As(err, &concurrency) {
-		body.Code, body.Principal = concurrencyCode(concurrency.Slot), concurrency.Principal
+		if concurrency.Slot != egress.SlotDownload {
+			reason = "egress_stream_limit"
+		}
 		retryAfter = concurrency.RetryAfter
 	}
-
-	s.logger.Warn("egress refused", append(requestLogAttrs(r),
-		"code", body.Code, "principal", body.Principal, "class", string(class))...)
-	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfterSeconds(retryAfter))))
-	writeJSON(w, http.StatusTooManyRequests, body)
-}
-
-func concurrencyCode(slot egress.Slot) string {
-	if slot == egress.SlotDownload {
-		return EgressDownloadLimitCode
-	}
-	return EgressStreamLimitCode
+	s.logger.Warn("egress refused", append(requestLogAttrs(r), "reason", reason, "class", string(class))...)
+	w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds(retryAfter), 10))
+	writePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: "too many concurrent downloads or log streams", Details: map[string]any{"reason": reason}})
 }
 
 func retryAfterSeconds(d time.Duration) int64 {

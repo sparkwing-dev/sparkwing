@@ -8,33 +8,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// EngineController adapts authorized controller operations to C1's transactions. Middleware
-// supplies C2 Authorized values; bodies cannot supply actors, grants or fences.
-// Every mutation rechecks that authority transactionally through the store.
+// EngineController applies authorized operations through store transactions.
 type EngineController struct {
-	Store         *store.Store
-	RunnerPolicy  RunnerAdmissionPolicy
-	VersionPolicy *SignedEngineVersionPolicy
-	Units         UnitRenewer
-	Launcher      LauncherSyncReader
-	// ResolveTenant supplies the same transaction contract to embedded controllers and tests.
-	// A nil resolver uses Store.ForTeam.
-	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
-	// ResolveRunTeam supplies resource ownership before authorization. A nil
-	// resolver uses Store.AsOperator().RunTeam.
-	ResolveRunTeam func(context.Context, string) (store.Team, error)
-	// ResolveOperator supplies deployment revocation without exposing a tenant.
-	// A nil resolver uses Store.AsOperator.
-	ResolveOperator func(context.Context) (AuthorityRevoker, error)
-	// ProjectScheduling supplies the shared graph projection to embedded controllers
-	// and tests. A nil projector uses store.RunSnapshot.Scheduling.
+	Store             *store.Store
+	RunnerPolicy      RunnerAdmissionPolicy
+	VersionPolicy     *SignedEngineVersionPolicy
+	Units             UnitRenewer
+	Launcher          LauncherSyncReader
+	ResolveTenant     func(context.Context, store.Team) (RunTransactions, error)
+	ResolveRunTeam    func(context.Context, string) (store.Team, error)
+	ResolveOperator   func(context.Context) (AuthorityRevoker, error)
 	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
-	// ReadRunStatus overrides the store's consistent status read for embedded controllers.
-	ReadRunStatus func(context.Context, store.Team, string) (RunStatusFacts, error)
+	ReadRunStatus     func(context.Context, store.Team, string) (RunStatusFacts, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.
-// The proposal's source outcome is loaded by the store, never supplied by HTTP.
 func (s *EngineController) ReconcileJob(ctx context.Context, authorized capability.Authorized, body controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error) {
 	actor := engineActor(authorized)
 	tenant, err := s.runTransactions(ctx, authorized.Target.Team)
@@ -70,8 +58,7 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	return response, nil
 }
 
-// Claim calls engine.EvaluateRunner against signed policy before a new award, derives total
-// capacity from registration and uses reported availability with the shared matcher.
+// Claim checks signed runner policy and registered capacity before awarding work.
 func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	return s.claim(ctx, authorized, body)
 }
@@ -86,8 +73,7 @@ func (s *EngineController) Exchange(ctx context.Context, authorized capability.A
 	return s.exchange(ctx, authorized)
 }
 
-// Compatibility serves /api/v1/capabilities?engine_version= from verified release
-// metadata. API compatibility and security eligibility remain separate decisions.
+// Compatibility resolves controller API support from verified engine release metadata.
 func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error) {
 	if engineVersion == "" {
 		return controllerwire.Compatibility{}, invalidEngineBody("engine_version is required")

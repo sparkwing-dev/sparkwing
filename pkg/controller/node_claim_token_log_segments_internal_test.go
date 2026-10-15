@@ -25,7 +25,7 @@ func TestNodeClaimTokenUploadsItsNodesLogSegmentsUntilTheClaimEnds(t *testing.T)
 	ctx := t.Context()
 	now := time.Now()
 	runner, _, err := st.CreateToken("pool", store.TokenKindRunner,
-		[]string{ScopeNodesClaim, ScopeRunsState}, 0, now)
+		[]string{"nodes.claim", "runs.state"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}

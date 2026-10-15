@@ -774,7 +774,7 @@ func TestNodeLogStreamFollowsEveryAttemptAndResumes(t *testing.T) {
 	if _, err := f.st.DB().ExecContext(ctx, `UPDATE nodes SET status = 'done' WHERE run_id = 'run-d' AND node_id = 'a'`); err != nil {
 		t.Fatal(err)
 	}
-	admin, _, err := f.st.CreateToken("root", store.TokenKindUser, []string{ScopeAdmin}, 0, time.Now())
+	admin, _, err := f.st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

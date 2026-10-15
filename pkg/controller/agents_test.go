@@ -130,15 +130,15 @@ func TestAgents_PlainHolderUsesOwnLivePoll(t *testing.T) {
 	defer st.Close()
 	ctx := context.Background()
 	now := time.Now().UTC()
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, ownerToken, err := st.CreateToken("agent-a", store.TokenKindRunner, []string{controller.ScopeNodesClaim}, 0, now)
+	owner, ownerToken, err := st.CreateToken("agent-a", store.TokenKindRunner, []string{"nodes.claim"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, _, err := st.CreateToken("agent-b", store.TokenKindRunner, []string{controller.ScopeNodesClaim}, 0, now)
+	other, _, err := st.CreateToken("agent-b", store.TokenKindRunner, []string{"nodes.claim"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}

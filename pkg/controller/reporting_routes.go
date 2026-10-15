@@ -16,6 +16,7 @@ func (s *Server) reportingEndpoints() []Endpoint {
 		engine = &EngineController{Store: s.store}
 	}
 	endpoints := []Endpoint{
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/metrics", Decode: engine.runTarget, Handle: s.handleGetJobMetrics},
 		{Method: "GET", Pattern: "/api/v1/runs", Decode: authorityTarget, Handle: s.handleListRuns},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/receipt", Decode: engine.runTarget, Handle: s.handleGetRunReceipt},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/attempts", Decode: engine.runTarget, Handle: s.handleListAttempts},

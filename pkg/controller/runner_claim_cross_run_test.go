@@ -32,7 +32,7 @@ func newCrossRunFixture(t *testing.T) crossRunFixture {
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
 	now := time.Now()
-	scopes := []string{controller.ScopeNodesClaim, controller.ScopeTriggersClaim, controller.ScopeRunsState}
+	scopes := []string{"nodes.claim", "triggers.claim", "runs.state"}
 	runner, _, err := st.CreateToken("runner-a", store.TokenKindRunner, scopes, 0, now)
 	if err != nil {
 		t.Fatal(err)
