@@ -109,8 +109,19 @@ func (h *host) Masks() []string {
 	return append([]string(nil), h.masks...)
 }
 func (h *host) Close() error { h.cancel(); return nil }
-func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
+
+func executionError(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sdkserve.Planning(ctx) {
+		return fmt.Errorf("host services require an execution binding")
+	}
+	return nil
+}
+
+func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
+	if err := executionError(ctx); err != nil {
 		return "", false, err
 	}
 	v, ok := h.opts.Secrets[name]
@@ -126,7 +137,7 @@ func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
 }
 
 func (h *host) Output(ctx context.Context, job string) (json.RawMessage, error) {
-	if err := ctx.Err(); err != nil {
+	if err := executionError(ctx); err != nil {
 		return nil, err
 	}
 	raw, ok := h.opts.Outputs[job]
@@ -137,7 +148,7 @@ func (h *host) Output(ctx context.Context, job string) (json.RawMessage, error) 
 }
 
 func (h *host) Latest(ctx context.Context, p, j string, _ time.Duration) (json.RawMessage, error) {
-	if err := ctx.Err(); err != nil {
+	if err := executionError(ctx); err != nil {
 		return nil, err
 	}
 	if h.opts.Latest == nil {
@@ -147,7 +158,7 @@ func (h *host) Latest(ctx context.Context, p, j string, _ time.Duration) (json.R
 }
 
 func (h *host) RunPipeline(ctx context.Context, r sdkserve.ChildRequest) (json.RawMessage, error) {
-	if err := ctx.Err(); err != nil {
+	if err := executionError(ctx); err != nil {
 		return nil, err
 	}
 	if h.opts.RunPipeline == nil {
@@ -157,7 +168,7 @@ func (h *host) RunPipeline(ctx context.Context, r sdkserve.ChildRequest) (json.R
 }
 
 func (h *host) OIDC(ctx context.Context, a string) (string, error) {
-	if err := ctx.Err(); err != nil {
+	if err := executionError(ctx); err != nil {
 		return "", err
 	}
 	if h.opts.OIDCToken == nil {
@@ -179,7 +190,7 @@ func (h *host) ReleaseCleanup(context.Context, string) error {
 }
 
 func (h *host) Mask(ctx context.Context, value string) error {
-	if err := ctx.Err(); err != nil {
+	if err := executionError(ctx); err != nil {
 		return err
 	}
 	if value == "" {

@@ -54,6 +54,7 @@ func TestProtocol(t *testing.T) {
 						})
 						t.Run("sdk-frame-boundaries", testGoSDKFrameLimit)
 						t.Run("public-fake-host", testGoSDKFakeHost)
+						t.Run("declaration-services", testGoSDKDeclarationServices)
 						t.Run("fake-host-run-snapshot", testGoSDKFakeHostRunSnapshot)
 						t.Run("entrypoint-alias", testGoSDKEntrypointAlias)
 						t.Run("output-failures", testGoSDKOutputFailures)
