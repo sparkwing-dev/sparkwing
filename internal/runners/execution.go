@@ -1,6 +1,7 @@
 package runners
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -9,9 +10,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
-func runInputFor(unit controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
+// RunInputForAward captures sealed inputs and granted identity without assigning execution authority.
+func RunInputForAward(unit controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
 	request := unit.Request
-	if request.RunID != unit.RunID || request.Request.Team == "" || request.Hash == "" {
+	if unit.RunID == "" || request.RunID == "" || request.Request.Team == "" || request.Hash == "" {
 		return nodehost.RunInput{}, errors.New("runner award is missing its sealed request")
 	}
 	input := nodehost.RunInput{RunID: unit.RunID, RequestHash: string(request.Hash), GrantedRunner: unit.Runner}
@@ -22,7 +24,7 @@ func runInputFor(unit controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
 		return nodehost.RunInput{}, err
 	}
 	if accepted := unit.Accepted; accepted != nil {
-		if accepted.Spec.Request.RunID != unit.RunID || accepted.Spec.Request.Request.Team != request.Request.Team || accepted.Spec.Request.Hash != request.Hash || accepted.Spec.Hash == "" || accepted.PlanHash == "" {
+		if accepted.Spec.Request.RunID != request.RunID || accepted.Spec.Request.Request.Team != request.Request.Team || accepted.Spec.Request.Hash != request.Hash || accepted.Spec.Hash == "" || accepted.PlanHash == "" {
 			return nodehost.RunInput{}, errors.New("runner award has a different accepted run or request seal")
 		}
 		value, err := acceptedInput(unit.RunID, *accepted)
@@ -39,9 +41,11 @@ func acceptedInput(runID string, accepted controllerwire.PlanAccepted) (nodehost
 	var err error
 	input.Spec, err = json.Marshal(accepted.Spec)
 	if err == nil {
-		err = json.Unmarshal(accepted.Plan, &input.Plan)
+		decoder := json.NewDecoder(bytes.NewReader(accepted.Plan))
+		decoder.DisallowUnknownFields()
+		err = decoder.Decode(&input.Plan)
 	}
-	if err != nil {
+	if err != nil || !json.Valid(accepted.Plan) {
 		return nodehost.AcceptedRun{}, errors.New("runner award requires the accepted spec and plan")
 	}
 	return input, nil

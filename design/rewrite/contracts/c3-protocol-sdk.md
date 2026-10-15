@@ -88,8 +88,10 @@ native hosts. Jobs use `nodehost.NewNodeInput` with the persisted row and captur
 runner. The shared hosts acquire the selected engine and own the only renewal
 keeper. No prepared input or outer runner keeper remains.
 
-For trigger and here awards, the runner constructs the first seal and accepted
-second seal from the captured award. Owner authority comes from the authenticated
+For trigger and here awards, `runners.RunInputForAward` captures the request
+body, accepted plan and granted runner before service binding. The CLI here path
+uses that constructor too. A retry keeps the original request seal while its
+execution run ID comes from the current award. Owner authority comes from the authenticated
 principal and persisted owner lease. Service construction cannot replace either
 seal. `NewManagedRunner` keeps claimant and awarded transports separate.
 The production remote native-store adapter and its authenticated-principal binding,
@@ -485,9 +487,8 @@ The unfenced `RunNodeCommand` entry point and its environment-derived claim
 reader are removed. Runners and launcher bootstrap must supply the authenticated
 award and `ClaimStore`, source-access and executor adapters to `ClaimedNodeHost`.
 The older run-host caller still uses its dispatched-heartbeat helper until its
-own lifecycle cut. The old Job builders in `internal/runners/k8s` and
-`internal/runners/launcher` still emit `run-node` and need the authenticated
-bootstrap cut owned by the runner area.
+own lifecycle cut. The old `internal/runners/k8s` builder is deleted. The shared launcher Job
+builder passes a private, one-use award through authenticated bootstrap exchange.
 
 The unused launcher execution function, its buffered attempt reporter and cache
 grant renewal loop are removed. `HostNode` and the claimed-mode pod branch are

@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -66,6 +67,7 @@ func hereAward(t *testing.T) controllerwire.ClaimedUnit {
 
 func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 	award := hereAward(t)
+	award.Runner = nodeproto.RunnerIdentity{Name: "server-runner", Type: "runner", Labels: []string{"trusted"}}
 	plan := json.RawMessage(`{"jobs":[]}`)
 	spec, err := runspec.SealSpec(runspec.SealInput{
 		Request: award.Request, Plan: plan, Now: time.Unix(2, 0),
@@ -102,9 +104,10 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 					if err != nil || token != award.Capability || !reflect.DeepEqual(got, award) {
 						t.Fatal("binder lost server-granted identity or authority")
 					}
-					return hereHostSession{close: func() error { closed++; return nil }, host: hereTestHost(func(ctx context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+					got.Runner.Labels[0] = "changed-by-binding"
+					return hereHostSession{input: nodehost.RunInput{GrantedRunner: nodeproto.RunnerIdentity{Name: "forged", Type: "cloud"}}, close: func() error { closed++; return nil }, host: hereTestHost(func(ctx context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						calls = append(calls, "host")
-						var request runspec.SealedRequest
+						var request runspec.Request
 						var accepted runspec.Spec
 						if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
 							t.Fatal(err)
@@ -115,7 +118,7 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 						if err := json.Unmarshal(input.Accepted.Spec, &accepted); err != nil {
 							t.Fatal(err)
 						}
-						if input.RunID != "retry-run" || input.RequestHash != string(award.Request.Hash) || !reflect.DeepEqual(request, award.Request) || !reflect.DeepEqual(accepted, spec) || input.Accepted.RunID != "retry-run" || input.Accepted.PlanHash != string(spec.PlanHash) {
+						if input.RunID != "retry-run" || input.RequestHash != string(award.Request.Hash) || !reflect.DeepEqual(request, award.Request.Request) || !reflect.DeepEqual(input.GrantedRunner, nodeproto.RunnerIdentity{Name: "server-runner", Type: "runner", Labels: []string{"trusted"}}) || !reflect.DeepEqual(accepted, spec) || input.Accepted.RunID != "retry-run" || input.Accepted.PlanHash != string(spec.PlanHash) {
 							t.Fatal("resume changed the request or accepted seal")
 						}
 						return nodehost.RunCompletion{Outcome: "success"}, nil

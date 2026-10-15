@@ -24,12 +24,16 @@ type Hosting struct {
 }
 
 // Host confirms live authority before binding services; native hosts own acquisition and renewal.
-func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (result error) {
-	if err := validateHostedAward(unit); err != nil {
-		return err
-	}
+func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) error {
 	if strings.TrimSpace(h.ControllerURL) == "" || h.Bind == nil {
 		return errors.New("runner host requires a controller URL and native service binding")
+	}
+	return hostAward(ctx, unit, h.bind)
+}
+
+func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(context.Context, controllerwire.ClaimedUnit, controllerwire.ClaimedUnit, nodehost.RunInput) (NativeServices, storeInputs, error)) (result error) {
+	if err := validateHostedAward(unit); err != nil {
+		return err
 	}
 	data, err := json.Marshal(unit)
 	if err != nil {
@@ -39,7 +43,7 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if err := json.Unmarshal(data, &captured); err != nil {
 		return err
 	}
-	input, err := runInputFor(captured)
+	input, err := RunInputForAward(captured)
 	if err != nil {
 		return err
 	}
@@ -58,21 +62,7 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
-	controller, err := h.controller(captured.Capability)
-	if err != nil {
-		return err
-	}
-	beat, err := controller.Renew(ctx, captured.UnitID, controllerwire.RenewalRequest{})
-	if err != nil {
-		return err
-	}
-	if beat.CancelRequested {
-		return &lease.CancelError{Reason: beat.CancelReason}
-	}
-	if err := context.Cause(ctx); err != nil {
-		return err
-	}
-	services, principal, err := h.Bind(ctx, unit, controller)
+	services, inputs, err := bind(ctx, captured, unit, input)
 	defer func() {
 		if services.Close != nil {
 			result = errors.Join(result, services.Close())
@@ -84,28 +74,46 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
-	if !principalMatches(captured, principal) || services.Config.Store == nil {
-		return awardMismatch()
-	}
-	inputs, err := nativeInputs(ctx, services.Config.Store, captured, principal, input)
-	if err != nil {
-		return err
-	}
-	return hostNative(ctx, captured, services, inputs)
-}
-
-func hostNative(ctx context.Context, unit controllerwire.ClaimedUnit, services NativeServices, inputs storeInputs) error {
 	owner, claimed, _, err := nodehost.NewNativeHost(services.Config)
 	if err != nil {
 		return err
 	}
-	if unit.Unit == capability.UnitNode {
+	if captured.Unit == capability.UnitNode {
 		inputs.node.Storage = services.Storage
 		return claimed.Execute(ctx, inputs.node)
 	}
 	inputs.run.Storage = services.Storage
 	_, err = owner.Run(ctx, inputs.run)
 	return err
+}
+
+func (h Hosting) bind(ctx context.Context, unit, original controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {
+	controller, err := h.controller(unit.Capability)
+	if err != nil {
+		return NativeServices{}, storeInputs{}, err
+	}
+	beat, err := controller.Renew(ctx, unit.UnitID, controllerwire.RenewalRequest{})
+	if err != nil {
+		return NativeServices{}, storeInputs{}, err
+	}
+	if beat.CancelRequested {
+		return NativeServices{}, storeInputs{}, &lease.CancelError{Reason: beat.CancelReason}
+	}
+	if err := context.Cause(ctx); err != nil {
+		return NativeServices{}, storeInputs{}, err
+	}
+	services, principal, err := h.Bind(ctx, original, controller)
+	if err == nil {
+		err = context.Cause(ctx)
+	}
+	if err != nil {
+		return services, storeInputs{}, err
+	}
+	if !principalMatches(unit, principal) || services.Config.Store == nil {
+		return services, storeInputs{}, awardMismatch()
+	}
+	inputs, err := nativeInputs(ctx, services.Config.Store, unit, principal, input)
+	return services, inputs, err
 }
 
 func (h Hosting) controller(bearer string) (controllerwire.Controller, error) {
@@ -143,7 +151,7 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 		if unit.Purpose != capability.PurposeWork || binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
 			return errors.New("runner award has an invalid job or attempt binding")
 		}
-		if unit.Engine == nil || unit.Accepted == nil || unit.Request.RunID != unit.RunID || unit.Request.Request.Team == "" || unit.Accepted.Spec.Request.RunID != unit.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
+		if unit.Engine == nil || unit.Accepted == nil || unit.Request.RunID == "" || unit.Request.Request.Team == "" || unit.Accepted.Spec.Request.RunID != unit.Request.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
 			return errors.New("runner award is missing its matching accepted engine and run")
 		}
 		if unit.Runner.Name == "" || unit.Runner.Type == "" {

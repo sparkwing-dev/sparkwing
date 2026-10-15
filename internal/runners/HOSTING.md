@@ -10,7 +10,8 @@ and native service binder. The binder returns `NativeServices` with an authentic
 `NativeHostStore` and the current C2 principal. It must derive that principal from
 the authenticated transport. Decoding the opaque bearer does not establish authority.
 `Hosting` confirms renewal before binding and captures the wire award before callbacks.
-Both placements use the same persisted-input checks and `nodehost.NewNativeHost`.
+Both placements share award capture, deadlines, partial-service cleanup,
+persisted-input checks and `nodehost.NewNativeHost`.
 The native owner and claimed hosts own source acquisition and their only lease keeper.
 
 `RunnerCLI` serves the existing metrics address alongside its bound factory's
@@ -47,6 +48,10 @@ owner and claimed host own acquisition, lease renewal and joining. Services clos
 after those hosts return, including partial construction failures. Configured
 storage still needs fresh per-attempt bindings in the shared executor.
 
+`RunInputForAward` captures the request, accepted plan and granted runner for
+remote, embedded and CLI here hosting. The execution run ID can differ from the
+original request seal on retry. Persisted rows and authenticated claim bindings
+still name the execution run.
 `RunInput.SealedRequest` contains the captured `runspec.Request` body. Its hash
 and run ID are separate fields. `GrantedRunner` is the server-granted identity,
 with its own label slice. It reaches both planning and self-claimed work. A node's
@@ -57,7 +62,10 @@ identity before SDK execution.
 and through `Config.Open`. It runs real C2 claim authentication, shared controller
 issuance, the native owner and C1 completion before joining local workers. The remote-award and managed-runner variants use the same native owner, with an
 in-process controller transport and tenant standing in for the remote store adapter.
-They retain awarded labels across service-binding mutation. Enrollment, version
+They retain awarded labels and seals across service-binding mutation. The
+remote-renewal case blocks acquisition until the shared native keeper renews
+again. The remote-cancellation case leaves the live claim unfinished and joins
+its service cleanup. Enrollment, version
 policy, source entry and unused process services are fixtures. `FuzzStoreQueueClaimAuthorityW8` checks named and
 ordered claims against revoked, changed and narrowed credentials, duplicate and
 unsupported kinds, and omitted selection. Refusals leave the queue unclaimed.

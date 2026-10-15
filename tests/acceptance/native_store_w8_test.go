@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,14 +95,14 @@ func (nativeStoreEnginesW8) Ensure(context.Context, engine.Identity, releaseasse
 }
 
 func TestNativeStoreOwnerW8(t *testing.T) {
-	for _, mode := range []string{"embedded_queue", "award_snapshot", "remote_award", "managed_remote", "local_controller"} {
+	for _, mode := range []string{"embedded_queue", "award_snapshot", "remote_award", "managed_remote", "local_controller", "remote_renewal", "remote_cancel"} {
 		t.Run(mode, func(t *testing.T) { checkNativeStoreOwnerW8(t, mode) })
 	}
 }
 
 func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	t.Helper()
-	direct := mode == "award_snapshot" || mode == "remote_award"
+	direct := mode == "award_snapshot" || mode == "remote_award" || mode == "remote_renewal" || mode == "remote_cancel"
 	var server *controller.EngineController
 	var root capability.Issued
 	var s *store.Store
@@ -115,6 +116,10 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	}
 	expected := unit.Runner
 	expected.Labels = append([]string{}, unit.Runner.Labels...)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	renewed := make(chan struct{})
+	var renewals atomic.Int64
 	bound, acquired, closed := false, false, false
 	done := make(chan struct{})
 	bind := func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
@@ -129,6 +134,8 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 		if direct {
 			unit.Runner.Labels[0] = "ambient"
+			unit.Accepted.Spec.Hash = "changed-by-binding"
+			unit.Accepted.Plan[0] = '['
 		}
 		cfg := nodehost.NativeHostConfig{
 			Lease: lease.Keeper{Lease: time.Minute, Interval: time.Second}, Source: source.Options{Engines: nativeStoreEnginesW8{}},
@@ -150,6 +157,17 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				Wait: func(context.Context, store.RunSnapshot) error { return errors.New("unexpected state wait") },
 				Acquire: func(ctx context.Context, input nodehost.RunInput) (*source.Entry, error) {
 					acquired = true
+					if mode == "remote_renewal" {
+						select {
+						case <-renewed:
+						case <-ctx.Done():
+							return nil, context.Cause(ctx)
+						}
+					} else if mode == "remote_cancel" {
+						cancel()
+						<-ctx.Done()
+						return nil, context.Cause(ctx)
+					}
 					if direct && !reflect.DeepEqual(input.GrantedRunner, expected) || input.GrantedRunner.Name != "runner" || input.Owner.Authority != binding.Principal.Authority || input.Owner.Owner.Generation != binding.Principal.Capability.Binding.Generation {
 						t.Error("native owner received a changed runner or fence")
 					}
@@ -164,10 +182,11 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				},
 			},
 		}
+		if mode == "remote_renewal" {
+			cfg.Lease.Interval = time.Millisecond
+		}
 		return runners.NativeServices{Config: cfg, Close: func() error { closed = true; close(done); return authorities.Close() }}, nil
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
 	var executionErr error
 	remote := runners.Hosting{ControllerURL: "https://controller.example", NewController: cloudStoreClientW8(t, server), Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, control controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
 		principal := control.(*storedRunnerW8).authorized.Principal
@@ -177,9 +196,16 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		}
 		services, err := bind(ctx, runners.StoreBinding{Tenant: tenant, Principal: principal})
 		services.Config.Store = tenant
+		if mode == "remote_renewal" {
+			services.Config.Store = nativeRenewalStoreW8{NativeHostStore: tenant, renew: func() {
+				if renewals.Add(1) == 2 {
+					close(renewed)
+				}
+			}}
+		}
 		return services, principal, err
 	}}
-	if mode == "remote_award" {
+	if mode == "remote_award" || mode == "remote_renewal" || mode == "remote_cancel" {
 		executionErr = remote.Host(ctx, unit)
 	} else if mode == "managed_remote" {
 		runner, err := runners.NewManagedRunner(ctx, runners.RuntimeConfig{
@@ -247,7 +273,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			t.Fatalf("owner store after execution: terminal=%t error=%v", terminal, err)
 		}
 	}
-	if executionErr != nil {
+	if executionErr != nil && !(mode == "remote_cancel" && errors.Is(executionErr, context.Canceled)) {
 		t.Fatal(executionErr)
 	}
 
@@ -256,9 +282,28 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	run, err := tenant.ReadRun(t.Context(), "run")
+	if mode == "remote_cancel" {
+		if err != nil || !errors.Is(executionErr, context.Canceled) || run.Owner == nil || run.Owner.Holder != unit.Binding.Holder || run.Owner.Generation != unit.Binding.Generation || run.State == store.RunSuccess || run.State == store.RunFailed || run.State == store.RunCancelled || !bound || !acquired || !closed {
+			t.Fatalf("cancelled acquisition finished or abandoned its claim: state=%s error=%v host error=%v", run.State, err, executionErr)
+		}
+		return
+	}
 	if err != nil || run.State != store.RunSuccess || !bound || !acquired || !closed {
 		t.Fatalf("state=%s bound=%v acquired=%v closed=%v error=%v", run.State, bound, acquired, closed, err)
 	}
+}
+
+type nativeRenewalStoreW8 struct {
+	nodehost.NativeHostStore
+	renew func()
+}
+
+func (s nativeRenewalStoreW8) RenewOwner(ctx context.Context, actor store.Actor) (store.LeaseBeat, error) {
+	beat, err := s.NativeHostStore.RenewOwner(ctx, actor)
+	if err == nil {
+		s.renew()
+	}
+	return beat, err
 }
 
 func requireLocalCancellationW8(t *testing.T, err error) {

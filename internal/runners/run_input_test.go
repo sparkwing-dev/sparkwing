@@ -2,6 +2,7 @@ package runners
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -68,7 +69,7 @@ func TestNativeInputsUsePersistedAuthority(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			unit, p, state := hostingStateFor(t, kind)
-			input, err := runInputFor(unit)
+			input, err := RunInputForAward(unit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,6 +86,69 @@ func TestNativeInputsUsePersistedAuthority(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunInputForAwardRejectsMalformedPlan(t *testing.T) {
+	for _, body := range []string{`{"jobs":[],"unknown":true}`, `{"jobs":[]} {}`, `{"jobs":`, `{"jobs":"invalid"}`} {
+		t.Run(body, func(t *testing.T) {
+			unit, _, _ := hostingStateFor(t, capability.UnitNode)
+			unit.Accepted.Plan = json.RawMessage(body)
+			if _, err := RunInputForAward(unit); err == nil {
+				t.Fatal("malformed acceptance reached host construction")
+			}
+		})
+	}
+}
+
+func FuzzRunInputForAwardCapturesRetrySeals(f *testing.F) {
+	f.Add([]byte("original"), false)
+	f.Add([]byte("retry"), true)
+	f.Fuzz(func(t *testing.T, data []byte, node bool) {
+		replacement := "changed-" + hex.EncodeToString(data)
+		kind := capability.UnitTrigger
+		if node {
+			kind = capability.UnitNode
+		}
+		unit, principal, state := hostingStateFor(t, kind)
+		unit.Request.RunID = "source-" + hex.EncodeToString(data)
+		state.snapshot.Run.Request = unit.Request
+		unit.Runner.Labels = []string{"granted"}
+		if node {
+			unit.Accepted.Spec.Request = unit.Request
+			state.snapshot.Run.Spec = &unit.Accepted.Spec
+		}
+		if err := validateHostedAward(unit); err != nil {
+			t.Fatal(err)
+		}
+		input, err := RunInputForAward(unit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := nativeInputs(t.Context(), state, unit, principal, input); err != nil {
+			t.Fatal(err)
+		}
+		if node && input.Accepted.RunID != unit.RunID {
+			t.Fatal("accepted execution retained the source run ID")
+		}
+		var body runspec.Request
+		if err := json.Unmarshal(input.SealedRequest, &body); err != nil || !reflect.DeepEqual(body, unit.Request.Request) || input.RunID != unit.RunID {
+			t.Fatalf("input lost execution identity or sealed request: %v", err)
+		}
+		before, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unit.Request.Request.RequestedArgs["arg"] = replacement
+		unit.Runner.Labels[0] = replacement
+		if node {
+			unit.Accepted.Spec.Request.Hash = runspec.Hash(replacement)
+			unit.Accepted.Plan[0] = '['
+		}
+		after, err := json.Marshal(input)
+		if err != nil || string(before) != string(after) || input.Owner != (store.Actor{}) {
+			t.Fatalf("captured inputs changed or acquired authority: %v", err)
+		}
+	})
 }
 
 func FuzzNativeInputsRejectChangedAwards(f *testing.F) {
@@ -118,7 +182,7 @@ func FuzzNativeInputsRejectChangedAwards(f *testing.F) {
 		case 9:
 			unit.JobID += value
 		}
-		input, err := runInputFor(unit)
+		input, err := RunInputForAward(unit)
 		if err == nil {
 			_, err = nativeInputs(t.Context(), state, unit, p, input)
 		}

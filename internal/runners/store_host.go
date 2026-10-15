@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -35,46 +34,21 @@ type StoreHosting struct {
 }
 
 // Host authenticates before binding services; shared hosts own acquisition, renewal and joining.
-func (h StoreHosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (result error) {
+func (h StoreHosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) error {
 	if h.Store == nil || h.Bind == nil {
 		return errors.New("store hosting requires the owned store and native services")
 	}
-	if err := validateHostedAward(unit); err != nil {
-		return err
-	}
-	input, err := runInputFor(unit)
-	if err != nil {
-		return err
-	}
-	deadline := unit.Binding.Deadline
-	for _, bound := range []*time.Time{unit.OwnerDeadline, unit.ParentCapabilityExpiry} {
-		if bound != nil && (deadline == nil || bound.Before(*deadline)) {
-			deadline = bound
-		}
-	}
-	if deadline != nil {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, *deadline)
-		defer cancel()
-	}
+	return hostAward(ctx, unit, h.bind)
+}
+
+func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {
 	inputs, err := h.inputs(ctx, unit, input)
 	if err != nil {
-		return err
+		return NativeServices{}, inputs, err
 	}
 	services, err := h.Bind(ctx, inputs.binding)
-	defer func() {
-		if services.Close != nil {
-			result = errors.Join(result, services.Close())
-		}
-	}()
-	if err != nil {
-		return err
-	}
-	if err := context.Cause(ctx); err != nil {
-		return err
-	}
 	services.Config.Store = inputs.binding.Tenant
-	return hostNative(ctx, unit, services, inputs)
+	return services, inputs, err
 }
 
 type storeInputs struct {

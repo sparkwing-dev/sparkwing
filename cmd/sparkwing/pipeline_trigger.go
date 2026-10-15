@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -96,7 +97,9 @@ func runPipelineTrigger(args []string) error {
 		return err
 	}
 	if flags.runner == hereRunnerFlag {
-		return hostAndFollowHere(prof, flags.pipeline, resp)
+		return handoffHereRun(context.Background(), client.EngineOptions{
+			URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil },
+		}, controllerwire.CreateRunResponse{RunID: resp.RunID, HereBearer: resp.RunnerToken}, defaultHereDependencies(flags.output))
 	}
 
 	if flags.detach {
