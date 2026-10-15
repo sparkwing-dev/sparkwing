@@ -1,6 +1,7 @@
 package unitfile
 
 import (
+	"encoding/base64"
 	"slices"
 	"strings"
 	"testing"
@@ -33,4 +34,32 @@ func TestPlistArgumentsRefuseAmbiguousAndIncompleteDocuments(t *testing.T) {
 			t.Fatalf("accepted ambiguous native command: %#v", got)
 		}
 	}
+}
+
+func FuzzPlistArguments(f *testing.F) {
+	f.Add([]byte("owner's <config> & paths"))
+	f.Add([]byte{0, 0xff, '\n'})
+	f.Fuzz(func(t *testing.T, value []byte) {
+		argument := base64.StdEncoding.EncodeToString(value) + "<&>\"'\n"
+		args := []string{"/bin with space/sparkwing", "--config", argument, ""}
+		var command strings.Builder
+		command.WriteString(`<key>ProgramArguments</key><array>`)
+		for _, arg := range args {
+			command.WriteString("<string>" + XMLText(arg) + "</string>")
+		}
+		command.WriteString(`</array>`)
+		body := "<plist><dict><key>Label</key><string>runner</string>" + command.String() + "</dict></plist>"
+		if got := PlistArguments([]byte(body)); !slices.Equal(got, args) {
+			t.Fatalf("native arguments changed: %#v != %#v", got, args)
+		}
+		for _, malformed := range []string{
+			"<plist><dict>" + command.String() + command.String() + "</dict></plist>",
+			"<plist><dict>" + command.String(),
+			body + body,
+		} {
+			if got := PlistArguments([]byte(malformed)); got != nil {
+				t.Fatalf("ambiguous or incomplete command accepted: %#v", got)
+			}
+		}
+	})
 }

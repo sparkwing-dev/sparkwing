@@ -607,20 +607,10 @@ func (cl *Client) Draining() bool { return cl.ack.Draining }
 
 func (cl *Client) DaemonVersion() string { return cl.ack.BinaryVersion }
 
-// DaemonStoreSchema returns the runs-store schema version the connected
-// daemon's binary understands, or 0 when the daemon predates the field and
-// the skew cannot be detected before it reads the store.
-func (cl *Client) DaemonStoreSchema() int { return cl.ack.StoreSchemaVersion }
-
 // APIReady reports whether the connected daemon serves the controller HTTP
 // API on its api.sock. A daemon that predates the field advertises nothing,
 // which reads as false.
 func (cl *Client) APIReady() bool { return cl.ack.APIReady != nil && *cl.ack.APIReady }
-
-// APIAdvertised reports whether the connected daemon answered about its
-// controller API socket at all. A daemon that predates the field advertises
-// nothing, which is not the same as advertising that the socket is unbound.
-func (cl *Client) APIAdvertised() bool { return cl.ack.APIReady != nil }
 
 // APIError reports why the connected daemon's API socket is unbound, empty
 // when it is bound or when the daemon predates the field.

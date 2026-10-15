@@ -59,6 +59,11 @@ exact verified engine and calls its `InstallSDK`; it has no second Go/npm
 installer. The old CLI installer and its duplicate tests are removed. Shared
 engine tests own dependency installation and version checks.
 
+Selected-engine Go installation hashes the captured build environment with
+`GOWORK=off` through the shared binary-cache key owner. A workspace disabled for
+compilation cannot add graph inputs or make an otherwise usable cache entry fail.
+The generated workspace-mutation test covers this boundary.
+
 Go installation must preserve sparks overlays, populate missing checksums before
 cache hashing and hold or reacquire its executable lease through execution.
 The shared installer and source-host composition still need that integration

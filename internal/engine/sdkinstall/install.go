@@ -73,7 +73,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 func installGoSDK(ctx context.Context, dir string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) (command []string, result error) {
 	// safety: workspace and modfile overrides must not replace the SDK that selected this engine.
 	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
-	key, err := bincache.PipelineCacheKey(dir)
+	key, _, err := bincache.ExplainCacheKey(dir, environment)
 	if err != nil {
 		return nil, err
 	}

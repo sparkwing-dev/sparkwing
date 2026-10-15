@@ -54,6 +54,9 @@ A job renewal cannot report execution before its start transition commits.
 `Inspect` reads the executable and arguments from the actual registration.
 It uses the runner's shared parser to identify the effective config, including
 repeated flags and values that resemble flags.
+Plist inspection decodes one dictionary and a string-only `ProgramArguments`
+array. Duplicate commands, incomplete XML and extra documents are refused.
+`FuzzPlistArguments` covers literal argument recovery and those refusals.
 `Refresh` replaces the executable in the installed command. It preserves all
 arguments, including repository overrides and repeated config flags, and keeps
 the unit's environment, log paths and native policy. Inspection, refresh and

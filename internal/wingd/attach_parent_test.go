@@ -52,7 +52,7 @@ func TestChildAttachByParentNodeTakesItsCoresAndTheChainsGroups(t *testing.T) {
 func watchCancel(lease *client.Lease) <-chan string {
 	got := make(chan string, 2)
 	go func() {
-		_ = lease.WatchOwnership(func(ev wingwire.Evicted) { got <- "evicted " + ev.Key }, func(c wingwire.Cancel) { got <- "cancelled " + c.Reason }, nil)
+		lease.WatchControl(func(ev wingwire.Evicted) { got <- "evicted " + ev.Key }, func(c wingwire.Cancel) { got <- "cancelled " + c.Reason })
 	}()
 	return got
 }

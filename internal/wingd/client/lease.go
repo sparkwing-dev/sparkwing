@@ -162,20 +162,12 @@ func (l *Lease) Watch(onEvicted func(wingwire.Evicted)) {
 // base once a frame arrives, which is the only proof the watch is working
 // again.
 func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) {
-	if err := l.watchLease(onEvicted, onCancel, nil); err != nil {
+	if err := l.watchLease(onEvicted, onCancel); err != nil {
 		l.cl.opts.logf("lease %s: eviction watch ended: %v", l.RunID, err)
 	}
 }
 
-// WatchOwnership keeps the lease attached across daemon restarts and reports
-// each recovered connection. It must remain the lease connection's only reader.
-// It returns [ErrReattachRejected] when a successor no longer has the lease, or
-// the recovery error that otherwise ended the watch.
-func (l *Lease) WatchOwnership(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel), onReattached func()) error {
-	return l.watchLease(onEvicted, onCancel, onReattached)
-}
-
-func (l *Lease) watchLease(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel), onReattached func()) error {
+func (l *Lease) watchLease(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
 	retry := newRetry("lease watch", 0)
 	for {
 		msg, err := l.cl.dec.read()
@@ -188,9 +180,6 @@ func (l *Lease) watchLease(onEvicted func(wingwire.Evicted), onCancel func(wingw
 			recovered, recoverErr := l.recoverWatch()
 			if !recovered {
 				return recoverErr
-			}
-			if onReattached != nil {
-				onReattached()
 			}
 			continue
 		}
