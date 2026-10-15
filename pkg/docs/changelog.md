@@ -76,6 +76,11 @@ unlock.
   Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 ### Fixed
 
+- **controller:** Preserve manual ref namespaces in data record queries and responses. A record written under `manual:<ref>` can be selected with the same ref, and lookups keep verified and manual read grants separate.
+
+- **controller:** Read committed logs through the configured data backend and retain the claim's holder fence
+  Native claim and account-session reads share the egress meter. Log streams use `Cache-Control: no-store`.
+
 - **repos update:** Honor checkout selection, explicit previews and fleet confirmation
   Updates apply to the current checkout by default. `--dry-run` previews it;
   `--all-repos --yes` applies across the fleet. A sibling directory whose name

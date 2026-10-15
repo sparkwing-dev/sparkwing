@@ -18,6 +18,12 @@ type RunControlWriter interface {
 	ResolveAuthorizedApproval(context.Context, capability.Authorized, controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
 }
 
+// DebugPauseResumer closes an authorized job pause in its committing transaction.
+type DebugPauseResumer interface {
+	Team() store.Team
+	ResumeAuthorizedDebugPause(context.Context, capability.Authorized) error
+}
+
 // WithRunControlWriter supplies tenant run-control transactions before Handler is constructed.
 func (s *Server) WithRunControlWriter(resolve func(context.Context, store.Team) (RunControlWriter, error)) *Server {
 	s.resolveRunControlWriter = resolve
@@ -52,10 +58,41 @@ func (s *Server) runControlEndpoints() []Endpoint {
 		engine = &EngineController{Store: s.store}
 	}
 	return []Endpoint{
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/resume", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleResumeDebugPause},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/debug-pauses", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleCreateDebugPause},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/approvals/{job}", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleResolveApproval},
 	}
 }
+
+func (s *Server) handleResumeDebugPause(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if err := decodeEngineRequest(r, &struct{}{}); err != nil {
+		return err
+	}
+	var writer DebugPauseResumer
+	if s.resolveRunControlWriter != nil {
+		control, err := s.runControlWriter(r, a)
+		if err != nil {
+			return err
+		}
+		writer, _ = control.(DebugPauseResumer)
+	} else {
+		tenant, err := s.reportingTenant(r, a)
+		if err != nil {
+			return err
+		}
+		writer = tenant
+	}
+	if writer == nil || string(writer.Team()) != a.Target.Team {
+		return missingEndpointPolicy()
+	}
+	if err := writer.ResumeAuthorizedDebugPause(r.Context(), a); err != nil {
+		return engineLookupError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+var _ DebugPauseResumer = (*store.Tenant)(nil)
 
 func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body struct {

@@ -68,10 +68,14 @@ func decodeClaimRequest(r *http.Request) (controllerwire.ClaimRequest, error) {
 		return body, err
 	}
 	if run := r.PathValue("run"); run != "" {
-		if body.RunID != "" && body.RunID != run || body.JobID != "" || len(body.Kinds) != 1 || body.Kinds[0] != capability.UnitTrigger {
-			return body, invalidEngineBody("named trigger claim must select its path run and trigger kind")
+		kind, job := capability.UnitTrigger, r.PathValue("job")
+		if job != "" {
+			kind = capability.UnitNode
 		}
-		body.RunID = run
+		if body.RunID != "" && body.RunID != run || body.JobID != "" && body.JobID != job || len(body.Kinds) != 1 || body.Kinds[0] != kind {
+			return body, invalidEngineBody("named claim must select its path and unit kind")
+		}
+		body.RunID, body.JobID = run, job
 	}
 	if _, err := engineClaimTarget(body); err != nil {
 		return body, err

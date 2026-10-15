@@ -61,6 +61,9 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 		prefix = capability.NodeHostPrefix
 	}
 	raw := prefix + base64.RawURLEncoding.EncodeToString(secret[:])
+	if request.Provision != nil && request.Provision.Seed != "" {
+		raw = request.Provision.Seed
+	}
 	c.Prefix = raw[:16]
 	c.Digest = sha256.Sum256([]byte(raw))
 	c.IssuedAt = tx.now()

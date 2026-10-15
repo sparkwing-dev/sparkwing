@@ -54,7 +54,7 @@ func TestBlobPersistencePublishedAttemptDataSelectors(t *testing.T) {
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {
 		t.Fatal(err)
 	}
-	authorized := capability.Authorized{Principal: capability.Principal{Capability: publisher}}
+	authorized := dataAccessAuthority(t, s, publisher.Prefix)
 	for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataRecord, capability.DataUpload, capability.DataCommit} {
 		for _, selector := range []string{"own", "other_job", "foreign_run", "attempt", "generation", "missing"} {
 			t.Run(string(operation)+"/"+selector, func(t *testing.T) {

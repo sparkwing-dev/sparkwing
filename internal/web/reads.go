@@ -58,7 +58,7 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
 	out, err := streamhttp.NewWriter(w, 30*time.Second)
 	if err != nil {

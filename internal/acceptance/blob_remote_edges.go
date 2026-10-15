@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"path/filepath"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"

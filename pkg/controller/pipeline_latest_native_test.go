@@ -1,0 +1,48 @@
+package controller
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+func TestPipelineLatestHTTPUsesNativeDeclaredJobReference(t *testing.T) {
+	e, handler, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`,
+		[]byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output"}]}`))
+	now := time.Now().UTC()
+	request, err := runspec.SealRequest(runspec.Request{
+		Version: 1, Team: "a", Pipeline: "producer", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
+		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:1"}},
+		RequestedArgs: map[string]string{"secret": "never-expose-secret", "public": "visible"},
+		SecretArgs:    runspec.Optional[[]string]{Set: true, Value: []string{"secret"}},
+	}, runspec.IntakeFacts{RunID: "producer-run", AdmittedAt: now.Add(-time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,started_at,finished_at,log_retention_class,log_retention_days) VALUES ('a','producer-run',2,'producer','success',?,?,?,'gh:1','host','execute',?,'account',?,?,?,'r30',30)`,
+		encoded, request.Hash, request.AdmittedAt.UnixNano(), []byte(`[]`), request.AdmittedAt.UnixNano(), request.AdmittedAt.UnixNano(), now.Add(-time.Minute).UnixNano())
+	response := engineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
+	var award controllerwire.ClaimResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
+		t.Fatalf("claim: %v %s", err, response.Body)
+	}
+	response = engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/producer/latest?max_age=2h", "", 200)
+	var latest store.Run
+	if err := json.Unmarshal(response.Body.Bytes(), &latest); err != nil || latest.ID != "producer-run" || latest.Args["secret"] != runspec.RedactedArgValue || latest.Args["public"] != "visible" || strings.Contains(response.Body.String(), "never-expose-secret") {
+		t.Fatalf("latest: %v %+v %s", err, latest, response.Body)
+	}
+	engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/undeclared/latest", "", 403)
+	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job"}`))
+	engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/producer/latest", "", 403)
+}
