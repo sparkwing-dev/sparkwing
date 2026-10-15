@@ -57,7 +57,7 @@ func newRunnerClaimFixture(t *testing.T) runnerClaimFixture {
 			t.Fatal(err)
 		}
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).Handler())
+	srv := httptest.NewServer(controller.New(st, nil).WithSecretsCipher(testCipher(t)).Handler())
 	t.Cleanup(srv.Close)
 	return runnerClaimFixture{st: st, url: srv.URL, runner: runner}
 }

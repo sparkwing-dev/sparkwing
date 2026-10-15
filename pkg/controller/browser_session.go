@@ -160,42 +160,6 @@ type browserSession struct {
 	csrfToken string
 }
 
-type browserSessionKey struct{}
-
-func withBrowserSession(ctx context.Context, sess *browserSession) context.Context {
-	return context.WithValue(ctx, browserSessionKey{}, sess)
-}
-
-func browserSessionFrom(ctx context.Context) *browserSession {
-	sess, _ := ctx.Value(browserSessionKey{}).(*browserSession)
-	return sess
-}
-
-// safety: a cookie is the one credential a browser attaches on its own, so it
-// authenticates only a request that carries no Authorization of its own, and
-// it never authenticates a write that fails the CSRF check. Bearer, claim and
-// Session-header requests reach the authenticator exactly as they arrived.
-func (s *Server) cookieSessions(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		secure := s.cookiesSecure()
-		raw := sessionCookie(r, secure)
-		if raw == "" || r.Header.Get("Authorization") != "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		sess, err := s.resolveBrowserSession(r.Context(), raw)
-		if err != nil {
-			s.refuseBrowserSession(w, err, secure)
-			return
-		}
-		if unsafeMethod(r.Method) && !validAPIRequestCSRF(r, sess.csrfToken, secure) {
-			csrfError(w)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(withBrowserSession(r.Context(), sess)))
-	})
-}
-
 func (s *Server) resolveBrowserSession(ctx context.Context, raw string) (*browserSession, error) {
 	p, sess, err := s.lookupSession(ctx, raw, time.Now().UTC())
 	if err != nil {

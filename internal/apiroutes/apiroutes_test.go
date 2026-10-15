@@ -436,6 +436,24 @@ func TestParseControllerBusinessRegistrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{
+		"DELETE /api/v1/runs/{run}":                                   false,
+		"PATCH /api/v1/team":                                          false,
+		"DELETE /api/v1/team":                                         false,
+		"POST /api/v1/team/invitations":                               false,
+		"DELETE /api/v1/team/invitations/{invitation}":                false,
+		"PUT /api/v1/team/build-trust":                                false,
+		"DELETE /api/v1/team/github-app/installations/{installation}": false,
+		"PUT /api/v1/team/github-app/triggers":                        false,
+		"DELETE /api/v1/team/github-app/triggers":                     false,
+		"GET /api/v1/team/github-app/automation":                      false,
+		"PUT /api/v1/team/github-app/automation":                      false,
+		"DELETE /api/v1/team/github-app/automation":                   false,
+		"PUT /api/v1/team/github-app/extra-repos":                     false,
+		"POST /api/v1/team/billing/checkout":                          false,
+		"POST /api/v1/team/billing/card":                              false,
+		"POST /api/v1/team/billing/pay":                               false,
+		"PUT /api/v1/team/billing/budget":                             false,
+
 		"GET /api/v1/schedules":                   false,
 		"DELETE /api/v1/schedules/{schedule}":     false,
 		"POST /api/v1/schedules/{schedule}/run":   false,

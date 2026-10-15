@@ -55,7 +55,7 @@ func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	}
 
 	meter := egress.New(cfg)
-	ctrl := controller.New(st, nil).EnableAuthFromStore().WithEgressMeter(meter)
+	ctrl := controller.New(st, nil).WithEgressMeter(meter)
 	srv := httptest.NewServer(ctrl.Handler())
 	t.Cleanup(srv.Close)
 	return egressFixture{

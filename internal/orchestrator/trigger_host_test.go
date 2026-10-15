@@ -79,7 +79,7 @@ func newHostedTriggerWith(t *testing.T, args map[string]string, shape func(*stor
 		t.Fatal(err)
 	}
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().WithSecretsCipher(cipher).Handler())
+	srv := httptest.NewServer(controller.New(st, quiet).WithSecretsCipher(cipher).Handler())
 	t.Cleanup(srv.Close)
 	h.url = srv.URL
 	h.claimTrigger(t, "run-hosted", args, shape)

@@ -27,7 +27,7 @@ func TestFloodPolicy_ATeamsTokensShareOneCap(t *testing.T) {
 	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore().WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 2})
+	srv := controller.New(st, nil).WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 2})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	if err := st.AsOperator().CreateTeam(ctx, "acme"); err != nil {
@@ -82,7 +82,7 @@ func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
 	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore().WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
+	srv := controller.New(st, nil).WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	auth := map[store.Team]string{}

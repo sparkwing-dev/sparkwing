@@ -335,7 +335,6 @@ func TestPlacement_PresenceIsBoundToTheClaimingCredential(t *testing.T) {
 		t.Fatalf("CreateToken: %v", err)
 	}
 	srv := httptest.NewServer(controller.New(st, nil).
-		EnableAuthFromStore().
 		WithLocalFirstPlacement(nil, time.Minute, time.Minute).Handler())
 	defer srv.Close()
 	ctx := context.Background()

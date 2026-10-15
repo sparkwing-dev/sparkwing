@@ -161,8 +161,8 @@ func TestMetricsHTTPDeploymentPolicy(t *testing.T) {
 	}
 }
 
-func TestBusinessReadMountPreservesUnmigratedWriteBoundary(t *testing.T) {
-	s := New(newStoreForAuth(t), nil).EnableAuthFromStore()
+func TestBusinessWritesRequireVerifiedAuthority(t *testing.T) {
+	s := New(newStoreForAuth(t), nil)
 	for _, endpoint := range []struct{ method, path string }{{"POST", "/api/v1/team/invitations"}, {"DELETE", "/api/v1/team/invitations/invitation"}, {"PUT", "/api/v1/team/build-trust"}} {
 		r := httptest.NewRequest(endpoint.method, endpoint.path, strings.NewReader(`{}`))
 		r.Header.Set("Authorization", "Bearer invalid")

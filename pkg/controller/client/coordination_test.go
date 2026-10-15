@@ -48,7 +48,7 @@ func newCoordinationFixture(t *testing.T) coordinationFixture {
 		t.Fatalf("CreateToken runner: %v", err)
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()

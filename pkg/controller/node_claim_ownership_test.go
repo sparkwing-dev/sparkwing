@@ -61,7 +61,7 @@ func newOwnershipFixtureWith(t *testing.T, scopes []string, configure func(*cont
 		t.Fatalf("MarkNodeReady: %v", err)
 	}
 
-	c := controller.New(st, nil).EnableAuthFromStore()
+	c := controller.New(st, nil)
 	if configure != nil {
 		c = configure(c)
 	}

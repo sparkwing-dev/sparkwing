@@ -1733,3 +1733,30 @@ Embedded controllers must supply authority-bearing `ScheduleWriter` and
 are not substitutes. The default refuses a missing adapter. Team invitation,
 trust, GitHub App, billing and storage reads now require the shared capability
 policy; API metrics requires `operator.limits` or console authority.
+
+## Remaining team credential routes
+
+Team rename/deletion, invitation writes, build trust, run deletion, GitHub App
+configuration and billing writes use the shared capability policy. The legacy
+token-table verifier, positive and negative caches, here/Actions route fences,
+legacy tenant-route table and browser API middleware are removed. The Go
+`Authenticator`, `NewAuthenticator`, `WithAuthenticator`, `EnableAuthFromStore`,
+`AuthEnabled` and controller `ScopesForRole` APIs are removed. Constructing a
+controller installs its policy boundary. Use `WithAuthorization` for an
+embedded authority reader and binding checker. Use `store.ScopesForRole` for
+role projection.
+
+Embedded transaction adapters use `WithTeamWriter`, `WithGitHubAppWriter` and
+`WithBillingWriter`. Missing adapters return `policy_missing`. A write must
+recheck current authority and membership inside its committing transaction.
+No former raw write is a fallback.
+
+Invitation creation and billing checkout, card setup and pay-now require an
+`Idempotency-Key` header. Their JSON failures use the canonical error envelope.
+Billing refusal fields live under `error.details`, with their business code in
+`reason`. A completed billing-page replay returns the saved URL. The checkout
+service must preserve its `key` across retries. Card setup also receives the
+committed `setup_id`.
+
+The account dashboard no longer calls the removed self-service account-deletion
+route. Account deletion belongs to the deployment operator console.

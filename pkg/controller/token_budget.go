@@ -65,15 +65,6 @@ func (t *tokenBudget) values() TokenRequestBudget {
 	return t.policy
 }
 
-func (s *Server) tokenBudgeted(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.allowTokenRequest(w, r, s.floodKey(r, "")) {
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (s *Server) allowDataRequest(w http.ResponseWriter, r *http.Request, team store.Team, prefix string) bool {
 	principal := &Principal{Team: team, TokenPrefix: prefix}
 	// safety: this partial principal only keys the budget, so it stays out of

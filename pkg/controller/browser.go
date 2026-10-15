@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -75,23 +74,10 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	} else {
 		s.signInRoutes(browser)
 		browser.Handle("/", s.pageGate(pages))
-		top.Handle("/api/", s.browserAPI(api))
+		top.Handle("/api/", api)
 	}
 	top.Handle("/", s.pageOrAPI(api, s.logged(browser)))
 	return web.SecurityHeaders(d.HSTS, top)
-}
-
-func (s *Server) browserAPI(api http.Handler) http.Handler {
-	legacy := originguard.RefuseCrossSiteWrites(s.cookieSessions(api))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authed, router := s.routeProbe()
-		_, pattern := authed.Handler(r)
-		if routeRegistered(router, r) || pattern == "" {
-			api.ServeHTTP(w, r)
-			return
-		}
-		legacy.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) signInRoutes(mux *http.ServeMux) {

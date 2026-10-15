@@ -71,7 +71,7 @@ func newStorageFixture(t *testing.T, quotas ...store.StorageQuota) storageFixtur
 	if err := st.MarkNodeReady(ctx, "run-1", "only"); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore()
+	srv := controller.New(st, nil)
 	controller.ConfigureConsoleFixture(srv)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

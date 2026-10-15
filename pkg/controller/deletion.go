@@ -43,34 +43,31 @@ type deleteTeamReq struct {
 	ConfirmSlug string `json:"confirm_slug"`
 }
 
-// safety: the slug is typed back rather than implied by the session, so a
-// stale tab open on another team cannot delete the team it no longer shows.
-func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
+func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req deleteTeamReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	if store.NormalizeTeam(store.Team(req.ConfirmSlug)) != p.Team {
-		writeError(w, http.StatusBadRequest, errors.New("confirm_slug does not match the active team's slug"))
-		return
+	if strings.TrimSpace(req.ConfirmSlug) == "" || store.NormalizeTeam(store.Team(req.ConfirmSlug)) != store.Team(a.Target.Team) {
+		return invalidEngineBody("confirm_slug does not match the active team's slug")
 	}
-	del, revoked, err := t.RequestDeletion(r.Context(), p.AccountID, time.Now())
-	if errors.Is(err, store.ErrOnlyTeam) || moneyInFlight(err) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
+	writer, err := s.teamWriter(r, a)
 	if err != nil {
-		writeIdentityError(w, s, r, "delete team", err)
-		return
+		return err
 	}
-	s.invalidateRevokedTokens(revoked)
-	s.logger.Info("team deletion requested", "team", string(del.Team), "by", p.AccountID)
+	del, err := writer.DeleteAuthorizedTeam(r.Context(), a)
+	if err != nil {
+		if errors.Is(err, store.ErrOnlyTeam) || moneyInFlight(err) {
+			return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
+		}
+		return accountMutationError(err)
+	}
+	if del.Team != store.Team(a.Target.Team) {
+		return missingEndpointPolicy()
+	}
+	s.logger.Info("team deletion requested", "team", string(del.Team), "by", a.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusAccepted, teamDeletionBody(del))
+	return nil
 }
 
 func (s *Server) handleMyTeamDeletions(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -132,7 +129,6 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID
 	case err != nil:
 		return err
 	}
-	s.invalidateRevokedTokens(res.RevokedPrefixes)
 	out := deletedAccountJSON{AccountID: res.AccountID, DeletedTeams: make([]string, 0, len(res.DeletedTeams))}
 	for _, t := range res.DeletedTeams {
 		out.DeletedTeams = append(out.DeletedTeams, string(t))
@@ -143,7 +139,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID
 }
 
 func (s *Server) handleOperatorDeleteTeam(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	del, revoked, err := s.store.AsOperator().RequestTeamDeletion(r.Context(), store.Team(authorized.Target.Team), time.Now())
+	del, _, err := s.store.AsOperator().RequestTeamDeletion(r.Context(), store.Team(authorized.Target.Team), time.Now())
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return &apierr.Error{Code: apierr.NotFound, Message: "team is not registered"}
@@ -154,7 +150,6 @@ func (s *Server) handleOperatorDeleteTeam(w http.ResponseWriter, r *http.Request
 	case err != nil:
 		return err
 	}
-	s.invalidateRevokedTokens(revoked)
 	s.logger.Info("team deletion requested", "team", string(del.Team), "by", authorized.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusAccepted, teamDeletionBody(del))
 	return nil
@@ -173,11 +168,7 @@ func (s *Server) runTeamDeletions(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// safety: another replica may still accept a revoked token from its cache,
-// or write through a tenant handle it cached, until those caches lapse; the
-// purge waits out twice the longer of them, so nothing written through a
-// stale cache lands after the rows are gone.
-var teamPurgeDelay = 2 * max(tokenCacheTTL, tenantCacheTTL)
+var teamPurgeDelay = 2 * tenantCacheTTL
 
 // safety: a cache grant or log upload URL issued before the deletion is
 // verified by its signature alone and writes into the team's storage until it

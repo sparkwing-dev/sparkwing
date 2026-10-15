@@ -18,7 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func TestEnableAuthFromStoreRefusesAnonymousBeforeBootstrapProperty(t *testing.T) {
+func TestControllerRefusesAnonymousBeforeBootstrapProperty(t *testing.T) {
 	for _, licensing := range []string{"single_team", "license_before", "license_after"} {
 		t.Run(licensing, func(t *testing.T) {
 			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -32,15 +32,11 @@ func TestEnableAuthFromStoreRefusesAnonymousBeforeBootstrapProperty(t *testing.T
 				raw, key := multiTeamLicense(t)
 				lic := license.Resolve(raw, key, time.Now(), nil)
 				if licensing == "license_before" {
-					s.WithLicense(lic).EnableAuthFromStore()
+					s.WithLicense(lic)
 				} else {
-					s.EnableAuthFromStore().WithLicense(lic)
+					s.WithLicense(lic)
 				}
 			} else {
-				s.EnableAuthFromStore()
-			}
-			if !s.AuthEnabled() {
-				t.Fatal("startup disabled authentication before bootstrap")
 			}
 			h := s.Handler()
 			property := func(selector []byte) bool {

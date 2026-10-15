@@ -1228,3 +1228,33 @@ masking at the real committing edge remain W1/W3 integration obligations.
 The surviving legacy run-now, cron-team, compute-limit and approval fixtures
 must be ported to final intake and lifecycle before their old state APIs go.
 No native matrix cell is newly complete in this continuation.
+
+## W2 final business routes and verifier retirement
+
+The final seventeen legacy business registrations are migrated. The token-table
+Authenticator and its positive/negative caches, here/Actions fences, legacy
+tenant route table, requireScope and redundant cookie API middleware are deleted.
+Their cache implementation tests and open/admin-superset expectations retire.
+No argon2 or cached-verification behavior remains to port. The common capability
+authentication and policy suites retain missing/malformed/expired/revoked,
+ancestry/membership, grant and tenant refusals. TestControllerRefusesAnonymousBeforeBootstrapProperty
+retains the actual Server startup refusal, without a separate enable call.
+
+TestReportingRouteAuthorityProperty now exercises all seventeen route policies,
+including denied calls through actual Server registrations. The generated
+TestTeamWriteHTTPAuthorityProperty covers six team/run writes and App unbind,
+trigger deletion and automation withdrawal through committing fakes. It checks
+verified team/actor forwarding, wrong-team adapter refusal, changed-authority
+conflicts and private backend errors. TestBillingPageHTTPAuthorityAndReplayProperty
+covers all three hosted-page kinds, reservation-before-provider order, completion,
+replay without provider access, provider failure, committing conflict and budget
+forwarding. Malformed/forged bodies reach no successful mutation. Neither
+property proves real transaction races, financial reservation persistence,
+provider delivery or App consent after discovery.
+
+The four dashboard self-service account-deletion tests are removed with their
+retired helper and UI. Console deletion and last-owner handling remain covered
+by the earlier real console-route port. Teams and billing HTTP fixtures now use
+canonical failures and the required replay headers. Old broad team/billing/App
+fixtures still need migration off retired token/trigger APIs. No native matrix
+cell is newly enabled and no fake-backed result is native integration evidence.

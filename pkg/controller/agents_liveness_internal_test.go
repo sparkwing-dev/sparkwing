@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -49,7 +50,7 @@ func TestBusyRunnerHeartbeatUpdatesObservedLivenessWithoutPolling(t *testing.T) 
 	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET started_at = ? WHERE run_id = ?`, old.UnixNano(), "run"); err != nil {
 		t.Fatal(err)
 	}
-	s := New(st, nil).EnableAuthFromStore()
+	s := New(st, nil)
 	key := presenceKey{tokenPrefix: identity.Prefix, name: "moonborn"}
 	s.runnerPresence.record(key, []string{"local"}, &claimCapacity{MaxConcurrent: 1, ActiveClaims: 1}, match.Profile{}, nil, old)
 	server := httptest.NewServer(s.Handler())

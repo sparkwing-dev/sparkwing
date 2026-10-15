@@ -36,7 +36,7 @@ func newCronsProfileFixture(t *testing.T) *cronsProfileFixture {
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(srv.Close)
 	writeProfilesFixture(t, fmt.Sprintf(
 		"profiles:\n  prod:\n    controller: { url: %s, token: %s }\n", srv.URL, raw))

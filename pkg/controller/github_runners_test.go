@@ -44,7 +44,7 @@ func newGHFixture(t *testing.T) *ghFixture {
 		t.Fatal(err)
 	}
 	google, gh := googletest.New(t), githuboidctest.New(t)
-	srv := controller.New(st, nil).EnableAuthFromStore().
+	srv := controller.New(st, nil).
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 		WithExternalURL(ghAudience).

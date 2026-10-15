@@ -522,24 +522,24 @@ func installationIDFrom(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+	writer, err := s.githubAppWriter(r, a)
+	if err != nil {
+		return err
 	}
-	id, ok := installationIDFrom(w, r)
-	if !ok {
-		return
+	id, err := strconv.ParseInt(r.PathValue("installation"), 10, 64)
+	if err != nil || id <= 0 {
+		return invalidEngineBody("installation must be a positive integer")
 	}
-	if err := t.UnbindGitHubAppInstallation(r.Context(), id); err != nil {
-		writeIdentityError(w, s, r, "unbind github app installation", err)
-		return
+	if err := writer.UnbindAuthorizedGitHubInstallation(r.Context(), a, id); err != nil {
+		return accountMutationError(err)
 	}
-	s.logger.Info("github app installation disconnected", "team", string(p.Team), "installation_id", id, "by", p.AccountID)
+	s.logger.Info("github app installation disconnected", "team", string(store.Team(a.Target.Team)), "installation_id", id, "by", a.Principal.Capability.Subject.ID)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // safety: the operator's route is how a binding moves between teams: an
@@ -679,53 +679,45 @@ func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Requ
 // safety: the repository is resolved through GitHub to an installation this
 // team holds, so a subscription can name only a repository the team proved
 // it controls.
-func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	var req githubAppTriggerReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return githubAppRequestError(http.StatusBadRequest, err)
 	}
 	pipeline, slug, err := validGitHubSubscription(req.Pipeline, req.Repository)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return githubAppRequestError(http.StatusBadRequest, err)
 	}
 	if err := store.ValidateGitHubTagPatterns(req.Tags); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return githubAppRequestError(http.StatusBadRequest, err)
 	}
 	if !req.Push && len(req.Tags) == 0 && !req.PullRequest && !req.PullRequestClosed && !req.PullRequestLabeled && !req.PullRequestReadyForReview &&
 		!req.ReleasePublished && !req.ReleasePrereleased && !req.BranchCreate && !req.BranchDelete {
-		writeError(w, http.StatusBadRequest, errors.New("subscribe to at least one event"))
-		return
+		return githubAppRequestError(http.StatusBadRequest, errors.New("subscribe to at least one event"))
 	}
 	if req.PullRequestLabeled && len(req.PullRequestLabels) == 0 {
-		writeError(w, http.StatusBadRequest, errors.New("pull_request_labeled needs pull_request_labels"))
-		return
+		return githubAppRequestError(http.StatusBadRequest, errors.New("pull_request_labeled needs pull_request_labels"))
 	}
 	repo, _ := store.ParseGitHubRepo(slug)
 	inst, found, err := s.teamInstallationFor(r.Context(), t, repo)
 	if err != nil {
 		s.logger.Warn("github app trigger lookup", "repository", slug, "err", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
-		return
+		return githubAppRequestError(http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
-		return
+		return githubAppRequestError(http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), inst.InstallationID)
 	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
 	if err != nil && !truncated {
-		writeError(w, http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
-		return
+		return githubAppRequestError(http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
 	}
 	var match *githubapp.Repository
 	for i := range repos {
@@ -734,14 +726,16 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if match == nil && truncated {
-		writeError(w, http.StatusBadGateway, errors.New("the installation covers more repositories than GitHub lists, so "+slug+" cannot be confirmed"))
-		return
+		return githubAppRequestError(http.StatusBadGateway, errors.New("the installation covers more repositories than GitHub lists, so "+slug+" cannot be confirmed"))
 	}
 	if match == nil {
-		writeError(w, http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
-		return
+		return githubAppRequestError(http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
 	}
-	saved, err := t.PutGitHubAppTrigger(r.Context(), store.GitHubAppTrigger{
+	writer, err := s.githubAppWriter(r, a)
+	if err != nil {
+		return err
+	}
+	saved, err := writer.PutAuthorizedGitHubTrigger(r.Context(), a, store.GitHubAppTrigger{
 		RepositoryID: match.ID, Repository: match.FullName, InstallationID: inst.InstallationID,
 		Pipeline: pipeline, Push: req.Push, Tags: req.Tags, PullRequest: req.PullRequest,
 		Branches: req.Branches, BaseBranches: req.BaseBranches,
@@ -749,38 +743,36 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		PullRequestLabels: req.PullRequestLabels, PullRequestReadyForReview: req.PullRequestReadyForReview,
 		ReleasePublished: req.ReleasePublished, ReleasePrereleased: req.ReleasePrereleased,
 		BranchCreate: req.BranchCreate, BranchDelete: req.BranchDelete,
-		CreatedBy: p.AccountID,
-	}, time.Now())
+	})
 	if err != nil {
-		writeIdentityError(w, s, r, "put github app trigger", err)
-		return
+		return accountMutationError(err)
 	}
-	s.logger.Info("github app trigger written", "team", string(p.Team), "repository", saved.Repository,
+	s.logger.Info("github app trigger written", "team", string(store.Team(a.Target.Team)), "repository", saved.Repository,
 		"pipeline", saved.Pipeline, "push", saved.Push, "tags", saved.Tags, "pull_request", saved.PullRequest,
-		"by", p.AccountID)
+		"by", a.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusOK, githubAppTriggerOut(saved))
+	return nil
 }
 
-func (s *Server) handleDeleteGitHubAppTrigger(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleDeleteGitHubAppTrigger(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+	writer, err := s.githubAppWriter(r, a)
+	if err != nil {
+		return err
 	}
 	id, err := strconv.ParseInt(r.URL.Query().Get("repository_id"), 10, 64)
 	pipeline := r.URL.Query().Get("pipeline")
 	if err != nil || id <= 0 || pipeline == "" {
-		writeError(w, http.StatusBadRequest, errors.New("repository_id and pipeline are required"))
-		return
+		return githubAppRequestError(http.StatusBadRequest, errors.New("repository_id and pipeline are required"))
 	}
-	if err := t.DeleteGitHubAppTrigger(r.Context(), id, pipeline); err != nil {
-		writeIdentityError(w, s, r, "delete github app trigger", err)
-		return
+	if err := writer.DeleteAuthorizedGitHubTrigger(r.Context(), a, id, pipeline); err != nil {
+		return accountMutationError(err)
 	}
-	s.logger.Info("github app trigger removed", "team", string(p.Team), "repository_id", id, "pipeline", pipeline, "by", p.AccountID)
+	s.logger.Info("github app trigger removed", "team", string(store.Team(a.Target.Team)), "repository_id", id, "pipeline", pipeline, "by", a.Principal.Capability.Subject.ID)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // safety: an installation another team holds, or a suspended one, reads as not found,

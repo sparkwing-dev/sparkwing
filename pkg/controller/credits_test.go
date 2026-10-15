@@ -64,7 +64,7 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
-	ctrl := controller.New(st, nil).EnableAuthFromStore()
+	ctrl := controller.New(st, nil)
 	controller.ConfigureConsoleFixture(ctrl)
 	if feature != "" {
 		pub, priv := licensetest.NewKey(t)

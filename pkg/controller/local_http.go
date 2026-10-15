@@ -21,9 +21,9 @@ func (s *Server) HTTP() wingd.LocalHTTP {
 			}
 			return capability.Subject{Kind: capability.SubjectLocal, ID: subject}
 		})
-		_, router := s.routers()
+		router := s.routers()
 		router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			_, policy := s.routeProbe()
+			policy := s.routeProbe()
 			writeRouteMiss(w, allowedRouteMethods(policy, r, routeProbeMethods))
 		})
 		api := s.observedHandler(router)

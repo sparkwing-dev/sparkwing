@@ -30,10 +30,7 @@ var gitObjectSHA = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
 
-	authState := "disabled"
-	if s.auth != nil {
-		authState = "enabled"
-	}
+	authState := "enabled"
 
 	if err := s.store.DB().PingContext(r.Context()); err != nil {
 		s.logger.Error("controller health database check failed", "err", err)
@@ -260,40 +257,29 @@ func triggerRunInvocation(env map[string]string) map[string]any {
 	return inv
 }
 
-func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	id := r.PathValue("id")
+func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	id := a.Target.RunID
 	localDir := s.dashboard != nil && s.dashboard.Local && s.dashboard.Paths.Root != ""
-	// safety: a laptop run's directory is named by its id, so an id that is not one path segment is refused
-	// before anything is deleted rather than leaving its row gone and its directory behind.
 	if err := storage.SafeSegment(id); localDir && err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return invalidEngineBody(err.Error())
 	}
-	// safety: the run's log records are the only index of its segments, so
-	// the segments go first.
-	if _, err := s.deleteDataLogs(r.Context(), tenant.Team(), id); err != nil {
-		s.writeInternalError(w, r, "delete the run's log segments", err)
-		return
+	writer, err := s.teamWriter(r, a)
+	if err != nil {
+		return err
 	}
-	if err := tenant.DeleteRun(r.Context(), id); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	if err := writer.DeleteAuthorizedRun(r.Context(), a); err != nil {
+		return engineLookupError(err)
+	}
+	if _, err := s.deleteDataLogs(r.Context(), store.Team(a.Target.Team), id); err != nil {
+		return err
 	}
 	if localDir {
 		if err := removeLocalRunDir(s.dashboard.Paths.RunsDir(), id); err != nil {
-			s.writeInternalError(w, r, "remove the run's directory", err)
-			return
+			return err
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // safety: a laptop dashboard's node logs live in the run's directory on its own disk; os.Root keeps a planted

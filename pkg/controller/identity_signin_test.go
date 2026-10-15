@@ -125,7 +125,7 @@ func TestARolelessSessionCannotReadServices(t *testing.T) {
 func TestAccountSessionsStopWithoutALicense(t *testing.T) {
 	f := newIdentityFixture(t)
 	s := f.signIn(person("g-u", "una@example.com", "Una"))
-	bare := controller.New(f.store, nil).EnableAuthFromStore()
+	bare := controller.New(f.store, nil)
 	ts := httptest.NewServer(bare.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = bare.Shutdown(context.Background()) })

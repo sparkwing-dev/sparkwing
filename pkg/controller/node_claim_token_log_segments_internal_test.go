@@ -29,7 +29,7 @@ func TestNodeClaimTokenUploadsItsNodesLogSegmentsUntilTheClaimEnds(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := New(st, nil).EnableAuthFromStore()
+	srv := New(st, nil)
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
 	if err := st.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "p", Status: "running", StartedAt: now}); err != nil {

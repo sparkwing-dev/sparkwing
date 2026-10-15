@@ -128,7 +128,7 @@ func TestEscapedChildEventSecretsStayMaskedInStoreAndReaderHTTP(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			srv := controller.New(st, nil).EnableAuthFromStore()
+			srv := controller.New(st, nil)
 			t.Cleanup(func() { _ = srv.Shutdown(ctx) })
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/parent/events", nil)
 			req.Header.Set("Authorization", "Bearer "+raw)

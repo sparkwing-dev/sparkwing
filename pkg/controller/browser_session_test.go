@@ -52,7 +52,7 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 	}
 	csrf := sess.CSRFToken
 	logs := &syncBuffer{}
-	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).EnableAuthFromStore()
+	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil)))
 	if d != nil {
 		srv.WithDashboard(*d)
 	}

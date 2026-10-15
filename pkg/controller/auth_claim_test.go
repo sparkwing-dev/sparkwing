@@ -28,7 +28,6 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(controller.New(st, nil).
-		EnableAuthFromStore().
 		Handler())
 	defer srv.Close()
 
@@ -88,7 +87,7 @@ func TestNodeClaim_ARevokedTokenReachesTheClientAsDead(t *testing.T) {
 	if err := st.RevokeToken(tok.Prefix, now); err != nil {
 		t.Fatalf("RevokeToken: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
 	_, err = client.NewWithToken(srv.URL, nil, raw).ClaimNode(t.Context(), "agent-1", nil, 30*time.Second, nil)

@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type buildTrustRequest struct {
@@ -24,19 +23,18 @@ func (s *Server) handleGetBuildTrust(w http.ResponseWriter, r *http.Request, a c
 	return nil
 }
 
-func (s *Server) handlePutBuildTrust(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
+func (s *Server) handlePutBuildTrust(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req buildTrustRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	if err := t.SetTrustLocalBuilds(r.Context(), req.TrustLocalBuilds); err != nil {
-		s.writeInternalError(w, r, "set build trust", err)
-		return
+	writer, err := s.teamWriter(r, a)
+	if err != nil {
+		return err
+	}
+	if err := writer.SetAuthorizedBuildTrust(r.Context(), a, req.TrustLocalBuilds); err != nil {
+		return accountMutationError(err)
 	}
 	writeJSON(w, http.StatusOK, req)
+	return nil
 }

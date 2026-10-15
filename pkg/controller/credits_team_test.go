@@ -73,7 +73,7 @@ func TestCreditRefusalLandsOnTheRefusedTeamsRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	signed, pub := multiTeamLicense(t)
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithLicense(
+	srv := httptest.NewServer(controller.New(st, nil).WithLicense(
 		license.Resolve(signed, pub, time.Now(), nil)).Handler())
 	t.Cleanup(srv.Close)
 	c := client.NewWithToken(srv.URL, nil, raw)

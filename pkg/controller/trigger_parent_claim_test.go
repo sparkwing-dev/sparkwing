@@ -70,7 +70,7 @@ func newParentClaimFixture(t *testing.T) parentClaimFixture {
 		Claimant: identity, HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID,
 		ReservationID: node.ClaimReservationID, ClaimGeneration: node.ClaimGeneration,
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(srv.Close)
 	return parentClaimFixture{
 		store:         st,

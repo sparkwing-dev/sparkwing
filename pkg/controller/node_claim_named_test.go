@@ -84,7 +84,7 @@ func newNamedClaimFixture(t *testing.T, opts store.TokenOptions) namedClaimFixtu
 		Features: []string{license.FeatureMetering}, IssuedTo: "test",
 		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
 	})
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithLicense(
+	srv := httptest.NewServer(controller.New(st, nil).WithLicense(
 		license.Resolve(raw, pub, time.Now(), nil)).Handler())
 	t.Cleanup(srv.Close)
 	return namedClaimFixture{url: srv.URL, token: token, prefix: record.Prefix, store: st}

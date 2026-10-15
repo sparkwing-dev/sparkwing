@@ -45,7 +45,7 @@ func newTriggerOwnershipFixture(t *testing.T) triggerOwnershipFixture {
 	}
 	seedRepoTrigger(t, st, "run-owned", "acme/web")
 
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(srv.Close)
 
 	trig, err := client.NewWithToken(srv.URL, nil, holder).ClaimTrigger(context.Background())

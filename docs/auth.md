@@ -25,16 +25,14 @@ transactional authority checks before those presentations can execute work.
 Embedded local controllers use `Server.HTTP()` for the API and dashboard
 handlers in `wingd.LocalHTTP`. The API reads the verified socket identity from
 Wingd's connection context. Explicit credentials keep precedence. Browser
-requests supply their own authentication. These handlers expose the shared
-policy routes and exclude the legacy route fallback.
+requests supply their own authentication. These handlers expose the same capability policy routes as the network controller.
 
 Schedule, invitation, build-trust, billing and storage reads use member
 capability policy. The same holds for GitHub App installation, repository,
 trigger and extra-repository reads. Schedule and review mutations pass the verified
 `Authorized` value to tenant transactions through `WithScheduleWriter` and
 `WithRunControlWriter`. Each committing transaction rechecks ancestry,
-membership and the selected route alternative. The old token verifier and
-legacy request principal cannot authorize these routes. Missing adapters fail
+membership and the selected route alternative. Team administration, run deletion and GitHub App configuration writes use the same boundary. Embedded controllers supply `WithTeamWriter`, `WithGitHubAppWriter` and `WithBillingWriter` for committing transactions. The token-table verifier, its caches and its route fences are removed. Missing adapters fail
 with `policy_missing`. Metrics on the API listener uses deployment or console
 policy.
 
@@ -459,6 +457,15 @@ error. Pricing and compute measurements come from the controller's observations.
 
 ## Buying credits
 
+Checkout, card setup and payment-recovery POSTs require one nonempty
+`Idempotency-Key` header. A committing transaction derives the team, account,
+reservation and current billing limits. The checkout service receives that
+reservation as its request key. A completed replay returns the recorded URL
+without opening another page. Provider failure leaves the reservation available
+for reconciliation. API failures use the canonical error envelope. Billing
+refusal details include a `reason`, such as `balance_cap` or `purchase_limit`.
+
+
 The controller verifies Stripe signatures at `POST /webhooks/stripe`. Checkout
 payments, failures and expiry carry the committed provider session identity.
 Card setup and card payment outcomes, individual refund updates, early fraud
@@ -595,8 +602,7 @@ Authorization header. Failures return the canonical error envelope. Embedded
 controllers supply `WithIdentityLinkWriter` for committing session and nonce
 checks. A missing writer returns `policy_missing`.
 
-A nonlocal dashboard requires a live session for its private pages, even when
-legacy bearer authentication is disabled. Its login page remains available to
+A nonlocal dashboard requires a live session for its private pages. Its login page remains available to
 signed-out browsers. `Dashboard.Local` selects local pages without browser login.
 
 ### Sign-up gate
@@ -646,15 +652,14 @@ See [Credential management](credentials.md) for the implemented client surface.
 ## Credential lookup
 
 Capability lookup uses SHA-256 of the complete random token. Password hashing
-remains a separate account concern. Cached authorization lasts at most five
-seconds and also requires fresh ancestry and membership generations. A failed
-generation read refuses cache reuse. Expiry is checked within a cache window.
+remains a separate account concern. Every authenticated request reads current
+authority, ancestry, membership and expiry in one store snapshot. The controller
+has no bearer verification cache.
 
 ## How long revocation takes to bite
 
 Revocation advances the affected authority generation in the same transaction.
-Every descendant depends on live ancestry. The five-second cache TTL does not
-replace the generation check.
+Every descendant depends on live ancestry. Each request reads those facts again.
 
 Revocation cannot recall a signed URL or an external GitHub or OIDC credential
 already issued. Those retain their separate expirations. Stopping a runner is

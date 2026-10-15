@@ -24,7 +24,7 @@ func TestSignedLogKeyCannotBeReplaced(t *testing.T) {
 		}
 	})
 	s := New(nil, nil).WithDataObjects(objects)
-	_, router := s.routers()
+	router := s.routers()
 	index := 0
 	property := func(first, second [32]byte) bool {
 		index++

@@ -180,7 +180,6 @@ func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
 		t.Fatalf("tenant-b token: %v", err)
 	}
 	ts := httptest.NewServer(controller.New(st, nil).
-		EnableAuthFromStore().
 		WithFloodPolicy(controller.FloodPolicy{DedupeWindow: time.Minute}).
 		Handler())
 	t.Cleanup(ts.Close)

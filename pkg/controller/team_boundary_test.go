@@ -115,7 +115,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 		t.Fatal(err)
 	}
 	raw, pub := multiTeamLicense(t)
-	srv := controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).
+	srv := controller.New(st, nil).WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -577,7 +577,7 @@ var ownerAlsoAdmitted = map[string]bool{
 
 func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 	for _, role := range []store.Role{store.RoleReader, store.RoleEditor, store.RoleOwner} {
-		for _, s := range controller.ScopesForRole(role) {
+		for _, s := range store.ScopesForRole(role) {
 			switch s {
 			case controller.ScopeAdmin, controller.ScopeSecretsRead, controller.ScopeNodesClaim,
 				controller.ScopeTriggersClaim, controller.ScopeRunsState:

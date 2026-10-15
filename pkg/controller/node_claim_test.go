@@ -55,7 +55,7 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 	c := client.New(srv.URL, nil)
 	ctx := context.Background()

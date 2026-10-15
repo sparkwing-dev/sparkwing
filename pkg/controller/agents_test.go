@@ -151,7 +151,7 @@ func TestAgents_PlainHolderUsesOwnLivePoll(t *testing.T) {
 	if err := st.MarkNodeReady(ctx, "old-run", "work"); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(func() { srv.Close() })
 	claim := func(token, holder string) int {
 		status, body := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/nodes/claim", token,
@@ -181,7 +181,7 @@ func TestAgents_PlainHolderUsesOwnLivePoll(t *testing.T) {
 		t.Fatalf("stored claim credential matches owner = %t, owner length=%d, claim length=%d, err=%v", len(claims) == 1 && claims[0].TokenPrefix == ownerToken.Prefix, len(ownerToken.Prefix), len(claims[0].TokenPrefix), err)
 	}
 	srv.Close()
-	srv = httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv = httptest.NewServer(controller.New(st, nil).Handler())
 	list := func() controller.Agent {
 		status, body := agentRequest(t, http.MethodGet, srv.URL+"/api/v1/agents", admin, nil)
 		if status != http.StatusOK {

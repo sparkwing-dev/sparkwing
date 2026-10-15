@@ -111,7 +111,7 @@ func TestRotateToken_ChunkedBodyKeepsTheGrace(t *testing.T) {
 		t.Fatalf("CreateToken worker: %v", err)
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
 	resp := postChunked(t, srv.URL+"/api/v1/tokens/"+worker.Prefix+"/rotate", admin, `{"grace_secs":3600}`)

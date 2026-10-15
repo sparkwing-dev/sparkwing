@@ -131,7 +131,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore().WithDashboard(controller.Dashboard{
+	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{
 		Bundle:  os.DirFS(config.webOut),
 		Version: "auth-browser-fixture",
 		Paths:   home,

@@ -153,7 +153,7 @@ describe("switchTeam", () => {
 
   it("surfaces the controller's refusal", async () => {
     respond = () =>
-      new Response(JSON.stringify({ error: "not a member of acme" }), {
+      new Response(JSON.stringify({error: {code:"forbidden",message:"not a member of acme"}}), {
         status: 403,
       });
     await assert.rejects(teams.switchTeam("acme"), (err: Error) => {
@@ -334,7 +334,7 @@ describe("mintMachineToken", () => {
 
   it("surfaces the controller's pattern validation error", async () => {
     respond = () =>
-      new Response(JSON.stringify({ error: "bad repo pattern" }), {
+      new Response(JSON.stringify({error: {code:"bad_request",message:"bad repo pattern"}}), {
         status: 400,
       });
     await assert.rejects(
@@ -588,48 +588,4 @@ describe("deletion", () => {
     assert.equal(del.state, "pending");
   });
 
-  it("reads a 409 on account deletion as the list of teams to deal with", async () => {
-    respond = () =>
-      Response.json(
-        {
-          error: "hand ownership on",
-          teams: [{ slug: "acme", display_name: "Acme", role: "owner" }],
-        },
-        { status: 409 },
-      );
-    const res = await teams.deleteAccount("ada@example.com");
-    assert.deepEqual(res, {
-      kind: "blocked",
-      teams: [{ slug: "acme", display_name: "Acme", role: "owner" }],
-    });
-    assert.deepEqual(JSON.parse(calls[0].body), {
-      confirm_email: "ada@example.com",
-    });
-  });
-
-  it("reports the teams an account deletion took with it", async () => {
-    respond = () =>
-      Response.json({ account_id: "u", deleted_teams: ["ada-space"] });
-    assert.deepEqual(await teams.deleteAccount("ada@example.com"), {
-      kind: "deleted",
-      deletedTeams: ["ada-space"],
-    });
-  });
-
-  it("asks for a fresh sign-in when the controller wants one", async () => {
-    respond = () =>
-      Response.json(
-        { error: "reauth_required", message: "sign in again" },
-        { status: 403 },
-      );
-    assert.deepEqual(await teams.deleteAccount("ada@example.com"), {
-      kind: "reauth",
-    });
-  });
-
-  it("throws on any other refusal", async () => {
-    respond = () =>
-      Response.json({ error: "confirm_email does not match" }, { status: 400 });
-    await assert.rejects(teams.deleteAccount("x@example.com"), /confirm_email/);
-  });
 });

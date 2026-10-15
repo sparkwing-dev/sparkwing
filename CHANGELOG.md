@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** Team, GitHub App and billing writes use the shared capability policy
+  The legacy token verifier, caches and route fences are removed. Invitation and payment-page POSTs require a replay key. Embedded controllers supply authority-bearing transaction adapters. Account deletion is available through the operator console. See [migration guide](docs/migrations/_unreleased.md#remaining-team-credential-routes).
+
 - **controller (Breaking):** Reporting reads use the shared capability policy and job log paths
   Runner, approval and sizing reads use `/runners`, `/approvals` and `/sizing`. Legacy read paths and the `paused` alias are removed. See [migration guide](docs/migrations/_unreleased.md#reporting-credential-routes).
 

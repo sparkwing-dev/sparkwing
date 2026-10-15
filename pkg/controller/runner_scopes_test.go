@@ -47,7 +47,7 @@ func newScopedFixture(t *testing.T, scopes []string) (scopedFixture, string) {
 	if err != nil {
 		t.Fatalf("CreateToken runner: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).Handler())
+	srv := httptest.NewServer(controller.New(st, nil).WithSecretsCipher(testCipher(t)).Handler())
 	t.Cleanup(srv.Close)
 	return scopedFixture{url: srv.URL, store: st}, raw
 }

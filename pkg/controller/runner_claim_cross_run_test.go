@@ -48,7 +48,7 @@ func newCrossRunFixture(t *testing.T) crossRunFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(srv.Close)
 
 	if err := st.CreateRun(ctx, store.Run{ID: "lib-1", Pipeline: "lib", Status: "running", StartedAt: now.Add(-time.Hour)}); err != nil {

@@ -33,17 +33,17 @@ type AgentHeadroom struct {
 
 	ObservedAt string
 }
-type Authenticator struct {
-}
-func (a *Authenticator) AuthDisabled() bool
-func (a *Authenticator) Authenticate(raw string) (*Principal, error)
-func (a *Authenticator) Invalidate(prefix string)
-func (a *Authenticator) Middleware(next http.Handler) http.Handler
-func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
 type AuthorityRevoker interface {
 	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
 }
 const BalanceCapCode = "balance_cap"
+type BillingWriter interface {
+	Team() store.Team
+	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
+	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
+	RecordAuthorizedBillingPageFailure(context.Context, capability.Authorized, capability.BillingPage) error
+	SetAuthorizedSpendBudget(context.Context, capability.Authorized, int64) error
+}
 type BootstrapAdminIssuer interface {
 	EnsureBootstrapCapability(context.Context, capability.ProvisionSpec) (bool, error)
 }
@@ -269,6 +269,15 @@ type GitCredentialReleaseJSON struct {
 	ReleasedAt       int64
 }
 const GitHubActionsLabel = "github-actions"
+type GitHubAppWriter interface {
+	Team() store.Team
+	UnbindAuthorizedGitHubInstallation(context.Context, capability.Authorized, int64) error
+	PutAuthorizedGitHubTrigger(context.Context, capability.Authorized, store.GitHubAppTrigger) (store.GitHubAppTrigger, error)
+	DeleteAuthorizedGitHubTrigger(context.Context, capability.Authorized, int64, string) error
+	PutAuthorizedGitHubAutomation(context.Context, capability.Authorized, store.GitHubAppAutomation) error
+	DeleteAuthorizedGitHubAutomation(context.Context, capability.Authorized, int64) error
+	SetAuthorizedGitHubExtraRepos(context.Context, capability.Authorized, string, []string, map[string]int64) ([]string, error)
+}
 type GitHubRunnerRegistry interface {
 	Team() store.Team
 	GitHubRunnerBindings(context.Context) ([]store.GitHubRunnerBinding, error)
@@ -324,7 +333,6 @@ func LongestHonoredIdlePoll(d time.Duration) time.Duration
 const MaxHonoredIdleClaimPoll = 8 * time.Second
 const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 func New(st *store.Store, logger *slog.Logger) *Server
-func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewFilesystemDataSigner(baseURL string, key []byte) (*FilesystemDataSigner, error)
 func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter
 func NewS3DataSigner(client *s3.Client, bucket string) (*S3DataSigner, error)
@@ -465,7 +473,6 @@ const ScopeSecretsRead = store.ScopeSecretsRead
 const ScopeTeamAdmin = store.ScopeTeamAdmin
 const ScopeTriggersClaim = store.ScopeTriggersClaim
 const ScopeTriggersRead = store.ScopeTriggersRead
-func ScopesForRole(role store.Role) []string
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)
 type SecretReader interface {
 	Team() store.Team
@@ -474,10 +481,8 @@ type SecretReader interface {
 func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
-func (s *Server) AuthEnabled() bool
 func (s *Server) CheckFreeTierSource()
 func (s *Server) EgressMeter() *egress.Meter
-func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) HTTP() wingd.LocalHTTP
 func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)
@@ -489,9 +494,9 @@ func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 func (s *Server) WithAccountReader(reader AccountReader) *Server
 func (s *Server) WithAccountWriter(writer AccountWriter) *Server
-func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithAuthorization(authorization RouteAuthorization) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
+func (s *Server) WithBillingWriter(resolve func(context.Context, store.Team) (BillingWriter, error)) *Server
 func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server
 func (s *Server) WithCapabilityManager(resolve func(context.Context, store.Team) (CapabilityManager, error)) *Server
 func (s *Server) WithConcurrencyStore(resolve func(context.Context, store.Team) (ConcurrencyStore, error)) *Server
@@ -512,6 +517,7 @@ func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithFreeTier(src FreeTierSource) *Server
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server
+func (s *Server) WithGitHubAppWriter(resolve func(context.Context, store.Team) (GitHubAppWriter, error)) *Server
 func (s *Server) WithGitHubRunnerBindingLookup(lookup func(context.Context, store.Team, int64) (store.GitHubRunnerBinding, error)) *Server
 func (s *Server) WithGitHubRunnerRegistry(resolve func(context.Context, store.Team) (GitHubRunnerRegistry, error)) *Server
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
@@ -548,6 +554,7 @@ func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (Sizi
 func (s *Server) WithSourceAuditReader(resolve func(context.Context, store.Team) (SourceAuditReader, error)) *Server
 func (s *Server) WithSourceController(source *SourceController) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
+func (s *Server) WithTeamWriter(resolve func(context.Context, store.Team) (TeamWriter, error)) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyAddr(addr string) *Server
 type ServicesResponse struct {
@@ -600,6 +607,15 @@ type SourceTransactions interface {
 const SpendLimitCode = "spend_limit"
 const StorageMaintenanceInterval = time.Hour
 const TeamDeletionInterval = time.Minute
+type TeamWriter interface {
+	Team() store.Team
+	RenameAuthorizedTeam(context.Context, capability.Authorized, string) (store.TeamInfo, error)
+	DeleteAuthorizedTeam(context.Context, capability.Authorized) (store.TeamDeletion, error)
+	CreateAuthorizedInvitation(context.Context, capability.Authorized, string, store.Role, string) (store.Invitation, error)
+	DeleteAuthorizedInvitation(context.Context, capability.Authorized, string) error
+	SetAuthorizedBuildTrust(context.Context, capability.Authorized, bool) error
+	DeleteAuthorizedRun(context.Context, capability.Authorized) error
+}
 type TokenRequestBudget struct {
 	PerTokenMinute int
 

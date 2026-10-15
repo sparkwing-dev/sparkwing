@@ -53,7 +53,7 @@ func TestTriggerHost_AHereRunnerHostsItsPinnedRunUnderItsOwnCredential(t *testin
 		t.Fatal(err)
 	}
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().WithSecretsCipher(cipher).Handler())
+	srv := httptest.NewServer(controller.New(st, quiet).WithSecretsCipher(cipher).Handler())
 	t.Cleanup(srv.Close)
 	if err := client.NewWithToken(srv.URL, nil, admin).CreateSecretForPipeline(t.Context(), "DEPLOY_GUARD", "skip", "podnode", true, false); err != nil {
 		t.Fatal(err)

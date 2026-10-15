@@ -131,7 +131,7 @@ func TestCreateNode_StrangerTokenLearnsNothingAboutTheRun(t *testing.T) {
 		t.Fatalf("CreateToken: %v", err)
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
 	payload, err := json.Marshal(store.Node{RunID: "victim", NodeID: "n1", Status: "pending"})

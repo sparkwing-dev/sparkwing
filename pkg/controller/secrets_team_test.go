@@ -61,7 +61,7 @@ func TestRunnerReadsTheClaimedRunsTeamSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).Handler())
+	srv := httptest.NewServer(controller.New(st, nil).WithSecretsCipher(testCipher(t)).Handler())
 	t.Cleanup(srv.Close)
 	c := client.NewWithToken(srv.URL, nil, raw)
 

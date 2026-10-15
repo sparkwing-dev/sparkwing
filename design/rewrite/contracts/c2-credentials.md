@@ -2310,8 +2310,7 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
    audit transaction. C2 supplies no alternate SQL implementation. Persistent
    root, delegation, claim and exchange entry points must reach `Store.Issue`.
 5. **Controller cutover.** The running `Server` uses `PolicyRouter` for the
-   Stripe callback and migrated engine, ledger-read and operator endpoints. Other routes retain legacy auth and
-   registrations. Wire final handlers and decoders to `PolicyRouter`, provide
+   Stripe callback and migrated engine, ledger-read and operator endpoints. All business routes now register through PolicyRouter. The legacy token-table verifier, caches, route fences and private mux are removed. Wire final handlers and decoders to `PolicyRouter`, provide
    account/console/verified-local identity and CSRF adapters, then delete the
    old auth stack and handler authorization. Final route-inventory and
    handler-policy lint checks must cover those actual registrations. W3/W4
@@ -2574,7 +2573,102 @@ console policy, while the dedicated listener retains its network boundary.
 Controller endpoint groups register together once, so one shared PolicyRouter
 owns every method on a path. Discovery follows those actual endpoint calls.
 
-See [the continuation report](../W2-business-cut-handoff.md) for remaining
-legacy routes, old caller fixtures and production store integration.
+See the [business continuation](../W2-business-cut-handoff.md) for older test ports and the [final-route continuation](../W2-final-routes-handoff.md) for transaction integration and retired verifier callers.
+
+
+### Final team, App and billing route cut
+
+All seventeen formerly legacy registrations use PolicyRouter. Team and App
+configuration keep their declared member grants. DELETE /runs/{run} resolves
+the persisted team and requires runs.control. Billing availability is checked
+after authentication. Invitation creation and all three billing-page POSTs
+require exactly one nonempty Idempotency-Key. Unknown body fields are refused.
+
+C2 declares TeamWriter, GitHubAppWriter and BillingWriter in their real route
+files. WithTeamWriter, WithGitHubAppWriter and WithBillingWriter resolve them
+for the selected team. Their Team must match Authorized.Target.Team. The
+default requires Tenant to implement the corresponding interface and refuses
+missing adapters. There is no call to an unfenced legacy method.
+
+Every mutation below must recheck complete live authority and membership using
+the store clock in its committing transaction, deriving the team and audit
+actor. Keep current product limits and refusal semantics. The exact interfaces
+are:
+
+```go
+type TeamWriter interface {
+	Team() store.Team
+	RenameAuthorizedTeam(context.Context, capability.Authorized, string) (store.TeamInfo, error)
+	DeleteAuthorizedTeam(context.Context, capability.Authorized) (store.TeamDeletion, error)
+	CreateAuthorizedInvitation(context.Context, capability.Authorized, string, store.Role, string) (store.Invitation, error)
+	DeleteAuthorizedInvitation(context.Context, capability.Authorized, string) error
+	SetAuthorizedBuildTrust(context.Context, capability.Authorized, bool) error
+	DeleteAuthorizedRun(context.Context, capability.Authorized) error
+}
+```
+
+```go
+type GitHubAppWriter interface {
+	Team() store.Team
+	UnbindAuthorizedGitHubInstallation(context.Context, capability.Authorized, int64) error
+	PutAuthorizedGitHubTrigger(context.Context, capability.Authorized, store.GitHubAppTrigger) (store.GitHubAppTrigger, error)
+	DeleteAuthorizedGitHubTrigger(context.Context, capability.Authorized, int64, string) error
+	PutAuthorizedGitHubAutomation(context.Context, capability.Authorized, store.GitHubAppAutomation) error
+	DeleteAuthorizedGitHubAutomation(context.Context, capability.Authorized, int64) error
+	SetAuthorizedGitHubExtraRepos(context.Context, capability.Authorized, string, []string, map[string]int64) ([]string, error)
+}
+```
+
+```go
+type BillingWriter interface {
+	Team() store.Team
+	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
+	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
+	RecordAuthorizedBillingPageFailure(context.Context, capability.Authorized, capability.BillingPage) error
+	SetAuthorizedSpendBudget(context.Context, capability.Authorized, int64) error
+}
+```
+
+Team rename preserves slug identity. Deletion retains last-team, held-team,
+debt and checkout guards. Invitation creation owns role/email/expiry/use rules,
+existing email budgets and durable request replay. Build trust never comes
+from repository code. Run deletion verifies exact ownership and lifecycle,
+commits deletion before external cleanup, and permits cleanup retry. Physical
+log cleanup addresses the run prefix rather than relying on removed row indexes.
+
+App writes must recheck installation ownership, suspension and verified numeric
+repository identities. The controller resolves GitHub facts before mutation.
+Actor fields are not caller-controlled. Extra repository slugs and numeric IDs
+commit together through SetAuthorizedGitHubExtraRepos. The former two separate
+raw writes are removed. Automation consent is checked again at commit after
+provider discovery. Unbind and deletion are tenant-scoped.
+
+BillingPageKind and BillingPage live in internal/capability/billing_pages.go
+so persistence can consume them without importing controller. The three kinds
+are credits, card and recovery. PrepareAuthorizedBillingPage locks current
+billing standing, checks card/trust/budget/purchase/balance and deletion guards,
+and derives reservation ID, customer, email, charge/attempt, amount and expiry.
+Its amount argument is the requested cents only for credits; zero for the
+other two. It commits one immutable reservation and replay identity for the
+exact caller, team, kind and request. A changed request under a key conflicts.
+A completed replay returns its recorded URL after rechecking live authority.
+
+The provider runs outside the transaction and receives ReservationID as key.
+Card setup also receives it as setup_id. CompleteAuthorizedBillingPage rechecks
+live authority and the exact committed reservation and saves the provider ID,
+URL and bounded expiry. It cannot replace another operation's facts or extend
+a reservation. RecordAuthorizedBillingPageFailure records the failed delivery
+without erasing its key or permitting a second financial reservation after an
+ambiguous provider failure. Settlement uses the verified provider callback and
+committed billing record. SetAuthorizedSpendBudget retains current budget
+validation. The checkout service must make key/setup_id durable and idempotent.
+W1/W1b and that service supply these integrations. W2's fake-backed properties
+establish HTTP, authority forwarding and provider order, not ledger persistence.
+
+The legacy controller Authenticator, its caches and enable/configuration APIs,
+requireScope, here/Actions route fences, tenant route table and browser API
+cookie middleware are deleted. Remaining Principal consumers belong to browser
+page/provider flows and old unregistered runtime helpers. Their remaining cut
+is listed in W2's report. No native credential-matrix cell is closed here.
 
 <!-- design:end -->

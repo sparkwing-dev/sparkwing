@@ -47,6 +47,9 @@ func TestReportingRouteAuthorityProperty(t *testing.T) {
 	endpoints := append(s.reportingEndpoints(), s.teamReadEndpoints()...)
 	endpoints = append(endpoints, s.scheduleEndpoints()...)
 	endpoints = append(endpoints, s.runControlEndpoints()...)
+	endpoints = append(endpoints, s.teamWriteEndpoints()...)
+	endpoints = append(endpoints, s.githubAppEndpoints()...)
+	endpoints = append(endpoints, s.billingEndpoints()...)
 	for _, endpoint := range endpoints {
 		if endpoint.Pattern == "/metrics" {
 			continue
@@ -100,7 +103,7 @@ func TestReportingRouteAuthorityProperty(t *testing.T) {
 				if err := router.Register(entry); err != nil {
 					t.Fatal(err)
 				}
-				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci", "{schedule}", "schedule", "{installation}", "17").Replace(entry.Pattern)
+				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci", "{schedule}", "schedule", "{installation}", "17", "{invitation}", "invite").Replace(entry.Pattern)
 				r := httptest.NewRequest(endpoint.Method, path+"?team=forged&run_id=other&job_id=other&selector="+url.QueryEscape(string(input)), nil)
 				r.Header.Set("Authorization", "Bearer "+raw)
 				r.Header.Set("X-Sparkwing-Team", "forged")

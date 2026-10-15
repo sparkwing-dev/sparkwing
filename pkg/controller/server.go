@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,7 +40,6 @@ type Server struct {
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
 
-	auth                       *Authenticator
 	credentialIssuer           CredentialIssuer
 	runnerMeteringWriter       RunnerMeteringWriter
 	resolveCapabilityManager   func(context.Context, store.Team) (CapabilityManager, error)
@@ -63,6 +61,9 @@ type Server struct {
 	resolveSourceAuditReader   func(context.Context, store.Team) (SourceAuditReader, error)
 	resolveSecretReader        func(context.Context, store.Team) (SecretReader, error)
 	resolveScheduleWriter      func(context.Context, store.Team) (ScheduleWriter, error)
+	resolveBillingWriter       func(context.Context, store.Team) (BillingWriter, error)
+	resolveTeamWriter          func(context.Context, store.Team) (TeamWriter, error)
+	resolveGitHubAppWriter     func(context.Context, store.Team) (GitHubAppWriter, error)
 	resolveRunControlWriter    func(context.Context, store.Team) (RunControlWriter, error)
 
 	peerIdentity func(*http.Request) capability.Subject
@@ -134,7 +135,6 @@ type Server struct {
 
 	routeProbeOnce sync.Once
 	routeProbeMux  *http.ServeMux
-	routeProbePub  *http.ServeMux
 
 	storage storageSample
 
@@ -313,53 +313,12 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	return s
 }
 
-func (s *Server) authMiddleware() *Authenticator {
-	if s.auth != nil {
-		return s.auth
-	}
-	return NewAuthenticator(nil, 0).WithLogger(s.logger)
-}
-
 // WithTrustedProxyAddr serves the same API on a second address whose
 // requests key login throttling, the bearer failure budget and the
 // request log on their X-Real-IP. Only a proxy that overwrites that
 // header may reach addr.
 func (s *Server) WithTrustedProxyAddr(addr string) *Server {
 	s.trustedProxyAddr = addr
-	return s
-}
-
-// EnableAuthFromStore requires credentials before serving private routes.
-func (s *Server) EnableAuthFromStore() *Server {
-	s.auth = s.storeAuthenticator()
-	return s
-}
-
-// safety: a revocation on another replica reaches this one at most this late.
-const tokenCacheTTL = 60 * time.Second
-
-func (s *Server) storeAuthenticator() *Authenticator {
-	return NewAuthenticator(s.store, tokenCacheTTL).
-		WithLogger(s.logger)
-}
-
-// safety: a request with no credential acts as the default team's operator, which on a multi-team
-// controller is every team's operator, so the multi-team license forces token auth. It runs
-// again when the handler is built because the license may be installed after EnableAuthFromStore.
-func (s *Server) requireAuthForTeams() {
-	if s.auth == nil && s.store != nil && s.MultiTeam() {
-		s.auth = s.storeAuthenticator()
-	}
-}
-
-// AuthEnabled reports whether legacy private routes require credentials.
-func (s *Server) AuthEnabled() bool {
-	return s.auth != nil
-}
-
-// WithAuthenticator installs a pre-built Authenticator.
-func (s *Server) WithAuthenticator(a *Authenticator) *Server {
-	s.auth = a
 	return s
 }
 
@@ -392,17 +351,9 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handler() http.Handler {
-	s.requireAuthForTeams()
-	mux, router := s.routers()
-	legacy := s.authenticated(s.githubRunnerFence(s.hereRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, mux)))))
-	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if _, pattern := mux.Handler(r); pattern != "" {
-			legacy.ServeHTTP(w, r)
-			return
-		}
-		s.writeRouteMiss(w, r)
-	})
-	return s.observedHandler(router, mux)
+	router := s.routers()
+	router.HandleFunc("/", s.writeRouteMiss)
+	return s.observedHandler(router)
 }
 
 func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux) http.Handler {
@@ -413,46 +364,13 @@ func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux
 		})))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.Metering() {
-			path := r.URL.Path
-			// safety: migrated ledger reads authenticate before checking billing availability.
-			legacyCredits := strings.HasPrefix(path, "/api/v1/credits") && path != "/api/v1/credits" && path != "/api/v1/credits/history" && path != "/api/v1/credits/settings"
-			if legacyCredits ||
-				strings.HasPrefix(path, "/api/v1/team/billing") && r.Method != http.MethodGet {
-				http.NotFound(w, r)
-				return
-			}
 			r = r.WithContext(store.WithoutCreditMetering(r.Context()))
 		}
 		h.ServeHTTP(w, r)
 	})
 }
 
-// safety: neither mux is wired to the other and no handler runs, so a caller
-// that only needs to know whether a route exists can build these from a zero
-// Server without reaching a store.
-func (s *Server) routers() (authed, public *http.ServeMux) {
-	mux := http.NewServeMux()
-
-	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
-
-	mux.Handle("PATCH /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRenameTeam)))
-	mux.Handle("DELETE /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteTeam)))
-	mux.Handle("POST /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleInvite)))
-	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
-	mux.Handle("PUT /api/v1/team/build-trust", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutBuildTrust)))
-	mux.Handle("DELETE /api/v1/team/github-app/installations/{installation_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppUnbind)))
-	mux.Handle("PUT /api/v1/team/github-app/triggers", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppTrigger)))
-	mux.Handle("DELETE /api/v1/team/github-app/triggers", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteGitHubAppTrigger)))
-	mux.Handle("GET /api/v1/team/github-app/automation", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppAutomation)))
-	mux.Handle("PUT /api/v1/team/github-app/automation", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAutomation)))
-	mux.Handle("DELETE /api/v1/team/github-app/automation", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAutomation)))
-	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
-
-	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))
-	mux.Handle("POST /api/v1/team/billing/card", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCard)))
-	mux.Handle("POST /api/v1/team/billing/pay", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingPay)))
-	mux.Handle("PUT /api/v1/team/billing/budget", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingBudget)))
-
+func (s *Server) routers() *http.ServeMux {
 	router := http.NewServeMux()
 	var endpoints []Endpoint
 	endpoints = append(endpoints, s.operatorEndpoints()...)
@@ -475,6 +393,9 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	endpoints = append(endpoints, s.teamReadEndpoints()...)
 	endpoints = append(endpoints, s.scheduleEndpoints()...)
 	endpoints = append(endpoints, s.runControlEndpoints()...)
+	endpoints = append(endpoints, s.teamWriteEndpoints()...)
+	endpoints = append(endpoints, s.githubAppEndpoints()...)
+	endpoints = append(endpoints, s.billingEndpoints()...)
 	s.registerControllerEndpoints(router, endpoints)
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	if s.dataController != nil {
@@ -488,18 +409,18 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	router.Handle("POST /webhooks/stripe", s.paymentHandler())
 
-	return mux, router
+	return router
 }
 
 // safety: several routes are registered only when this server was given the
 // surface behind them, so the answer is this server's, not the build's. It
 // runs registration a second time rather than reading the serving muxes,
 // because the caller asks before the store that server needs is open.
-func (s *Server) routeProbe() (*http.ServeMux, *http.ServeMux) {
+func (s *Server) routeProbe() *http.ServeMux {
 	s.routeProbeOnce.Do(func() {
-		s.routeProbeMux, s.routeProbePub = s.routers()
+		s.routeProbeMux = s.routers()
 	})
-	return s.routeProbeMux, s.routeProbePub
+	return s.routeProbeMux
 }
 
 // RegisteredRoute reports whether this server registers a handler for the
@@ -507,15 +428,11 @@ func (s *Server) routeProbe() (*http.ServeMux, *http.ServeMux) {
 // controller uses it to tell a route this server does not serve, which is a
 // permanent answer, from a condition that may clear.
 func (s *Server) RegisteredRoute(r *http.Request) bool {
-	mux, router := s.routeProbe()
-	return routeRegistered(router, r) || routeRegistered(mux, r)
+	return routeRegistered(s.routeProbe(), r)
 }
 
 func (s *Server) writeRouteMiss(w http.ResponseWriter, r *http.Request) {
-	legacy, policy := s.routeProbe()
-	methods := append(allowedRouteMethods(legacy, r, routeProbeMethods), allowedRouteMethods(policy, r, routeProbeMethods)...)
-	slices.Sort(methods)
-	writeRouteMiss(w, slices.Compact(methods))
+	writeRouteMiss(w, allowedRouteMethods(s.routeProbe(), r, routeProbeMethods))
 }
 
 // WriteUnsupportedRoute answers a request for a route this build does not
@@ -525,43 +442,6 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
 		"error": UnsupportedRouteError,
 		"route": r.Method + " " + r.URL.Path,
 	})
-}
-
-func (s *Server) authenticated(next http.Handler) http.Handler {
-	byToken := s.authMiddleware().Middleware(next)
-	return noStore(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if sess := browserSessionFrom(r.Context()); sess != nil {
-			observeRequestPrincipal(sess.principal.Kind)
-			ctx := contextWithPrincipal(r.Context(), sess.principal)
-			stampPrincipal(ctx, sess.principal)
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
-		// safety: a session is resolved even while bearer auth is off, because
-		// a signed-in account's team and role come only from its session and a
-		// request carrying one must not fall through as an anonymous caller.
-		if raw := extractSessionHeader(r); raw != "" {
-			s.serveSession(w, r, raw, next)
-			return
-		}
-		if s.peerIdentity == nil || r.Header.Get("Authorization") != "" {
-			byToken.ServeHTTP(w, r)
-			return
-		}
-		peer, err := s.identifyPeer(r)
-		if err != nil {
-			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
-				Code:    "unauthenticated",
-				Message: "the connection carries no identity this controller accepts",
-			})
-			return
-		}
-		p := &Principal{Name: peer.Peer.ID, Kind: "service", Scopes: []string{ScopeAdmin}, Authed: time.Now().UTC()}
-		observeRequestPrincipal(p.Kind)
-		ctx := contextWithPrincipal(r.Context(), p)
-		stampPrincipal(ctx, p)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	}))
 }
 
 // UnsupportedRouteError is the `error` member of the 404 body a controller

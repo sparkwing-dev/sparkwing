@@ -18,22 +18,24 @@ type renameTeamReq struct {
 	DisplayName string `json:"display_name"`
 }
 
-func (s *Server) handleRenameTeam(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
+func (s *Server) handleRenameTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req renameTeamReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	info, err := t.Rename(r.Context(), req.DisplayName, time.Now())
+	writer, err := s.teamWriter(r, a)
 	if err != nil {
-		writeIdentityError(w, s, r, "rename team", err)
-		return
+		return err
 	}
-	writeJSON(w, http.StatusOK, teamJSON{Slug: string(info.Slug), DisplayName: info.Label(), Role: p.Role})
+	info, err := writer.RenameAuthorizedTeam(r.Context(), a, req.DisplayName)
+	if err != nil {
+		return accountMutationError(err)
+	}
+	if info.Slug != store.Team(a.Target.Team) {
+		return missingEndpointPolicy()
+	}
+	writeJSON(w, http.StatusOK, teamJSON{Slug: string(info.Slug), DisplayName: info.Label(), Role: string(store.RoleOwner)})
+	return nil
 }
 
 type memberJSON struct {
@@ -41,12 +43,6 @@ type memberJSON struct {
 	Email  string `json:"email"`
 	Name   string `json:"name"`
 	Role   string `json:"role"`
-}
-
-func (s *Server) invalidateRevokedTokens(prefixes []string) {
-	for _, prefix := range prefixes {
-		s.auth.Invalidate(prefix)
-	}
 }
 
 type invitationJSON struct {
@@ -84,26 +80,32 @@ type inviteResp struct {
 	EmailSent bool   `json:"email_sent"`
 }
 
-func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
+func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req inviteReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	inv, err := t.CreateInvitation(r.Context(), p.AccountID, req.Email, store.Role(req.Role), time.Now())
+	key, err := controlIdempotencyKey(r)
 	if err != nil {
-		writeIdentityError(w, s, r, "invite", err)
-		return
+		return err
+	}
+	writer, err := s.teamWriter(r, a)
+	if err != nil {
+		return err
+	}
+	inv, err := writer.CreateAuthorizedInvitation(r.Context(), a, req.Email, store.Role(req.Role), key)
+	if err != nil {
+		return accountMutationError(err)
+	}
+	if inv.Team != store.Team(a.Target.Team) {
+		return missingEndpointPolicy()
 	}
 	noteAuditTarget(r.Context(), "invitation_id", inv.ID)
 	noteAuditTarget(r.Context(), "role", string(inv.Role))
 	accept := s.acceptURL(inv.ID)
-	sent := s.mailInvitation(r.Context(), p, t, inv, accept)
+	sent := s.mailInvitation(r.Context(), a, inv, accept)
 	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent})
+	return nil
 }
 
 // WithMailer sends invitation emails through m. Without one, the controller
@@ -115,7 +117,7 @@ func (s *Server) WithMailer(m mailer.Mailer) *Server {
 
 // safety: a failed or refused send leaves the invitation standing, because the
 // owner still holds its accept link; only the email is lost, and the response says so.
-func (s *Server) mailInvitation(ctx context.Context, p *Principal, t *store.Tenant, inv store.Invitation, accept string) bool {
+func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, inv store.Invitation, accept string) bool {
 	if s.mailer == nil {
 		if err := (mailer.Log{Logger: s.logger}).Send(ctx, mailer.Message{To: inv.Email, Subject: "team invitation"}); err != nil {
 			s.logger.Warn("invitation email: log", "err", err)
@@ -131,13 +133,15 @@ func (s *Server) mailInvitation(ctx context.Context, p *Principal, t *store.Tena
 		s.logger.Info("invitation email withheld: the address reached its daily limit", "invitation", inv.ID)
 		return false
 	}
-	inviter := p.Name
-	if acct, err := s.store.Account(ctx, p.AccountID); err == nil && strings.TrimSpace(acct.Name) != "" {
+	inviter := a.Principal.Capability.Subject.ID
+	if acct, err := s.store.Account(ctx, a.Principal.Capability.Subject.ID); err == nil && strings.TrimSpace(acct.Name) != "" {
 		inviter = acct.Name
 	}
-	team := string(t.Team())
-	if info, err := t.Info(ctx); err == nil {
-		team = info.Label()
+	team := string(inv.Team)
+	if tenant, err := s.store.ForTeam(ctx, inv.Team); err == nil {
+		if info, err := tenant.Info(ctx); err == nil {
+			team = info.Label()
+		}
 	}
 	msg, err := mailer.InvitationMessage(inv.Email, mailer.Invitation{
 		InviterName: inviter, TeamName: team, Role: string(inv.Role), AcceptURL: accept, ExpiresAt: inv.ExpiresAt,
@@ -167,16 +171,16 @@ func (s *Server) acceptURL(id string) string {
 	return u.Scheme + "://" + u.Host + path
 }
 
-func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	writer, err := s.teamWriter(r, a)
+	if err != nil {
+		return err
 	}
-	if err := t.DeleteInvitation(r.Context(), r.PathValue("id"), time.Now()); err != nil {
-		writeIdentityError(w, s, r, "delete invitation", err)
-		return
+	if err := writer.DeleteAuthorizedInvitation(r.Context(), a, r.PathValue("invitation")); err != nil {
+		return accountMutationError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

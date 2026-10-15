@@ -369,7 +369,14 @@ async function readErrorBody(res: Response): Promise<ErrorBody> {
     const text = (await res.text()).trim();
     try {
       const body = JSON.parse(text) as unknown;
-      if (body && typeof body === "object") return body as ErrorBody;
+      if (body && typeof body === "object" && "error" in body) {
+        const error = body.error;
+        if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+          const details = "details" in error && error.details && typeof error.details === "object" ? error.details as Record<string, unknown> : {};
+          return { ...details, error: error.message, code: typeof details.reason === "string" ? details.reason : ("code" in error && typeof error.code === "string" ? error.code : undefined) };
+        }
+        return {};
+      }
     } catch {
       // A proxy or gateway may answer in plain text.
     }
@@ -468,7 +475,10 @@ export async function startCheckout(
 ): Promise<string> {
   const res = await authFetch("/api/v1/team/billing/checkout", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": crypto.randomUUID(),
+    },
     body: JSON.stringify({ amount_cents: amountCents }),
   });
   if (!res.ok) {
@@ -504,7 +514,10 @@ export const checkoutRefreshDelays = [2_000, 5_000, 10_000, 15_000, 20_000];
 export async function openHostedPage(
   path: "/api/v1/team/billing/card" | "/api/v1/team/billing/pay",
 ): Promise<string> {
-  const res = await authFetch(path, { method: "POST" });
+  const res = await authFetch(path, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+  });
   if (!res.ok) {
     const body = await readErrorBody(res);
     throw new BillingApiError(

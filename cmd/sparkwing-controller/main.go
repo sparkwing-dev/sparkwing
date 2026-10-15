@@ -503,7 +503,6 @@ func run(args []string) error {
 	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
 		return fmt.Errorf("--free-team-slots: %w", err)
 	}
-	srv.EnableAuthFromStore()
 	if err := configureSecrets(ctx, srv, st, creds, generatedKeyPath(p.StateDB())); err != nil {
 		return err
 	}

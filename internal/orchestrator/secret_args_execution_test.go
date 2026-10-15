@@ -47,7 +47,7 @@ func execControllerWithSecretRun(t *testing.T, runID string) (*store.Store, *cli
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(srv.Close)
 	return st, client.NewWithToken(srv.URL, nil, raw)
 }

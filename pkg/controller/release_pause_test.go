@@ -29,7 +29,7 @@ func newPauseTestServer(t *testing.T) (*Server, string, *store.Store) {
 		t.Fatalf("CreateToken: %v", err)
 	}
 
-	srv := New(st, nil).WithAuthenticator(NewAuthenticator(st, 0))
+	srv := New(st, nil)
 	return srv, raw, st
 }
 

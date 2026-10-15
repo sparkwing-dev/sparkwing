@@ -49,7 +49,7 @@ func newHereFixture(t *testing.T) *hereFixture {
 
 // safety: a fresh controller has an empty credential cache, so a changed expiry is read from the store.
 func (f *hereFixture) restart() {
-	srv := httptest.NewServer(controller.New(f.st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(f.st, nil).Handler())
 	f.t.Cleanup(srv.Close)
 	f.url = srv.URL
 }

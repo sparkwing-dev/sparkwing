@@ -28,7 +28,7 @@ func newTriggerUserServer(t *testing.T) (*store.Store, *httptest.Server, string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	ts := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(ts.Close)
 	return st, ts, raw
 }

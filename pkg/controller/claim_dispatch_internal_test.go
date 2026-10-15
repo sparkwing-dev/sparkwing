@@ -43,7 +43,7 @@ func newDispatchRouteFixture(t *testing.T) dispatchRouteFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return dispatchRouteFixture{st: st, handler: New(st, nil).EnableAuthFromStore().Handler(), reader: reader}
+	return dispatchRouteFixture{st: st, handler: New(st, nil).Handler(), reader: reader}
 }
 
 func (f dispatchRouteFixture) claim(t *testing.T, nodeID string, kind store.ClaimTokenKind) string {

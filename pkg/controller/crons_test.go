@@ -55,7 +55,7 @@ func newCronsFixture(t *testing.T) *cronsFixture {
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(srv.Close)
 	return &cronsFixture{t: t, url: srv.URL, store: st, writer: writer, reader: reader, none: none}
 }

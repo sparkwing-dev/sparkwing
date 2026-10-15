@@ -141,33 +141,6 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, raw string, next http.Handler) {
-	p, err := s.sessionPrincipal(r.Context(), raw, time.Now().UTC())
-	if err != nil {
-		if errors.Is(err, store.ErrSessionBackend) {
-			s.logger.Error("session.unavailable", "error", err.Error())
-			setRetryAfter(w, authUnavailableRetryAfter)
-			writeAuthError(w, http.StatusServiceUnavailable, authErrorBody{
-				Code: "unavailable", Message: "authentication is temporarily unavailable",
-			})
-			return
-		}
-		writeAuthError(w, http.StatusUnauthorized, authErrorBody{Code: "unauthenticated", Message: err.Error()})
-		return
-	}
-	observeRequestPrincipal(p.Kind)
-	ctx := contextWithPrincipal(r.Context(), p)
-	stampPrincipal(ctx, p)
-	next.ServeHTTP(w, r.WithContext(ctx))
-}
-
-// safety: an account's scopes come from its membership as it stands now, so a demotion or removal
-// takes effect on the next request rather than at session expiry.
-func (s *Server) sessionPrincipal(ctx context.Context, raw string, now time.Time) (*Principal, error) {
-	p, _, err := s.lookupSession(ctx, raw, now)
-	return p, err
-}
-
 func (s *Server) lookupSession(ctx context.Context, raw string, now time.Time) (*Principal, *store.Session, error) {
 	sess, err := s.store.LookupSessionAndRenew(ctx, raw, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
@@ -217,38 +190,6 @@ func (s *Server) memberRole(ctx context.Context, team store.Team, accountID stri
 		return "", errors.Join(store.ErrSessionBackend, err)
 	}
 	return role, nil
-}
-
-// safety: a bearer token names no human, so it cannot use the routes a membership decides.
-func accountPrincipal(w http.ResponseWriter, r *http.Request) (*Principal, bool) {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok || p.AccountID == "" {
-		writeAuthError(w, http.StatusUnauthorized, authErrorBody{
-			Code: "unauthenticated", Message: "sign in to use this route",
-		})
-		return nil, false
-	}
-	return p, true
-}
-
-func (s *Server) teamMember(w http.ResponseWriter, r *http.Request, min store.Role) (*Principal, *store.Tenant, bool) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return nil, nil, false
-	}
-	if !store.Role(p.Role).AtLeast(min) {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code: "forbidden", Principal: p.label(),
-			Message: "this needs the " + string(min) + " role in the active team",
-		})
-		return nil, nil, false
-	}
-	t, err := s.store.ForTeam(r.Context(), p.Team)
-	if err != nil {
-		s.writeInternalError(w, r, "team handle", err)
-		return nil, nil, false
-	}
-	return p, t, true
 }
 
 var errAccountSessionsDisabled = errors.New("sign-in is not enabled on this controller")
