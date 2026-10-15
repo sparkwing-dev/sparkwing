@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **storage:** Filesystem and S3 manifest readers verify stored length, digest
+  and successful close before returning file metadata. Authenticated controller
+  binding remains pending.
+
 - **storage:** Filesystem and S3 CAS backends support the leased reachability
   collector. Removed age-based output pruning and bucket-measurement expiry.
   Referenced bytes survive regardless of object age.

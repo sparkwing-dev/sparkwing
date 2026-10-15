@@ -195,22 +195,30 @@ func checkInterruptedCollection(ctx context.Context, db *sql.DB, op *store.Opera
 }
 
 func putCollectionObject(ctx context.Context, objects blob.ObjectBackend, transfers blob.HTTPClient, b blob.Blob, body []byte, ticket string) error {
-	pending := "teams/" + b.Team + "/pending/" + ticket
-	signed, err := objects.Sign(ctx, capability.ObjectToSign{Method: http.MethodPut, Key: pending, Size: b.Size, SHA256: string(b.Digest), ExpiresAt: time.Now().Add(time.Minute)})
+	pending, err := stageBoundaryObject(ctx, objects, transfers, b, body, ticket)
 	if err != nil {
-		return err
-	}
-	r, err := transfers.Transfer(ctx, collectionTransfer(signed), bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	if err := r.Close(); err != nil {
-		return err
-	}
-	if err := objects.CommitObject(ctx, pending, b); err != nil {
 		return err
 	}
 	return objects.DeleteObject(ctx, pending)
+}
+
+func stageBoundaryObject(ctx context.Context, objects blob.ObjectBackend, transfers blob.HTTPClient, b blob.Blob, body []byte, ticket string) (string, error) {
+	pending := "teams/" + b.Team + "/pending/" + ticket
+	signed, err := objects.Sign(ctx, capability.ObjectToSign{Method: http.MethodPut, Key: pending, Size: b.Size, SHA256: string(b.Digest), ExpiresAt: time.Now().Add(time.Minute)})
+	if err != nil {
+		return "", err
+	}
+	r, err := transfers.Transfer(ctx, collectionTransfer(signed), bytes.NewReader(body))
+	if r != nil {
+		err = errors.Join(err, r.Close())
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := objects.CommitObject(ctx, pending, b); err != nil {
+		return "", err
+	}
+	return pending, nil
 }
 
 func collectionTransfer(signed capability.SignedObject) blob.SignedTransfer {

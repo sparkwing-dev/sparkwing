@@ -208,6 +208,14 @@ creates the final key only if absent, and verifies final bytes before returning.
 A physical commit grants no record, existence row or receipt. Those remain W1's
 transactional responsibility after the controller repeats authorization.
 
+`ObjectBackend.ReadManifest(ctx, team, digest)` derives the tenant CAS key and
+returns file members only after verifying the full stored length, digest and
+successful close. `storage.BlobManifests` implements W1's `BlobManifestReader`
+with that physical reader. The record transaction authorizes the manifest before
+reading it and independently authorizes every returned member. This adapter opens
+no store transaction or authenticated data request, so it can run inside W1's
+existing transaction. Controller binding must supply it to `Tenant.BlobRecords`.
+
 `ObjectBackend.DeleteBlob` implements W1's existing `BlobDeleter` interface for
 filesystem and S3 collection. It derives the tenant CAS key from the selected
 blob. Missing bytes are an idempotent success. The leased collector owns the

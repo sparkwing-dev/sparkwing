@@ -6,10 +6,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// ObjectBackend requires verified ticket-specific staging bytes, including when the final blob already exists.
+// ObjectBackend owns verified publication, tenant manifest reads and physical deletion.
 type ObjectBackend interface {
 	capability.DataSigner
 	CommitObject(context.Context, string, Blob) error
 	DeleteObject(context.Context, string) error
 	DeleteBlob(context.Context, Blob) error
+	ReadManifest(context.Context, string, Digest) ([]Member, error)
 }

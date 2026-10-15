@@ -69,7 +69,8 @@ func (s collectionS3) RoundTrip(r *http.Request) (*http.Response, error) {
 	return out, nil
 }
 
-func checkStorageS3Collection(t *testing.T) {
+func storageS3(t *testing.T) (*blob.S3, collectionS3) {
+	t.Helper()
 	transport := collectionS3{objects: make(map[string][]byte)}
 	client := s3.New(s3.Options{
 		Region: "us-east-1", BaseEndpoint: aws.String("https://objects.invalid"), UsePathStyle: true, RetryMaxAttempts: 1,
@@ -82,6 +83,11 @@ func checkStorageS3Collection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return objects, transport
+}
+
+func checkStorageS3Collection(t *testing.T) {
+	objects, transport := storageS3(t)
 	if err := acceptance.CheckBlobCollection(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 		t.Fatal(err)
 	}

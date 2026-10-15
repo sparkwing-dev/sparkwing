@@ -2,6 +2,27 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 manifest admission
+
+**W2 verified manifest binding.** `storage.BlobManifests{Objects: objects}` now
+implements W1's existing `BlobManifestReader` for filesystem and S3. Supply it
+to `Tenant.BlobRecords` in `BindData`. It verifies the selected tenant's full CAS
+object and closes it before returning members, without opening a nested store
+transaction. Physical reads grant no receipt or reference edge. Real SQLite
+boundaries cover forged metadata, unrelated same-run receipts, independent
+uploads and reopening. Controller authentication remains W2's integration.
+
+**W1 C1 record layout integration.** Output and manifest writers use the run ID
+as `Name` with an empty `Scope.Key`, as C1 declares. `ResultBlobKey` still uses
+`Name=result` and a run/attempt/generation key. The W7 physical/store fixture
+passes using that W1 key. A temporary overlay with the C1 key reproduces
+`result key differs from attempt fence`. Memo writers/readers use
+`MemoRecordName=result` with optional manifest/members. W1 still writes and
+looks up `output` and `manifest`. Align admission, copy destinations and the
+output-size check with C1. The repo-bound remote client also leaves tenant and
+verified-default-ref selection to the server, while W1's exact lookup still
+requires those fields. W7's component readers and physical adapters are ready.
+
 ## From W4 review fixes (2026-10-15)
 
 
@@ -20,4 +41,3 @@ Each worker acts on every entry naming its area. Entries come from area reviews 
 **DESIGN: W3 environment projection (finding 9).** Invariant: automatic startup classification and complete cleanup environment come from one procenv projection. Use `SplitJobEnv`/the shared builder before process creation and supply cleanup with the complete attempt environment. Test unmarked GOMAXPROCS/NODE_OPTIONS at interpreter startup, unchanged declarations on replan, and body/cleanup using the same DOCKER_HOST. An explicitly marked startup variable cannot establish automatic classification.
 
 W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./internal/nodehost -run '^TestHostedRunEmitsTheDispatchersEvents$' -count=1` fails compilation. `events_test.go` still references PlanDocOld, PlanModifiers, PlanNode, PlanConsume, PlanApproval, PlanClosures and SkippedConcurrent. Its auto retry branches and node_auto_retry expectations describe removed behavior. Other node-host test files fail on old APIs too. The two orchestrator RetryAuto tests still pass removed `auto=true` to the fixture and need porting to retained retry semantics.
-

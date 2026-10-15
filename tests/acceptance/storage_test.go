@@ -53,5 +53,9 @@ func TestStorage(t *testing.T) {
 	})
 	t.Run("storage-reachability-and-retention-tails/filesystem-store", checkStorageFilesystemCollection)
 	t.Run("storage-reachability-and-retention-tails/s3-store-boundary", checkStorageS3Collection)
+	t.Run("storage-reference-edge-laundering/filesystem-manifests", checkStorageFilesystemManifests)
+	t.Run("storage-reference-edge-laundering/s3-manifests", checkStorageS3Manifests)
+	t.Run("storage-reference-edge-laundering/filesystem-manifest-records", checkStorageFilesystemManifestRecords)
+	t.Run("storage-reference-edge-laundering/s3-manifest-records", checkStorageS3ManifestRecords)
 	pendingScenarios(t, "storage")
 }

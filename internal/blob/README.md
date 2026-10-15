@@ -66,6 +66,20 @@ Record transactions, read-set construction, unique-byte accounting, GC and
 retention belong to `pkg/store`. Controller authorization and upload tickets belong
 to the controller and capability packages.
 
+`ObjectBackend.ReadManifest` reads only the selected tenant's CAS object and
+returns its file metadata after verifying length, digest and successful close.
+`storage.BlobManifests` supplies that reader to `Tenant.BlobRecords`. The record
+transaction authorizes the manifest first and checks every member afterward.
+This physical read opens no nested database transaction. W2 still needs to install
+the adapter in its authenticated record binding.
+
+The filesystem and S3 manifest boundaries generate file metadata and reject
+tenant substitution, corrupt bytes, truncation and malformed members. The SQLite
+record boundaries reject forged metadata and borrowed same-run upload receipts,
+then admit independently verified member uploads and read them after reopening.
+Those record fixtures use W1's `ResultBlobKey`; the output/manifest key and memo
+record-name conflicts with C1 remain open.
+
 Artifact capture and staging live in `internal/artifacts`. Its `Data` value binds
 the byte store, record store and authority to the same job. Capture uploads each
 file even if another principal stored identical bytes, because an existence

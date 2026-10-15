@@ -27,6 +27,13 @@ pipeline binary or source bundle. Each reference requires either the exact
 uploader's receipt or an authorized read edge. Knowing a digest does not grant
 access. Presence queries reveal only objects the caller may read.
 
+The filesystem and S3 manifest readers derive file metadata from the tenant's
+immutable object. They verify its full length and digest, then close it before
+returning metadata. The record transaction checks that metadata against the
+submitted members and verifies each member's existence and authority.
+The physical reader adapter is implemented. Its authenticated controller binding
+is still pending.
+
 Each upload ticket must stage and verify its own bytes, including when identical
 content already exists. Missing staging fails the commit. Before settlement, a
 retry keeps the staged object; after settlement, it replays the stored receipt
