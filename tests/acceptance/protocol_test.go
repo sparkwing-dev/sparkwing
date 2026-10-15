@@ -33,6 +33,10 @@ func TestProtocol(t *testing.T) {
 					continue
 				}
 				t.Run(target.ID, func(t *testing.T) {
+					if scenario.ID == "protocol-envelope-transcripts" && target.ID == "local-go-"+runtime.GOOS {
+						testGoSDKEnvelopeTranscripts(t)
+						return
+					}
 					if scenario.ID == "protocol-memo-input-boundaries" && target.ID == "local-go-"+runtime.GOOS {
 						t.Run("sdk-input-contract", testGoSDKMemoInputBoundaries)
 						t.Skip("persisted memo reuse and write suppression require W1/W3 storage integration")
