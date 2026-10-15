@@ -13,7 +13,7 @@ func TestRegisterWritesACommandRecordAndReleaseRemovesIt(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "run-1")
-	t.Setenv("SPARKWING_NODE_ID", "build")
+	t.Setenv("SPARKWING_JOB_ID", "build")
 	ledger := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir())
 
 	release, err := Register(context.Background(), Spec{Argv: []string{"docker", "rm", "-f", "c1"}, Description: "docker run x"})
@@ -37,7 +37,7 @@ func TestRegisterOutsideARunIsANoOp(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "")
-	t.Setenv("SPARKWING_NODE_ID", "")
+	t.Setenv("SPARKWING_JOB_ID", "")
 	release, err := Register(context.Background(), Spec{Argv: []string{"docker", "rm", "-f", "c1"}})
 	if err != nil {
 		t.Fatal(err)
@@ -48,11 +48,28 @@ func TestRegisterOutsideARunIsANoOp(t *testing.T) {
 	}
 }
 
+func TestRegisterIgnoresRemovedNodeIdentity(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_RUN_ID", "run-1")
+	t.Setenv("SPARKWING_JOB_ID", "")
+	t.Setenv("SPARKWING_NODE_ID", "retired-job")
+	release, err := Register(t.Context(), Spec{Argv: []string{"cleanup"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	records, err := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir()).List()
+	if err != nil || len(records) != 0 {
+		t.Fatalf("removed identity registered a cleanup: %+v (%v)", records, err)
+	}
+}
+
 func TestRegisterWithNoArgvIsANoOp(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "run-1")
-	t.Setenv("SPARKWING_NODE_ID", "build")
+	t.Setenv("SPARKWING_JOB_ID", "build")
 	if _, err := Register(context.Background(), Spec{}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +84,7 @@ func TestRegisterWithoutADescriptionRecordsOnlyTheProgram(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "run-1")
-	t.Setenv("SPARKWING_NODE_ID", "build")
+	t.Setenv("SPARKWING_JOB_ID", "build")
 	release, err := Register(context.Background(), Spec{Argv: []string{"/usr/bin/vault", "token", "revoke", "hunter2-token"}})
 	if err != nil {
 		t.Fatal(err)

@@ -69,7 +69,7 @@ type failureCtxKey struct{}
 // WithFailure returns a context carrying f, read back by a failure-aware
 // recovery callback. The orchestrator installs
 // it on the context handed to an OnFailure recovery node.
-func WithFailure(ctx context.Context, f Failure) context.Context {
+func withFailure(ctx context.Context, f Failure) context.Context {
 	return context.WithValue(ctx, failureCtxKey{}, f)
 }
 

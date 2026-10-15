@@ -9,6 +9,9 @@ import (
 )
 
 func open() (*os.File, *os.File, error) {
+	if len(os.Args) != 2 {
+		return nil, nil, fmt.Errorf("%s takes no handle arguments on Unix", Arg)
+	}
 	fds := []int{3, 4}
 	for _, fd := range fds {
 		var st syscall.Stat_t

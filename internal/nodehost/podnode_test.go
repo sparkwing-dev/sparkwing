@@ -28,13 +28,13 @@ func TestSessionCountsLinesItsStuckSinkNeverGot(t *testing.T) {
 		Entry: pipelineentry.Binary(os.Args[0]),
 		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
 		Sink:  sink,
-		Grace: 100 * time.Millisecond,
+		Grace: 100 * time.Millisecond, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if _, err := s.Call(callCtx(t), runNode("echo")); err != nil {
-		t.Fatalf("run_node: %v", err)
+	if _, err := s.Call(callCtx(t), runStep("echo")); err != nil {
+		t.Fatalf("run_step: %v", err)
 	}
 	if _, err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
@@ -47,8 +47,8 @@ func TestSessionCountsLinesItsStuckSinkNeverGot(t *testing.T) {
 // A session whose sink kept up loses nothing.
 func TestSessionLosesNothingWhenItsSinkKeepsUp(t *testing.T) {
 	s := startFake(t, context.Background(), &recorder{})
-	if _, err := s.Call(callCtx(t), runNode("echo")); err != nil {
-		t.Fatalf("run_node: %v", err)
+	if _, err := s.Call(callCtx(t), runStep("echo")); err != nil {
+		t.Fatalf("run_step: %v", err)
 	}
 	if _, err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
@@ -76,9 +76,9 @@ func TestExecuteMasksSecretInputs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	res, err := Execute(ctx, Config{
-		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
+		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 		Pipeline: "attempts", Args: map[string]string{"marker": t.TempDir(), "pass": "input-secret-4242"},
-		Run:   nodeproto.RunContextOld{RunID: "run-secret-input"},
+		Run:   nodeproto.RunContext{RunID: "run-secret-input"},
 		State: openStore(t), Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 		Attempts: &Attempts{
 			Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
@@ -113,10 +113,10 @@ func TestClaimedMemoFollowerWithNoOutputRunsTheNode(t *testing.T) {
 			return MemoSource{}, store.ErrNotFound
 		},
 	}
-	run := &Run{ID: "run-follower", State: st, Logger: slog.New(slog.DiscardHandler)}
+	run := &Run{ID: "run-follower", State: st, Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	ran := false
 	r := &memoRun{
-		cfg: &Config{}, m: m, adm: &Admission{Slots: m.Slots}, n: &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: "n"}},
+		cfg: &Config{}, m: m, adm: &Admission{Slots: m.Slots}, n: &NodeRun{Run: run, Plan: nodeproto.JobSpec{ID: "n", Steps: []nodeproto.StepSpec{{ID: "body"}}}},
 		next: func(context.Context, *NodeRun) Result {
 			ran = true
 			return Result{Outcome: sparkwing.Success, Output: []byte(`"own"`)}

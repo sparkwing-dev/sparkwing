@@ -28,9 +28,9 @@ type envelopeInputs struct {
 type envelopeFixture struct{ sparkwing.Base }
 
 // safety: a reply other than "ok" fails the node, so a test can fail a body it holds.
-func envelopeBody(addr string) func(context.Context) (string, error) {
+func envelopeBody(addr, id string) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
-		who := os.Getenv("SPARKWING_RUN_ID") + "/" + sparkwing.NodeFromContext(ctx)
+		who := os.Getenv("SPARKWING_RUN_ID") + "/" + id
 		var d net.Dialer
 		conn, err := d.DialContext(ctx, "tcp", addr)
 		if err != nil {
@@ -64,20 +64,22 @@ func (j *envelopeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func (envelopeFixture) Plan(_ context.Context, plan *sparkwing.Plan, in envelopeInputs, _ sparkwing.RunContext) error {
 	gated := func(id string) *sparkwing.JobNode {
-		return sparkwing.Job(plan, id, &envelopeJob{body: envelopeBody(in.Gate)}).Resources(sparkwing.Cores(1))
+		return sparkwing.Job(plan, id, &envelopeJob{body: envelopeBody(in.Gate, id)}).Resources(sparkwing.Cores(1))
 	}
-	key := func(context.Context) (sparkwing.CacheKey, error) { return sparkwing.CacheKey(in.Key), nil }
+	key := func(context.Context) (sparkwing.MemoValue, error) { return sparkwing.MemoValue(in.Key), nil }
 	group := func(name string, scope sparkwing.Scope, capacity int, onLimit sparkwing.OnLimit) *sparkwing.ConcurrencyGroup {
 		return sparkwing.NewConcurrencyGroup(name, sparkwing.ConcurrencyLimit{Capacity: capacity, Scope: scope, OnLimit: onLimit})
 	}
 	switch in.Shape {
+	case "":
+		gated("work")
 	case "memo":
-		gated("build").Memoize(key)
-		gated("twin").Memoize(key)
+		gated("build").Memo(key)
+		gated("twin").Memo(key)
 	case "memo-skip-lead":
-		gated("lead").Memoize(key).Concurrency(group("memo-skip-grp", sparkwing.ScopeGlobal, 1, sparkwing.Skip))
+		gated("lead").Memo(key).Concurrency(group("memo-skip-grp", sparkwing.ScopeGlobal, 1, sparkwing.Skip))
 	case "memo-follow":
-		gated("follow").Memoize(key)
+		gated("follow").Memo(key)
 	case "box":
 		gated("work").Concurrency(group("box-grp", sparkwing.ScopeBox, 1, sparkwing.Queue))
 	case "run", "run-pair":
@@ -102,39 +104,10 @@ func (envelopeFixture) Plan(_ context.Context, plan *sparkwing.Plan, in envelope
 		sparkwing.Job(plan, "record", func(context.Context) error {
 			return os.WriteFile(filepath.Join(in.Marker, "zone"), []byte(in.Zone), 0o600)
 		})
-	case "recover-memo", "recover-skip", "recover-conc":
-		addEnvelopeRecovery(plan, in, gated, key, group)
 	default:
 		return fmt.Errorf("unknown shape %q", in.Shape)
 	}
 	return nil
-}
-
-func addEnvelopeRecovery(plan *sparkwing.Plan, in envelopeInputs, gated func(string) *sparkwing.JobNode,
-	key sparkwing.CacheKeyFn, group func(string, sparkwing.Scope, int, sparkwing.OnLimit) *sparkwing.ConcurrencyGroup,
-) {
-	rollback := func(context.Context) error {
-		f, err := os.OpenFile(filepath.Join(in.Marker, "rollback"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintln(f, "body")
-		return errors.Join(err, f.Close())
-	}
-	failing := func(context.Context) error { return errors.New("deploy failed") }
-	switch in.Shape {
-	case "recover-memo":
-		deploy := sparkwing.Job(plan, "deploy", failing).OnFailure("rollback", rollback)
-		deploy.OnFailureNode().Memoize(key)
-	case "recover-skip":
-		deploy := sparkwing.Job(plan, "deploy", failing).OnFailure("rollback", rollback)
-		deploy.OnFailureNode().SkipIf(func(context.Context) bool { return true })
-	case "recover-conc":
-		g := group("recover-grp", sparkwing.ScopeRun, 1, sparkwing.Fail)
-		gated("hold").Concurrency(g)
-		deploy := gated("deploy").OnFailure("rollback", rollback)
-		deploy.OnFailureNode().Concurrency(g)
-	}
 }
 
 func init() {

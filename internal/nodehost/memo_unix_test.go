@@ -53,9 +53,9 @@ func TestMemo(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
 		res, err := Execute(ctx, Config{
-			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
+			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 			Pipeline: "attempts", Args: map[string]string{"memo": "true", "marker": marker},
-			Run:   nodeproto.RunContextOld{RunID: runID},
+			Run:   nodeproto.RunContext{RunID: runID},
 			State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(), Claim: claim,
@@ -99,8 +99,8 @@ func TestMemo(t *testing.T) {
 			t.Errorf("first run: memoized outcome=%q error=%q, want success", r.Outcome, r.Error)
 		}
 		r := row(t, "run-memo-2", "memoized")
-		if r.Outcome != string(sparkwing.Cached) || r.FailureReason != "" || r.StartedAt == nil {
-			t.Errorf("second run: memoized outcome=%q reason=%q started=%v, want cached and started", r.Outcome, r.FailureReason, r.StartedAt)
+		if r.Outcome != string(sparkwing.Memoized) || r.FailureReason != "" || r.StartedAt == nil {
+			t.Errorf("second run: memoized outcome=%q reason=%q started=%v, want memoized and started", r.Outcome, r.FailureReason, r.StartedAt)
 		}
 		if got, want := output(t, "run-memo-2", "memoized"), output(t, "run-memo-1", "memoized"); got != want || !strings.Contains(got, "run-memo-1") {
 			t.Errorf("second run output %s, want the first run's %s", got, want)
@@ -135,8 +135,8 @@ func TestMemo(t *testing.T) {
 			}
 		}
 		logs.mu.Unlock()
-		if end["cache_hit"] != true || end["outcome"] != string(sparkwing.Cached) {
-			t.Errorf("memoized node_end attrs = %v, want a cached cache_hit", end)
+		if end["cache_hit"] != true || end["outcome"] != string(sparkwing.Memoized) {
+			t.Errorf("memoized node_end attrs = %v, want a memoized cache_hit", end)
 		}
 	})
 
@@ -191,8 +191,8 @@ func TestMemo(t *testing.T) {
 	})
 
 	t.Run("AMemoizedSourceStillFansOut", func(t *testing.T) {
-		if r := row(t, "run-memo-2", "memo-targets"); r.Outcome != string(sparkwing.Cached) {
-			t.Errorf("source outcome=%q error=%q, want cached", r.Outcome, r.Error)
+		if r := row(t, "run-memo-2", "memo-targets"); r.Outcome != string(sparkwing.Memoized) {
+			t.Errorf("source outcome=%q error=%q, want memoized", r.Outcome, r.Error)
 		}
 		if n := bodies("memo-targets"); n != 1 {
 			t.Errorf("source body ran %d times, want once", n)

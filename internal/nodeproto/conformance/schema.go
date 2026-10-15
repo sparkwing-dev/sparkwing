@@ -1,9 +1,6 @@
-// Package conformance holds the node protocol conformance suite
-// (docs/node-protocol.md): a driver that starts any SDK entry with
-// --sw-node-protocol and runs a fixed set of sessions against the fixture
-// pipeline in testdata/fixture.json, which every SDK implements alike. The
-// Go SDK's fixture is ./gofixture. The package itself exports the subset
-// JSON Schema check that judges every frame against docs/schemas.
+// Package conformance checks SDK process transcripts against the v2 corpus
+// and schema snapshots in testdata. Its host decodes emitted errors independently
+// so SDK conformance does not depend on the controller's error implementation.
 package conformance
 
 import (

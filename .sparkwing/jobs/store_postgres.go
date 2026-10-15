@@ -139,7 +139,7 @@ func (p *StorePostgres) run(ctx context.Context) error {
 				if err != nil {
 					return "", err
 				}
-				layout := storePostgresLayout(root, sparkwing.ToolCacheDir("embedded-postgres"), port)
+				layout := storePostgresLayout(root, pipelineCacheDir("embedded-postgres"), port)
 				sparkwing.Info(ctx, "starting embedded postgres on :%d (data=%s)", layout.Port, layout.Data)
 				candidate := embeddedpostgres.NewDatabase(layout.config(&serverLog))
 				if err := candidate.Start(); err != nil {
@@ -147,7 +147,7 @@ func (p *StorePostgres) run(ctx context.Context) error {
 					continue
 				}
 				server = candidate
-				sparkwing.AnnotateOld(ctx, fmt.Sprintf("embedded postgres ready on :%d", layout.Port))
+				sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("embedded postgres ready on :%d", layout.Port)})
 				return layout.DSN, nil
 			}
 			return "", lastErr
@@ -206,7 +206,7 @@ func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) 
 
 	interrupts := r.interrupts
 	if interrupts == nil {
-		// safety: pkg/runner installs no handler, so an unhandled SIGINT
+		// safety: the SDK installs no handler, so an unhandled SIGINT
 		// kills this process before any defer can stop the server.
 		signaled := make(chan os.Signal, 1)
 		signal.Notify(signaled, os.Interrupt, syscall.SIGTERM)

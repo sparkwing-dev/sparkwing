@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -50,7 +51,7 @@ func childPlanAdmissionScan(ctx context.Context, state StateBackend, concurrency
 		}
 		return childPlanAdmission{Status: childPlanAdmissionQueued, QueuedAt: run.CreatedAt}, nil
 	}
-	keys, err := planConcurrencyKeys(run.PlanSnapshot)
+	keys, err := planConcurrencyKeys(run.PlanSnapshot, runID)
 	if err != nil {
 		return childPlanAdmission{Status: childPlanAdmissionUnknown}, err
 	}
@@ -108,29 +109,22 @@ func childPlanAdmissionScan(ctx context.Context, state StateBackend, concurrency
 	return childPlanAdmission{Status: childPlanAdmissionUnknown}, nil
 }
 
-func planConcurrencyKeys(raw []byte) ([]string, error) {
+func planConcurrencyKeys(raw []byte, runID string) ([]string, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	var snapshot struct {
-		PlanConcurrency   *nodeproto.PlanConc  `json:"plan_concurrency"`
-		PlanConcurrencies []nodeproto.PlanConc `json:"plan_concurrency_groups"`
-	}
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
+	var doc nodeproto.PlanDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, err
 	}
-	keys := make([]string, 0, 1+len(snapshot.PlanConcurrencies))
+	var keys []string
 	seen := map[string]bool{}
-	if snapshot.PlanConcurrency != nil && snapshot.PlanConcurrency.Key != "" {
-		keys = append(keys, snapshot.PlanConcurrency.Key)
-		seen[snapshot.PlanConcurrency.Key] = true
-	}
-	for _, group := range snapshot.PlanConcurrencies {
-		if group.Key == "" || seen[group.Key] {
-			continue
+	for _, group := range doc.Concurrency {
+		key := nodehost.ConcurrencyKey(group, runID, boxHostID())
+		if !seen[key] {
+			keys = append(keys, key)
+			seen[key] = true
 		}
-		keys = append(keys, group.Key)
-		seen[group.Key] = true
 	}
 	return keys, nil
 }
@@ -138,7 +132,7 @@ func planConcurrencyKeys(raw []byte) ([]string, error) {
 func filterGlobalScopeKeys(keys []string) []string {
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
-		if strings.HasPrefix(key, nodeproto.ConcurrencyKeyGlobalPrefix) {
+		if strings.HasPrefix(key, "global:") {
 			out = append(out, key)
 		}
 	}

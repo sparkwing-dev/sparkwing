@@ -21,7 +21,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // safety: a submitted trigger cannot carry this key, because sanitizeTriggerEnv drops
@@ -821,7 +820,7 @@ func (s *Server) githubAppCheckUpdate(ctx context.Context, trigger *store.Trigge
 		return githubCheckUpdate{}, false
 	}
 	sha := trigger.GitSHA
-	if head := trigger.TriggerEnv[sparkwing.EnvPRHeadSHA]; trigger.TriggerEnv[sparkwing.EnvGitHubEventName] == sparkwing.EventPullRequest && head != "" {
+	if head := trigger.TriggerEnv["GITHUB_HEAD_SHA"]; trigger.TriggerEnv["GITHUB_EVENT_NAME"] == "pull_request" && head != "" {
 		sha = head
 	}
 	if !githubCommit(strings.ToLower(sha)) {

@@ -34,6 +34,9 @@ type SecretsProvider interface {
 func PipelineSecrets[T any](ctx context.Context) *T {
 	raw := ctx.Value(keyPipelineSecrets)
 	if raw == nil {
+		raw = resolveTypedSecrets(ctx)
+	}
+	if raw == nil {
 		return nil
 	}
 	v, ok := raw.(*T)

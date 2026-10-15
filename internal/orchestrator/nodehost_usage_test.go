@@ -41,7 +41,7 @@ func TestNodehostUsageReachesCapacityRecord(t *testing.T) {
 			record := nodehost.RecordUsage(localState{st: st})
 			record(ctx, &nodehost.NodeRun{
 				Run:  &nodehost.Run{ID: "r1", Logger: slog.Default()},
-				Plan: nodeproto.PlanNode{ID: "build"},
+				Plan: nodeproto.JobSpec{ID: "build"},
 			}, nodehost.Usage{CPUTime: 1500 * time.Millisecond, MaxRSSBytes: 300 << 20, Wall: 2 * time.Second, SessionWide: tc.sessionWide})
 			if err := st.FinishNode(ctx, "r1", "build", "success", "", nil); err != nil {
 				t.Fatal(err)

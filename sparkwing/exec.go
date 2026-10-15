@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // ExitNotStarted marks an ExecError where the child process never
@@ -24,7 +24,13 @@ import (
 const ExitNotStarted = -1
 
 // WorkDir returns the pipeline working directory (the repo root).
-func WorkDir() string { return CurrentRuntime().WorkDir }
+func WorkDir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	return dir
+}
 
 // ExecResult is the structured result of a command invocation.
 type ExecResult struct {
@@ -296,7 +302,7 @@ func (c *Cmd) execute(silent bool) (ExecResult, error) {
 	case kindExec:
 		helper = "sparkwing.Exec"
 	}
-	planguard.Guard(c.ctx, helper)
+	sdkserve.RequireExecution(c.ctx, helper)
 
 	var name string
 	var args []string
@@ -389,16 +395,16 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	streamsDone := make(chan struct{})
 	configureProcessGroup(ctx, cmd, streamsDone)
 
-	logger := LoggerFromContext(ctx)
+	logger := loggerFromContext(ctx)
 	logger.Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "info",
-		JobID: NodeFromContext(ctx),
+		JobID: nodeFromContext(ctx),
 		Event: "exec_start",
 		Msg:   "$ " + display,
 	}))
 	Debug(ctx, "exec: %s (dir=%s)", display, dir)
-	if len(extraEnv) > 0 && DebugEnabled() {
+	if len(extraEnv) > 0 {
 		Debug(ctx, "exec env: %s", formatEnvDiff(extraEnv))
 	}
 
@@ -491,7 +497,7 @@ func emitCommandResources(ctx context.Context, cmd *exec.Cmd, wall time.Duration
 	if !ok {
 		return
 	}
-	reportResource(ctx, ResourceSample{CPUMillicores: amortizedMillicores(cpu, wall), MemoryBytes: maxRSS, CPUTime: cpu})
+	reportResource(ctx, resourceSample{CPUMillicores: amortizedMillicores(cpu, wall), MemoryBytes: maxRSS, CPUTime: cpu})
 }
 
 func amortizedMillicores(cpu, wall time.Duration) int64 {
@@ -532,7 +538,7 @@ func closeFiles(files ...*os.File) {
 func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level string, logger Logger, buf *strings.Builder, limiter *diagnosticOutputLimiter) {
 	defer wg.Done()
 	defer r.Close()
-	node := NodeFromContext(ctx)
+	node := nodeFromContext(ctx)
 	silent := isSilent(ctx)
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)

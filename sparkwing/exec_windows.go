@@ -177,9 +177,9 @@ func (j stepJob) close() {
 // the node's usefulness.
 func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, job stepJob) func() {
 	run := os.Getenv("SPARKWING_RUN_ID")
-	node := NodeFromContext(ctx)
+	node := nodeFromContext(ctx)
 	if node == "" {
-		node = os.Getenv("SPARKWING_NODE_ID")
+		node = os.Getenv("SPARKWING_JOB_ID")
 	}
 	if run == "" || node == "" || job.job == nil || cmd.Process == nil {
 		return func() {}

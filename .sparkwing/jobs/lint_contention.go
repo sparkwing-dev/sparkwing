@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -23,39 +21,9 @@ const golangciTimeout = "Timeout exceeded"
 // message alone.
 const golangciTimeoutExit = 4
 
-const lintCoreCost = 4.0
-
-const measuredColdCoreDemand = 2.67
-
-const lintReserveCores = 2.0
-
-var lintBudget = sparkwing.BoxToolBudget("golangci-lint", grantableCores(), lintLockWait)
-
-func grantableCores() float64 {
-	c := float64(goruntime.NumCPU()) - lintReserveCores
-	if c < 1 {
-		c = 1
-	}
-	return c
-}
-
-func lintSlotCost() int {
-	cost := sparkwing.ToolCostCenticores(lintCoreCost)
-	if capacity := lintBudget.Limit().Capacity; cost > capacity {
-		return capacity
-	}
-	return cost
-}
-
 const gateBaselineRef = "origin/main"
 
-func lintCommandFor(holdsBudget bool) string {
-	flag := "--allow-serial-runners"
-	if holdsBudget {
-		flag = "--allow-parallel-runners"
-	}
-	return fmt.Sprintf("golangci-lint run %s ./...", flag)
-}
+func lintCommand() string { return "golangci-lint run --allow-serial-runners ./..." }
 
 // perf: the subset that answers in about a second over the packages one push
 // touches. Every name is enabled in .golangci.yml, the whole set the release
@@ -78,21 +46,10 @@ var prePushLinters = []string{
 // the second the subset measures.
 func fastLintCommand(cores int, pkgs []string) string {
 	return fmt.Sprintf("GOMAXPROCS=%d GOLANGCI_LINT_CACHE=%s golangci-lint run --allow-parallel-runners -j %d --timeout 1m --enable-only %s %s",
-		cores, shellQuote(sparkwing.ToolCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
+		cores, shellQuote(pipelineCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
 }
 
 func runGolangciLint(ctx context.Context) error {
-	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
-	gcToken := os.Getenv("SPARKWING_CACHE_GRANT")
-
-	restored, restoredBytes, restoreErr := sparkwing.RestoreLintCache(ctx, gcURL)
-	switch {
-	case restoreErr != nil:
-		sparkwing.Warn(ctx, "lint cache: restore: %v", restoreErr)
-	case restored:
-		sparkwing.Info(ctx, "lint cache: restored %d bytes from blob store", restoredBytes)
-	}
-
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
@@ -103,23 +60,13 @@ func runGolangciLint(ctx context.Context) error {
 	}
 	sparkwing.Info(ctx, "golangci-lint: %s", describeLintScope(dirs, baseline))
 
-	release, holdsBudget := sparkwing.ToolSlot(ctx, lintBudget, lintSlotCost())
-	defer release()
-
 	// safety: each worktree keeps its own cache. A cache shared between trees
 	// replays findings under the path of the tree that filled it, and those sit
 	// outside this tree's diff, so the baseline filter drops every one.
-	cacheDir := sparkwing.ToolCacheDir("golangci-lint")
-	if holdsBudget {
-		sparkwing.Info(ctx, "golangci-lint: holding %s; running parallel (cache %s)", lintBudget, cacheDir)
-	} else {
-		sparkwing.Warn(ctx, "golangci-lint: no box budget; falling back to the tool's own box-wide lock (cache %s)", cacheDir)
-	}
-
+	cacheDir := pipelineCacheDir("golangci-lint")
 	lintCtx, cancel := context.WithTimeout(ctx, lintLockWait)
 	defer cancel()
 
-	lintStart := time.Now()
 	var failures []string
 	for _, dir := range dirs {
 		if empty, emptyErr := moduleHasNoPackages(lintCtx, dir); emptyErr == nil && empty {
@@ -127,7 +74,7 @@ func runGolangciLint(ctx context.Context) error {
 			continue
 		}
 		stepStart := time.Now()
-		cmd := sparkwing.Bash(lintCtx, lintCommandFor(holdsBudget)).
+		cmd := sparkwing.Bash(lintCtx, lintCommand()).
 			Dir(dir).
 			Env("GOLANGCI_LINT_CACHE", cacheDir)
 		if _, runErr := cmd.Run(); runErr != nil {
@@ -137,19 +84,11 @@ func runGolangciLint(ctx context.Context) error {
 		}
 		sparkwing.Info(lintCtx, "golangci-lint: %s clean (%s)", dir, time.Since(stepStart).Round(time.Second))
 	}
-	lintDur := time.Since(lintStart)
 	if len(failures) > 0 {
 		return fmt.Errorf("golangci-lint failed in %d of %d module(s):\n  - %s",
 			len(failures), len(dirs), strings.Join(failures, "\n  - "))
 	}
 
-	savedBytes, saveErr := sparkwing.SaveLintCache(ctx, gcURL, gcToken)
-	switch {
-	case saveErr != nil:
-		sparkwing.Warn(ctx, "lint cache: save: %v", saveErr)
-	case savedBytes > 0:
-		sparkwing.Info(ctx, "lint cache: saved %d bytes (lint ran %s)", savedBytes, lintDur.Round(time.Second))
-	}
 	return nil
 }
 

@@ -18,7 +18,7 @@ func TestSecret_NoResolverInstalled(t *testing.T) {
 }
 
 func TestSecret_BlankName(t *testing.T) {
-	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
+	ctx := withSecretResolver(context.Background(), secretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) { return "x", true, nil },
 	))
 	if _, err := Secret(ctx, ""); err == nil {
@@ -28,7 +28,7 @@ func TestSecret_BlankName(t *testing.T) {
 
 func TestSecret_DelegatesToResolver(t *testing.T) {
 	called := 0
-	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
+	ctx := withSecretResolver(context.Background(), secretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) {
 			called++
 			if name != "TOKEN" {
@@ -51,7 +51,7 @@ func TestSecret_DelegatesToResolver(t *testing.T) {
 
 func TestSecret_PropagatesResolverError(t *testing.T) {
 	want := errors.New("source unreachable")
-	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
+	ctx := withSecretResolver(context.Background(), secretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) { return "", false, want },
 	))
 	_, err := Secret(ctx, "FOO")
@@ -67,7 +67,7 @@ func TestSecret_PropagatesResolverError(t *testing.T) {
 }
 
 func TestSecret_RejectsUnmaskedEntry(t *testing.T) {
-	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
+	ctx := withSecretResolver(context.Background(), secretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) {
 			return "us-east-1", false, nil
 		},
@@ -76,38 +76,8 @@ func TestSecret_RejectsUnmaskedEntry(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for masked=false entry")
 	}
-	if !strings.Contains(err.Error(), "use sparkwing.Config") {
-		t.Fatalf("err = %v, want hint to use Config", err)
-	}
-}
-
-func TestConfig_RejectsMaskedEntry(t *testing.T) {
-	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
-		func(ctx context.Context, name string) (string, bool, error) {
-			return "abc123", true, nil
-		},
-	))
-	_, err := Config(ctx, "TOKEN")
-	if err == nil {
-		t.Fatal("expected error for masked=true entry")
-	}
-	if !strings.Contains(err.Error(), "use sparkwing.Secret") {
-		t.Fatalf("err = %v, want hint to use Secret", err)
-	}
-}
-
-func TestConfig_ReadsUnmaskedEntry(t *testing.T) {
-	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
-		func(ctx context.Context, name string) (string, bool, error) {
-			return "us-east-1", false, nil
-		},
-	))
-	got, err := Config(ctx, "REGION")
-	if err != nil {
-		t.Fatalf("Config: %v", err)
-	}
-	if got != "us-east-1" {
-		t.Fatalf("Config = %q, want us-east-1", got)
+	if !strings.Contains(err.Error(), "use sparkwing.Variable") {
+		t.Fatalf("err = %v, want hint to use Variable", err)
 	}
 }
 
@@ -134,29 +104,4 @@ func TestMustSecret_PanicMessageIncludesName(t *testing.T) {
 		}
 	}()
 	MustSecret(context.Background(), "DATABASE_URL")
-}
-
-func TestMustConfig_PanicMessageIncludesName(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic")
-		}
-		msg := ""
-		switch v := r.(type) {
-		case error:
-			msg = v.Error()
-		case string:
-			msg = v
-		default:
-			t.Fatalf("panic of unexpected type %T: %v", r, r)
-		}
-		if !strings.Contains(msg, `"REGION"`) {
-			t.Fatalf("panic %q must include the config name", msg)
-		}
-		if !strings.Contains(msg, "MustConfig") {
-			t.Fatalf("panic %q should name the calling helper", msg)
-		}
-	}()
-	MustConfig(context.Background(), "REGION")
 }

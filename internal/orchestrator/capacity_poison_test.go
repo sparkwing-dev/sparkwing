@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func contendedRun(t *testing.T, st *store.Store, ctx context.Context, key, runID string, peakCores float64, charge runCharge) {
@@ -181,10 +180,7 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 		return res
 	}
 
-	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
-	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
 	alpha := gitRepoDir(t, "alpha")
-	sparkwing.SetWorkDir(alpha)
 	t.Chdir(alpha)
 	for i := range 4 {
 		c := resolve().Cores
@@ -196,7 +192,6 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 	}
 
 	beta := gitRepoDir(t, "beta")
-	sparkwing.SetWorkDir(beta)
 	t.Chdir(beta)
 	res := resolve()
 	if res.Source != store.CostSourceDefault {

@@ -6,17 +6,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 	p := Pipeline{
 		Name:  "cluster-down",
 		Risks: []string{"destructive", "prod"},
-		RisksBySteps: []sparkwing.DescribeStepRisks{
-			{NodeID: "cluster-down", StepID: "terraform-destroy-eks", Labels: []string{"destructive", "prod"}},
-			{NodeID: "cluster-down", StepID: "terraform-destroy-nat", Labels: []string{"destructive"}},
+		RisksBySteps: []nodeproto.StepRisks{
+			{JobID: "cluster-down", StepID: "terraform-destroy-eks", Labels: []string{"destructive", "prod"}},
+			{JobID: "cluster-down", StepID: "terraform-destroy-nat", Labels: []string{"destructive"}},
 		},
 	}
 	raw, err := json.Marshal(p)
@@ -27,7 +28,7 @@ func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 	for _, want := range []string{
 		`"risks":["destructive","prod"]`,
 		`"risks_by_step":[`,
-		`"node_id":"cluster-down"`,
+		`"job_id":"cluster-down"`,
 		`"step_id":"terraform-destroy-eks"`,
 		`"labels":["destructive","prod"]`,
 	} {
@@ -50,12 +51,12 @@ func TestPipelineJSON_OmitsEmptyRisks(t *testing.T) {
 }
 
 func TestCatalogCopy_PreservesRisks(t *testing.T) {
-	dp := sparkwing.DescribePipeline{
+	dp := nodeproto.PipelineDescription{
 		Name:  "cluster-down",
 		Short: "tear down the cluster",
 		Risks: []string{"destructive", "prod"},
-		RisksBySteps: []sparkwing.DescribeStepRisks{
-			{NodeID: "cluster-down", StepID: "destroy", Labels: []string{"destructive", "prod"}},
+		RisksByStep: []nodeproto.StepRisks{
+			{JobID: "cluster-down", StepID: "destroy", Labels: []string{"destructive", "prod"}},
 		},
 	}
 	a := Pipeline{
@@ -65,7 +66,7 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 		Args:         dp.Args,
 		Examples:     dp.Examples,
 		Risks:        dp.Risks,
-		RisksBySteps: dp.RisksBySteps,
+		RisksBySteps: dp.RisksByStep,
 	}
 
 	if a.Name != dp.Name {
