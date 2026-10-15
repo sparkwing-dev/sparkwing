@@ -14,5 +14,8 @@ func newLocalNativeServices(ctx context.Context, home string, owned *store.Store
 	if err != nil {
 		return runners.NativeServices{}, err
 	}
-	return localcontroller.NativeServices(ctx, home, installedVersion(), owned, binding, options)
+	return localcontroller.NativeServices(ctx, localcontroller.NativeConfig{
+		Home: home, Version: installedVersion(), Store: binding.Tenant, Parent: owned, Bindings: owned,
+		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: options,
+	})
 }

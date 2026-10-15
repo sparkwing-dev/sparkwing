@@ -54,8 +54,14 @@ cannot sustain a running controller. The socket-free `rewrite_integration`
 claimant probe reproduces the missing authority. Constructor success does not
 establish queue readiness.
 
-`NativeServices` binds the owned tenant to W3's host configuration, source,
-captured environments, lease keeper, state following and process router. Owner
+`NativeServices` takes `NativeConfig` with W3's `NativeHostStore`, C2's
+`AuthenticationReader` and `BindingChecker`, the authenticated principal, refresh
+and renewal callbacks, and source options. The embedded queue passes its tenant
+and elected store. An adapter can supply those interfaces without another store
+opener. Refreshed authority, persisted run identity and both tenant projections
+must agree before process transport opens. The constructor binds W3's host
+configuration, source, captured environments, lease keeper, state following and
+process router. Owner
 renewals reauthenticate the award, check its owner fence, and call the shared
 unit-renewal transaction with current compute activity. The shared host owns
 the keeper and joins it before service cleanup. It
@@ -85,7 +91,14 @@ The local schedule factory constructs the same home-bound lifecycle and native
 timer operations without opening the store. Registration, pinning and ticks
 remain unbound because the current controller contracts have no local-checkout
 registration with a captured environment, pin operation or tick operation.
-The factory tests verify home preservation and native timer cancellation.
+The CLI factory tests verify home preservation and native timer cancellation.
+`localcontroller.NewScheduleService` constructs the store-backed cron service
+inside the elected owner. It uses the owned default-team tenant, captures the
+OS account and hostname, and binds the tick lock and pin directory to that home.
+Its launcher must implement the shared `crons.Launcher` contract. The factory
+adds no intake path. SQLite tests cover registration, pin/unpin, tick history and
+pin deletion through this service with a fake prover and launcher. The HTTP
+operations and captured-environment association above still need contracts.
 
 Before readiness, this composition acquires the store's `controller.reaper`
 lease, runs unit recovery and concurrency maintenance, then asks the state

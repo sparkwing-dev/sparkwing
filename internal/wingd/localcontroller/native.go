@@ -28,14 +28,32 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// NativeServices binds the elected local store to shared source, process and host services.
-func NativeServices(ctx context.Context, home, version string, owned *store.Store, binding runners.StoreBinding, sourceOptions source.Options) (_ runners.NativeServices, err error) {
-	if owned == nil || binding.Tenant == nil || binding.Refresh == nil || binding.Principal.Capability.Team != string(binding.Tenant.Team()) || binding.Principal.Capability.Binding.RunID == "" {
-		return runners.NativeServices{}, errors.New("local native host requires its authenticated tenant and run")
+// NativeConfig binds one authenticated award to shared state and authority services.
+type NativeConfig struct {
+	Home      string
+	Version   string
+	Store     nodehost.NativeHostStore
+	Parent    capability.AuthenticationReader
+	Bindings  capability.BindingChecker
+	Principal capability.Principal
+	Refresh   func(context.Context) (capability.Principal, error)
+	Renew     func(context.Context, string, bool) (store.LeaseBeat, error)
+	Source    source.Options
+}
+
+// NativeServices constructs the shared host services without opening a state store.
+func NativeServices(ctx context.Context, cfg NativeConfig) (runners.NativeServices, error) {
+	return nativeServices(ctx, cfg, net.Listen)
+}
+
+func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, string) (net.Listener, error)) (_ runners.NativeServices, err error) {
+	if cfg.Store == nil || cfg.Parent == nil || cfg.Bindings == nil || cfg.Refresh == nil || cfg.Renew == nil || cfg.Principal.Capability.Team == "" || cfg.Principal.Capability.Binding.RunID == "" {
+		return runners.NativeServices{}, errors.New("local native host requires authenticated state, authority, renewal and run bindings")
 	}
+	home, version, sourceOptions := cfg.Home, cfg.Version, cfg.Source
 	current := func(ctx context.Context) (capability.Principal, error) {
-		principal, err := binding.Refresh(ctx)
-		if err == nil && principal.Authority != binding.Principal.Authority {
+		principal, err := cfg.Refresh(ctx)
+		if err == nil && (principal.Authority != cfg.Principal.Authority || principal.Capability.Team != cfg.Principal.Capability.Team || principal.Capability.Binding.RunID != cfg.Principal.Capability.Binding.RunID) {
 			err = errors.New("local host authority changed")
 		}
 		return principal, err
@@ -51,9 +69,12 @@ func NativeServices(ctx context.Context, home, version string, owned *store.Stor
 	if err != nil {
 		return runners.NativeServices{}, err
 	}
-	run, err := binding.Tenant.ReadSnapshot(ctx, binding.Principal.Capability.Binding.RunID)
+	run, err := cfg.Store.ReadSnapshot(ctx, cfg.Principal.Capability.Binding.RunID)
 	if err != nil {
 		return runners.NativeServices{}, err
+	}
+	if run.Run.ID != cfg.Principal.Capability.Binding.RunID || string(run.Run.Team) != cfg.Principal.Capability.Team || run.Run.Request.Request.Team != cfg.Principal.Capability.Team {
+		return runners.NativeServices{}, nodeClaimMismatch()
 	}
 	captured, err := snapshots.Load(ctx, run.Run.Request.Request.Env)
 	if err != nil {
@@ -67,7 +88,7 @@ func NativeServices(ctx context.Context, home, version string, owned *store.Stor
 	if run.Run.Spec != nil {
 		sourceOptions.SDK = run.Run.Spec.Resolved.Engine.Pin.SDK
 	}
-	authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: owned, Bindings: owned})
+	authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: cfg.Parent, Bindings: cfg.Bindings})
 	if err != nil {
 		return runners.NativeServices{}, err
 	}
@@ -77,10 +98,10 @@ func NativeServices(ctx context.Context, home, version string, owned *store.Stor
 			err = errors.Join(err, closeResources())
 		}
 	}()
-	claims := &nodeClaims{auth: capability.NewAuthenticator(owned), bindings: owned, masker: masker, current: current, readNode: binding.Tenant.ReadNode}
+	claims := &nodeClaims{auth: capability.NewAuthenticator(cfg.Parent), bindings: cfg.Bindings, masker: masker, current: current, readNode: cfg.Store.ReadNode}
 	masks := nodehost.NewMaskRegistry(masker)
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return runners.NativeServices{}, err
 	}
@@ -97,12 +118,12 @@ func NativeServices(ctx context.Context, home, version string, owned *store.Stor
 		return grant, err
 	}
 
-	follower := nodehost.StateFollower{Store: binding.Tenant, Subscribe: localStateSubscription}
+	follower := nodehost.StateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	config := nodehost.NativeHostConfig{
-		Store: binding.Tenant, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
+		Store: cfg.Store, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
-		Admission: admission, Capacity: &nodehost.StoreAdmission{Store: binding.Tenant, BoxID: admission.BoxID},
-		Owner: nodehost.OwnerHost{Renew: localOwnerRenew(current, owned.RenewUnit), Local: func(store.NodeRow) bool { return true }, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
+		Admission: admission,
+		Owner:     nodehost.OwnerHost{Renew: localOwnerRenew(current, cfg.Renew), Local: func(store.NodeRow) bool { return true }, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},
@@ -111,7 +132,7 @@ func NativeServices(ctx context.Context, home, version string, owned *store.Stor
 		}},
 		Evaluation: nodehost.EvaluationDependencies{
 			Bind: func(ctx context.Context, input nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
-				row, err := binding.Tenant.ReadNode(ctx, store.NodeRef{RunID: run.Run.ID, NodeID: input.NodeID})
+				row, err := cfg.Store.ReadNode(ctx, store.NodeRef{RunID: run.Run.ID, NodeID: input.NodeID})
 				if err != nil {
 					return nodehost.ProcessGrant{}, err
 				}
@@ -121,6 +142,9 @@ func NativeServices(ctx context.Context, home, version string, owned *store.Stor
 				return nil, &apierr.Error{Code: apierr.PolicyMissing, Message: "local output reads require authorized byte and record bindings"}
 			},
 		},
+	}
+	if capacity, ok := cfg.Store.(nodehost.CapacityStore); ok {
+		config.Capacity = &nodehost.StoreAdmission{Store: capacity, BoxID: admission.BoxID}
 	}
 	return runners.NativeServices{Config: config, Close: closeResources}, nil
 }

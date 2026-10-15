@@ -149,29 +149,24 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	workers := []struct {
-		name string
-		run  func(context.Context) error
-	}{
-		{"queue", c.queue.Run},
-		{"activity", func(ctx context.Context) error { return c.State.Watch(ctx, report) }},
-		{"maintenance", func(ctx context.Context) error { return c.maintain(ctx, lease) }},
-	}
-	results := make(chan error, len(workers))
-	for _, worker := range workers {
+	results := make(chan error, 3)
+	start := func(name string, run func(context.Context) error) {
 		go func() {
-			err := worker.run(ctx)
+			err := run(ctx)
 			if err == nil && ctx.Err() == nil {
 				err = errors.New("stopped unexpectedly")
 			}
 			if err != nil {
-				err = fmt.Errorf("wingd: local %s: %w", worker.name, err)
+				err = fmt.Errorf("wingd: local %s: %w", name, err)
 			}
 			results <- err
 		}()
 	}
+	start("queue", c.queue.Run)
+	start("activity", func(ctx context.Context) error { return c.State.Watch(ctx, report) })
+	start("maintenance", func(ctx context.Context) error { return c.maintain(ctx, lease) })
 	var result error
-	for range workers {
+	for range 3 {
 		result = errors.Join(result, <-results)
 		cancel()
 	}
