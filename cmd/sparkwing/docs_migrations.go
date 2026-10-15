@@ -33,6 +33,9 @@ func runDocsMigrations(args []string) error {
 		return fmt.Errorf("docs migrations: unexpected positional %q", fs.Arg(1))
 	}
 	between := fs.Changed("from") || fs.Changed("to")
+	if between && fs.Changed("version") {
+		return errors.New("docs migrations: --version and --from/--to are mutually exclusive")
+	}
 	if fs.NArg() == 1 {
 		if between || wf.version != "" {
 			return fmt.Errorf("docs migrations: unexpected positional %q; --version or --from/--to already pick the guides", fs.Arg(0))

@@ -5,7 +5,56 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
+
+func TestRepositoryCLIExamplesUseCurrentGrammar(t *testing.T) {
+	if !checkCLIVerbs(filepath.Join("..", "..", "docs")) {
+		t.Fatal("documentation invokes commands outside the current grammar")
+	}
+}
+
+func TestExistingCIExamplesUseCurrentGrammar(t *testing.T) {
+	blocks, err := extract(filepath.Join("..", "..", "docs"), "yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := 0
+	var inspect func(*yaml.Node)
+	inspect = func(node *yaml.Node) {
+		if node.Kind == yaml.ScalarNode {
+			for _, line := range strings.Split(node.Value, "\n") {
+				args := strings.Fields(line)
+				if len(args) == 0 || args[0] != "sparkwing" {
+					continue
+				}
+				commands++
+				if _, err := clisurface.Parse("sparkwing", args[1:]); err != nil {
+					t.Errorf("CI example %q: %v", line, err)
+				}
+			}
+		}
+		for _, child := range node.Content {
+			inspect(child)
+		}
+	}
+	for _, block := range blocks {
+		if block.file != "ci-embedded.md" {
+			continue
+		}
+		var doc yaml.Node
+		if err := yaml.Unmarshal([]byte(block.body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		inspect(&doc)
+	}
+	if commands == 0 {
+		t.Fatal("CI guide contains no Sparkwing invocations")
+	}
+}
 
 func TestLoadRegistry_CollectsPathsAndHiddenVerbs(t *testing.T) {
 	valid, posArgs := loadRegistry()
@@ -138,6 +187,41 @@ func TestCheckCLIVerbsValidatesFencedGrammar(t *testing.T) {
 				t.Fatalf("invalid grammar accepted: %s", command)
 			}
 		})
+	}
+}
+
+func TestCheckCLIVerbsRejectsRetiredInlineFlags(t *testing.T) {
+	for _, command := range []string{
+		"secrets set --name TYPESAFE_API_KEY --file <path>",
+		"examples --name lint-test-go --body",
+		"pipeline new --name deploy",
+		"run build --sw-no-cache",
+		"pipeline list --query build",
+		"pipeline plan --static",
+		"pipeline list -x",
+		"secrets set --name NAME --file\n<path> --pipeline PIPELINE --profile PROFILE",
+	} {
+		t.Run(command, func(t *testing.T) {
+			content := t.TempDir()
+			writeDoc(t, content, "guide.md", "Run `sparkwing "+command+"` first.\n")
+			if checkCLIVerbs(content) {
+				t.Fatalf("retired inline flag accepted: %s", command)
+			}
+		})
+	}
+}
+
+func TestCheckCLIVerbsAcceptsInlineFragments(t *testing.T) {
+	content := t.TempDir()
+	writeDoc(t, content, "guide.md", strings.Join([]string{
+		"`sparkwing run`",
+		"`sparkwing secrets set --secret NAME --file <path>`",
+		"`sparkwing runs status --run`",
+		"`sparkwing run --sw-cache-from P`",
+		"`sparkwing run build -- --author-option value`",
+	}, "\n"))
+	if !checkCLIVerbs(content) {
+		t.Fatal("valid inline fragments rejected")
 	}
 }
 

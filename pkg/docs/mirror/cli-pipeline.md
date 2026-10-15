@@ -207,7 +207,7 @@ Add a library to the sparks: block
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--source PATH` | source |
+| `--source PATH` | source (required) |
 | `--version VER` | version |
 | `--spark NAME` | spark |
 
@@ -282,7 +282,7 @@ Remove a library from the sparks: block
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--spark NAME` | spark |
+| `--spark NAME` | spark (required) |
 
 ## `sparkwing pipeline sparks update`
 

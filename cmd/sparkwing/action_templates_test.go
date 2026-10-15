@@ -68,7 +68,7 @@ func TestRenderTemplateList_PrintsCategoryHeadersAndFooter(t *testing.T) {
 	}
 	for _, affordance := range []string{
 		"2 examples across 2 categories",
-		"docs search", "--name <example> --body",
+		"docs search", "--example <example> --body",
 		"--category <c> --cloud <aws|gcp>",
 		"sparkwing pipeline new",
 	} {

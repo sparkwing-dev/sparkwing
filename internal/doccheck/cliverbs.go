@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,7 +102,8 @@ func extractInvocations(file, doc string) []cliVerb {
 	inFence := false
 	fenceShell := false
 	complete := false
-	for i, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "```") {
 			if inFence {
@@ -133,8 +135,21 @@ func extractInvocations(file, doc string) []cliVerb {
 			}
 			continue
 		}
+		start := i
+		for strings.Count(line, "`")%2 != 0 && i+1 < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[i+1]), "```") {
+			i++
+			line += "\n" + lines[i]
+		}
 		for _, m := range inlineCodeRE.FindAllStringSubmatch(line, -1) {
-			if inv, ok := parseInvocation(file, i+1, m[1]); ok {
+			if inv, ok := parseInvocation(file, start+1, m[1]); ok {
+				args, err := shellExampleArgs(m[1])
+				if err == nil {
+					_, err = clisurface.Parse("sparkwing", append([]string{"--help"}, args...))
+				}
+				var usage *clisurface.UsageError
+				if errors.As(err, &usage) && (strings.HasPrefix(usage.Message, "unknown flag ") || strings.HasPrefix(usage.Message, "unknown short flag ") || strings.HasSuffix(usage.Message, " is not accepted")) {
+					inv.err = err
+				}
 				out = append(out, inv)
 			}
 		}

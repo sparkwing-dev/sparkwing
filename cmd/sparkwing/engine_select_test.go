@@ -138,6 +138,27 @@ func TestPipelineEnginePinComesFromPipelineDirectoryProperty(t *testing.T) {
 	}
 }
 
+func TestSDKPinInspectionRetainsManifestAndLockfileSizes(t *testing.T) {
+	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
+		t.Run(string(sdk), func(t *testing.T) {
+			dir := t.TempDir()
+			if sdk == engine.GoSDK {
+				body := "module pipeline\nrequire github.com/sparkwing-dev/sparkwing v1.2.3\n//"
+				body += strings.Repeat("x", maxMetadataBytes-len(body))
+				writeRepoFile(t, filepath.Join(dir, "go.mod"), body)
+				writeRepoFile(t, filepath.Join(dir, "go.sum"), strings.Repeat("x", maxMetadataBytes+1))
+			} else {
+				body := `{"dependencies":{"@sparkwing/sdk":"1.2.3"},"description":"` + strings.Repeat("x", maxMetadataBytes+1) + `"}`
+				writeRepoFile(t, filepath.Join(dir, "package.json"), body)
+			}
+			report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, sdk, engine.ReadPin, engine.VersionForPin)
+			if report.Runs != "v1.2.3" || report.Refusal != "" {
+				t.Fatalf("valid SDK inputs refused: %+v", report)
+			}
+		})
+	}
+}
+
 func TestPipelineEngineSwitchRechecksPolicyInSelectedExecutable(t *testing.T) {
 	command, selected, output, calls := engineSwitchFixture(t, engine.GoSDK)
 	command.current = selected.Executable

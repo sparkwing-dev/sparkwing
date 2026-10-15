@@ -153,14 +153,18 @@ func TestProfilesRemoveRevokesOnlyMemberCredential(t *testing.T) {
 					if r.URL.Path != "/api/v1/tokens/"+prefix {
 						t.Fatalf("metadata route: %s", r.URL)
 					}
-					return 200, `{"prefix":"` + prefix + `","kind":"` + tc.kind + `","principal":"` + tc.principal + `","scopes":[]}`
+					kind := "account"
+					if tc.kind == "runner" {
+						kind = "machine"
+					}
+					return 200, `{"prefix":"` + prefix + `","team":"team-a","subject":{"kind":"` + kind + `","id":"` + tc.principal + `"},"audience":"controller","grants":[],"created_by":"issuer","git_credentials":false,"metered":false,"issued_at":"2026-10-14T00:00:00Z"}`
 				}
 				if r.Method == "DELETE" {
 					deletes++
 					if tc.revoked {
-						return 200, `{"prefix":"` + prefix + `","revoked":true}`
+						return http.StatusNoContent, ""
 					}
-					return 200, `{"prefix":"` + prefix + `","revoked":false}`
+					return http.StatusServiceUnavailable, `{"code":"unavailable","message":"revocation not committed"}`
 				}
 				t.Fatalf("unexpected request: %s", r.Method)
 				return 500, ""
