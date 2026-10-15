@@ -79,13 +79,11 @@ type runFlags struct {
 
 	runHandleFile string
 
-	detached           bool
-	pipelineRef        string
-	idempotencyKey     string
-	requestID          string
-	consumerIdle       string
-	consumerClaimLease string
-	outputFormat       string
+	detached       bool
+	pipelineRef    string
+	idempotencyKey string
+	requestID      string
+	outputFormat   string
 }
 
 type detachedOnlyFlag struct {
@@ -97,8 +95,6 @@ func (flags runFlags) detachedOnlyFlags() []detachedOnlyFlag {
 	return []detachedOnlyFlag{
 		{"--sw-idempotency-key", flags.idempotencyKey},
 		{"--sw-request-id", flags.requestID},
-		{"--sw-consumer-idle", flags.consumerIdle},
-		{"--sw-consumer-claim-lease", flags.consumerClaimLease},
 	}
 }
 

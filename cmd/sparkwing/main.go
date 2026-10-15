@@ -486,8 +486,6 @@ func runJobs(args []string) error {
 	case "logs", "grep":
 		return runRunsLogs(contextValue, args[0], args[1:])
 
-	case "consumer":
-		return runRunsConsumer(args[1:])
 	case "cancel":
 		return runRunsCancel(contextValue, args[1:])
 	case "retry":

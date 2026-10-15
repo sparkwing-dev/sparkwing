@@ -38,14 +38,8 @@ type submitResult struct {
 
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	RequestID      string `json:"request_id,omitempty"`
-
-	ConsumerPID     int    `json:"consumer_pid,omitempty"`
-	ConsumerStarted string `json:"consumer_started,omitempty"`
 }
 
-// runDetached persists PIPELINE as a trigger, hands it to this home's resident
-// consumer, and prints the run handle. Nothing about the run is bound to this
-// process afterward.
 func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthrough []string) error {
 	if err := refuseForegroundOnlyFlags(wf); err != nil {
 		return err
@@ -54,15 +48,6 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 	if err != nil {
 		return err
 	}
-	idle, err := parseConsumerDuration("--sw-consumer-idle", wf.consumerIdle)
-	if err != nil {
-		return err
-	}
-	claimLease, err := parseConsumerDuration("--sw-consumer-claim-lease", wf.consumerClaimLease)
-	if err != nil {
-		return err
-	}
-
 	//nolint:contextcheck // The repo registry read predates a context-aware API.
 	repoDir, declared, err := resolveSubmitRepo(ctx, pipelineName, wf.pipelineRef)
 	if err != nil {
@@ -139,19 +124,13 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 		}
 	}
 
-	//nolint:contextcheck // The resident consumer lifecycle predates a context-aware process-table API.
-	if cerr := ensureTriggerConsumerFn(paths.Root, idle, claimLease); cerr != nil {
-		return fmt.Errorf("run %s is persisted but no consumer could be started to execute it: %w\n"+
-			"Start one with `sparkwing runs consumer start`; the run is queued and will execute when it comes up",
-			result.RunID, cerr)
+	if err := st.Close(); err != nil {
+		return fmt.Errorf("close submission store before controller startup: %w", err)
+	}
+	if err := startLocalController(ctx, paths.Root, resolveLocalServices); err != nil {
+		return fmt.Errorf("run %s is persisted but its local controller could not start: %w", result.RunID, err)
 	}
 
-	if info, ok := orchestrator.ConsumerInfo(paths.Root); ok {
-		result.ConsumerPID = info.PID
-		if !info.Started.IsZero() {
-			result.ConsumerStarted = info.Started.Format(time.RFC3339)
-		}
-	}
 	return emitSubmitResult(result, format)
 }
 
@@ -164,21 +143,6 @@ func resolveDetachedOutput(v string) (string, error) {
 		return "", fmt.Errorf("%s: --sw-output must be one of pretty|json|plain, got %q", detachedPath, v)
 	}
 	return resolveTTYAwareOutput(v, detachedPath)
-}
-
-func parseConsumerDuration(flag, value string) (time.Duration, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return 0, nil
-	}
-	d, err := time.ParseDuration(trimmed)
-	if err != nil {
-		return 0, fmt.Errorf("%s %q: expected a duration such as 5m or 90s", flag, value)
-	}
-	if d < 0 {
-		return 0, fmt.Errorf("%s %q: must not be negative", flag, value)
-	}
-	return d, nil
 }
 
 type submission struct {
@@ -744,10 +708,6 @@ func emitSubmitResult(r submitResult, format string) error {
 		}
 		if r.LogPath != "" {
 			fmt.Fprintf(&out, "  logs:   %s\n", r.LogPath)
-		}
-		if r.ConsumerPID != 0 {
-			fmt.Fprintf(&out, "  runner: consumer pid %d (started %s)\n",
-				r.ConsumerPID, r.ConsumerStarted)
 		}
 		fmt.Fprintf(&out, "  follow: sparkwing runs logs --run %s --follow\n", r.RunID)
 		fmt.Fprintf(&out, "  cancel: sparkwing runs cancel --run %s\n", r.RunID)

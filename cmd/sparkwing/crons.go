@@ -140,8 +140,8 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.T
 	if err != nil {
 		return "", err
 	}
-	if cerr := cronsEnsureConsumer(l.paths.Root); cerr != nil {
-		return "", fmt.Errorf("run %s stays queued and will start when a consumer does, but none could be started now: %w",
+	if cerr := cronsStartController(ctx, l.paths.Root); cerr != nil {
+		return "", fmt.Errorf("run %s stays queued because its local controller could not start: %w",
 			result.RunID, cerr)
 	}
 	return result.RunID, nil
@@ -178,9 +178,9 @@ func runQueuedAt(run *store.Run) time.Time {
 	return run.StartedAt
 }
 
-// safety: tests replace this to exercise a launch with no consumer, without
-// spawning one.
-var cronsEnsureConsumer = func(home string) error { return ensureTriggerConsumer(home, 0, 0) }
+var cronsStartController = func(ctx context.Context, home string) error {
+	return startLocalController(ctx, home, resolveLocalServices)
+}
 
 // safety: tests replace this with a fake service manager and unit directory.
 var cronsTimerHost = defaultCronsTimerHost

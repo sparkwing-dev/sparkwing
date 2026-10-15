@@ -1047,3 +1047,29 @@ The removed `TestResumeNeedsDispatch` tested the deleted configuration API.
 These ports use the final process/store interfaces with scripted fakes. Native
 generated recovery, retry and placement remain acceptance work. The retained
 legacy SQLite scheduler fixtures still require W3's final store migration.
+
+## W8 separate local consumer retirement
+
+`orchestrator.ServeConsumer`, its dashboard contention entry point and the
+`runs consumer` process are removed. Detached and scheduled startup call the
+local controller lifecycle. The standalone CLI child loop retains its own source,
+environment and execution helpers. `localws.Run` had no production caller and
+is removed with its second store opener.
+
+| Removed or migrated case | Final evidence |
+| --- | --- |
+| Consumer election, dashboard contention, idle exit and handover | `TestLocalRuntimeRefusesConcurrentOwnerBeforeOpeningStore`, `TestLocalRuntimeIdleHoldsAndProbes`, `TestLocalProcessLifecycleStartsDetachedAndReusesOwner` and `FuzzLocalProcessLifecycleKeepsOwnership`. One election replaces the competing dashboard/consumer locks. |
+| Immediate pending work, mixed claims and joined shutdown | `TestLoopUsesOneQueueForTriggerAndNode`, `TestLoopCancellationCancelsAndJoinsHost`, `TestCompositionJoinsQueueAndActivityBeforeStoreClose` and `TestNativeStoreOwnerW8/local_controller`. |
+| Legacy trigger heartbeat, refusal, transient failure and cancellation | Shared keeper tests and `TestClaimedNodeHostRenewsBeforeSourceAndJoinsExecution`, `TestClaimedNodeHostRejectsLostAuthorityBeforeAcquisition`, `TestClaimedNodeHostLossDuringAcquisitionDiscardsEntry`. |
+| Setup failure, cancellation versus failure and terminal results | `TestClaimedNodeHostReportsSetupFailuresThroughTheClaim`, final owner failure tests and `TestAdmissionUsesOwnedStoreDuringDrain`. |
+| Uncaptured retry environment refusal | `TestOwnerHostRefusesChangedCapturedValuesBeforeSourceEnvironment` and the captured-environment file/metadata tests. The final snapshot is bound to its sealed digest. |
+| Ref-worktree lifetime during dispatch | Final remote acquisition uses a private directory and joins before cleanup. Borrowed local checkouts are preserved. `TestRunnerSourceCancellationJoinsFetchAndRemovesCheckout` and claimed-host acquisition-loss tests cover cleanup. Old `submittedWorktreeDir` and consumer sweep coordination retire. |
+| Detached startup and retired consumer commands | `TestStartLocalControllerUsesCapturedLifecycle`, `TestStartLocalControllerPreservesFailures`, `TestSeparateConsumerCommandRemoved` and existing surface-dispatch guards. Native detached execution and restart remain acceptance work. |
+| Dashboard server lifecycle and address refusal | Final runtime/dashboard startup and joined-failure suites and CLI dashboard validation replace the old `localws.Run` listener tests. HTTP handler, origin, token and read-only assertions retain their fixture server. |
+
+The consumer's maintenance-interval test retires with that private timer.
+Its comment-spelling tests retire with its source. Checkout selection and log
+path tests remain in `orchestrator/local_submission_test.go`. The legacy
+process replacement tests retire because a ready owner is reused and explicit
+restart controls replacement. Snapshot/idempotency/argument tests unrelated to
+the process remain. No native placement cell closes from these component ports.

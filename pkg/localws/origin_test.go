@@ -1,7 +1,6 @@
 package localws
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -67,18 +66,6 @@ func TestRun_RejectsCrossSiteAndReboundRequests(t *testing.T) {
 		"Sec-Fetch-Site": "same-origin",
 		"Content-Type":   "application/json",
 	})
-}
-
-func TestRun_RefusesNonLoopbackAddrWithoutOptIn(t *testing.T) {
-	t.Parallel()
-
-	err := Run(context.Background(), Options{Home: t.TempDir(), Addr: "0.0.0.0:4343"})
-	if err == nil {
-		t.Fatal("Run accepted a non-loopback addr without AllowRemote")
-	}
-	if !strings.Contains(err.Error(), "not loopback") {
-		t.Fatalf("error = %v, want it to name the loopback requirement", err)
-	}
 }
 
 func TestLoopbackBind(t *testing.T) {

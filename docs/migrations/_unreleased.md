@@ -32,6 +32,17 @@ running unless `--force` is selected. Replacement preserves the home, dashboard
 address and stay policy, waits for shutdown, and refuses an unready or
 wrong-version replacement.
 
+## Separate trigger consumer removed
+
+The `runs consumer` commands and internal `__runs-consume` process are removed.
+The local controller owns the queue and claim renewal. Detached and scheduled
+startup use its lifecycle and wait for readiness. Submission receipts no longer
+contain `consumer_pid` or `consumer_started`. The separate dashboard store
+opener is removed too.
+
+The native service binder and sealed local intake still need integration.
+See [local execution](../local-execution.md) for that boundary.
+
 ## Job failure reports
 
 Replace `JobResult.error` with `failure: {job, stage, error}`. The nested error

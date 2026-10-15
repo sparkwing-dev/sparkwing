@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -378,26 +377,8 @@ func linesIn(path string) []string {
 }
 
 func (e *submitTestEnv) stopConsumer() {
-	if pid, ok := orchestrator.ConsumerPID(e.home); ok {
-		if err := stopSupervisor(pid, ""); err != nil {
-			e.t.Errorf("stop consumer process %d: %v", pid, err)
-			return
-		}
-		poll := time.NewTicker(10 * time.Millisecond)
-		defer poll.Stop()
-		deadline := time.NewTimer(5 * time.Second)
-		defer deadline.Stop()
-		for {
-			if !processAlive(pid) {
-				return
-			}
-			select {
-			case <-poll.C:
-			case <-deadline.C:
-				e.t.Errorf("consumer process %d did not exit within cleanup bound", pid)
-				return
-			}
-		}
+	if err := wingdclient.Stop(e.t.Context(), wingdclient.Options{Home: e.home}); err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
+		e.t.Error(err)
 	}
 }
 
@@ -449,9 +430,9 @@ func TestRunDetached_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 
 	var pid int
 	waitUntil(t, "a detached consumer to hold the queue", 10*time.Second, func() bool {
-		var ok bool
-		pid, ok = orchestrator.ConsumerPID(e.home)
-		return ok
+		status, err := wingdclient.QueryLocalController(t.Context(), e.home)
+		pid = status.PID
+		return err == nil && status.Running
 	})
 	if pid == os.Getpid() {
 		t.Fatal("the test process is hosting the consumer; the run is not detached")
@@ -539,94 +520,6 @@ func TestRunDetached_RequestIDDoesNotDeduplicate(t *testing.T) {
 	if trig.IdempotencyKey != "" {
 		t.Fatalf("request id leaked into the idempotency key: %q", trig.IdempotencyKey)
 	}
-}
-
-func TestRunDetached_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
-	e := newSubmitTestEnv(t)
-	e.useHostedFixture(t, hostedFixtureSource)
-
-	first := e.submit()
-	waitUntil(t, "the first submitted run to execute", 90*time.Second, func() bool {
-		return len(e.markerLines()) == 1
-	})
-	_ = first
-
-	pid, ok := orchestrator.ConsumerPID(e.home)
-	if !ok {
-		t.Fatal("no consumer to kill")
-	}
-	if err := signalKill(pid); err != nil {
-		t.Fatalf("kill consumer: %v", err)
-	}
-	waitUntil(t, "the killed consumer's lock to be released", 10*time.Second, func() bool {
-		running, err := orchestrator.ConsumerRunning(e.home)
-		return err == nil && !running
-	})
-
-	st := e.store()
-	ctx := context.Background()
-	now := time.Now()
-	const recovered = "run-recovered"
-	if err := orchestrator.CaptureSubmissionEnvironment(e.home, recovered, e.env(), slog.Default()); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: recovered, Pipeline: "fixture", CreatedAt: now, TriggerSource: "runs-submit",
-		TriggerEnv: map[string]string{
-			orchestrator.SubmitRepoDirKey:                 e.repoDir,
-			orchestrator.SubmissionEnvironmentCapturedKey: "1",
-		},
-	}, store.Run{
-		ID: recovered, Pipeline: "fixture", Status: "pending",
-		TriggerSource: "runs-submit", CreatedAt: now, StartedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	e.mustRun("runs", "consumer", "start")
-
-	waitUntil(t, "the restarted consumer to execute the queued run", 60*time.Second, func() bool {
-		run, err := st.GetRun(ctx, recovered)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if run.Status == "failed" {
-			t.Fatalf("restarted consumer refused queued run: %s", run.Error)
-		}
-		lines := e.markerLines()
-		return len(lines) == 2 && lines[1] == recovered
-	})
-}
-
-func TestRunsConsumer_StatusAndStopReportTheResidentProcess(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	e := newSubmitTestEnv(t)
-
-	if out, err := e.run("runs", "consumer", "status"); err == nil {
-		t.Fatalf("status exited 0 with no consumer running:\n%s", out)
-	}
-
-	e.mustRun("runs", "consumer", "start")
-	out := e.mustRun("runs", "consumer", "status")
-	if records := decodeOutputRecords(t, []byte(out)); len(records) != 1 || records[0]["service"] != "consumer" || records[0]["state"] != "running" {
-		t.Fatalf("status did not report a running consumer:\n%s", out)
-	}
-
-	out = e.mustRun("runs", "consumer", "stop")
-	if !strings.Contains(out, "stopped") {
-		t.Fatalf("stop did not report stopping:\n%s", out)
-	}
-	waitUntil(t, "the stopped consumer to release the queue", 10*time.Second, func() bool {
-		running, err := orchestrator.ConsumerRunning(e.home)
-		return err == nil && !running
-	})
 }
 
 func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T) {
@@ -1096,87 +989,6 @@ func TestRunDetached_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 	}
 	if !strings.Contains(pretty, "already finished") {
 		t.Errorf("pretty duplicate ack does not say the run is over:\n%s", pretty)
-	}
-}
-
-func TestRunDetached_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	e := newSubmitTestEnv(t)
-	e.useHostedFixture(t, hostedFixtureSource)
-
-	old := exec.Command(e.bin, "__runs-consume", "--home", e.home,
-		"--idle", "10m", "--version", "v0.0.1-old")
-	old.Env = e.env()
-	old.Dir = e.repoDir
-	logF, _ := os.Create(filepath.Join(e.home, "old-consumer.log"))
-	old.Stdout, old.Stderr = logF, logF
-	if err := old.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = old.Process.Kill(); _ = old.Wait() })
-	waitUntil(t, "the old consumer to take the queue", 20*time.Second, func() bool {
-		running, err := orchestrator.ConsumerRunning(e.home)
-		return err == nil && running
-	})
-	oldPID, _ := orchestrator.ConsumerPID(e.home)
-
-	e.submit()
-
-	info, ok := orchestrator.ConsumerInfo(e.home)
-	if !ok {
-		t.Fatal("no consumer after submitting against an outdated one")
-	}
-	if info.PID == oldPID {
-		t.Fatalf("the outdated consumer (pid %d, v0.0.1-old) still owns the queue; "+
-			"an upgrade would never take effect", oldPID)
-	}
-	if info.Version == "v0.0.1-old" {
-		t.Fatalf("replacement consumer still reports the old version %q", info.Version)
-	}
-	// safety: this waits on the longest chain in this file, a consumer replaced and
-	// then a run executed, so it carries the longest bound any wait here uses.
-	waitUntil(t, "the new consumer to execute the run", 120*time.Second, func() bool {
-		return len(e.markerLines()) >= 1
-	})
-}
-
-func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-	e := newSubmitTestEnv(t)
-	holdStarted := e.useBlockingFixture(t)
-
-	ack := e.submit()
-	waitUntil(t, "the dispatch to start", 120*time.Second, func() bool {
-		return e.startsInMarker() >= 1
-	})
-	waitForFixtureHold(t, holdStarted)
-
-	e.mustRun("runs", "consumer", "stop")
-
-	st := e.store()
-	waitUntil(t, "the interrupted run's trigger to leave the claimed state", 30*time.Second, func() bool {
-		trig, err := st.GetTrigger(context.Background(), ack.RunID)
-		return err == nil && trig.Status != "claimed"
-	})
-	trig, err := st.GetTrigger(context.Background(), ack.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trig.Status == "claimed" {
-		t.Fatal("stopping the consumer left the run's trigger claimed with nothing executing it")
-	}
-
-	if trig.Status == "pending" {
-		n, cerr := st.CountPendingTriggers(context.Background())
-		if cerr != nil || n == 0 {
-			t.Fatalf("trigger reads pending but the queue is empty (n=%d err=%v)", n, cerr)
-		}
 	}
 }
 

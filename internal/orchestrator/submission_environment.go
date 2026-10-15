@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -52,7 +53,7 @@ type submissionEnvironmentSnapshot struct {
 }
 
 func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog.Logger) (err error) {
-	layout, err := ConsumerLayoutFor(home)
+	home, err = wingd.HomeDir(home)
 	if err != nil {
 		return err
 	}
@@ -60,7 +61,7 @@ func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(layout.Home, submissionEnvironmentDir)
+	dir := filepath.Join(home, submissionEnvironmentDir)
 	if err := fssecure.EnsureDir(dir); err != nil {
 		return fmt.Errorf("secure submission environment directory: %w", err)
 	}
@@ -68,7 +69,7 @@ func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog
 	if err != nil {
 		return fmt.Errorf("encode submission environment: %w", err)
 	}
-	path := submissionEnvironmentPath(layout.Home, runID)
+	path := submissionEnvironmentPath(home, runID)
 	privateDir, err := fssecure.MkdirPrivateTemp(dir, ".submission-environment-")
 	if err != nil {
 		return fmt.Errorf("create private submission environment directory: %w", err)
@@ -108,11 +109,11 @@ func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog
 }
 
 func DiscardSubmissionEnvironment(home, runID string) error {
-	layout, err := ConsumerLayoutFor(home)
+	home, err := wingd.HomeDir(home)
 	if err != nil {
 		return err
 	}
-	err = os.Remove(submissionEnvironmentPath(layout.Home, runID))
+	err = os.Remove(submissionEnvironmentPath(home, runID))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}

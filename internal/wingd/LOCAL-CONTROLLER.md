@@ -120,6 +120,15 @@ Jev policy, preserving explicit zero values and the defaults for omitted fields.
 
 ## Integration requirements
 
+Detached and scheduled startup callers use the shared lifecycle, preserve its
+startup error and require a running result. They refuse a service binding for
+another home before starting it. The separate trigger-consumer command, process,
+election, store opener, dispatcher and renewal loop are removed. `localws.Run`,
+which started another consumer beside a second store owner, is removed too.
+The retained local HTTP handler fixtures use their own test server.
+The CLI service resolver and sealed local intake remain production bindings.
+
+
 `localcontroller.Config.Bind` still needs the production shared services.
 Its `State` interface supplies readiness, the owned secrets read, startup
 reconciliation and live activity observation. The binder

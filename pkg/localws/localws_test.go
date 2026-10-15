@@ -3,9 +3,7 @@ package localws
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -130,91 +129,45 @@ func fixtureShell() fstest.MapFS {
 
 func startLocalws(t *testing.T, opts Options) string {
 	t.Helper()
+	paths, err := localPaths(opts.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	token, err := paths.EnsureServeToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if opts.Bundle == nil {
 		opts.Bundle = fixtureShell()
 	}
-	ln := pickListener(t)
-	t.Cleanup(func() { _ = ln.Close() })
-	opts.Listener = ln
-	addr := ln.Addr().String()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	var runErr error
-	go func() {
-		runErr = Run(ctx, opts)
-		close(done)
-	}()
-	var stopOnce sync.Once
-	var stopErr error
-	stopReported := false
-	runErrReported := false
-	stop := func() {
-		stopOnce.Do(func() {
-			cancel()
-			timer := time.NewTimer(10 * time.Second)
-			defer timer.Stop()
-			select {
-			case <-done:
-			case <-timer.C:
-				stopErr = fmt.Errorf("localws did not stop within 10s")
-			}
-		})
-		if stopErr != nil && !stopReported {
-			stopReported = true
-			t.Errorf("stop localws: %v", stopErr)
-		}
-		if stopErr == nil && runErr != nil && !runErrReported {
-			runErrReported = true
-			t.Errorf("localws exited: %v", runErr)
-		}
-	}
-	t.Cleanup(stop)
-
-	// safety: a -race build of this package needs seconds to open its store
-	// and mount the controller, so the wait is sized for that, not for the
-	// tenth of a second an uninstrumented one takes.
-	client := &http.Client{Timeout: time.Second}
-	retry := time.NewTicker(20 * time.Millisecond)
-	defer retry.Stop()
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
-	for {
-		select {
-		case <-done:
-			runErrReported = true
-			t.Fatalf("localws exited before readiness: %v", runErr)
-		default:
-		}
-		resp, err := client.Get("http://" + addr + "/api/v1/health")
-		if err == nil {
-			resp.Body.Close()
-			token, err := orchestrator.PathsAt(opts.Home).ServeToken()
-			if err != nil {
-				t.Fatalf("read the serve token: %v", err)
-			}
-			serveTokens.Store(addr, token)
-			return addr
-		}
-		select {
-		case <-done:
-			runErrReported = true
-			t.Fatalf("localws exited before readiness: %v", runErr)
-		case <-retry.C:
-		case <-deadline.C:
-			stop()
-			t.Fatal("localws did not start in time")
-		}
-	}
-}
-
-func pickListener(t *testing.T) net.Listener {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	return ln
+	ctrl := controller.New(state, nil).WithSecretsCipher(ring.For(state)).WithLocalExecution().WithDashboard(controller.Dashboard{
+		Local: true, Bundle: opts.Bundle, Version: opts.Version, Paths: paths,
+		Capabilities: backend.Capabilities{Mode: "local", Storage: backend.CapabilitiesStorage{Artifacts: "fs", Logs: "fs", Runs: "sqlite"}, Features: localFeatures()},
+	})
+	srv := httptest.NewUnstartedServer(nil)
+	opts.Addr = srv.Listener.Addr().String()
+	srv.Config.Handler = buildHandler(opts, handlerParts{paths: paths, store: state, ctrl: ctrl, serveToken: token})
+	srv.Start()
+	t.Cleanup(srv.Close)
+	serveTokens.Store(opts.Addr, token)
+	t.Cleanup(func() { serveTokens.Delete(opts.Addr) })
+	return opts.Addr
 }
 
 var serveTokens sync.Map

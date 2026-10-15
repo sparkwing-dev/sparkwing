@@ -310,9 +310,9 @@ func cronsBuildableRepo(t *testing.T) string {
 
 func TestCronLaunchReportsAConsumerThatWillNotStart(t *testing.T) {
 	launcher, st := cronsRealLauncher(t)
-	prior := cronsEnsureConsumer
-	cronsEnsureConsumer = func(string) error { return errors.New("consumer did not take the queue lock") }
-	t.Cleanup(func() { cronsEnsureConsumer = prior })
+	prior := cronsStartController
+	cronsStartController = func(context.Context, string) error { return errors.New("consumer did not take the queue lock") }
+	t.Cleanup(func() { cronsStartController = prior })
 
 	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsBuildableRepo(t), Pipeline: "every-minute"}
 	runID, err := launcher.Launch(context.Background(), sched, time.Now())
@@ -338,9 +338,9 @@ func TestCronLaunchReportsAConsumerThatWillNotStart(t *testing.T) {
 
 func TestCronLauncherStopsCountingAPendingRunOnceItIsStale(t *testing.T) {
 	launcher, _ := cronsRealLauncher(t)
-	prior := cronsEnsureConsumer
-	cronsEnsureConsumer = func(string) error { return nil }
-	t.Cleanup(func() { cronsEnsureConsumer = prior })
+	prior := cronsStartController
+	cronsStartController = func(context.Context, string) error { return nil }
+	t.Cleanup(func() { cronsStartController = prior })
 
 	ctx := context.Background()
 	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsBuildableRepo(t), Pipeline: "every-minute"}

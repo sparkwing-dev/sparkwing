@@ -16,9 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
-	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -622,21 +620,6 @@ func TestLocalTriggerFailure_LiveContextRecordsTheFailedRun(t *testing.T) {
 	}
 }
 
-func TestClaimedTriggerFailure_RecordsTheDispatchError(t *testing.T) {
-	st := consumerTestStore(t, t.TempDir())
-	claimed := claimedChildTrigger(t, st, "run-consumer-broken", "deploy")
-
-	finishClaimedTriggerFailure(context.Background(), st, claimed, quietLogger(), errors.New("compile failed"))
-
-	run, err := st.GetRun(context.Background(), "run-consumer-broken")
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	if run.Status != "failed" || !strings.Contains(run.Error, "compile failed") {
-		t.Fatalf("run = %q %q, want failed with the dispatch error it carries", run.Status, run.Error)
-	}
-}
-
 func assertTriggerStatus(t *testing.T, st *store.Store, id, want string) {
 	t.Helper()
 	trig, err := st.GetTrigger(context.Background(), id)
@@ -662,97 +645,6 @@ func TestLocalTriggerFailure_RunTheChildFinishedStillFinishesTheTrigger(t *testi
 	recordLocalTriggerFailure(ctx, localState{st: st}, claimed, errors.New("exit status 1"), quietLogger())
 
 	assertTriggerStatus(t, st, "run-child-finished", "failed")
-}
-
-func TestLocalSetupFailureChild(t *testing.T) {
-	if os.Getenv("SPARKWING_LOCAL_SETUP_TEST_CHILD") != "1" {
-		t.Skip("child process fixture")
-	}
-	SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget secret-should-not-be-shown"))
-	// safety: the variable names the fake host, which hosts no daemon, so the run takes the standalone store.
-	t.Setenv(wingdclient.HostBinEnv, "")
-	if err := HostClaimedTrigger(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_PROGRAM")); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the child fixture is a shell script")
-	}
-	for _, tc := range []struct {
-		name    string
-		pending bool
-	}{
-		{name: "pending run", pending: true},
-		{name: "run absent", pending: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("SPARKWING_HOME", home)
-			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_CHILD", "1")
-			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_RUN", "local-setup-failure")
-			binary, err := os.Executable()
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_BINARY", binary)
-			st := consumerTestStore(t, home)
-			repoDir := t.TempDir()
-			if err := os.Mkdir(filepath.Join(repoDir, ".sparkwing"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			// safety: the pinned pipeline answers describe alone; the host fails its setup before any node runs.
-			pinned := filepath.Join(t.TempDir(), "child")
-			describe := `{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[{"name":"orch-ok"}]}}`
-			if err := os.WriteFile(pinned, []byte("#!/bin/sh\nread -r _ <&3\necho '"+describe+"' >&4\n"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_PROGRAM", pinned)
-			// safety: the fake hosts the trigger but no daemon, so the claimer's daemon start fails and the run is standalone.
-			host := filepath.Join(t.TempDir(), "sparkwing")
-			if err := os.WriteFile(host, []byte("#!/bin/sh\n[ \"$1\" = __host-trigger ] || exit 1\nexec \"$SPARKWING_LOCAL_SETUP_TEST_BINARY\" -test.run=^TestLocalSetupFailureChild$\n"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv(wingdclient.HostBinEnv, host)
-			ctx := context.Background()
-			const id = "local-setup-failure"
-			// safety: a local submission carries its captured environment, and the
-			// child fixture reads its switches from it.
-			writeMachineSettings(t, "run:\n  submit_env_allow: [SPARKWING_LOCAL_SETUP_TEST_*]\n")
-			if err := CaptureSubmissionEnvironment(home, id, os.Environ(), quietLogger()); err != nil {
-				t.Fatal(err)
-			}
-			if err := st.CreateTrigger(ctx, store.Trigger{
-				ID: id, Pipeline: "orch-ok", CreatedAt: time.Now(),
-				TriggerEnv: map[string]string{
-					SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned, SubmissionEnvironmentCapturedKey: "1",
-				},
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if tc.pending {
-				if err := st.CreateRun(ctx, store.Run{ID: id, Pipeline: "orch-ok", Status: "pending", StartedAt: time.Now()}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			trigger, err := st.ClaimNextTrigger(ctx, time.Minute)
-			if err != nil || trigger == nil {
-				t.Fatalf("claim trigger: %v, %+v", err, trigger)
-			}
-			cache := &localCompileCache{}
-			defer cache.Close()
-			runClaimedTrigger(ctx, st, trigger, cache, quietLogger(), home, time.Minute)
-			run, err := st.GetRun(ctx, id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if run.Status != "failed" || !strings.Contains(run.Error, "pipeline setup failed before dispatch") ||
-				strings.Contains(run.Error, "secret-should-not-be-shown") {
-				t.Fatalf("local setup failure run = status %q, error %q", run.Status, run.Error)
-			}
-		})
-	}
 }
 
 func TestExecLocalChildCarriesTheChildsStderrInItsError(t *testing.T) {

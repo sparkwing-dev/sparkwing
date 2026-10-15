@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -223,8 +224,8 @@ func TestRunDetached_RefusesARiskTheRefDeclares(t *testing.T) {
 			t.Fatalf("the refusal does not name %q:\n%s", want, refused)
 		}
 	}
-	if pid, ok := orchestrator.ConsumerPID(sparkwingHome); ok {
-		t.Fatalf("the refused launch started consumer process %d", pid)
+	if status, err := wingdclient.QueryLocalController(t.Context(), sparkwingHome); err == nil && status.Running {
+		t.Fatalf("the refused launch started controller process %d", status.PID)
 	}
 	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("the refused launch executed pipeline work: %v", statErr)
