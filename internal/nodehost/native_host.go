@@ -102,6 +102,13 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.Planning.Validation = validation
 	layers := owner.Layer
 	owner.Layer = func(ctx context.Context, layer LayerSpec, input EvaluationInput, row store.NodeRow, storage StorageBinding) (OwnerLayerResult, error) {
+		if layer.Name == "debug" {
+			unused, err := unusedOwnerPolicy(layer.Name, input, row, owner.Local)
+			if err != nil || unused || owner.Debug != nil {
+				return OwnerLayerResult{}, err
+			}
+			return OwnerLayerResult{}, errors.New("debug pause requires an authority-bearing boundary adapter")
+		}
 		if layer.Name == "skip_if" {
 			return evaluator.skipLayer(ctx, input, row, processes.Log)
 		}

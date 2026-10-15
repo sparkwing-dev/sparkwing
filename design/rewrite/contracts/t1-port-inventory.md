@@ -1006,7 +1006,16 @@ use actual SQLite. SDK compute and selected foreign record boundaries remain
 fakes. Atomic expansion replaces partial batch repair. A skipped source skips its
 generated consumers, following frozen section 3.6.
 
-Four debug test roots and the selection test remain in their old fixtures because
-the final bound pause contract and sealed selection fields are absent. Socket
-coverage remains unverified in the sandbox. The complete nodehost package does
-not pass. No native acceptance cell is added, unskipped or claimed complete.
+The [debug port](../w3-debug-store-port-progress.md) replaces the four debug roots' old
+scheduler/store fixture with native owner scheduling and real tenant intake,
+claims and transitions. A fake implements the declared pause boundary. The
+retained host assertions cover before/after/failure ordering, downstream release,
+gate/recovery exceptions, cancellation and sealed timeout propagation. Actual
+pause persistence, expiry, activity and event assertions still need W1's adapter.
+The old cancellation assertion that rewrote a terminal job is removed because
+terminal results are absorbing.
+
+The selection test remains in its old fixture because sealed selection fields
+are absent. Socket coverage remains unverified in the sandbox. The complete
+nodehost package does not pass. No native acceptance cell is added, unskipped or
+claimed complete.

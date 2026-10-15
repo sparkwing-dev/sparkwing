@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -282,7 +281,7 @@ func TestNativeHostOpensApprovalThroughOwnerTransition(t *testing.T) {
 }
 
 func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
-	for _, mode := range []string{"remote", "local", "concurrency", "memo", "debug"} {
+	for _, mode := range []string{"remote", "local", "concurrency", "memo", "debug", "debug-after"} {
 		t.Run(mode, func(t *testing.T) {
 			config, _, state, _ := nativeHostFixture(t)
 			input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
@@ -297,12 +296,16 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 			if mode == "concurrency" {
 				state.row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Capacity: 1, Cost: 1, Scope: "global", OnLimit: "queue"}}
 			}
-			if mode == "debug" {
+			if mode == "debug" || mode == "debug-after" {
 				var spec runspec.Spec
 				if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 					t.Fatal(err)
 				}
-				spec.Resolved.Settings.Options.Pause.Value.Before.Value = []string{input.NodeID}
+				if mode == "debug" {
+					spec.Resolved.Settings.Options.Pause.Value.Before.Value = []string{input.NodeID}
+				} else {
+					spec.Resolved.Settings.Options.Pause.Value.After.Value = []string{input.NodeID}
+				}
 				var err error
 				input.Accepted.Spec, err = json.Marshal(spec)
 				if err != nil {
@@ -346,7 +349,7 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 	run := RunInput{GrantedRunner: input.GrantedRunner}
 	request, err := releasedRequest(owner, t.Context(), run, input.Accepted, input.Entry, state.row, store.DecisionReady)
 	var failure *apierr.Error
-	if !errors.As(err, &failure) || failure.Code != apierr.SDKError || failure.Message != refused.Error() || request != nil || !reflect.DeepEqual(layers, []string{"debug"}) || len(state.changes) != 0 {
+	if !errors.As(err, &failure) || failure.Code != apierr.SDKError || failure.Message != refused.Error() || request != nil || len(layers) != 0 || len(state.changes) != 0 {
 		t.Fatalf("request=%+v layers=%v changes=%+v error=%v", request, layers, state.changes, err)
 	}
 }
@@ -403,7 +406,7 @@ func TestNativeHostSkipPolicyJoinsEvaluationBeforeTransition(t *testing.T) {
 	defer cancel()
 	run := RunInput{GrantedRunner: input.GrantedRunner}
 	request, err := releasedRequest(owner, ctx, run, input.Accepted, input.Entry, state.row, store.DecisionReady)
-	if err != nil || request != nil || delegated != 2 || !reflect.DeepEqual(layers, []string{"debug"}) || len(state.changes) != 1 || state.changes[0].To != store.NodeSkipped {
+	if err != nil || request != nil || delegated != 2 || len(layers) != 0 || len(state.changes) != 1 || state.changes[0].To != store.NodeSkipped {
 		t.Fatalf("request=%+v layers=%v changes=%+v delegations=%d error=%v", request, layers, state.changes, delegated, err)
 	}
 	if len(diagnostics) != 1 || string(diagnostics[0].Attrs) != `{"predicate":0}` {

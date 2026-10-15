@@ -24,6 +24,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 	defer func() { cancel(context.Canceled); workers.Wait() }()
 	completed := make(chan ownerExecution)
 	active := map[string]bool{}
+	debugged := map[string]int64{}
 	project, decide := h.Project, h.Decide
 	if project == nil {
 		project = store.RunSnapshot.Scheduling
@@ -47,6 +48,15 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		if err := context.Cause(ctx); err != nil {
 			return RunCompletion{}, err
 		}
+		select {
+		case result := <-completed:
+			delete(active, result.nodeID)
+			if result.err != nil {
+				return RunCompletion{}, result.err
+			}
+			continue
+		default:
+		}
 		snapshot, err := h.Store.ReadSnapshot(ctx, input.RunID)
 		if err != nil {
 			return RunCompletion{}, err
@@ -54,9 +64,30 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		if snapshot.Run.ID != input.RunID {
 			return RunCompletion{}, errors.New("scheduling changed the run identity")
 		}
+		for _, row := range snapshot.Nodes {
+			if row.Status != store.StatusDone || active[row.Ref.NodeID] {
+				continue
+			}
+			if generation, ok := debugged[row.Ref.NodeID]; ok && generation == row.Generation {
+				continue
+			}
+			debugged[row.Ref.NodeID] = row.Generation
+			boundary, err := debugBoundary(input, accepted, row, false)
+			if err != nil {
+				return RunCompletion{}, err
+			}
+			if boundary != nil {
+				launch(row.Ref.NodeID, func() error { return h.debugBoundary(ctx, input, accepted, row, false) })
+			}
+		}
 		graph, err := project(snapshot)
 		if err != nil {
 			return RunCompletion{}, err
+		}
+		for i := range graph.Nodes {
+			if !graph.CancelRequested && active[graph.Nodes[i].ID] && graph.Nodes[i].Status == string(store.StatusDone) {
+				graph.Nodes[i].Status, graph.Nodes[i].Outcome = string(store.StatusRunning), ""
+			}
 		}
 		decision := decide(graph)
 		if decision.Outcome != "" && len(active) == 0 && len(decision.Nodes) == 0 {
@@ -180,6 +211,9 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	if h.Layer == nil {
 		return errors.New("run host requires owner layer policies before dispatch")
 	}
+	if err := h.debugBoundary(ctx, input, accepted, row, true); err != nil {
+		return err
+	}
 	request := store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone}
 	for _, layer := range LayerTable() {
 		if layer.Side != OwnerSide {
@@ -222,7 +256,9 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			return err
 		}
 		if local {
-			return next(ctx, request)
+			if err := next(ctx, request); err != nil {
+				return err
+			}
 		}
 		return nil
 	}

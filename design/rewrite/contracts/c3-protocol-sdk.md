@@ -176,6 +176,7 @@ are part of this contract.
 | `nodehost.RunCompletion` | Reports the verdict after atomic run/unit finish. |
 | `nodehost.RunHost.Run` | Runs acquire through completion for every run-host placement. |
 | `nodehost.OwnerHost`, `OwnerStore` | Coordinate renewal, planning, acceptance, scheduling and atomic finish through the Tenant contracts. |
+| `nodehost.DebugBoundary`, `DebugBoundaryWaiter`, `OwnerHost.Debug` | Wait at sealed owner pause boundaries under the current owner and job generation. Released boundaries remain released on replay. Persistence and timeout release require an authority-bearing adapter. |
 | `nodehost.OwnerDelegator`, `OwnerHost.Delegator` | Resolve live owner ceilings and delegate expansion submission to the exact source generation under that owner lease. |
 | `nodehost.NewNativeHost`, `NativeHostConfig` | Assemble owner and claimed execution with one native executor and register their delegated process services. |
 | `nodehost.LocalAdmission`, `LocalAdmission.Run`, `LocalAdmission.Node` | Hold local run resources and run/box semaphores through joined scheduling, and job admission through execution and cleanup, using sealed settings. Nonlocal concurrency requires its store adapter. |

@@ -70,6 +70,7 @@ type OwnerHost struct {
 	Decide    func(store.ScheduleSnapshot) store.ScheduleDecision
 	Wait      func(context.Context, store.RunSnapshot) error
 	WaitNode  WaitNodeChange
+	Debug     DebugBoundaryWaiter
 	Layer     func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)
 	Local     func(store.NodeRow) bool
 	Admit     func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error
