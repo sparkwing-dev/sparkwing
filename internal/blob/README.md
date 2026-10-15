@@ -277,6 +277,15 @@ Batch signing checks S3 lifecycle readiness. Offset reads verify persisted range
 before emitting bytes, and corrupt objects fail before output. Controller
 authorization and segment records are fakes in this property.
 
+The sink acceptance properties drive concurrent numbered writers through the
+real spool, compression, signed transfers, committed reader and stored manifest.
+Each backend receives 128 generated cases with job, trigger, plan and eval
+subjects. Duplicate appends appear once, each writer's records retain their
+order, live offsets match the final bytes, and closing removes the spool.
+Lost PUT replies require exact stored-byte verification. Altered generations
+cannot select the committed ranges. Record and authority callbacks are fakes.
+The unused filesystem append-log backend and its example are removed.
+
 Local host construction does not open an artifact backend from
 `SPARKWING_CACHE_URL` or create an unused raw artifact cache. The final host
 contract takes live byte and record clients through `nodehost.StorageBinding`.

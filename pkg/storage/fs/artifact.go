@@ -1,13 +1,4 @@
-// Package fs implements storage.ArtifactStore + storage.LogStore on
-// top of the local filesystem. Both surfaces run the shared
-// pkg/storage/conformance suites.
-//
-// Layout under Root:
-//
-//	artifacts/<aa>/<rest>            content-keyed blobs (sha-prefix shard)
-//	logs/<runID>/<nodeID>.ndjson     per-node JSONL log
-//
-// Both stores write atomically (tmp file + rename).
+// Package fs stores immutable raw log objects and measures filesystem usage.
 package fs
 
 import (

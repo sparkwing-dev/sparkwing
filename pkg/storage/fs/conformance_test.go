@@ -17,13 +17,3 @@ func TestConformance_ArtifactStore(t *testing.T) {
 		return s
 	})
 }
-
-func TestConformance_LogStore(t *testing.T) {
-	conformance.TestLogStore(t, func() storage.LogStore {
-		s, err := fs.NewLogStore(t.TempDir())
-		if err != nil {
-			t.Fatalf("NewLogStore: %v", err)
-		}
-		return s
-	})
-}

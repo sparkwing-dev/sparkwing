@@ -1067,9 +1067,7 @@ not mode 0700, or the filesystem refuses the socket. The daemon keeps
 arbitrating admission in that state rather than leaving the machine with no
 daemon, and says so: `sparkwing daemon status` reports `api_ready: false`
 with the bind failure in `api_error`, `sparkwing doctor` warns, and both
-name the path as `api_socket`. A cache URL the daemon cannot open is the
-same shape of fault: the daemon serves without artifact routes and reports
-`artifact_store_error`.
+name the path as `api_socket`.
 
 On `api.sock` the peer uid *is* the identity. A request with no
 `Authorization` header is served as an admin principal named

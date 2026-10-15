@@ -70,6 +70,8 @@ func TestStorage(t *testing.T) {
 	t.Run("storage-components/go-modules-resolver", checkStorageGoModulesResolver)
 	t.Run("storage-log-segments-and-fallback/filesystem-records", checkStorageFilesystemLogRecords)
 	t.Run("storage-log-segments-and-fallback/s3-components", checkStorageS3Logs)
+	t.Run("storage-log-segments-and-fallback/filesystem-sink", checkStorageFilesystemLogSink)
+	t.Run("storage-log-segments-and-fallback/s3-sink", checkStorageS3LogSink)
 	t.Run("storage-memo-materialization-failures/filesystem-components", checkStorageFilesystemMaterialization)
 	t.Run("storage-memo-materialization-failures/s3-components", checkStorageS3Materialization)
 	t.Run("storage-memo-and-depcache-scope/filesystem-archives", checkStorageFilesystemDepcache)

@@ -91,10 +91,7 @@ type ReadOpts struct {
 	Grep  string // substring filter (case-sensitive)
 }
 
-// LogStore persists per-node log streams keyed by (runID, nodeID).
-// Implementations store opaque bytes; callers control marshaling.
-// Implementations live in the [fs] and [logseg] subpackages. [ReadOpts]
-// narrows the slice returned by Read.
+// LogStore exposes run and job log access for controller and dashboard readers.
 type LogStore interface {
 	// Append writes data verbatim to the (runID, nodeID) log.
 	Append(ctx context.Context, runID, nodeID string, data []byte) error

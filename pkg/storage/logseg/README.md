@@ -74,6 +74,12 @@ job and trigger/plan/eval subjects over real filesystem signed uploads and reads
 It covers lost PUT responses, offset resume, subject mismatch and corrupt bytes.
 Its authorization, lifecycle readiness and record persistence are fakes.
 
+The `filesystem-sink` and `s3-sink` acceptance cells also exercise concurrent
+numbered writers, duplicate delivery, live offsets, compression, batch renewal,
+offset reads and spool removal through the real sink. Each backend runs 128
+generated cases. Record persistence and authorization remain fakes. The removed
+`fs.LogStore` has no production caller.
+
 The store's transactional authorization and log persistence, controller routes,
 egress settlement, retention scheduling and host bindings still need integration.
 S3 log signing still needs admission for future slots whose payload size and

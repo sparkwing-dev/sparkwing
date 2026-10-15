@@ -1,5 +1,15 @@
 # Migrating to the next release
 
+## Filesystem logs use tagged segments
+
+`fs.LogStore` and `fs.NewLogStore` are removed. Log writers use a tagged
+`logseg.Sink` with the host's bound `logseg.SubjectUploader`. Filesystem and S3
+storage use the same immutable segment format.
+
+Daemon handshake and status responses drop `artifact_store_error`, which
+described a cache backend the daemon no longer opens. Remove that field from
+status consumers. API binding faults still use `api_ready` and `api_error`.
+
 ## Log identities use tagged subjects
 
 - **Before:** log manifests carried separate run, node, attempt and generation

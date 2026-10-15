@@ -2,6 +2,30 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 tagged-sink acceptance and unused backend deletion
+
+**Completed W7 cuts.** The unused `fs.LogStore` and `fs.NewLogStore`, their
+append test, example and mixed-fixture tests are deleted. Their only callers
+were tests. Concurrent numbered writers now run through the real tagged sink,
+filesystem and S3 signed transfers, spool and committed reader in
+`storage-log-segments-and-fallback/filesystem-sink` and `s3-sink`. Each backend
+receives 128 generated cases. Duplicate delivery, writer ordering, live offsets,
+lost PUT responses, byte-offset reads, generation mismatch and spool cleanup
+pass, including under the race detector. Authorization and records are fakes.
+
+The dead `artifact_store_error` diagnostic is removed from the daemon config,
+handshake, probe, CLI and wire snapshot. Its source docs and embedded copies
+are updated. The field had no producer after cache-backend construction was
+removed. W8/W9 should keep it deleted while migrating the remaining daemon
+surface. No replacement field or fallback was added.
+
+Storage acceptance reports 72 passing events and 425 skips. W1's existing
+result/memo and log-slot layout handoffs, W2's authenticated bindings and
+W3/W8's host construction remain open. These two sink cells do not close
+native acceptance. Full bincache/docs HTTP fixtures and daemon socket tests
+are unavailable in this sandbox. Their focused storage, drift and display
+checks pass.
+
 ## From W7 archive integration and cache delivery cleanup
 
 **W7 archive transactions now pass with both physical backends.**

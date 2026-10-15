@@ -122,18 +122,7 @@ func checkStorageLogs(t *testing.T) {
 
 func checkStorageLogRoundTrip(t *testing.T, objects storageLogObjects, transport http.RoundTripper, corrupt func(string, []byte), seed [16]byte, ordinal uint8, lost bool) bool {
 	t.Helper()
-	i, _ := storageIdentity(seed, uint32(ordinal))
-	subject := blob.LogSubject{Team: i.Team, RunID: i.RunID}
-	switch ordinal % 4 {
-	case 0:
-		subject.Kind, subject.Attempt = blob.LogJobAttempt, &i.Attempt.Value
-	default:
-		subject.Kind = blob.LogOwnerUnit
-		subject.Unit = &blob.LogUnit{Kind: []blob.LogUnitKind{blob.LogTrigger, blob.LogPlan, blob.LogEval}[ordinal%4-1], Generation: int64(ordinal) + 1}
-		if subject.Unit.Kind == blob.LogEval {
-			subject.Unit.Source = &blob.LogSource{NodeID: "generator", Generation: int64(ordinal) + 2}
-		}
-	}
+	subject := storageLogSubject(seed, ordinal)
 	class := logseg.ClassStandard
 	if ordinal%2 == 0 {
 		class = logseg.ClassFree
@@ -189,4 +178,20 @@ func checkStorageLogRoundTrip(t *testing.T, objects storageLogObjects, transport
 	var output bytes.Buffer
 	result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject}, &output)
 	return err != nil && result.Bytes == 0 && output.Len() == 0 && !result.Complete
+}
+
+func storageLogSubject(seed [16]byte, ordinal uint8) blob.LogSubject {
+	i, _ := storageIdentity(seed, uint32(ordinal))
+	subject := blob.LogSubject{Team: i.Team, RunID: i.RunID}
+	switch ordinal % 4 {
+	case 0:
+		subject.Kind, subject.Attempt = blob.LogJobAttempt, &i.Attempt.Value
+	default:
+		subject.Kind = blob.LogOwnerUnit
+		subject.Unit = &blob.LogUnit{Kind: []blob.LogUnitKind{blob.LogTrigger, blob.LogPlan, blob.LogEval}[ordinal%4-1], Generation: int64(ordinal) + 1}
+		if subject.Unit.Kind == blob.LogEval {
+			subject.Unit.Source = &blob.LogSource{NodeID: "generator", Generation: int64(ordinal) + 2}
+		}
+	}
+	return subject
 }

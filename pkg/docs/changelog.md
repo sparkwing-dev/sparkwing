@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** Removed the unused filesystem append-log backend
+  and the cache-specific `artifact_store_error` daemon status field.
+  Tagged sinks write immutable log segments. See
+  [migration steps](docs/migrations/_unreleased.md#filesystem-logs-use-tagged-segments).
+
 - **storage:** (Breaking) Physical log key helpers move from `logseg` to
   `internal/blob`. Signed log slots reserve zero for the final manifest and use
   positive segment indexes. Store and authenticated transport binding remain pending.
