@@ -1,8 +1,98 @@
 # W9 handoff
 
-This continuation starts at 53740f1ff with a clean worktree. W9 is still
+This continuation starts at e6958e0f9 with a clean worktree. W9 is still
 incomplete. The lead owns Git staging/commits, independent review, pipelines
-and native QA. Session 12 supersedes conflicting earlier status below.
+and native QA. Session 13 supersedes conflicting earlier status below.
+
+## This continuation (session 13)
+
+### Implementation and deletion
+
+Removed the CLI's remaining legacy Client dependency. Runner enrollment now
+uses NewRunnerTokenManager and the shared authenticated engine transport.
+The CLI's runnerController wrapper and runnerTokenOperations interface are
+deleted. RunnerTokenManager relocates that existing interface to its client
+owner and combines enrollment with the existing team token management methods.
+Client.EnrollRunner and the unused Client.CreateServiceToken are removed.
+Service callers use NewTokenManager with the deployment namespace.
+
+W2 already implements reserved_pools on its existing enrollment request. The
+earlier W9 refusal was stale. runners add now forwards repeated and
+comma-separated --reserved-for values with the name and repository proposal.
+The controller still owns registration and pool authority. Existing private-file
+writes, service setup, revocation and rollback remain in use.
+
+Invariant: one enrollment call sends at most one issuance request even when its
+reply is lost. The generated property covers transport loss, canonical
+unavailability, incomplete issuance and varied names/pools. It also checks the
+single registration route and disabled HTTP body replay. Deployment token
+managers refuse enrollment before transport. The existing surface component
+now enrolls, reads metadata and revokes through one final client for HTTP and
+api.sock transports. Those transports are fakes.
+
+Deleted the duplicate runWingdRunWith lifecycle constructor. Its two tests now
+exercise runWingdRunCommand, including the real NewLocalRuntime election and
+factory-failure cleanup. Removed unused release-tag/home-display adapters,
+GitHub URL parser and snapshot-size formatter.
+
+Gross deletion is 131 production-source Go lines and 11 test-source Go lines,
+including comments and blanks. Production source adds 35 lines, for a net
+reduction of 96. No whole file is deleted. No foreign runtime caller changed.
+No archived T1 source test is newly ported. Existing lifecycle and enrollment
+tests were migrated with their implementation.
+
+### Verification
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE and GOTMPDIR
+under /tmp/sw-astra-W9, and TMPDIR under that root. Test parallelism is four.
+
+- Whole-repository go build -p 4 ./... passes.
+- Scoped vet passes for cmd/sparkwing, controller/client, clisurface,
+  controllerwire and tests/acceptance.
+- Focused TestWingdRun, TestRunners, TestRunnerEnrollment, TestCredential,
+  TestSurface and the enrollment property seeds pass.
+- FuzzRunnerEnrollmentNeverReplays passes 10,219 executions with four workers.
+- Full clisurface, controllerwire, doccheck, apiref and apispec tests pass.
+- The default-team caller inventory passes without a stale entry or table edit.
+- Both TypeScript release/publication checks and both release-target checks pass.
+  Windows packaging needed no change. Native bridge execution remains CI work.
+- Commentcheck passes across 2,112 files. Whitespace and embedded-doc drift
+  checks pass. The client API snapshot was regenerated with cmd/apidiff.
+
+No native acceptance cell was activated. Full CLI/client suites, operational
+Sparkwing binaries, pipelines, releases and publications were not run. The
+lead retains independent review and native QA. Git configuration still uses
+Korey's normal identity and has no injected core.worktree.
+
+### Contracts and integration left open
+
+The W9-local contract update documents RunnerTokenManager's existing W2 wire
+shape and single-use transport. No foreign contract changed. The previous
+amendments/handoffs audit still applies. A1-49 advances through the final
+enrollment transport and closes the stale pool-request gap. Real W1/W2 origin
+policy, enrollment persistence and supervised runner startup still need proof.
+
+The remaining Client trigger, named claim and raw state methods still serve
+W3's StateStoreOld/RunCoordination graph and W2/W3 legacy fixtures. This
+continuation does not replace those fixtures with compatibility adapters.
+Native local/here resolvers, full remote host-store and process-service
+composition, captured source/environment delivery, cloud bootstrap composition,
+authorized cache/result/log bindings, local schedule pin/proof/tick operations,
+initial here-reason persistence and debug release remain open as recorded in
+session 12. Publication must preserve the local verdict on upload failure.
+
+### Shared edits and friction
+
+Shared files are tests/acceptance/{runner_credentials_contract_test.go,
+surface_contract_test.go}, .apidiff/pkg_controller_client.txt, CHANGELOG.md and
+its generated mirror, and generated docs mirrors. W9's own c3-controller-wire.md
+is updated. Lead-owned handoffs.md and amendments files are unchanged.
+
+The initial compile caught an unavailable apierr helper and an unused import.
+Both are corrected and final checks pass. Overwing matching/showing succeeded
+despite its installed-binary staleness notice. Native integration and the
+foreign contracts above remain the work to continue. No Git state was written.
+Scratch is removed before reporting.
 
 ## This continuation (session 12)
 

@@ -18,7 +18,6 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -67,6 +66,7 @@ type runnerEnrollment struct {
 	service     runnerServicePlan
 	profileName string
 	format      string
+	pools       []string
 }
 
 func runRunnersAdd(args []string) error {
@@ -84,26 +84,8 @@ func runRunnersAdd(args []string) error {
 	return enrollRunner(context.Background(), manager, enrollment)
 }
 
-type runnerTokenOperations interface {
-	controllerwire.TokenManager
-	EnrollRunner(context.Context, client.EnrollRunnerRequest) (*client.CreatedToken, error)
-}
-
-type runnerController struct {
-	controllerwire.TokenManager
-	client *client.Client
-}
-
-func (c runnerController) EnrollRunner(ctx context.Context, request client.EnrollRunnerRequest) (*client.CreatedToken, error) {
-	return c.client.EnrollRunner(ctx, request)
-}
-
-func runnerTokenManager(prof *namedProfile) (runnerTokenOperations, error) {
-	manager, err := client.NewTokenManager(client.EngineOptions{URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil }}, false)
-	if err != nil {
-		return nil, err
-	}
-	return runnerController{TokenManager: manager, client: client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())}, nil
+func runnerTokenManager(prof *namedProfile) (client.RunnerTokenManager, error) {
+	return client.NewRunnerTokenManager(client.EngineOptions{URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil }})
 }
 
 func prepareRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, error) {
@@ -146,9 +128,7 @@ func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, erro
 		}
 		maxConcurrent = &value
 	}
-	if inv.Has("reserved-for") {
-		return enrollment, nil, &apierr.Error{Code: apierr.PolicyMissing, Message: "runner pool enrollment is unavailable", Hint: "the controller must support team-admin runner registration"}
-	}
+	enrollment.pools = inv.Flags["reserved-for"]
 	prof, err := resolveProfile(inv.Value("profile"))
 	if err != nil {
 		return enrollment, nil, err
@@ -171,8 +151,8 @@ func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, erro
 	return enrollment, prof, nil
 }
 
-func enrollRunner(ctx context.Context, manager runnerTokenOperations, enrollment runnerEnrollment) error {
-	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos})
+func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enrollment runnerEnrollment) error {
+	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools})
 	if err != nil {
 		return err
 	}

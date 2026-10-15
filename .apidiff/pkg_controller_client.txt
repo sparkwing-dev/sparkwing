@@ -64,7 +64,6 @@ func (c *Client) CreateNode(ctx context.Context, n store.Node) error
 func (c *Client) CreateRun(ctx context.Context, r store.Run) error
 func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bool) error
 func (c *Client) CreateSecretForPipeline(ctx context.Context, name, value, pipeline string, masked, shared bool) error
-func (c *Client) CreateServiceToken(ctx context.Context, req CreateServiceTokenRequest) (*CreatedToken, error)
 func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error)
 func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*TriggerResponse, error)
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
@@ -94,7 +93,6 @@ func (c *Client) EnqueueTriggerWithEnv(
 	branch string,
 	triggerEnv map[string]string,
 ) (string, error)
-func (c *Client) EnrollRunner(ctx context.Context, req EnrollRunnerRequest) (*CreatedToken, error)
 func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (c *Client) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (c *Client) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish store.ExecutionAttemptFinish) error
@@ -258,6 +256,7 @@ func NewRunPruner(options EngineOptions) (controllerwire.RunPruner, error)
 func NewRunReader(options EngineOptions) (controllerwire.RunReader, error)
 func NewRunReview(options EngineOptions) (controllerwire.RunReview, error)
 func NewRunnerReader(options EngineOptions) (controllerwire.RunnerReader, error)
+func NewRunnerTokenManager(options EngineOptions) (RunnerTokenManager, error)
 func NewScheduleManager(options EngineOptions) (controllerwire.ScheduleManager, error)
 func NewScheduleRepositoryManager(options EngineOptions) (controllerwire.ScheduleRepositoryManager, error)
 func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, error)
@@ -285,6 +284,10 @@ type RotatedToken struct {
 	New          TokenInfo
 	OldPrefix    string
 	OldRevokedAt time.Time
+}
+type RunnerTokenManager interface {
+	controllerwire.TokenManager
+	EnrollRunner(context.Context, EnrollRunnerRequest) (*CreatedToken, error)
 }
 type Secret struct {
 	Name      string
@@ -470,6 +473,7 @@ func (c *engineClient) TransitionJob(ctx context.Context, run, job string, input
 func (c *engineClient) WriteOperatorLimits(ctx context.Context, input controllerwire.OperatorLimitsWrite) (controllerwire.OperatorLimits, error)
 func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.SecretWrite) (controllerwire.SecretWritten, error)
 func (c *tokenManager) CreateToken(ctx context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error)
+func (c *tokenManager) EnrollRunner(ctx context.Context, request EnrollRunnerRequest) (*CreatedToken, error)
 func (c *tokenManager) ListTokens(ctx context.Context, q controllerwire.TokenQuery) (controllerwire.Tokens, error)
 func (c *tokenManager) ReadToken(ctx context.Context, prefix string) (controllerwire.TokenMetadata, error)
 func (c *tokenManager) RevokeToken(ctx context.Context, prefix string) (controllerwire.TokenRevoked, error)

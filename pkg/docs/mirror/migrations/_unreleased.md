@@ -1584,9 +1584,13 @@ Both return `capability`, `prefix`, `team`, `grants` and optional RFC3339 expiry
 They return the bearer once, use no-store and require session CSRF for cookie
 authentication. Do not automatically replay issuance.
 
-Go callers use `EnrollRunner` and `CreateServiceToken`. Member `CreateToken`
-accepts `Grants` and `ExpiresAt`; the old kind/principal/scopes/TTL request and
-Token/Metadata response fields are removed. Controller integrations retain the
+Go callers use `client.NewRunnerTokenManager(...).EnrollRunner` for enrollment
+and `client.NewTokenManager(..., true).CreateToken` with kind `service` for
+deployment issuance. The legacy `Client.EnrollRunner` and `Client.CreateServiceToken`
+methods are removed. `runners add --reserved-for POOL` forwards the pool proposal
+to the team-admin enrollment route. Repeated and comma-separated values are
+preserved. Enrollment sends one request and never replays a lost bearer response.
+Member `Client.CreateToken` accepts `Grants` and `ExpiresAt`. Controller integrations retain the
 existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
 Missing origin policy refuses with `unavailable`. Production enrollment and
 console-origin persistence must be provided before enabling those flows.

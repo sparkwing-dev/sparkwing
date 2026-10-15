@@ -188,8 +188,11 @@ func TestWingdRunResolvesHomeWithoutChangingEnvironment(t *testing.T) {
 
 func TestWingdRunRequiresControllerBeforeOpeningHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "controller")
-	err := runWingdRunWith([]string{"--home", home, "--version", "test"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "controller composition") {
+	err := runWingdRunCommand(t.Context(), []string{"--home", home, "--version", "test"}, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context) (wingd.LocalRuntime, error) {
+		return nil, nil
+	})
+	var structured *apierr.Error
+	if !errors.As(err, &structured) || structured.Code != apierr.Unavailable {
 		t.Fatalf("run without controller = %v", err)
 	}
 	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
@@ -202,7 +205,7 @@ func TestWingdRunOpensControllerUnderElection(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	want := errors.New("controller unavailable")
 	called := false
-	err := runWingdRunWith([]string{"--home", home, "--version", "test"}, func(ctx context.Context, got string) (wingd.LocalController, error) {
+	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{Admission: wingd.Config{Home: home}, Open: func(ctx context.Context, got string) (wingd.LocalController, error) {
 		called = true
 		if got != home || ctx.Err() != nil {
 			t.Fatalf("factory home = %q, context = %v", got, ctx.Err())
@@ -212,6 +215,12 @@ func TestWingdRunOpensControllerUnderElection(t *testing.T) {
 			t.Fatalf("election before factory = %v, %v", held, err)
 		}
 		return nil, want
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runWingdRunCommand(t.Context(), []string{"--home", home, "--version", "test"}, &bytes.Buffer{}, wingd.LocalStartOptions{}, func(context.Context) (wingd.LocalRuntime, error) {
+		return runtime, nil
 	})
 	if !called || !errors.Is(err, want) {
 		t.Fatalf("factory called = %v, run = %v", called, err)

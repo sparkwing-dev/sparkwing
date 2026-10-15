@@ -188,19 +188,3 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 	}
 	return temporaryDir, pipelineDirectory, cleanup, nil
 }
-
-func parseGithubOwnerRepo(url string) string {
-	if strings.HasPrefix(url, "git@github.com:") {
-		rest := strings.TrimPrefix(url, "git@github.com:")
-		rest = strings.TrimSuffix(rest, ".git")
-		return rest
-	}
-	for _, prefix := range []string{"https://github.com/", "http://github.com/"} {
-		if strings.HasPrefix(url, prefix) {
-			rest := strings.TrimPrefix(url, prefix)
-			rest = strings.TrimSuffix(rest, ".git")
-			return rest
-		}
-	}
-	return ""
-}

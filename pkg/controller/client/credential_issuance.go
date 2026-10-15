@@ -78,24 +78,6 @@ func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*Crea
 	return &out, nil
 }
 
-// EnrollRunner provisions a team machine root once under current team administration.
-func (c *Client) EnrollRunner(ctx context.Context, req EnrollRunnerRequest) (*CreatedToken, error) {
-	var out CreatedToken
-	if err := c.post(ctx, "/api/v1/runners", req, http.StatusCreated, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// CreateServiceToken provisions a deployment service root once under operator.tokens.
-func (c *Client) CreateServiceToken(ctx context.Context, req CreateServiceTokenRequest) (*CreatedToken, error) {
-	var out CreatedToken
-	if err := c.post(ctx, "/api/v1/operator/tokens", req, http.StatusCreated, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // ListTokens lists the controller's tokens, narrowed to one kind when kind is
 // not empty. Revoked tokens are left out unless includeRevoked is set.
 func (c *Client) ListTokens(ctx context.Context, kind string, includeRevoked bool) ([]TokenInfo, error) {

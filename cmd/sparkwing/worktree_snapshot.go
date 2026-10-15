@@ -729,19 +729,6 @@ func appendGitEnv(overrides []string) []string {
 	return env
 }
 
-func snapshotBytes(n int64) string {
-	const unit = int64(1024)
-	if n < unit {
-		return strconv.FormatInt(n, 10) + " B"
-	}
-	div, exp := unit, 0
-	for value := n / unit; value >= unit && exp < 5; value /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
-}
-
 func snapshotGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		args = append([]string{"-c", "core.longpaths=true"}, args...)
