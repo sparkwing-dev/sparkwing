@@ -110,3 +110,12 @@ observable. The two-strikes rule leaves this runtime change for the lead.
 trees through Run, with comparable and slice-backed caller causes and optional
 committed awards. Seed 8 reproduces the panic before its award reaches the host.
 The proposed runtime change still needs the lead's decision.
+
+W8 verified the proposed leaf classification with a temporary Go overlay. The
+complete runner suite and 64,397 interruption fuzz executions pass with that
+change. The working tree still reproduces both retained failures. The approved
+outcome regression, repository build, W8 vet, commentcheck, engine/launcher and
+focused local-controller/component suites pass without the overlay. No runtime
+change was applied. The interruption DESIGN still needs the lead's decision.
+The committed outcome property also passed 60,631 fuzz executions without the
+overlay.

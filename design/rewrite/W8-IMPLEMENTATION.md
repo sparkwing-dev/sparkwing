@@ -5,21 +5,31 @@ W8 remains incomplete. The approved pending-claim outcome redesign is implemente
 retained failing regressions in interruption classification, described below.
 No further runtime patch was made after that review finding.
 
-This continuation adds `FuzzLoopPendingPolicyInterruption` through the public
-Run boundary. It varies nested wrappers and joins, independent denials, caller
-causes, committed awards and host failures. Eight baseline cases pass. Seed 8
-reproduces the known slice-backed-cause panic before the host adopts its award.
-The original arbitrary-cause regression also still fails. This is test preparation
-for the proposed classification redesign, which still needs a lead decision.
-No production code or API changed. Deleted production lines and new T1 ports
-are zero. The shared edit is the W8 classification entry in contracts/handoffs.md.
+This continuation reproduced both retained classification failures. Seed 8 of
+`FuzzLoopPendingPolicyInterruption` panics before its committed award reaches the
+host. The proposed redesign passes the complete runner suite through a temporary
+Go overlay: unwrap the error tree first, then compare leaves only with `ctx.Err()`.
+Run's existing defer retains arbitrary caller causes. The runtime remains unchanged
+because the separate interruption-classification DESIGN still needs a lead decision.
+The approved pending-claim outcome implementation was already committed.
+The overlay passed 64,397 interruption fuzz executions in ten seconds, including
+all nine seeds. The working-tree policy-denial regression and managed-runner
+outcome checks pass.
+The committed outcome property passed 60,631 fuzz executions in ten seconds
+without the overlay.
 
-Verification for this continuation passes the repository build, W8 vet,
-commentcheck, focused local-controller/cluster checks and the engine, launcher
-and component acceptance suites. The runner suite passes when the two known
-classification regressions are excluded. Its full run retains those failures.
-The approved outcome property passed 75,494 fuzz cases in ten seconds. No native
-acceptance cell was activated. The integration table below remains open.
+The working-tree repository build, W8/acceptance vet, commentcheck, engine,
+launcher, runner-service and focused local-controller/component acceptance checks
+pass. No native acceptance cell was activated. No production code or API changed,
+and no old code or tests were deleted. New T1 ports are zero. Only the W8 reports
+and the W8 classification entry in contracts/handoffs.md changed.
+
+The remaining foreign implementations were checked directly. `source.Acquire`,
+source projections, `lease.Keeper.Run`, `client.NewEngineClient` and
+`EngineController.SyncLauncher` still panic as stubs. Existing W8 adapters and
+fake-based component tests remain the implementation boundary. Shared run/plan/eval
+identity construction, local-controller composition and deployed Cloud proofs
+remain open in the integration table below.
 
 A pending claim returns its response, transport error and stop result independently.
 Run adopts a valid committed award before applying the stop result. Lifecycle

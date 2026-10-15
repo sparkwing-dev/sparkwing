@@ -14,6 +14,12 @@ The failing regression is retained under the DESIGN decision below. All 26
 assigned rows and W8 handoffs were rechecked. Other integration dependencies
 remain below. Earlier merge-resolution sections describe previous sessions.
 
+The proposed interruption redesign passes the full runner suite and 64,397 fuzz
+executions through a temporary Go overlay. Both retained regressions still fail
+in the working tree because the separate DESIGN has no lead decision. This
+continuation changes only these reports and the W8 handoff. It adds no production
+code, contract surface or T1 port and activates no native acceptance cell.
+
 | Amendment | W8 action and remaining integration |
 | --- | --- |
 | A1-08 | The unified loop uses one ClaimRequest with both kinds. RunnerStoreLifecycleW8Components now exercises the real EngineController and SQLite claim scan through that loop. W9 NewEngineClient remains a stub. HTTP response-loss evidence remains open. |
