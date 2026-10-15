@@ -8,6 +8,16 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+The raw paid-credit route and its handler tests are retired.
+`pkg/store/credit_grant_runtime_test.go` ports free-grant idempotency, team
+scoping, validation, balance/history accounting and payment-linked reversals
+to the final schema. Paid fixtures use committed checkout settlement facts.
+`payment_refunds_test.go` retains refund replay and ports pre-settlement fraud
+warning refusal. Generated properties exercise every raw store grant surface
+and the registered retired HTTP route. The existing ledger-retention SQLite
+cell also refuses raw paid grants. Native provider and controller adapters
+remain open. No archived source row or native acceptance cell is newly closed.
+
 The service-token storage and download counter handlers and their rolling-block
 tests are retired. `pkg/controller/store_data_retirement_internal_test.go` adds
 `FuzzLegacyStorageCountersAreGone` over generated credentials, tenant strings and

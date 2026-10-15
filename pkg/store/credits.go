@@ -308,17 +308,7 @@ func ValidCreditGrantKind(kind string) bool {
 	return kind == CreditGrantFree || kind == CreditGrantPaid || kind == CreditGrantReversal
 }
 
-// CreditGrantRequest is one movement of the grant side of the ledger: credits
-// added, or, for [CreditGrantReversal], credits taken back.
-//
-// Reference is the payment id the grant came from, or an operator note. A
-// non-empty one makes the grant idempotent: a second request naming the same
-// kind and reference returns the row already written, which is what lets a
-// payment webhook retry. An empty reference writes a new row every time.
-//
-// A reversal carries a negative AmountMicro, its own Reference (the refund id,
-// so partial refunds of one payment each land), and Reverses naming the
-// reference of the paid grant it takes back.
+// CreditGrantRequest carries a free grant or a negative, payment-linked reversal with its idempotency reference.
 type CreditGrantRequest struct {
 	Kind        string
 	AmountMicro int64
@@ -338,6 +328,9 @@ type CreditGrantResult struct {
 }
 
 func (req CreditGrantRequest) validate() error {
+	if req.Kind == CreditGrantPaid {
+		return fmt.Errorf("%w: paid credit requires verified checkout settlement", ErrInvalidInput)
+	}
 	if !ValidCreditGrantKind(req.Kind) {
 		return fmt.Errorf("credits: unknown grant kind %q", req.Kind)
 	}
@@ -350,13 +343,6 @@ func (req CreditGrantRequest) validate() error {
 		}
 		if req.AmountMicro > MaxCreditGrantMicro {
 			return fmt.Errorf("credits: a grant may not exceed %d micro-credits", MaxCreditGrantMicro)
-		}
-		// safety: a paid grant is one checkout's payment, so it is bounded by
-		// the largest purchase; that bounds what a leaked grant credential can
-		// add, since the balance cap does not refuse a paid grant.
-		if req.Kind == CreditGrantPaid && req.AmountMicro > CreditPurchaseMaxCents*MicroCreditsPerCent {
-			return fmt.Errorf("credits: a paid grant is one purchase, at most %d micro-credits",
-				int64(CreditPurchaseMaxCents*MicroCreditsPerCent))
 		}
 		if req.Reverses != "" {
 			return fmt.Errorf("credits: only a %s grant reverses another grant", CreditGrantReversal)
@@ -413,7 +399,7 @@ func grantCredits(
 	return &grant, nil
 }
 
-// RecordCreditGrant writes a tenant grant or payment-linked reversal and reports whether it was created.
+// RecordCreditGrant writes a free grant or payment-linked reversal and reports whether it was created.
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error) {
@@ -447,15 +433,7 @@ func (s *Store) recordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	if req.Reference != "" {
-		var existing CreditGrant
-		var found bool
-		var err error
-		if req.Kind == CreditGrantPaid {
-			// safety: checkout and card grants share a provider payment identity.
-			existing, found, err = paidGrantForPaymentTx(ctx, tx, req.Reference)
-		} else {
-			existing, found, err = creditGrantByReferenceTx(ctx, tx, team, req.Kind, req.Reference)
-		}
+		existing, found, err := creditGrantByReferenceTx(ctx, tx, team, req.Kind, req.Reference)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
@@ -487,15 +465,6 @@ func (s *Store) recordCreditGrant(
 				ErrReversalExceedsPayment, req.Reverses, reversed.AmountMicro, already, -req.AmountMicro)
 		}
 	}
-	if req.Kind == CreditGrantPaid {
-		if err := refuseWarnedPaymentTx(ctx, tx, req.Reference); err != nil {
-			return CreditGrantResult{}, err
-		}
-	}
-	// safety: a paid grant is money that already moved, so the cap was held
-	// when its checkout opened and is not held again here; refusing it would
-	// leave a payment with no credits. Only an operator's free grant meets the
-	// cap at the ledger.
 	if req.Kind == CreditGrantFree {
 		if err := refuseAboveBalanceCapTx(ctx, tx, team, req.AmountMicro, now.UnixNano()); err != nil {
 			return CreditGrantResult{}, err

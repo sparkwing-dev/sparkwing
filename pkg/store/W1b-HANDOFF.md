@@ -1,171 +1,174 @@
 # W1b handoff
 
-Continues 0b8b18c03. W1b remains incomplete. The lead owns commits, independent
-review, pipelines and native integration. Earlier reports remain in Git history.
+Continues c212c89ff and the integration merge 94e9f2d83. W1b remains incomplete.
+The lead owns commits, independent review, pipelines and native integration.
 
 ## This continuation
 
-The first two lead handoffs were already committed. The shared record mutation
-owner and catalog removals were not repeated. This continuation advances the
-third handoff by removing the service-token storage counter transport and the
-rolling-reservation API it used.
+The first two lead handoffs remain done. The transaction-local record mutation
+owner and the two catalog removals were not repeated. The third lead item advances
+with the raw paid-credit cut. The previous service-counter route cut stays intact.
 
-Removed all four public counter routes: `/internal/storage/reserve`,
-`/internal/storage/commit`, `/internal/storage/release` and
-`/internal/downloads/charge`. Their request types, authentication helpers,
-handlers and route registrations are deleted. `Store.RenewStorage`,
-`storageRenewRequest`, `recordStorageRenewTx` and `replayStorageRenewTx` are deleted.
-The retained download-cap builder and caller-standing projection moved from
-storage_counters.go to storage_standing.go without changing their API.
+Removed POST /api/v1/credits/grants, createGrantReq, handleCreditsGrant and its
+route-resource registration. Deleted the two retired paid-route test files.
+Store.GrantCredits, Tenant.GrantCredits and Tenant.RecordCreditGrant refuse the
+paid kind before opening a ledger transaction. Their free grant and payment-linked
+reversal paths remain. Deleted the unreachable raw-paid validation, global
+payment-reference lookup and warning check from that generic grant writer.
 
-The removed routes cannot mutate any tenant's accounting, regardless of the
-presented credential, selected tenant or byte delta. The registered-router fuzz
-property ran red before removal and passed 129 executions afterward.
+Invariant: no caller-selected paid grant can change any team's ledger or checkout,
+before or after verified checkout settlement. FuzzPaymentRawPaidGrantsCannotFundTeam
+exercises all three raw store entry points, generated references, actors, amounts
+and both tenants. FuzzLegacyPaidCreditRouteIsGone exercises the registered router
+with generated credentials, tenants, references and amounts. The store property
+failed against the original implementation. The HTTP property was first run after
+its handler removal, so no pre-removal failure is claimed for it.
 
-The two retained signup-source tests now use the final SQLite schema without a
-listener. They preserve full-tier and unreadable-source refusal and the server's
-own signup-condition projection. They no longer mint a cache counter token.
-Porting them exposed SetFreeTeamSlots writing the removed sparkwing_meta table.
-It now uses the existing final-settings writer. Negative or sealed updates leave
-the policy unchanged. The new store test checks persistence after reopening and
-sealed-write refusal. Native sign-in remains separate integration evidence.
+Porting TestAWarnedPurchaseIsNotGranted exposed the final checkout writer accepting
+an actionable early fraud warning. That test failed before the fix. The existing
+warning checker now runs in the same settlement transaction before the grant or
+provider-event receipt commits. An informational warning still permits settlement.
+No pricing, purchase cap, quota, schema, setting or foreign Go contract changed.
 
-Deleted 396 production Go lines and added 63, including moved declarations, for a
-333-line net reduction. Deleted 488 test lines and added 148, including retained
-fixtures and replacement proofs, for a 340-line net reduction. The old rolling
-block growth, renewal replay and renewal lock-order tests are removed with their
-mechanism. The surviving direct-upload slot test retains its upload assertions.
-No new archived T1 source row or native acceptance cell is closed.
+Deleted 116 production Go lines and added 19, a 97-line net reduction. Deleted
+782 test lines and added 266, including the two new files, a 516-line net
+reduction. These figures exclude prose and generated documentation.
 
-No schema, price, minimum, quota, flag, setting, environment variable, compatibility
-mechanism or foreign Go contract was added. The existing slot setting changed its
-persistence owner. Final upload-ticket tests retain scoped quota admission,
-immutable replay, concurrent-client, abort and restart evidence.
+## Ports and acceptance
+
+credit_grant_runtime_test.go replaces credits_reference_test.go and
+credit_grant_reference_test.go. It retains free-grant reference replay and changed
+terms, independent tenant references, empty references, free/paid kind separation,
+request bounds, grants-minus-charges, reversal replay, state/history/deployment
+totals, foreign/unfunded/excessive reversal refusal and refunds of spent credit.
+Paid fixtures use committed checkout facts through the existing private settlement
+boundary. The opaque C2 verification implementation is not replaced or claimed.
+
+The prior raw-paid refund test is retired in favor of payment_refunds_test.go's
+committed-checkout refund/restart/replay and partial-reversal proofs. The warned
+purchase test moved from card_billing_test.go to that final-schema file. The card
+identity matrix now covers card/card, card/checkout, checkout/card and
+checkout/checkout. Raw grant funding is refused by the generated property instead.
+
+The existing billing-ledger-survives-retention/store-data-sqlite cell additionally
+refuses raw paid grants for the operator and adversarially named foreign team.
+The default-team ledger fixture uses an operator free grant because it tests
+tenant selection and balance projection, not provider settlement.
+No new native acceptance cell or archived T1 source row is closed.
 
 ## Verification
 
-Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
-GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1b/. Use go -C with this worktree's
-absolute path. Builds, tests and vet use -p 4.
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1b/. Run go -C with this worktree's
+absolute path. Builds, vet and tests use -p 4.
 
-- Whole-repository go build ./... passed after the source and embedded-doc changes.
-- go vet ./pkg/store/... ./pkg/controller/... ./internal/acceptance/...
-  ./tests/acceptance/... passed.
-- Final W1b selection passed 200 top-level store tests / 608 cases, with zero
-  skips or failures, in 157.448 seconds. The complete generated record-mutation
-  authority property is included. This is not a full-store suite pass.
-- Eight controller top-level tests / 11 cases passed without skips. These include
-  the retired-route fuzz seeds, both signup-source ports and the five retained
-  maintenance/retirement checks. A separate generated fuzz run passed 129 cases.
+- Whole-repository go build ./... passed after the final embedded-doc sync.
+- Scoped go vet passed for store, controller and both acceptance package trees.
+  A final store-only vet also passed after the added assertions.
+- The final store regression selection passed 195 top-level tests /
+  605 cases, without skips or failures, in 239.720 seconds. The full generated
+  record-mutation authority property remains included. This is a scoped pass.
+- Nine controller top-level tests / 14 cases passed without skips, including the
+  two retired-route generated properties' seed cases and retained maintenance
+  and signup checks.
+- Both generated properties passed. The final store run executed 128 inputs,
+  including refusal before and after valid checkout settlement. The router run
+  executed 137 inputs.
 - TestStorage and TestBilling passed 2 top-level tests / 43 cases, including all
   12 existing store-data-sqlite proofs. The 562 native/platform skips remain.
-- All internal/apiref and internal/apispec tests passed: 28 top-level tests /
-  46 cases. The curated OpenAPI source lost the four retired operations, then
-  its generator produced identical output. The generated API page lost four rows.
-- Nine focused changelog/mirror tests passed. bin/sync-docs.sh --check passed.
-- commentcheck -base main passed across 1014 Go files. sleepcheck -base HEAD and
-  git diff --check passed.
-- cmd/apidiff regenerated snapshots in scratch. Every generated snapshot matches
-  its stored counterpart after the one RenewStorage entry was removed. The
-  pre-existing orphan .apidiff/pkg_runner.txt has no generated package and is
-  unchanged.
+- All apiref/apispec tests passed: 28 top-level tests / 46 cases.
+  The generated OpenAPI output equals the curated file after operation/schema
+  removal. The generated API reference lost the retired row.
+- Eight focused embedded changelog tests passed. sync-docs.sh --check passed.
+- commentcheck -base main passed across 1016 Go files. sleepcheck -base HEAD,
+  gofmt and git diff --check passed.
+- The final warned-purchase assertion passed independently and confirms that
+  refused settlement leaves the checkout's payment/grant fields untouched.
 
 Store selection:
 
 ```text
-^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore|TestStorage|TestBilling|TestGrantCredits|TestCreditGrant|TestCreditReversal|TestCreditHistory|TestCreditsBalanceIs|TestCreditsDefaultTenant|TestTenantSQLScope|TestTenantWriters|TestTenantTwins)
+^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestAWarnedPurchaseIsNotGranted|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore|TestStorage|TestBilling|TestGrantCredits|TestCreditGrant|TestCreditReversal|TestCreditHistory|TestCreditsBalanceIs|TestCreditsDefaultTenant|TestTenantSQLScope|TestTenantWriters|TestTenantTwins|FuzzPaymentRawPaidGrantsCannotFundTeam)
 ```
 
-Use go test -json -p 4 ./pkg/store -run '<selection>' -count=1 -timeout=240s.
-Acceptance uses go test -json -p 4 ./internal/acceptance/... ./tests/acceptance/...
--run '^(TestStorage|TestBilling)$' -count=1 -timeout=240s.
+Use go test -json -p 4 ./pkg/store -run '<selection>' -count=1 -timeout=480s.
+Acceptance uses ./internal/acceptance/... ./tests/acceptance/... with
+-run '^(TestStorage|TestBilling)$'. Each generated property uses -run '^$'
+-fuzz '^<property>$' -fuzztime=128x -parallel=4 -timeout=120s.
 
-Controller selection:
+No full-store, full-controller, race, PostgreSQL, provider, physical-backend or
+native-platform pass is claimed. Older legacy fixtures outside the selection
+still call raw paid grants or use removed tokens/claim/storage schemas. They
+need final-path ports with their consumer cutovers, not a paid-grant fallback.
 
-```text
-^(FuzzLegacyStorageCountersAreGone|TestSignUpFreeTierClosesWithTheLastSlot|TestTheServerIsItsOwnFreeTierSource|TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage|TestAMultiTeamStoragePassSeedsRetentionAndReleasesOldRuns|TestASingleTeamControllerKeepsItsOperatorsRetention|TestStorageRetentionPassRequiresMaintenanceFence|TestLegacyEgressTotalsEndpointIsGone)$
-```
-
-The generated router run uses go test -p 4 ./pkg/controller -run '^$'
--fuzz '^FuzzLegacyStorageCountersAreGone$' -fuzztime=128x -parallel=4 -timeout=120s.
-
-The route property first failed because the registered endpoints returned 401.
-The signup ports first failed because sparkwing_meta no longer exists. Both
-causes were corrected in place. The OpenAPI generator initially refused removed
-request types until their curated operation blocks were deleted. These failures
-are not represented as passes.
-
-No full-store, full-controller, full-docs, race, PostgreSQL, provider, physical
-backend or native-platform pass is claimed. Pipelines and independent review
-remain with the lead, as required by the swarm brief.
-
-## Amendment audit and remaining work
+## Remaining assignments and real integration
 
 - A1-24: transaction-owned data authorization and binding proofs remain intact.
   W2 DataController.DataAuthority and BindData still need real adapters.
 - A1-27: issuance/start/renew/release/reap/finish billing joins remain open.
   authority_issue.go still refuses metered roots and persists unmetered awards
-  through W1's separate writer. C2 SettleBilling remains a panic stub. Existing
-  BillingRules require full unstarted refunds, but at_award auto-opened intervals
-  do not distinguish actual first execution or customer-runner waits. W1/W2/W3
-  still need the explicit execution/wait transport before that join can preserve
-  the rule. Accounting proofs continue to use contract calculator fakes.
-- A1-28: committed-checkout settlement remains implemented. W2 owns verified
-  provider events and removal of caller-selected paid grants.
-  VerifiedPaymentEvent.Event remains a stub.
+  through W1's separate writer. C2 SettleBilling remains a panic stub. The
+  execution-start/customer-wait transport is still missing. The at_award helper
+  alone cannot distinguish an unstarted refund from compute or customer-runner
+  wait. W1/W2/W3 must expose those facts before that join preserves BillingRules.
+  Accounting proofs continue to use contract calculator fakes. W1 files were
+  not edited or supplied a second transition owner.
+- A1-28: committed-checkout settlement and raw paid-grant refusal are implemented.
+  W2 still owns provider verification and its HTTP adapter.
+  VerifiedPaymentEvent.Event remains a stub. Card billing keeps its separate
+  payment-linked settlement contract.
 - A1-29 through A1-35: upload tickets, tagged receipts, provenance, record/member
   persistence, read-set authorization, memo/depcache, tombstones and tagged logs
-  remain implemented behind contracts. W7 RecordNamespace and AuthorizeEdge are
-  still stubs. Store proofs use contract fakes. Physical verification/deletion,
-  verified manifest-reader configuration, GC, trusted replica identity, binary
-  execution policy, signed transfers and exact proxy egress remain integration
-  work. Allowance-driven physical eviction is still open.
-- The counter transport is removed. internal/storagequota.Client and
-  internal/cache still contain W7's old RPC consumers. They receive no fallback.
-  W7 must retire them with the cache service. Final DataBinding is the contract
-  for their replacement. No foreign implementation was substituted here.
+  remain implemented behind contracts. W7 RecordNamespace and AuthorizeEdge
+  remain stubs. Store proofs use contract fakes. Physical verification/deletion,
+  manifest-reader configuration, GC, trusted replica identity, binary execution
+  policy, signed transfers and exact proxy egress remain integration work.
+  Allowance-driven physical eviction remains open.
 - Legacy claim-credit, principal event/download counters, raw storage helpers,
-  output objects, direct uploads and node-log transport still need their full
-  consumer cutovers. Direct-upload and log paths retain reserveStorageTx,
-  commitStorageTx and the old reservation tables. StorageStanding still reads
-  those legacy rows. The old data_download.go combines direct source, artifacts
-  and binary signing through cache grants. Removing only its binary lookup would
-  strand direct-source callers. Never-executed materialization source identity
-  and imported owner-log identity still need their earlier cross-area contracts.
-- A1-53: native placements, real provider/backend and PostgreSQL evidence remain
-  with the lead and integrating areas.
+  output objects, direct uploads and node-log transport still need consumer
+  cutovers. Direct-upload/log paths retain reserveStorageTx, commitStorageTx and
+  old reservation tables. StorageStanding still reads those rows. W7's old
+  internal/storagequota and internal/cache RPC clients have no counter fallback.
+  The source/artifact/binary data_download adapter still uses cache grants.
+  Earlier materialization and imported-owner-log identity contracts remain open.
+- A1-53: native placements, provider/backend and PostgreSQL evidence remain with
+  the lead and integrating areas. The first two lead handoffs are done. The
+  third remains in progress. No new foreign contract change is requested.
 
-W1's implementation files were not edited. No foreign contract change is newly
-requested. The first two lead items remain done. The third is in progress.
+## Shared files, assumptions and friction
 
-## Shared files and cleanup
+Production caller removals outside pkg/store are controller/credits.go,
+controller/server.go and controller/tenant_routes.go. The final HTTP refusal
+property replaces controller/credit_grant_request_test.go. The retired
+controller/credits_grant_reference_test.go and credits_grant_team_test.go are
+deleted. internal/acceptance/store_billing.go extends the existing store proof.
 
-Owned store changes: team_storage.go, free_tier.go, credit_settings_runtime_test.go,
-team_storage_test.go, free_tier_test.go, STORE-DATA.md and this handoff.
+Owned store production changes are credits.go and payment_contract.go. Test
+ports touch card_billing_test.go, card_payment_replay_boundary_test.go,
+credit_reversals_test.go, credits_test.go, credits_per_team_test.go,
+payment_checkout_caps_test.go and payment_refunds_test.go. The two new files
+are credit_grant_runtime_test.go and payment_authority_test.go. The two deleted
+store files are credits_reference_test.go and credit_grant_reference_test.go.
+STORE-DATA.md and this handoff record the persistence and work boundaries. Shared docs are contracts/c1-data.md,
+contracts/t1-port-inventory.md, api/openapi.yaml, CHANGELOG.md, docs/auth.md,
+docs/migrations/_unreleased.md and the generated docs/api-reference.md.
+bin/sync-docs.sh generated their embedded copies and pkg/docs/changelog.md.
 
-Production caller removal outside pkg/store: controller/server.go and deletion
-of controller/storage_counters.go, with its surviving declarations moved to
-controller/storage_standing.go. Test caller migrations: deletion of
-controller/storage_counters_test.go, the retained signup proofs in
-controller/free_tier_source_test.go, the unchanged freeTeamToken fixture moved
-to controller/team_download_test.go, and the router property in
-controller/store_data_retirement_internal_test.go.
+No new production mechanism, environment variable, compatibility surface or
+configuration default was added. The existing paid-credit authority boundary
+moved to its declared checkout transaction. Reverting this cut means restoring
+the removed handler and raw-paid branches, not adding a compatibility alias.
 
-Shared documentation: contracts/c1-data.md, contracts/t1-port-inventory.md,
-.apidiff/pkg_store.txt, api/openapi.yaml, CHANGELOG.md, docs/api-reference.md,
-auth.md, gitcache.md, limits.md, migrations/_unreleased.md, observability.md,
-security.md and self-hosting.md. bin/sync-docs.sh generated their embedded copies
-and pkg/docs/changelog.md. Historical design/credential-model.md is unchanged.
-No internal/blob, internal/cache, host, protocol, SDK or W1 transition source was
-changed.
-
-Friction: old signup fixtures depended on removed token/schema paths and a
-listener. The replacement tests use the final store and real gate projection.
-The broader area still depends on the named foreign stubs and legacy cutovers.
-No new production mechanism was introduced to hide those gaps.
-
-No service, candidate install, provider call, deployment, release, Git write or
-harness-memory write ran. Bootstrap discovery ran installed sparkwing info before
-the brief was loaded. No Sparkwing command ran after the brief. The lead retains
-committing, review and pipelines. Scratch and check processes are removed before
-reporting.
+Friction: the old grant tests used the retired payment entry point and schema.
+The replacement proofs use final checkout facts. The initial scoped run also
+found four card-identity matrix cases still expecting raw paid grants. They
+were ported to final settlement pairs. The broad run then exposed one default-team
+ledger fixture still using a raw paid grant. That fixture now uses a free operator
+grant. The earlier 240-second broad run exhausted its budget after 184 top-level
+tests. Its lock-order test passes alone in 6.07 seconds. The rerun uses 480 seconds.
+Those failed and timed-out runs are not counted as passes.
+The missing C2 verifier, calculator and execution/wait transport still prevent
+real billing integration. The lead retains review, committing and pipelines.
+No Sparkwing binary, service, provider call, deployment, release, Git write or
+harness-memory write ran. Scratch was deleted after checks. Every owned check process exited. Git HEAD remained 94e9f2d83. The shared config
+has no core.worktree or repository-local identity override.

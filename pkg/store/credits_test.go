@@ -125,44 +125,6 @@ func setChargeWindowWithoutExecution(t *testing.T, s *store.Store, runID, nodeID
 	}
 }
 
-func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-
-	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if balance != 0 {
-		t.Fatalf("fresh balance = %d, want 0", balance)
-	}
-
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_123", "admin"); err != nil {
-		t.Fatalf("paid grant: %v", err)
-	}
-	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 50*store.MicroCreditsPerCent, "", "admin"); err != nil {
-		t.Fatalf("free grant: %v", err)
-	}
-	balance, err = tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if want := int64(1050 * store.MicroCreditsPerCent); balance != want {
-		t.Fatalf("balance = %d, want %d", balance, want)
-	}
-
-	grants, err := tenant(t, s, store.DefaultTeam).ListCreditGrants(ctx, 10)
-	if err != nil {
-		t.Fatalf("list grants: %v", err)
-	}
-	if len(grants) != 2 {
-		t.Fatalf("grants = %d, want 2", len(grants))
-	}
-	if grants[0].Kind != store.CreditGrantFree {
-		t.Fatalf("newest grant kind = %q, want free", grants[0].Kind)
-	}
-}
-
 func TestCreditsGrantRejectsUnknownKindAndZero(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

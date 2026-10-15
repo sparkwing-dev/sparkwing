@@ -188,7 +188,7 @@ func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {
 	}
 
 	def := tenant(t, s, store.DefaultTeam)
-	if _, err := def.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := def.GrantCredits(ctx, store.CreditGrantFree,
 		100*store.MicroCreditsPerCent, "pay_local", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

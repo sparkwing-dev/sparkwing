@@ -1,5 +1,12 @@
 # Store data persistence
 
+The raw paid-credit grant path is removed. `Store.GrantCredits`,
+`Tenant.GrantCredits` and `Tenant.RecordCreditGrant` accept no `paid` kind.
+Paid checkout credit uses `Store.SettlePayment`, which derives the team and
+amount from the committed checkout. Actionable fraud warnings refuse that
+transaction before a grant or event receipt commits. C2's verified-event
+implementation and controller adapter remain integration dependencies.
+
 The service-token storage and download counter routes are removed.
 `Store.RenewStorage` and its rolling block replay helpers are removed with them.
 Final upload tickets retain atomic reserve, verified commit, abort and replay.

@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Paid credit requires verified checkout settlement
+
+`POST /api/v1/credits/grants` is removed. `Store.GrantCredits`,
+`Tenant.GrantCredits` and `Tenant.RecordCreditGrant` refuse `paid` grants.
+Free operator grants and payment-linked reversals keep their existing paths.
+
+Checkout integrations must supply C2's verified provider event to
+`Store.SettlePayment`. The committed checkout supplies the team and credit
+amount. The event must match its session, payment, amount, currency and test/live
+mode. Actionable fraud warnings refuse settlement before any credit or event
+receipt commits. Replayed events grant once. Provider verification and its
+controller adapter remain integration work.
+
 ## Storage counters use verified upload tickets
 
 The `/internal/storage/reserve`, `/internal/storage/commit`,
@@ -209,7 +222,7 @@ that keep the logs service running.
   `credits.grant` route.
 - **After:** those powers answer only a listed operator's own signed-in
   console session (`--operator-accounts`). The four admin routes above are
-  removed. `POST /api/v1/credits/grants` records `paid` grants only and
+  removed. `POST /api/v1/credits/grants` is removed.
   `POST /api/v1/credits/freezes` holds by `payment_id` and `dispute_id`
   only; the `reverses`, `team` and `release` fields are gone and are
   refused as unknown. Every `credits.grant` route answers `403` to an

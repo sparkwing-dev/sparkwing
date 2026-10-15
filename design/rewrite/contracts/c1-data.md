@@ -772,6 +772,14 @@ is removed. Verified failure and expiry events own those outcomes.
 `CreditGrantRequest` carries no checkout session. Only verified payment
 settlement writes the checkout's paid timestamp and grant association.
 
+The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
+`Store.GrantCredits`, `Tenant.GrantCredits` and `Tenant.RecordCreditGrant`
+refuse caller-selected paid credit before opening a ledger transaction.
+The existing free grant and payment-linked reversal paths remain. Checkout
+settlement checks actionable fraud warnings in the same transaction as the
+grant and event receipt. A refusal leaves the checkout and ledger unchanged.
+The verified-event implementation and HTTP adapter remain W2 integrations.
+
 Credit pricing and storage-rate settings use unsealed JSON values in `settings`.
 Only missing keys select defaults. Malformed values, invalid prices and sealed
 rows return errors. A settings batch and its returned snapshot commit together.
