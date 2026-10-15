@@ -22,6 +22,11 @@ unlock.
 
 ### Changed
 
+- **controller/client (Breaking):** Remove the unused secret mutation methods
+  Secret writes and deletes use `NewSecretManager` and the shared controller messages. The unreachable legacy remote run hosts are also removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
+
+- **local controller:** Foreground runtime construction uses the parsed home, and local service composition shares that home with lifecycle, managed units and logs. The elected controller factory remains an integration requirement.
+
 - **controller/client (Breaking):** Remove the old raw/SSE log and event readers, duplicate step, pause and pending-approval readers, and unused heartbeat watch callback
   Use `NewLogReader`, `NewRunReader`, `NewDebugReader` and `NewRunReview`. Segment-upload watch notifications remain. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 

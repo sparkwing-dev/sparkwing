@@ -10,36 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func TestSecretsRoundTrip(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	c := client.New(base, nil)
-	ctx := context.Background()
-
-	if err := c.CreateSecret(ctx, "api_token", "abc123", true); err != nil {
-		t.Fatalf("CreateSecret: %v", err)
-	}
-
-	got, err := c.GetSecret(ctx, "api_token")
-	if err != nil {
-		t.Fatalf("GetSecret: %v", err)
-	}
-	if got.Value != "abc123" {
-		t.Fatalf("GetSecret value=%q want abc123", got.Value)
-	}
-	if got.Principal != "anonymous" {
-		t.Fatalf("GetSecret principal=%q want anonymous", got.Principal)
-	}
-
-	if err := c.DeleteSecret(ctx, "api_token"); err != nil {
-		t.Fatalf("DeleteSecret: %v", err)
-	}
-	if _, err := c.GetSecret(ctx, "api_token"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("GetSecret after delete: want ErrNotFound, got %v", err)
-	}
-}
-
 func TestSecrets_AdminReadResolvesTheNamedRunsPipeline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")

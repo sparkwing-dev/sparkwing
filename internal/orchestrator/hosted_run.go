@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"maps"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -27,7 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -521,55 +519,6 @@ func hostedCapacityFingerprint(doc *nodeproto.PlanDoc) string {
 	}
 
 	return hashCanonicalJSON(map[string]any{"edges": edges, "concurrency": conc})
-}
-
-// RunHostedCommand runs one `sparkwing run` through [RunHosted] and renders it
-// as the pipeline binary did, with logFormat and opts.Verbose choosing the
-// renderer. The error says why the run did not succeed.
-func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logFormat string) (*Result, error) {
-	paths, err := DefaultPaths()
-	if err != nil {
-		return nil, fmt.Errorf("resolve paths: %w", err)
-	}
-	// safety: the host's own diagnostics, such as retries and cache misses,
-	// went to the pipeline binary's stderr at info; here they would print raw
-	// between the renderer's records, so only warnings show unless verbose.
-	if !opts.Verbose {
-		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	}
-	if opts.MaxParallel == 0 {
-		if err := applyCIEmbeddedEnv(&opts); err != nil {
-			return nil, err
-		}
-	}
-	if opts.MaxParallel == 0 {
-		opts.MaxParallel = runtime.NumCPU()
-	}
-	delegate := runRenderer(logFormat, opts.Verbose)
-	opts.Delegate = delegate
-	opts.AdmissionClass = admissionClassFromEnv()
-	opts.Admission = pipelineAdmission("", wingwire.OriginLocal)
-	// safety: a sparkwing run started from a node's step attaches to what that node holds, which the node's
-	// environment names, so it never queues behind the node waiting on it.
-	if run, node := os.Getenv("SPARKWING_RUN_ID"), os.Getenv("SPARKWING_NODE_ID"); run != "" && node != "" {
-		opts.Admission.ParentRunID, opts.Admission.ParentNodeID = run, node
-	}
-	res, err := RunHosted(ctx, paths, opts, entry)
-	if renderer, ok := delegate.(*compactRunRenderer); ok {
-		renderer.finishResult(res, err)
-		if rerr := renderer.Err(); rerr != nil {
-			return res, fmt.Errorf("run output: %w", rerr)
-		}
-	}
-	switch {
-	case err != nil:
-		return res, errors.New(runDisplayError(delegate, err))
-	case res.Status == "success":
-		return res, nil
-	case res.Error != nil:
-		return res, errors.New(runDisplayError(delegate, res.Error))
-	}
-	return res, fmt.Errorf("run %s", res.Status)
 }
 
 type hostedChildren struct {

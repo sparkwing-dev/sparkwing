@@ -726,4 +726,10 @@ capture. W9's legacy env/attach readers and claim-prefix pod guessing are delete
 Debug resume still needs W2's declared release route, authority and replay body.
 Native controller, Kubernetes, Windows and Darwin integration remains open.
 
+The unused legacy secret mutation methods are removed. `SecretManager` owns
+writes and deletes with typed persistence receipts. The retained execution
+secret read still serves the local consumer and requires its final host cutover.
+The unreachable orchestrator remote trigger and node entrypoints are deleted.
+Its resident local-consumer host graph remains a separate integration task.
+
 <!-- design:end -->

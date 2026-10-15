@@ -3,29 +3,10 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-type WorkerOptions struct {
-	ControllerURL string
-
-	LogsURL string
-
-	HeartbeatInterval time.Duration
-
-	Logger *slog.Logger
-
-	Delegate sparkwing.Logger
-
-	RunnerFactory func(backends Backends, trigger *store.Trigger) runner.Runner
-
-	Token string
-}
 
 const pipelineSetupFailed = "pipeline setup failed before dispatch; retry the run, check Fleet or local agent status, and give this run ID to an operator if it repeats"
 

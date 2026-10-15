@@ -60,6 +60,7 @@ func TestSurfaceRemovedClientRecoveryAPIs(t *testing.T) {
 		"HeartbeatTrigger", "ClaimLaunch", "SourceCredential", "WithClaimResources", "BaseURL", "AppendNodeLiveLog", "DeleteRun", "EnrollRunner", "CreateServiceToken",
 		"EnqueueTrigger", "CreateToken", "ListTokens", "LookupToken", "RevokeToken", "RotateToken", "ListSecrets",
 		"PendingNodeBounce", "ConsumeNodeBounce", "ResetNodeForAutoRetry", "RetryRun", "ListTriggers",
+		"CreateSecret", "CreateSecretForPipeline", "DeleteSecret", "DeleteSecretForPipeline",
 		"ListCrons", "GetCron", "PutCronRepo", "DeleteCronRepo", "PauseCron", "ResumeCron",
 		"DisarmCron", "RunCronNow", "SetCronOverride", "ClearCronOverride",
 	} {

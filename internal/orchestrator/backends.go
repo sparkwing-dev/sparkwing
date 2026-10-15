@@ -359,8 +359,6 @@ func localNewRunID() string {
 	return newRunID()
 }
 
-func NewLocalRunID() string { return localNewRunID() }
-
 func firstNonEmptyStr(a, b string) string {
 	if a != "" {
 		return a

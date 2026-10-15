@@ -1,4 +1,3 @@
-// Secrets CRUD against the controller.
 package client
 
 import (
@@ -21,20 +20,6 @@ type Secret struct {
 	Bound     bool   `json:"bound"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
-}
-
-// CreateSecret uploads value under name, replacing any existing row.
-// masked=false registers non-secret config (region, log level, etc).
-func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bool) error {
-	return c.CreateSecretForPipeline(ctx, name, value, "", masked, false)
-}
-
-// CreateSecretForPipeline uploads value under name, owned by the named
-// pipeline. An empty pipeline stores the secret unscoped, where only an
-// admin reads it until shared is true, which opens it to every run.
-func (c *Client) CreateSecretForPipeline(ctx context.Context, name, value, pipeline string, masked, shared bool) error {
-	body := map[string]any{"name": name, "value": value, "pipeline": pipeline, "masked": masked, "shared": shared}
-	return c.post(ctx, "/api/v1/secrets", body, http.StatusNoContent, nil)
 }
 
 // GetSecret fetches one row including its value. Returns
@@ -96,35 +81,6 @@ func secretRefusal(resp *http.Response) error {
 		return fmt.Errorf("controller %d: %s", resp.StatusCode, cmp.Or(body.Code, resp.Status))
 	}
 	return fmt.Errorf("controller %d (%s): %s", resp.StatusCode, body.Code, body.Message)
-}
-
-// DeleteSecret removes the row by name. Returns store.ErrNotFound
-// when no row existed.
-func (c *Client) DeleteSecret(ctx context.Context, name string) error {
-	return c.DeleteSecretForPipeline(ctx, name, "")
-}
-
-// DeleteSecretForPipeline removes the row a pipeline owns. An empty
-// pipeline removes the unscoped row.
-func (c *Client) DeleteSecretForPipeline(ctx context.Context, name, pipeline string) error {
-	u := fmt.Sprintf("%s/api/v1/secrets/%s%s", c.baseURL, url.PathEscape(name), queryParam("pipeline", pipeline))
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusNoContent:
-		return nil
-	case http.StatusNotFound:
-		return notFound(resp)
-	default:
-		return readHTTPError(resp)
-	}
 }
 
 func queryParam(key, value string) string {

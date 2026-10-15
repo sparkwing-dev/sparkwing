@@ -32,13 +32,13 @@ func runWingd(args []string) error {
 func runWingdRun(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runWingdRunCommand(ctx, args, os.Stdout, wingd.LocalStartOptions{Version: installedVersion()}, func(ctx context.Context) (wingd.LocalRuntime, error) {
-		services, err := resolveLocalServices(ctx)
+	return runWingdRunCommand(ctx, args, os.Stdout, wingd.LocalStartOptions{Version: installedVersion()}, func(ctx context.Context, options wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+		services, err := resolveLocalServicesAt(ctx, options.Home)
 		return services.runtime, err
 	})
 }
 
-func runWingdRunCommand(ctx context.Context, args []string, out io.Writer, options wingd.LocalStartOptions, resolve func(context.Context) (wingd.LocalRuntime, error)) error {
+func runWingdRunCommand(ctx context.Context, args []string, out io.Writer, options wingd.LocalStartOptions, resolve func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error)) error {
 	inv, err := clisurface.Parse("sparkwing", append([]string{"wingd", "run"}, args...))
 	if err != nil {
 		return err
@@ -53,7 +53,7 @@ func runWingdRunCommand(ctx context.Context, args []string, out io.Writer, optio
 	if err != nil {
 		return err
 	}
-	runtime, err := resolve(ctx)
+	runtime, err := resolve(ctx, options)
 	if err != nil {
 		return err
 	}

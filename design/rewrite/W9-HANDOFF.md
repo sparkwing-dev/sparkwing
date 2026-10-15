@@ -1,5 +1,156 @@
 # W9 handoff
 
+## Continuation from fac7dd6ae
+
+This section supersedes conflicting status below. The worktree started clean.
+W9 remains incomplete. No Git writes, release, installation or Sparkwing
+executable ran. Lead-owned handoffs and amendments are unchanged.
+
+### Implementation and deletion
+
+Removed the unused orchestrator HostTriggerRun/TriggerHost and RunNodeOnce
+entrypoints. Their claimed-node dispatcher, legacy keeper, remote fetch/host
+assembly, invocation-based run-context reconstruction, raw pod host and pod
+log wrapper are gone. Removed RunNodeOption and its claim/allowlist options,
+the global MetricsHook, RunHostedCommand, WorkerOptions and NewLocalRunID.
+The five old host source files and nine obsolete host test files are deleted.
+These entrypoints had no production callers outside their unreachable graph.
+The local consumer still uses RunHosted and its state/backend graph.
+
+Retained source admission and binary preparation in runner_source.go. Retained
+install/environment helpers and the local host's trigger-source projection in
+runner_process.go, and its guard helper in hosted_guard.go. This is a move of
+shared code, not a second implementation. The podnode fixture remains because
+internal/sdkserve/fixture_build_test.go still compile-checks it.
+
+Removed Client.CreateSecret, CreateSecretForPipeline, DeleteSecret and
+DeleteSecretForPipeline. NewSecretManager already owns writes and deletes.
+Removed the unauthenticated old controller round-trip test and its unsupported
+route-table entry. Existing final secret transport and authenticated encrypted
+mutation components retain the write/delete concerns. Execution secret reads
+still serve the local consumer and remain for its final host cutover.
+
+W9 now composes W8's NewLocalRuntime, the owner-aware lifecycle client,
+NewManagedUnitManager and the private log reader under one captured home.
+Composition takes wingd.LocalController's factory contract and does not open a
+store. W2 has no elected factory in this checkout. openLocalController therefore
+returns a named unavailable error when the elected runtime attempts that open.
+No alternate store or legacy service is used. Foreground resolution receives
+parsed LocalStartOptions before construction, so --home selects the runtime's
+home as well as its Run arguments.
+
+Production delta versus HEAD is 502 added, 1,369 removed, net -867. Orchestrator
+accounts for -917, Client for -44, and CLI composition for +94. W9-owned paths
+are +50 this continuation and -5,994 versus main, within the -2,900 target.
+Tests, acceptance, testdata and contract declarations are excluded.
+
+### Acceptance, ports and verification
+
+Invariant: the local runtime, lifecycle client, managed units and log source
+use one captured home, and composition cannot open the controller before election.
+FuzzLocalServicesKeepOneCapturedHome passed three seeds and 2,668 generated cases
+with two workers. It refuses different runtime/unit homes and checks the runtime's
+bound-home refusal. The file-backed component reads the selected private log,
+preserves executable/version metadata and refuses a cancelled read. The foreground
+regression checks the parsed home, version and stay policy at the resolver.
+
+The source-admission refusal test now calls the retained admission boundary
+instead of the deleted fetch/host path. Its five source cases remain. The
+protocol trigger-source test and checkout helpers used by envelope tests moved
+without losing their assertions. No archived T1 port was completed. No native
+placement cell was unskipped. The old host's integration coverage must still be
+established through the final native placements.
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache and temporary directories under /tmp/sw-astra-W9.
+Tests and builds use -p 4 at most.
+
+- Whole-repository build passes after the final production deletions.
+- Scoped vet passes for CLI, controller/client and orchestrator.
+- Full clisurface, controllerwire, runspec and doccheck suites pass.
+- TestSurface acceptance components pass, including the expanded removed-client
+  API check. Focused engine/data/secret/run-reader/log-reader client tests pass.
+- Local, standalone, dashboard, doctor, here and foreground CLI components pass.
+- Focused retained source/environment/guard helpers pass. The profile guard
+  passes after removing exceptions for deleted host functions.
+- Existing TestClaimedNodeHost, TestNativeHost, TestOwnerHost, TestOwnerPolicy,
+  TestOwnerEvaluation and TestKeeper components pass. These use the owners'
+  contract fakes and native fixture boundaries, not a composed controller service.
+- Changed controller and orchestrator test packages compile. The actual
+  TestDefaultTeamTwinsAreCalledOnlyWhereTheDefaultTeamIsMeant inventory passes.
+- TestDoctorSweepSurvivesPrunedRun passes. Full runspec tests retain the 256-case
+  sealed StartAt/StopAt/Only acceptance/retry property. The launcher registry
+  retains required --docker-image, removes launch --deadline and allows owner
+  plan units without a synthetic job selector. No reimplementation was needed.
+- TypeScript bridge assembly/publication tests and publication fuzz seeds pass.
+  Native Windows execution and actual publication remain lead/CI evidence.
+- Commentcheck passes across 2,107 files. Whitespace and embedded-doc drift pass.
+  The controller/client API snapshot was regenerated from current source.
+
+The first broad CLI selection exposed a test that invoked the real default
+resolver against the sandbox's forbidden socket transport. It now tests the
+missing-lifecycle failure with a fake, retaining the no-fallback assertion.
+The corrected selection passes. No real API socket, detached lifecycle,
+Postgres, Windows/Darwin SDK, Docker/Kubernetes or real-repository QA is claimed.
+Pipelines and full-repository tests remain lead work.
+
+### Assignment audit and remaining integration
+
+The earlier audit below still applies, with these updates. Lead decisions 07:40
+items 1 and 6, the doctor handoff and Windows packaging are implemented and
+reverified. A1-03/08/09/13-18/22/38/55 retain their final wire/error/claim/failure/
+expansion/step/launcher transports. A1-20/29/30/34/37/43/45/47/49 retain their
+existing credential/data/cache/version/settings/guard components. A1-51's
+remaining source/reference/runtime retirement and A1-53 native QA remain open.
+
+Priority (1) remains incomplete. StateStoreOld, RunCoordination, RunHosted,
+local consumer/backend/lease plumbing and the remaining raw Client still exist.
+The unused pkg/localws entrypoint is the external production reference to
+RunLocalTriggerConsumer. It needs its own retirement or migration before that
+remaining graph is cut. No old host is restored by this continuation.
+
+A1-10/11/19/39/40/41/50 still need real composition:
+
+- W2 must supply the elected wingd.LocalController factory, including shared
+  HTTP/dashboard handlers, the owned store, queue, reconciliation and maintenance.
+  W9's construction now accepts that exact interface. No C2 signature changed.
+- W3's NewNativeHost now exists, but RemoteOwnerStore only supplies scheduling,
+  reconciliation and expansion projections. It does not implement NativeHostStore's
+  private snapshots, acceptance, transitions, completion and renewal. Public
+  scheduling projections cannot replace the private persisted execution snapshot.
+- W9 still needs selected-engine/source/environment capture, process delegation,
+  authorized storage/log bindings, native here hosting and publication. Publication
+  failure must preserve the local verdict. No contract was invented to bypass a
+  missing authority or persistence boundary.
+- W8's lifecycle client starts a runtime in-process when no elected owner exists.
+  A CLI invocation that returns must leave an on-demand controller in a surviving
+  process. Detached foreground startup/readiness still needs its native binding.
+  Foreground home selection is now correct, but this process-lifetime seam remains.
+- Schedule checkout/environment/proof/pin, tick/dry-run/timer integration,
+  persisted here reason and debug-release policy/acknowledgement remain open.
+
+No foreign contract was changed. Missing constructors/adapters are integration
+points above, not approval requests. Native acceptance and release remain open.
+
+### Shared files and friction
+
+Shared production files are the five deleted orchestrator host files, the three
+retained-helper files, and hosted_run.go, worker.go and backends.go. Shared test
+changes are repo_admission_test.go, source_url_test.go, the moved checkout/source
+fixtures and the nine deleted old host tests. pkg/controller/secrets_test.go loses
+only its obsolete raw-client round trip. tests/acceptance/surface_contract_test.go
+checks the four retired mutation methods. The client API snapshot, CHANGELOG.md
+and generated docs mirrors are updated. W9's wire notes describe the cuts.
+There were no outside production callers of the deleted host entrypoints to migrate.
+
+Xwing environment-context discovery failed because its session-index lock is
+outside the writable roots. The user-selected environment 1087 was reused.
+Overwing discovery worked with its stale-binary notice. The first inventory
+selection matched no tests. It was corrected to the actual inventory test, which
+ran and passed. No missing-test run is counted as evidence. Git still resolves
+Korey's identity and has no injected core.worktree. Scratch is removed before the
+final report, and the shared build cache is retained.
+
 ## Continuation from 725342711
 
 Started with a clean worktree. This section supersedes conflicting status below.

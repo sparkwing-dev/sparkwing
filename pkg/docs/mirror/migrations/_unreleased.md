@@ -34,6 +34,21 @@ Segment writers still receive watch notifications through their uploader.
 removed. Callers retain their own credential input. The final clients do not
 probe old controller capabilities before choosing an API.
 
+`Client.CreateSecret`, `CreateSecretForPipeline`, `DeleteSecret` and
+`DeleteSecretForPipeline` are removed. Use `NewSecretManager`, `WriteSecret`
+with an idempotency key, and `DeleteSecret` with a `SecretSelector`. Mutations
+return the persisted metadata or deletion receipt instead of an empty response.
+
+The unused orchestrator `HostTriggerRun`, `TriggerHost`, `RunNodeOnce`,
+`RunNodeOption`, claim options and global metrics hook are removed. The CLI
+already selects the shared run and node host contracts. Source admission and
+install helpers still used by the local consumer remain.
+
+Foreground runtime construction now receives its parsed `--home` before the
+runtime binds its store election. Lifecycle, managed units and log reads share
+that captured home. The elected shared-controller factory and detached startup
+still require native integration. This does not establish a runnable local host.
+
 ## Sealed step selections
 
 `--sw-start-at`, `--sw-stop-at` and `--sw-only` enter the request seal as
