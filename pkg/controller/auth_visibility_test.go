@@ -45,7 +45,7 @@ func TestEnableAuthFromStoreRefusesAnonymousBeforeBootstrapProperty(t *testing.T
 			h := s.Handler()
 			property := func(selector []byte) bool {
 				forged := hex.EncodeToString(selector)
-				for _, path := range []string{"/api/v1/runs", "/api/v1/tokens", "/api/v1/agents"} {
+				for _, path := range []string{"/api/v1/runs", "/api/v1/tokens", "/api/v1/runners"} {
 					r := httptest.NewRequest("GET", path+"?team="+forged, nil)
 					r.Header.Set("X-Sparkwing-Team", forged)
 					w := httptest.NewRecorder()

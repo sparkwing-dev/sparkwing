@@ -1,4 +1,4 @@
-package acceptance_test
+package controller
 
 import (
 	"fmt"
@@ -6,19 +6,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestFinalCredentialRouteDeclarations(t *testing.T) {
-	expected := acceptance.CredentialRoutes()
+	expected := credentialRouteExpectations()
 	if err := compareCredentialRoutes(expected, capability.Routes); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func compareCredentialRoutes(expected []acceptance.CredentialRouteExpectation, actual []capability.RoutePolicy) error {
-	want := make(map[string]acceptance.CredentialRouteExpectation, len(expected))
+func compareCredentialRoutes(expected []credentialRouteExpectation, actual []capability.RoutePolicy) error {
+	want := make(map[string]credentialRouteExpectation, len(expected))
 	for _, row := range expected {
 		key := row.Method + " " + row.Path
 		if _, exists := want[key]; exists {
@@ -127,7 +126,7 @@ func TestFinalCredentialRouteCoverageRejectsDrift(t *testing.T) {
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
 			routes := cloneCredentialRoutes()
-			if err := compareCredentialRoutes(acceptance.CredentialRoutes(), mutate(routes)); err == nil {
+			if err := compareCredentialRoutes(credentialRouteExpectations(), mutate(routes)); err == nil {
 				t.Fatal("accepted changed permission contract")
 			}
 		})
@@ -140,7 +139,7 @@ func TestFinalCredentialRouteAlternativeOrder(t *testing.T) {
 	for i := range routes {
 		slices.Reverse(routes[i].Access)
 	}
-	if err := compareCredentialRoutes(acceptance.CredentialRoutes(), routes); err != nil {
+	if err := compareCredentialRoutes(credentialRouteExpectations(), routes); err != nil {
 		t.Fatal(err)
 	}
 }

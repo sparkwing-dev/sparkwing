@@ -1168,3 +1168,36 @@ captured and current ordinals and nanosecond timestamps for job and owner
 reports. Mismatched ordinals return lock_held without entering RecordStep.
 These are HTTP component proofs with fake transactions. The legacy
 StateStoreOld step callers and native placement/store composition remain open.
+
+
+## W2 reporting credential cut
+
+TestCapacityReadUsesRequestTenantProperty now calls the final authorized sizing
+handler and proves that a forged legacy Principal and request selectors cannot
+replace Authorized.Target.Team. Missing authority and an unregistered team have
+separate exact canonical refusals. The existing anonymous-bootstrap property
+uses /runners after the /agents cut. The retained agents liveness fixture passes
+the explicit target to its read handler.
+
+TestReportingRouteAuthorityProperty generates revoked, expired, wrong-audience,
+nonmember, deployment and wrong-grant presentations for all 22 reporting read
+registrations. It exercises the real verifier and policy selector against
+committed-fact fakes, with negative requests repeated through Server.Handler.
+TestReportingRetiredRoutes covers the removed read paths. The actual controller
+client's NodeLogs read, stream, completeness and whole-run requests retain exact
+escaped selectors in TestNodeLogReaderUsesJobRoutes. The prior raw-event method
+refusal property still requires 405 with Allow after registration moves.
+
+The 258-line independent expected route table moved from
+internal/acceptance/credential_routes.go to
+pkg/controller/credential_route_expectations_test.go. Its independent comparison,
+mutation sensitivity and alternative-order tests moved beside it. The executable
+policy-alternative tests use the runtime rows, while the moved tests retain the
+hand-written permission oracle. No oracle is regenerated from implementation.
+No scenario, Harness method, registry or skipped native cell was added.
+
+These changes prove authorization transport and the real SQLite sizing projection.
+They do not establish final-schema run/reporting SQL or native composed log,
+receipt and runner-read implementations. Those retained tenant reads still need
+their owning store integration. The legacy verifier and remaining schedules,
+team mutations and other registrations are unfinished work.

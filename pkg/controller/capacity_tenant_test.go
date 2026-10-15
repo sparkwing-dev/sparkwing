@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -38,11 +41,13 @@ func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
 	handler := server.capacityRead(web.CapacityProfilesHandler)
 	for i := range 96 {
 		team := []store.Team{"alpha", "beta"}[random.IntN(2)]
-		query := fmt.Sprintf("/api/v1/capacity/profiles?team=%s&pipeline=%s", []string{"default", "alpha", "beta", "_%", "' OR 1=1 --"}[random.IntN(5)], []string{"default-only", "alpha-only", "beta-only"}[random.IntN(3)])
+		query := fmt.Sprintf("/api/v1/sizing?team=%s&pipeline=%s", []string{"default", "alpha", "beta", "_%", "' OR 1=1 --"}[random.IntN(5)], []string{"default-only", "alpha-only", "beta-only"}[random.IntN(3)])
 		req := httptest.NewRequest(http.MethodGet, strings.ReplaceAll(query, " ", "%20"), nil)
-		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{AccountID: "account", Team: team}))
+		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{AccountID: "account", Team: store.DefaultTeam}))
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+		if err := handler(rec, req, capability.Authorized{Target: capability.Target{Team: string(team)}}); err != nil {
+			writePolicyError(rec, err)
+		}
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), string(team)+"-only") {
 			t.Fatalf("request %d read wrong team: %d %s", i, rec.Code, rec.Body)
 		}
@@ -52,12 +57,20 @@ func TestCapacityReadUsesRequestTenantProperty(t *testing.T) {
 			}
 		}
 	}
-	for _, team := range []store.Team{"", "missing"} {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/profiles", nil)
+	for _, tc := range []struct {
+		team   store.Team
+		status int
+		code   apierr.Code
+	}{{"", http.StatusInternalServerError, apierr.PolicyMissing}, {"missing", http.StatusNotFound, apierr.NotFound}} {
+		team := tc.team
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/sizing", nil)
 		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{AccountID: "account", Team: team}))
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusForbidden {
+		if err := handler(rec, req, capability.Authorized{Target: capability.Target{Team: string(team)}}); err != nil {
+			writePolicyError(rec, err)
+		}
+		var failure apierr.Envelope
+		if rec.Code != tc.status || json.Unmarshal(rec.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != tc.code {
 			t.Fatalf("unregistered team %q read profiles: %d %s", team, rec.Code, rec.Body)
 		}
 	}

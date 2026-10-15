@@ -1,0 +1,140 @@
+package controller
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"testing/quick"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+type reportingFacts struct {
+	snapshot capability.AuthenticationSnapshot
+	digest   [32]byte
+	checks   int
+}
+
+func (f *reportingFacts) ReadAuthentication(_ context.Context, key capability.CredentialLookup, _ capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
+	if key.Class != capability.CredentialBearer || key.Digest != f.digest {
+		return capability.AuthenticationSnapshot{}, sessionUnavailable()
+	}
+	return f.snapshot, nil
+}
+
+func (f *reportingFacts) CheckBinding(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {
+	f.checks++
+	return nil
+}
+
+func TestReportingRouteAuthorityProperty(t *testing.T) {
+	s := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(&EngineController{
+		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "a", nil },
+	})
+	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	for _, endpoint := range s.reportingEndpoints() {
+		t.Run(endpoint.Pattern, func(t *testing.T) {
+			property := func(input []byte, mutation uint8) bool {
+				run, job := "r"+hex.EncodeToString(input), "j"+hex.EncodeToString(input)
+				now := time.Unix(100, 0).UTC()
+				p := capability.Principal{Class: capability.CredentialBearer,
+					Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "credential"},
+					Capability: capability.Capability{Prefix: "credential", Digest: sha256.Sum256([]byte(raw)), Team: "a",
+						Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"},
+						Issuance: capability.Delegate, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}},
+				}
+				member := true
+				status, code := 204, apierr.Code("")
+				switch mutation % 8 {
+				case 1:
+					p.Capability.RevokedAt, status, code = &now, 401, apierr.Unauthenticated
+				case 2:
+					p.Capability.Grants, status, code = []capability.Grant{capability.NodesClaim}, 403, apierr.Forbidden
+				case 3:
+					p.Capability.Team = "b"
+					if strings.Contains(endpoint.Pattern, "{run}") {
+						status, code = 403, apierr.Forbidden
+					}
+				case 4:
+					p.Capability.Subject.Kind, status, code = capability.SubjectOperator, 403, apierr.Forbidden
+				case 5:
+					p.Capability.Audience, status, code = capability.NodeHost, 401, apierr.Unauthenticated
+				case 6:
+					member, status, code = false, 401, apierr.Unauthenticated
+				case 7:
+					p.Capability.ExpiresAt, status, code = &now, 401, apierr.Unauthenticated
+				}
+				facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: member}}}}
+				router := NewPolicyRouter(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
+				called := false
+				entry := endpoint
+				entry.Handle = func(w http.ResponseWriter, _ *http.Request, a capability.Authorized) error {
+					called = true
+					if a.Target.Team != p.Capability.Team || strings.Contains(entry.Pattern, "{run}") && a.Target.RunID != run || strings.Contains(entry.Pattern, "{job}") && a.Target.NodeID != job {
+						return missingEndpointPolicy()
+					}
+					w.WriteHeader(204)
+					return nil
+				}
+				if err := router.Register(entry); err != nil {
+					t.Fatal(err)
+				}
+				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci").Replace(entry.Pattern)
+				r := httptest.NewRequest("GET", path+"?team=forged&run_id=other&job_id=other&selector="+url.QueryEscape(string(input)), nil)
+				r.Header.Set("Authorization", "Bearer "+raw)
+				r.Header.Set("X-Sparkwing-Team", "forged")
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, r)
+				if w.Code != status || called != (status == 204) || (facts.checks > 0) != called {
+					t.Logf("mutation=%d: HTTP %d %s; handler=%t checks=%d", mutation%8, w.Code, w.Body, called, facts.checks)
+					return false
+				}
+				if code != "" {
+					var failure apierr.Envelope
+					if json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != code {
+						return false
+					}
+					s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
+					actual := httptest.NewRecorder()
+					s.Handler().ServeHTTP(actual, r.Clone(r.Context()))
+					return actual.Code == status && json.Unmarshal(actual.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == code
+				}
+				return true
+			}
+			if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestReportingRetiredRoutes(t *testing.T) {
+	s := New(nil, nil)
+	h := s.Handler()
+	for _, path := range []string{
+		"/api/v1/agents", "/api/v1/capacity/profiles", "/api/v1/capacity/profiles/explain", "/api/v1/approvals/pending",
+		"/api/v1/runs/run/paused", "/api/v1/runs/run/logs/job", "/api/v1/runs/run/logs/job/stream", "/api/v1/runs/run/logs/job/completeness",
+	} {
+		for _, bearer := range []string{"", "swct_retired", "swk_unrecognized"} {
+			r := httptest.NewRequest("GET", path, nil)
+			r.Header.Set("Authorization", "Bearer "+bearer)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != 404 || s.RegisteredRoute(r) {
+				t.Fatalf("%s: HTTP %d %s", path, w.Code, w.Body)
+			}
+		}
+	}
+}

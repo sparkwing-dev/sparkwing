@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -127,54 +128,54 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, got)
 }
 
-func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	runID := authorized.Target.RunID
+	nodeID := authorized.Target.NodeID
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	a, err := tenant.GetApproval(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
-			return
+			return nil
 		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, a)
+	return nil
 }
 
-func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	runID := authorized.Target.RunID
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	rows, err := tenant.ListApprovalsForRun(r.Context(), runID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	if rows == nil {
 		rows = []*store.Approval{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"approvals": rows})
+	return nil
 }
 
-func (s *Server) handleListPendingApprovals(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleListPendingApprovals(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	rows, err := tenant.ListPendingApprovals(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	if rows == nil {
 		rows = []*store.Approval{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"approvals": rows})
+	return nil
 }

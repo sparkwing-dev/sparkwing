@@ -3,7 +3,6 @@ package controller
 import (
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
@@ -23,8 +22,9 @@ func (s *Server) HTTP() wingd.LocalHTTP {
 			return capability.Subject{Kind: capability.SubjectLocal, ID: subject}
 		})
 		_, router := s.routers()
-		router.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-			writePolicyError(w, &apierr.Error{Code: apierr.NotFound, Message: "route is not registered"})
+		router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			_, policy := s.routeProbe()
+			writeRouteMiss(w, allowedRouteMethods(policy, r, routeProbeMethods))
 		})
 		api := s.observedHandler(router)
 		dashboard := api

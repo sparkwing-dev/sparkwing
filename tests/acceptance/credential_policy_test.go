@@ -7,24 +7,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // safety: independent alternatives judge policy selection without claiming store or transport evidence.
 func TestCredentialPolicyAlternatives(t *testing.T) {
-	for _, expected := range acceptance.CredentialRoutes() {
-		if expected.Authentication != "capability" {
+	for _, route := range capability.Routes {
+		if route.Authentication != capability.AuthCapability {
 			continue
 		}
-		t.Run(expected.Method+" "+expected.Path, func(t *testing.T) {
-			route, ok := capability.LookupRoute(expected.Method, expected.Path)
-			if !ok {
-				t.Fatal("missing route")
-			}
-			for _, alternative := range expected.Alternatives {
-				t.Run(alternative, func(t *testing.T) { checkPolicyAlternative(t, route, expected.Audience, alternative) })
+		t.Run(route.Method+" "+route.Path, func(t *testing.T) {
+			for _, access := range route.Access {
+				grants := make([]string, len(access.Grants))
+				for i, grant := range access.Grants {
+					grants[i] = string(grant)
+				}
+				alternative := strings.Join([]string{string(access.Credential), strings.Join(grants, ","), string(access.Binding), string(access.Liveness)}, "|")
+				t.Run(alternative, func(t *testing.T) { checkPolicyAlternative(t, route, string(route.Audience), alternative) })
 			}
 		})
 	}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -70,20 +71,18 @@ func validateGitSHA(sha string) error {
 	return errors.New("git.sha must be a 40-64 character hex object id")
 }
 
-func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	filter, parseErr := store.ParseRunFilterValidated(r.URL.Query())
 	if parseErr != nil {
-		writeError(w, http.StatusBadRequest, parseErr)
-		return
+		return invalidEngineBody(parseErr.Error())
 	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	runs, err := tenant.ListRuns(r.Context(), filter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	runs = store.RedactedRuns(runs)
 	if runs == nil {
@@ -91,6 +90,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Sparkwing-Run-Filter-Version", store.RunFilterVersion)
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+	return nil
 }
 
 func includeHas(csv, target string) bool {
@@ -102,11 +102,10 @@ func includeHas(csv, target string) bool {
 	return false
 }
 
-func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	name := r.PathValue("name")
 	if name == "" {
-		writeError(w, http.StatusBadRequest, errors.New("pipeline name required"))
-		return
+		return invalidEngineBody("pipeline name required")
 	}
 	q := r.URL.Query()
 	statuses := splitCSV(q.Get("status"))
@@ -117,29 +116,23 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("max_age"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("max_age: %w", err))
-			return
+			return invalidEngineBody("invalid max_age")
 		}
 		if d < 0 {
-			writeError(w, http.StatusBadRequest, errors.New("max_age must be >= 0"))
-			return
+			return invalidEngineBody("max_age must be >= 0")
 		}
 		maxAge = d
 	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	run, err := tenant.GetLatestRun(r.Context(), name, statuses, maxAge)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, store.RedactedRun(run))
+	return nil
 }
 
 func splitCSV(s string) []string {
@@ -411,21 +404,21 @@ type claimCapacity struct {
 	ActiveClaims  int `json:"active_claims"`
 }
 
-func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
-	runID := r.PathValue("id")
+	runID := authorized.Target.RunID
 	steps, err := tenant.ListNodeSteps(r.Context(), runID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	if steps == nil {
 		steps = []*store.NodeStep{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
+	return nil
 }
 
 func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) {
@@ -455,18 +448,17 @@ func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusCreated)
 }
 
-func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
-	runID := r.PathValue("id")
+	runID := authorized.Target.RunID
 	var afterSeq int64
 	if v := r.URL.Query().Get("after"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid after: %w", err))
-			return
+			return invalidEngineBody("invalid after")
 		}
 		afterSeq = n
 	}
@@ -474,37 +466,36 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid limit"))
-			return
+			return invalidEngineBody("invalid limit")
 		}
 		limit = min(n, store.MaxRunListLimit)
 	}
 	events, err := tenant.ListEventsAfter(r.Context(), runID, afterSeq, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	if events == nil {
 		events = []store.Event{}
 	}
 	writeJSON(w, http.StatusOK, api.PublicEvents(events))
+	return nil
 }
 
-func (s *Server) handleListDebugPauses(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleListDebugPauses(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	runID := authorized.Target.RunID
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	pauses, err := tenant.ListDebugPauses(r.Context(), runID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	if pauses == nil {
 		pauses = []*store.DebugPause{}
 	}
 	writeJSON(w, http.StatusOK, pauses)
+	return nil
 }
 
 func auditPrincipal(r *http.Request) string {

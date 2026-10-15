@@ -66,45 +66,12 @@ func (s *Server) meteredStream(class egress.Class, next http.Handler) http.Handl
 
 func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler) http.Handler {
 	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		principal := egressPrincipal(r)
-		// safety: a response the server discards holds no slot and
-		// counts nothing.
-		if egress.Bodyless(r) {
-			next.ServeHTTP(w, r)
+		team, err := requestTeam(r)
+		if err != nil {
+			writePolicyError(w, err)
 			return
 		}
-		if s.egress != nil && slot != egress.SlotNone {
-			// safety: the slot keys on the authenticated principal alone,
-			// because a caller names its own pod and a named pod would buy
-			// another slot.
-			release, err := s.egress.Open(principal, slot)
-			if err != nil {
-				s.writeEgressRefusal(w, r, class, err)
-				return
-			}
-			defer release()
-		}
-		var tenant *store.Tenant
-		if s.store != nil {
-			team := store.DefaultTeam
-			if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && p.Team != "" {
-				team = p.Team
-			}
-			var err error
-			tenant, err = s.store.ForTeam(r.Context(), team)
-			if err != nil {
-				s.writeInternalError(w, r, "resolve egress team", err)
-				return
-			}
-		}
-		delivered := s.egress.Handle(w, r, principal, class, next)
-		if tenant != nil && delivered > 0 {
-			ctx := context.WithoutCancel(r.Context())
-			err := tenant.AddUsage(ctx, store.UsageDelta{Period: time.Now().UTC().Format("2006-01-02"), ReplicaID: s.leaseHolder, Counter: "egress_bytes", Amount: delivered})
-			if err != nil {
-				s.logger.Error("record delivered egress failed", "team", tenant.Team(), "bytes", delivered, "err", err)
-			}
-		}
+		s.meterResponse(w, r, class, slot, next, egressPrincipal(r), team)
 	})
 	// safety: viewing a run's logs is never charged to its team, so a team
 	// past its download cap can still read why its run failed.
@@ -114,6 +81,43 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.chargeTeamDownload(w, r, counted)
 	})
+}
+
+func (s *Server) meterResponse(w http.ResponseWriter, r *http.Request, class egress.Class, slot egress.Slot, next http.Handler, principal string, team store.Team) {
+	// safety: a response the server discards holds no slot and
+	// counts nothing.
+	if egress.Bodyless(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+	if s.egress != nil && slot != egress.SlotNone {
+		// safety: the slot keys on the authenticated principal alone,
+		// because a caller names its own pod and a named pod would buy
+		// another slot.
+		release, err := s.egress.Open(principal, slot)
+		if err != nil {
+			s.writeEgressRefusal(w, r, class, err)
+			return
+		}
+		defer release()
+	}
+	var tenant *store.Tenant
+	if s.store != nil {
+		var err error
+		tenant, err = s.store.ForTeam(r.Context(), team)
+		if err != nil {
+			s.writeInternalError(w, r, "resolve egress team", err)
+			return
+		}
+	}
+	delivered := s.egress.Handle(w, r, principal, class, next)
+	if tenant != nil && delivered > 0 {
+		ctx := context.WithoutCancel(r.Context())
+		err := tenant.AddUsage(ctx, store.UsageDelta{Period: time.Now().UTC().Format("2006-01-02"), ReplicaID: s.leaseHolder, Counter: "egress_bytes", Amount: delivered})
+		if err != nil {
+			s.logger.Error("record delivered egress failed", "team", tenant.Team(), "bytes", delivered, "err", err)
+		}
+	}
 }
 
 // safety: the team is the credential's, so a download is charged to the team

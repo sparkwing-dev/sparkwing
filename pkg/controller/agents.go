@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 const runnerHeadroomStale = time.Hour
@@ -37,16 +39,15 @@ type AgentHeadroom struct {
 	ObservedAt string `json:"observed_at"`
 }
 
-func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	windowStart := time.Now().Add(-1 * time.Hour)
 	claims, err := tenant.ListAgentClaims(r.Context(), windowStart)
 	if err != nil {
-		s.writeInternalError(w, r, "list agent claims", err)
-		return
+		return engineLookupError(err)
 	}
 
 	type holderInfo struct {
@@ -146,4 +147,5 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"agents": out})
+	return nil
 }

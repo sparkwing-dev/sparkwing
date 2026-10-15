@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** Reporting reads use the shared capability policy and job log paths
+  Runner, approval and sizing reads use `/runners`, `/approvals` and `/sizing`. Legacy read paths and the `paused` alias are removed. See [migration guide](docs/migrations/_unreleased.md#reporting-credential-routes).
+
 - **controller (Breaking):** Step lifecycle reports use the shared attempt-fenced request and acknowledgement
   Start, finish and skip require `state` and a captured positive `source_attempt`. Errors are masked text, and optional timestamps preserve nanoseconds. A stale ordinal returns `lock_held`. See [migration guide](docs/migrations/_unreleased.md#typed-step-reports).
 

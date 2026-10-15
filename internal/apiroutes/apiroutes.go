@@ -98,6 +98,7 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		{"s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())", "github_runner_admin.go"},
 		{"s.registerPolicyEndpoints(router, s.sessionEndpoints())", "session_routes.go"},
 		{"s.registerAccountRoutes(router)", "account_routes.go"},
+		{"s.registerReportingRoutes(router)", "reporting_routes.go"},
 		{"s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())", "browser_session_routes.go"},
 		{"s.registerPolicyEndpoints(mux, s.loginEndpoints())", "browser_login_routes.go"},
 		{"s.registerPolicyEndpoints(mux, s.oauthEndpoints())", "browser_oauth_routes.go"},

@@ -30,7 +30,7 @@ func (c *Client) NodeLogs() NodeLogs { return NodeLogs{c: c} }
 func (l NodeLogs) logPath(runID, nodeID string) string {
 	p := "/api/v1/runs/" + url.PathEscape(runID) + "/logs"
 	if nodeID != "" {
-		p += "/" + url.PathEscape(nodeID)
+		p = "/api/v1/runs/" + url.PathEscape(runID) + "/jobs/" + url.PathEscape(nodeID) + "/logs"
 	}
 	return p
 }

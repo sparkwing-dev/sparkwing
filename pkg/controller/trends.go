@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // TrendPoint matches web/src/lib/api.ts:TrendPoint. One bucket of
@@ -22,7 +24,7 @@ type TrendPoint struct {
 	AvgWaitMs int64  `json:"avg_wait_ms"`
 }
 
-func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	hours := 24
 	if v := r.URL.Query().Get("hours"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -45,14 +47,13 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	}
 	bucketNs := int64(bucketDur)
 
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	runs, err := tenant.ListRunTrends(r.Context(), cutoff, pipeline)
 	if err != nil {
-		s.writeInternalError(w, r, "list run trends", err)
-		return
+		return engineLookupError(err)
 	}
 
 	type bucket struct {
@@ -135,4 +136,5 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+	return nil
 }

@@ -390,7 +390,7 @@ export async function getNodeLogs(
   nodeID: string,
 ): Promise<string> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}?format=ndjson`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/logs?format=ndjson`,
     { cache: "no-store", headers: { Accept: "application/x-ndjson" } },
   );
   if (!res.ok) return "";
@@ -402,7 +402,7 @@ export async function getNodeLogCompleteness(
   nodeID: string,
 ): Promise<LogCompleteness | null> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}/completeness`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/logs/completeness`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return null;
@@ -436,7 +436,7 @@ export async function searchRunLogs(
 }
 
 export function getNodeStreamUrl(runID: string, nodeID: string): string {
-  return `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}/stream?format=ndjson`;
+  return `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/logs/stream?format=ndjson`;
 }
 
 export interface RunsGrepMatch {
@@ -594,7 +594,7 @@ export interface Agent {
 }
 
 export async function getAgents(): Promise<Agent[]> {
-  const res = await authFetch(`${API_URL}/api/v1/agents`, {
+  const res = await authFetch(`${API_URL}/api/v1/runners`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return [];
@@ -778,7 +778,7 @@ export async function getApproval(
 }
 
 export async function getPendingApprovals(): Promise<Approval[]> {
-  const res = await authFetch(`${API_URL}/api/v1/approvals/pending`, {
+  const res = await authFetch(`${API_URL}/api/v1/approvals`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return [];
@@ -1024,7 +1024,7 @@ export interface CapacityExplain {
 }
 
 export async function getCapacityProfiles(): Promise<CapacityProfiles | null> {
-  const res = await authFetch(`${API_URL}/api/v1/capacity/profiles`, {
+  const res = await authFetch(`${API_URL}/api/v1/sizing`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return null;
@@ -1035,7 +1035,7 @@ export async function getCapacityExplain(
   pipeline: string,
 ): Promise<CapacityExplain | null> {
   const res = await authFetch(
-    `${API_URL}/api/v1/capacity/profiles/explain?pipeline=${encodeURIComponent(pipeline)}`,
+    `${API_URL}/api/v1/sizing/explain?pipeline=${encodeURIComponent(pipeline)}`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return null;

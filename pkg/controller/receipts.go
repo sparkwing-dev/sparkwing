@@ -1,33 +1,27 @@
 package controller
 
 import (
-	"errors"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func (s *Server) handleGetRunReceipt(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleGetRunReceipt(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
-	runID := r.PathValue("id")
+	runID := authorized.Target.RunID
 	run, err := tenant.GetRun(r.Context(), runID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	nodes, err := tenant.ListNodes(r.Context(), runID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	rec := receipt.BuildReceipt(run, nodes, s.costPerRunnerHour, s.costRateSource)
 	writeJSON(w, http.StatusOK, rec)
+	return nil
 }

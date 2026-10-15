@@ -1388,7 +1388,7 @@ func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*stor
 
 // ListPendingApprovals returns every unresolved approval, oldest-first.
 func (c *Client) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error) {
-	u := c.baseURL + "/api/v1/approvals/pending"
+	u := c.baseURL + "/api/v1/approvals"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err

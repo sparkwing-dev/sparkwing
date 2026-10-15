@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +19,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
@@ -26,7 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
-	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -399,7 +398,7 @@ func (s *Server) handler() http.Handler {
 			legacy.ServeHTTP(w, r)
 			return
 		}
-		writeRouteMiss(w, allowedRouteMethods(mux, r, routeProbeMethods))
+		s.writeRouteMiss(w, r)
 	})
 	return s.observedHandler(router, mux)
 }
@@ -432,31 +431,6 @@ func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux
 func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux := http.NewServeMux()
 
-	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListRuns)))
-	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
-
-	mux.Handle("GET /api/v1/runs/{id}/logs", requireScope(ScopeLogsRead, s.metered(egress.ClassLog, s.dashboardRead(web.RunLogsHandler))))
-	mux.Handle("GET /api/v1/runs/{id}/logs/search", requireScope(ScopeLogsRead, s.dashboardRead(func(b backend.Backend) http.HandlerFunc {
-		return web.RunLogsSearchHandler(b, controllerSearchBounds)
-	})))
-	mux.Handle("GET /api/v1/runs/{id}/logs/{node}", requireScope(ScopeLogsRead, s.metered(egress.ClassLog, s.dashboardRead(web.NodeLogsHandler))))
-	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", requireScope(ScopeLogsRead, s.meteredStream(egress.ClassLogStream, s.dashboardRead(web.NodeLogStreamHandler))))
-	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/completeness", requireScope(ScopeLogsRead, s.dashboardRead(web.NodeLogCompletenessHandler)))
-	mux.Handle("GET /api/v1/runs/grep", requireScope(ScopeLogsRead, s.dashboardRead(func(b backend.Backend) http.HandlerFunc {
-		return web.RunsGrepHandler(b, controllerSearchBounds)
-	})))
-	mux.Handle("GET /api/v1/runs/{id}/events/stream", requireScope(ScopeRunsRead, s.dashboardRead(web.EventsStreamHandler)))
-	mux.Handle("GET /api/v1/capacity/profiles", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityProfilesHandler)))
-	mux.Handle("GET /api/v1/capacity/profiles/explain", requireScope(ScopeRunsRead, s.capacityRead(web.CapacityExplainHandler)))
-
-	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
-	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
-
-	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
-
-	mux.Handle("GET /api/v1/pipelines", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPipelines)))
-	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
-
 	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
 
 	mux.Handle("GET /api/v1/crons", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListCrons)))
@@ -476,19 +450,10 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 		mux.Handle("GET /metrics", requireScope(ScopeAdmin, metricsHandler()))
 	}
 
-	mux.Handle("GET /api/v1/runs/{id}/steps", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeSteps)))
-
 	mux.Handle("POST /api/v1/runs/{id}/debug-pauses", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateDebugPause)))
-	mux.Handle("GET /api/v1/runs/{id}/debug-pauses", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListDebugPauses)))
-	mux.Handle("GET /api/v1/runs/{id}/paused", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListDebugPauses)))
-
-	mux.Handle("GET /api/v1/runs/{id}/events", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListEvents)))
 
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRequestApproval)))
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeApprovalsWrite, http.HandlerFunc(s.handleResolveApproval)))
-	mux.Handle("GET /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetApproval)))
-	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
-	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
 
 	mux.Handle("PATCH /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRenameTeam)))
 	mux.Handle("DELETE /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteTeam)))
@@ -534,6 +499,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())
 	s.registerPolicyEndpoints(router, s.sessionEndpoints())
 	s.registerAccountRoutes(router)
+	s.registerReportingRoutes(router)
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	if s.dataController != nil {
 		if objects, ok := s.dataController.Objects.(*blob.Filesystem); ok {
@@ -567,6 +533,13 @@ func (s *Server) routeProbe() (*http.ServeMux, *http.ServeMux) {
 func (s *Server) RegisteredRoute(r *http.Request) bool {
 	mux, router := s.routeProbe()
 	return routeRegistered(router, r) || routeRegistered(mux, r)
+}
+
+func (s *Server) writeRouteMiss(w http.ResponseWriter, r *http.Request) {
+	legacy, policy := s.routeProbe()
+	methods := append(allowedRouteMethods(legacy, r, routeProbeMethods), allowedRouteMethods(policy, r, routeProbeMethods)...)
+	slices.Sort(methods)
+	writeRouteMiss(w, slices.Compact(methods))
 }
 
 // WriteUnsupportedRoute answers a request for a route this build does not

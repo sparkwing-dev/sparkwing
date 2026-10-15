@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -98,7 +99,9 @@ func TestBusyRunnerHeartbeatUpdatesObservedLivenessWithoutPolling(t *testing.T) 
 		t.Fatalf("rejected heartbeat refreshed liveness: %v -> %v", acceptedAt, seen)
 	}
 	rec := httptest.NewRecorder()
-	s.handleAgents(rec, httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil))
+	if err := s.handleAgents(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runners", nil), capability.Authorized{Target: capability.Target{Team: "default"}}); err != nil {
+		t.Fatal(err)
+	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("agents = %d: %s", rec.Code, rec.Body.String())
 	}

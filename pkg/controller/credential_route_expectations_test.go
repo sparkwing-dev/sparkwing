@@ -1,18 +1,12 @@
-package acceptance
+package controller
 
-// CredentialRouteExpectation pins the authorization alternatives for one final route.
-// Alternatives use credential|comma-separated grants|binding|liveness; every grant
-// belongs to that complete alternative. See t1-credential-routes.md for authority
-// and unresolved assumptions. These literals must never be refreshed from runtime output.
-type CredentialRouteExpectation struct {
+type credentialRouteExpectation struct {
 	Method, Path, Audience, Owner, Authentication string
 	Alternatives                                  []string
 }
 
-// CredentialRoutes returns independent committed expectations for the final C2 surface.
-// A fresh slice lets sensitivity tests change their copy without changing the oracle.
-func CredentialRoutes() []CredentialRouteExpectation {
-	return []CredentialRouteExpectation{
+func credentialRouteExpectations() []credentialRouteExpectation {
+	return []credentialRouteExpectation{
 		{"GET", "/api/v1/runs/{run}/snapshot", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|sensitive"}},
 		{"POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", "controller", "run", "capability", []string{"awarded_or_delegated_claim|nodes.claim|runOfTrigger|sensitive"}},
 		{"POST", "/api/v1/runs", "controller", "team", "capability", []string{"unbound_member_or_local|runs.write|bodyNamesRun|credential", "awarded_or_delegated_claim|children.start|bodyNamesRun|sensitive"}},

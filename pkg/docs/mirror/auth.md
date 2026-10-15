@@ -28,6 +28,10 @@ Wingd's connection context. Explicit credentials keep precedence. Browser
 requests supply their own authentication. These handlers expose the shared
 policy routes and exclude the legacy route fallback.
 
+Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
+
+Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
+
 `GET /api/v1/queue` uses the shared capability policy. A member or verified
 local peer needs `runs.read` for its active team. Queue groups and advertised
 runner headroom belong to that team. Machine roots and work claims cannot read
