@@ -285,9 +285,6 @@ func TestActiveTeamSwitchNeedsMembership(t *testing.T) {
 
 func TestIdentityRoutesRefuseABearerToken(t *testing.T) {
 	f := newIdentityFixture(t)
-	if code := f.call("GET", "/api/v1/me", "Bearer "+f.admin, nil, nil); code != http.StatusUnauthorized {
-		t.Fatalf("GET /me with the operator token = %d, want 401", code)
-	}
 	if code := f.call("POST", "/api/v1/teams", "Bearer "+f.admin, map[string]string{"slug": "ops"}, nil); code != http.StatusUnauthorized {
 		t.Fatalf("POST /teams with the operator token = %d, want 401", code)
 	}

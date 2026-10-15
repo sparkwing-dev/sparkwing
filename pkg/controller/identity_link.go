@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -43,21 +44,21 @@ func identityOut(id store.Identity) identityJSON {
 	return identityJSON{Provider: id.Provider, Email: id.Email, CreatedAt: id.CreatedAt.Unix()}
 }
 
-func (s *Server) handleIdentities(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	ids, err := s.store.AccountIdentities(r.Context(), p.AccountID)
+func (s *Server) handleIdentities(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	reader, err := s.accountReader()
 	if err != nil {
-		s.writeInternalError(w, r, "list identities", err)
-		return
+		return err
+	}
+	ids, err := reader.AccountIdentities(r.Context(), a.Principal.Capability.Subject.ID)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	out := identitiesResp{Identities: []identityJSON{}, Providers: s.signInProviders()}
 	for _, id := range ids {
 		out.Identities = append(out.Identities, identityOut(id))
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 type identityLinkState struct {

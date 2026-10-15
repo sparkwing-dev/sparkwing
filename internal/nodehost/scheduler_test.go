@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -65,10 +66,10 @@ func (f *fakeExec) ran(id string) bool {
 func hostDoc(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		t.Fatalf("validate: %v", err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	return hostAccepted(t, ctx, st, doc, exec)
 }
@@ -80,12 +81,23 @@ func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStoreOld, d
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
 	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
-		t.Fatalf("add: %v", err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	s.loop(ctx)
 	res.Order = s.order
 	res.Status, res.Err = s.verdict(ctx)
 	return res
+}
+
+func awaitHostedResult(t *testing.T, ctx context.Context, done <-chan RunResult) RunResult {
+	t.Helper()
+	select {
+	case result := <-done:
+		return result
+	case <-ctx.Done():
+		t.Fatal("host did not finish:", context.Cause(ctx))
+		return RunResult{}
+	}
 }
 
 func nodeRow(t *testing.T, st *store.Store, id string) *store.Node {
@@ -212,7 +224,7 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	fx := &fakeExec{bodies: map[string]Executor{"slow": func(ctx context.Context, _ *NodeRun) Result {
-		cancel(&CancelError{Reason: "interrupted by SIGINT"})
+		cancel(&lease.CancelError{Reason: "interrupted by SIGINT"})
 		<-ctx.Done()
 		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 	}}}
@@ -301,7 +313,8 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 	}}}
 	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"),
+		{
+			ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"),
 			Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Steps: []nodeproto.StepSpec{{ID: "body"}},
 		},
 	}}
@@ -504,7 +517,7 @@ func TestNodeErrorBoundingNeverSplitsASecret(t *testing.T) {
 			if len(log.records) != 1 || strings.Contains(log.records[0].Msg, tc.fragment) {
 				t.Errorf("a hook logging its error leaked %q: %+v", tc.fragment, log.records)
 			}
-			recorded := recordedErrText(masker, errors.New(tc.raw))
+			recorded := recordedErrText(maskErr(masker, errors.New(tc.raw)))
 			if strings.Contains(recorded, tc.fragment) || len(recorded) > nodeErrTextMaxBytes {
 				t.Errorf("recorded error is %d bytes and leaks %q: %q", len(recorded), tc.fragment, recorded)
 			}

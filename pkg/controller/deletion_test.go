@@ -201,53 +201,6 @@ func TestDeleteTeamRefusesTheOnlyTeam(t *testing.T) {
 	}
 }
 
-func TestDeleteAccountNeedsTheEmailAndNoOrphanedTeam(t *testing.T) {
-	f := newIdentityFixture(t)
-	owner := f.user("o", "olga@example.com")
-	mia := f.user("m", "mia@example.com")
-	f.join(owner, mia, "mia@example.com", "reader")
-
-	if code := f.call("DELETE", "/api/v1/me", "Bearer "+f.admin, map[string]string{"confirm_email": "olga@example.com"}, nil); code != http.StatusUnauthorized {
-		t.Fatalf("a bearer token deleting an account = %d, want 401", code)
-	}
-	if code := f.call("DELETE", "/api/v1/me", owner.auth, map[string]string{"confirm_email": "mia@example.com"}, nil); code != http.StatusBadRequest {
-		t.Fatalf("confirming with another address = %d, want 400", code)
-	}
-	var refusal struct {
-		Error struct {
-			Details struct {
-				Teams []struct {
-					Slug string `json:"slug"`
-				} `json:"teams"`
-			} `json:"details"`
-		} `json:"error"`
-	}
-	if code := f.call("DELETE", "/api/v1/me", owner.auth, map[string]string{"confirm_email": "olga@example.com"}, &refusal); code != http.StatusConflict {
-		t.Fatalf("last owner deleting their account = %d, want 409", code)
-	}
-	if len(refusal.Error.Details.Teams) != 1 || refusal.Error.Details.Teams[0].Slug != owner.team {
-		t.Fatalf("refusal names %+v, want %s", refusal.Error.Details.Teams, owner.team)
-	}
-
-	var done struct {
-		DeletedTeams []string `json:"deleted_teams"`
-	}
-	if code := f.call("DELETE", "/api/v1/me", mia.auth, map[string]string{"confirm_email": "Mia@Example.com"}, &done); code != http.StatusOK {
-		t.Fatalf("member deleting their account = %d, want 200", code)
-	}
-	if len(done.DeletedTeams) != 1 || done.DeletedTeams[0] != mia.team {
-		t.Fatalf("deleted teams = %v, want the member's own space %s", done.DeletedTeams, mia.team)
-	}
-	if code := f.call("GET", "/api/v1/me", mia.auth, nil, nil); code != http.StatusUnauthorized {
-		t.Fatalf("the deleted account's session = %d, want 401", code)
-	}
-	var members []member
-	f.call("GET", "/api/v1/team/members", owner.auth, nil, &members)
-	if len(members) != 1 || members[0].UserID != owner.id {
-		t.Fatalf("owner's team after the member's deletion = %+v", members)
-	}
-}
-
 func TestOperatorDeletesAnAccountByEmailAndATeamBySlug(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")

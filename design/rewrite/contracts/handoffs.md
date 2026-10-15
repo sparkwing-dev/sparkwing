@@ -2,158 +2,14 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
-**W2 login and transport identity continuation.** GET/POST /login now use
-PolicyRouter and the shared capability verifier. The old token-table sign-in
-and its replaced tests are removed. Real SQLite login, ancestry and console
-proof tests pass. WithPeerIdentity replaces WithPeerPrincipal and api.sock's
-caller supplies only its verified uid subject. The default controller projects
-configured direct account sessions to console identity on console routes.
-See [W2-login-peer-handoff.md](../W2-login-peer-handoff.md).
-
-**W1: local peer authentication for W2/W8.** W2 supplies the trusted local
-subject through the existing CredentialLookup.Peer and AuthenticationReader.
-Store.authenticationAuthorityTx still refuses CredentialPeer. Supply its
-one-authority, parentless local snapshot with server-derived team and grants,
-plus the local authority representation used by BindingChecker and committing
-actors. Store.CheckBinding currently resolves every principal through a
-persisted capability/session AuthorityRef. W2 adds no local SQL, alternate
-issuer, bearer or permissive store fallback. Component transport proofs use
-fakes. Real api.sock execution remains open.
-
-**W1: console transaction identity for W2.** W2's default reader now derives
-console identity from a committed direct account session and the current
-configured operator accounts. It preserves the hashed session AuthorityRef.
-Console writes still require C1's committing recheck of session liveness and
-trusted console origin. The existing legacy grant/trust/freeze/settings methods
-do not carry that authority. Root service provisioning still expects an
-operator/service capability rather than this verified console account. These
-are production integrations, not satisfied by the HTTP proof tests.
-
-**W2 runner administration and billing hard cut.** The three legacy GitHub
-runner permission routes, token-table metering route and eight credits.grant
-service routes are removed. The dashboard uses /api/v1/runners/github.
-Final GitHub administration and console runner metering use PolicyRouter and
-C2's local transaction contracts. Signed checkout transport remains. See
-[W2-route-cut-handoff.md](../W2-route-cut-handoff.md).
-
-**W1: GitHub enrollment transactions for W2.** C2 declares
-controller.GitHubRunnerRegistry with Team() Team,
-GitHubRunnerBindings(ctx) ([]GitHubRunnerBinding, error),
-RegisterGitHubRunner(ctx, Authorized, GitHubRunnerBinding)
-(GitHubRunnerBinding, error), and RevokeGitHubRunner(ctx, Authorized, int64)
-error. Recheck current team.admin, ancestry, tenant, actor, enrollment limits
-and canonical repository facts in the committing transaction. Repeated
-registration must not duplicate authority. Revocation removes the enrollment
-and revokes its Actions roots/descendants atomically against concurrent
-ProvisionActions. Preserve numeric repository/owner identity, repo_key,
-registration ID and nanosecond timestamps. A real SQLite call to the legacy
-Tenant.AddGitHubRunnerBinding failed with
-`NOT NULL constraint failed: github_runner_bindings.repo_key (1299)`.
-It is not a production adapter. W2's default mutation path refuses missing
-transactions and its component proofs use fakes.
-
-**W1: console runner metering for W2.** C2 declares
-controller.RunnerMeteringWriter.SetRunnerMetered(ctx, Authorized, string,
-bool) error. Recheck the committed console session, resolve the enrolled
-machine root by its public capability prefix in the runner selector, update only its future-award metering
-and preserve immutable billing on existing awards. W2 supplies the declared
-console-only route and explicit boolean transport with a fake writer.
-Store.SetTokenMetered on the retired token table is not a fallback.
-
-**W1/W2: verified card and dispute events.** The legacy financial service
-callbacks and startup service-token seeding are deleted. C2 PaymentEvent
-and C1 SettlePayment still cover only committed checkout payment, failure
-and expiry. Card setup, off-session card outcomes, refunds, warning and
-dispute events need the verified-event contract before their HTTP ports can
-be completed. Existing C1 card/refund/dispute tests retain the business
-requirements. No caller-selected team/credit path replaces the deleted routes.
-
-**W2 OAuth continuation.** OAuth start and callback now use PolicyRouter and
-their named browser proof. Eight active HTTP tests cover real SQLite account
-sessions through a fake provider transport. Generated proof and PKCE refusals
-create no session. Errors and audit records exclude provider diagnostics and
-credentials. The callback retains the identity-link continuation without
-redeeming its code. See [W2-oauth-handoff.md](../W2-oauth-handoff.md).
-
-**W1: roleless sessions and identity-link nonce storage.**
-CreateIdentityAccountSession requires a membership even when ResolveSignIn
-returns a verified waitlisted account with no active team. Supply its final
-roleless session representation through creation, renewal and
-AuthenticationReader. It must satisfy account-only policy while granting no
-team authority. ConsumeIdentityLinkState queries identity_link_states, which
-is absent from schema.sql. Supply the durable, replica-safe one-use state
-contract before W2 cuts over link completion. These are real C1 gaps. W2 has
-added no alternate issuer, SQL table or in-memory nonce registry.
-
-**W1/W2/W6/W8: startup bootstrap contract.** The mounted bootstrap-admin-token
-is an input raw credential, but ProvisionCapability/Store.Issue generate a new
-raw capability and accept no seeded presentation. EnsureBootstrapAdminToken
-still calls the retired token table. Resolve that delivery mismatch before
-W2 replaces startup provisioning. The trusted bootstrap gate must remain in
-the issuing transaction and revocation must survive restart. No C1 or C4
-signature changed in this continuation.
-
-**W1/W2: root enrollment origin integration.** W2 now registers POST
-/api/v1/runners and POST /api/v1/operator/tokens through PolicyRouter and the
-existing CredentialIssuer.ProvisionCapability. C2 declares their strict local
-request shapes. Trusted registration selectors are runner:<team>:<name> and
-service:<name>. W1's production ProvisionPolicy must verify or create the
-registration within the same issuance transaction, enforce live team-admin or
-deployment/console origin, permitted pools/repositories, existing issuance
-limits and active name uniqueness, and retain registration/origin facts for
-claims and rotation. No W2 SQL, alternate issuer or registry is added. Missing
-origin policy refuses with unavailable. Real SQLite root round trips and
-rollback pass with a fake policy. They do not prove registry races or production
-ClaimProfileResolver behavior. W1's current ProvisionService origin check also
-requires operator/service subjects with operator.tokens, so a verified console
-account cannot pass it yet. W1 owns that representation. W2's named console
-HTTP proof passes with a fake issuer. See
-[W2-root-provisioning-handoff.md](../W2-root-provisioning-handoff.md).
-
-**W1/W2: capability inventory and rotation.** W2's member/deployment metadata
-and rotation HTTP routes use PolicyRouter and C2's CapabilityManager. Its
-shared Metadata, InventoryFilter and Rotation types live in internal/capability
-so persistence can implement the interface without importing controller.
-W1 must supply Team, ListCapabilities(ctx, Authorized, InventoryFilter),
-ReadCapability(ctx, Authorized), and RotateCapability(ctx, Authorized, grace,
-expires). Recheck live authority and ownership in the transaction. Inventories
-return owned account/machine controller credentials or deployment
-service/operator roots, never executable awards or private authority fields.
-Rotation commits through Store.Issue, preserves origin/parent/registration,
-owner, scopes and source consent, respects current issuance expiry ceilings,
-cannot widen grants, and commits
-the bounded old revocation with the replacement before returning Raw.
-The replacement cannot parent to the old credential that rotation ends.
-W1's readAuthorityTx currently rejects every non-nil RevokedAt, including a
-future grace deadline. C2 credentialAlive already accepts it until that
-deadline. Align the persistence check before claiming grace integration.
-No W1 implementation or foreign contract signature changed. HTTP and client
-tests use fakes. See [W2-capability-management-handoff.md](../W2-capability-management-handoff.md).
-
-**W2 session policy continuation.** Documented Session authorization headers now
-reach ordinary policy routes. The default controller reader applies the existing
-license and absolute lifetime to the store's single authentication snapshot,
-including session ancestors. Migrated dashboard routes bypass pre-renewal and
-retain canonical errors. Browser /logout uses the named browser proof and the
-shared verified-session deletion path. SQLite HTTP properties cover failed
-proof without renewal, ambiguous presentations, lifetime and cross-session
-selection. The old browser logout regression is ported. W1's roleless/console
-representation and LookupSession backend tagging remain open. See
-[W2-session-policy-handoff.md](../W2-session-policy-handoff.md).
-
-**W1/W2: session lifecycle continuation.** W2's renewal and API logout now use
-PolicyRouter's declared browser proof, real hashed sessions and the sealed CSRF
-key. Logout takes no body, verifies session-bound CSRF and same-origin proof,
-and deletes only the authenticated session. Renewal refuses ambiguous
-presentations and HEAD, keeps current membership/parent ceilings and enforces
-the configured absolute lifetime. Real SQLite HTTP properties pass. W1 still
-owns roleless and console session representation. Its LookupSession path must
-also classify every backend fault with ErrSessionBackend: the authority-chain
-error return and RowsAffected error return in pkg/store/auth.go currently
-propagate infrastructure errors without that tag. A temporary overlay probe
-dropping memberships before GET auth/session returned 401 instead of 503.
-W2 has not added SQL or error-message matching. Wider browser login, OAuth, peer and legacy route
-cutovers remain W2 work. See [W2-session-flow-handoff.md](../W2-session-flow-handoff.md).
+W1's offer-round cut is complete. The finalizer, timer, idle-registry path,
+warm-dispatch caller, factory and HTTP/client endpoint are removed. Legacy
+readiness writers remain until host migration, but open no offer rounds. Shared
+matching now accepts scoped Actions claims and checks every push ancestor during
+matching and award issuance. The SQLite ordered-matching cell and adversarial
+claim properties pass. W2/W8 still own production Actions evidence, enrollment
+and runner wiring. Old offer columns remain until legacy claim/credit retirement.
+See `../w1-session15-progress.md` for the caller list and evidence.
 
 ## From W4 review fixes (2026-10-15)
 
@@ -181,22 +37,16 @@ W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./interna
 
 **W1 scope clarification (lead).** When W1 removes a legacy store API (Store.AcceptPlan and its validator, StateStoreOld, old claim and trigger writers, offer rounds, old maintenance APIs), W1 migrates or deletes every remaining caller, including callers in W1b-owned test fixtures such as the output and log fixtures reached through dispatchRun. Keep each caller change minimal and list the files in your report. This overrides the "do not edit W1b's files" line for caller migration only. W1b does not reintroduce removed APIs.
 
-**W1/W2: cancellation and session integration.** W2 now passes cancellation reasons through C1's existing request-only edge. The real held-job and event test passes, including a generated holder-preservation property. W2 added BindingState.CancelReason to C2. W1 still needs to project the first committed intent through ReadAuthentication, with job intent preceding run intent. W2 authenticates session presentations against their committed hashed AuthorityRef.ID and uses C1's sealed-key session lookup for the default CSRF verifier. The controller no longer patches a missing Capability.Digest. Browser renewal, roleless sessions and console/peer identity remain open.
+**W1: separate cancellation intent for W2.** W2's cancellation-reason persistence test fails because the store has no cancellation-intent field separate from the terminal reason. Add it to the store's authentication/cancellation snapshot (amendment A1-21), and finish the session digest and CSRF persistence W2 reads. W2 consumes it through the contract interface.
 
-**W1: logical-record authorization for W2.** A live remote-cache authority calling Tenant.CheckDataAccess with DataLookup, RecordKind=memo, RecordName=hash and no Digest gets `invalid blob digest` before a record can be selected. Bound record/memo/depcache lookups call this interface before selecting digests. CopyMemo also checks DataRecord before its transactional hit. Resolve live selection authority through the existing contract and keep digest/member checks inside the record transaction. The SQLite probe and remaining integrations are recorded in [W2-cache-handoff.md](../W2-cache-handoff.md). W2's transport uses the existing methods with fakes while this integration remains open.
-
-**W1: source-release audit read projection for W2.** Tenant.GitCredentialReleases still selects token_prefix and decodes released_at as seconds. ReleaseSourceCredential writes capability_prefix and nanoseconds. Supply the final tenant-scoped audit read projection before W2 migrates GET /api/v1/team/git-credentials/releases. This is a code-inspection mismatch. No successful real audit-list integration is claimed. See [W2-inventory-handoff.md](../W2-inventory-handoff.md).
-
-**W1: credential mutation transactions for W2.** C2 declares controller.CredentialWriter for the five migrated secret/git write routes. Its methods are Team() Team, WriteSecret(ctx, Authorized, Secret) error, RemoveSecret(ctx, Authorized, name, pipeline) error, WriteGitCredential(ctx, Authorized, GitCredential) (GitCredential, error), ConfirmGitCredentialFor(ctx, Authorized, host, fingerprint) (GitCredential, error), and RemoveGitCredential(ctx, Authorized, host) error. Recheck ancestry, current membership/team.admin or verified local authority, exact tenant and actor in each committing transaction. Use the store clock. Existing CreateOrReplaceSecret/DeleteSecret/PutGitCredential/ConfirmGitCredential/DeleteGitCredential accept no authority and remain unsuitable as production adapters. W2 tests with a fake writer over real SQLite. The production default refuses writes until Tenant implements the interface. C2's declaration is local. No C1 signature or implementation is changed. Team-scoped key rotation also needs a separate authority-bearing transaction because Store.RotateSecretValues/RotateGitCredentialSecrets walk every team. See [W2-mutations-handoff.md](../W2-mutations-handoff.md).
-
-**W1: credential maintenance adapters for W2.** The rotation and source-audit HTTP cutovers are done against C2's local interfaces. CredentialRotator requires Team() Team and RotateCredentials(ctx, Authorized, func(Secret) (string, error), func(GitCredential) (string, error)) (int, int, error). Recheck live team-admin or verified local authority, visit only that tenant's rows once serially, and commit both value-column rewrites together. Any error rolls back both tables. Return visited secret/git counts and preserve all other row fields. SourceAuditReader requires Team() Team and SourceReleaseAudits(ctx, limit) ([]capability.SourceReleaseAudit, error), newest first, decoding capability_prefix and nanosecond timestamps. This replaces the earlier request to adapt the legacy GitCredentialReleases projection. Missing adapters return policy_missing. The global Store rotation and legacy audit reader are not fallbacks. W2 tests with fakes and does not claim production transaction or audit-query coverage. See [W2-maintenance-handoff.md](../W2-maintenance-handoff.md).
 W1 continuation status: cancellation reasons now persist independently on runs and
 jobs and reach job, owner and eval renewal. Session digest lookup, nanosecond
 writes, current membership, capability-parent ceilings and sealed CSRF-key
 persistence are implemented. `CreateTokenSession` is removed. Session creation and
 lookup no longer accept caller clocks. See `../w1-session11-progress.md` for caller
-migrations and evidence. W2 has extended C2 `BindingState` with `CancelReason`. W1 must now populate
-that field through `ReadAuthentication`. OAuth/browser middleware and roleless-session
+migrations and evidence. W2 still needs to extend C2 `BindingState` with the
+cancellation reason before W1 can project it through `ReadAuthentication`. W1 has
+not changed that foreign contract. OAuth/browser middleware and roleless-session
 representation remain integration points.
 
 W1's unit-reaper cut is complete. The unfenced node, agent-loss and trigger
@@ -209,22 +59,44 @@ and `settleExpiredClaimTx` helper can retire after this cut is merged.
 
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
 
-**Contract change needed, W1/W9/W3: attempt identity on job transitions.**
+**W1 done, W9/W3 contract change needed: attempt identity on job transitions.**
 Invariant: an execution report affects only the attempt it names, and replay of
-that report cannot consume another attempt. C1 `NodeTransition` and C3
-`JobTransitionRequest` carry claim generation but no source attempt ordinal.
-Two successive identical retry failures therefore hash identically. A direct
-store probe with retry budget two starts attempt four, then the next failure
-returns `Replayed:true, Attempt:4` instead of starting five. A delayed report
-also lacks an attempt fence after retry under the same claim. Carry the source
-attempt through the request and adapter, check it in the committing transaction,
-and include it in replay identity. Start, unstarted refusal and reaper semantics
-must remain explicit. W1 has not changed the foreign wire shape. The reproducer
-and command are in `../w1-session12-progress.md`.
+that report cannot consume another attempt. C1 `NodeTransition.SourceAttempt`
+now requires an explicit nonnegative ordinal on holder start, retry, report and
+unstarted release. It participates in the digest and must match the locked row
+unless the complete transition replays. Other causes and actors omit it.
+Initial start uses zero, resumed start uses the retained ordinal, and unstarted
+refusal/release consumes none. The generated store property and strengthened
+SQLite retry cell prove repeated identical failures and delayed-report refusal.
+W9 must add the ordinal to `JobTransitionRequest` and its adapter. W3 must send
+the captured source ordinal and consume `Applied.Attempt`. W1 has not changed
+the foreign wire shape. Its omission now fails loudly, so the two controller
+execution-path tests remain blocked on that amendment. W1b must also supply the
+existing attempt in its `blobResultFixture` transition. See
+`../w1-session16-progress.md` for evidence and the exact pending callers.
 
 **DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.
 
-**W2 continuation evidence.** Session verification/default CSRF and cancellation-reason delivery are covered in [W2-sessions-cancellation-handoff.md](../W2-sessions-cancellation-handoff.md). W1 can now project C2 BindingState.CancelReason. Native TypeScript setup and unrelated docs failures remain with their owners.
+W1's concurrency-maintenance cut is complete. `Operator.MaintainConcurrency`
+requires the elected `controller.reaper` fence and commits holder cleanup, waiter
+cleanup and promotion atomically. The raw Store method, `Maintenance` registry,
+six unfenced operations and obsolete concurrency-memo sweep are removed. Controller
+startup and periodic work use the leased pass. The local daemon acquires its own
+reaper fence. The SQLite `recovery-concurrency-no-revival/store-sqlite` cell proves
+promotion, reopening and returning-owner queue order. See
+`../w1-session14-progress.md` for caller migrations and evidence. W1b's record
+retention remains separate and unchanged. The independent doctor repair,
+PurgeDeadLocalConcurrency and CountDeadLocalConcurrency are also removed. Terminal
+capacity is cleaned in every scope by the same elected pass.
+
+**Contract gap confirmed, W8/W9 launcher synchronization (A1-38).**
+`LauncherObservation` carries UnitID, JobName and NodeUID, but not claim generation.
+Store UnitID is stable across re-awards: plan/trigger use RunID, and work/eval
+encode UnitRef without claim generation. NodeUID identifies a Kubernetes node,
+not the Job instance. A sync adapter cannot distinguish a former award's Job from
+its replacement using these fields. W8/W9 must supply the immutable award fence
+and Kubernetes instance correlation before W1 can implement safe cleanup.
+`EngineController.SyncLauncher` remains a stub. No foreign wire type was changed.
 
 **DESIGN approved (lead): W1b record mutation authorization.** Invariant: no record, manifest or memo copy persists unless the writer, ancestor and holder authority is current at the moment of the write. Record publication has one transaction-local mutation owner used by both CommitRecord and CopyMemo: prepare namespaces and verified members first (any I/O happens here), then take the existing blob locks, recheck current authority against the store clock inside the same transaction, and persist the complete destination batch through that owner. That final recheck is the linearization boundary; nothing writes after it without passing it. Preserve immutable replay, all-or-nothing output and manifest copies, and caller-owned rollback. Remove the scattered per-path checks this replaces. TestBlobRecordsMutationCannotOutliveAuthority must go green with its full generated-case run.
 
@@ -234,8 +106,189 @@ and command are in `../w1-session12-progress.md`.
 
 **DESIGN approved (lead): W8 pending-claim outcomes.** Invariant: a committed award is always owned, and every independent stop reason (policy refusal, cancellation, idle, claim deadline, version) stays observable to the caller. The pending claim returns the award and the stop reason as independent results. Run adopts any returned award first, then applies the stop reason, joins the held hosts, and returns that reason; the joining defer never replaces a stop reason with success. Existing owners of cancellation, idle, claim-deadline and version checks stay as they are. `TestLoopPendingAwardPreservesPolicyDenial` must go green, plus a property test over interleavings of award delivery and each stop reason.
 
-**W1: authority-bearing secret reads for W2.** The secret-by-name HTTP cutover now uses C2's local SecretReader interface: Team() Team and ReadSecret(ctx, Authorized) (*Secret, error). Use one store-clock transaction to recheck ancestry, current membership, the selected route alternative and claim liveness/cancellation. Derive claim run/pipeline from its binding and seal, require declaration, enforce pipeline/shared precedence and only_on pools, and commit secret_released with selection. A missing run selector never detaches a claim from its bound run. Member run selectors stay tenant-scoped, and masked member reads are forbidden. Return no row after a failed audit or authority check. Tenant.ReleaseClaimSecret takes the retired ClaimToken and caller clock and is not an adapter. W2 tests the final HTTP/decryption path with fakes. The default refuses missing transactions with policy_missing. See [W2-secret-reads-handoff.md](../W2-secret-reads-handoff.md).
+W1's schedule handle cut is complete. Thirteen implicit-default-team Store
+methods are removed. Local constructors select DefaultTeam. Controller requests
+use their authenticated Tenant, and deployment ticks select each enumerated team.
+Tick metadata belongs to Operator and settings. Arming writes the canonical
+repository key, and non-run history stores a nullable run reference. The SQLite
+surface-schedules-and-managed-timers/store-sqlite cell passes through rollback
+and reopening. W9/W6 still own old cron YAML fixtures and timer/HTTP integration.
+Unverified GitHub push callers must supply resolved repository identity before
+arming. W1 has not changed foreign contracts or W1b implementation files.
 
 **DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.
 
+W1's A1-27 lifecycle join now uses W1b's billing helpers for issuance, starts,
+renewal, release, plan/expansion acceptance, finish and reaping. Pricing comes
+from sealed resources. Reservations keep the existing minute window, while C2
+applies each unit's final minimum. Queued matching passes over unfunded work and
+award issuance repeats its deadline check after accounting. Cloud job renewal
+can start billing without creating an execution attempt. The SQLite
+`billing-start-award-versus-start/store-sqlite` proof covers the real award,
+exchange and start transactions through reopening. W2 still owns the production
+calculator. W3 must report current owner compute with Executing, including false
+during customer-runner waits. W1b still owns spend-exhaustion/grace policy and
+legacy credit retirement. W1b implementation files are unchanged. The legacy
+store API cuts and the previously recorded foreign contract gaps remain open.
+
+W1's legacy plan-acceptance cut is complete. `Store.AcceptPlan`, its separate
+validator and inserter, `Client.SubmitPlan`, the controller's old claim-token
+acceptance branch and the old launched planner are removed. `Tenant.AcceptPlan`
+retains required-secret diagnostics under the current owner and store clock.
+The SQLite `lifecycle-request-and-plan-seals/store-sqlite` cell passes through
+second-insert rollback, replay, drift and reopening. Shared strict-validator,
+identifier secrecy, child intake and stale result-record ports pass.
+
+The lead's caller-migration exception is used for `node_output_test.go` and one
+`SourceAttempt` addition in W1b's `blob_result_records_test.go`. W1b persistence
+and accounting implementations are unchanged. `CreatePlanNode` still has four
+legacy controller/log fixture callers. StateStoreOld, raw lifecycle, readiness,
+claim/trigger writers and old controller fixtures still need retirement. W2's
+calculator and cancellation-reason shape, W9/W3 source-attempt transport and
+W8/W9 launcher correlation remain foreign integration points. See
+`../w1-session19-progress.md` for the cut, ports and verification.
 **Lead decision for W3: "the W4 expansion-concurrency mismatch question" is settled by c3-protocol-notes.md line 66.** A generated job's concurrency membership must match the existing plan or job definition of that group on capacity, scope and on_limit; cost may differ; a mismatch refuses the expansion with `plan_invalid` naming the field path. The host supplies existing definitions through `ExistingConcurrency`. W3 implements this in the strict raw-bytes expansion validation (handoff "W3 expansion acceptance"). If a W4 membership test accepts a mismatch on capacity, scope or on_limit, W3 corrects that test as a minimal shared-file edit and lists it. No further lead input is needed.
+
+W1's raw unstarted-requeue cut is complete. `Store.RequeueUnstartedClaim` and
+its Tenant twin are removed with every Go caller. Expired owners use the leased
+`ReapUnits` pass. Generated tests cover repeated award generations, stale
+release/renewal/finish, terminal absorption and settlement with future-dated
+ledger rows. The SQLite unstarted-lapse cell now also covers real owner intake,
+repeated requeue/reclaim, stale plan refusal and reopening. The lead's caller
+exception is used only for legacy credit-test retirement. W1b implementation
+files are unchanged. StateStoreOld, raw lifecycle/readiness and the remaining
+legacy claim/trigger writers still need retirement. See
+`../w1-session20-progress.md` for ports, shared files and evidence.
+
+W1's run-row heartbeat cut is complete. `TouchRunHeartbeat` on Store, Tenant
+and Client, `TouchNodeHeartbeat` on the same handles, `Run.LastHeartbeatAt`,
+the independent scheduler and Kubernetes dispatcher timestamp loops, their legacy
+HTTP handlers and Doctor's heartbeat-age finalizer are removed. The generated
+owner-liveness property proves owner renewal, expiry at the exact boundary,
+remote-job isolation and failed-renewal atomicity. All eight SQLite recovery
+cells pass. The unstarted-owner proof also checks persisted renewal. W2's final
+owner-heartbeat policy route remains declared and needs its production binding
+to `EngineController.Renew`. Production watched-job delivery remains with that
+integration. W1b implementation files are unchanged. The remaining legacy API
+cuts and previously recorded foreign gaps remain open. See
+`../w1-session21-progress.md` for ports, shared caller files and verification.
+
+W1's raw node-status and readiness-withdrawal cut is complete. `SetNodeStatus`
+and `RevokeNodeReady` are removed from Store, Tenant and Client with their HTTP
+handlers and retry entries. Debug pauses use activity detail. Queue withdrawal
+uses `TransitionNode` with `CauseRevoke`. A generated property preserves holders,
+state and events under refused writes. The SQLite
+`lifecycle-transition-replay-and-fencing/store-sqlite` cell passes through
+withdrawal, reopening, stale-start refusal and terminal replay. The retry-policy
+fixture also drops its stale run-heartbeat assertion. W3's debug fixture fails
+before a pause because CreateRun still writes the removed args_json column.
+W4/W9's SDK symbol-doc drift remains separate. StateStoreOld, CreatePlanNode,
+raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
+open, along with the earlier foreign contract gaps. W1b implementation files
+are unchanged. See `../w1-session22-progress.md` for evidence and shared files.
+
+## From bw-3095-w1b-store-data (unreviewed by lead)
+
+W1b continuation: shared `accountBillingAwardTx` now bypasses the calculator
+for unmetered awards, including checkpoint, final settlement and replay. W1's
+`accountUnitBillingTx` can remove its duplicate unmetered calculator override
+after the branches join. This checkout still lacks W1's `unit_billing.go` and
+metered issuance changes. The real lifecycle join remains open here.
+
+W1b also moved `CreditSettings`, `SetCreditSettings`,
+`SetOperatorCreditSettings`, `CreditRateTable` and `WarmCPUClassCores` from
+Store to Operator without aliases. W1's pending callers use `AsOperator()`.
+The raw Store `GrantCredits`, `ListCreditCharges` and `AppendEventOnce` wrappers
+are removed. Select a Tenant explicitly for their retained methods. Caller
+migrations in this checkout are complete. W1 lifecycle files changed only at
+two price-read callsites in `store.go`.
+
+## From bw-3095-w3-host (unreviewed by lead)
+
+W3's [shared steps and alias caller continuation](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
+removes the separate retained step scheduler. The retained and common executors
+now use one graph driver. CLI argument parsing and local, trigger and pod planning
+carry the invoked alias separately from the registered SDK entrypoint. Admission
+test workers stop and join before cleanup. Owner policy composition, full native
+placement migration and the remaining legacy hosting deletion stay open.
+
+W3's [concurrency and self-claim continuation](w3-ingress-lease-continuation.md#concurrency-and-self-claim-continuation)
+closes the settled expansion-concurrency refusal through the shared validator and
+the scheduler's raw-byte ingress. Owner self-claims now use `NewNodeInput`.
+`OwnerHost.Bind` is removed. Placements retain private awards through
+`OwnerHost.AdoptClaim` before per-attempt delegation. The legacy backoff assertion
+uses the common executor, and two further retained-test hangs are bounded.
+Owner policy composition, production caller migration and legacy deletion remain.
+
+W3's [runtime ingress and lease continuation](w3-ingress-lease-continuation.md)
+preserves generated bytes through the retained scheduler's strict validation,
+checks replayed batches, shares procenv projection with native startup and
+cleanup, and removes the separate dispatched-claim heartbeat loop. The debug-test
+hang is fixed. Legacy store fixtures still fail, and the native caller cut and
+owner-policy composition remain open against the listed foreign contracts.
+
+W3's [router and native assembly continuation](w3-router-native-continuation.md)
+cuts the production service router to v2 and joins owner and claimed execution
+through one native assembly. Per-process cleanup and child-wait activity come
+from the live delegation. The three reported daemon-policy tests pass. Full
+legacy tests, native placements and the legacy runtime cut remain open.
+
+**W4: default child arguments must serialize as an object.** The real host router
+refuses `sdkserve.ChildRequest{Pipeline: "compile", Job: "build"}` because its
+nil map serializes as `args:null`. `sparkwing.RunAndAwait` starts with that nil
+map when no argument option is supplied. Normalize it to `{}` at the SDK
+transport boundary and test the default through the registered host router.
+The shared service decoder keeps its null-collection refusal. W3 has not changed
+the foreign SDK implementation or added a compatibility request shape.
+
+W3's [native grant continuation](w3-native-grant-continuation.md) connects the
+validated revoker to native attempt/evaluation startup. The real Go SDK owner
+failure acceptance component replaces the legacy eval regression test. The
+separate host-trigger heartbeat API and loop are removed. Its CLI caller and
+legacy host fixture use `lease.Keeper`. Owner/job renewal preserves C1's
+cancellation reason. Full native placement, foreign contract
+fields and the remaining legacy runtime cut stay open.
+
+W3's [process grant continuation](w3-grant-continuation.md) makes executors and
+owner evaluators retain revocation before binding validation or startup.
+The credential component now covers actual delegation through execution,
+retries and rejected startup. The native claim-host test uses real memory
+delegations with fake C2 validation. Native router and placement assembly,
+missing foreign contract fields and the legacy runtime cut remain open.
+
+W3's [process authority continuation](w3-authority-continuation.md) adds the
+memory delegation/snapshot/binding adapter and service revocation. The new
+credential component uses explicit C2 validation fakes. Production C2 router
+assembly, remote parent snapshots, native placements and legacy removal remain open.
+
+W3's [diagnostics continuation](w3-diagnostics-continuation.md) ports retained
+step logs and activates the eleven-case native Go step-policy component. The
+SQLite step cell now verifies diagnostic commit ordering and refused delivery.
+Four further SQLite cases port the orchestrator's foreign-holder refusal and
+refuse changed capability, generation and ordinal before renewal or execution.
+Step windows, owner policies, process authority, native placements and legacy
+runtime removal remain open.
+
+W3's [step continuation](w3-step-continuation.md) adds fenced step persistence,
+six SQLite cases and native Go step-state/dry-run coverage. The remaining
+cross-area contract gaps and legacy runtime cuts are listed there.
+
+W3's [execution continuation](w3-execution-continuation.md) updates the earlier
+[settlement audit](w3-settlement-continuation.md). Finding 4 now uses one decoder
+across both executors, with real SDK failures for predicates, memo and generation.
+The concurrency codec regression is fixed. Five event cases run the common
+executor against SQLite transitions. Native router/placement wiring, the complete
+legacy event port and runtime deletion remain open. The merged W4 concurrency
+tests still differ from finding 5's mismatch-refusal wording.
+
+**W9/W2: typed fenced step reports for W3.** The common executor now requires
+C1's `RecordStep`. C2 already declares start/finish/skip routes, but
+`controllerwire.Controller` and the engine client have no typed step writer.
+Declare the transport and map it to `StepReport` using server-derived actor,
+generation and attempt. W3's local interface and SQLite evidence are in the
+[step continuation](w3-step-continuation.md). Do not restore unfenced old writers.
+
+**W6/W9: seal retained step-window selections for W3.** The acceptance inventory
+retains StartAt/StopAt/Only, but `runspec.Options` has no representation for them.
+Declare their intake/seal representation before W3 migrates those assertions to
+the common executor. Mutable flags and invocation blobs cannot replace the seal.

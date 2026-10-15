@@ -16,14 +16,12 @@ const (
 	defaultTeamCli      = "a local CLI command over the laptop's own state database, where every run is created in the default team"
 	defaultTeamCrons    = "local workspace crons launch runs into the laptop's state database, in the default team"
 	defaultTeamState    = "the laptop and admission-daemon state backend, whose runs and triggers are created through Store.CreateRun and the unbound local claim, so every row it touches is the default team's"
-	defaultTeamConc     = "local concurrency runs in-process for the laptop's runs, which are the default team's"
 	defaultTeamConsumer = "the local trigger consumer claims through ClaimNextTrigger, whose unbound claimant reaches only the default team's queue, so every trigger it settles is the default team's"
 	defaultTeamWorktree = "ref worktrees and submission environments exist only for triggers the local consumer claimed, which are the default team's"
 	defaultTeamStores   = "finds and reads runs in the laptop's own state databases, where every run is the default team's"
 	defaultTeamView     = "a local run view over the laptop's state database, where every run is the default team's"
 	defaultTeamBackend  = "the store backend serves one install's runs in the default team, as its ListRuns already does; a multi-team deployment serves its dashboard through the controller backend"
 	defaultTeamSecrets  = "local secrets live in the laptop's state database under the default team"
-	defaultTeamProfiles = "the host's capacity profiles are recorded by its local runs, in the default team"
 )
 
 // safety: every entry names a function outside this package that reaches a
@@ -39,11 +37,8 @@ var defaultTeamCallers = map[string]string{
 	"cmd/sparkwing.listLocalAnnotations":                               defaultTeamCli,
 	"cmd/sparkwing.listLocalApprovals":                                 defaultTeamCli,
 	"cmd/sparkwing.persistSubmission":                                  defaultTeamCli,
-	"cmd/sparkwing.resetNamedProfile":                                  defaultTeamCli,
 	"cmd/sparkwing.resolveLocalApproval":                               defaultTeamCli,
 	"cmd/sparkwing.retryLocalRuns":                                     defaultTeamCli,
-	"cmd/sparkwing.runCapacityReset":                                   defaultTeamCli,
-	"cmd/sparkwing.runCapacityStats":                                   defaultTeamCli,
 	"cmd/sparkwing.runCronsShow":                                       defaultTeamCrons,
 	"cmd/sparkwing.runDebugEnv":                                        defaultTeamCli,
 	"cmd/sparkwing.runDebugRelease":                                    defaultTeamCli,
@@ -53,20 +48,11 @@ var defaultTeamCallers = map[string]string{
 	"internal/backend.(*StoreBackend).ListEventsAfter":                 defaultTeamBackend,
 	"internal/backend.(*StoreBackend).ListNodes":                       defaultTeamBackend,
 	"internal/localsecrets.(*storeSource).read":                        defaultTeamSecrets,
-	"internal/opsview.diagnosePoisonedProfiles":                        defaultTeamProfiles,
 	"internal/orchestrator.(*HeldRunStore).FinalizeCancelledRuns":      defaultTeamStores,
 	"internal/orchestrator.(*HeldRunStore).IsRunTerminal":              defaultTeamStores,
 	"internal/orchestrator.(*HeldRunStore).finalizeRun":                defaultTeamStores,
 	"internal/orchestrator.(*StandaloneStores).Find":                   defaultTeamStores,
 	"internal/orchestrator.(consumerRuntime).shouldExit":               defaultTeamConsumer,
-	"internal/orchestrator.(localConcurrency).AcquireSlot":             defaultTeamConc,
-	"internal/orchestrator.(localConcurrency).CancelWaiter":            defaultTeamConc,
-	"internal/orchestrator.(localConcurrency).ForceReleaseSuperseded":  defaultTeamConc,
-	"internal/orchestrator.(localConcurrency).HeartbeatSlot":           defaultTeamConc,
-	"internal/orchestrator.(localConcurrency).ObserveSlot":             defaultTeamConc,
-	"internal/orchestrator.(localConcurrency).ReleaseSlot":             defaultTeamConc,
-	"internal/orchestrator.(localConcurrency).ResolveWaiter":           defaultTeamConc,
-	"internal/orchestrator.(localConcurrency).State":                   defaultTeamConc,
 	"internal/orchestrator.(localState).AcknowledgeNodeExecutionStart": defaultTeamState,
 	"internal/orchestrator.(localState).AddNodeMetricSample":           defaultTeamState,
 	"internal/orchestrator.(localState).AddNodeUsage":                  defaultTeamState,
@@ -83,7 +69,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.(localState).GetActiveDebugPause":           defaultTeamState,
 	"internal/orchestrator.(localState).GetApproval":                   defaultTeamState,
 	"internal/orchestrator.(localState).GetNode":                       defaultTeamState,
-	"internal/orchestrator.(localState).GetPipelineProfile":            defaultTeamState,
 	"internal/orchestrator.(localState).GetRun":                        defaultTeamState,
 	"internal/orchestrator.(localState).GetTrigger":                    defaultTeamState,
 	"internal/orchestrator.(localState).ListDebugPauses":               defaultTeamState,
@@ -92,22 +77,15 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.(localState).ListNodes":                     defaultTeamState,
 	"internal/orchestrator.(localState).ListPendingApprovals":          defaultTeamState,
 	"internal/orchestrator.(localState).ListPendingTriggersForParent":  defaultTeamState,
-	"internal/orchestrator.(localState).RecordContention":              defaultTeamState,
-	"internal/orchestrator.(localState).RecordProfileObservation":      defaultTeamState,
-	"internal/orchestrator.(localState).RecordWaitObservation":         defaultTeamState,
 	"internal/orchestrator.(localState).ReleaseClaimAtGeneration":      defaultTeamState,
 	"internal/orchestrator.(localState).ReleaseDebugPause":             defaultTeamState,
 	"internal/orchestrator.(localState).ResolveApproval":               defaultTeamState,
 	"internal/orchestrator.(localState).SetNodeArtifactManifest":       defaultTeamState,
-	"internal/orchestrator.(localState).SetNodeStatus":                 defaultTeamState,
 	"internal/orchestrator.(localState).SetNodeSummary":                defaultTeamState,
-	"internal/orchestrator.(localState).SetPipelinePin":                defaultTeamState,
 	"internal/orchestrator.(localState).SetStepSummary":                defaultTeamState,
 	"internal/orchestrator.(localState).SkipNodeStep":                  defaultTeamState,
 	"internal/orchestrator.(localState).StartNode":                     defaultTeamState,
 	"internal/orchestrator.(localState).StartNodeStep":                 defaultTeamState,
-	"internal/orchestrator.(localState).TouchNodeHeartbeat":            defaultTeamState,
-	"internal/orchestrator.(localState).TouchRunHeartbeat":             defaultTeamState,
 	"internal/orchestrator.(localState).UpdateNodeActivity":            defaultTeamState,
 	"internal/orchestrator.(localState).UpdateNodeDeps":                defaultTeamState,
 	"internal/orchestrator.JobErrors":                                  defaultTeamView,

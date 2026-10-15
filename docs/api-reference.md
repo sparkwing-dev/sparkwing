@@ -60,7 +60,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/launcher/claim` | `claims.launch` |
 | `POST` | `/api/v1/launcher/sync` | `claims.launch` |
 | `PUT` | `/api/v1/log-segments/{key...}` | `public` |
-| `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
 | `POST` | `/api/v1/me/active-team` | `authenticated` |
 | `GET` | `/api/v1/me/identities` | `authenticated` |
@@ -145,7 +144,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/log-manifest` | `claim` or `runs.state` |
@@ -160,10 +158,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-commit` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-upload` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `claim` or `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/oidc-token` | `claim` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
@@ -246,10 +241,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
-| `POST` | `/internal/downloads/charge` | `public` |
-| `POST` | `/internal/storage/commit` | `public` |
-| `POST` | `/internal/storage/release` | `public` |
-| `POST` | `/internal/storage/reserve` | `public` |
 | `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
 | `POST` | `/webhooks/stripe` | `public` |

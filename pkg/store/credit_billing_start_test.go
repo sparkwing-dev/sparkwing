@@ -28,7 +28,7 @@ func fundedMeteredNode(t *testing.T, s *store.Store, runID string) (store.ClaimI
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, runID, "build")
 	granted := int64(100 * store.MicroCreditsPerCent)
-	if _, err := s.GrantCredits(context.Background(), store.CreditGrantPaid, granted, "pay_"+runID, "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantPaid, granted, "pay_"+runID, "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	return claimant, granted
@@ -284,7 +284,7 @@ func TestStaleCancellationSettlesAtTheExecutionStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	charges, err := s.ListCreditCharges(ctx, 10)
+	charges, err := tenant(t, s, store.DefaultTeam).ListCreditCharges(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

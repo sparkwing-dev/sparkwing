@@ -308,17 +308,7 @@ func ValidCreditGrantKind(kind string) bool {
 	return kind == CreditGrantFree || kind == CreditGrantPaid || kind == CreditGrantReversal
 }
 
-// CreditGrantRequest is one movement of the grant side of the ledger: credits
-// added, or, for [CreditGrantReversal], credits taken back.
-//
-// Reference is the payment id the grant came from, or an operator note. A
-// non-empty one makes the grant idempotent: a second request naming the same
-// kind and reference returns the row already written, which is what lets a
-// payment webhook retry. An empty reference writes a new row every time.
-//
-// A reversal carries a negative AmountMicro, its own Reference (the refund id,
-// so partial refunds of one payment each land), and Reverses naming the
-// reference of the paid grant it takes back.
+// CreditGrantRequest carries a free grant or a negative, payment-linked reversal with its idempotency reference.
 type CreditGrantRequest struct {
 	Kind        string
 	AmountMicro int64
@@ -338,6 +328,9 @@ type CreditGrantResult struct {
 }
 
 func (req CreditGrantRequest) validate() error {
+	if req.Kind == CreditGrantPaid {
+		return fmt.Errorf("%w: paid credit requires verified checkout settlement", ErrInvalidInput)
+	}
 	if !ValidCreditGrantKind(req.Kind) {
 		return fmt.Errorf("credits: unknown grant kind %q", req.Kind)
 	}
@@ -350,13 +343,6 @@ func (req CreditGrantRequest) validate() error {
 		}
 		if req.AmountMicro > MaxCreditGrantMicro {
 			return fmt.Errorf("credits: a grant may not exceed %d micro-credits", MaxCreditGrantMicro)
-		}
-		// safety: a paid grant is one checkout's payment, so it is bounded by
-		// the largest purchase; that bounds what a leaked grant credential can
-		// add, since the balance cap does not refuse a paid grant.
-		if req.Kind == CreditGrantPaid && req.AmountMicro > CreditPurchaseMaxCents*MicroCreditsPerCent {
-			return fmt.Errorf("credits: a paid grant is one purchase, at most %d micro-credits",
-				int64(CreditPurchaseMaxCents*MicroCreditsPerCent))
 		}
 		if req.Reverses != "" {
 			return fmt.Errorf("credits: only a %s grant reverses another grant", CreditGrantReversal)
@@ -379,19 +365,7 @@ func (req CreditGrantRequest) validate() error {
 	return nil
 }
 
-// GrantCredits adds credits to the default team's balance and returns the row
-// it holds for them. A grant that lifts that balance above zero clears the
-// team's exhaustion stamp, so a node cancelled for an empty balance is the
-// last one cancelled. A non-empty reference is idempotent: the row already
-// written under that kind and reference is returned instead of a second one.
-func (s *Store) GrantCredits(
-	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
-) (*CreditGrant, error) {
-	return grantCredits(ctx, s.defaultTenant().RecordCreditGrant, kind, amountMicro, reference, createdBy)
-}
-
-// GrantCredits adds credits to t's balance and returns the row it holds for
-// them. It reads the same as [Store.GrantCredits] otherwise.
+// GrantCredits writes a free grant or payment-linked reversal for this tenant.
 func (t *Tenant) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error) {
@@ -413,7 +387,7 @@ func grantCredits(
 	return &grant, nil
 }
 
-// RecordCreditGrant writes a tenant grant or payment-linked reversal and reports whether it was created.
+// RecordCreditGrant writes a free grant or payment-linked reversal and reports whether it was created.
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error) {
@@ -447,15 +421,7 @@ func (s *Store) recordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	if req.Reference != "" {
-		var existing CreditGrant
-		var found bool
-		var err error
-		if req.Kind == CreditGrantPaid {
-			// safety: checkout and card grants share a provider payment identity.
-			existing, found, err = paidGrantForPaymentTx(ctx, tx, req.Reference)
-		} else {
-			existing, found, err = creditGrantByReferenceTx(ctx, tx, team, req.Kind, req.Reference)
-		}
+		existing, found, err := creditGrantByReferenceTx(ctx, tx, team, req.Kind, req.Reference)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
@@ -487,15 +453,6 @@ func (s *Store) recordCreditGrant(
 				ErrReversalExceedsPayment, req.Reverses, reversed.AmountMicro, already, -req.AmountMicro)
 		}
 	}
-	if req.Kind == CreditGrantPaid {
-		if err := refuseWarnedPaymentTx(ctx, tx, req.Reference); err != nil {
-			return CreditGrantResult{}, err
-		}
-	}
-	// safety: a paid grant is money that already moved, so the cap was held
-	// when its checkout opened and is not held again here; refusing it would
-	// leave a payment with no credits. Only an operator's free grant meets the
-	// cap at the ledger.
 	if req.Kind == CreditGrantFree {
 		if err := refuseAboveBalanceCapTx(ctx, tx, team, req.AmountMicro, now.UnixNano()); err != nil {
 			return CreditGrantResult{}, err
@@ -700,7 +657,7 @@ func (s *Store) creditState(ctx context.Context, team Team, window time.Duration
 		out.BurnMicro = burn.Int64
 	}
 
-	settings, err := s.CreditSettings(ctx)
+	settings, err := s.AsOperator().CreditSettings(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -789,82 +746,6 @@ type CreditSettingsUpdate struct {
 	MaxChargeSeconds          *int64
 	StorageRateMicroPerGBDay  *int64
 	StorageFreeAllowanceBytes *int64
-}
-
-// CreditSettings reads every setting together. A controller that set none of
-// them reads the defaults.
-func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error) {
-	var out CreditSettings
-	tx, err := s.beginSnapshotReadTx(ctx)
-	if err != nil {
-		return out, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err = creditSettingsTx(ctx, tx)
-	if err != nil {
-		return out, err
-	}
-	return out, tx.Commit()
-}
-
-// SetCreditSettings validates every value the update names and writes them in
-// one transaction, so a refused field leaves the ledger exactly as it was. It
-// answers the settings in force after the write. An update naming nothing is
-// refused, as is a rate outside one micro-credit to MaxCreditRateMicro, a
-// scalar rate beside a rate table, a negative grace period, and a charge cap
-// outside MinCreditMaxChargeSeconds to MaxCreditMaxChargeSeconds. Every
-// refusal is an ErrInvalidCreditSetting. Programmatic callers may update the
-// scalar after storing a table; operator surfaces use
-// [Store.SetOperatorCreditSettings] to keep the table authoritative.
-func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error) {
-	writes, err := creditSettingsWrites(up)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	tx, err := s.beginCreditSettingsTx(ctx)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err := writeCreditSettingsTx(ctx, tx, writes)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	return out, tx.Commit()
-}
-
-// SetOperatorCreditSettings applies an operator's settings update and keeps a
-// stored rate table authoritative. A scalar rate may win before the first
-// table is stored; after that, the operator must update the table. The
-// authority check and every write share one serialized transaction.
-func (s *Store) SetOperatorCreditSettings(
-	ctx context.Context, up CreditSettingsUpdate,
-) (_ CreditSettings, err error) {
-	writes, err := creditSettingsWrites(up)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	tx, err := s.beginCreditSettingsTx(ctx)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if up.RateMicroPerSecond != nil && up.RateTable == nil {
-		raw, err := creditSettingRawTx(ctx, tx, metaKeyCreditRateTable)
-		if err != nil {
-			return CreditSettings{}, err
-		}
-		if raw != "" {
-			return CreditSettings{}, fmt.Errorf(
-				"%w: rate_micro_per_second is the four-core entry of the rate table; write rate_table instead",
-				ErrInvalidCreditSetting)
-		}
-	}
-	out, err := writeCreditSettingsTx(ctx, tx, writes)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	return out, tx.Commit()
 }
 
 func creditSettingsWrites(up CreditSettingsUpdate) (map[string]string, error) {
@@ -1018,12 +899,6 @@ func validWarmCPUClass(cores int64) error {
 	return nil
 }
 
-// WarmCPUClassCores returns the largest cpu class a warm runner pool serves. A
-// controller that set none serves [DefaultWarmCPUClassCores].
-func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
-}
-
 func validCreditGrace(secs int64) error {
 	if secs < 0 {
 		return fmt.Errorf("%w: the grace period must not be negative, got %d",
@@ -1157,12 +1032,6 @@ func clearTeamCreditExhaustedTx(ctx context.Context, tx *storeTx, team Team, now
 		  WHERE name = ? AND credit_exhausted_at != 0`,
 		nowNS, string(team))
 	return err
-}
-
-// ListCreditCharges returns the default team's charges newest first, at most
-// limit rows and never more than [CreditHistoryMaxLimit].
-func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error) {
-	return s.defaultTenant().ListCreditCharges(ctx, limit)
 }
 
 func creditLimit(limit int) int {
@@ -1686,21 +1555,6 @@ func (s *Store) chargeNodeTx(
 	return out, nil
 }
 
-type expiredClaim struct {
-	runID, nodeID, tokenPrefix string
-	leaseNS                    int64
-}
-
-// safety: the holder stopped renewing, so the node ran until its lease ran out and no later; the
-// interval since the last charge bills to there, under a heartbeat's per-charge cap, before the
-// anchoring claim is cleared. A lease lost before execution bills the same way, since billing starts
-// when the machine starts work; a claim whose machine never started is refunded whole by the settle.
-func (s *Store) settleExpiredClaimTx(ctx context.Context, tx *storeTx, claim expiredClaim, nowNS int64) error {
-	_, err := s.chargeNodeTx(ctx, tx, claim.runID, claim.nodeID, claim.tokenPrefix,
-		time.Unix(0, min(claim.leaseNS, nowNS)), true)
-	return err
-}
-
 // safety: the team travels in this struct rather than as a Team parameter,
 // because the statements around it also read and write `nodes`, whose rows do
 // not carry a usable team yet; a parameter would make the scope guard demand a
@@ -1983,15 +1837,7 @@ func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool
 	return nil
 }
 
-// AppendEventOnce writes an event on a default-team run unless the run or
-// node already carries one of that kind, which keeps a condition a poller
-// re-observes every half second to one row. It reports whether it wrote.
-func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (bool, error) {
-	return s.defaultTenant().AppendEventOnce(ctx, runID, nodeID, kind, payload)
-}
-
-// AppendEventOnce is [Store.AppendEventOnce] on one of t's runs. A run of
-// another team reads as [ErrNotFound].
+// AppendEventOnce writes a tenant run event unless that run or job already has its kind.
 func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {
 	// safety: the common call finds the event already there, so the read comes
 	// before the transaction rather than inside one opened twice a second.

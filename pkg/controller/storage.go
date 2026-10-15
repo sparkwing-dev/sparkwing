@@ -83,10 +83,6 @@ func (s *Server) maintainStorage(ctx context.Context) {
 		s.logger.Error("storage settings read failed", "err", err)
 		return
 	}
-	now := time.Now().UTC()
-	if _, err := s.store.PruneStorageCommitReceipts(ctx, now); err != nil {
-		s.logger.Error("prune storage commit receipts failed", "err", err)
-	}
 	s.maintainRetainedData(ctx)
 	size, err := s.store.AsOperator().DatabaseSize(ctx)
 	if err != nil {
@@ -110,6 +106,10 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 	}
 	if err != nil {
 		s.logger.Error("storage maintenance lease failed", "err", err)
+		return
+	}
+	if _, err := operator.PruneEgressUsage(ctx, lease); err != nil {
+		s.logger.Error("egress usage prune failed", "err", err)
 		return
 	}
 	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 5000})

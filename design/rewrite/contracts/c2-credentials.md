@@ -2144,4 +2144,26 @@ C1's schema stores node identifiers internally while wire JSON uses job_id.
 Public node-host output paths likewise use `/node/v1/jobs/{job}/output`.
 There are no compatibility aliases or runtime migrations.
 
+### Account discovery read cutover
+
+The three account discovery reads under `/api/v1/me` use PolicyRouter and the
+existing account-session policy. The account subject comes from Authorized.
+The read-only AccountReader is a subset of existing Store reads and defaults
+to that store. It cannot renew or switch sessions. GET /me reports the team in
+the authenticated session and no longer changes it from Account.ActiveTeam.
+The legacy registrations and handler identity checks are removed.
+
+Credit-settings reads use the existing member runs.read row. Billing
+availability follows authentication and authorization. No foreign contract
+signature or persistence implementation changed. Roleless account authority
+remains a C1 integration gap. The new HTTP tests use both fake readers and
+real SQLite account sessions. Native credential matrix cells remain open.
+
+Self-service DELETE /api/v1/me and its confirmation/freshness gate are removed.
+Account deletion is console-only under the existing operator account path.
+A generated retired-route property checks that the old presentation cannot
+mutate state. The last-owner conflict is ported through the real console route.
+C1 DeleteAccount still needs the final-schema transaction and authority-bearing
+commit check. No legacy token-table fallback is provided.
+
 <!-- design:end -->

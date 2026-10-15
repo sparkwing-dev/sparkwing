@@ -1,5 +1,12 @@
 # pkg/controller
 
+type AccountReader interface {
+	Account(context.Context, string) (store.Account, error)
+	AccountMemberships(context.Context, string) ([]store.Membership, error)
+	OpenInvitationsForEmail(context.Context, string, time.Time) ([]store.Invitation, error)
+	AccountIdentities(context.Context, string) ([]store.Identity, error)
+	TeamDeletionsRequestedBy(context.Context, string) ([]store.TeamDeletion, error)
+}
 type Agent struct {
 	Name          string
 	Type          string
@@ -442,9 +449,9 @@ func (s *Server) Metering() bool
 func (s *Server) MultiTeam() bool
 func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
-func (s *Server) RunStoragePass(ctx context.Context) (bool, error)
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
+func (s *Server) WithAccountReader(reader AccountReader) *Server
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithAuthorization(authorization RouteAuthorization) *Server
@@ -503,7 +510,6 @@ func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, d
 func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (SizingStore, error)) *Server
 func (s *Server) WithSourceAuditReader(resolve func(context.Context, store.Team) (SourceAuditReader, error)) *Server
 func (s *Server) WithSourceController(source *SourceController) *Server
-func (s *Server) WithStoragePass(cache *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
@@ -559,7 +565,6 @@ type SourceTransactions interface {
 }
 const SpendLimitCode = "spend_limit"
 const StorageMaintenanceInterval = time.Hour
-const StoragePassEvery = time.Hour
 const TeamDeletionInterval = time.Minute
 type TeamStorage struct {
 	CacheURL string

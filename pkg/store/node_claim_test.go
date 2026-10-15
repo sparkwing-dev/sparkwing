@@ -325,41 +325,6 @@ func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
 	}
 }
 
-func TestNodeClaim_RevokeOnlyWhenUnclaimed(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedRunAndNode(t, s, "run-1", "node-a")
-	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
-		t.Fatal(err)
-	}
-
-	ok, err := s.RevokeNodeReady(ctx, "run-1", "node-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal("revoke should have succeeded on unclaimed ready node")
-	}
-	n, _ := s.GetNode(ctx, "run-1", "node-a")
-	if n.ReadyAt != nil {
-		t.Fatalf("ready_at still set after revoke: %v", *n.ReadyAt)
-	}
-
-	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-1", 30*time.Second, nil); err != nil {
-		t.Fatal(err)
-	}
-	ok, err = s.RevokeNodeReady(ctx, "run-1", "node-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ok {
-		t.Fatal("revoke should refuse when node is claimed")
-	}
-}
-
 func TestNodeClaim_DoneNodesNotClaimable(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

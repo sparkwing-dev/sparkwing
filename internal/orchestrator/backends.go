@@ -228,14 +228,6 @@ func (l localState) ListNodeSteps(ctx context.Context, runID string) ([]*store.N
 	return l.st.ListNodeSteps(ctx, runID)
 }
 
-func (l localState) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	return l.st.TouchNodeHeartbeat(ctx, runID, nodeID)
-}
-
-func (l localState) TouchRunHeartbeat(ctx context.Context, runID string) error {
-	return l.st.TouchRunHeartbeat(ctx, runID)
-}
-
 func (l localState) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
 	return l.st.AddNodeMetricSample(ctx, runID, nodeID, sample)
 }
@@ -282,10 +274,6 @@ func (l localState) ReleaseDebugPause(ctx context.Context, runID, nodeID, releas
 
 func (l localState) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error) {
 	return l.st.ListDebugPauses(ctx, runID)
-}
-
-func (l localState) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	return l.st.SetNodeStatus(ctx, runID, nodeID, status)
 }
 
 func (l localState) CreateApproval(ctx context.Context, a store.Approval) error {

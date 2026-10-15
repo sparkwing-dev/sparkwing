@@ -119,9 +119,10 @@ func TestPaymentCheckoutRawGrantCannotSettleProviderSession(t *testing.T) {
 	if err := a.AttachCreditCheckout(t.Context(), id, "provider-session", now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: MicroCreditsPerCent, Reference: "provider-session", CreatedBy: "billing"}); err != nil {
-		t.Fatal(err)
+	if _, err := a.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: MicroCreditsPerCent, Reference: "provider-session", CreatedBy: "billing"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("raw paid grant: %v", err)
 	}
+	rewriteSchemaCount(t, s.db, "credit_grants", 0)
 	var unpaid int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM credit_checkouts WHERE team='a' AND id=? AND paid_at IS NULL AND grant_id IS NULL", id).Scan(&unpaid); err != nil || unpaid != 1 {
 		t.Fatalf("raw grant settled checkout: unpaid=%d: %v", unpaid, err)

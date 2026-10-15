@@ -153,14 +153,13 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 		{"append a run event", func() error {
 			return c.AppendEvent(ctx, trig.ID, "build", "node_queued", []byte(`{}`))
 		}},
-		{"heartbeat the run", func() error { return c.TouchRunHeartbeat(ctx, trig.ID) }},
 		{"start the node", func() error { return c.StartNode(ctx, trig.ID, "build") }},
 		{"annotate the node", func() error { return c.AppendNodeAnnotation(ctx, trig.ID, "build", "compiling") }},
 		{"pause the node", func() error {
-			return c.SetNodeStatus(ctx, trig.ID, "build", "paused")
+			return c.UpdateNodeActivity(ctx, trig.ID, "build", "paused")
 		}},
 		{"resume the node", func() error {
-			return c.SetNodeStatus(ctx, trig.ID, "build", "running")
+			return c.UpdateNodeActivity(ctx, trig.ID, "build", "")
 		}},
 		{"finish the node", func() error {
 			return c.FinishNode(ctx, trig.ID, "build", "success", "", nil)
@@ -185,10 +184,7 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	}
 }
 
-// Warm dispatch opens and closes the executor offer round from the process
-// holding the run's trigger claim, so the three readiness routes answer that
-// claim and refuse every other bearer of the same scope set.
-func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
+func TestRunnerScopes_TriggerHolderControlsReadiness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
@@ -216,12 +212,6 @@ func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 
 	if err := c.MarkNodeReady(held, trigger.ID, "build"); err != nil {
 		t.Fatalf("MarkNodeReady holding the trigger claim: %v", err)
-	}
-	if _, err := c.FinalizeNodeReady(held, trigger.ID, "build"); err != nil {
-		t.Fatalf("FinalizeNodeReady holding the trigger claim: %v", err)
-	}
-	if _, err := c.RevokeNodeReady(held, trigger.ID, "build"); err != nil {
-		t.Fatalf("RevokeNodeReady holding the trigger claim: %v", err)
 	}
 
 	err = client.NewWithToken(f.url, nil, strangerRaw).MarkNodeReady(held, trigger.ID, "build")
@@ -1202,68 +1192,6 @@ func TestRunnerScopes_CoordinationWritesNeedAClaimOnThatPipeline(t *testing.T) {
 	}
 	if _, err := sc.ListNodeMetrics(ctx, "run-1", "build"); err == nil {
 		t.Error("a runner holding no claim read another run's node metrics, want 403")
-	}
-}
-
-// A trigger returned to the queue carries no claimant, so the principal
-// that held it before cannot ride a later in-process claim.
-func TestRunnerScopes_AReleasedTriggerDropsItsClaimant(t *testing.T) {
-	f, raw := newScopedFixture(t, runnerScopes)
-	ctx := context.Background()
-	c := client.NewWithToken(f.url, nil, raw)
-
-	seedRepoTrigger(t, f.store, "run-1", "acme/web")
-	if _, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
-		t.Fatalf("ClaimSpecificTrigger: %v", err)
-	}
-	if _, err := f.store.RequeueUnstartedClaim(ctx, "run-1"); err != nil {
-		t.Fatalf("RequeueUnstartedClaim: %v", err)
-	}
-
-	var principal, prefix string
-	if err := f.store.DB().QueryRowContext(ctx,
-		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE id = ?`, "run-1",
-	).Scan(&principal, &prefix); err != nil {
-		t.Fatalf("read the released row: %v", err)
-	}
-	if principal != "" || prefix != "" {
-		t.Errorf("released trigger still names %q/%q as its claimant", principal, prefix)
-	}
-
-	if _, err := f.store.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
-		t.Fatalf("in-process re-claim: %v", err)
-	}
-	if err := f.store.CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-
-	for _, tc := range []struct {
-		name string
-		call func() error
-	}{
-		{"read the trigger", func() error { _, err := c.GetTrigger(ctx, "run-1"); return err }},
-		{"create a node on the live run", func() error {
-			return c.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "intruder", Status: "pending"})
-		}},
-		{"finish the live run", func() error { return c.FinishRun(ctx, "run-1", "failed", "") }},
-		{"record contention against its pipeline", func() error { return c.RecordContention(ctx, "deploy") }},
-	} {
-		if err := tc.call(); err == nil {
-			t.Errorf("the released principal could still %s", tc.name)
-		}
-	}
-
-	run, err := f.store.GetRun(ctx, "run-1")
-	if err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-	if run.Status != "running" {
-		t.Errorf("run status = %q, want running: a principal holding nothing finished it", run.Status)
 	}
 }
 

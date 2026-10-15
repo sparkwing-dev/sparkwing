@@ -64,43 +64,6 @@ func TestRequestCancel_ClaimedRunKeepsTheCooperativePath(t *testing.T) {
 	}
 }
 
-func TestClaim_RefusesACancelledTriggerReturnedToTheQueue(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedSubmittedRun(t, s, "run-requeued", "deploy")
-	if _, err := s.ClaimNextTrigger(ctx, time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RequestCancel(ctx, "run-requeued"); err != nil {
-		t.Fatal(err)
-	}
-	requeued, err := s.RequeueUnstartedClaim(ctx, "run-requeued")
-	if err != nil || !requeued {
-		t.Fatalf("RequeueUnstartedClaim = %v, %v", requeued, err)
-	}
-
-	if _, err := s.ClaimSpecificTrigger(ctx, "run-requeued", time.Minute); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("ClaimSpecificTrigger: err=%v, want ErrNotFound", err)
-	}
-	if _, err := s.ClaimNextTrigger(ctx, time.Minute); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("ClaimNextTrigger: err=%v, want ErrNotFound", err)
-	}
-	run, err := s.GetRun(ctx, "run-requeued")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.Status != "cancelled" {
-		t.Fatalf("run status = %q, want cancelled", run.Status)
-	}
-	trig, err := s.GetTrigger(ctx, "run-requeued")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trig.Status == "pending" {
-		t.Fatal("refused trigger is left pending in the queue")
-	}
-}
-
 // Whichever of cancel and claim lands first, the run either never
 // reaches a runner or reaches one that is told to cancel.
 func TestRequestCancel_RaceWithClaim(t *testing.T) {

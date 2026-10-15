@@ -27,7 +27,7 @@ func (s *Server) writeClaimResult(w http.ResponseWriter, r *http.Request, status
 		writeJSON(w, http.StatusOK, map[string]string{"status": "replayed"})
 	case err == nil:
 		writeJSON(w, http.StatusOK, map[string]string{"status": status})
-	case errors.Is(err, store.ErrPlanInvalid), errors.Is(err, store.ErrAttemptInvalid):
+	case errors.Is(err, store.ErrAttemptInvalid):
 		writeError(w, http.StatusUnprocessableEntity, err)
 	case errors.Is(err, store.ErrClaimResultConflict), errors.Is(err, store.ErrClaimNotLive):
 		writeError(w, http.StatusConflict, err)

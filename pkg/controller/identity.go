@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
@@ -392,25 +393,19 @@ type meResp struct {
 	Waitlisted  bool                `json:"waitlisted"`
 }
 
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	reader, err := s.accountReader()
+	if err != nil {
+		return err
 	}
 	ctx := r.Context()
-	acct, err := s.store.Account(ctx, p.AccountID)
+	accountID := a.Principal.Capability.Subject.ID
+	acct, err := reader.Account(ctx, accountID)
 	if err != nil {
-		s.writeInternalError(w, r, "me account", err)
-		return
+		return engineLookupError(err)
 	}
-	// safety: a session opened while the account held no team carries none, so
-	// once an approval or another device gives it one, the session follows.
-	if p.Team == "" && acct.ActiveTeam != "" {
-		if err := s.switchTeam(ctx, p, acct.ActiveTeam); err != nil && !errors.Is(err, store.ErrNotFound) {
-			s.writeInternalError(w, r, "me session team", err)
-			return
-		}
-		p.Team = acct.ActiveTeam
+	if acct.ID != accountID {
+		return errors.New("inconsistent persisted account")
 	}
 	resp := meResp{
 		User:        userJSONBody{ID: acct.ID, Email: acct.Email, Name: acct.Name},
@@ -418,23 +413,24 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		Invitations: []invitationRefJSON{},
 		Waitlisted:  acct.Waitlisted,
 	}
-	members, err := s.store.AccountMemberships(ctx, acct.ID)
+	members, err := reader.AccountMemberships(ctx, accountID)
 	if err != nil {
-		s.writeInternalError(w, r, "me memberships", err)
-		return
+		return engineLookupError(err)
 	}
 	for _, m := range members {
+		if m.AccountID != accountID {
+			return errors.New("inconsistent persisted account membership")
+		}
 		ref := teamRefJSON{Slug: string(m.Team), DisplayName: store.TeamInfo{Slug: m.Team, DisplayName: m.DisplayName}.Label(), Role: string(m.Role)}
 		resp.Memberships = append(resp.Memberships, ref)
-		if m.Team == p.Team {
+		if string(m.Team) == a.Principal.Capability.Team {
 			active := ref
 			resp.ActiveTeam = &active
 		}
 	}
-	invites, err := s.store.OpenInvitationsForEmail(ctx, acct.Email, time.Now().UTC())
+	invites, err := reader.OpenInvitationsForEmail(ctx, acct.Email, time.Now().UTC())
 	if err != nil {
-		s.writeInternalError(w, r, "me invitations", err)
-		return
+		return engineLookupError(err)
 	}
 	for _, inv := range invites {
 		resp.Invitations = append(resp.Invitations, invitationRefJSON{
@@ -444,6 +440,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
+	return nil
 }
 
 type activeTeamReq struct {

@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -42,35 +41,6 @@ func TestTriggerClaim_ReclaimDropsPreviousClaimant(t *testing.T) {
 	}
 	if held {
 		t.Fatal("runner-a still holds the claim after another consumer re-claimed the trigger")
-	}
-}
-
-func TestTriggerClaim_RequeueUnstartedClaimDropsClaimant(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
-
-	seedPending(t, s, "t1")
-	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
-	}
-	requeued, err := s.RequeueUnstartedClaim(ctx, "t1")
-	if err != nil {
-		t.Fatalf("RequeueUnstartedClaim: %v", err)
-	}
-	if !requeued {
-		t.Fatal("RequeueUnstartedClaim returned false for an unstarted claim")
-	}
-	if _, err := s.ClaimSpecificTrigger(ctx, "t1", time.Hour); err != nil {
-		t.Fatalf("ClaimSpecificTrigger: %v", err)
-	}
-
-	held, err := s.PrincipalHoldsTriggerClaim(ctx, "t1", runnerA, time.Now())
-	if err != nil {
-		t.Fatalf("PrincipalHoldsTriggerClaim: %v", err)
-	}
-	if held {
-		t.Fatal("runner-a still holds the claim after its unstarted claim was requeued and taken")
 	}
 }
 
@@ -136,33 +106,5 @@ func TestTriggerClaim_ClaimantOutlivesLeaseAndCompletion(t *testing.T) {
 	}
 	if got != runnerA {
 		t.Errorf("TriggerClaimant after finish = %+v, want the holder %+v", got, runnerA)
-	}
-}
-
-// A trigger nobody holds and a trigger that does not exist are different
-// answers: the first is the zero identity, the second is ErrNotFound.
-func TestTriggerClaim_ClaimantClearedByRequeue(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
-
-	seedPending(t, s, "t1")
-	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
-	}
-	requeued, err := s.RequeueUnstartedClaim(ctx, "t1")
-	if err != nil || !requeued {
-		t.Fatalf("RequeueUnstartedClaim = (%v, %v), want (true, nil)", requeued, err)
-	}
-	got, err := s.TriggerClaimant(ctx, "t1")
-	if err != nil {
-		t.Fatalf("TriggerClaimant: %v", err)
-	}
-	if got != (store.ClaimIdentity{}) {
-		t.Errorf("TriggerClaimant = %+v, want the zero identity after a requeue", got)
-	}
-
-	if _, err := s.TriggerClaimant(ctx, "no-such-trigger"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("TriggerClaimant for a missing trigger = %v, want ErrNotFound", err)
 	}
 }

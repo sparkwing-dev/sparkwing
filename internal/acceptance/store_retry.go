@@ -20,7 +20,7 @@ func checkRecoveryApplicationRetry(ctx context.Context, root string) (err error)
 		return err
 	}
 	ref := store.NodeRef{RunID: "run", NodeID: "job"}
-	started, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart})
+	started, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: recoverySourceAttempt(0)})
 	if err != nil || started.Attempt != 1 {
 		return fmt.Errorf("first execution: %+v %v", started, err)
 	}
@@ -28,10 +28,26 @@ func checkRecoveryApplicationRetry(ctx context.Context, root string) (err error)
 	if err != nil {
 		return err
 	}
-	retry := store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseRetry, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: "verify", MaskedError: "verification failed"}}}
+	retry := store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseRetry, SourceAttempt: recoverySourceAttempt(1), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeFailed, Reason: "verify", MaskedError: "verification failed"}}}
 	applied, err := f.tenant.TransitionNode(ctx, retry)
 	if err != nil || applied.Attempt != 2 || applied.Generation != started.Generation {
 		return fmt.Errorf("application retry: %+v %v", applied, err)
+	}
+	if err := f.reopen(ctx, path); err != nil {
+		return err
+	}
+	if replayed, err := f.tenant.TransitionNode(ctx, retry); err != nil || !replayed.Replayed || replayed.Attempt != 2 {
+		return fmt.Errorf("retry replay after reopen: %+v %v", replayed, err)
+	}
+	retry.SourceAttempt = recoverySourceAttempt(2)
+	applied, err = f.tenant.TransitionNode(ctx, retry)
+	if err != nil || applied.Replayed || applied.Attempt != 3 || applied.Generation != started.Generation {
+		return fmt.Errorf("second identical failure: %+v %v", applied, err)
+	}
+	delayed := retry
+	delayed.SourceAttempt = recoverySourceAttempt(1)
+	if _, err := f.tenant.TransitionNode(ctx, delayed); err == nil {
+		return errors.New("delayed failure changed a later attempt")
 	}
 	if err := f.reopen(ctx, path); err != nil {
 		return err
@@ -40,10 +56,15 @@ func checkRecoveryApplicationRetry(ctx context.Context, root string) (err error)
 	if err != nil {
 		return err
 	}
-	if after.Status != store.StatusRunning || after.ClaimedBy != before.ClaimedBy || after.CapabilityPrefix != before.CapabilityPrefix || after.Generation != before.Generation || after.LeaseExpiresAt == nil || before.LeaseExpiresAt == nil || !after.LeaseExpiresAt.Equal(*before.LeaseExpiresAt) || after.Disruptions != 0 || after.ApplicationRetries != 1 || after.Attempt != 2 {
+	if after.Status != store.StatusRunning || after.ClaimedBy != before.ClaimedBy || after.CapabilityPrefix != before.CapabilityPrefix || after.Generation != before.Generation || after.LeaseExpiresAt == nil || before.LeaseExpiresAt == nil || !after.LeaseExpiresAt.Equal(*before.LeaseExpiresAt) || after.Disruptions != 0 || after.ApplicationRetries != 2 || after.Attempt != 3 {
 		return fmt.Errorf("retry changed claim continuity: %+v", after)
 	}
-	result := store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}
+	result := store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: recoverySourceAttempt(3), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess}}}
+	delayed = result
+	delayed.SourceAttempt = recoverySourceAttempt(2)
+	if _, err := f.tenant.TransitionNode(ctx, delayed); err == nil {
+		return errors.New("delayed success finished a later attempt")
+	}
 	for i := range 2 {
 		applied, err := f.tenant.TransitionNode(ctx, result)
 		if err != nil || applied.Replayed != (i == 1) {
@@ -61,17 +82,19 @@ func checkRecoveryApplicationRetry(ctx context.Context, root string) (err error)
 	if err != nil {
 		return err
 	}
-	if len(view.Attempts) != 2 || len(view.Snapshot.Nodes) != 1 || view.Snapshot.Nodes[0].Outcome != store.NodeSuccess || view.Snapshot.Nodes[0].ClaimedBy != "" || view.Snapshot.Nodes[0].LeaseExpiresAt != nil {
+	if len(view.Attempts) != 3 || len(view.Snapshot.Nodes) != 1 || view.Snapshot.Nodes[0].Outcome != store.NodeSuccess || view.Snapshot.Nodes[0].ClaimedBy != "" || view.Snapshot.Nodes[0].LeaseExpiresAt != nil {
 		return fmt.Errorf("retry result did not persist: %+v", view)
 	}
 	for i, attempt := range view.Attempts {
 		want := store.NodeFailed
-		if i == 1 {
+		if i == 2 {
 			want = store.NodeSuccess
 		}
 		if attempt.Identity.Attempt != int64(i+1) || attempt.Identity.Generation != started.Generation || attempt.Holder != before.ClaimedBy || attempt.CapabilityPrefix != before.CapabilityPrefix || attempt.Outcome != want || attempt.FinishedAt == nil {
 			return fmt.Errorf("retry attempt %d: %+v", i, attempt)
 		}
 	}
-	return checkRecoveryEvents(ctx, f, []string{"job_started", "job_retrying", "job_succeeded"})
+	return checkRecoveryEvents(ctx, f, []string{"job_started", "job_retrying", "job_retrying", "job_succeeded"})
 }
+
+func recoverySourceAttempt(attempt int64) *int64 { return &attempt }

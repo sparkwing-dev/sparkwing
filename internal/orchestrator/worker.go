@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -74,61 +72,3 @@ func ConfirmTerminalRunAfterWriteError(ctx context.Context, state interface {
 	return err == nil && run != nil &&
 		(run.Status == "success" || run.Status == "failed" || run.Status == "cancelled")
 }
-
-func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
-	interval time.Duration,
-	cancelRun context.CancelFunc, cancelled *atomic.Bool, logger *slog.Logger,
-) {
-	if interval < 100*time.Millisecond {
-		interval = 100 * time.Millisecond
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	lastOK := time.Now()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			hbCtx, cancel := context.WithTimeout(ctx, runHeartbeatTimeout)
-			status, err := c.HeartbeatTrigger(hbCtx, triggerID)
-			cancel()
-			if err != nil {
-				if client.IsTokenDead(err) || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
-					logger.Warn("heartbeat: trigger claim ended; cancelling run",
-						"trigger_id", triggerID, "err", err)
-					cancelRun()
-					return
-				}
-				silence := time.Since(lastOK)
-				if silence >= runHeartbeatMaxSilence {
-					logger.Error("heartbeat: controller unreachable beyond lease window; cancelling run",
-						"trigger_id", triggerID,
-						"silence", silence.Round(time.Second),
-						"err", err)
-					cancelRun()
-					return
-				}
-				logger.Warn("heartbeat failed",
-					"trigger_id", triggerID,
-					"err", err,
-					"silence", silence.Round(time.Second))
-				continue
-			}
-			lastOK = time.Now()
-			if status != nil && status.CancelRequested {
-				if cancelled.CompareAndSwap(false, true) {
-					logger.Info("operator cancel requested; cancelling run ctx",
-						"trigger_id", triggerID)
-					cancelRun()
-				}
-			}
-		}
-	}
-}
-
-var (
-	runHeartbeatTimeout = 2 * time.Second
-
-	runHeartbeatMaxSilence = 3 * time.Minute
-)

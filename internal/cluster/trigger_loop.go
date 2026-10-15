@@ -13,9 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -146,7 +147,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			// safety: the controller refuses every claim this loop will make, so
 			// polling on would only repeat the refusal.
 			if errors.Is(err, store.ErrMeteredInProcessNodes) {
-				return fmt.Errorf("trigger loop: this credential is metered, so it claims triggers only with --trigger-runner=k8s or warm: %w", err)
+				return fmt.Errorf("trigger loop: this credential is metered, so it claims triggers only with --trigger-runner=k8s: %w", err)
 			}
 			pacing.failed(ctx, err, nil)
 			continue
@@ -365,9 +366,6 @@ func hostTriggerRun(ctx context.Context, entry pipelineentry.Command, workDir st
 	})
 }
 
-// safety: the Jobs and warm runners a node goes to reach the controller
-// themselves, under the claim each node's dispatch takes, so they get the
-// controller's address and never this runner's token.
 func triggerNodeRunner(opts TriggerLoopOptions) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
 	var deadline string
 	if opts.K8sJobDeadline > 0 {
@@ -644,7 +642,7 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 			if err == nil {
 				if status != nil && status.CancelRequested {
 					logger.Warn("trigger loop: cancellation requested; stopping the run", "trigger_id", triggerID)
-					killChild(&nodehost.CancelError{Reason: errTriggerCancelled.Error()})
+					killChild(&lease.CancelError{Reason: errTriggerCancelled.Error()})
 					return triggerClaimCancelled
 				}
 				lastOK = time.Now()

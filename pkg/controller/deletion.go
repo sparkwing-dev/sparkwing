@@ -95,65 +95,26 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, teamDeletionBody(del))
 }
 
-func (s *Server) handleMyTeamDeletions(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	dels, err := s.store.TeamDeletionsRequestedBy(r.Context(), p.AccountID)
+func (s *Server) handleMyTeamDeletions(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	reader, err := s.accountReader()
 	if err != nil {
-		s.writeInternalError(w, r, "list team deletions", err)
-		return
+		return err
+	}
+	dels, err := reader.TeamDeletionsRequestedBy(r.Context(), a.Principal.Capability.Subject.ID)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	out := make([]teamDeletionJSON, 0, len(dels))
 	for _, d := range dels {
 		out = append(out, teamDeletionBody(d))
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-// safety: a session left open on a shared machine must not be able to delete
-// the account behind it, so deletion asks for a fresh sign-in.
-const accountDeletionSignInWindow = 10 * time.Minute
-
-type deleteAccountReq struct {
-	ConfirmEmail string `json:"confirm_email"`
+	return nil
 }
 
 type deletedAccountJSON struct {
 	AccountID    string   `json:"account_id"`
 	DeletedTeams []string `json:"deleted_teams"`
-}
-
-func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	if time.Since(p.signedInAt) > accountDeletionSignInWindow {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code: "reauth_required", Principal: p.label(),
-			Message: "deleting an account needs a sign-in from the last 10 minutes; sign out, sign in again and retry",
-		})
-		return
-	}
-	var req deleteAccountReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	acct, err := s.store.Account(r.Context(), p.AccountID)
-	if err != nil {
-		s.writeInternalError(w, r, "delete account", err)
-		return
-	}
-	if store.NormalizeEmail(req.ConfirmEmail) != acct.Email {
-		writeError(w, http.StatusBadRequest, errors.New("confirm_email does not match the account's email"))
-		return
-	}
-	if err := s.deleteAccount(w, r, acct.ID, p.AccountID); err != nil {
-		writePolicyError(w, err)
-	}
 }
 
 func (s *Server) handleOperatorDeleteAccount(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {

@@ -404,24 +404,11 @@ partial object is ever readable. Every read is served through the pod, never
 redirected to the bucket, so the egress meter and the request budget see every
 byte.
 
-The cache does not count what each team holds in its bucket: the controller
-does, in its database, and the cache asks it for room before a team's
-write and charges each team's download to its day there
-([Tenant limits](limits.md)). The cache's store ceiling covers its
-volume alone; the controller's `--bucket-store` measurement covers the
-bucket. On a multi-team deployment give the cache `--controller` and a
-`service` token holding only the `storage.count` scope, minted with
-`sparkwing cluster tokens create --type service --principal cache --scope storage.count`
-and mounted as the file `controller-token` in its `--credentials-dir`; a cache
-with a `cache-grant-key` and `--blob-store` refuses to start without
-`--controller`, and one with `--controller` refuses to start without the
-token. Give the controller `--cache-blob-store`, the same URL the cache uses,
-and its hourly storage pass lists it to reconcile the counts, cache objects
-and log segments alike, and expires a team's cache objects 30 days after
-their last write. The controller's role then needs `s3:ListBucket`,
-`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` and
-`s3:GetLifecycleConfiguration` on the cache's prefix.
-`GET /api/v1/storage` shows a team what it holds.
+The controller's service-token storage and download counter routes are removed.
+Remove cache `controller-token` credentials. Final upload accounting uses verified
+tickets, and deployment reports sum tenant, period and replica rows. The leased
+maintenance pass bills committed inventory. It does not reconcile counters from
+bucket listings. See [Tenant limits](limits.md).
 
 Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
 cache, and the controller deletes the team's log segments, both idempotent. A

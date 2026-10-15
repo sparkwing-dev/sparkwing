@@ -65,8 +65,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/concurrency/{key}/resolve":        resConcurrencyKey,
 	"GET /api/v1/concurrency/{key}/state":          resConcurrencyKey,
 
-	"GET /api/v1/credits/settings": resNone,
-
 	"GET /api/v1/crons":                  resNone,
 	"GET /api/v1/crons/{id}":             resCron,
 	"POST /api/v1/crons/{id}/disarm":     resCron,
@@ -84,12 +82,8 @@ var tenantRoutes = map[string]tenantResource{
 
 	"POST /api/v1/invitations/{id}/accept": resOwnInvitation,
 
-	"DELETE /api/v1/me":                       resNone,
-	"GET /api/v1/me":                          resNone,
 	"POST /api/v1/me/active-team":             resNone,
-	"GET /api/v1/me/identities":               resNone,
 	"DELETE /api/v1/me/identities/{provider}": resOwnIdentity,
-	"GET /api/v1/me/team-deletions":           resNone,
 
 	"GET /api/v1/pipelines":               resNone,
 	"GET /api/v1/pipelines/{name}/latest": resPipeline,
@@ -128,7 +122,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/deps":                     resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish":         resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start":          resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready":           resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/finish":                   resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat":                resRun,
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs":                      resRun,
@@ -143,10 +136,7 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/output-commit":            resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload":            resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/release":                  resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready":             resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/start":                    resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/status":                   resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/touch":                    resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/usage":                    resRun,
 	"POST /api/v1/runs/{id}/oidc-token":                              resRun,
 	"GET /api/v1/runs/{id}/paused":                                   resRun,

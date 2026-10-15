@@ -23,12 +23,6 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /webhooks/github-app": true,
 		// safety: the payment verifier checks Stripe's exact body before settlement.
 		"POST /webhooks/stripe": true,
-		// safety: the cache proves itself with its storage.count service token, which
-		// the handlers check themselves.
-		"POST /internal/storage/reserve":  true,
-		"POST /internal/storage/commit":   true,
-		"POST /internal/storage/release":  true,
-		"POST /internal/downloads/charge": true,
 		// safety: output bytes move through URLs this controller signed for one
 		// upload or one object; the handlers check the signature and its expiry.
 		"PUT /api/v1/outputs/uploads/{id}":     true,
@@ -48,7 +42,6 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 		// safety: these act on the caller's own memberships, so accountPrincipal inside each handler
 		// is the gate, and it refuses every caller that is not a signed-in account.
 		"GET /api/v1/me":                          true,
-		"DELETE /api/v1/me":                       true,
 		"GET /api/v1/me/team-deletions":           true,
 		"POST /api/v1/me/active-team":             true,
 		"GET /api/v1/me/identities":               true,

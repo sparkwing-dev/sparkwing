@@ -50,14 +50,14 @@ func TestChildStartsAndAwaitsItsOutput(t *testing.T) {
 	if got.status != http.StatusCreated || got.body["run_id"] != "child-1" {
 		t.Fatalf("start: status %d body %v", got.status, got.body)
 	}
-	got = ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?node=build", bearer, "")
+	got = ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?job=build", bearer, "")
 	if got.status != http.StatusOK || got.body["status"] != "success" ||
 		got.body["output"].(map[string]any)["image"] != "app:1" {
 		t.Fatalf("await: status %d body %v", got.status, got.body)
 	}
 
 	ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
-	got = ask(t, s, http.MethodGet, "/node/v1/children/child-2/await?node=build&wait_ms=0", bearer, "")
+	got = ask(t, s, http.MethodGet, "/node/v1/children/child-2/await?job=build&wait_ms=0", bearer, "")
 	if got.status != http.StatusOK || got.body["status"] != "running" || got.body["output"] != nil {
 		t.Fatalf("await running: status %d body %v", got.status, got.body)
 	}
@@ -72,11 +72,11 @@ func TestChildOrdinalSurvivesAFailedCall(t *testing.T) {
 	c := newChildController(t, leak, started("child-1"), answer(http.StatusConflict, map[string]string{"error": "cycle: build would re-enter itself"}), started("child-2"))
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
 
-	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`), http.StatusBadGateway, "upstream_unavailable")
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`), http.StatusServiceUnavailable, "unavailable")
 	if got := ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`); got.status != http.StatusCreated {
 		t.Fatalf("retry: status %d body %v", got.status, got.body)
 	}
-	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"deploy"}`), http.StatusConflict, "cycle")
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"deploy"}`), http.StatusConflict, "conflict")
 	ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
 	if want := []int64{0, 0, 1, 2}; len(c.ordinals) != 4 || c.ordinals[0] != want[0] || c.ordinals[1] != want[1] ||
 		c.ordinals[2] != want[2] || c.ordinals[3] != want[3] {
@@ -94,15 +94,15 @@ func TestChildStartRefusals(t *testing.T) {
 	}{
 		{
 			"other repository", `{"pipeline":"build","repo":"elsewhere"}`,
-			answer(http.StatusUnprocessableEntity, map[string]string{"error": "own repository only"}), http.StatusUnprocessableEntity, "child_repo",
+			answer(http.StatusUnprocessableEntity, map[string]string{"error": "own repository only"}), http.StatusUnprocessableEntity, "plan_invalid",
 		},
 		{
 			"ordinal conflict", `{"pipeline":"build"}`,
-			answer(http.StatusConflict, map[string]string{"error": "invocation 0 already started a child"}), http.StatusBadGateway, "upstream_unavailable",
+			answer(http.StatusConflict, map[string]string{"error": "invocation 0 already started a child"}), http.StatusServiceUnavailable, "unavailable",
 		},
 		{
 			"claim ended", `{"pipeline":"build"}`,
-			answer(http.StatusForbidden, map[string]string{"error": "claim_ended"}), http.StatusBadGateway, "upstream_unavailable",
+			answer(http.StatusForbidden, map[string]string{"error": "claim_ended"}), http.StatusServiceUnavailable, "unavailable",
 		},
 		{"no pipeline", `{}`, nil, http.StatusBadRequest, "bad_request"},
 		{"slash in pipeline", `{"pipeline":"a/b"}`, nil, http.StatusBadRequest, "bad_request"},
@@ -140,7 +140,7 @@ func TestAwaitRefusesARunThisNodeDidNotStart(t *testing.T) {
 		"/node/v1/children/run-1/await",
 		"/node/v1/children/some-other-teams-run/await",
 	} {
-		wantRefusal(t, ask(t, s, http.MethodGet, path, other, ""), http.StatusNotFound, "unknown_child")
+		wantRefusal(t, ask(t, s, http.MethodGet, path, other, ""), http.StatusNotFound, "not_found")
 	}
 	if asked := c.asked()[before:]; len(asked) != 0 {
 		t.Fatalf("an unknown child reached the controller: %v", asked)
@@ -148,11 +148,11 @@ func TestAwaitRefusesARunThisNodeDidNotStart(t *testing.T) {
 	for _, path := range []string{
 		"/node/v1/children/child-1/await?wait_ms=60001",
 		"/node/v1/children/child-1/await?wait_ms=-1",
-		"/node/v1/children/child-1/await?node=..",
+		"/node/v1/children/child-1/await?job=..",
 	} {
 		wantRefusal(t, ask(t, s, http.MethodGet, path, starter, ""), http.StatusBadRequest, "bad_request")
 	}
-	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?node=build", starter, ""); got.status != http.StatusOK {
+	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?job=build", starter, ""); got.status != http.StatusOK {
 		t.Fatalf("starter's own await: status %d body %v", got.status, got.body)
 	}
 	noLeak(t, logs)
@@ -190,7 +190,7 @@ func TestAwaitEndsWhenTheGrantIsRevoked(t *testing.T) {
 	}()
 	<-polled
 	revoke()
-	if status := <-done; status != http.StatusBadGateway {
-		t.Fatalf("revoked await answered %d, want 502", status)
+	if status := <-done; status != http.StatusServiceUnavailable {
+		t.Fatalf("revoked await answered %d, want 503", status)
 	}
 }

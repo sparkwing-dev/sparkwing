@@ -28,9 +28,6 @@ func seedOrderedNodes(t *testing.T, st *store.Store) {
 		if err := st.StartNode(ctx, "run-1", orderedNodeIDs[i]); err != nil {
 			t.Fatalf("StartNode(%s): %v", orderedNodeIDs[i], err)
 		}
-		if err := st.TouchNodeHeartbeat(ctx, "run-1", orderedNodeIDs[i]); err != nil {
-			t.Fatalf("TouchNodeHeartbeat(%s): %v", orderedNodeIDs[i], err)
-		}
 	}
 }
 

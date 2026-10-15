@@ -50,8 +50,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	objectStore, objectStoreProblems := objectStoreHealth(s.bucketMeasured())
 	problems = append(problems, objectStoreProblems...)
-	storagePass, storagePassProblems := s.storagePassHealth()
-	problems = append(problems, storagePassProblems...)
 
 	egressState, egressProblems := s.egressHealth()
 	problems = append(problems, egressProblems...)
@@ -60,9 +58,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status": "ok", "auth": authState,
 		"object_store": objectStore, "database": s.storageHealth(),
 		"egress": egressState,
-	}
-	if storagePass != nil {
-		resp["storage_pass"] = storagePass
 	}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
@@ -357,7 +352,11 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 			}))
 		}
 	}
-	seq, err := s.store.AppendEventCharged(r.Context(), chargedPrincipal(r),
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	seq, err := tenant.AppendEventCharged(r.Context(), s.leaseHolder,
 		runID, body.NodeID, body.Kind, body.Payload)
 	if writeStorageWriteRefusal(w, s.logger, err) {
 		return
@@ -1522,11 +1521,7 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	ctx := r.Context()
-	if now := time.Now(); s.runnerPresence.complete(now, s.placement.liveness) {
-		ctx = store.WithQueueRunners(ctx, s.runnerPresence.live(now, s.placement.liveness, presenceKey{}))
-	}
-	if err := tenant.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := tenant.MarkNodeReady(r.Context(), runID, nodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -1535,43 +1530,6 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	result, err := s.store.FinalizeClaimRound(r.Context(), runID, nodeID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		s.writeInternalError(w, r, "finalize ready node", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct {
-		Revoked bool `json:"revoked"`
-		Pending bool `json:"pending,omitempty"`
-	}{Revoked: result.Revoked, Pending: result.Pending})
-}
-
-type revokeResp struct {
-	Revoked bool `json:"revoked"`
-}
-
-func (s *Server) handleRevokeNodeReady(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	ok, err := tenant.RevokeNodeReady(r.Context(), runID, nodeID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, revokeResp{Revoked: ok})
 }
 
 func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request) {
@@ -1661,20 +1619,6 @@ func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
 		steps = []*store.NodeStep{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
-}
-
-func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	if err := tenant.TouchNodeHeartbeat(r.Context(), runID, nodeID); err != nil {
-		s.writeNodeStoreError(w, "touch node heartbeat", runID, nodeID, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) writeNodeStoreError(w http.ResponseWriter, operation, runID, nodeID string, err error) {
@@ -1820,29 +1764,4 @@ func auditPrincipal(r *http.Request) string {
 		return p.Name
 	}
 	return "anonymous"
-}
-
-func (s *Server) handleSetNodeStatus(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	var body struct {
-		Status string `json:"status"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if body.Status == "" {
-		writeError(w, http.StatusBadRequest, errors.New("status is required"))
-		return
-	}
-	if err := tenant.SetNodeStatus(r.Context(), runID, nodeID, body.Status); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }

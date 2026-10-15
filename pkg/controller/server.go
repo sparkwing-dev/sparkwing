@@ -46,6 +46,7 @@ type Server struct {
 	runnerMeteringWriter       RunnerMeteringWriter
 	resolveCapabilityManager   func(context.Context, store.Team) (CapabilityManager, error)
 	authorization              RouteAuthorization
+	accountReads               AccountReader
 	dataController             *DataController
 	sourceController           *SourceController
 	operatorSettings           operatorSettingsStore
@@ -78,8 +79,6 @@ type Server struct {
 
 	sessionMaxLifetime time.Duration
 
-	concurrencyCacheCap int
-
 	secretsCipher Cipher
 
 	costPerRunnerHour float64
@@ -91,7 +90,6 @@ type Server struct {
 	artifactStore storage.ArtifactStore
 
 	bucketUsageStore storage.ArtifactStore
-	storagePass      *storagePass
 	downloadStores   map[store.StorageKind]*teamblob.Store
 	downloadS3       *s3.PresignClient
 	downloadCDN      *sign.URLSigner
@@ -103,7 +101,6 @@ type Server struct {
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.
-	egressPrunedMonth string
 
 	cachePodURL  string
 	dashboardURL string
@@ -188,24 +185,23 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		logger = slog.Default()
 	}
 	srv := &Server{
-		store:               st,
-		operatorSettings:    storeOperatorSettings{Store: st, Operator: st.AsOperator()},
-		outputSigner:        newOutputSigner(),
-		logger:              logger,
-		loginLimit:          newLoginLimiter(),
-		queueTimeout:        15 * time.Minute,
-		sessionMaxLifetime:  DefaultSessionMaxLifetime,
-		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
-		runnerHeadroom:      newRunnerHeadroomRegistry(),
-		liveLogs:            newLiveLogs(),
-		runnerPresence:      newRunnerPresenceRegistry(),
-		runnerHeartbeats:    newRunnerHeartbeatRegistry(),
-		cronHolder:          defaultCronHolder(),
-		leaseHolder:         rand.Text(),
-		requestBudget:       newPrincipalBudget(RequestBudget{}),
-		idleClaimPoll:       DefaultMaxIdleClaimPoll,
-		downloadFree:        DefaultTeamDailyDownloadFreeBytes,
-		downloadFunded:      DefaultTeamDailyDownloadFundedBytes,
+		store:              st,
+		operatorSettings:   storeOperatorSettings{Store: st, Operator: st.AsOperator()},
+		outputSigner:       newOutputSigner(),
+		logger:             logger,
+		loginLimit:         newLoginLimiter(),
+		queueTimeout:       15 * time.Minute,
+		sessionMaxLifetime: DefaultSessionMaxLifetime,
+		runnerHeadroom:     newRunnerHeadroomRegistry(),
+		liveLogs:           newLiveLogs(),
+		runnerPresence:     newRunnerPresenceRegistry(),
+		runnerHeartbeats:   newRunnerHeartbeatRegistry(),
+		cronHolder:         defaultCronHolder(),
+		leaseHolder:        rand.Text(),
+		requestBudget:      newPrincipalBudget(RequestBudget{}),
+		idleClaimPoll:      DefaultMaxIdleClaimPoll,
+		downloadFree:       DefaultTeamDailyDownloadFreeBytes,
+		downloadFunded:     DefaultTeamDailyDownloadFundedBytes,
 	}
 	if st != nil {
 		srv.credentialIssuer = st
@@ -746,11 +742,10 @@ func (s *Server) handler() http.Handler {
 			return ratelimit.ClientIP(r)
 		})))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.runnerPresence.listening(time.Now())
 		if !s.Metering() {
 			path := r.URL.Path
 			// safety: migrated ledger reads authenticate before checking billing availability.
-			legacyCredits := strings.HasPrefix(path, "/api/v1/credits") && path != "/api/v1/credits" && path != "/api/v1/credits/history"
+			legacyCredits := strings.HasPrefix(path, "/api/v1/credits") && path != "/api/v1/credits" && path != "/api/v1/credits/history" && path != "/api/v1/credits/settings"
 			if legacyCredits ||
 				strings.HasPrefix(path, "/api/v1/team/billing") {
 				http.NotFound(w, r)
@@ -869,21 +864,14 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 		mux.Handle("GET /metrics", requireScope(ScopeAdmin, metricsHandler()))
 	}
 
-	// safety: readiness is a dispatcher decision, so the offer-round routes below bind
-	// to the live claim on the run's trigger rather than to the scope alone. A node claim
-	// never satisfies them, which keeps a runner from skipping its node's dependencies.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleMarkNodeReady))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleRevokeNodeReady))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinalizeNodeReady))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimHeartbeat)).orElse(requireScope(ScopeNodesClaim, s.heartbeatBudgeted(http.HandlerFunc(s.handleHeartbeatNodeClaim)))))
-	// safety: a dispatcher that executes a node itself needs the fence every
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNamedNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimExecutionStart)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input", newClaimSensitiveRoute(claimWorkKinds, pathClaimBinding, http.HandlerFunc(s.handleClaimInput)))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleUpdateNodeActivity)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity)))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleTouchNodeHeartbeat)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat)))))
 
 	mux.Handle("GET /api/v1/runs/{id}/steps", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeSteps)))
 
@@ -894,7 +882,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/events", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListEvents)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetActiveDebugPause)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/release", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleReleaseDebugPause)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleSetNodeStatus))))
 
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRequestApproval)))
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeApprovalsWrite, http.HandlerFunc(s.handleResolveApproval)))
@@ -902,11 +889,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
 
-	mux.Handle("GET /api/v1/me", http.HandlerFunc(s.handleMe))
-	mux.Handle("DELETE /api/v1/me", http.HandlerFunc(s.handleDeleteMe))
-	mux.Handle("GET /api/v1/me/team-deletions", http.HandlerFunc(s.handleMyTeamDeletions))
 	mux.Handle("POST /api/v1/me/active-team", http.HandlerFunc(s.handleSetActiveTeam))
-	mux.Handle("GET /api/v1/me/identities", http.HandlerFunc(s.handleIdentities))
 	mux.Handle("DELETE /api/v1/me/identities/{provider}", http.HandlerFunc(s.handleIdentityUnlink))
 	mux.Handle("POST /api/v1/teams", http.HandlerFunc(s.handleCreateTeam))
 	mux.Handle("POST /api/v1/invitations/{id}/accept", http.HandlerFunc(s.handleAcceptInvitation))
@@ -936,7 +919,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/team/billing/card", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCard)))
 	mux.Handle("POST /api/v1/team/billing/pay", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingPay)))
 	mux.Handle("PUT /api/v1/team/billing/budget", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingBudget)))
-	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
 
 	router := http.NewServeMux()
 	s.registerOperatorRoutes(router)
@@ -953,17 +935,12 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerPolicyEndpoints(router, s.actionsEndpoints())
 	s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())
 	s.registerPolicyEndpoints(router, s.sessionEndpoints())
+	s.registerAccountRoutes(router)
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: the cache proves itself with its storage.count service token,
-	// which these handlers check.
-	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
 	// safety: these carry a URL signature this process minted, not a bearer.
 	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", s.handleOutputBlobPut)
 	router.HandleFunc("GET /api/v1/outputs/objects/{key...}", s.handleOutputBlobGet)
 	router.HandleFunc("PUT /api/v1/log-segments/{key...}", s.handleLogSegmentPut)
-	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
-	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
-	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	router.Handle("POST /webhooks/stripe", s.paymentHandler())
@@ -1111,11 +1088,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		servers = append(servers, listener(s.trustedProxyAddr, ratelimit.TrustedListener(srv.Handler)))
 	}
 
-	if n, err := store.Maintenance.ReconcileConcurrencyKeys(s.store, ctx, store.DefaultConcurrencyLease); err != nil {
-		s.logger.Warn("concurrency reconcile on startup failed", "err", err)
-	} else if n > 0 {
-		s.logger.Info("concurrency reconcile promoted stranded waiters", "count", n)
-	}
+	s.reapLeased(ctx)
 
 	s.loadEgressUsage(ctx)
 	s.reconcileOwnedRuns(ctx)
@@ -1125,7 +1098,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runCronTick(ctx, cronTickOffer)
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 	go s.runBucketCeiling(ctx)
-	go s.runStoragePass(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 	go s.runCardBilling(ctx, CardBillingInterval)
 
@@ -1243,7 +1215,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.sweepEgressUsage(ctx)
 			s.reapLeased(ctx)
 			s.reconcileOwnedRuns(ctx)
 			s.sampleOperationalSeries(ctx)
@@ -1267,9 +1238,7 @@ func (s *Server) reapLeased(ctx context.Context) bool {
 }
 
 func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
-	concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
-		CacheCap: s.concurrencyCacheCap,
-	})
+	concurrency, err := s.store.AsOperator().MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
 	if err != nil {
 		s.logger.Error("concurrency maintenance failed", "err", err)
 	}
@@ -1283,12 +1252,6 @@ func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
 			"key", w.Key, "run_id", w.RunID,
 			"node_id", w.NodeID, "policy", w.Policy,
 			"arrived_at", w.ArrivedAt.Format(time.RFC3339))
-	}
-	if concurrency.CacheExpired > 0 {
-		s.logger.Info("swept expired concurrency cache entries", "count", concurrency.CacheExpired)
-	}
-	if concurrency.CacheEvicted > 0 {
-		s.logger.Info("evicted LRU concurrency cache entries", "count", concurrency.CacheEvicted)
 	}
 	if recoveries, err := s.store.ReapUnits(ctx, lease, 500); err != nil {
 		s.logger.Error("work recovery sweep failed", "err", err)

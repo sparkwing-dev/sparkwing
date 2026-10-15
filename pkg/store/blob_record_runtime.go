@@ -115,11 +115,6 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 	if err != nil {
 		return blob.Record{}, err
 	}
-	// safety: verified manifest I/O can outlast the uploader's authority.
-	a, err = resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Authority, capability.DataWrite)
-	if err != nil {
-		return blob.Record{}, err
-	}
 	scope, err := r.rules.RecordNamespace(request.Key)
 	if err != nil {
 		return blob.Record{}, err
@@ -136,23 +131,6 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 			return blob.Record{}, authorityError(apierr.PayloadTooLarge, "output exceeds the byte limit")
 		}
 	}
-	digests := []blob.Digest{request.Digest}
-	if request.ManifestDigest.Set {
-		digests = append(digests, request.ManifestDigest.Value)
-	}
-	for _, member := range members {
-		digests = append(digests, member.Digest)
-	}
-	slices.Sort(digests)
-	digests = slices.Compact(digests)
-	for _, digest := range digests {
-		if err := advisoryLockTx(ctx, tx, "blob:"+string(r.tenant.team)+":"+string(digest)); err != nil {
-			return blob.Record{}, err
-		}
-		if err := r.authorizeDigestTx(ctx, tx, a, request.Key.Kind, digest); err != nil {
-			return blob.Record{}, err
-		}
-	}
 	if request.Key.Kind == blob.KindMemo {
 		if !request.ExpiresAt.Set {
 			request.ExpiresAt = runspec.Optional[time.Time]{Set: true, Value: tx.now().Add(limits.MemoDefaultTTL)}
@@ -165,28 +143,14 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 		}
 	}
 	record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, CreatedAt: tx.now(), ExpiresAt: request.ExpiresAt}
-	existing, found, err := readBlobRecordTx(ctx, tx, request.Key, scope)
+	batch, err := r.mutateRecordsTx(ctx, tx, a, []blobRecordMutation{{record: record, scope: scope, members: members}}, false)
 	if err != nil {
 		return blob.Record{}, err
 	}
-	if found && (request.Key.Kind == blob.KindOutput || request.Key.Kind == blob.KindManifest) {
-		if existing.Digest != record.Digest || existing.ManifestDigest != record.ManifestDigest || existing.ExpiresAt != record.ExpiresAt || !reflect.DeepEqual(existing.Source, record.Source) {
-			return blob.Record{}, authorityError(apierr.Conflict, "job output record is immutable")
-		}
-		return existing, tx.Commit()
-	}
-	if err := persistBlobRecordTx(ctx, tx, record, scope, a.source); err != nil {
+	if err := tx.Commit(); err != nil {
 		return blob.Record{}, err
 	}
-	if err := persistBlobMembersTx(ctx, tx, r.tenant.team, record, members); err != nil {
-		return blob.Record{}, err
-	}
-	for _, digest := range digests {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", r.tenant.team, digest); err != nil {
-			return blob.Record{}, err
-		}
-	}
-	return record, tx.Commit()
+	return batch[0], nil
 }
 
 func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {

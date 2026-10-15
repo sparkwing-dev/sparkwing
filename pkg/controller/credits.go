@@ -275,13 +275,19 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a cap
 	return nil
 }
 
-func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.store.CreditSettings(r.Context())
+func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	if !s.Metering() {
+		return &apierr.Error{Code: apierr.NotFound, Message: "credit billing is unavailable"}
+	}
+	if s.store == nil {
+		return missingEndpointPolicy()
+	}
+	settings, err := s.store.AsOperator().CreditSettings(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
+	return nil
 }
 
 func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
@@ -289,7 +295,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 	if err := decodeJSON(r, &body); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
-	settings, err := s.store.SetOperatorCreditSettings(r.Context(), body.update())
+	settings, err := s.store.AsOperator().SetOperatorCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
 			return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
@@ -513,12 +519,8 @@ func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.Insufficie
 // trigger claim gets when it names no node runner that claims each node.
 const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 
-// safety: credits are charged on node claims, and a trigger holder that runs
-// nodes in its own process never makes one, so a metered credential claims a
-// trigger only when it runs the nodes through k8s Jobs or warm capacity,
-// which claim each node themselves.
 func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Request, nodeRunner string) bool {
-	if nodeRunner == "k8s" || nodeRunner == "warm" {
+	if nodeRunner == "k8s" {
 		return false
 	}
 	prefix, err := s.meteredTokenPrefix(r)
@@ -532,7 +534,7 @@ func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Requ
 	p, _ := PrincipalFromContext(r.Context())
 	writeAuthError(w, http.StatusForbidden, authErrorBody{
 		Code: MeteredInProcessNodesCode, Principal: p.label(),
-		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s or warm",
+		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s",
 	})
 	return true
 }

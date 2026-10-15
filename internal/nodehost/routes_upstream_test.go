@@ -129,7 +129,7 @@ func ask(t *testing.T, s *nodehost.Server, method, path, bearer, body string) re
 
 func wantRefusal(t *testing.T, got reply, status int, code string) {
 	t.Helper()
-	if got.status != status || got.body["code"] != code {
+	if got.status != status || failureCode(got) != code {
 		t.Fatalf("status %d body %v, want %d %s", got.status, got.body, status, code)
 	}
 }
@@ -159,7 +159,7 @@ func TestForwardRoutesWithoutAClaimAnswer502(t *testing.T) {
 	s, _ := start(t)
 	bearer, _ := admitClaim(t, s, "build", nil)
 	got := ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"sts"}`)
-	wantRefusal(t, got, http.StatusBadGateway, "upstream_unavailable")
+	wantRefusal(t, got, http.StatusServiceUnavailable, "unavailable")
 }
 
 func nodeWithClaim(node string, claim *nodehost.Claim) nodehost.Node {

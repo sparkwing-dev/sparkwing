@@ -4,6 +4,27 @@
 
 ## Amendment 1 integration evidence
 
+`TestSurface/surface-schedules-and-managed-timers/store-sqlite` checks schedule
+persistence below CLI, timers and HTTP. Two teams share one repository path.
+Foreign reads, edits and fire history stay inaccessible. A failed history insert
+rolls back the cursor. Reopening preserves both schedule history and operator tick
+metadata. Tenant deletion preserves the other team's schedule. The native
+managed-timer cells remain pending.
+
+`TestPlacement/placement-ordered-matching/store-sqlite` checks that an Actions
+push cannot claim another repository's earlier trigger. Two jobs prove that soft
+preferences rank eligible choices and remain optional. An ineligible oldest job
+keeps its queue position through failed polls and can be claimed as soon as its
+requirement is satisfied. The final store transactions, matcher and capability
+ancestry are real. Enrollment is a contract fake. Native placement cells remain
+required.
+
+`TestRecovery/recovery-concurrency-no-revival/store-sqlite` runs the elected
+capacity maintenance pass. A forged fence cannot promote work. After expiry, the
+queued competitor takes capacity exactly once. Reopening preserves that holder,
+and the former owner queues as a new arrival. Native host and platform cells
+remain required.
+
 `TestRecovery/recovery-local-orphans/store-sqlite` proves the local store boundary.
 It runs the elected reaper, repeats the pass and reopens the database. Unstarted
 owners requeue without a disruption. Started owners fail in place. Each case has
@@ -318,13 +339,15 @@ dispatch, unique lifecycle events, and persistence across reopening. Authority i
 preseeded in the final schema and enrollment uses a contract fake. These cells
 do not replace the native placement cells below.
 
-`TestRecovery/recovery-application-retry-ordinal/store-sqlite` checks a failed
-attempt followed by a successful retry under one holder, generation and lease.
-Both completed attempt records and the three exact lifecycle events survive
-reopening. Terminal replay emits no extra event and a conflicting result fails.
-The repeated-identical-failure contract gap in `handoffs.md` remains open.
-This cell proves one application retry at the store boundary. Native process,
-backoff and launcher-Job continuity still require their placement cells.
+`TestRecovery/recovery-application-retry-ordinal/store-sqlite` checks two identical
+failures followed by success under one holder, generation and lease. Explicit
+source ordinals separate their replay identities. Delayed failure and success
+reports cannot affect a newer attempt. Retry replay after reopening creates no
+attempt or event. All three completed attempts and the four exact lifecycle
+events survive reopening. Terminal replay emits no extra event and a conflicting
+result fails. W9's source-ordinal wire amendment remains open in `handoffs.md`.
+Native process, backoff and launcher-Job continuity still require their placement
+cells.
 
 The nine skeleton groups are `TestLifecycle`, `TestRecovery`, `TestPlacement`,
 `TestCredentials`, `TestStorage`, `TestProtocol`, `TestEnvironment`, `TestSurface`

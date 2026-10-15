@@ -58,25 +58,25 @@ func (d *debugStore) eventList() []string {
 }
 
 func fastDebugPolls(t *testing.T) {
-	previous := debugPausePoll
+	prevPause := debugPausePoll
 	debugPausePoll = time.Millisecond
-	t.Cleanup(func() { debugPausePoll = previous })
+	t.Cleanup(func() { debugPausePoll = prevPause })
 }
 
 func hostDebug(t *testing.T, ctx context.Context, ds *debugStore, doc nodeproto.PlanDoc, dbg Debug, exec Executor) RunResult {
 	t.Helper()
 	if err := ds.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		t.Fatalf("validate: %v", err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	cfg := Config{Execute: exec, Debug: dbg}
 	run := &Run{ID: testRunID, Doc: doc, State: ds, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
 	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
-		t.Fatalf("add: %v", err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	s.loop(ctx)
 	res.Status, res.Err = s.verdict(ctx)
@@ -115,7 +115,7 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 
 			done := make(chan RunResult, 1)
 			go func() { done <- hostDebug(t, ctx, ds, doc, tc.dbg, fx.run) }()
-			if got := <-ds.paused; got != "build:"+tc.reason {
+			if got := awaitHostedEvent(t, ctx, ds.paused, done); got != "build:"+tc.reason {
 				t.Fatalf("paused %q, want build:%s", got, tc.reason)
 			}
 			if fx.ran("build") != tc.ranOnce {
@@ -124,13 +124,13 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 			if fx.ran("deploy") {
 				t.Error("deploy ran while build was paused")
 			}
-			if row := nodeRow(t, ds.Store, "build"); row.Status != "paused" {
-				t.Errorf("build row status %q while paused, want paused", row.Status)
+			if row := nodeRow(t, ds.Store, "build"); row.StatusDetail != "paused" {
+				t.Errorf("build row detail %q while paused, want paused", row.StatusDetail)
 			}
 			if err := ds.ReleaseDebugPause(ctx, testRunID, "build", "alice", store.PauseReleaseManual); err != nil {
 				t.Fatal(err)
 			}
-			<-done
+			awaitHostedResult(t, ctx, done)
 			wantRow(t, ds.Store, "build", tc.outcome, "")
 			if !fx.ran("deploy") && tc.outcome == sparkwing.Success {
 				t.Error("deploy never ran after build resumed")
@@ -176,9 +176,9 @@ func TestDebugCancelDuringAPauseCancelsTheNode(t *testing.T) {
 			runCtx, stop := context.WithCancel(ctx)
 			done := make(chan RunResult, 1)
 			go func() { done <- hostDebug(t, runCtx, ds, doc, dbg, fx.run) }()
-			<-ds.paused
+			awaitHostedEvent(t, ctx, ds.paused, done)
 			stop()
-			res := <-done
+			res := awaitHostedResult(t, ctx, done)
 
 			if res.Status != "failed" {
 				t.Errorf("run status %q, want failed", res.Status)
@@ -216,7 +216,7 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 	done := make(chan RunResult, 1)
 	go func() { done <- hostDebug(t, ctx, ds, doc, dbg, fx.run) }()
 
-	if got := <-ds.paused; got != "gate:"+store.PauseReasonBefore {
+	if got := awaitHostedEvent(t, ctx, ds.paused, done); got != "gate:"+store.PauseReasonBefore {
 		t.Fatalf("paused %q, want the gate before it waits", got)
 	}
 	if _, err := ds.GetApproval(ctx, testRunID, "gate"); !errors.Is(err, store.ErrNotFound) {
@@ -225,11 +225,11 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 	if err := ds.ReleaseDebugPause(ctx, testRunID, "gate", "alice", store.PauseReleaseManual); err != nil {
 		t.Fatal(err)
 	}
-	<-ds.asked
+	awaitHostedEvent(t, ctx, ds.asked, done)
 	if err := resolveAs(store.ApprovalResolutionApproved, "alice", "")(ds.Store); err != nil {
 		t.Fatal(err)
 	}
-	<-done
+	awaitHostedResult(t, ctx, done)
 
 	wantRow(t, ds.Store, "rollback", sparkwing.Failed, "still broke")
 	pauses, err := ds.ListDebugPauses(ctx, testRunID)

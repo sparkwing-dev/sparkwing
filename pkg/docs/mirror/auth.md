@@ -683,11 +683,10 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.read`       | GET `/api/v1/runs/{id}/logs`, `/runs/{id}/logs/{node}`, `/runs/{id}/logs/{node}/stream`, `/runs/{id}/logs/{node}/completeness`, `/runs/{id}/logs/search` and `/runs/grep` |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`. Every write naming a run is bound to a run the caller owns |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, the readiness route `mark-ready`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`. Every write naming a run is bound to a run the caller owns |
 | `secrets.read` | Member or verified local reads of unmasked config through GET `/api/v1/secrets/{name}`. Masked values require a live, declaring `secrets.release` claim |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
-| `storage.count`   | The cache service's scope: POST `/internal/storage/reserve`, `/internal/storage/commit` and `/internal/storage/release` for any team's cache or logs, POST `/internal/downloads/charge`. It reaches no other route, and only the operator mints it, with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`; no team's token may carry it. The cache reads it from the file `controller-token` in its `--credentials-dir` |
 | `admin`           | tokens / users / secrets CRUD, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
@@ -712,9 +711,8 @@ opens with exactly those two reads: `GET /api/v1/runs/{id}` and
 run in place of the scope, so the claim the runner already took is what opens
 them. Add `runs.read` only to give a token the deployment-wide view.
 
-A warm-pool dispatcher hands nodes to a pool on that same set. It opens and
-closes each claim round while holding the run's trigger claim, so the readiness
-routes admit it without an `admin` token.
+Queued and named claims use the shared matcher. The warm dispatcher and its
+offer-round finalization route are removed.
 
 Registered secret string values are masked in child-run events before storage,
 including values escaped by JSON. Numeric fields retain their types and precision.
@@ -768,8 +766,8 @@ the lease and never widens list routes.
 Run-definition writes -- run create and finish, plan snapshot, node create, and
 run-level events -- require the source trigger's exact live generation.
 Per-node writes accept either the node's exact live claim or that source
-trigger generation. A run heartbeat likewise accepts one exact live node claim
-from the run or the source trigger generation. A runner with `runs.state` but
+trigger generation. Run liveness follows the exact owner lease. A job claim
+cannot keep the run owner alive. A runner with `runs.state` but
 without the applicable fence gets `403 claim_required`; a stale generation
 gets `409 Conflict`.
 
@@ -813,7 +811,7 @@ claim:
   missing. The child is claimed like any other run and never holds the
   parent's claim token. Anything else answers `403 claim_mismatch`.
 - It reads any node of its run but writes only to its own node. Of the
-  run-level writes it makes only a node's own: events, the run heartbeat, the
+  run-level writes it makes only a node's own: events, the
   cache grant, the run's workload OIDC token, the run's source credential and
   the run's Git proxy. Run
   create and finish, plan, node create and the readiness routes answer
@@ -843,9 +841,9 @@ The two reads a node process opens with, `GET /api/v1/runs/{id}` and
 without `runs.read` or `triggers.read` is admitted when it holds a live claim
 on that run, and refused with `403 missing_scope` otherwise.
 
-`mark-ready`, `revoke-ready`, and `finalize-ready` take `runs.state` plus the
+`mark-ready` takes `runs.state` plus the
 live claim on the run's trigger. A
-node claim never satisfies them: readiness is a dispatcher decision, and the
+node claim never satisfies it: readiness is a dispatcher decision, and the
 dispatcher is whoever claimed the trigger. A caller that does not hold that
 claim gets `403 claim_required`, and a run with no trigger row answers `404`.
 `admin` bypasses.
@@ -863,8 +861,7 @@ already lapsed, because a lapsed row proves nothing about who is calling. The
 `admin` bypasses all of it.
 
 A `nodes.claim` token also reaches only the runs it is working on. The node
-read routes (`GET nodes/{id}`, `nodes/{id}/output`) and
-`POST /runs/{id}/heartbeat` answer `403 claim_required` unless the caller holds
+read routes (`GET nodes/{id}`, `nodes/{id}/output`) answer `403 claim_required` unless the caller holds
 an unexpired claim on some node of that run. `admin` bypasses; so does
 `runs.read` on the reads, which already grants the wider view through
 `GET /runs/{id}/nodes`.
@@ -1061,9 +1058,10 @@ cache verifies grants with, and the purge deletes the team's segments under
 every retention class's `teams/<team>/` prefix. An owner cannot delete their
 only team; deleting their account does that.
 
-A user deletes their account with `DELETE /api/v1/me`, typing their email back
-as `confirm_email`, from a session signed in within the last 10 minutes; an
-older session answers `403` with `reauth_required`. The account, its sign-in
+Account deletion uses `DELETE /api/v1/operator/accounts/{account}` and requires
+an operator-console session with CSRF proof. Self-service `DELETE /api/v1/me`
+is removed. Bearers and ordinary account sessions cannot delete accounts.
+The account, its sign-in
 identities, memberships and sessions go, and every token it minted in any team
 is revoked. Teams the user is the only member of, their personal space
 included, are deleted as above. In teams the user shares, rows that recorded
@@ -1080,10 +1078,8 @@ charges name the team, not a person, and are left as they are. A replica's
 in-memory egress counter for the address can write it back once until that
 month's rows are pruned. While the user is the last owner of a team that has
 other members the request answers `409` and lists those teams, so they hand
-ownership on or delete each first. The operator carries out a request that
-arrived by mail with `DELETE /api/v1/accounts/{account}`, naming the account by
-id or email, and deletes a team with `DELETE /api/v1/teams/{team}`; both need
-`admin`.
+ownership on or delete each first. The console names the account by id or email. Team deletion uses
+`DELETE /api/v1/operator/teams/{team}` under the same console proof.
 
 Owning a secret means creating and deleting it, not keeping it from editors.
 Anyone who can run a team's pipelines -- an editor or above -- can use the
@@ -1701,11 +1697,10 @@ renew the claim nor report the result, so the runner cancels the node or run
 rather than beating until the lease lapses.
 
 A dispatcher whose token dies mid-run treats it as a lost claim. The local,
-Kubernetes and warm-pool runners stop their node heartbeats and status polls,
+and Kubernetes runners stop their node heartbeats and status polls,
 write no row for the node, and hand it back as cancelled. They leave running
 work alone: a local child process or a Job's pod renews its node claim with its
-own credential, so it finishes or stops by that claim. A warm-pool node is not
-handed to the fallback. `sparkwing runs logs --follow` against a controller
+own credential, so it finishes or stops by that claim. `sparkwing runs logs --follow` against a controller
 stops at the first dead-token refusal, and backs off from 300ms to 5s on other
 failures.
 
@@ -1751,3 +1746,21 @@ resets the backoff.
   boundary. A future
   capability service could make the same split portable across container and
   process boundaries that do not share one supervisor.
+
+## Account discovery
+
+`GET /api/v1/me`, `GET /api/v1/me/identities` and
+`GET /api/v1/me/team-deletions` require a live account session. They use the
+shared route policy and return the common error object. A live bearer, machine
+claim, deployment credential or local peer cannot read these account records.
+Account and email selectors in the URL do not change whose records are read.
+
+These reads do not renew sessions, set cookies or change the active team.
+Use the active-team action to select another membership. `GET /me` reports the
+team in the authenticated session, even if the account's saved choice differs.
+Embedders may supply `WithAccountReader` before constructing `Handler`. The
+default reader uses the controller store.
+
+`GET /api/v1/credits/settings` uses the member `runs.read` policy. Authentication
+precedes the check that credit billing is enabled. An unavailable billing
+feature returns `not_found` only after authentication and authorization.

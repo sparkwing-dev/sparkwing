@@ -100,14 +100,6 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("expected ErrLockHeld, got %v", err)
 	}
-
-	revoked, err := c.RevokeNodeReady(ctx, "run-1", "node-a")
-	if err != nil {
-		t.Fatalf("RevokeNodeReady: %v", err)
-	}
-	if revoked {
-		t.Fatal("revoke should be false when node is claimed")
-	}
 }
 
 func TestNodeClaim_ExecutionStartAcknowledgement(t *testing.T) {
@@ -173,39 +165,6 @@ func TestNodeClaim_ExecutionStartAcknowledgement(t *testing.T) {
 		Outcome: "cancelled",
 	}); err != nil {
 		t.Fatalf("cancelled execution finish: %v", err)
-	}
-}
-
-func TestNodeClaim_RevokeAfterReadyNoPodClaimedYet(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-	c := client.New(srv.URL, nil)
-	ctx := context.Background()
-
-	seedRunNode(t, st, "run-1", "node-a")
-	if err := c.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
-		t.Fatal(err)
-	}
-	revoked, err := c.RevokeNodeReady(ctx, "run-1", "node-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !revoked {
-		t.Fatal("revoke should succeed on ready, unclaimed node")
-	}
-	n, err := c.ClaimNode(ctx, "pod-1", nil, 30*time.Second, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != nil {
-		t.Fatalf("node should not be claimable after revoke: %+v", n)
 	}
 }
 

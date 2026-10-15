@@ -57,10 +57,10 @@ func TestLocalChildrenStartAndAwaitWithoutAController(t *testing.T) {
 		Hold: func() func() { holds++; return func() { resumes++ } },
 	})
 
-	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, ""); got.status != http.StatusNotFound || got.body["code"] != "unknown_child" {
+	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, ""); got.status != http.StatusNotFound || failureCode(got) != "not_found" {
 		t.Fatalf("await before start: status %d body %v", got.status, got.body)
 	}
-	if got := ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"self"}`); got.status != http.StatusConflict || got.body["code"] != "cycle" {
+	if got := ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"self"}`); got.status != http.StatusConflict || failureCode(got) != "conflict" {
 		t.Fatalf("cycle: status %d body %v", got.status, got.body)
 	}
 	got := ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
@@ -71,7 +71,7 @@ func TestLocalChildrenStartAndAwaitWithoutAController(t *testing.T) {
 		t.Fatalf("parents = %v, want %v: the child attaches to what that node holds", kids.parents, want)
 	}
 
-	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=300&node=build", bearer, ""); got.status != http.StatusOK || got.body["status"] != "pending" {
+	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=300&job=build", bearer, ""); got.status != http.StatusOK || got.body["status"] != "pending" {
 		t.Fatalf("queued child: status %d body %v", got.status, got.body)
 	}
 	if holds != 1 || resumes != 1 {
@@ -80,11 +80,11 @@ func TestLocalChildrenStartAndAwaitWithoutAController(t *testing.T) {
 	kids.mu.Lock()
 	kids.runs["child-1"] = &store.Run{ID: "child-1", Status: "success"}
 	kids.mu.Unlock()
-	got = ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=1000&node=build", bearer, "")
+	got = ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=1000&job=build", bearer, "")
 	if out, _ := got.body["output"].(map[string]any); got.status != http.StatusOK || got.body["status"] != "success" || out["tag"] != "v2" {
 		t.Fatalf("finished child: status %d body %v", got.status, got.body)
 	}
-	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0&node=nope", bearer, ""); got.status != http.StatusNotFound || got.body["code"] != "unknown_node" {
+	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0&job=nope", bearer, ""); got.status != http.StatusNotFound || failureCode(got) != "unknown_job" {
 		t.Fatalf("unknown node: status %d body %v", got.status, got.body)
 	}
 	noLeak(t, logs)

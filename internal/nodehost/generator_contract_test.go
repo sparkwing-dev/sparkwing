@@ -4,6 +4,7 @@ package nodehost
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestGeneratorFixturesUseValidatedV2Declarations(t *testing.T) {
@@ -43,25 +45,24 @@ func TestGeneratorFixturesUseValidatedV2Declarations(t *testing.T) {
 			}
 			validation.Expansion, validation.ExistingJobs = true, plan.Jobs
 			for _, source := range []string{"targets", "child"} {
-				var result nodeproto.EvalResult
-				if err := ask(t.Context(), session, nodeproto.Request{Op: nodeproto.OpEval, Closure: source + "/generate/0"}, &result); err != nil {
+				closure := source + "/generate/0"
+				raw, err := evalGenerator(t.Context(), session, closure)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if result.Error != nil {
-					t.Fatal(result.Error)
+				writes := &expansionWrites{}
+				s := &scheduler{run: &Run{ID: "r", Doc: plan, State: writes, Logger: slog.New(slog.DiscardHandler), validation: validation}, nodes: slices.Clone(validation.ExistingJobs), results: map[string]Result{}, started: map[string]bool{}}
+				s.expand(t.Context(), source, Result{Outcome: sparkwing.Success, expansions: []expansion{{closure: closure, raw: raw}}})
+				if err := s.group(closure).err; err != nil {
+					t.Fatal(err)
 				}
-				validation.SourceJob = source
-				expansion, err := nodeproto.ValidatePlan(append(append([]byte(`{"jobs":`), result.Value...), '}'), validation)
-				if err != nil {
-					t.Fatalf("%s expansion: %v", source, err)
-				}
-				if len(expansion.Jobs) == 0 {
+				if len(writes.nodes) == 0 {
 					t.Fatalf("%s generated no jobs", source)
 				}
-				if !slices.Equal(expansion.Jobs[0].Needs, []string{source}) {
-					t.Fatalf("generated dependency = %v, want %s", expansion.Jobs[0].Needs, source)
+				if !slices.Equal(writes.nodes[0].Deps, []string{source}) {
+					t.Fatalf("generated dependency = %v, want %s", writes.nodes[0].Deps, source)
 				}
-				validation.ExistingJobs = append(validation.ExistingJobs, expansion.Jobs...)
+				validation.ExistingJobs = s.nodes
 			}
 		})
 	}

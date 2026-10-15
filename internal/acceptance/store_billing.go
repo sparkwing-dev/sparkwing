@@ -35,8 +35,18 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if err := seedStoreBillingBoundary(ctx, db); err != nil {
 		return err
 	}
+	for _, team := range []store.Team{store.DefaultTeam, "neighbor_%'--"} {
+		tenant, err := s.ForTeam(ctx, team)
+		if err != nil {
+			return err
+		}
+		_, err = tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000000, Reference: "caller-selected", CreatedBy: "billing"})
+		if !errors.Is(err, store.ErrInvalidInput) {
+			return fmt.Errorf("raw paid grant for %s: %v", team, err)
+		}
+	}
 	rate, free := int64(store.StorageBytesPerGB), int64(3)
-	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		return err
 	}
 	operator := s.AsOperator()

@@ -592,19 +592,6 @@ paths:
                 detail: {type: string}
       responses:
         "204": {description: Updated.}
-
-  /api/v1/runs/{id}/nodes/{nodeID}/touch:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Update the node's last-heartbeat timestamp.
-      responses:
-        "204": {description: Touched.}
-
-  /api/v1/runs/{run}/jobs/{job}/annotations:
     parameters:
       - in: path
         name: run
@@ -615,7 +602,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: node.report or node.report or data.write
+      x-sparkwing-scope: claim or nodes.claim
       tags: [jobs]
       summary: Append one annotation string to the job.
       description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
@@ -736,26 +723,6 @@ paths:
         "204": {description: Stamped.}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: runs.state
-      tags: [nodes]
-      summary: Atomically null `ready_at` iff the node is not claimed.
-      responses:
-        "200":
-          description: Whether the revoke won the race.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.revokeResp
-                type: object
-                required: [revoked]
-                properties:
-                  revoked: {type: boolean}
-
   /api/v1/runs/{id}/nodes/{nodeID}/heartbeat:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
@@ -804,55 +771,6 @@ paths:
         "204": {description: Lease extended.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: Caller is not the current claim holder.}
-
-  /api/v1/runs/{run}/heartbeat:
-    parameters:
-      - in: path
-        name: run
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: trigger.host
-      tags: [runs]
-      summary: Renew the authorized run owner lease.
-      description: The store renews the owner and its self-claimed jobs and concurrency holders atomically, then returns cancellation and watched jobs.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/EngineRenewalRequest"}
-      responses:
-        "200":
-          description: Committed result, including replay.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/EngineRenewalResponse"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-        "409": {description: The state or authority changed before the transaction committed.}
-
-  /api/v1/runs/{id}/nodes/{nodeID}/status:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: runs.state
-      tags: [nodes]
-      summary: Override a node's status (debug / repair).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSetNodeStatus.body
-              type: object
-              required: [status]
-              properties:
-                status: {type: string}
-      responses:
-        "204": {description: Updated.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/release:
     parameters:
@@ -2757,40 +2675,6 @@ paths:
         "409": {description: Claim is stale or the ordinal is not the next attempt.}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-      - in: path
-        name: nodeID
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: runs.state
-      tags: [nodes]
-      summary: Close a claim round and release the node to the dispatcher's fallback.
-      description: |
-        After the five-second claim window, clears the readiness of a node no
-        runner claimed so the dispatcher can execute it itself. A still-open
-        round or hard placement requirement reports `pending`.
-      responses:
-        "200":
-          description: Resolution state.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [revoked]
-                properties:
-                  revoked: {type: boolean, description: Readiness moved back to coordinator fallback.}
-                  pending: {type: boolean, description: The offer window or a hard placement requirement remains unresolved.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
   /api/v1/crons:
     get:
       x-sparkwing-scope: runs.read
@@ -3586,7 +3470,7 @@ paths:
       x-sparkwing-scope: authenticated
       tags: [teams]
       summary: Describe the signed-in user, the active team, every membership, and open invitations.
-      description: "Needs an identity-provider session (`Authorization: Session <id>`); a bearer token answers 401."
+      description: "Requires a live account session. A live bearer or unrelated authority answers 403. Reads do not renew the session or change its team."
       responses:
         "200":
           description: The signed-in user.
@@ -3620,46 +3504,6 @@ paths:
                         team_display_name: {type: string}
                         role: {type: string, enum: [owner, editor, reader]}
         "401": {$ref: "#/components/responses/Unauthorized"}
-    delete:
-      x-sparkwing-scope: authenticated
-      tags: [teams]
-      summary: Delete the signed-in user's account.
-      description: >-
-        Needs an identity-provider session signed in within the last 10 minutes, and `confirm_email` equal to the account's address. Removes the account, its sign-in identities, memberships and sessions, and revokes every token it minted in any team. Teams the account is the only member of, its personal space included, are queued for deletion with all their data. Rows that recorded the account in teams it shared (runs, triggers, approvals, schedules, pause releases, credit grants, node claims, secrets, egress usage, event payloads) stay with those teams and name `deleted user`. While the account is the last owner of a team that has other members the request answers 409 and lists those teams.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.deleteAccountReq
-              type: object
-              required: [confirm_email]
-              properties:
-                confirm_email: {type: string}
-      responses:
-        "200":
-          description: Deleted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
-                type: object
-                required: [account_id, deleted_teams]
-                properties:
-                  account_id: {type: string}
-                  deleted_teams:
-                    type: array
-                    items: {type: string}
-                    description: Teams the account was the only member of, now queued for deletion.
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`); sign in again and retry."}
-        "409":
-          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PolicyError"
 
   /api/v1/me/team-deletions:
     get:
@@ -3704,7 +3548,7 @@ paths:
       x-sparkwing-scope: authenticated
       tags: [teams]
       summary: List the signed-in user's sign-in methods and the providers the account can link.
-      description: "Needs an identity-provider session (`Authorization: Session <id>`); a bearer token answers 401."
+      description: "Requires a live account session. A live bearer or unrelated authority answers 403. Reads do not renew the session or change its team."
       responses:
         "200":
           description: The account's sign-in methods.
@@ -4758,166 +4602,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-
-  /internal/storage/reserve:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Reserve room in a team's cache or log store before a write.
-      description: |
-        Only the cache's `storage.count` service token may call it, for any
-        team. A free team is held to its share of the allowance, three
-        quarters for the cache and three sixteenths for logs, counting what
-        it stores and every reservation still held; a funded team is counted
-        without a limit. `up_to` grants as much of `bytes` as the team has room for,
-        zero or less asking for all of it. A reservation expires after an
-        hour unless it is committed or released.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              x-sparkwing-go-type: pkg/controller.storageReserveReq
-              required: [team, store, bytes]
-              properties:
-                team: {type: string}
-                store: {type: string, enum: [cache, logs]}
-                bytes: {type: integer, format: int64}
-                up_to: {type: boolean}
-      responses:
-        "200":
-          description: The reservation. A single-team controller answers funded with no id.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/store.StorageReservation
-                properties:
-                  reservation: {type: string}
-                  tier: {type: string, enum: [funded, free]}
-                  granted_bytes: {type: integer, format: int64}
-                  unlimited: {type: boolean}
-                  expires_at: {type: string, format: date-time}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "402": {description: The team has neither credits nor a free-tier slot.}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "413": {description: The write would pass the team's free share of this store.}
-
-  /internal/storage/commit:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Count what a write stored and drop its reservation.
-      description: |
-        `bytes` is what the write added to the store: its size, or for an
-        overwrite the difference from what it replaced, which may be
-        negative. A reservation that already expired, or that is not the
-        named team's, drops nothing and the bytes still count. Callers are
-        authorized as for the reserve route. `next_bytes` above zero also
-        reserves up to that many bytes more in the same transaction and
-        answers the new reservation, for a writer that draws many small
-        writes from one block; the commit lands even when the next block is
-        refused.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              x-sparkwing-go-type: pkg/controller.storageCommitReq
-              required: [team, store, bytes]
-              properties:
-                team: {type: string}
-                store: {type: string, enum: [cache, logs]}
-                reservation: {type: string}
-                bytes: {type: integer, format: int64}
-                next_bytes: {type: integer, format: int64}
-      responses:
-        "200":
-          description: Counted, and the next block when `next_bytes` asked for one.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/store.StorageReservation
-                properties:
-                  reservation: {type: string}
-                  tier: {type: string, enum: [funded, free]}
-                  granted_bytes: {type: integer, format: int64}
-                  unlimited: {type: boolean}
-                  expires_at: {type: string, format: date-time}
-        "204": {description: Counted.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "402": {description: "The next block was refused: the team has neither credits nor a free-tier slot. The commit landed."}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "413": {description: "The next block was refused: the team's share is spent. The commit landed."}
-
-  /internal/storage/release:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Give back a reservation whose write stored nothing.
-      description: A reservation already committed, released or expired is not an error.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              x-sparkwing-go-type: pkg/controller.storageReleaseReq
-              required: [team, reservation]
-              properties:
-                team: {type: string}
-                reservation: {type: string}
-      responses:
-        "204": {description: Released.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /internal/downloads/charge:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Charge a download to its team's UTC day.
-      description: |
-        Only the cache's `storage.count` service token reaches it. A
-        download whose size is known is charged whole before its first byte and refused when it
-        would pass the team's daily cap, `--team-daily-download-free-bytes`
-        or `--team-daily-download-funded-bytes` by whether the team pays.
-        Zero `bytes` checks that room is left. `record` charges a finished
-        stream whatever the cap says. The operator's team has no cap.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              x-sparkwing-go-type: pkg/controller.downloadChargeReq
-              required: [team, bytes]
-              properties:
-                team: {type: string}
-                bytes: {type: integer, format: int64}
-                record: {type: boolean}
-      responses:
-        "200":
-          description: The team's day after the charge.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/store.DownloadCharged
-                properties:
-                  tier: {type: string, enum: [funded, free]}
-                  day_bytes: {type: integer, format: int64}
-                  cap_bytes: {type: integer, format: int64, description: The cap the charge was held to; zero is none.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "429": {description: "The team's day is spent; Retry-After names the seconds until midnight UTC."}
 
   /api/v1/team/billing:
     get:
@@ -6423,7 +6107,7 @@ paths:
       tags: [teams]
       summary: Delete an account on the operator's word.
       description: >-
-        Carries out a deletion request that reached the operator by other means. The path names the account by id or by email; an address held by more than one account, none verified, answers 409 and needs the id. The deletion is the one `DELETE /api/v1/me` performs, including its 409 for a last owner of a team with other members.
+        Carries out a deletion request that reached the operator by other means. The path names the account by id or by email; an address held by more than one account, none verified, answers 409 and needs the id. Requires the operator's own console session and CSRF proof. A last owner of a team with other members receives 409 with the affected teams.
       parameters:
         - {name: account, in: path, required: true, schema: {type: string}}
       responses:
@@ -7076,6 +6760,36 @@ paths:
       responses:
         default: {description: Undescribed.}
 
+  /api/v1/runs/{run}/heartbeat:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: trigger.host
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{run}/jobs/{job}/annotations:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: node.report or node.report or data.write
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
 components:
   securitySchemes:
     bearerToken:
@@ -7417,12 +7131,6 @@ components:
         annotations:
           type: array
           items: {type: string}
-        last_heartbeat_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: >-
-            Most recent run-level liveness ping from the dispatching orchestrator. Absent for rows that predate the column and for backends that ping per node instead (local and S3 modes).
         admission:
           type: string
           enum: [planning, admitted]
