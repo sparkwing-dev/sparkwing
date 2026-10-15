@@ -491,7 +491,7 @@ func TestSettlementChecksTheAttemptAndTheFrozenAmount(t *testing.T) {
 	if st, err := acme.SpendStanding(ctx, now); err != nil || st.OpenCharge == nil {
 		t.Fatalf("standing = %+v, %v; want a short payment to leave the charge open", st, err)
 	}
-	if err := s.AsOperator().RecordAttemptIntent(ctx, w.AttemptID, "pi_full", now); err != nil {
+	if err := s.AsOperator().RecordAttemptIntent(ctx, w.AttemptID, "pi_full", w.Customer, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
@@ -596,7 +596,7 @@ func TestANonActionableWarningStopsNoGrant(t *testing.T) {
 	trustWithCard(t, acme, now)
 	spend(t, s, "acme", "ch_1", 15_000)
 	w := dueCharge(t, s, now)
-	if err := s.AsOperator().RecordAttemptIntent(ctx, w.AttemptID, "pi_quiet", now); err != nil {
+	if err := s.AsOperator().RecordAttemptIntent(ctx, w.AttemptID, "pi_quiet", w.Customer, now); err != nil {
 		t.Fatal(err)
 	}
 	if team, err := s.AsOperator().TestOnlyRecordPaymentWarning(ctx, store.PaymentWarning{

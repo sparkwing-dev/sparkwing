@@ -13,6 +13,7 @@ import (
 func cardCollectionFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	t.Helper()
 	s, _ := paymentFixture(t, capability.PaymentTest)
+	providerCorrelationSchema(t, s)
 	now := time.Date(2026, 10, 15, 12, 0, 0, 123, time.UTC)
 	s.clock = func() time.Time { return now }
 	tenant := &Tenant{s: s, team: "a"}
@@ -186,7 +187,7 @@ func TestAnAttemptPastTheKeyLifeIsReplaced(t *testing.T) {
 	if next.AttemptID == first.AttemptID || next.PaymentIntent != "" {
 		t.Fatalf("attempt after a day = %+v; want a new attempt, not the old key", next)
 	}
-	if err := s.AsOperator().RecordAttemptIntent(t.Context(), next.AttemptID, "pi_bound", now); err != nil {
+	if err := s.AsOperator().RecordAttemptIntent(t.Context(), next.AttemptID, "pi_bound", next.Customer, now); err != nil {
 		t.Fatal(err)
 	}
 	later := cardCollectionDue(t, s, now.Add(72*time.Hour))

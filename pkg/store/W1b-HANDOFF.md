@@ -1,165 +1,148 @@
 # W1b store-data continuation
 
-Session base: 94764599e. The integration merge is committed and the starting
-worktree was clean. No unmerged paths or conflict markers remain. No Git write
-ran in this session.
+Session base: 9dc5f609a. The interrupted merge was already committed. The starting
+worktree was clean, and no unmerged paths remain. No Git write ran.
 
-## Implemented and deleted
+## Implemented
 
-The 12:15 materialization priority is closed through memoization. Its existing
-real-store proof passes again without changing that implementation. It selects
-a memo, copies output and manifest selectors through the controller wire and
-host, deletes the source run and memo, and reads the exact output and artifact
-bytes through persisted record authorization and filesystem signing. Missing
-or corrupt output, manifest or member bytes become executable misses. The proof
-also checks download charging, reader substitution and revocation after binding.
-The lead can release W7 to its legacy output/log cut.
+`Operator.RecordAttemptIntent` now commits the collection payment correlation
+and exact attempt binding in one ledger-locked transaction. Team and charge come
+from the persisted attempt, with their same-team relation checked. The trusted
+worker passes the customer used in its provider request. A saved-card replacement
+during that request cannot substitute the new customer. Mode comes from the
+configured store setting. Currency is USD, matching the declared ledger contract.
 
-Removed the unused production methods Store.CancelNodeForExhaustedCredits and
-Store.CancelNodeForComputeLimit. Their retained result behavior is ported to
-TestMeteredFailureReportSettlesAndReleasesClaimProperty, using real claim
-issuance and Tenant.TransitionNode. It covers runner and Cloud claims, started
-and unstarted work, failure reasons, claim release, closed compute, immutable
-award settlement and exact versus changed replay. Job and attempt finish times
-come from the store clock and cannot precede execution. An unstarted Cloud
-failure refunds its reservation. This does not implement exhaustion detection
-or renewal-time grace policy.
+Exact replay writes nothing. Changed payer, customer, attempt, charge, kind,
+currency, mode or payment fails without changing the attempt or finances. A
+payment already assigned to a checkout cannot also fund a collection. Failure
+at either the correlation insert or attempt update rolls back both writes.
+The provider collection fixture now calls this writer instead of inserting its
+correlation by hand.
 
-Also removed the unused Store.AccountEmail query. The three API cuts remove 26 production lines.
+The invariant is: a provider payment settles only its persisted collection
+attempt, charge and payer, and a refused binding changes no financial state.
+Four new tests cover both rollback boundaries, reopening, immutable replay,
+saved-card replacement before binding, checkout-payment refusal, and eight
+explicit plus 32 generated association substitutions.
 
-The tenant SQL scope guard exposed two inherited payment queries. Collection
-now reads its exact attempt under the payer already resolved from the committed
-correlation. Global payer discovery is consolidated in the existing reviewed
-paymentWarningTeamTx owner, removing providerPaymentOwnerTx. Its mode-scoped
-association must agree with retained grant and attempt identity. W1's exception
-catalog is unchanged. TestProviderPaymentRejectsConflictingPersistedPayerProperty
-replaces the correlation's payer or mode across all six payment-linked outcomes
-and requires unchanged finances. No forwarding alias or production mechanism
-was added. Source documentation and the API snapshot reflect the cuts.
+The customer argument changes W1b's existing Operator API. Its production caller
+and test callers are migrated. No other area's declared contract is changed.
+No schema fragment, new interface, environment variable or policy is added.
 
-## Acceptance and test ports
+Removed four unused exports: ErrMeteredInProcessNodes, LiveLogOffsetHeader,
+LiveLogAttemptHeader and LogWatchHeader. Their declarations and comments account
+for 20 deleted production lines. The raw, unassociated attempt update is also
+replaced. Across production Go files the diff adds 56 lines and deletes 35,
+for a net **+21 lines**. Of these, pkg/store adds 55 and deletes 34. The shared
+controller caller adds and deletes one line.
 
-Three retired tests now run through the current transition and billing owners:
+## Existing priorities and acceptance
 
-- TestCancelNodeForExhaustedCreditsFailsAndReleasesTheNode.
-- TestCancelNodeForComputeLimitFailsTheNodeAndReleasesTheClaim.
-- TestStaleCancellationSettlesAtTheExecutionStart.
+12:15 remains closed through memoization. All six cases of
+TestMaterializedResultCopiesBytesThroughControllerAndHost pass again. The real
+store selects a memo, copies committed output/manifest selectors through the
+controller wire and host, deletes the source run and memo, then reads the exact
+output and artifact bytes through persisted authorization and filesystem signing.
+Missing or corrupt output, manifest and members become executable misses.
+The proof also checks charging, substituted reader identity and revocation.
+W7 can proceed with its legacy output/log cut.
 
-Their replacement runs eight explicit combinations and 24 generated cases.
-Current transitions accept no caller-selected finish time, removing the stale
-cancellation timestamp mechanism. The port inventory records that distinction.
-The unpriced-class raw writer is retained because the current transition table
-has no owner edge that fails an unclaimed job for that refusal. Its intended
-replacement needs W1's state-machine contract; this worker did not invent one.
+07:40 item 2 retains all seven non-checkout settlement outcomes. The new binding
+writer closes the collection-association implementation gap, against the schema
+fake. Receipt persistence, provider mode isolation and setup association still
+need the integrations below. No production provider-readiness claim is made.
 
-09:40 item 1 remains closed for W1b. Its nine store proofs already live in
-pkg/store tests. The remaining internal/acceptance/store_* files cover W1's
-claims, plans, credentials, schedules, capacity, transitions and recovery. No
-Harness, scenario catalog or boundary registry was extended.
-
-No new native acceptance cell is claimed. The passing package proofs include
-materialization, provider settlement, blob records and authorization, logs,
-retention, billing, presence, CAS, cache scope and reference edges.
+09:40 item 1 remains closed for W1b. Its nine store boundary proofs already live
+in pkg/store tests. Remaining internal/acceptance/store_* files belong to W1's
+claim, plan, credential, schedule, capacity and recovery work. No scenario catalog,
+Harness or boundary registry changed. No new native acceptance cell or archived
+T1 test port is claimed in this continuation.
 
 ## Required integration and contract handoffs
 
-07:40 item 2 has all seven non-checkout outcomes implemented in
-payment_provider_settlement.go, using the expanded C2 verified-event proof.
-The existing schema fake tests pass. The production schema still cannot persist
-these receipts, so production payment readiness is not claimed. W1 must apply
-the existing local C1 requirements in design/rewrite/contracts/c1-data.md:
+- W1 must install the existing C1 payment_events and payment_correlations schema
+  contract in its final schema.sql. RecordAttemptIntent now requires that table
+  and fails without it. There is no fallback to the unassociated legacy update.
+- W1 still owns mode isolation for retained card fingerprints, warnings and
+  collection rows. Raw legacy financial rows do not become provider authority.
+- W2 owns the trusted billing-page setup correlation and production route
+  composition under the lead's 14:40 decision. W1b's collection writer now exists.
+  Provider-network/configuration composition and setup reservation persistence
+  remain unproved. The collection worker supplies its actual request customer.
+- Renewal-time credit/spend exhaustion and grace remain open. The final accounting
+  join has no declared per-award exhaustion anchor or cancellation result for
+  every unit kind. W1's renewal/state owners must expose that policy boundary.
+  Reusing the legacy node-only anchor for owner units would not satisfy it.
+- Coalesced copies still need a declared persisted cross-run read edge. Memoization
+  satisfies 12:15. Spec equality and the legacy waiter table grant no such read.
+- Legacy claim-credit and local output helpers still have W1/W3 production callers.
+  Their lifecycle migrations remain required before the backing code can go.
 
-- Extend payment_events with the seven kinds, nullable non-checkout checkout,
-  warning-only nullable payer, object_id, event_json and settlement_json. Keep
-  checkout foreign keys and required checkout associations. Index mode/object.
-- Add immutable mode/provider payment_correlations for setup or collection,
-  bound to the exact payer, customer and internal attempt/charge.
-- Trusted billing-page completion and collection writers create those
-  associations from their committed reservations. Bind the exact attempt's
-  payment intent. Signed provider metadata never chooses the payer.
-- Complete mode isolation for retained legacy card fingerprints, warnings and
-  collection rows. Raw legacy rows are not replacement provider authority.
-
-W1's schema and issuance/admission/reaping files were not edited. W2 owns the
-production route handoff under the lead's 14:40 decision. Its route adapters
-still need to meet these persistence requirements.
-
-Coalesced copies need a declared persisted cross-run read edge. Spec equality
-and the legacy waiter table cannot grant it. Memoization satisfies the requested
-12:15 byte-copy proof without that undeclared authority.
-
-Renewal-time credit/spend exhaustion and grace remain open. The shared award,
-compute, checkpoint and settlement helpers work with W1's lifecycle joins, and
-all TestMeteredUnit tests pass. Legacy claim-credit and raw local output paths
-still have W1/W3 callers in this checkout. Removing their backing code before
-those caller migrations would break the build. W1's newer independent branch
-reports more legacy cuts, but they are not in this worktree's integration base.
+The combined W1+W1b production delta against main is **+3,609 lines**:
+14,836 added and 11,227 deleted, excluding tests, testdata, acceptance and paths
+containing contract, matching the lead's budget script. This is **7,859 lines**
+over the -4,250 target. The added transaction checks implement the required
+provider correlation, replay and rollback contract inside the existing owner.
+The old single UPDATE cannot enforce that contract. No budget waiver or COMPLETE
+claim is made. Larger legacy retirement still depends on the caller migrations
+above.
 
 ## Files
 
-Production changes are in pkg/store/credits.go, card_billing.go,
-payment_provider_settlement.go, payment_lookup.go and
-payment_warning_settlement.go. Payment properties extend
-payment_provider_settlement_test.go. Tests changed in credits_test.go,
-compute_limits_test.go and credit_billing_start_test.go. The new port is
-metered_failure_test.go. STORE-DATA.md corrects stale payment integration claims
-and documents the raw writer cut. This report replaces the prior session note.
+Production edits: pkg/store/operator_card_billing.go, credits.go and node_logs.go.
+Tests: payment_collection_binding_test.go, payment_provider_settlement_test.go,
+operator_card_billing_test.go and card_billing_test.go.
+Source documentation: pkg/store/STORE-DATA.md and this report.
+Shared files: pkg/controller/card_billing.go (one customer argument),
+design/rewrite/contracts/c1-data.md and .apidiff/pkg_store.txt.
+W1's production files and the lead-owned handoffs/amendments are unchanged.
 
-Shared files touched this session: design/rewrite/contracts/t1-port-inventory.md
-and .apidiff/pkg_store.txt. No W1 production file or lead-owned handoffs/amendment
-file was changed. No W3/W7/W9 implementation file was changed again.
-
-The earlier materialization edits remain in these cross-area files:
+The earlier materialization integration files remain:
 
 - W9: internal/controllerwire/engine.go and pkg/controller/engine_snapshot.go.
 - W3: internal/nodehost/output_records.go, owner_evaluation.go,
   owner_schedule.go, remote_contract.go, sdk_code.go and sdk_replay.go.
 - W7: internal/blob/authority.go, keys.go, object_contract.go and objects.go,
   plus pkg/storage/manifest.go.
-- Controller binding: pkg/controller/data.go preserves the default persisted
-  authority resolver used by the real-store proof.
+- Controller binding: pkg/controller/data.go.
 
-## Budget
+None of those materialization files changed again in this continuation.
 
-Session net production Go delta is -28 lines: 36 added and 64 deleted, all
-in pkg/store. Combined W1+W1b store production against main is +3,588:
-14,796 added and 11,208 deleted, excluding tests, testdata, acceptance and contract declarations. This is 7,838
-lines over the -4,250 budget. No waiver or COMPLETE claim is made. The remaining
-legacy call chains and already documented unsized persistence requirements must
-be resolved with the lead and W1. The payment edit consolidates existing owners
-and needs no new mechanism or overage justification.
+## Verification and friction
 
-## Verification
+Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-gocache, TMPDIR/GOTMPDIR=/tmp/sw-astra-W1b and -p 4.
 
-All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
-GOCACHE=/tmp/sw-gocache and TMPDIR/GOTMPDIR under /tmp/sw-astra-W1b. Test
-parallelism is four or less.
+- Whole-repository go build -p 4 ./... passes on the final production source.
+- Scoped go vet passes for pkg/store, pkg/controller, internal/nodehost and
+  internal/blob.
+- Provider, binding, payment-mutation, current collection and tenant SQL scope
+  tests pass in 7.817 seconds. The final rollback-boundary addition passes in
+  the separate TestCollectionBinding run, 0.224 seconds.
+- The six real-byte materialization cases pass in 0.388 seconds.
+- Final blob/log/materialization/metered boundary selection passes in 84.070
+  seconds. It includes the real-store byte proof and the moved W1b store proofs.
+- commentcheck -base main . passes across 2,165 Go files.
+- pkg_store API output matches its regenerated snapshot. The full snapshot check
+  finds pre-existing W9 client drift: RotatedToken.New now uses
+  capability.Metadata and TokenInfo/TokenSubject are absent. That other snapshot
+  remains unchanged.
+- git diff --check passes. Local Git user identity/core.worktree overrides are
+  absent.
 
-- Final whole-repository go build -p 4 ./... passes.
-- Scoped go vet passes for pkg/store, pkg/controller, internal/nodehost,
-  internal/blob and tests/acceptance, including test compilation.
-- The focused payment/blob/materialization/log/store-boundary selection passes
-  in 52.185 seconds, including all six real-byte materialization cases and the
-  provider-event proofs using their schema fake.
-- The final provider/payment/tenant-scope selection passes in 8.810 seconds,
-  including the new persisted-payer property.
-- All TestMeteredUnit tests pass in 2.743 seconds.
-- The new failure-report property passes in 1.021 seconds.
-- commentcheck -base main . is clean across 2,143 Go files.
-- Generated API output matches every checked-in snapshot. Diff whitespace is
-  clean. Local Git configuration has no user identity or core.worktree override.
+Initial new tests failed because the old writer committed no correlation and
+accepted a conflicting persisted payer. The added checkout-payment test also
+failed before its refusal was implemented. Those tests now pass.
 
-The first scope-guard run failed on the two inherited payment queries described
-above. The final guard and provider properties pass after consolidation.
-
-The first new-test compilation found another caller of the deleted compute
-cancellation method in credit_billing_start_test.go. Its stale-time regression
-was ported with the other two tests. No production regression or remaining
-compilation failure was observed.
+Two overly broad test selections reached inherited legacy fixtures. The first
+failed TestADeclineHoldsATeamWithPrepaidBalanceAtNew on the removed tokens table.
+The second failed TestCreditLedgerTotals_SplitsGrantsAndCharges and
+TestCreditLedgerTotals_SettledSecondsNeverFall because their raw paid grants are
+refused. Those are not passing evidence or new regressions. The final selection
+excludes those legacy fixtures. No whole-repository test suite was run.
 
 The lead still owns independent review, pipelines, PostgreSQL, native runtime
-and provider-network evidence. No Sparkwing executable, socket-dependent
-pipeline, service, deployment or release ran. Scratch is deleted at the end of
-the session. The shared build cache is retained.
+and provider-network evidence. No Sparkwing executable, service, deployment or
+release ran. Scratch is deleted after checks complete. Shared cache is retained.
 
 STATUS: CONTINUE

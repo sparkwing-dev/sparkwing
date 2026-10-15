@@ -420,11 +420,24 @@ Operator pass.
 
 `payment_provider_settlement.go` extends verified-event dispatch to card setup,
 collection, refunds, warnings and disputes. Its receipt and provider-correlation
-schema contract is recorded in `design/rewrite/contracts/c1-data.md`. W1's final
-schema and trusted billing-page/collection writers have not implemented that
-contract. Tests use a schema fake for those missing tables. Production callbacks
-remain unavailable until that integration lands, and failed receipt writes
-cannot leave financial mutations behind.
+schema contract is recorded in `design/rewrite/contracts/c1-data.md`. Tests use
+a schema fake until W1 installs those tables. Production callbacks also need
+the trusted billing-page setup writer. Failed receipt writes cannot leave
+financial mutations behind.
+
+`Operator.RecordAttemptIntent` binds collection payments and their provider
+correlations under one ledger lock. The persisted attempt and charge supply the
+payer. The trusted worker supplies the customer selected for its provider request,
+so replacing the saved card while that call runs cannot change the association.
+The configured mode and USD currency complete the binding. Immutable replay
+writes nothing. A conflicting association, changed customer or payment, or a
+payment already associated with a checkout fails without changing the attempt.
+Association failure rolls back both writes. This writer requires the pending
+correlation schema and does not fall back to the old unassociated update.
+
+The unused `ErrMeteredInProcessNodes`, `LiveLogOffsetHeader`,
+`LiveLogAttemptHeader` and `LogWatchHeader` exports are removed. Tagged log
+subjects and the unit-renewal wire own those concerns.
 
 Global payer discovery uses the existing reviewed `paymentWarningTeamTx` owner.
 Verified events require its mode-scoped checkout or collection association to

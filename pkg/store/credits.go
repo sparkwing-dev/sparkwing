@@ -812,9 +812,6 @@ func creditLimit(limit int) int {
 	return limit
 }
 
-// ErrMeteredInProcessNodes is returned when a metered credential claims a trigger without naming a node runner that claims each node, such as k8s or warm.
-var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
-
 type creditMeteringDisabledKey struct{}
 
 // WithoutCreditMetering keeps claims, trigger settlement and storage writes out of the credit ledger while preserving token-bound claim ownership.

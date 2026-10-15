@@ -50,8 +50,11 @@ failing receipt boundary and checks their financial state after reopening.
 Generated properties cover refund conservation, payer isolation, immutable
 replay, setup ordering and unrepresentable collection amounts. Verified event
 dispatch now consumes C2's expanded proof in `payment_provider_settlement.go`.
-The schema and billing-page writers below are pending W1 integration. The tests
-substitute those tables and do not establish production payment readiness.
+The schema below is pending W1 integration. The setup association still needs
+its trusted billing-page writer. Collection binding uses
+`Operator.RecordAttemptIntent`, which takes the customer used by the trusted
+worker's provider request. The tests substitute the missing tables and do not
+establish production payment readiness.
 
 ### Non-checkout payment persistence contract
 
@@ -94,6 +97,17 @@ is installed by W1b.
   internal charge, customer and confirmed payment-intent ID. It also binds
   `card_attempts.payment_intent` before settlement. Provider metadata, callback
   parameters and caller-selected teams cannot create these associations.
+
+`RecordAttemptIntent` persists the collection correlation and the exact attempt's
+payment intent in one ledger-locked transaction. It derives team and charge from
+the existing attempt and checks their same-team relation. Its customer argument
+comes from the trusted worker's provider request, retaining that identity across
+a concurrent saved-card replacement. A checkout payment cannot fund collection.
+Exact replay adds no write. Conflicting payer, customer, attempt, charge, kind,
+currency, mode or payment fails without changing the attempt or finances.
+The provider collection fixture uses this writer instead of inserting an
+association. Generated binding tests and receipt-failure tests exercise these
+owners against the declared schema fake.
 
 `providerPaymentFixture` supplies a schema fake for this contract. It drives all
 seven non-checkout outcomes, event/object replay, rollback, reopening, setup

@@ -197,7 +197,7 @@ func (s *Server) chargeCard(ctx context.Context, wk store.CardChargeWork) (cardC
 		if err != nil || res.Status != cardChargeCreated {
 			return res, err
 		}
-		if err := s.store.AsOperator().RecordAttemptIntent(ctx, wk.AttemptID, res.PaymentIntent, time.Now()); err != nil {
+		if err := s.store.AsOperator().RecordAttemptIntent(ctx, wk.AttemptID, res.PaymentIntent, wk.Customer, time.Now()); err != nil {
 			return res, err
 		}
 		wk.PaymentIntent = res.PaymentIntent

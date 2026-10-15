@@ -28,12 +28,16 @@ func providerPaymentFixture(t *testing.T) (*Store, *Tenant, time.Time) {
  object_id TEXT NOT NULL DEFAULT '', event_json TEXT, settlement_json TEXT,
  PRIMARY KEY(payment_mode,event_id),
  FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode))`)
+	return s, tenant, now
+}
+
+func providerCorrelationSchema(t *testing.T, s *Store) {
+	t.Helper()
 	rewriteSchemaExec(t, s.db, `CREATE TABLE payment_correlations (
  payment_mode TEXT NOT NULL, provider_id TEXT NOT NULL, kind TEXT NOT NULL,
  team TEXT NOT NULL REFERENCES teams(name), customer_id TEXT NOT NULL,
  currency TEXT NOT NULL DEFAULT '', attempt_id TEXT NOT NULL DEFAULT '', charge_id TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(payment_mode,provider_id))`)
-	return s, tenant, now
 }
 
 func providerPaymentEvent(now time.Time, kind capability.PaymentEventKind) capability.PaymentEvent {
@@ -52,10 +56,9 @@ func providerCollectionEvent(t *testing.T, s *Store, now time.Time, kind capabil
 	t.Helper()
 	cardCollectionDebt(t, s, "debt", 15000)
 	work := cardCollectionDue(t, s, now)
-	if err := s.AsOperator().RecordAttemptIntent(t.Context(), work.AttemptID, "payment", now); err != nil {
+	if err := s.AsOperator().RecordAttemptIntent(t.Context(), work.AttemptID, "payment", work.Customer, now); err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id,currency,attempt_id,charge_id) VALUES ('test','payment','collection','a','cus_1','usd',?,?)`, work.AttemptID, work.ChargeID)
 	e := providerPaymentEvent(now, kind)
 	e.ObjectID, e.AmountMinor, e.CustomerID, e.MethodID = e.PaymentID, work.AmountCents, "cus_1", "pm_1"
 	e.Status, e.Fingerprint = "succeeded", "fp_1"

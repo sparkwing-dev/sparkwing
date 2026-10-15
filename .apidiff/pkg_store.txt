@@ -985,7 +985,6 @@ var ErrInvitationOpen = errors.New("store: that address already has an open invi
 var ErrLastOwner = errors.New("store: a team keeps at least one owner")
 var ErrLastSignInMethod = errors.New("store: an account keeps at least one sign-in method")
 var ErrLockHeld = errors.New("held by another holder")
-var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
 var ErrNoOutputDir = errors.New("store: this store keeps no output bytes; upload the output instead")
 var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
 var ErrNoTeam = errors.New("store: team is required")
@@ -1416,8 +1415,6 @@ type LeaseBeat struct {
 	WatchedNodes    []string
 }
 func LiveLogAttempt(attempt, generation int64) string
-const LiveLogAttemptHeader = "X-Sparkwing-Log-Attempt"
-const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
 type LockClass string
 func LockOrder() []LockClass
 type LogSegments struct {
@@ -1426,7 +1423,6 @@ type LogSegments struct {
 	Complete         bool
 	IncompleteReason string
 }
-const LogWatchHeader = "X-Sparkwing-Log-Watch"
 func LooksLikeEmail(email string) bool
 func MachinePrincipal(name string) string
 func MachineTokenScopes() []string
@@ -1777,7 +1773,7 @@ func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, er
 func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (int64, error)
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error
 func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonLease, after string, limit int) ([]ControllerRun, error)
-func (o *Operator) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
+func (o *Operator) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent, customer string, now time.Time) error
 func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error)
