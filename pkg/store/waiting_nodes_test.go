@@ -16,7 +16,7 @@ func TestWaitingNodesReadSealedDemandAndPageReadyWork(t *testing.T) {
 	for _, id := range []string{"next", "last"} {
 		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',ready_at,spec_json,execution_json FROM nodes WHERE node_id='job'`, id)
 	}
-	first, err := s.ListWaitingNodes(t.Context(), s.now(), [2]string{}, 2)
+	first, err := s.AsOperator().ListWaitingNodes(t.Context(), s.now(), [2]string{}, 2)
 	if err != nil || len(first) != 2 || first[0].NodeID != "job" || first[1].NodeID != "last" {
 		t.Fatalf("first page: %+v, %v", first, err)
 	}
@@ -25,7 +25,7 @@ func TestWaitingNodesReadSealedDemandAndPageReadyWork(t *testing.T) {
 			t.Fatalf("sealed demand: %+v", row)
 		}
 	}
-	last, err := s.ListWaitingNodes(t.Context(), s.now(), [2]string{first[1].RunID, first[1].NodeID}, 2)
+	last, err := s.AsOperator().ListWaitingNodes(t.Context(), s.now(), [2]string{first[1].RunID, first[1].NodeID}, 2)
 	if err != nil || len(last) != 1 || last[0].NodeID != "next" {
 		t.Fatalf("last page: %+v, %v", last, err)
 	}
@@ -49,7 +49,7 @@ func TestWaitingNodesRetainTheRunsRunnerSelection(t *testing.T) {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_display=''`, body)
-			waiting, err := s.ListWaitingNodes(t.Context(), s.now(), [2]string{}, 10)
+			waiting, err := s.AsOperator().ListWaitingNodes(t.Context(), s.now(), [2]string{}, 10)
 			want := selected.Value
 			if selected.Kind == runspec.RunnerName {
 				want = "name=" + want
@@ -71,22 +71,22 @@ func TestNodeAttentionUpdatesOnlyWaitingJobsInTheNamedTeam(t *testing.T) {
 	} {
 		t.Run(update, func(t *testing.T) {
 			s, _ := unitClaimFixture(t)
-			if err := s.SetNodeAttention(t.Context(), []NodeAttention{{Team: "b", RunID: "run", NodeID: "job", Reason: "foreign"}}); err != nil {
+			if err := s.AsOperator().SetNodeAttention(t.Context(), []NodeAttention{{Team: "b", RunID: "run", NodeID: "job", Reason: "foreign"}}); err != nil {
 				t.Fatal(err)
 			}
-			waiting, err := s.ListWaitingNodes(t.Context(), s.now(), [2]string{}, 10)
+			waiting, err := s.AsOperator().ListWaitingNodes(t.Context(), s.now(), [2]string{}, 10)
 			if err != nil || len(waiting) != 1 || waiting[0].Attention != "" {
 				t.Fatalf("foreign attention: %+v, %v", waiting, err)
 			}
-			if err := s.SetNodeAttention(t.Context(), []NodeAttention{{Team: "a", RunID: "run", NodeID: "job", Reason: "waiting"}}); err != nil {
+			if err := s.AsOperator().SetNodeAttention(t.Context(), []NodeAttention{{Team: "a", RunID: "run", NodeID: "job", Reason: "waiting"}}); err != nil {
 				t.Fatal(err)
 			}
-			waiting, err = s.ListWaitingNodes(t.Context(), s.now(), [2]string{}, 10)
+			waiting, err = s.AsOperator().ListWaitingNodes(t.Context(), s.now(), [2]string{}, 10)
 			if err != nil || len(waiting) != 1 || waiting[0].Attention != "waiting" {
 				t.Fatalf("waiting attention: %+v, %v", waiting, err)
 			}
 			rewriteSchemaExec(t, s.db, update)
-			if err := s.SetNodeAttention(t.Context(), []NodeAttention{{Team: "a", RunID: "run", NodeID: "job", Reason: "stale"}}); err != nil {
+			if err := s.AsOperator().SetNodeAttention(t.Context(), []NodeAttention{{Team: "a", RunID: "run", NodeID: "job", Reason: "stale"}}); err != nil {
 				t.Fatal(err)
 			}
 			var reason string
@@ -112,7 +112,7 @@ func TestWaitingNodesExcludeWithdrawnAndUnclaimableWork(t *testing.T) {
 		t.Run(update, func(t *testing.T) {
 			s, _ := unitClaimFixture(t)
 			rewriteSchemaExec(t, s.db, update)
-			waiting, err := s.ListWaitingNodes(t.Context(), time.Unix(0, 2), [2]string{}, 10)
+			waiting, err := s.AsOperator().ListWaitingNodes(t.Context(), time.Unix(0, 2), [2]string{}, 10)
 			if err != nil || len(waiting) != 0 {
 				t.Fatalf("ineligible waiting work: %+v, %v", waiting, err)
 			}
@@ -125,7 +125,7 @@ func TestWaitingNodesRejectCorruptDemand(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			s, _ := unitClaimFixture(t)
 			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(body))
-			if waiting, err := s.ListWaitingNodes(t.Context(), s.now(), [2]string{}, 10); err == nil || len(waiting) != 0 {
+			if waiting, err := s.AsOperator().ListWaitingNodes(t.Context(), s.now(), [2]string{}, 10); err == nil || len(waiting) != 0 {
 				t.Fatalf("corrupt demand: %+v, %v", waiting, err)
 			}
 		})

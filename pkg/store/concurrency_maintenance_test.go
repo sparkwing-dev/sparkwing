@@ -113,7 +113,7 @@ func TestMaintainConcurrency_SweepsExpiredCacheRows(t *testing.T) {
 	if res.CacheExpired != 1 {
 		t.Fatalf("CacheExpired = %d, want 1", res.CacheExpired)
 	}
-	if n, err := s.CountConcurrencyCache(ctxT(t)); err != nil {
+	if n, err := s.AsOperator().CountConcurrencyCache(ctxT(t)); err != nil {
 		t.Fatalf("count cache: %v", err)
 	} else if n != 0 {
 		t.Fatalf("cache rows = %d, want 0 after TTL sweep", n)
@@ -135,7 +135,7 @@ func TestMaintainConcurrency_EvictsOverCapCacheRows(t *testing.T) {
 	if res.CacheEvicted != 3 {
 		t.Fatalf("CacheEvicted = %d, want 3 (5 rows down to cap 2)", res.CacheEvicted)
 	}
-	if n, err := s.CountConcurrencyCache(ctxT(t)); err != nil {
+	if n, err := s.AsOperator().CountConcurrencyCache(ctxT(t)); err != nil {
 		t.Fatalf("count cache: %v", err)
 	} else if n != 2 {
 		t.Fatalf("cache rows = %d, want 2 (cap)", n)
@@ -417,7 +417,7 @@ func TestMaintainConcurrency_SweepsCacheRowsWhoseOriginRunIsGone(t *testing.T) {
 	if res.CacheOrphaned != 1 {
 		t.Fatalf("CacheOrphaned = %d, want 1", res.CacheOrphaned)
 	}
-	if n, err := s.CountConcurrencyCache(ctx); err != nil {
+	if n, err := s.AsOperator().CountConcurrencyCache(ctx); err != nil {
 		t.Fatalf("count cache: %v", err)
 	} else if n != 1 {
 		t.Fatalf("cache rows = %d, want 1 (the live run's entry kept)", n)
@@ -430,7 +430,7 @@ func TestMaintainConcurrency_SweepsCacheRowsWhoseOriginRunIsGone(t *testing.T) {
 	if again.CacheOrphaned != 0 {
 		t.Fatalf("second pass CacheOrphaned = %d, want 0", again.CacheOrphaned)
 	}
-	if n, err := s.CountConcurrencyCache(ctx); err != nil {
+	if n, err := s.AsOperator().CountConcurrencyCache(ctx); err != nil {
 		t.Fatalf("count cache: %v", err)
 	} else if n != 1 {
 		t.Fatalf("cache rows after second pass = %d, want 1", n)

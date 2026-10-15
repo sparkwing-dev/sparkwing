@@ -29,7 +29,7 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 				if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: owner, To: NodeReady, Cause: CauseRelease}); err != nil {
 					t.Fatal(err)
 				}
-				waiting, err := s.ListWaitingNodes(t.Context(), now.Add(time.Nanosecond), [2]string{}, 10)
+				waiting, err := s.AsOperator().ListWaitingNodes(t.Context(), now.Add(time.Nanosecond), [2]string{}, 10)
 				if err != nil || len(waiting) != 1 || waiting[0].RunID != ref.RunID || waiting[0].NodeID != ref.NodeID {
 					t.Fatalf("recovered work awaiting a runner: %+v, %v", waiting, err)
 				}
@@ -50,7 +50,7 @@ func TestRequeuedJobRemainsEligibleForEveryMatchingRunner(t *testing.T) {
 					t.Fatalf("recovery events: %+v, %v", events, err)
 				}
 				rewriteSchemaCount(t, s.db, "runs", 1)
-				waiting, err = s.ListWaitingNodes(t.Context(), now.Add(time.Nanosecond), [2]string{}, 10)
+				waiting, err = s.AsOperator().ListWaitingNodes(t.Context(), now.Add(time.Nanosecond), [2]string{}, 10)
 				if err != nil || len(waiting) != 0 {
 					t.Fatalf("claimed work awaiting a runner: %+v, %v", waiting, err)
 				}
