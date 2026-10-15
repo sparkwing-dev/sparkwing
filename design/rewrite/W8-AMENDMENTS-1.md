@@ -6,12 +6,13 @@ This snapshot covers every amendment-1 row whose action column names W8. A
 component pass proves its named boundary. It does not activate a native catalog
 cell or establish an HTTP, Cloud or OS deployment proof.
 
-The continuation from `0b8a9389a` retains W8's deletion of three conflicted
-legacy test files. All 26 assigned rows and the W8 handoffs were rechecked.
-A1-08/39/55 keep a pending claim intact across successful policy refreshes.
-Their outcome handling remains under the DESIGN handoff below.
-The prior contract and integration dependencies remain below. Earlier
-merge-resolution sections describe previous sessions.
+The approved pending-claim outcomes are implemented. A1-08/39/55 now keep
+awards and stop results independent through both Loop and ManagedRunner. The
+original policy-denial regression passes. The final review found a second
+interruption-classification bug with a non-comparable cancellation cause.
+The failing regression is retained under the DESIGN decision below. All 26
+assigned rows and W8 handoffs were rechecked. Other integration dependencies
+remain below. Earlier merge-resolution sections describe previous sessions.
 
 | Amendment | W8 action and remaining integration |
 | --- | --- |
@@ -40,7 +41,7 @@ merge-resolution sections describe previous sessions.
 | A1-51 | W8's retired cluster v1 host paths stay deleted. Shared Go/TS corpus parity, remaining orchestrator fixtures and generated references remain W3/W4/W5/W9 work. |
 | A1-52 | The install result has no preload. Windows npm shim argv uses Node through the shared npmcmd helper and process-group runner. Windows execution and the packaged TS bridge still need native evidence. No Linux fixture is counted as Windows proof. |
 | A1-53 | Native catalog cells stay blocked. Component acceptance passes only its component suite. No native driver or real-repository QA was available in this sandbox. |
-| A1-55 | A here loop with RunID and omitted Kinds now requests only its trigger, matching the shared client's named route contract. A component checks the request, unchanged award and no retry after a lost response. A fuzz property checks request selection and foreign-run refusal. Successful policy refreshes retain the pending request. A controlled-clock component and a second fuzz property prove that delayed delivery and response loss never replay that claim. The review regression below leaves pending-claim outcome handling incomplete. Native claim/reclaim, requester ancestry and HTTP response-loss evidence remain integration obligations. |
+| A1-55 | A here loop with RunID and omitted Kinds now requests only its trigger, matching the shared client's named route contract. A component checks the request, unchanged award and no retry after a lost response. A fuzz property checks request selection and foreign-run refusal. Successful policy refreshes retain the pending request. A controlled-clock component and a second fuzz property prove that delayed delivery and response loss never replay that claim. Independent outcome handling now preserves the award and stop result. The interruption-classification DESIGN below remains open. Native claim/reclaim, requester ancestry and HTTP response-loss evidence remain integration obligations. |
 
 ## Merge resolution
 
@@ -363,20 +364,33 @@ needs W3's run/plan/eval identity inputs and shared process constructor. Native
 catalog cells and new T1 inventory ports remain unclaimed. Component coverage
 uses the declared source, keeper, controller and host interfaces with fakes.
 
-## DESIGN: pending-claim outcomes
+## Approved pending-claim outcomes
 
-The review found a second bug after the policy-refresh correction. The invariant
-is that a committed award remains owned while every independent stop reason
-remains observable. When a policy refusal cancels a request and the controller
-returns its committed award, claimWhileHosting's defer clears the policy error.
-With MaxClaims=1, Run drains the award and returns nil.
-TestLoopPendingAwardPreservesPolicyDenial reproduces that result and remains a
-failing package test.
+Implemented the lead-approved independent outcome representation. Run adopts a
+committed award before applying its stop result and joins hosts. Loop.run also
+keeps policy errors separate from other failures through ManagedRunner, which
+consumes only the update policy result. Cancellation, invalid-award and host
+errors survive. The hostFailure marker and extraction are deleted.
 
-The proposed redesign returns award and stop reason independently. Run adopts
-any returned award before applying the stop reason. It joins hosted work and
-returns that reason. Deferred claim recovery must not clear it. The brief's
-two-strike rule leaves that redesign for the lead's decision. No second runtime
-patch was made. No other area's contract must change for this proposal.
+TestLoopPendingAwardPreservesPolicyDenial, the managed-update regressions and
+the here component's pending_award_after_policy_refusal case pass. The final
+outcome property passed 45,134 generated cases. These remain component proofs.
+No native catalog cell or T1 inventory port was added.
+
+## DESIGN: interruption classification
+
+Invariant: arbitrary legal error values never panic, and independent denials
+survive cancellation. Review first reproduced clean drain being reported as a
+policy failure. The shared classification now distinguishes cancellation-only
+error trees from joined denials. Final review found a second bug: comparing an
+error with context.Cause(ctx) panics when both hold a non-comparable error value.
+TestLoopPendingPolicyAcceptsArbitraryCancellationCause retains the failing case.
+The two-strikes rule stops further runtime patches pending the lead's decision.
+
+Proposed redesign: recognize only ctx.Err's comparable sentinel at cancellation
+leaves, while Run's joining defer preserves arbitrary caller causes. Test nested
+wrappers/joins, independent denials and comparable/non-comparable custom causes.
+The approved outcome representation and the other 26-row integration limits
+remain unchanged. No other area's contract needs to change.
 
 <!-- design:end -->

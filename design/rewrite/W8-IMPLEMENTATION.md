@@ -1,96 +1,108 @@
 # W8 implementation handoff
 
-W8 remains incomplete. This continuation from `0b8a9389a` resolved the three
-working-file merge conflicts and rechecked all 26 assigned amendment rows and
-the W8 handoffs. The lead must stage the conflict resolutions under the brief's
-no-Git-write rule.
+W8 remains incomplete. The approved pending-claim outcome redesign is implemented.
+`TestLoopPendingAwardPreservesPolicyDenial` now passes. The final runner suite has
+one retained failing regression in interruption classification, described below.
+No further runtime patch was made after that review finding.
 
-The loop now retains a pending claim across successful version-policy refreshes.
-Previously each refresh cancelled the request and started another claim. The
-new controlled-clock here component reproduced three requests through the old
-loop. The revised component passes with one request. A property test passed
-41,650 cases over run bytes, here/ordinary selection, refresh counts and delivered
-or lost responses. This is component evidence against a fake controller.
+A pending claim returns its response, transport error and stop result independently.
+Run adopts a valid committed award before applying the stop result. Lifecycle
+expiry cannot restart the claim loop after award delivery. Joining hosts retains
+both the stop result and the caller's cancellation cause.
 
-**DESIGN: pending-claim outcomes.** The independent review found a second bug in
-the same mechanism. If policy refusal cancels a pending request and that request
-returns a committed award, the deferred recovery clears the policy error.
-MaxClaims=1 then drains the award and returns success. The invariant is that a
-committed award remains owned while every independent stop reason remains
-observable. `TestLoopPendingAwardPreservesPolicyDenial` reproduces hosted=1 with
-a nil error. It is retained as a failing package test. The brief's two-strike
-rule stops further runtime changes pending the lead's decision.
+The private `Loop.run` keeps policy and ordinary failures separate through the
+managed-runner boundary. Public `Run` joins them. `ManagedRunner` consumes the
+update policy result while retaining cancellation, invalid-award and host errors.
+This removes `hostFailure` and its extraction rather than pruning joined errors.
+The existing update boundary still checks cancellation before replacement.
 
-The proposed redesign returns the award and stop reason independently from the
-pending request. Run adopts any returned award before applying the stop reason,
-then joins the held hosts and returns that reason. The joining defer must never
-replace it with success. Existing cancellation, idle, claim-deadline and version
-checks remain the same owners. No public API, setting, timer, environment
-variable or production mechanism was added. Undo restores the changed select
-cases and their regression tests together.
+Review reproduced drain-generated cancellation being reported as policy refusal
+and cancellation/invalid-award failures being lost during update. Their retained
+regressions pass. A shared policy-interruption predicate preserves independent
+denials, including denials joined with cancellation. Direct, wrapped and joined
+cancellation-only checks drain cleanly, with and without a committed award.
 
-All three modify/delete conflicts retain W8's deletions:
+**DESIGN: interruption classification.** Invariant: every legal error value is
+accepted without panic, and a denial joined with cancellation remains observable.
+The final review found a second bug in this mechanism. `policyInterrupted` compares
+an error with `context.Cause(ctx)`. Both can hold a non-comparable slice-backed
+error, which panics. `TestLoopPendingPolicyAcceptsArbitraryCancellationCause`
+retains the failing public-surface regression. The two-strikes rule in SWARM-BRIEF
+requires a lead decision before another runtime patch.
 
-- internal/orchestrator/wingd_runstore_test.go, 549 incoming lines.
-- internal/runners/k8s/k8s_test.go, 1,567 incoming lines.
-- internal/runners/k8s/profile_cpu_policy_test.go, 64 incoming lines.
+Proposed redesign: classify cancellation at error-tree leaves using only the
+known comparable `ctx.Err()` sentinel. Keep arbitrary caller causes in Run's
+existing joining defer. A callback returning a custom cause may retain that
+cause in both result channels, which is safe and observable. Test nested error
+trees, joined denials and comparable/non-comparable custom causes. No public
+contract, timer, setting or environment variable needs to change.
 
-The 2,180 incoming legacy test lines exercise removed implementations. Their
-files are absent. The index still lists those three paths because workers may
-not write Git metadata. New legacy implementation deletions: 0 lines. New T1
-inventory ports: none. The prior sizing port remains. No native catalog cell
-was activated.
+All 26 amendment rows and W8 handoffs were rechecked. No further bounded W8
+implementation or legacy cut surfaced. Existing fake-based components continue
+to cover the declared foreign interfaces. The remaining real integrations are:
+
+| Owner | Boundary still open |
+| --- | --- |
+| W3 | Source acquisition/projections, keeper, remote owner operations, host factories, delegated routes, replay loading and shared run/plan/eval identity inputs. RunInput still lacks the granted runner. |
+| W9 | Engine/data HTTP clients and final runner/launcher/dashboard composition. Plan bootstrap still requires a job. Launcher grammar lacks docker-image and has an unplumbed deadline. |
+| W1/W2 | Plan/eval Execution resources, SyncLauncher and a production adapter for LocalRuntimeConfig.Open with shared controller/store/consumer/activity. |
+| W3/W7 | Workspace-off binary-cache hashing matching the selected-engine Go build. |
+| W8/T1/lead | Deployed Cloud Probe/Clear callbacks, complete reservation cleanup, native Windows/macOS execution, placement and real-repository QA. |
+
+The old W8 cluster, k8s/warmpool and duplicate local-controller execution paths
+remain deleted. Legacy cache charts/settings still belong to W7's hard cut.
+The admission d.sock protocol remains required by frozen section 2.5.
+
+This continuation replaces **64 production lines** in loop.go and managed.go,
+including the award-recovery tuple/defer and hostFailure marker/extraction.
+Whole legacy files deleted: 0. No public API or outside production caller was
+removed. New T1 inventory ports: none. TestSizingBelowCeiling remains the prior
+port. No native acceptance catalog cell was activated.
 
 Verification used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
 GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8:
 
-- Whole-repository build after the runtime change passed.
-- Vet passed for cluster, runners, engine, wingd and both acceptance packages.
-- Runner, launcher, engine and cluster suites passed before the review regression
-  was added. Cluster excluded only TestStartMetricsListener_ServesMetrics because
-  sockets are unavailable. The final runner suite has the known failing test above.
-- Focused W8 components, Cloud builder components and local/managed lifecycle
-  checks passed. The acceptance package took 2.560 seconds.
-- The pending-claim property passed 41,650 fuzz executions in five seconds.
+- Whole-repository build and W8/acceptance vet passed after the final runtime edit.
+- Cluster, runners/launcher, runner services, engine/npmcmd/sdkinstall suites passed.
+  Cluster excluded only TestStartMetricsListener_ServesMetrics because its native
+  socket proof is unavailable in this sandbox.
+- The runner suite passed before the final review regression was retained. Its
+  final run fails TestLoopPendingPolicyAcceptsArbitraryCancellationCause. The
+  original policy-denial regression and the managed-update regressions pass.
+- Runner loop/managed-runner race checks passed before that retained regression.
+- The final outcome property passed **45,134 fuzz executions** in ten seconds.
+  It varies run bytes, delivery ordering, six stop reasons, award/no award,
+  host errors and cancellation during host join. An earlier run passed 59,614.
+- Focused W8 components, Cloud components and local/managed lifecycle checks
+  passed. The acceptance package took 2.118 seconds. These are component proofs.
 - Commentcheck against main passed across 1,175 files. Sleepcheck against HEAD,
-  gofmt and git diff --check passed.
+  gofmt and git diff --check passed. The final test-only additions were rechecked.
 
-The failure is reproducible with
-`go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./internal/runners -run '^TestLoopPendingAwardPreservesPolicyDenial$' -count=1 -timeout=1m`.
+The failing regression command is
+`go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./internal/runners -run '^TestLoopPendingPolicyAcceptsArbitraryCancellationCause$' -count=1 -timeout=1m`.
 The acceptance command is
 `go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./tests/acceptance ./internal/acceptance ./internal/wingd ./internal/wingd/client -run 'W8|^TestLauncherCloud|^TestLocal|^TestManaged' -count=1 -timeout=3m`.
 The property command is
-`go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./internal/runners -run '^$' -fuzz '^FuzzLoopPendingClaimNoReplay$' -fuzztime=5s -parallel=4 -timeout=1m`.
+`go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./internal/runners -run '^$' -fuzz '^FuzzLoopPendingClaimStopOutcomes$' -fuzztime=10s -parallel=4 -timeout=1m`.
 
-Remaining cross-area contract requests are unchanged:
+Shared files touched: tests/acceptance/here_runner_w8_test.go and the W8 status
+paragraph in contracts/handoffs.md. Other edits stay in internal/runners and
+W8's two implementation reports. No other area's Go contract changed.
 
-| Owner | Remaining boundary | Evidence in this checkout |
-| --- | --- | --- |
-| W3 | Host construction, delegated node routes, generated-code replay loading and run/plan/eval execution identity inputs. | RunHost/NodeHost are interfaces without final constructors. RunInput lacks granted runner identity. The shared process constructor remains undeclared. |
-| W3/W9 | Source, keeper, remote owner and HTTP/data implementations, followed by runner/Cloud composition. | source.Acquire/ForRequest/ForExecution, lease.Keeper.Run, RemoteOwnerStore, NewEngineClient and NewDataClient still panic. W8 consumes these interfaces through component fakes. |
-| W1/W2/W9 | Cloud plan/eval resources, launcher sync, local controller services/activity and CLI composition. | SyncLauncher still panics. Plan/eval claims clear Execution. LocalRuntimeConfig.Open has no production shared-controller implementation. W9 grammar still requires a job for plan units and lacks the required launcher Docker image/deadline plumbing. |
-| W3/W7 | Workspace-off binary-cache hashing. | sdkinstall builds with GOWORK=off, while PipelineCacheKey follows the ambient workspace. |
-| W8/T1/lead | Cloud probes, reservation cleanup, native Windows identity and full placement/real-repository QA. | KubernetesBoundary still needs deployment-owned Probe/Clear callbacks. Native catalog cells remain blocked. |
+Mechanisms added: private pending/run outcomes carry independent results through
+the existing owners. The smaller recovery-tuple approach lost policy failures.
+Undo restores the loop and managed-runner caller together. The interruption
+predicate remains under the DESIGN decision above. No new service, public
+interface, retry, timer, setting or environment variable was added.
 
-The W8 execution-identity slice in handoffs.md remains done at its node-award
-boundary. Actual hello, run/plan/eval inputs and the shared constructor remain
-with W3. Missing declarations stop those pieces under the contract rule. W8
-continues to test declared interfaces with fakes and retains the real
-EngineController/SQLite components already implemented.
+Friction: bootstrap ran installed sparkwing info --for-agent once before reading
+the brief's prohibition. It printed context and exited zero. No state mutation
+was observed, but its absence is unverified. No further Sparkwing binary,
+pipeline, Git write, deployment or release ran. Native/socket proofs remain
+unavailable. Git config has no local user identity or core.worktree override.
+No W8 scratch processes remain. /tmp/sw-astra-W8 was deleted.
 
-Shared files touched are tests/acceptance/here_runner_w8_test.go and the retained
-deletion of internal/orchestrator/wingd_runstore_test.go. Other changed files
-are internal/runners/loop.go, loop_test.go, service/RUNNER-SERVICE.md and the two
-W8 reports. No production caller outside W8 or other area's contract changed.
-
-Friction: the sandbox prevents socket and native Cloud/Windows proofs. The
-reviewer mistakenly invoked installed `sparkwing info --for-agent` once despite
-the brief. It printed discovery context and exited zero. No state mutation was
-observed, but its absence is unverified. No further Sparkwing binary, pipeline,
-Git write, deployment or release ran. Git config has no local user identity or
-core.worktree override. All check processes finished and /tmp/sw-astra-W8 was deleted.
-
-The sections below retain historical evidence.
+The sections below retain historical evidence and superseded status reports.
 
 ## Completed before this continuation
 

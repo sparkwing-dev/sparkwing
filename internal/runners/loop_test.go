@@ -3,6 +3,7 @@ package runners
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -499,6 +500,135 @@ func TestLoopPendingAwardPreservesPolicyDenial(t *testing.T) {
 	})
 }
 
+func TestLoopPendingClaimStopOutcomes(t *testing.T) {
+	for reason, name := range []string{"policy", "cancellation", "idle", "claim_deadline", "version", "drain"} {
+		t.Run(name, func(t *testing.T) {
+			for order := range uint8(3) {
+				for _, awarded := range []bool{false, true} {
+					testPendingClaimStop(t, "run", uint8(reason), order, awarded, true, false)
+				}
+			}
+		})
+	}
+}
+
+func FuzzLoopPendingClaimStopOutcomes(f *testing.F) {
+	for reason := range uint8(6) {
+		f.Add("run", reason, reason%3, true, false, false)
+	}
+	f.Fuzz(func(t *testing.T, run string, reason, order uint8, awarded, hostFails, cancelJoining bool) {
+		testPendingClaimStop(t, "run:"+run, reason%6, order%3, awarded, hostFails, cancelJoining)
+	})
+}
+
+func testPendingClaimStop(t *testing.T, run string, reason, order uint8, awarded, hostFails, cancelJoining bool) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		defer cancel(nil)
+		started, cancelled := make(chan struct{}), make(chan struct{})
+		deliver, returned := make(chan struct{}), make(chan struct{})
+		hostStarted, hostFinish := make(chan struct{}), make(chan struct{})
+		var deliverOnce sync.Once
+		release := func() { deliverOnce.Do(func() { close(deliver) }) }
+		denied, cancelledErr, hostErr := errors.New("policy denied"), errors.New("caller cancelled"), errors.New("host failed")
+		if reason == 4 {
+			denied = errRunnerUpdate
+		}
+		checks, claims, hosted := 0, 0, 0
+		loop := Loop{
+			Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, MaxClaims: int(order % 2), RunID: run},
+			CheckVersion: func(context.Context, string) error {
+				checks++
+				if (reason == 0 || reason == 4) && checks > 1 {
+					if order < 2 {
+						release()
+						if order == 0 {
+							<-returned
+						}
+					}
+					return denied
+				}
+				return nil
+			},
+			Controller: claimFunc(func(claimCtx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				claims++
+				if claims != 1 {
+					return controllerwire.ClaimResponse{}, errors.New("claimed after stop")
+				}
+				defer close(returned)
+				go func() { <-claimCtx.Done(); close(cancelled) }()
+				close(started)
+				<-deliver
+				if !awarded {
+					return controllerwire.ClaimResponse{}, claimCtx.Err()
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, UnitID: "unit", RunID: run, Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(hostCtx context.Context, unit controllerwire.ClaimedUnit) error {
+				hosted++
+				if unit.RunID != run || (reason != 1 && hostCtx.Err() != nil) {
+					t.Error("award identity or held context changed")
+				}
+				close(hostStarted)
+				<-hostFinish
+				if hostFails {
+					return hostErr
+				}
+				return nil
+			}),
+		}
+		if reason == 2 {
+			loop.Config.IdleExit = time.Minute
+		}
+		if reason == 3 {
+			loop.Config.ClaimUntil = time.Now().Add(time.Minute)
+		}
+		finished := make(chan error, 1)
+		go func() { finished <- loop.Run(ctx) }()
+		<-started
+		if reason == 1 || reason == 5 {
+			if order == 0 {
+				release()
+			}
+			if reason == 1 {
+				cancel(cancelledErr)
+			} else {
+				loop.Drain()
+			}
+			if order == 1 {
+				release()
+			}
+		}
+		<-cancelled
+		release()
+		if awarded {
+			<-hostStarted
+			synctest.Wait()
+			select {
+			case err := <-finished:
+				t.Fatalf("returned before host joined: %v", err)
+			default:
+			}
+			if cancelJoining {
+				cancel(cancelledErr)
+			}
+			close(hostFinish)
+		}
+		err := <-finished
+		wantDenied := reason == 0 || reason == 4
+		wantCancelled := reason == 1 || (awarded && cancelJoining)
+		wantHostErr := awarded && hostFails
+		wantHosted := 0
+		if awarded {
+			wantHosted = 1
+		}
+		if claims != 1 || hosted != wantHosted || errors.Is(err, denied) != wantDenied || errors.Is(err, cancelledErr) != wantCancelled || errors.Is(err, hostErr) != wantHostErr || (err == nil) != (!wantDenied && !wantCancelled && !wantHostErr) {
+			t.Fatalf("reason=%d order=%d awarded=%t claims=%d hosted=%d error=%v", reason, order, awarded, claims, hosted, err)
+		}
+	})
+}
+
 func FuzzLoopPendingClaimNoReplay(f *testing.F) {
 	f.Add("run", true, uint8(2), false)
 	f.Add("run/other:\x00", false, uint8(3), true)
@@ -688,6 +818,113 @@ func TestLoopRefreshDuringBlockedClaimDrainsHeldHost(t *testing.T) {
 		}
 		if claims != 2 {
 			t.Fatalf("claims=%d, want one award and one cancelled request", claims)
+		}
+	})
+}
+
+func TestLoopDrainDuringPendingClaimPolicyRefresh(t *testing.T) {
+	for mode, name := range []string{"cancelled", "wrapped", "joined_cancellation", "denied", "joined_denial", "wrapped_joined_denial"} {
+		t.Run(name, func(t *testing.T) {
+			for _, awarded := range []bool{false, true} {
+				synctest.Test(t, func(t *testing.T) {
+					refreshing := make(chan struct{})
+					denied := errors.New("runner version refused")
+					checks, hosted := 0, 0
+					loop := Loop{
+						Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1},
+						CheckVersion: func(ctx context.Context, _ string) error {
+							checks++
+							if checks == 1 {
+								return nil
+							}
+							close(refreshing)
+							<-ctx.Done()
+							switch mode {
+							case 0:
+								return ctx.Err()
+							case 1:
+								return fmt.Errorf("policy refresh: %w", ctx.Err())
+							case 2:
+								return errors.Join(ctx.Err(), fmt.Errorf("policy refresh: %w", ctx.Err()))
+							case 3:
+								return denied
+							case 4:
+								return errors.Join(ctx.Err(), denied)
+							default:
+								return fmt.Errorf("policy refresh: %w", errors.Join(ctx.Err(), denied))
+							}
+						},
+						Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+							<-ctx.Done()
+							if awarded {
+								return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, UnitID: "unit", RunID: "run", Capability: "private"}}, nil
+							}
+							return controllerwire.ClaimResponse{}, ctx.Err()
+						}),
+						Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
+							hosted++
+							return ctx.Err()
+						}),
+					}
+					finished := make(chan error, 1)
+					go func() { finished <- loop.Run(t.Context()) }()
+					<-refreshing
+					loop.Drain()
+					err := <-finished
+					wantHosted := 0
+					if awarded {
+						wantHosted = 1
+					}
+					if hosted != wantHosted || (mode < 3 && err != nil) || (mode >= 3 && !errors.Is(err, denied)) {
+						t.Fatalf("awarded=%t hosted=%d policy error=%v", awarded, hosted, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+type pendingPolicyCause []string
+
+func (c pendingPolicyCause) Error() string { return c[0] }
+
+func TestLoopPendingPolicyAcceptsArbitraryCancellationCause(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		defer cancel(nil)
+		refreshing := make(chan struct{})
+		checks := 0
+		loop := Loop{
+			Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1},
+			CheckVersion: func(ctx context.Context, _ string) error {
+				checks++
+				if checks == 1 {
+					return nil
+				}
+				close(refreshing)
+				<-ctx.Done()
+				return context.Cause(ctx)
+			},
+			Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				<-ctx.Done()
+				return controllerwire.ClaimResponse{}, ctx.Err()
+			}),
+			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { return nil }),
+		}
+		finished := make(chan error, 1)
+		go func() {
+			defer func() {
+				if v := recover(); v != nil {
+					finished <- fmt.Errorf("Run panicked: %v", v)
+				}
+			}()
+			finished <- loop.Run(ctx)
+		}()
+		<-refreshing
+		cancel(pendingPolicyCause{"operator shutdown"})
+		var cause pendingPolicyCause
+		if err := <-finished; !errors.As(err, &cause) || cause[0] != "operator shutdown" {
+			t.Fatalf("Run = %v, want operator shutdown cause", err)
 		}
 	})
 }

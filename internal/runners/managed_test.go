@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -22,6 +24,7 @@ type unavailableVersions struct{ err error }
 func (v unavailableVersions) Index(context.Context, time.Time) (engine.IndexResult, error) {
 	return engine.IndexResult{}, v.err
 }
+
 func (v unavailableVersions) PrepareRunnerUpdate(context.Context, string, releaseasset.Target) (engine.SoftwareUpdate, error) {
 	panic("unverified policy cannot select an update")
 }
@@ -58,6 +61,7 @@ func (v *managedVersionFixture) Index(context.Context, time.Time) (engine.IndexR
 	close(v.release)
 	return engine.IndexResult{Index: v.replacement}, nil
 }
+
 func (v *managedVersionFixture) PrepareRunnerUpdate(context.Context, string, releaseasset.Target) (engine.SoftwareUpdate, error) {
 	select {
 	case <-v.finished:
@@ -100,6 +104,39 @@ func TestManagedRunnerDrainsHeldWorkBeforeVerifiedReplacement(t *testing.T) {
 	}
 }
 
+func TestManagedRunnerUpdatesAfterPendingAwardDrains(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := runnerReleaseFixture(t)
+		initial, replacement := runnerPolicyFixtures(t)
+		policy := &managedVersionFixture{initial: initial, replacement: replacement, update: engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release, Required: true}, started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{}), t: t}
+		installation := &installationFixture{}
+		claims, hosted := 0, 0
+		runner := ManagedRunner{
+			Loop: &Loop{
+				Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1, MaxClaims: 1},
+				Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+					claims++
+					close(policy.started)
+					<-ctx.Done()
+					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "private"}}, nil
+				}),
+				Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
+					hosted++
+					defer close(policy.finished)
+					return ctx.Err()
+				}),
+			},
+			Versions: policy, Installation: installation, Target: release.Target(),
+		}
+		if err := runner.Run(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if claims != 1 || hosted != 1 || !reflect.DeepEqual(installation.calls, []string{"drain", "replace", "refresh", "restart"}) {
+			t.Fatalf("claims=%d hosted=%d installation=%v", claims, hosted, installation.calls)
+		}
+	})
+}
+
 func TestManagedRunnerUpdatesAfterCompletedUnitFailure(t *testing.T) {
 	release := runnerReleaseFixture(t)
 	initial, replacement := runnerPolicyFixtures(t)
@@ -107,7 +144,8 @@ func TestManagedRunnerUpdatesAfterCompletedUnitFailure(t *testing.T) {
 	installation := &installationFixture{}
 	failure := errors.New("source cleanup failed")
 	runner := ManagedRunner{
-		Loop: &Loop{Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1}, OnError: func(error) {},
+		Loop: &Loop{
+			Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1}, OnError: func(error) {},
 			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "private"}}, nil
 			}),
@@ -155,4 +193,67 @@ func runnerPolicyFixtures(t *testing.T) (engine.VerifiedIndex, engine.VerifiedIn
 	policy.Versions = append(policy.Versions, engine.VersionInfo{Version: "v0.20.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)})
 	policy.Minimum = engine.Restriction{Version: "v0.20.0", Reason: "security fixture", Security: true, AnnouncedAt: now.Add(-time.Minute), EffectiveAt: now.Add(-time.Second)}
 	return initial, verify()
+}
+
+func TestManagedRunnerPreservesCancellationCauseDuringPendingAwardDrain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		defer cancel(nil)
+		cause := errors.New("operator shutdown")
+		release := runnerReleaseFixture(t)
+		initial, replacement := runnerPolicyFixtures(t)
+		policy := &managedVersionFixture{initial: initial, replacement: replacement, update: engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release, Required: true}, started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{}), t: t}
+		installation := &installationFixture{}
+		runner := ManagedRunner{
+			Loop: &Loop{
+				Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1, MaxClaims: 1},
+				Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+					close(policy.started)
+					<-ctx.Done()
+					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "private"}}, nil
+				}),
+				Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error {
+					cancel(cause)
+					close(policy.finished)
+					return nil
+				}),
+			},
+			Versions: policy, Installation: installation, Target: release.Target(),
+		}
+		err := runner.Run(ctx)
+		if len(installation.calls) != 0 {
+			t.Errorf("replacement started after cancellation: %v", installation.calls)
+		}
+		if !errors.Is(err, cause) {
+			t.Fatalf("lost cancellation cause: error=%v, cause=%v", err, cause)
+		}
+	})
+}
+
+func TestManagedRunnerPreservesInvalidPendingAwardFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := runnerReleaseFixture(t)
+		initial, replacement := runnerPolicyFixtures(t)
+		policy := &managedVersionFixture{initial: initial, replacement: replacement, update: engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release, Required: true}, started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{}), t: t}
+		installation := &installationFixture{}
+		runner := ManagedRunner{
+			Loop: &Loop{
+				Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1, MaxClaims: 1},
+				Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+					close(policy.started)
+					<-ctx.Done()
+					close(policy.finished)
+					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, RunID: "run", Capability: "private"}}, nil
+				}),
+				Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error {
+					t.Error("host accepted invalid award")
+					return nil
+				}),
+			},
+			Versions: policy, Installation: installation, Target: release.Target(),
+		}
+		if err := runner.Run(t.Context()); err == nil || !strings.Contains(err.Error(), "controller award is missing unit identity or authority") {
+			t.Fatalf("invalid award failure discarded after update: %v; installation=%v", err, installation.calls)
+		}
+	})
 }

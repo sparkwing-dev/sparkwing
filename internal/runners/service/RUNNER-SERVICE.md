@@ -30,6 +30,9 @@ authority remain server decisions.
 Successful version-policy refreshes keep a pending claim on its original request.
 Policy refusal, drain and lifecycle deadlines cancel and join that request.
 A committed award returned during cancellation still drains through its host.
+The stop result survives award delivery, and the loop takes no more claims.
+Managed updates consume the update policy result and retain other failures,
+including the caller's cancellation cause during cleanup or replacement.
 
 Hosting accepts direct trigger, here and work awards with matching unit purposes
 and claim fences. Bootstrap credentials require the Cloud exchange path. Renewal,

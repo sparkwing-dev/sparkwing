@@ -15,14 +15,22 @@ import (
 
 func TestHereRunnerNamedClaimW8Components(t *testing.T) {
 	for _, scenario := range []struct {
-		name          string
-		lost, delayed bool
-	}{{"awarded", false, false}, {"response_lost", true, false}, {"response_lost_after_refresh", true, true}} {
+		name                  string
+		lost, delayed, denied bool
+	}{
+		{"awarded", false, false, false},
+		{"response_lost", true, false, false},
+		{"response_lost_after_refresh", true, true, false},
+		{"pending_award_after_policy_refusal", false, true, true},
+	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				unit := runnerAuthorityAwardW8(capability.UnitTrigger)
 				unit.Purpose = capability.PurposeHere
 				failure := errors.New("claim response lost")
+				if scenario.denied {
+					failure = errors.New("runner version revoked")
+				}
 				ctx, cancel := context.WithTimeout(t.Context(), 3*limits.VersionIndexRefresh)
 				defer cancel()
 				respond := make(chan struct{})
@@ -38,7 +46,9 @@ func TestHereRunnerNamedClaimW8Components(t *testing.T) {
 							select {
 							case <-respond:
 							case <-ctx.Done():
-								return controllerwire.ClaimResponse{}, ctx.Err()
+								if !scenario.denied {
+									return controllerwire.ClaimResponse{}, ctx.Err()
+								}
 							}
 						}
 						if scenario.lost {
@@ -46,8 +56,11 @@ func TestHereRunnerNamedClaimW8Components(t *testing.T) {
 						}
 						return controllerwire.ClaimResponse{Claim: &unit}, nil
 					}},
-					Host: bootstrapHostW8(func(_ context.Context, got controllerwire.ClaimedUnit) error {
+					Host: bootstrapHostW8(func(hostCtx context.Context, got controllerwire.ClaimedUnit) error {
 						hosted++
+						if err := hostCtx.Err(); err != nil {
+							return err
+						}
 						if got.RunID != unit.RunID || got.Capability != unit.Capability || got.Binding != unit.Binding {
 							return errors.New("here award changed before hosting")
 						}
@@ -55,13 +68,17 @@ func TestHereRunnerNamedClaimW8Components(t *testing.T) {
 					}),
 					CheckVersion: func(ctx context.Context, version string) error {
 						checks++
+						if scenario.denied && checks > 1 {
+							return failure
+						}
 						if checks == 3 {
 							close(respond)
 						}
 						return runnerStorePolicyW8{}.CheckRunner(ctx, version)
 					},
 				}
-				if err := loop.Run(ctx); (scenario.lost && !errors.Is(err, failure)) || (!scenario.lost && err != nil) {
+				wantError := scenario.lost || scenario.denied
+				if err := loop.Run(ctx); (wantError && !errors.Is(err, failure)) || (!wantError && err != nil) {
 					t.Fatal(err)
 				}
 				wantHosted := 1

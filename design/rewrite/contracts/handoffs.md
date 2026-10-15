@@ -96,3 +96,12 @@ and command are in `../w1-session12-progress.md`.
 **W1b priority (lead).** After the two items above, prioritize legacy cutovers and real integration over more test coverage: retire the legacy claim-credit, raw storage, output, direct-upload and log paths you own, migrating callers with the smallest change (the W1 scope note above applies to you in the other direction for caller migration only), and join W1's real issuance/start/finish transactions to the billing helpers (A1-27).
 
 **DESIGN approved (lead): W8 pending-claim outcomes.** Invariant: a committed award is always owned, and every independent stop reason (policy refusal, cancellation, idle, claim deadline, version) stays observable to the caller. The pending claim returns the award and the stop reason as independent results. Run adopts any returned award first, then applies the stop reason, joins the held hosts, and returns that reason; the joining defer never replaces a stop reason with success. Existing owners of cancellation, idle, claim-deadline and version checks stay as they are. `TestLoopPendingAwardPreservesPolicyDenial` must go green, plus a property test over interleavings of award delivery and each stop reason.
+
+W8 pending-claim outcome representation is implemented. The original regression,
+managed-update error preservation, here component and outcome property pass.
+**DESIGN: W8 interruption classification.** The second review finding is retained
+in TestLoopPendingPolicyAcceptsArbitraryCancellationCause: comparing an error to
+context.Cause(ctx) panics for a slice-backed cause. The proposed replacement
+recognizes only ctx.Err's comparable sentinel at error-tree leaves and leaves
+arbitrary causes to Run's existing defer. Independent joined denials must remain
+observable. The two-strikes rule leaves this runtime change for the lead.
