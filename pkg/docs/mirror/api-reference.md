@@ -34,7 +34,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/credits/card-refunds` | `credits.grant` |
 | `POST` | `/api/v1/credits/cards` | `credits.grant` |
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
-| `POST` | `/api/v1/credits/grants` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
 | `GET` | `/api/v1/credits/payments/{reference}` | `credits.grant` |
 | `POST` | `/api/v1/credits/reversals` | `credits.grant` |

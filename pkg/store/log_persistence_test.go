@@ -130,22 +130,70 @@ func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
 }
 
 func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
-	s, tenant, actor, attempt := resultFixture(t)
-	now := s.now()
-	finished := now.Add(-2 * limits.LogSealGrace)
-	started := finished.Add(-time.Second).UnixNano()
-	rewriteSchemaExec(t, s.db, "UPDATE nodes SET status='done',outcome='success',started_at=?,finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run'", started, now.UnixNano())
-	rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET started_at=?,finished_at=?,outcome='success' WHERE team='a' AND run_id='run'", started, finished.UnixNano())
-	commit := logCommit(actor, attempt)
-	commit.Final = true
-	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
-		t.Fatal("later node finish extended the attempt's write grace")
+	property := func(offset int16, later uint8) bool {
+		s, tenant, actor, attempt := resultFixture(t)
+		commit := logCommit(actor, attempt)
+		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
+			t.Fatal(err)
+		}
+		reader := authorityMember(t, s, "grace-reader", RoleReader)
+		lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "logs", time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		finished := s.now()
+		nodeFinished := finished.Add(time.Duration(1+later%59) * time.Second)
+		rewriteSchemaExec(t, s.db, "UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run'", nodeFinished.UnixNano())
+		rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET finished_at=?,outcome='success' WHERE team='a' AND run_id='run'", finished.UnixNano())
+		s.clock = func() time.Time { return finished.Add(limits.LogSealGrace + time.Duration(offset)) }
+		request := blob.LogReadRequest{Subject: commit.Subject}
+		allowed := offset <= 0
+		read, readErr := tenant.ReadLogSegments(t.Context(), actor, request)
+		writeErr := tenant.RecordSegments(t.Context(), commit)
+		if (readErr == nil) != allowed || (writeErr == nil) != allowed || (!allowed && len(read.Segments) != 0) {
+			t.Logf("offset=%d later=%d read=%v write=%v", offset, later, readErr, writeErr)
+			return false
+		}
+		sealed, err := s.AsOperator().SealAbandonedLogStreams(t.Context(), lease, 1)
+		if err != nil || sealed != int64(boolInt(!allowed)) {
+			t.Logf("offset=%d maintenance sealed=%d: %v", offset, sealed, err)
+			return false
+		}
+		commit.Final = true
+		if err := tenant.RecordSegments(t.Context(), commit); (err == nil) != allowed {
+			t.Logf("offset=%d final seal=%v", offset, err)
+			return false
+		}
+		got, err := tenant.ReadLogSegments(t.Context(), reader, request)
+		wantReason := ""
+		if !allowed {
+			wantReason = "writer_lost"
+		}
+		if err != nil || got.Complete != allowed || got.IncompleteReason != wantReason || !slices.Equal(got.Segments, commit.Segments) {
+			t.Logf("offset=%d historical log=%+v: %v", offset, got, err)
+			return false
+		}
+		if size, err := tenant.StorageRetainedBytes(t.Context()); err != nil || size != 3 {
+			t.Logf("offset=%d retained bytes=%d: %v", offset, size, err)
+			return false
+		}
+		row, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
+		if err != nil || row.Status != StatusDone || row.Outcome != NodeSuccess || row.FinishedAt == nil || !row.FinishedAt.Equal(nodeFinished) {
+			t.Logf("log mutation changed job: %+v: %v", row, err)
+			return false
+		}
+		rewriteSchemaCount(t, s.db, "log_streams", 1)
+		rewriteSchemaCount(t, s.db, "log_segments", 1)
+		return true
 	}
-	if _, err := tenant.ReadLogSegments(t.Context(), actor, blob.LogReadRequest{Subject: commit.Subject}); err == nil || errors.Is(err, ErrNotFound) {
-		t.Fatalf("later node finish extended the attempt's read grace: %v", err)
+	for _, offset := range []int16{-1, 0, 1} {
+		if !property(offset, 58) {
+			t.Fatalf("attempt grace boundary at %d ns", offset)
+		}
 	}
-	rewriteSchemaCount(t, s.db, "log_streams", 0)
-	rewriteSchemaCount(t, s.db, "log_segments", 0)
+	if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(92076))}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLogPersistenceRejectsMalformedSubjects(t *testing.T) {

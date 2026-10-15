@@ -12,15 +12,12 @@ const (
 	DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
 )
 
-// WithTeamDownloadCaps sets what one team may download in a UTC day through
-// signed data transfers, by whether it pays. Zero is no cap.
+// WithTeamDownloadCaps sets per-team daily download caps; zero disables a cap.
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server {
 	s.downloadFree, s.downloadFunded = free, funded
 	return s
 }
 
-// safety: a signed-up team reads its own standing and nothing of any other
-// team's; the operator's team has no free tier to report.
 func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, error) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p == nil || !s.MultiTeam() {
@@ -30,11 +27,11 @@ func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, erro
 	if team == "" || team == store.DefaultTeam {
 		return nil, nil
 	}
-	got, err := s.store.StorageStandingFor(r.Context(), team)
+	tenant, err := s.store.ForTeam(r.Context(), team)
 	if err != nil {
 		return nil, err
 	}
-	held, err := s.store.TeamStorage(r.Context(), team)
+	got, err := tenant.StorageStanding(r.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -44,8 +41,8 @@ func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, erro
 		LogShareBytes:   store.FreeLogShare(got.AllowanceBytes),
 		EventShareBytes: store.FreeEventShare(got.AllowanceBytes),
 		EventBytes:      got.EventBytes,
-		CacheBytes:      held[store.StorageCache].UsedBytes + held[store.StorageCache].ReservedBytes,
-		LogBytes:        held[store.StorageLogs].UsedBytes + held[store.StorageLogs].ReservedBytes,
+		CacheBytes:      got.BlobBytes + got.ReservedBlobBytes,
+		LogBytes:        got.LogBytes,
 	}, nil
 }
 

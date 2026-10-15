@@ -3176,57 +3176,6 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CreditState"}
 
-  /api/v1/credits/grants:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Record a verified payment's paid credits on the ledger.
-      description: |
-        The checkout service's route: only its own token reaches it, and no
-        other credential stands in. It writes a `paid` grant and refuses any
-        other `kind` with 400. An operator's
-        free grant goes through `POST /api/v1/operator/teams/{team}/grants`,
-        and a refund through `POST /api/v1/credits/reversals`.
-
-        A grant records who granted the credits and the payment `reference`
-        they came from. A grant that lifts the balance above zero lets
-        metered runners claim again and stops the cancellation of nodes
-        running on an empty balance.
-
-        A non-empty `reference` is idempotent: a second request naming the
-        same `reference` returns the grant already written with 200, so a
-        payment webhook may redeliver. A replay must carry the terms it
-        carried the first time: one naming a `reference` another grant holds
-        under a different `amount_micro` is refused with 409.
-
-        A `paid` grant is never refused by the team balance cap, because its
-        payment already went through and the cap was held when its checkout
-        opened; it is at most one purchase, $500, and names the Checkout
-        Session it settles in `checkout`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/CreateGrantRequest"}
-      responses:
-        "200":
-          description: The grant this reference already wrote.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CreditGrant"}
-        "201":
-          description: The grant written.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CreditGrant"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "409":
-          description: >-
-            Another grant holds this reference under different terms, or the payment drew an early fraud warning and is refunded rather than granted (`payment_warned`).
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Error"}
-
   /api/v1/credits/reversals:
     post:
       x-sparkwing-scope: credits.grant
@@ -7217,15 +7166,6 @@ components:
         charges:
           type: array
           items: {$ref: "#/components/schemas/CreditCharge"}
-    CreateGrantRequest:
-      x-sparkwing-go-type: pkg/controller.createGrantReq
-      type: object
-      required: [kind, amount_micro]
-      properties:
-        kind: {type: string, enum: [paid]}
-        amount_micro: {type: integer, format: int64, description: "Micro-credits to add; 100,000 is one credit and 1,000,000 one cent, and one grant may not exceed 10^15."}
-        reference: {type: string, description: "The payment id. A non-empty one is idempotent."}
-        team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller; defaults to the default team otherwise."}
     PaymentReversal:
       x-sparkwing-go-type: pkg/controller.reversePaymentJSON
       type: object

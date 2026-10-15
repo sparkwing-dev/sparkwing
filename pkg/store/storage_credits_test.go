@@ -15,7 +15,7 @@ const gib = int64(1) << 30
 func chargeableTeam(t *testing.T, st *store.Store, principal string, rate, free int64) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := st.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+	if _, err := st.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{
 		StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free,
 	}); err != nil {
 		t.Fatalf("set storage settings: %v", err)
@@ -33,13 +33,13 @@ func TestAnEmptyBalanceRefusesATeamWithNoQuotaRow(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	rate := int64(store.CloudStorageRateMicroPerGBDay)
-	if _, err := st.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+	if _, err := st.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{
 		StorageRateMicroPerGBDay: &rate,
 	}); err != nil {
 		t.Fatalf("set storage settings: %v", err)
 	}
 	seedRunWithNode(t, st, "r1", "n1", "running")
-	_, err := st.AppendEventCharged(ctx, "nomad", "r1", "n1", "log", []byte("bytes"))
+	_, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("bytes"))
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("append = %v, want an insufficient-credits refusal", err)
 	}
@@ -51,22 +51,22 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, gib)
 	seedRunWithNode(t, st, "r1", "n1", "running")
 
-	_, err := st.AppendEventCharged(ctx, "acme", "r1", "n1", "log", []byte("more bytes"))
+	_, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("more bytes"))
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("append on an empty balance = %v, want an insufficient-credits refusal", err)
 	}
-	if !strings.Contains(err.Error(), "acme") {
+	if !strings.Contains(err.Error(), string(store.DefaultTeam)) {
 		t.Fatalf("refusal = %v, want one naming the team", err)
 	}
 	if got := countRows(t, st, `SELECT COUNT(*) FROM events`); got != 0 {
 		t.Fatalf("events = %d, want the refused write stored nothing", got)
 	}
 
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 10*store.MicroCreditsPerCent,
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 10*store.MicroCreditsPerCent,
 		"", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if _, err := st.AppendEventCharged(ctx, "acme", "r1", "n1", "log", []byte("more bytes")); err != nil {
+	if _, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("more bytes")); err != nil {
 		t.Fatalf("append once the balance holds credit: %v", err)
 	}
 	retained, err := storageTestTenant(t, st).StorageRetainedBytes(ctx)
@@ -86,11 +86,11 @@ func TestStorageSettingsRefuseValuesOutsideTheirBounds(t *testing.T) {
 		{StorageRateMicroPerGBDay: ptrInt64(store.MaxStorageRateMicroPerGBDay + 1)},
 		{StorageFreeAllowanceBytes: ptrInt64(-1)},
 	} {
-		if _, err := st.SetCreditSettings(ctx, up); !errors.Is(err, store.ErrInvalidCreditSetting) {
+		if _, err := st.AsOperator().SetCreditSettings(ctx, up); !errors.Is(err, store.ErrInvalidCreditSetting) {
 			t.Fatalf("SetCreditSettings(%+v) = %v, want an invalid-setting refusal", up, err)
 		}
 	}
-	settings, err := st.CreditSettings(ctx)
+	settings, err := st.AsOperator().CreditSettings(ctx)
 	if err != nil {
 		t.Fatalf("settings: %v", err)
 	}

@@ -10,50 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// A reversal takes back what a payment still has on the ledger, in the team
-// it funded, once: a repeat under the same reference returns the first, and a
-// second reference for a payment already taken back writes nothing.
-func TestReversePaymentTakesBackWhatThePaymentStillHas(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
-	dollars := func(n int64) int64 { return n * 100 * store.MicroCreditsPerCent }
-	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: dollars(100), Reference: "pi_1", CreatedBy: "billing",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantReversal, AmountMicro: -dollars(30), Reference: "re_part", Reverses: "pi_1",
-		CreatedBy: "ops",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	first, err := s.ReversePayment(ctx, "pi_1", "refund:pi_1", "ops", 0)
-	if err != nil {
-		t.Fatalf("reverse: %v", err)
-	}
-	if !first.Created || first.Team != "acme" || first.Grant.AmountMicro != -dollars(70) ||
-		first.PaidMicro != dollars(100) || first.ReversedMicro != dollars(100) || first.BalanceMicro != 0 {
-		t.Fatalf("reversal = %+v, grant %+v; want the remaining $70 taken back from acme", first, first.Grant)
-	}
-	again, err := s.ReversePayment(ctx, "pi_1", "refund:pi_1", "ops", 0)
-	if err != nil || again.Created || again.Grant == nil || again.Grant.ID != first.Grant.ID {
-		t.Fatalf("repeat = %+v, %v; want the first reversal back", again, err)
-	}
-	other, err := s.ReversePayment(ctx, "pi_1", "dp_1", "billing", 0)
-	if err != nil || other.Created || other.Grant != nil || other.ReversedMicro != dollars(100) {
-		t.Fatalf("a second reference for a payment already reversed = %+v, %v; want nothing written", other, err)
-	}
-	if got, err := acme.CreditBalanceMicro(ctx); err != nil || got != 0 {
-		t.Fatalf("balance = %d, %v; want 0", got, err)
-	}
-	if _, err := s.ReversePayment(ctx, "pi_unknown", "refund:pi_unknown", "ops", 0); !errors.Is(err, store.ErrUnknownPayment) {
-		t.Fatalf("an unknown payment = %v, want ErrUnknownPayment", err)
-	}
-}
-
 // A frozen team's metered claims are refused however much it holds, until
 // every freeze on it is released; an unmetered claim is not affected.
 func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {

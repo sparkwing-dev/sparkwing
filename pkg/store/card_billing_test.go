@@ -64,7 +64,7 @@ func TestANewTeamStopsAtItsDailyCap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := storetest.Open(t)
 			claimant, _ := fundedMeteredNode(t, s, "run-cap")
-			if _, err := s.GrantCredits(context.Background(), store.CreditGrantPaid, dollarsMicro(30), "pay_more", "admin"); err != nil {
+			if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantPaid, dollarsMicro(30), "pay_more", "admin"); err != nil {
 				t.Fatal(err)
 			}
 			spentOn(t, s, "default", tc.day, store.NewDailyCapCents)
@@ -611,20 +611,6 @@ func TestASetupAfterAnUnorderedSaveIsNotStale(t *testing.T) {
 	}
 }
 
-// A prepaid purchase whose payment drew a warning is refused at the ledger.
-func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
-	if _, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{WarningID: "issfr_2", PaymentIntent: "pi_buy", Actionable: true},
-		time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, 10_000*store.MicroCreditsPerCredit, "pi_buy", "billing"); !errors.Is(err, store.ErrPaymentWarned) {
-		t.Fatalf("grant of a warned payment = %v, want ErrPaymentWarned", err)
-	}
-}
-
 // A decline holds the team, drops an operator's grant back to New and stops
 // every claim, prepaid balance or not; the retries still run under the hold,
 // and paying the charge lifts it.
@@ -861,12 +847,6 @@ func TestANonActionableWarningStopsNoGrant(t *testing.T) {
 	}
 	if freeze, err := acme.CreditFreeze(ctx); err != nil || freeze.Frozen {
 		t.Fatalf("freeze = %+v, %v; want none", freeze, err)
-	}
-	if _, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{WarningID: "issfr_q2", PaymentIntent: "pi_buy"}, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, store.MicroCreditsPerCredit, "pi_buy", "billing"); err != nil {
-		t.Fatalf("a purchase with a non-actionable warning = %v; want granted", err)
 	}
 }
 

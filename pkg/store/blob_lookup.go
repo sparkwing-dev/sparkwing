@@ -340,31 +340,7 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 	if err != nil || !hit.Found {
 		return hit, err
 	}
-	digests := []blob.Digest{}
-	if hit.Output.Set {
-		digests = append(digests, hit.Output.Value)
-	}
-	if hit.Manifest.Set {
-		digests = append(digests, hit.Manifest.Value)
-	}
-	for _, member := range hit.Members {
-		digests = append(digests, member.Digest)
-	}
-	slices.Sort(digests)
-	for _, digest := range slices.Compact(digests) {
-		if err := advisoryLockTx(ctx, tx, "blob:"+string(r.tenant.team)+":"+string(digest)); err != nil {
-			return blob.MemoHit{}, err
-		}
-		if _, err := requireBlobTx(ctx, tx, r.tenant.team, digest); err != nil {
-			if cacheMissError(err) {
-				return blob.MemoHit{}, nil
-			}
-			return blob.MemoHit{}, err
-		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", r.tenant.team, digest); err != nil {
-			return blob.MemoHit{}, err
-		}
-	}
+	var batch []blobRecordMutation
 	for _, part := range []struct {
 		kind   blob.Kind
 		digest runspec.Optional[blob.Digest]
@@ -377,29 +353,33 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 		if err != nil {
 			return blob.MemoHit{}, err
 		}
-		prior, found, err := readBlobRecordTx(ctx, tx, key, scope)
-		if err != nil {
-			return blob.MemoHit{}, err
-		}
-		if found && prior.Digest != part.digest.Value {
-			return blob.MemoHit{}, authorityError(apierr.Conflict, "memo destination is immutable")
-		}
-		if found {
-			continue
-		}
 		record := original
 		record.Key, record.Digest, record.CreatedAt = key, part.digest.Value, tx.now()
 		record.ExpiresAt = runspec.Optional[time.Time]{}
 		record.ManifestDigest = runspec.Optional[blob.Digest]{}
 		record.Pinned = false
-		if err := persistBlobRecordTx(ctx, tx, record, scope, a.source); err != nil {
-			return blob.MemoHit{}, err
+		change := blobRecordMutation{record: record, scope: scope}
+		if part.kind == blob.KindManifest {
+			change.members = hit.Members
 		}
+		batch = append(batch, change)
 		edge := blob.ReadEdge{Kind: blob.EdgeMemoHit, Reader: request.Destination, Record: key, Digest: part.digest.Value}
 		hit.ReadSet.Edges = append(hit.ReadSet.Edges, edge)
 	}
 	if !request.Lookup.Budget.Deadline.IsZero() && !tx.now().Before(request.Lookup.Budget.Deadline) {
 		return blob.MemoHit{}, nil
 	}
-	return hit, tx.Commit()
+	if _, err := r.mutateRecordsTx(ctx, tx, a, batch, true); err != nil {
+		if cacheMissError(err) {
+			return blob.MemoHit{}, nil
+		}
+		return blob.MemoHit{}, err
+	}
+	if !request.Lookup.Budget.Deadline.IsZero() && !tx.now().Before(request.Lookup.Budget.Deadline) {
+		return blob.MemoHit{}, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return blob.MemoHit{}, err
+	}
+	return hit, nil
 }

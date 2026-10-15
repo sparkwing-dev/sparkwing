@@ -17,7 +17,7 @@ func TestPostgresConcurrentExecutionStartsAndActivity(t *testing.T) {
 	const runID = "parallel-start"
 	const count = 6
 	claimant := meteredClaimant(t, s, "runner:parallel")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		100*store.MicroCreditsPerCent, "parallel-start-credit", "admin"); err != nil {
 		t.Fatal(err)
 	}

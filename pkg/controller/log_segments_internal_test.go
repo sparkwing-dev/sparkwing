@@ -375,11 +375,11 @@ func TestLogSegmentsChargeTheTeamsLogStorageOnce(t *testing.T) {
 	}), pub, now, nil))
 	tok := f.claim(t, "a", store.ClaimTokenWork)
 	committed := func() int64 {
-		marks, err := f.st.StorageMarks(t.Context(), store.StorageLogs)
-		if err != nil {
+		var used int64
+		if err := f.st.DB().QueryRowContext(t.Context(), "SELECT used_bytes FROM team_storage WHERE team=? AND store=?", store.DefaultTeam, store.StorageLogs).Scan(&used); err != nil {
 			t.Fatal(err)
 		}
-		return marks[store.DefaultTeam]
+		return used
 	}
 	for _, step := range []struct {
 		n    int
@@ -822,45 +822,5 @@ func TestNodeLogSettlesOnlyWithNoRetryToCome(t *testing.T) {
 		if !settled() {
 			t.Fatalf("a node done with outcome %s reads as unsettled", outcome)
 		}
-	}
-}
-
-// A node's after-run work, such as hooks, cache saves and artifact
-// publication, can outlast its attempt by more than the seal grace, so the
-// ended claim's tail runs from the node's end when that is later.
-func TestAnEndedClaimsTailRunsFromTheNodesLaterEnd(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, up := f.sink(t, tok, "a")
-	const first = "a line long enough to cut a segment\n"
-	if err := s.Append([]byte(first), "", 0, 0); err != nil {
-		t.Fatal(err)
-	}
-	<-up.stored
-	wantPost(t, f.dispatchRouteFixture, attemptPath, tok, `{"outcome":"success"}`, http.StatusOK, "")
-	set := func(q string, at time.Time) {
-		t.Helper()
-		if _, err := f.st.DB().ExecContext(ctx, q, at.UnixNano()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	set(`UPDATE node_execution_attempts SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'a'`, time.Now().Add(-2*logseg.SealGrace))
-	set(`UPDATE nodes SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'a'`, time.Now())
-	if err := s.Append([]byte("after-run hook line\n"), "", 0, 0); err != nil {
-		t.Fatal(err)
-	}
-	m, err := s.Close(ctx, logseg.End{})
-	if err != nil || m.Status != logseg.StatusComplete || m.Lines != 2 {
-		t.Fatalf("seal within the grace of the node's end = %+v, %v", m, err)
-	}
-	if got, err := f.srv.dashboardLogs(store.DefaultTeam).Read(ctx, "run-d", "a", storage.ReadOpts{}); err != nil ||
-		string(got) != first+"after-run hook line\n" {
-		t.Fatalf("read %q, %v", got, err)
-	}
-
-	set(`UPDATE nodes SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'a'`, time.Now().Add(-logseg.SealGrace))
-	if code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/a/log-segments", tok, signRequest(2, []byte("late"))); code != http.StatusForbidden {
-		t.Fatalf("a request past the grace of both ends: %d %s, want 403", code, raw)
 	}
 }

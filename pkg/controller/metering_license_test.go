@@ -64,7 +64,7 @@ func TestUnlicensedControllerHasNoMetering(t *testing.T) {
 	if err != nil || trigger == nil {
 		t.Fatalf("trigger claim with a legacy metered token = %+v, %v", trigger, err)
 	}
-	charges, err := f.store.ListCreditCharges(ctx, 10)
+	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
 	if err != nil || len(charges) != 0 {
 		t.Fatalf("charges after claim = %+v, %v", charges, err)
 	}

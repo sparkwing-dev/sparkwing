@@ -685,7 +685,11 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 			}))
 		}
 	}
-	seq, err := s.store.AppendEventCharged(r.Context(), chargedPrincipal(r),
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	seq, err := tenant.AppendEventCharged(r.Context(), s.leaseHolder,
 		runID, body.NodeID, body.Kind, body.Payload)
 	if writeStorageWriteRefusal(w, s.logger, err) {
 		return

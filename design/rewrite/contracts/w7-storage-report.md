@@ -2,109 +2,121 @@
 
 <!-- design:begin -->
 
-## Integration merge and attempt-fenced result verification
+## Integration merge and retained storage
 
-All twelve conflicted paths have resolved working-tree contents. The lead-owned
-handoffs.md is byte-identical to incoming index stage 3. Both migration sections
-survive. Generated API docs and OpenAPI were rebuilt, then embedded docs synced.
-No conflict markers remain. The index still has twelve unmerged entries because
-the swarm brief prohibits Git writes. The lead must stage the resolved paths and
-finish the merge, including the deletion of internal/nodehost/memo_unix_test.go.
+All 24 conflicted paths have resolved working-tree contents. No conflict markers
+remain. The index still reports those paths because the brief prohibits Git
+writes. The lead must stage the resolutions and finish the merge. The incoming
+handoffs.md is unchanged from MERGE_HEAD.
 
-W7's cache-grant and output-signer removals survive. Incoming removal of the warm
-fallback, concurrency-cache maintenance, run-row heartbeat and launched planner
-also survives. Removed stale references to DefaultConcurrencyCacheCap and
-planLaunchedRun that otherwise broke the whole-repository build. Auth docs no
-longer claim the removed Git proxy or run-row heartbeat is available.
+The controller's storage report now reads ForTeam followed by
+Tenant.StorageStanding. It reports retained events, unique blobs, tagged logs
+and live blob-upload holds from W1b's snapshot. It no longer calls the removed
+StorageStandingFor or TeamStorage APIs. The merged implementation referenced
+the deleted internal/storagequota package. It now uses store.TeamStorageTier.
+W7's collection/billing test selects AsOperator for SetCreditSettings.
 
-The existing TestDataStorageAttachesVerifiedResultRecords property failed after
-the merge because holder transitions now require SourceAttempt. It now uses the
-real Tenant.TransitionNode API with ordinal zero at start and Applied.Attempt at
-report. Twelve generated cases still prove corrupt physical manifests cannot
-commit a terminal result, valid bytes can, and identical completion replays.
-Server.WithDataObjects still installs the real result verifier. This test proves
-the controller's store construction, not W9's transition wire adapter.
+The merge retains W7's cache-grant, filesystem-output, raw-filesystem-log and
+raw artifact plug-in deletions. It also retains W1b's paid-grant retirement,
+leased egress pruning, replica accounting, retained inventory and record-mutation
+owner. No deleted API or cache credential was restored to satisfy a caller.
 
-No additional legacy storage runtime was deleted: **0 storage lines**. Earlier
-cache service, internal/cache, gitcache, package proxy and cache chart deletions
-remain intact. No new acceptance cell or archived test port was added. No new
-credential, schema, restriction or foreign contract was introduced.
+Deleted 99 lines of duplicate legacy free-tier tests in storage_standing_test.go.
+Their replacements are in free_tier_source_test.go and use final store rows.
+Deleted the incoming, unused direct_upload_bucket_test.go helper, another 31
+lines. The deleted legacy egress_internal_test.go remains deleted, as selected
+by the integration branch. No additional output/log runtime was retired.
+The cache service, internal/cache, gitcache proxy, package proxy and cache chart
+remain absent. No new acceptance cells or archived-test ports were added.
+
+Source limits documentation describes retained inventory and quota expiry.
+regen-all.sh rebuilt derived references, snapshots and embedded docs. It also
+removed the stale generated sdk-planguard.md page. The vendored chart matched
+its source and was not rebuilt.
 
 ## Amendment and handoff audit
 
-All W7 rows in amendments-1.md and the incoming handoffs.md were checked against
-current definitions and callers. Earlier completed work remains complete.
-
-| Entries | Current integration and remaining owner action |
+| Entries | W7 implementation and remaining integration |
 | --- | --- |
-| A1-24/29 | W1 transactional data-access, exact result layouts and verified-default record APIs are consumed by W7's existing byte/record/archive integrations. W2 must bind authenticated authority and server-derived tenant/default ref for repository-only reads. |
-| A1-30/31/32/34 | W7 consumers use DataSigner, RecordStore and resolved UploadIdentity. DataAuthority, BindData and NewDataClient still panic. W2/W9 must implement those adapters and PolicyRouter. |
-| A1-33 | Both physical backends, manifest verification and leased collection remain wired. W1b must expose leased expired-staging selection. releaseExpiredBlobUploadQuotasTx releases holds without returning physical staging keys. |
-| A1-35 | W1 must install the transaction-local materialization copier. Store.materializations is assigned only in materialize_runtime_test.go. W1b retains the approved record-mutation authorization redesign. |
-| A1-36 | W3/W8 must construct fresh attempt/generation StorageBindings. W1/W3/W9 must expose committed output/manifest selectors for materialized jobs, which may have attempt zero. |
-| A1-37 | SDK helper, lint-cache and removed HTTP consumer cuts remain complete. |
-| A1-43/50 | W8/W9 retain host/profile construction, publication, historical release assets and CLI integration. |
-| A1-53 | T1/lead retain native authenticated transport, placement and real-repository QA. |
+| A1-24/29 | Existing byte, manifest and archive paths consume tenant upload/record APIs and authorized member metadata. W2 still resolves authenticated repo/default-ref authority. |
+| A1-30/31/32/34 | Remote cache consumes Records. Uploads retain the exact tagged uploader. W2 DataAuthority/BindData and W9 NewDataClient remain panic stubs. W7 continues to consume those interfaces rather than implementing authentication or SQL. |
+| A1-33 | Both physical backends, result-manifest verification and leased collection remain implemented and tested. W1b still needs a leased expired-staging selector. Its private quota-expiry helper returns no staging keys. |
+| A1-35 | The approved W1b record-mutation redesign is merged. Its full generated authority-expiry regression passes. W1's separate transaction-local materialization copier is still assigned only by tests. |
+| A1-36 | W3/W8 must construct fresh StorageBindings for each attempt/generation. W1/W3/W9 still need readable committed result selectors for materialized jobs. |
+| A1-37 | SDK cache/key helpers, lint-cache consumer migration and the removed HTTP path remain complete. |
+| A1-43/50 | W8/W9 retain engine/profile construction, publication and CLI integration. Historical release assets were not changed. |
+| A1-53 | Native authenticated HTTP/api.sock, placement and real-repository QA remain with T1/lead and the integrating areas. |
 
-W1's new SourceAttempt contract also needs W9/W3 transport and caller migration.
-JobTransitionRequest still has no source-attempt field, and nodeTransitionForStore
-cannot populate it. The repaired W7 property uses the tenant transaction rather
-than inventing a foreign wire field. W9 must complete that interface amendment.
+## Contract changes needed and remaining cuts
 
-W2/W9 must declare and implement authenticated log segment commit and binding
-construction for blob.LogTransport plus logseg.SegmentRecorder. The existing
-SubjectUploader already consumes those interfaces. Reusing the old per-node
-log-manifest endpoint would retain its incompatible persistence contract.
+W2/W9 must declare the authenticated log binding and segment-commit adapter that
+supplies blob.LogTransport and logseg.SegmentRecorder. The physical signer,
+SubjectUploader and CommittedReader already consume these interfaces. There is
+no controller adapter for the new transactional segment records. Reusing the
+old per-node manifest route would preserve the replaced persistence contract.
 
-The private materialization seam still returns unavailable without its copier.
-Public CopyMemo before ReconcileNode would commit edges separately from terminal
-state. MaterializedResultSource can identify a state sequence, but NodeRow still
-has no committed result-record selectors. The prior record-expiry regression was
-not patched under the brief's two-strikes rule. Its approved redesign remains W1b.
+W1 must bind CopyMaterializedRecords inside its state transaction. Public
+CopyMemo before reconciliation would commit result edges separately from the
+terminal state. W1/W3/W9 must expose the committed output/manifest record keys
+for materialized results, including jobs with no execution attempt. NodeRow
+does not expose these selectors. W9/W3 also still need to carry SourceAttempt
+through JobTransitionRequest and its store conversion.
 
-## Remaining deletion
+W1b must expose fenced expired-ticket staging selection for physical cleanup.
+releaseExpiredBlobUploadQuotasTx releases holds but returns no staging keys.
+Allowance-driven physical eviction remains open. No foreign contract was
+changed and no new product restriction or mechanism was introduced.
 
-Controller S3 output/log handlers and clients, orchestrator sinks, store-local
-output files, run-directory log readers, raw S3 log access and the listing-based
-reader remain live. Every remaining pkg/storage/s3 method has a production caller
-or supports bucket measurement. Removing them now would remove behavior without
-its authenticated replacement. These are unfinished cuts, not completed work.
+Remaining legacy cuts are controller S3 output/log handlers and clients,
+orchestrator sinks, store-local output files, run-directory log readers and
+listing-based S3 log access. Their callers still use the old paths. They are
+unfinished work, not completed deletions.
 
-Shared files touched by merge resolution or caller adaptation:
-pkg/controller/server.go, tenant_routes.go and data_result_test.go;
-internal/orchestrator/claim_exec.go; internal/cluster/runner_pool_cli_test.go;
-internal/nodehost/memo_unix_test.go (deletion retained); docs/auth.md,
-docs/api-reference.md and docs/migrations/_unreleased.md; their embedded mirrors;
-api/openapi.yaml; and the lead-owned handoffs.md conflict resolution only.
+## Shared files
+
+Production caller adaptation: pkg/controller/storage_standing.go.
+Fixture migration: pkg/controller/data_storage_test.go.
+Removed fixtures: pkg/controller/storage_standing_test.go and the incoming
+pkg/controller/direct_upload_bucket_test.go. server.go loses the orphaned
+comment for the removed egressPrunedMonth field.
+
+Merge resolutions cover .apidiff/pkg_store.txt, contracts/c1-data.md,
+pkg/controller/server.go, log_segments.go, log_segments_internal_test.go,
+storage_standing.go, the deleted data_download.go, direct_source_test.go,
+direct_upload_test.go and egress_internal_test.go, and source/embedded auth,
+gitcache, limits, migrations, observability, security and self-hosting docs.
+Both migration sections survive.
+
+Regeneration also updates source/embedded config-reference.md, sdk-reference.md,
+sdk-cleanup.md, sdk-git.md and sdk-inputs.md, deletes sdk-planguard.md, and
+updates API references, OpenAPI and API snapshots. These are generator output.
+The lead-owned amendments and handoffs files were not edited.
 
 ## Verification
 
-Commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
-GOCACHE=/tmp/sw-astra-W7/cache, GOTMPDIR=/tmp/sw-astra-W7/gotmp and
-TMPDIR=/tmp/sw-astra-W7/tmp. Tests used -p 4. No Sparkwing binary ran.
+Commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and -p 4.
+GOCACHE, GOTMPDIR and TMPDIR were under /tmp/sw-astra-W7/.
 
-Passed:
+- Whole-repository go build ./... passes.
+- All tests pass for internal/blob/..., internal/artifacts, internal/depcache,
+  internal/teamblob and pkg/storage/.... Vet also passes for these and controller.
+- Controller data-storage, filesystem-startup, retained-inventory, tenant
+  standing, egress, event/download accounting, final storage-route and free-tier
+  replacement tests pass. The result property still uses real claim/start,
+  reservation, receipt, record and terminal-state transactions.
+- Store result-record tests, TestBlobRecordsMutationCannotOutliveAuthority,
+  standing tests and FuzzStorageStandingTenantInventory seeds pass.
+- Existing TestStorage passes in 202.107 seconds with 80 passing test events,
+  424 skips and no failures. Real SQLite upload/record/log, manifest, archive
+  and physical-backend joins remain covered. Skips are not native evidence.
+- regen-all.sh, sync-docs.sh --check, commentcheck -base main and
+  git diff --check pass. Commentcheck inspected 1,343 files.
 
-- Whole-repository go build -p 4 ./....
-- All tests for internal/blob/..., internal/artifacts, internal/depcache,
-  internal/teamblob and pkg/storage/....
-- Vet for those packages plus pkg/controller and internal/orchestrator.
-- Controller TestDataStorage* and TestFilesystemDataStartup*.
-- Test compilation for controller, cluster, nodehost and orchestrator.
-- Existing TestStorage: 211.734 seconds, 80 passing test events, 424 skips,
-  no failures. Real tenant byte/record, manifest, archive and physical-log joins
-  remain among these cells. Component proofs do not establish native transport.
-- API route coverage and embedded-document drift checks.
-- Commentcheck against main: 1,310 files. git diff --check.
-
-Independent read-only review found no defect in the bounded merge resolutions
-or result-fixture migration. It did not independently run tests or establish
-wire behavior. No new design decision is requested.
-
-Friction: the brief reserves staging and committing to the lead, so Git still
-reports index conflicts. Remaining runtime joins cross ownership or require a
-foreign contract amendment. No substitute authentication or SQL implementation
-was added. Scratch is removed after checks. The lead owns merge completion.
+No independent review, full legacy suite, PostgreSQL, native placement, pipeline
+or release is claimed. The lead owns those decisions and merge completion.
+Friction is the unavailable foreign adapters and missing contract shapes above.
+The Git index remains unmerged because this worker cannot stage or commit.
+Scratch is deleted after verification.
 
 <!-- design:end -->
 

@@ -337,16 +337,18 @@ func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, 
 	if m == nil {
 		return w
 	}
-	return m.serve(w, r, principal, class)
+	writer, _ := m.serve(w, r, principal, class)
+	return writer
 }
 
-// Handle runs next with a writer from [Meter.Serve]. A nil meter runs next
-// uncounted.
-func (m *Meter) Handle(w http.ResponseWriter, r *http.Request, principal string, class Class, next http.Handler) {
-	next.ServeHTTP(m.Serve(w, r, principal, class), r)
+// Handle runs next and returns delivered successful-response bytes, including with a nil meter.
+func (m *Meter) Handle(w http.ResponseWriter, r *http.Request, principal string, class Class, next http.Handler) int64 {
+	writer, counted := m.serve(w, r, principal, class)
+	next.ServeHTTP(writer, r)
+	return counted.sent
 }
 
-func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, class Class) http.ResponseWriter {
+func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, class Class) (http.ResponseWriter, *countingWriter) {
 	counting := &countingWriter{
 		ResponseWriter: w,
 		meter:          m,
@@ -362,13 +364,13 @@ func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, 
 	hijacker, canHijack := w.(http.Hijacker)
 	switch {
 	case canFlush && canHijack:
-		return &flushingHijackingWriter{countingWriter: counting, flusher: flusher, hijacker: hijacker}
+		return &flushingHijackingWriter{countingWriter: counting, flusher: flusher, hijacker: hijacker}, counting
 	case canFlush:
-		return &flushingWriter{countingWriter: counting, flusher: flusher}
+		return &flushingWriter{countingWriter: counting, flusher: flusher}, counting
 	case canHijack:
-		return &hijackingWriter{countingWriter: counting, hijacker: hijacker}
+		return &hijackingWriter{countingWriter: counting, hijacker: hijacker}, counting
 	default:
-		return counting
+		return counting, counting
 	}
 }
 
@@ -775,6 +777,7 @@ type countingWriter struct {
 	bodyless bool
 	status   int
 	wrote    bool
+	sent     int64
 }
 
 func (w *countingWriter) WriteHeader(code int) {
@@ -789,6 +792,7 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 	w.wrote = true
 	n, err := w.ResponseWriter.Write(p)
 	if w.charges() {
+		w.sent += int64(n)
 		w.meter.Record(w.principal, w.class, int64(n))
 	}
 	return n, err

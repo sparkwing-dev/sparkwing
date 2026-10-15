@@ -817,7 +817,7 @@ The controller reads these budgets from its flags alone.
 The controller counts each team's UTC day in its database. A team is the
 one the caller's credential belongs to, never a token's name, which is free
 text two teams may share. The controller charges its artifact downloads
-there directly.
+there directly. Final usage accounting uses tenant, period and replica rows.
 
 A download is refused before its first byte only when the team is already at
 its cap. It is then charged the bytes it actually delivers, 8 MiB at a time as
