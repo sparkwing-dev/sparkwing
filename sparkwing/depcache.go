@@ -109,11 +109,8 @@ func Dir(path string, key KeySource) DirCache {
 //	sparkwing.Job(plan, "test", runTests).
 //	    CacheDir(sparkwing.GoModules())
 //
-// Storage follows the environment: a laptop run uses
-// $SPARKWING_HOME/depcache, a cluster run uses the sparkwing-cache
-// service when SPARKWING_CACHE_URL or SPARKWING_GITCACHE_URL is set.
-// The archive format is identical in both, which is what makes a
-// pipeline behave the same everywhere.
+// Local runs use $SPARKWING_HOME/depcache. Remote hosts bind a signed
+// /data backend to the job. Both use the same verified archive format.
 //
 // Every cache operation is best-effort: a missing lockfile, an
 // unreachable backend, or an oversized archive logs a warning and

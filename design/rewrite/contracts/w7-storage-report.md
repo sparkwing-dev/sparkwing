@@ -1,141 +1,170 @@
 # W7 storage handoff
 
-W7 is incomplete. The byte client and cache-service deletion build and pass their
-focused checks. The transactional storage, host integration and native acceptance
-work cannot be completed against the other areas' stubs in this checkout.
+W7 remains incomplete. Session 2 adds the physical object backends behind the
+frozen signing interface and removes more cache-service clients. Native
+acceptance, transactional integration and the remaining artifact/memo/source
+cut still need work. No git writes or Sparkwing executable invocations occurred.
 
-## Implemented
+## Implemented in session 2
 
-- All functions declared in `internal/blob/contracts.go` and `log_contract.go`.
-  Uploads check signed identity, size and SHA-256 before commit. Downloads require
-  verified EOF. Presence lookups keep the caller's deadline and discard partial
-  answers on timeout.
-- Exact uploader and reference-edge predicates, encoded memo/depcache namespaces,
-  server-derived write keys, binary provenance checks and tagged log validation.
-- A signed HTTP transfer client that refuses redirects and carries only signed
-  headers. It has no cache-service route fallback.
-- Read-only remote-cache access through injected records and byte clients. It
-  requires verified default-branch evidence, verifies returned bytes and permits
-  subsequent reads only of accepted output, manifest, member and archive digests.
-- A signed-data dependency-cache backend. It verifies an archive before publishing
-  extracted files. Hosts bind it with `depcache.WithBackend`; local files remain the
-  default when no backend is supplied.
-- Local compilation and warmup no longer fetch or upload remote pipeline binaries.
-- Cache-free runner/full charts and current release executable/image lists.
+- Filesystem and S3 implementations of `capability.DataSigner` in `internal/blob`.
+  PUTs bind the key, size, SHA-256 and expiry. GETs name immutable CAS objects,
+  exclude logs and enforce the sixty-second maximum from `internal/limits`.
+- Filesystem HTTP transfers use HMAC-signed URLs, confined directory operations,
+  verified staging and create-only publication. Bad, truncated or oversized
+  uploads leave no staging file. Tampered, expired and wrong-method URLs fail.
+- S3 PUT signatures include content length and SHA-256. Commit checks the object
+  checksum and length, fences the source ETag and creates the final key only if
+  absent. Both backends verify an existing final object before retry adoption.
+- `ObjectBackend` exposes signing, physical commit and deletion. It creates no
+  live rows or receipts. The authenticated controller/store transaction owns
+  those operations, as the frozen contract requires.
+- SDK git clone/fetch use upstream directly. Removed the cache probe, URL rewrite,
+  credential injection and fallback machinery.
+- Binary helpers take an injected data client and use only signed controller
+  routes. Removed `/bin` transfers and the older discovery/signing fallback.
+  Binary installation now checks exact size as well as SHA-256 and EOF. The new
+  short/long tests failed before that repair and pass afterward.
+- Removed the SDK lint-cache HTTP API and its pipeline calls. Lint retains its
+  local tool cache. Remote declaration through final `.Cache(Dir(...))` remains
+  open because that SDK method is a stub and the pipeline is a separate module.
+
+Session 1's signed byte client, edge predicates, scoped keys, remote-cache reader,
+depcache backend, cache-service deletion and chart/package changes remain in the
+committed branch. They were not rebuilt from scratch.
 
 ## Deleted
 
-59 files contain 12,787 deleted lines, including 4,493 production Go lines.
-The complete tracked diff removes 14,741 lines, including edits to retained files.
-These counts include tests and docs and exclude the binary chart archive.
+Session 2 removes six complete files containing **1,079 lines**:
 
-Removed `cmd/sparkwing-cache`, `internal/cache`, `pkg/storage/sparkwingcache`,
-controller gitcache proxy handlers and routes, cache-service deletion calls,
-cache Deployment/Service/PVC/NetworkPolicy templates, package-proxy chart wiring,
-cache credentials in the charts, and the associated cache-service tests.
-The runner chart archive was rebuilt from its source.
+- `internal/bincache/{signed_download.go,signed_download_test.go,publication_test.go}`.
+  The publication-failure test was ported to `direct_data_test.go`.
+- `sparkwing/{toolcache_blobstore.go,toolcache_blobstore_test.go,toolcache_archive_test.go}`.
 
-The hard cut is not complete. `internal/bincache` still contains gitcache source
-and binary helpers used by the old host/runner implementations. `internal/artifacts`
-still uses `storage.ArtifactStore`, and the old nodehost memo/artifact code and SDK
-toolcache client remain. Replacing those callers belongs with W3/W4/W8 integration;
-no new compatibility adapter was added here. General CLI/docs and Kubernetes QA
-scripts still need their owners' removal of old cache settings and terminology.
+It also removes obsolete binary transfer functions and tests, the SDK gitcache
+client, the CLI's fake cache-server tests and the removed SDK API documentation.
+Before this report update, the tracked session diff contained 2,298 removed lines.
+Session 1 removed 59 complete files containing 12,787 lines. Across both sessions,
+65 complete files containing 13,866 lines have been removed.
+
+The hard cut remains open for the gitcache source helpers in `internal/bincache`,
+old artifact/memo consumers, cache grants and old controller data handlers. The
+binary data client still uses `internal/directdata`; W2's final authenticated
+transport must replace it with `blob.Store`/`blob.RecordStore` bindings.
 
 ## Acceptance and test ports
 
-No native storage acceptance cell was activated. Running `TestStorage` reports
-424 skipped cells. `acceptance.New` and `acceptance.Run` still panic. The catalog
-suite passes, which is not runtime acceptance evidence.
+**Native storage acceptance: 0 activated, 424 cells skipped.**
+`acceptance.New` and `acceptance.Run` still panic. Catalog and port-inventory
+checks pass, which does not prove native execution. No fake result was labelled
+as a passing SQLite, Postgres, S3 or placement acceptance cell.
 
-`TestPresentIsBoundedAndAnswersAMissPastItsBudget` is ported at the byte-client
-boundary as `TestHasManyBudget`, including rejection of a partial timed-out answer.
-The remote memo test also proves an expired budget yields a miss. No worker-count
-assertion or sleep is retained.
+Component evidence added:
 
-The remaining storage-hotfix ports are not complete. New component tests cover
-same-run receipt laundering, all five admitted edge kinds, owner/publication
-fences, manual-ref namespace separation, binary provenance, early close,
-equal-size corruption, missing/truncated bytes, large presence requests, remote
-cache provenance, and archive integrity. These do not replace the missing
-transaction, quota, GC, memo-event, filesystem/S3 signing and native host tests.
+- Filesystem signing, verified publication, interrupted-commit adoption, corrupt
+  final refusal, bad-body cleanup, expiry, tamper, path and log-download refusal.
+- S3 signing and commit through the real AWS SDK with a fake HTTP service.
+  Checks signed size/checksum headers, source/destination copy conditions,
+  deduplication, interrupted-commit adoption and corrupt final refusal.
+- Signed binary transfers with fake HTTP: exact size/digest, missing data,
+  cancellation, failed publication cleanup, and bearer isolation on object PUT.
+- Direct SDK clone, upstream fetch and preservation of an existing destination.
 
-## Contract changes and integration needed
+The interrupted-upload and conflicting-checksum cases cover the physical-object
+parts of `TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires` and
+`TestDirectCommitRefusesExistingObjectWithDifferentChecksum`. Their transactional
+uploader/provenance obligations remain open, so these are partial ports. The
+prior presence-budget port remains in `TestHasManyBudget`.
 
-Local W7 contract repairs are recorded in `internal/blob/contracts.go`:
+The follower-output, refused manifest-copy, retry materialization, quota, GC,
+server-owned scope, same-run laundering and native host ports still require
+transactional/runtime integration. They are not claimed complete.
 
-- `Authority.Upload` carries a server-resolved owner/publication identity. The
-  original authority had only an optional job attempt and could not fence owners.
-  W2 must populate it after its live authority check.
-- `RemoteCacheOptions.Records` supplies the record lookup dependency absent from
-  the original constructor.
-- `RecordLookup.VerifiedDefaultOnly` asks the record owner to resolve the ref from
-  sealed default-branch evidence. W1 must implement this restriction, also checking
-  C2's read scope, before the remote cache can be used with the real store.
+## Contracts and real-integration points
 
-Other owners' contract/runtime work remains:
+Local W7 addition: `internal/blob/objects.go` declares `ObjectBackend`, implemented
+by `NewFilesystem` and `NewS3`. The object-signing types are unchanged from W2.
+The physical commit/deletion boundary is needed because neither signing nor
+`blob.RecordStore` owns object publication. No schema or another area's contract
+was changed. Removing these new backend files reverses this addition.
 
-- W1: implement `Tenant.LookupRecord`, `LookupMemo`, `LookupDepcache`, `CommitRecord`
-  and `CopyMemo` in `result_contract.go`, plus transactional existence/read-set,
-  receipts, unique-byte accounting, quota and retention. They remain panics here.
-- W2: implement `capability.AuthorizeData`, the signed-data adapter and authenticated
-  record transport. Object transfer alone does not establish existence or authority.
-- W3/W4/W8: provide bound byte/record clients to artifact, memo and depcache host
-  consumers. The old configs expose `storage.ArtifactStore`; the final host inputs
-  do not declare that binding. Cut the old bincache/SDK callers with those hosts.
-- Acceptance owner: implement the native driver before unskipping its target cells.
+The prior local W7 repairs remain: `Authority.Upload`,
+`RemoteCacheOptions.Records` and `RecordLookup.VerifiedDefaultOnly`.
 
-No changes were made to W1's store contracts or W2's capability contracts.
-There is no new architecture choice awaiting approval. The missing runtime seams
-above prevent a completed W7 claim.
+Other-area contract/integration work needed:
+
+- **W1:** expose the final tenant-bound upload lifecycle: persist immutable
+  tickets and quota reservations, resolve them at commit, then atomically record
+  live blob existence and the exact uploader receipt. `uploads` is in the final
+  schema, but the target contract files do not declare that lifecycle's methods.
+  Do not infer that an existing object is an authorized receipt.
+- **W1:** implement the `blob.RecordStore` methods, restricted default-branch
+  lookups, read sets, unique-byte accounting and retention. These remain stubs.
+- **W2:** authorize and reserve before signing. Mount the filesystem endpoint or
+  provide the S3 client, adapt the object backend to `blob.DataSigner`, and
+  reauthorize at commit. After the store commits, delete staging. Supply the
+  server-resolved uploader binding and final authenticated record transport.
+- **W3/W4/W8:** bind bytes and records to each host/attempt; migrate artifact,
+  memo, binary and depcache consumers. The final host inputs still do not expose
+  the storage binding. Replace the old source-fetch callers so gitcache helpers
+  and flags can be cut without adding an adapter.
+- **W4:** implement final `.Cache`; then migrate the repo lint declaration with
+  a workdir-safe key. Do not restore the deleted lint-cache HTTP API.
+- **T1:** implement the native driver and activate the full scenario assertions.
+
+No product design question was resolved outside the frozen architecture. These
+are implementation and integration obligations, not permission requests.
 
 ## Verification
 
-All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `-p 4`, and
-`GOCACHE`, `GOTMPDIR`, `TMPDIR` under `/tmp/sw-astra-W7`.
+All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and `GOCACHE`,
+`GOTMPDIR`, `TMPDIR` beneath `/tmp/sw-astra-W7`. Parallelism was at most `-p 4`.
+The directory is deleted at handoff.
 
 Passed:
 
-- Root `go build -p 4 ./...`.
-- `go vet -p 4` for blob (including depcache), depcache, orchestrator, cluster,
-  controller, storage subpackages, CLI, charts and the pipeline jobs package.
-- All tests in `internal/blob/...`, `internal/depcache`, `internal/releaseasset`
-  and `charts`. The full chart suite took 49.637 seconds.
-- Pipeline `TestPublishImageTagsGuardsPublishedDigests`.
-- Acceptance catalog tests. Storage's 424 native cells stayed skipped.
-- Both Helm renders, changed release-script shell syntax, and `git diff --check`.
+- Root `go build -p 4 ./...` and `.sparkwing` module `go build -p 4 ./...`.
+- Root vet for `internal/blob/...`, `internal/bincache`, `internal/depcache`,
+  `sparkwing/git`, `internal/cluster`, `internal/orchestrator`, `cmd/sparkwing`.
+  The `.sparkwing/jobs` vet also passes.
+- Full `internal/blob/...` and `internal/depcache` tests.
+- Bincache tests matching `TestDownloadBinary`, `TestDirectBinaryUpload`,
+  `TestFailedBinaryPublication` and `TestCompilePipelineCancel`.
+- SDK cache tests matching `TestCacheDir` and `TestToolCacheDir`; git clone/fetch
+  and promptless tests; CLI `TestPipelineCacheKey_HyphenFormat`.
+- Pipeline tests matching `TestLint|TestGolangci`.
+- Acceptance catalog/port inventory and the explicitly skipped storage matrix.
+- Source/embedded docs equality and `git diff --check`.
 
-Could not run:
+Limitations and friction:
 
-- `pkg/storage/storeurl` tests stop at `httptest.NewServer`: socket operation not
-  permitted. The CLI's `TestMaterialize_ColdCacheContactsNoController` stops for
-  the same reason. Neither is reported as passing.
-- Sparkwing pipelines, native acceptance, live S3/Postgres, Windows and deployment
-  checks were not run. The brief reserves the pipelines/gates for the lead.
+- Full `sparkwing/git` tests fail in three unchanged filesystem-fallback tests:
+  `TestFilesetHashFilesystemFallback`, `TestFilesetHashFramesFileContents`,
+  `TestFilesetHashIncludesPermissions`. They report `git ls-files: not a git
+  repository`. The sandbox exposes an empty read-only `/tmp/.git`. The changed
+  clone/fetch tests pass. This is not a full git-package test pass.
+- The API snapshot generator runs, but the existing snapshot has broad rewrite
+  drift, including annotations and approvals. Only this session's four removed
+  SDK symbols were removed from the snapshot; whole-snapshot equality is not
+  claimed.
+- Real S3, controller sockets, native placement runs, Postgres, Windows and
+  Sparkwing pipelines/gates were not run. HTTP tests use recorders/transports,
+  and the S3 test exercises SDK requests against a fake service.
+- Directly importing depcache from the pipeline fails Go's internal-package
+  boundary. That attempt was removed; the final pipeline build passes.
+- Test git fixture commits now disable signing per command. No repository-local
+  identity or worktree setting was changed. No shared git metadata was written.
 
-## Shared files touched
+## Shared files touched in session 2
 
-- `cmd/sparkwing/compile.go`, `spark.go`: remove local remote-binary transfers.
-- `internal/orchestrator/pod_node_host.go`, `run_node_remote.go`: remove the old
-  depcache grant injection and deleted HTTP cache-client dependency.
-- `pkg/controller/server.go`, `handlers.go`, `deletion.go`, plus new
-  `stream_deadline.go`: remove proxy routes and retain unrelated log deadlines.
-- Five cache-service tests in `internal/cluster` were deleted with their server.
-- `pkg/storage/doc.go`, `storage.go`, `storeurl/storeurl.go`: remove the HTTP
-  cache backend and its documentation.
-- Chart shared templates, values, READMEs, rendering tests and vendored archive.
-- `internal/releaseasset/target.go` and its test, `.github/workflows/release.yaml`,
-  `.sparkwing/jobs/{build,build_images,publish_image_tags_test}.go`, four release
-  scripts under `bin`, and `DELIVERY.md`: remove the shipped cache component.
+- `internal/cluster/trigger_loop.go`: bind the signed binary data client.
+- `internal/orchestrator/{run_node_remote.go,claim_exec.go,pod_node_host_test.go}`:
+  migrate binary-helper callers and test doubles to that client.
+- `cmd/sparkwing/compile_cache_test.go`: delete tests of the removed `/bin` API.
+- `.sparkwing/jobs/lint_contention.go`: remove the deleted lint HTTP client calls.
+- `sparkwing/git/{clone.go,clone_test.go,clone_direct_test.go}` and
+  `sparkwing/depcache.go`: direct cloning and current storage documentation.
+- `.apidiff/sparkwing.txt`, `docs/{sdk.md,sdk-reference.md}`, `CHANGELOG.md` and
+  their embedded copies: remove deleted SDK APIs and record the cut.
 
-## Friction and cleanup
-
-The contracts started without executable storage or acceptance implementations.
-`runspec -> nodeproto -> depcache` prevents depcache from importing blob, so the
-remote archive backend lives in `internal/blob/depcache` and uses depcache's
-exported archive functions. This is the added package boundary; moving the cache
-spec to a neutral package later would remove that need.
-
-The sandbox prevents socket tests and git writes. No Sparkwing executable was run
-and no git write was attempted. The repository-local `user.name` and
-`core.worktree` overrides remain unset. `/tmp/sw-astra-W7` is removed at handoff.
+STATUS: CONTINUE

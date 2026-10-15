@@ -116,7 +116,7 @@ func runNodeRemote(
 	if cacheGrant == "" || bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
 		binaryCacheURL = ""
 	}
-	binary, err := resolveRemoteBinary(ctx, sparkwingDir, controllerURL, token, runID, binaryCacheURL, cacheGrant, logger)
+	binary, err := resolveRemoteBinary(ctx, sparkwingDir, directdata.New(controllerURL, cacheGrant, runID, nil), logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
@@ -293,7 +293,7 @@ func (b remoteBinary) release() {
 	}
 }
 
-func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, controllerToken, runID, gcURL, token string, logger *slog.Logger) (remoteBinary, error) {
+func resolveRemoteBinary(ctx context.Context, sparkwingDir string, data *directdata.Client, logger *slog.Logger) (remoteBinary, error) {
 	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
 	if err != nil {
 		return remoteBinary{}, err
@@ -316,8 +316,8 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, contr
 	}
 	compiled := false
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if gcURL != "" || token != "" {
-			if fetchErr := bincache.TryBinaryPreferred(ctx, controllerURL, controllerToken, token, runID, gcURL, key, tempPath); fetchErr == nil {
+		if data != nil {
+			if fetchErr := bincache.DownloadBinary(ctx, data, key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("runNodeRemote: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
@@ -329,8 +329,8 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, contr
 	if err != nil {
 		return remoteBinary{}, err
 	}
-	if published && compiled && token != "" {
-		if err := bincache.UploadBinaryPreferred(ctx, controllerURL, token, runID, gcURL, key, lease.Path()); err != nil {
+	if published && compiled && data != nil {
+		if err := bincache.UploadBinary(ctx, data, key, lease.Path()); err != nil {
 			logger.Warn("runNodeRemote: bin cache upload failed", "err", err, "hash", key)
 		}
 	}

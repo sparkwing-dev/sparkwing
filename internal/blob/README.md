@@ -38,6 +38,26 @@ cache specification. A download is verified before archive extraction publishes
 files. Without an injected backend, dependency caches use local files.
 
 Record transactions, read-set construction, unique-byte accounting, GC and
-retention belong to `pkg/store`. Controller authorization and signing belong to
-the controller and capability packages. This package provides neither an alternate
-record database nor cache-service fallback routes.
+retention belong to `pkg/store`. Controller authorization and upload tickets belong
+to the controller and capability packages.
+
+`NewFilesystem` and `NewS3` implement `capability.DataSigner` and `ObjectBackend`.
+The controller passes an authorized `ObjectToSign` after reserving quota.
+PUT keys are `teams/<team>/pending/<ticket>` and bind the expected size and SHA-256.
+GET keys are `teams/<team>/cas/<sha256>`. Logs cannot use this signing surface.
+The controller supplies the expiry from the shared limits. Both backends refuse
+data downloads lasting longer than sixty seconds.
+
+The filesystem backend serves its configured endpoint using an injected signing
+key. It verifies the complete upload before publishing the staging file. S3 PUTs
+sign the content length and checksum. Commit checks the S3 checksum and length,
+then copies with a source ETag fence and a destination create-only condition.
+Both backends verify an existing final object before adopting it on a retry.
+Filesystem reads remain subject to the client's EOF verification.
+
+An object commit does not create a live blob or a receipt. The controller must
+reauthorize the immutable upload ticket, call `CommitObject`, and commit the blob
+row and exact uploader receipt in the store transaction. Only afterward may it
+delete the pending object. GC calls `DeleteObject` after the store's reachability
+and tombstone decision. Provenance stays on records because identical bytes may
+be uploaded by principals with different trust.

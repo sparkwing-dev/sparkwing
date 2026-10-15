@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -44,27 +43,8 @@ func CacheURL() string {
 	return strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/")
 }
 
-// ErrDigest reports a cached binary whose bytes do not match the digest the cache advertised,
-// or a response that carried no digest at all.
+// ErrDigest reports a binary whose bytes do not match the signed digest.
 var ErrDigest = errors.New("remote binary cache: digest verification failed")
-
-func parseDigestHeader(value string) ([]byte, error) {
-	for _, member := range strings.Split(value, ",") {
-		name, encoded, ok := strings.Cut(strings.TrimSpace(member), "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(name), "sha-256") {
-			continue
-		}
-		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
-		if err != nil {
-			return nil, fmt.Errorf("%w: undecodable sha-256 digest", ErrDigest)
-		}
-		if len(raw) != sha256.Size {
-			return nil, fmt.Errorf("%w: sha-256 digest is %d bytes", ErrDigest, len(raw))
-		}
-		return raw, nil
-	}
-	return nil, fmt.Errorf("%w: response carried no sha-256 digest", ErrDigest)
-}
 
 func mkdirCache(dir string) error {
 	err := os.MkdirAll(dir, 0o755)
@@ -93,39 +73,7 @@ func underSparkwingHome(dir string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, gcURL+"/bin/"+hash, nil)
-	if err != nil {
-		return err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	cli := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	resp, err := cli.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return ErrMiss
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bin cache GET: %s", resp.Status)
-	}
-	want, err := parseDigestHeader(resp.Header.Get("Digest"))
-	if err != nil {
-		return err
-	}
-	return installVerifiedBinary(dest, resp.Body, want, hash)
-}
-
-func installVerifiedBinary(dest string, src io.Reader, want []byte, hash string) error {
+func installVerifiedBinary(dest string, src io.Reader, want []byte, size int64, hash string) error {
 	if err := mkdirCache(filepath.Dir(dest)); err != nil {
 		return err
 	}
@@ -135,7 +83,8 @@ func installVerifiedBinary(dest string, src io.Reader, want []byte, hash string)
 	}
 	tmp := f.Name()
 	sum := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(f, sum), src); err != nil {
+	n, err := io.Copy(io.MultiWriter(f, sum), io.LimitReader(src, size))
+	if err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return err
@@ -145,7 +94,9 @@ func installVerifiedBinary(dest string, src io.Reader, want []byte, hash string)
 		return err
 	}
 	// safety: the key folds source inputs, not content, so only this digest ties the bytes to the cache entry.
-	if !bytes.Equal(sum.Sum(nil), want) {
+	var extra [1]byte
+	_, endErr := io.ReadFull(src, extra[:])
+	if n != size || !errors.Is(endErr, io.EOF) || !bytes.Equal(sum.Sum(nil), want) {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("%w: %s", ErrDigest, hash)
 	}
@@ -154,46 +105,6 @@ func installVerifiedBinary(dest string, src io.Reader, want []byte, hash string)
 	}
 	if err := os.Rename(tmp, dest); err != nil {
 		return errors.Join(err, os.Remove(tmp))
-	}
-	return nil
-}
-
-func UploadBinary(ctx context.Context, gcURL, token, hash, src string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, gcURL+"/bin/"+hash, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	cli := &http.Client{
-		Timeout: 60 * time.Second,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	resp, err := cli.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("bin cache PUT %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	if header := resp.Header.Get("Digest"); header != "" {
-		stored, err := parseDigestHeader(header)
-		if err != nil {
-			return err
-		}
-		sum := sha256.Sum256(data)
-		if !bytes.Equal(stored, sum[:]) {
-			return fmt.Errorf("%w: cache stored different bytes for %s", ErrDigest, hash)
-		}
 	}
 	return nil
 }

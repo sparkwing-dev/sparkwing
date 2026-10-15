@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	goruntime "runtime"
 	"strings"
 	"time"
@@ -82,17 +81,6 @@ func fastLintCommand(cores int, pkgs []string) string {
 }
 
 func runGolangciLint(ctx context.Context) error {
-	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
-	gcToken := os.Getenv("SPARKWING_CACHE_GRANT")
-
-	restored, restoredBytes, restoreErr := sparkwing.RestoreLintCache(ctx, gcURL)
-	switch {
-	case restoreErr != nil:
-		sparkwing.Warn(ctx, "lint cache: restore: %v", restoreErr)
-	case restored:
-		sparkwing.Info(ctx, "lint cache: restored %d bytes from blob store", restoredBytes)
-	}
-
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
@@ -119,7 +107,6 @@ func runGolangciLint(ctx context.Context) error {
 	lintCtx, cancel := context.WithTimeout(ctx, lintLockWait)
 	defer cancel()
 
-	lintStart := time.Now()
 	var failures []string
 	for _, dir := range dirs {
 		if empty, emptyErr := moduleHasNoPackages(lintCtx, dir); emptyErr == nil && empty {
@@ -137,19 +124,11 @@ func runGolangciLint(ctx context.Context) error {
 		}
 		sparkwing.Info(lintCtx, "golangci-lint: %s clean (%s)", dir, time.Since(stepStart).Round(time.Second))
 	}
-	lintDur := time.Since(lintStart)
 	if len(failures) > 0 {
 		return fmt.Errorf("golangci-lint failed in %d of %d module(s):\n  - %s",
 			len(failures), len(dirs), strings.Join(failures, "\n  - "))
 	}
 
-	savedBytes, saveErr := sparkwing.SaveLintCache(ctx, gcURL, gcToken)
-	switch {
-	case saveErr != nil:
-		sparkwing.Warn(ctx, "lint cache: save: %v", saveErr)
-	case savedBytes > 0:
-		sparkwing.Info(ctx, "lint cache: saved %d bytes (lint ran %s)", savedBytes, lintDur.Round(time.Second))
-	}
 	return nil
 }
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -76,7 +77,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 		return fail(err)
 	}
 	grant := RequestRunCacheGrant(ctx, controllerURL, token, runID, logger)
-	binary, err := resolveLaunchedBinary(ctx, filepath.Join(src, ".sparkwing"), controllerURL, token, runID, "", grant, logger)
+	binary, err := resolveLaunchedBinary(ctx, filepath.Join(src, ".sparkwing"), directdata.New(controllerURL, grant, runID, nil), logger)
 	if err != nil {
 		return fail(fmt.Errorf("build the pipeline: %w", err))
 	}

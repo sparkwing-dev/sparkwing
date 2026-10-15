@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -73,7 +74,7 @@ func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
 	r.create(t, args)
 	prevBinary := resolveLaunchedBinary
 	t.Cleanup(func() { resolveLaunchedBinary = prevBinary })
-	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
+	resolveLaunchedBinary = func(context.Context, string, *directdata.Client, *slog.Logger) (remoteBinary, error) {
 		return remoteBinary{entry: pipelineentry.Binary(bin)}, nil
 	}
 	r.src = t.TempDir()
@@ -333,7 +334,7 @@ func (r *launchedRun) recordRequests(t *testing.T) string {
 	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
+	resolveLaunchedBinary = func(context.Context, string, *directdata.Client, *slog.Logger) (remoteBinary, error) {
 		return remoteBinary{entry: pipelineentry.Binary(wrapper)}, nil
 	}
 	return log

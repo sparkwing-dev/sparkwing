@@ -167,7 +167,6 @@ type EnvVarDoc struct {
 type EnvVarDocer interface {
 	EnvVars() []EnvVarDoc
 }
-var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at a different workdir")
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
@@ -371,7 +370,6 @@ func Key(parts ...any) CacheKey
 func KeyFromFile(path string) KeySource
 type KeySource struct {
 }
-func LintCacheBlobKey() string
 type LintWarning struct {
 	NodeID string
 	Code   string
@@ -535,7 +533,6 @@ type ResourceSample struct {
 
 	CPUTime time.Duration
 }
-func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error)
 func RetryAuto() RetryOption
 func RetryBackoff(d time.Duration) RetryOption
 type RetryConfig struct {
@@ -610,7 +607,6 @@ var RuntimePlumbing = struct {
 	},
 }
 const Satisfied Outcome = "satisfied"
-func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error)
 type Scope string
 const ScopeBox Scope = "box"
 const ScopeGlobal Scope = "global"

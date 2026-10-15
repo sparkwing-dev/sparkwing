@@ -12,18 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 )
 
-// TryBinaryPreferred uses a controller-announced direct route for cloud
-// binaries. A committed local binary cannot reach this reader through that
-// route. An older controller keeps the cache service path.
-func TryBinaryPreferred(ctx context.Context, controllerURL, controllerToken, grant, runID, gcURL, hash, dest string) error {
-	d := directdata.New(controllerURL, grant, runID, nil)
-	available, err := d.Available(ctx)
-	if err != nil {
-		return err
-	}
-	if !available {
-		return TryBinaryPreferSigned(ctx, controllerURL, controllerToken, grant, gcURL, hash, dest)
-	}
+// DownloadBinary fetches a verified binary through the controller's data route.
+func DownloadBinary(ctx context.Context, d *directdata.Client, hash, dest string) error {
 	rc, meta, err := d.Download(ctx, "binary", "bin/"+hash)
 	if errors.Is(err, directdata.ErrNotFound) {
 		return ErrMiss
@@ -33,27 +23,14 @@ func TryBinaryPreferred(ctx context.Context, controllerURL, controllerToken, gra
 	}
 	defer rc.Close()
 	want, err := hex.DecodeString(meta.SHA256)
-	if err != nil || len(want) != sha256.Size {
-		return fmt.Errorf("%w: malformed signed binary digest", ErrDigest)
+	if err != nil || len(want) != sha256.Size || meta.Size < 0 {
+		return fmt.Errorf("%w: malformed signed binary digest or size", ErrDigest)
 	}
-	return installVerifiedBinary(dest, io.LimitReader(rc, meta.Size+1), want, hash)
+	return installVerifiedBinary(dest, rc, want, meta.Size, hash)
 }
 
-// UploadBinaryPreferred publishes a content-addressed object under the
-// controller's live claim when it announces direct data. An older controller
-// keeps the cache service's upload path.
-func UploadBinaryPreferred(ctx context.Context, controllerURL, grant, runID, gcURL, hash, src string) error {
-	d := directdata.New(controllerURL, grant, runID, nil)
-	available, err := d.Available(ctx)
-	if err != nil {
-		return err
-	}
-	if !available && gcURL == "" {
-		return nil
-	}
-	if !available {
-		return UploadBinary(ctx, gcURL, grant, hash, src)
-	}
+// UploadBinary publishes a binary through the controller's signed data route.
+func UploadBinary(ctx context.Context, d *directdata.Client, hash, src string) error {
 	f, err := os.Open(src)
 	if err != nil {
 		return err
@@ -66,6 +43,5 @@ func UploadBinaryPreferred(ctx context.Context, controllerURL, grant, runID, gcU
 	}
 	digest := hex.EncodeToString(sum.Sum(nil))
 	key := "bin/" + hash + "/" + digest
-	err = d.Upload(ctx, "binary", key, f, n, digest)
-	return err
+	return d.Upload(ctx, "binary", key, f, n, digest)
 }

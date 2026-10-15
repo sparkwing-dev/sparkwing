@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -575,13 +576,10 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 	}
 	compiled := false
 	fetched := false
-	binaryCacheURL := opts.GitcacheURL
-	if cacheGrant == "" || bincache.ControllerGitcacheToken(opts.GitcacheURL, opts.ControllerURL, opts.Token) != "" {
-		binaryCacheURL = ""
-	}
+	data := directdata.New(opts.ControllerURL, cacheGrant, runID, nil)
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if binaryCacheURL != "" || cacheGrant != "" {
-			if fetchErr := bincache.TryBinaryPreferred(ctx, opts.ControllerURL, opts.Token, cacheGrant, runID, binaryCacheURL, key, tempPath); fetchErr == nil {
+		if cacheGrant != "" {
+			if fetchErr := bincache.DownloadBinary(ctx, data, key, tempPath); fetchErr == nil {
 				fetched = true
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
@@ -595,7 +593,7 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 		return triggerBinary{}, err
 	}
 	if published && compiled && cacheGrant != "" {
-		if err := bincache.UploadBinaryPreferred(ctx, opts.ControllerURL, cacheGrant, runID, binaryCacheURL, key, lease.Path()); err != nil {
+		if err := bincache.UploadBinary(ctx, data, key, lease.Path()); err != nil {
 			logger.Warn("trigger loop: bin cache upload failed", "err", err, "hash", key)
 		}
 	}

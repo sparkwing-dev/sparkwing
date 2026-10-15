@@ -202,11 +202,6 @@ temporary home; set `SPARKWING_HOME` explicitly when testing persistence.
 `ToolCacheDir` derives its scope from `WorkDir()`: runs in one worktree share
 a cache, and each worktree has its own cache.
 
-`SaveLintCache` and `RestoreLintCache` operate on
-`ToolCacheDir("golangci-lint")` for the current `WorkDir()` and take no
-directory argument, so a fixed-workdir runner seeds the same cache it
-lints with.
-
 Each worktree keeps its own cache, and pays a cold first lint for it.
 A stored issue carries the absolute path of the tree that produced it,
 so a cache shared between worktrees replays paths that belong to
