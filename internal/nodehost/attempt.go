@@ -223,17 +223,6 @@ func failed(err error) Result {
 	return Result{Outcome: sparkwing.Failed, Err: err, Reason: reason}
 }
 
-func planSession(cfg Config) (SessionConfig, error) {
-	s := cfg.Session
-	if cfg.Attempts != nil {
-		s.Masker = cfg.Attempts.Masker
-	}
-	s.Binding = nil
-	var err error
-	s.Env, err = buildSessionEnvironment(s, procenv.Plan, sdkRuntime(cfg.Run, s.Runner))
-	return s, err
-}
-
 func buildSessionEnvironment(cfg SessionConfig, kind procenv.Kind, runtime procenv.Runtime) ([]string, error) {
 	base := cfg.Env
 	if base == nil {

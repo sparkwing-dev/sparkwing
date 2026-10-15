@@ -169,26 +169,8 @@ type Run struct {
 	leaseToken string
 }
 
-// A Layer wraps the executor with one part of a node's envelope, such as
-// caches or retries, or returns next unchanged when cfg does not enable that
-// part. Each part adds its Layer to the scheduler's list in one line.
+// Layer wraps an executor with one part of the host envelope.
 type Layer func(cfg *Config, next Executor) Executor
-
-// safety: the order is the envelope's nesting, outermost first: debug pauses, then skip_if, which the
-// dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, memo, which
-// copies a hit before any admission lease or group slot is taken, admission, artifacts, caches,
-// retries and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
-var layers = []Layer{
-	debugLayer,
-	skipIfLayer,
-	approvalsLayer,
-	memoLayer,
-	admissionLayer,
-	artifactsLayer,
-	cachesLayer,
-	retryLayer,
-	timeoutLayer,
-}
 
 // Execute plans the run in a short-lived SDK process, records the run and
 // its nodes, and runs the nodes in dependency order. An error means no run
@@ -220,63 +202,13 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		masker = cfg.Attempts.Masker
 	}
 	cfg.State, cfg.Logger = maskState(cfg.State, masker), maskLogger(cfg.Logger, masker)
-	scfg, err := planSession(cfg)
-	if err != nil {
-		return RunResult{}, maskErr(masker, err)
-	}
-	scfg.HoldOutput, scfg.Masker = true, masker
-	transport, output, err := scfg.protocol(nil)
-	if err != nil {
-		return RunResult{}, err
-	}
-	sess, err := StartProtocolSession(ctx, transport)
-	if err == nil {
-		err = scfg.hello(ctx, sess)
-	}
-	if err != nil {
-		if sess != nil {
-			err = errors.Join(err, sess.Close())
-		} else {
-			output.close()
-		}
-		return RunResult{}, err
-	}
-	stop := context.AfterFunc(ctx, func() { sess.failProtocol(context.Cause(ctx)) })
-	defer stop()
-	closeSession := func() {
-		if err := sess.Close(); err != nil {
-			cfg.Logger.Warn("nodehost: plan process", "err", err)
-		}
-	}
-	description, known, err := describeArgs(ctx, sess, scfg, cfg.Entrypoint, cfg.Args, masker)
-	args := description.Args
-	if err == nil && cfg.CheckArgs != nil {
-		err = cfg.CheckArgs(args)
-	}
-	if err == nil && cfg.CheckSecrets != nil {
-		err = cfg.CheckSecrets(ctx, describedSecrets(description.Description, true))
-	}
-	err = releaseDescribed(output, known, err)
-	if err == nil {
-		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
-	}
-	if err != nil {
-		closeSession()
-		return RunResult{}, maskErr(masker, err)
-	}
-
-	res = RunResult{RunID: cfg.Run.RunID, Nodes: map[string]Result{}}
 	finishCtx := context.WithoutCancel(ctx)
-	// safety: registered before FinishRun's defer so the run lease ends only
-	// once the run row is terminal; the daemon finalizes a run whose lease
-	// ends while its row still runs as orphaned.
 	releaseLease := func() {}
 	defer func() { releaseLease() }()
-	// safety: registered before the heartbeat's defer so the heartbeat has
-	// stopped before the run row goes terminal.
 	defer func() {
-		// safety: plan code's error can quote a secret flag, and the run row and
-		// every caller that prints the error outlive the masker.
+		if res.RunID == "" {
+			return
+		}
 		if res.Err != nil && masker != nil {
 			res.Err = maskedRunError{err: res.Err, text: masker.Mask(res.Err.Error())}
 		}
@@ -284,12 +216,21 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 			res.Status, res.Err = "failed", errors.Join(res.Err, fmt.Errorf("persist run state: %w", ferr))
 		}
 	}()
-
-	doc, raw, err := planRun(ctx, sess, scfg.Validation, cfg.Entrypoint, args, cfg.Run)
-	closeSession()
-	if err == nil {
-		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)
+	planned, err := planDocument(ctx, cfg.Session, PlanRequest{
+		Pipeline: cfg.Pipeline, Entrypoint: cfg.Entrypoint, Args: cfg.Args, Run: cfg.Run,
+		Requires: cfg.Requires, Masker: masker, StartAt: cfg.StartAt, StopAt: cfg.StopAt,
+		CheckArgs: cfg.CheckArgs, CheckSecrets: cfg.CheckSecrets,
+	}, func(args map[string]string) error {
+		if err := cfg.State.CreateRun(ctx, runRow(cfg, args)); err != nil {
+			return err
+		}
+		res = RunResult{RunID: cfg.Run.RunID, Nodes: map[string]Result{}}
+		return nil
+	})
+	if res.RunID == "" {
+		return RunResult{}, err
 	}
+	doc, raw, args := planned.Doc, planned.JSON, planned.Args
 	var skips map[string]string
 	if err == nil {
 		skips, err = onlySkips(doc, cfg.Only, cfg.StartAt, cfg.StopAt)
@@ -306,7 +247,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		return res, nil
 	}
 	run := newRun(&cfg, doc, args, skips)
-	run.Secrets = describedSecrets(description.Description, false)
+	run.Secrets = planned.Secrets
 	releaseLease = runPlanned(ctx, &cfg, run, &res)
 	return res, nil
 }
@@ -384,26 +325,27 @@ func chain(cfg *Config) Executor {
 	if cfg.Dispatch != nil {
 		return dispatchChain(cfg)
 	}
-	exec := func(context.Context, *NodeRun) Result {
-		return Result{Outcome: sparkwing.Failed, Err: errors.New("nodehost: no attempt executor")}
+	return podChain(cfg, "")
+}
+
+func wrapLayers(cfg *Config, next Executor, side LayerSide) Executor {
+	implementations := map[string]Layer{
+		"debug": debugLayer, "skip_if": skipIfLayer, "approval": approvalsLayer,
+		"memo": memoLayer, "admission": admissionLayer, "artifacts": artifactsLayer,
+		"caches": cachesLayer, "retry": retryLayer, "timeout": timeoutLayer,
 	}
-	if cfg.Attempts != nil {
-		exec = cfg.Attempts.executor(cfg)
-	}
-	inner := exec
-	exec = func(ctx context.Context, n *NodeRun) Result {
-		if err := n.Run.State.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
-			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("start node %s: %w", n.Plan.ID, err)}
+	table := LayerTable()
+	for i := len(table) - 1; i >= 0; i-- {
+		if side != "" && table[i].Side != side {
+			continue
 		}
-		if n.Attempt <= 1 {
-			hostEvent(ctx, n.Run, n.Plan.ID, "node_started", nil)
+		wrap := implementations[table[i].Name]
+		if wrap == nil {
+			return func(context.Context, *NodeRun) Result { return failed(errors.New("nodehost: unsupported host layer")) }
 		}
-		return inner(ctx, n)
+		next = wrap(cfg, next)
 	}
-	for i := len(layers) - 1; i >= 0; i-- {
-		exec = layers[i](cfg, exec)
-	}
-	return exec
+	return next
 }
 
 // safety: one goroutine owns the maps; executors report back over a channel.

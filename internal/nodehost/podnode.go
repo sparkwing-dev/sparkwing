@@ -49,6 +49,10 @@ type PlannedRun struct {
 // PlanDocument plans a pipeline in a short-lived SDK process, as a hosted
 // run's plan process does, and validates the plan the same way.
 func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (PlannedRun, error) {
+	return planDocument(ctx, cfg, req, nil)
+}
+
+func planDocument(ctx context.Context, cfg SessionConfig, req PlanRequest, beforePlan func(map[string]string) error) (PlannedRun, error) {
 	if req.Entrypoint == "" {
 		req.Entrypoint = req.Pipeline
 	}
@@ -93,6 +97,9 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 		err = req.CheckSecrets(ctx, describedSecrets(description.Description, true))
 	}
 	err = releaseDescribed(output, known, err)
+	if err == nil && beforePlan != nil {
+		err = beforePlan(out.Args)
+	}
 	if err == nil {
 		out.Doc, out.JSON, err = planRun(ctx, sess, scfg.Validation, req.Entrypoint, out.Args, req.Run)
 	}
@@ -175,7 +182,7 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 		}
 		n.Failure = parentFailure(parent, row.FailureReason, row.Error)
 	}
-	return podChain(cfg, []Layer{artifactsLayer, cachesLayer, retryLayer, timeoutLayer})(ctx, n)
+	return podChain(cfg, ExecutorSide)(ctx, n)
 }
 
 // safety: a generated node is in no process's plan, so this host runs the spec the run host recorded on its row
@@ -219,8 +226,11 @@ func podGenerated(ctx context.Context, run *Run, nodeID, acceptedHash string) (n
 	return spec, chain, nil
 }
 
-func podChain(cfg *Config, layers []Layer) Executor {
-	inner := cfg.Attempts.executor(cfg)
+func podChain(cfg *Config, side LayerSide) Executor {
+	inner := func(context.Context, *NodeRun) Result { return failed(errors.New("nodehost: no attempt executor")) }
+	if cfg.Attempts != nil {
+		inner = cfg.Attempts.executor(cfg)
+	}
 	exec := func(ctx context.Context, n *NodeRun) Result {
 		if err := n.Run.State.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
 			return failed(fmt.Errorf("start node %s: %w", n.Plan.ID, err))
@@ -230,8 +240,5 @@ func podChain(cfg *Config, layers []Layer) Executor {
 		}
 		return inner(ctx, n)
 	}
-	for i := len(layers) - 1; i >= 0; i-- {
-		exec = layers[i](cfg, exec)
-	}
-	return exec
+	return wrapLayers(cfg, exec, side)
 }

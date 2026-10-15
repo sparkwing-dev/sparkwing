@@ -12,10 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-var (
-	errWallTimeout = errors.New("node timeout")
-	errNoProgress  = errors.New("node made no progress")
-)
+var errWallTimeout = errors.New("node timeout")
 
 // safety: each attempt gets its own budgets. A success stands even when a
 // timer fired, since a firing during the body kills the session; a later
@@ -37,17 +34,17 @@ func timeoutLayer(cfg *Config, next Executor) Executor {
 			attempt.Hold = wt.hold
 		}
 		if idle > 0 {
-			it := &idleTimer{d: idle}
-			it.t = time.AfterFunc(idle, func() { cancel(errNoProgress) })
-			defer it.t.Stop()
+			idleCtx, activity, stop := executorProgressContext(actx, idle)
+			defer stop()
+			actx = idleCtx
 			outer := n.Progress
 			attempt.Progress = func() {
-				it.progress()
+				activity.Progress()
 				if outer != nil {
 					outer()
 				}
 			}
-			attempt.Pause = it.pause
+			attempt.Pause = activity.Await
 		}
 		res := next(actx, &attempt)
 		if res.Outcome == sparkwing.Success {
@@ -57,7 +54,7 @@ func timeoutLayer(cfg *Config, next Executor) Executor {
 		// message names the timeout the way the in-process executor did.
 		cause := context.Cause(actx)
 		switch {
-		case errors.Is(cause, errNoProgress):
+		case errors.Is(cause, errExecutorNoProgress):
 			res = Result{
 				Outcome: sparkwing.Failed, Reason: store.FailureNoProgressTimeout,
 				Err: fmt.Errorf("no progress for %s: %w", idle, context.DeadlineExceeded),
@@ -72,40 +69,6 @@ func timeoutLayer(cfg *Config, next Executor) Executor {
 		}
 		afterRunAfterTimeout(ctx, cfg, n, res)
 		return res
-	}
-}
-
-// safety: concurrent waits nest, so the count stays held until the last one
-// resumes, and a line logged while held does not restart it early.
-type idleTimer struct {
-	d      time.Duration
-	t      *time.Timer
-	mu     sync.Mutex
-	paused int
-}
-
-func (it *idleTimer) progress() {
-	it.mu.Lock()
-	defer it.mu.Unlock()
-	if it.paused == 0 {
-		it.t.Reset(it.d)
-	}
-}
-
-func (it *idleTimer) pause() (resume func()) {
-	it.mu.Lock()
-	it.paused++
-	it.t.Stop()
-	it.mu.Unlock()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			it.mu.Lock()
-			defer it.mu.Unlock()
-			if it.paused--; it.paused == 0 {
-				it.t.Reset(it.d)
-			}
-		})
 	}
 }
 

@@ -30,6 +30,121 @@ id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
 printf '{"reply":"%s","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"test"},"features":[]}}\n' "$id" >&4
 `
 
+type planningStore struct {
+	*store.Store
+	createErr, snapshotErr error
+	created                []store.Run
+	finished               []string
+	snapshots              int
+}
+
+func (s *planningStore) CreateRun(_ context.Context, run store.Run) error {
+	s.created = append(s.created, run)
+	return s.createErr
+}
+
+func (s *planningStore) UpdatePlanSnapshot(context.Context, string, []byte) error {
+	s.snapshots++
+	return s.snapshotErr
+}
+
+func (s *planningStore) FinishRun(_ context.Context, _, status, _ string) error {
+	s.finished = append(s.finished, status)
+	return nil
+}
+
+func TestPlanningRefusalsPreserveTheRunRecordBoundary(t *testing.T) {
+	for _, phase := range []string{"arguments", "secrets", "create", "plan", "snapshot", "protocol"} {
+		t.Run(phase, func(t *testing.T) {
+			dir := t.TempDir()
+			entry, marker := filepath.Join(dir, "planner"), filepath.Join(dir, "planned")
+			result := `"ok":true,"result":{"jobs":[{"id":"job","steps":[{"id":"body"}]}]}`
+			if phase == "plan" {
+				result = `"ok":false,"error":{"code":"sdk_error","message":"plan refused"}`
+			}
+			script := "#!/bin/sh\n" + testHelloScript + `IFS= read -r line <&3
+id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
+printf '{"reply":"%s","ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"label","default":"resolved"}],"secrets":[{"name":"required"}]}]}}\n' "$id" >&4
+IFS= read -r line <&3 || exit 0
+printf . > "$PLAN_MARKER"
+id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
+printf '{"reply":"%s",` + result + `}\n' "$id" >&4
+IFS= read -r line <&3
+`
+			if phase == "protocol" {
+				script += "printf 'not a frame\\n' >&4\n"
+			}
+			script += "exit 0\n"
+			if err := os.WriteFile(entry, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			refused := errors.New("refused " + phase)
+			state := &planningStore{Store: openStore(t)}
+			cfg := Config{
+				Session: SessionConfig{
+					Entry: pipelineentry.Binary(entry), Dir: dir,
+					Env:    []string{"PATH=/usr/bin:/bin", "PLAN_MARKER=" + marker},
+					Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+					Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
+				},
+				Pipeline: "demo", Run: nodeproto.RunContext{RunID: "run", Pipeline: "demo"},
+				State: state, Attempts: &Attempts{Masker: secrets.NewMasker()},
+				CheckArgs: func(args map[string]string) error {
+					if args["label"] != "resolved" {
+						t.Fatalf("unresolved arguments: %v", args)
+					}
+					if phase == "arguments" {
+						return refused
+					}
+					return nil
+				},
+				CheckSecrets: func(_ context.Context, names []string) error {
+					if len(names) != 1 || names[0] != "required" {
+						t.Fatalf("secret preflight lost declarations: %v", names)
+					}
+					if phase == "secrets" {
+						return refused
+					}
+					return nil
+				},
+			}
+			state.snapshotErr = refused
+			if phase == "create" {
+				state.createErr = refused
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			resultRun, err := Execute(ctx, cfg)
+			recorded := phase == "plan" || phase == "snapshot" || phase == "protocol"
+			if recorded {
+				if err != nil || resultRun.Status != "failed" || resultRun.Err == nil || len(state.finished) != 1 || state.finished[0] != "failed" {
+					t.Fatalf("recorded failure: result=%+v error=%v finishes=%v", resultRun, err, state.finished)
+				}
+			} else if err == nil || resultRun.RunID != "" || len(state.finished) != 0 {
+				t.Fatalf("pre-record refusal: result=%+v error=%v finishes=%v", resultRun, err, state.finished)
+			}
+			wantCreated := 1
+			if phase == "arguments" || phase == "secrets" {
+				wantCreated = 0
+			}
+			if len(state.created) != wantCreated || wantCreated == 1 && state.created[0].Args["label"] != "resolved" {
+				t.Fatalf("run records=%+v", state.created)
+			}
+			_, markerErr := os.Stat(marker)
+			if recorded != (markerErr == nil) || markerErr != nil && !errors.Is(markerErr, os.ErrNotExist) {
+				t.Fatalf("planning crossed a refused record boundary: %v", markerErr)
+			}
+			wantSnapshots := 0
+			if phase == "snapshot" {
+				wantSnapshots = 1
+			}
+			if state.snapshots != wantSnapshots {
+				t.Fatalf("plan snapshots=%d, want %d", state.snapshots, wantSnapshots)
+			}
+		})
+	}
+}
+
 func TestAStalledDescribeFinishesItsOwnerAndJoinsChildren(t *testing.T) {
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "stall-describe")

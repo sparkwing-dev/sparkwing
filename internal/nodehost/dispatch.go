@@ -11,21 +11,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: the layers a run host keeps around a dispatched node, in the
-// scheduler's order; the remote host runs the rest, so a node's caches and
-// artifacts land on the machine that runs it and a retry never dispatches it
-// twice.
-var dispatchLayers = []Layer{debugLayer, skipIfLayer, approvalsLayer, memoLayer, admissionLayer}
-
 func dispatchChain(cfg *Config) Executor {
 	dispatch, poll := cfg.Dispatch, cmp.Or(cfg.ClaimedRowPoll, defaultClaimedRowPoll)
 	exec := func(ctx context.Context, n *NodeRun) Result {
 		return dispatchedGenerators(ctx, cfg, n, adoptDispatchedRow(ctx, n, dispatch(ctx, n), poll))
 	}
-	for i := len(dispatchLayers) - 1; i >= 0; i-- {
-		exec = dispatchLayers[i](cfg, exec)
-	}
-	return exec
+	return wrapLayers(cfg, exec, OwnerSide)
 }
 
 // safety: a node's host cannot add nodes to the run, so the run host runs a
