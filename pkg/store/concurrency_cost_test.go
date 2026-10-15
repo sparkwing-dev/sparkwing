@@ -91,7 +91,7 @@ func TestConcurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost(t *tes
 		t.Fatalf("child node id before parent release = %q, want empty plan holder node", childHolder.NodeID)
 	}
 
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "db", "parent/-", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "db", "parent/-", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("ReleaseConcurrencySlot(parent): %v", err)
 	}
 	state, err = tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "db")
@@ -211,10 +211,10 @@ func TestConcurrency_ReleaseTransfersCostToSiblingInheritedHolder(t *testing.T) 
 			t.Fatalf("%s: want Granted got %s", childRunID, child.Kind)
 		}
 	}
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "db", "parent/-", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "db", "parent/-", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("ReleaseConcurrencySlot(parent): %v", err)
 	}
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "db", "child-a/-", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "db", "child-a/-", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("ReleaseConcurrencySlot(child-a): %v", err)
 	}
 
@@ -270,7 +270,7 @@ func TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders(t *testing.T)
 			t.Fatalf("%s: want Granted got %s", childRunID, child.Kind)
 		}
 	}
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "db", "parent/-", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "db", "parent/-", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("ReleaseConcurrencySlot(parent): %v", err)
 	}
 

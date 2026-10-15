@@ -54,29 +54,6 @@ func TestMintedTokenCarriesItsTeam(t *testing.T) {
 	}
 }
 
-// A rotation re-mints from the row it replaces, so the replacement has to
-// inherit the team rather than the default.
-func TestRotatedTokenKeepsItsTeam(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	tn := tenantFor(t, st, "acme")
-
-	_, tok, err := tn.CreateToken(ctx, "ci", store.TokenKindService, []string{"run:submit"}, time.Hour, time.Now())
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	_, rotated, _, err := st.RotateToken(tok.Prefix, time.Minute, time.Hour, time.Now())
-	if err != nil {
-		t.Fatalf("RotateToken: %v", err)
-	}
-	if rotated.Team != "acme" {
-		t.Errorf("rotated token reports team %q, want acme", rotated.Team)
-	}
-	if got := storedTeam(t, st, `SELECT team FROM tokens WHERE prefix = ?`, rotated.Prefix); got != "acme" {
-		t.Errorf("stored replacement carries team %q, want acme", got)
-	}
-}
-
 // A node is told no team by its caller; it belongs to a run, and the run
 // carries the right one.
 func TestCreatedNodeCarriesItsRunsTeam(t *testing.T) {

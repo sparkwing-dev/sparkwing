@@ -1278,3 +1278,39 @@ The membership session property covers refusal after the last membership and
 transfer to an existing reader membership. Capability-backed sessions retain
 their original team and end with the parent. The existing removed-member session
 and authority-generation properties retain their refusal assertions.
+
+
+## W1 issuance and report retirement
+
+`TestRotatedTokenKeepsItsTeam` and `TestTokenRotationCarriesTheMeteredMarker`
+are replaced by the existing capability rotation scope property and
+`TestCapabilityRotationRetainsMeteredMachine`. The ambiguous-prefix lookup and
+revocation checks remain. The removed raw rotation's prefix case has no final
+analogue because capability prefixes have a primary key.
+
+`TestGitHubRunnerCredentialMintIsBoundedAndSweepsExpiredOnes` is replaced by
+`TestGitHubEnrollmentAndIssuanceLimitsSerialize` and
+`TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit`. The final quota counts
+live capabilities while retaining expired rows for their audit period. The
+raw-token sweep assertion is dropped under the final retention contract.
+`TestGitHubRunnerCredentialRemembersItsPush` is replaced by
+`TestStoreActionsEnrollment`, `TestGitHubActionsRequiresCurrentEnrollmentProperty`
+and the existing push-scope properties.
+
+`TestGitHubRunnerAttemptRecordsWorkflowRun` is replaced by
+`TestAttemptExecutorComesFromClaimAncestryProperty`. Its 48 cases check direct
+and trigger-host awards, Actions workflow identity, machine subject identity,
+node-wide attempt identity and forged executor metadata through claim, start
+and the run-view read. Provisioning-origin proofs remain separate.
+
+Concurrency callers use `ReleaseAndNotify` and consume its committed promotion
+and follower results. The tenant mutation property still compares every foreign
+holder row after release. The legacy fixture suites continue to fail at their
+raw CreateRun calls against args_json. That failure reproduces against the
+unmodified HEAD overlay. They are not passing final-schema evidence.
+
+`TestOperatorUsageMetrics_WeeklyTractionFromOwnTables` is dropped with the
+retired deployment usage report required by frozen architecture section 9.3.
+The unused child-trigger reader's foreign-team assertion is removed with that
+reader. Existing child-intake authorization and ancestry properties remain.
+No native acceptance cell is newly activated.

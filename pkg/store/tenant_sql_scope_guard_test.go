@@ -100,8 +100,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"because the daily cap protects the inbox, not the team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
 		"so the installation's binding is how either finds the team it belongs to",
-	"(*Operator).usageRuns": "counts every team's runs per week for the operator's usage metrics, " +
-		"which report totals across teams and name none",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
 	"freeSlotOpenTx":     "a reservation asks whether any slot is left, so it counts every team's",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +

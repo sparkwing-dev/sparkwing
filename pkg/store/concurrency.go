@@ -273,11 +273,6 @@ type ConcurrencyState struct {
 	Waiters           []ConcurrencyWaiter
 }
 
-// ActiveConcurrencyHolder returns a tenant's live holder that has not been superseded.
-func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
-	return t.concurrencyHolder(ctx, key, holderID, now, holderLiveSQL(""))
-}
-
 // ConcurrencyHolder returns an unexpired tenant holder, including superseded holders.
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
 	return t.concurrencyHolder(ctx, key, holderID, now, holderLeaseLiveSQL(""))
@@ -1412,30 +1407,6 @@ func (t *Tenant) heartbeatConcurrencySlotOnce(ctx context.Context, key, holderID
 	return expires, superInt == 1, nil
 }
 
-// ReleaseConcurrencySlot releases a tenant holder and stores its reusable cache result.
-func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: entries-row lock first, keeping the one lock order shared
-	// with acquire and release+promote.
-	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
-		return false, err
-	}
-
-	released, _, _, err := txReleaseHolder(ctx, tx, t.team, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
-	if err != nil {
-		return false, err
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return false, err
-	}
-	return released, nil
-}
-
 func txReleaseHolder(ctx context.Context, tx *storeTx, team Team, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (released bool, runID, nodeID string, err error) {
 	var supersededInt int
 	var leaseNS, queueArrivedNS int64
@@ -1648,24 +1619,6 @@ func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, o
 		return false, nil, nil, err
 	}
 	return released, followers, promoted, nil
-}
-
-// ResolveCoalesceFollowers drains this tenant's waiters for the named leader.
-func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	out, err := txDrainCoalesceFollowers(ctx, tx, t.team, key, leaderRunID, leaderNodeID)
-	if err != nil {
-		return nil, err
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, team Team, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {

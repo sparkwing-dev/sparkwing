@@ -244,9 +244,7 @@ func TestTenantTriggersStayInTheirTeam(t *testing.T) {
 	if id, err := globex.FindSpawnedChildTriggerID(ctx, "trig-a", "build", "sub"); err != nil || id != "" {
 		t.Fatalf("globex.FindSpawnedChildTriggerID = %q, %v, want none", id, err)
 	}
-	if kids, err := globex.ListSpawnedChildrenByRun(ctx, "trig-a"); err != nil || len(kids) != 0 {
-		t.Fatalf("globex.ListSpawnedChildrenByRun = %v, %v, want none", kids, err)
-	}
+
 	if ids, err := globex.ListPendingTriggersForParent(ctx, "trig-a"); err != nil || len(ids) != 0 {
 		t.Fatalf("globex.ListPendingTriggersForParent = %v, %v, want none", ids, err)
 	}

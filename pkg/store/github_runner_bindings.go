@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -103,93 +102,6 @@ type GitHubRunnerPush struct {
 	Branch string
 	SHA    string
 	RunID  string
-}
-
-// MintGitHubRunnerCredential mints a runner credential for principal bound to
-// push and the live binding, valid for ttl. It refuses with
-// [ErrGitHubRunnerCredentialLimit] once
-// the team holds [MaxGitHubRunnerCredentials] live ones. The count and the
-// mint share a transaction under the team's lock, and the binding row is
-// locked before minting, so concurrent exchanges cannot pass the limit and
-// an unbind cannot leave a usable credential behind. It drops the team's
-// expired and revoked GitHub Actions credentials first.
-func (t *Tenant) MintGitHubRunnerCredential(
-	ctx context.Context, binding GitHubRunnerBinding, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
-) (string, *Token, error) {
-	if binding.Team != t.team || binding.RepositoryID <= 0 || binding.RepositoryOwnerID <= 0 ||
-		!strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix+fmt.Sprint(binding.RepositoryID)+":") ||
-		push.Branch == "" || push.SHA == "" || ttl <= 0 {
-		return "", nil, ErrInvalidInput
-	}
-	if err := refuseAdminScope(scopes); err != nil {
-		return "", nil, err
-	}
-	for attempt := 1; ; attempt++ {
-		raw, tok, err := t.mintGitHubRunnerCredentialOnce(ctx, binding, principal, push, scopes, ttl, now)
-		if err == nil {
-			return raw, tok, nil
-		}
-		if attempt < mintAttempts && isTokenPrefixCollision(err) {
-			continue
-		}
-		return "", nil, err
-	}
-}
-
-func (t *Tenant) mintGitHubRunnerCredentialOnce(
-	ctx context.Context, binding GitHubRunnerBinding, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
-) (string, *Token, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return "", nil, err
-	}
-	var ownerID int64
-	err = tx.QueryRowContext(ctx, `SELECT repository_owner_id FROM github_runner_bindings
-		WHERE team = ? AND repository_id = ?`+tx.forUpdate(), string(t.team), binding.RepositoryID).Scan(&ownerID)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && ownerID != binding.RepositoryOwnerID) {
-		return "", nil, ErrNotFound
-	}
-	if err != nil {
-		return "", nil, err
-	}
-	at := now.UTC().Unix()
-	like := GitHubRunnerPrincipalPrefix + "%"
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM github_runner_credentials WHERE team = ? AND expires_at <= ?`, string(t.team), at); err != nil {
-		return "", nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM tokens
-		WHERE team = ? AND kind = ? AND principal LIKE ?
-		  AND ((expires_at IS NOT NULL AND expires_at <= ?) OR (revoked_at IS NOT NULL AND revoked_at <= ?))`,
-		string(t.team), TokenKindRunner, like, at, at); err != nil {
-		return "", nil, err
-	}
-	var live int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM tokens
-		WHERE team = ? AND kind = ? AND principal LIKE ?
-		  AND (revoked_at IS NULL OR revoked_at > ?) AND expires_at IS NOT NULL AND expires_at > ?`,
-		string(t.team), TokenKindRunner, like, at, at).Scan(&live); err != nil {
-		return "", nil, err
-	}
-	if live >= MaxGitHubRunnerCredentials {
-		return "", nil, ErrGitHubRunnerCredentialLimit
-	}
-	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindRunner, scopes, ttl, now, TokenOptions{})
-	if err != nil {
-		return "", nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO github_runner_credentials (team, prefix, branch, sha, run_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		string(t.team), tok.Prefix, push.Branch, push.SHA, push.RunID, tok.ExpiresAt.UTC().Unix()); err != nil {
-		return "", nil, err
-	}
-	return raw, tok, tx.Commit()
 }
 
 // GitHubRunnerCredentialPush returns the push the GitHub Actions credential

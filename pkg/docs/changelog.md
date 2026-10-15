@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Retire unused token issuance and report APIs
+  Rotation uses capability management, Actions credentials use verified provisioning, and concurrency release includes follower resolution and promotion. Attempt history derives executor identity from claim ancestry. See [migration guide](docs/migrations/_unreleased.md#legacy-store-issuance-and-reports).
+
 - **store (Breaking):** Membership mutations use current authority
   Removed the raw member role and removal APIs, three default-team reader twins, unused member-token cap symbols and the unused subscription-name repository lookup. `UpdateMembership` commits membership, invitation, session and capability revocation effects together. Runtime purge and tenant guards share the final schema inventory. GitHub subscription and automation records persist canonical repository keys, and subscription timestamps preserve nanoseconds. See [migration guide](docs/migrations/_unreleased.md#membership-mutations-use-current-authority).
 

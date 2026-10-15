@@ -846,30 +846,6 @@ func TestUnmeteredClaimNeitherReservesNorCharges(t *testing.T) {
 	}
 }
 
-func TestTokenRotationCarriesTheMeteredMarker(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	_, cloud, err := s.CreateTokenWith(ctx, "agent:cloud", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now(),
-		store.TokenOptions{Metered: true})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	_, newTok, _, err := s.RotateToken(cloud.Prefix, time.Hour, 0, time.Now())
-	if err != nil {
-		t.Fatalf("rotate: %v", err)
-	}
-	if !newTok.Metered {
-		t.Fatal("a rotation dropped the metering marker")
-	}
-	metered, err := s.TokenMetered(ctx, newTok.Prefix)
-	if err != nil {
-		t.Fatalf("token metered: %v", err)
-	}
-	if !metered {
-		t.Fatal("the rotated token is not metered in the database")
-	}
-}
-
 func TestAppendEventOnceCollapsesRepeats(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

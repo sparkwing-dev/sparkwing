@@ -28,7 +28,7 @@ func TestConcurrency_GrantClearsOwnStaleWaiterRow(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("r2: want Queued, got %s", r.Kind)
 	}
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "k", "r1/n", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "k", "r1/n", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("release r1: %v", err)
 	}
 	if r := acquireT(t, s, store.AcquireSlotRequest{
@@ -67,7 +67,7 @@ func TestConcurrency_ReacquireKeepsQueuedArrivalOrder(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("new: want Queued got %s", r.Kind)
 	}
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "k", "holder/n", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "k", "holder/n", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("release holder: %v", err)
 	}
 	if r := acquireT(t, s, store.AcquireSlotRequest{

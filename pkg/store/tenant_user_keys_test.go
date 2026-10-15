@@ -180,10 +180,10 @@ func TestConcurrencyKeyIsUniquePerTeam(t *testing.T) {
 		}
 	}
 
-	if _, err := alpha.ReleaseConcurrencySlot(ctx, "deploy", "a1/n1", "success", "", "", 0); err != nil {
+	if _, _, _, err := alpha.ReleaseAndNotify(ctx, "deploy", "a1/n1", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("alpha release: %v", err)
 	}
-	if _, err := beta.ActiveConcurrencyHolder(ctx, "deploy", "b1/n1", time.Now()); err != nil {
+	if _, err := beta.ConcurrencyHolder(ctx, "deploy", "b1/n1", time.Now()); err != nil {
 		t.Errorf("beta lost its holder to alpha's release: %v", err)
 	}
 }

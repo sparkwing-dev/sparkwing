@@ -1130,16 +1130,6 @@ type FinishRunRequest struct {
 	Transition RunTransition
 	Unit       OwnerLeaseRef
 }
-type FirstGreenStats struct {
-	TeamsCreated  int
-	TeamsGreen    int
-	MedianSeconds int64
-	P90Seconds    int64
-	WithinHour    int
-	WithinDay     int
-	WithinWeek    int
-	Later         int
-}
 func FormatCredits(micro int64) string
 func FreeCacheShare(allowance int64) int64
 func FreeEventShare(allowance int64) int64
@@ -1792,7 +1782,6 @@ func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err e
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
 func (o *Operator) TriggerTeam(ctx context.Context, triggerID string) (Team, error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
-func (o *Operator) UsageMetrics(ctx context.Context, now time.Time, weeks int, exclude []Team) (*UsageMetrics, error)
 func (o *Operator) WarmCPUClassCores(ctx context.Context) (int64, error)
 func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error)
 const OperatorHoldPrefix = "operator-"
@@ -2266,12 +2255,6 @@ type RunnerPresence struct {
 	TokenPrefix string
 }
 const RunnerTokenLifetime = 90 * 24 * time.Hour
-type RunsBands struct {
-	One            int
-	TwoToNine      int
-	TenToFortyNine int
-	FiftyPlus      int
-}
 type ScheduleDecision struct {
 	Nodes   []NodeDecision
 	Outcome string
@@ -2916,7 +2899,6 @@ func (s *Store) ReversePayment(
 	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
 ) (_ CreditReversal, err error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
-func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []NodeLog, err error)
@@ -3020,7 +3002,6 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 func (t *Tenant) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
 func (t *Tenant) AcknowledgeRunEffect(ctx context.Context, delivery EffectDelivery) error
 func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
-func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
 func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error
@@ -3154,7 +3135,6 @@ func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, er
 func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error)
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
 func (t *Tenant) ListSecrets() ([]Secret, error)
-func (t *Tenant) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error)
 func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
 func (t *Tenant) LookupBlobUpload(ctx context.Context, authority blob.Authority, ticketID string) (UploadReservation, error)
 func (t *Tenant) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error)
@@ -3163,9 +3143,6 @@ func (t *Tenant) LookupRecord(ctx context.Context, request blob.RecordLookup) (b
 func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
-func (t *Tenant) MintGitHubRunnerCredential(
-	ctx context.Context, binding GitHubRunnerBinding, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
-) (string, *Token, error)
 func (t *Tenant) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (t *Tenant) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
@@ -3200,7 +3177,6 @@ func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wai
 func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authorized, row GitHubRunnerBinding) (GitHubRunnerBinding, error)
 func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (t *Tenant) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
-func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error)
 func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capability.Authorized) (GitCredential, capability.SourceReleaseAudit, error)
@@ -3220,7 +3196,6 @@ func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (t *Tenant) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
-func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
 func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error)
 func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, nextAt time.Time) error
@@ -3482,25 +3457,6 @@ type UsageDelta struct {
 	Counter   string
 	Amount    int64
 }
-type UsageMetrics struct {
-	Weeks      []UsageWeek
-	FirstGreen FirstGreenStats
-}
-type UsageWeek struct {
-	WeekStart time.Time
-
-	ActiveTeams int
-	Runs        int
-
-	CloudRuns     int
-	ConnectedRuns int
-
-	TeamsByRuns             RunsBands
-	MedianRunsPerActiveTeam float64
-	NewAccounts             int
-	NewTeams                int
-}
-func UsageWeekStart(at time.Time) time.Time
 func ValidComputeLimit(name string) bool
 func ValidCreditGrantKind(kind string) bool
 func ValidRunnerName(name string) bool

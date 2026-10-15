@@ -251,7 +251,7 @@ func TestCreateToken_StoreRefusesASecondRowOnOnePrefix(t *testing.T) {
 	}
 }
 
-func TestAmbiguousPrefixRefusesLookupRevokeAndRotate(t *testing.T) {
+func TestAmbiguousPrefixRefusesLookupAndRevoke(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
@@ -265,10 +265,6 @@ func TestAmbiguousPrefixRefusesLookupRevokeAndRotate(t *testing.T) {
 		}},
 		{"revoke", func(s *Store, prefix string, now time.Time) error {
 			return s.RevokeToken(prefix, now)
-		}},
-		{"rotate", func(s *Store, prefix string, now time.Time) error {
-			_, _, _, err := s.RotateToken(prefix, time.Hour, time.Hour, now)
-			return err
 		}},
 	}
 	for _, tc := range cases {

@@ -302,7 +302,7 @@ func TestConcurrency_CacheHitShortCircuits(t *testing.T) {
 	if r1.Kind != store.AcquireGranted {
 		t.Fatalf("r1: want Granted got %s", r1.Kind)
 	}
-	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour)
+	released, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour, 0)
 	if err != nil || !released {
 		t.Fatalf("release: released=%v err=%v", released, err)
 	}
@@ -329,7 +329,7 @@ func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
 	if r1.Kind != store.AcquireGranted {
 		t.Fatalf("r1: want Granted got %s", r1.Kind)
 	}
-	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour)
+	released, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour, 0)
 	if err != nil || !released {
 		t.Fatalf("release: released=%v err=%v", released, err)
 	}
@@ -343,7 +343,7 @@ func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
 		t.Fatalf("r2 with BypassRead: want Granted got %s", r2.Kind)
 	}
 
-	released2, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r2/n1", "success", "r2/n1", "hash-abc", time.Hour)
+	released2, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r2/n1", "success", "r2/n1", "hash-abc", time.Hour, 0)
 	if err != nil || !released2 {
 		t.Fatalf("release r2: released=%v err=%v", released2, err)
 	}
@@ -394,13 +394,9 @@ func TestConcurrency_PromoteNextWaiters(t *testing.T) {
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 	createLiveRunT(t, s, "r2")
-	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "", "", 0)
+	released, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "", "", 0, 30*time.Second)
 	if err != nil || !released {
 		t.Fatalf("release r1: released=%v err=%v", released, err)
-	}
-	promoted, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", 30*time.Second)
-	if err != nil {
-		t.Fatalf("promote: %v", err)
 	}
 	if len(promoted) != 1 || promoted[0].RunID != "r2" {
 		t.Fatalf("promote: got %+v, want [r2]", promoted)
@@ -441,13 +437,9 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 	if err := s.FinishRun(ctx, "r2", "success", ""); err != nil {
 		t.Fatalf("finish r2: %v", err)
 	}
-	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "", "", 0)
+	released, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "", "", 0, 30*time.Second)
 	if err != nil || !released {
 		t.Fatalf("release r1: released=%v err=%v", released, err)
-	}
-	promoted, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", 30*time.Second)
-	if err != nil {
-		t.Fatalf("promote: %v", err)
 	}
 	if len(promoted) != 1 || promoted[0].RunID != "r3" {
 		t.Fatalf("promote: got %+v, want [r3]", promoted)
@@ -485,7 +477,7 @@ func TestConcurrency_CoalesceFollowersResolvedByLeader(t *testing.T) {
 			t.Fatalf("r%d: want Coalesced got %s", i, resp.Kind)
 		}
 	}
-	followers, err := tenantFor(t, s, store.DefaultTeam).ResolveCoalesceFollowers(ctx, "k", "r1", "n1")
+	_, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "", "", 0, 0)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

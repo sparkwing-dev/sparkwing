@@ -1,5 +1,25 @@
 # Migrating to the next release
 
+## Legacy store issuance and reports
+
+`Store.RotateToken` is removed. Use the tenant's `RotateCapability` with
+current capability-management authority. `Tenant.MintGitHubRunnerCredential`
+is removed. Verified Actions exchange uses `Store.ProvisionCapability` with
+`ProvisionActions`.
+
+`Tenant.ReleaseConcurrencySlot` and `ResolveCoalesceFollowers` are removed.
+Use `ReleaseAndNotify` and consume its follower and promotion results from
+that transaction. `ActiveConcurrencyHolder` is removed. `ConcurrencyHolder`
+returns an unexpired holder. Check `Superseded` when active capacity is required.
+
+The unused `Tenant.ListSpawnedChildrenByRun`, `Operator.UsageMetrics`,
+`UsageMetrics`, `UsageWeek`, `RunsBands`, `FirstGreenStats` and `UsageWeekStart`
+store APIs are removed. The usage-metrics HTTP route was removed separately.
+
+Attempt history derives executor identity from claim ancestry. A supplied
+executor kind or location cannot override the awarded identity. Local host
+and cloud pod names remain display observations.
+
 ## Membership mutations use current authority
 
 `Tenant.SetMemberRole` and `RemoveMember` are removed. Use

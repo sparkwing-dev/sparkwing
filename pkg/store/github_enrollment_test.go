@@ -356,3 +356,32 @@ func TestGitHubEnrollmentRollbackPreservesConsentAndAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit(t *testing.T) {
+	tenant, _, _ := actionsEnrollment(t)
+	s := tenant.s
+	now := s.now()
+	s.clock = func() time.Time { return now }
+	var first capability.Issued
+	for i := range MaxGitHubRunnerCredentials {
+		issued, err := s.ProvisionCapability(t.Context(), actionsSpec(s, tenant.team, fmt.Sprint(i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = issued
+		}
+	}
+	if issued, err := s.ProvisionCapability(t.Context(), actionsSpec(s, tenant.team, "full")); !errors.Is(err, ErrGitHubRunnerCredentialLimit) || issued.Raw != "" {
+		t.Fatalf("full quota: %+v, %v", issued.Capability, err)
+	}
+	now = *first.Capability.ExpiresAt
+	if _, err := s.LookupCapability(t.Context(), first.Capability.Digest); err == nil {
+		t.Fatal("expired Actions authority authenticated")
+	}
+	issued, err := s.ProvisionCapability(t.Context(), actionsSpec(s, tenant.team, "after-expiry"))
+	if err != nil || issued.Raw == "" {
+		t.Fatalf("quota after expiry: %+v, %v", issued.Capability, err)
+	}
+	rewriteSchemaCount(t, s.db, "capabilities", MaxGitHubRunnerCredentials+1)
+}

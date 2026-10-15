@@ -2,6 +2,35 @@
 
 <!-- design:begin -->
 
+## Legacy issuance and report retirement
+
+`Store.RotateToken` and `Tenant.MintGitHubRunnerCredential` are removed.
+Capability rotation uses `Tenant.RotateCapability`. Actions exchange uses
+`Store.ProvisionCapability` with verified `ProvisionActions` evidence. The
+capability quota counts live roots. Expiry frees quota without deleting the
+retained authority rows.
+
+`Tenant.ReleaseConcurrencySlot`, `ResolveCoalesceFollowers` and
+`ActiveConcurrencyHolder` are removed. `ReleaseAndNotify` commits release,
+follower resolution and waiter promotion together. `ConcurrencyHolder` reads
+an unexpired holder, including a superseded one. Callers that require active
+capacity check its `Superseded` field.
+
+`Operator.UsageMetrics`, its weekly-report types and `UsageWeekStart` are
+removed with the retired usage-metrics route. The unused
+`Tenant.ListSpawnedChildrenByRun` trigger reader is removed. `SpawnedChild`
+remains the existing decoration input type.
+
+Attempt starts derive executor class and location from claim ancestry and
+billing provenance. Machine names come from the registered subject. Actions
+attempts retain their push ancestor's numeric repository and workflow run,
+with the enrollment's repository display name when available. A trigger-host
+award retains that ancestry when it awards a job. Host observations can supply
+only a local host or cloud pod display name, subject to the existing name
+bound and control-character filtering. Caller metadata cannot replace machine
+or Actions identity. The generated SQLite property covers direct and hosted
+claims with forged metadata. Native host-observation transport remains separate.
+
 ## Membership and schema inventory
 
 `Tenant.SetMemberRole`, `RemoveMember`, `MaxCLITokensPerMember` and

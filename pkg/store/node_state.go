@@ -738,14 +738,16 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		row.QueueStartedAt = nil
 		row.Attempt++
 		row.StartedAt = &now
-		kind, name, location := "runner", row.ClaimedBy, "unknown"
 		if a := change.Extra.Attempt; a != nil {
 			if a.Identity.Team != string(team) || a.Identity.RunID != row.Ref.RunID || a.Identity.NodeID != row.Ref.NodeID || a.Identity.Attempt != row.Attempt || a.Identity.Generation != row.Generation {
 				return errors.New("attempt identity does not match claim")
 			}
-			kind, name, location = a.ExecutorKind, a.ExecutorName, a.ExecutorLocation
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, row.ClaimedBy, row.CapabilityPrefix, kind, name, location, now.UnixNano())
+		kind, name, location, err := attemptExecutorTx(ctx, tx, change.Actor, change.Extra.Attempt)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, row.ClaimedBy, row.CapabilityPrefix, kind, name, location, now.UnixNano())
 		if err != nil {
 			return err
 		}

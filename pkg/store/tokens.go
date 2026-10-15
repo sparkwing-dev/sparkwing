@@ -87,9 +87,6 @@ type TokenOptions struct {
 	Metered bool
 	// CreatedBy names the account minting the token.
 	CreatedBy string
-	// safety: rotation is the one mint allowed to overlap a live token of the
-	// same agent name, and only the predecessor it revokes at grace end.
-	replaces string
 }
 
 // IsValid reports whether the token is usable at `now`.
@@ -253,7 +250,7 @@ func createTokenRow(
 	if err := retireExpiredAgentName(ctx, e, team, principal, kind, now); err != nil {
 		return "", nil, err
 	}
-	if err := refuseTakenAgentName(ctx, e, team, principal, kind, now, opts.replaces); err != nil {
+	if err := refuseTakenAgentName(ctx, e, team, principal, kind, now); err != nil {
 		return "", nil, err
 	}
 	raw, err := mintRaw(marker)
@@ -303,15 +300,15 @@ func isAgentNameCollision(err error) bool {
 // safety: every mint path passes through here, so a second live agent token
 // for one agent name cannot be minted by any of them. Two racing mints both
 // pass this read, and [agentNameIndex] refuses the second insert.
-func refuseTakenAgentName(ctx context.Context, q tokenExecer, team Team, principal, kind string, now time.Time, replaces string) (err error) {
+func refuseTakenAgentName(ctx context.Context, q tokenExecer, team Team, principal, kind string, now time.Time) (err error) {
 	if !isAgentToken(kind, principal) {
 		return nil
 	}
 	at := now.UTC().Unix()
 	rows, err := q.QueryContext(ctx, `SELECT prefix FROM tokens
-		WHERE team = ? AND kind IN (?, ?) AND principal = ? AND prefix <> ?
+		WHERE team = ? AND kind IN (?, ?) AND principal = ?
 		  AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
-		string(team), TokenKindRunner, TokenKindTeam, principal, replaces, at, at)
+		string(team), TokenKindRunner, TokenKindTeam, principal, at, at)
 	if err != nil {
 		return err
 	}
@@ -467,15 +464,6 @@ func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
 	return scanTokenRows(rows)
 }
 
-func selectTokensByPrefixTx(ctx context.Context, tx *storeTx, prefix string) ([]Token, error) {
-	rows, err := tx.QueryContext(ctx, selectTokensByPrefixSQL+tx.forUpdate(), prefix)
-	if err != nil {
-		return nil, fmt.Errorf("tokens: query: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	return scanTokenRows(rows)
-}
-
 func scanTokenRows(rows *sql.Rows) ([]Token, error) {
 	var out []Token
 	for rows.Next() {
@@ -586,91 +574,6 @@ func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error) {
 		return nil, fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, len(rows))
 	}
 	return &rows[0], nil
-}
-
-// RotateToken mints a peer and revokes the original at now+grace. The
-// read of the original, the mint, and the revocation share one
-// transaction, so a revoke that lands while the replacement is hashing
-// wins and the rotation rolls back rather than reviving the token.
-func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error) {
-	ctx := context.Background()
-	for attempt := 1; ; attempt++ {
-		raw, newTok, oldTok, err = s.rotateToken(ctx, prefix, grace, ttl, now)
-		if err == nil {
-			return raw, newTok, oldTok, nil
-		}
-		if attempt < mintAttempts && isTokenPrefixCollision(err) {
-			continue
-		}
-		return "", nil, nil, err
-	}
-}
-
-func (s *Store) rotateToken(
-	ctx context.Context, prefix string, grace, ttl time.Duration, now time.Time,
-) (string, *Token, *Token, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("tokens: rotate: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	rows, err := selectTokensByPrefixTx(ctx, tx, prefix)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	if len(rows) == 0 {
-		return "", nil, nil, errors.New("token not found")
-	}
-	if len(rows) > 1 {
-		return "", nil, nil, fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, len(rows))
-	}
-	oldTok := &rows[0]
-	if oldTok.RevokedAt != nil {
-		return "", nil, nil, errors.New("token is already revoked")
-	}
-
-	// safety: the predecessor is revoked before its successor is inserted, so
-	// it has left the agent-name index by the time the successor enters it.
-	revokeAt := now.Add(grace).UTC()
-	res, err := tx.ExecContext(ctx,
-		`UPDATE tokens SET revoked_at = ?
-          WHERE prefix = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		revokeAt.Unix(), prefix, revokeAt.Unix(),
-	)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("tokens: rotate update: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("tokens: rotate update: %w", err)
-	}
-	// safety: a revoke that landed since the read leaves no row to update, so the rotation rolls back
-	if n == 0 {
-		return "", nil, nil, errors.New("token is already revoked")
-	}
-	if n > 1 {
-		return "", nil, nil, fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, n)
-	}
-
-	// safety: the replacement inherits the original's team; a rotation that
-	// re-minted into [DefaultTeam] would move the credential out of the team
-	// whose work it authorizes.
-	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Team, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now,
-		TokenOptions{Metered: oldTok.Metered, replaces: oldTok.Prefix})
-	if err != nil {
-		return "", nil, nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE tokens SET replaced_by = ? WHERE prefix = ?`,
-		newTok.Prefix, prefix); err != nil {
-		return "", nil, nil, fmt.Errorf("tokens: rotate update: %w", err)
-	}
-	oldTok.RevokedAt = &revokeAt
-	oldTok.ReplacedBy = newTok.Prefix
-	if err := tx.Commit(); err != nil {
-		return "", nil, nil, fmt.Errorf("tokens: rotate: %w", err)
-	}
-	return raw, newTok, oldTok, nil
 }
 
 func prefixForKind(kind string) (string, bool) {

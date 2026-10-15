@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -223,90 +222,5 @@ func TestGitHubRunnerScopeClaimsOnlyItsPush(t *testing.T) {
 	}
 	if ok, err := st.GitHubRunnerAdmits(context.Background(), widgetsScope(), "run-main"); err != nil || !ok {
 		t.Fatalf("its own push: admits = %v, %v; want true", ok, err)
-	}
-}
-
-// The limit is counted and the credential minted under one lock, so a burst
-// of exchanges cannot pass it together, and expired credentials neither
-// count nor stay behind.
-func TestGitHubRunnerCredentialMintIsBoundedAndSweepsExpiredOnes(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, st, "acme")
-	now := time.Now()
-	binding, err := registerGitHubEnrollment(t, st, acme, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mint := func(at time.Time) error {
-		_, _, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", mainPush,
-			[]string{"nodes.claim"}, time.Hour, at)
-		return err
-	}
-	results := make(chan error, store.MaxGitHubRunnerCredentials+5)
-	var wg sync.WaitGroup
-	for range store.MaxGitHubRunnerCredentials + 5 {
-		wg.Go(func() { results <- mint(now) })
-	}
-	wg.Wait()
-	close(results)
-	minted := 0
-	for err := range results {
-		switch {
-		case err == nil:
-			minted++
-		case errors.Is(err, store.ErrGitHubRunnerCredentialLimit):
-		default:
-			t.Fatalf("mint: %v", err)
-		}
-	}
-	if minted != store.MaxGitHubRunnerCredentials {
-		t.Fatalf("%d credentials minted concurrently, want exactly %d", minted, store.MaxGitHubRunnerCredentials)
-	}
-	later := now.Add(2 * time.Hour)
-	if err := mint(later); err != nil {
-		t.Fatalf("mint once the others expired: %v", err)
-	}
-	var left int
-	if err := st.DB().QueryRow(storetest.Rebind(st,
-		`SELECT COUNT(*) FROM github_runner_credentials WHERE team = ?`), "acme").Scan(&left); err != nil {
-		t.Fatal(err)
-	}
-	if left != 1 {
-		t.Fatalf("%d credential rows after the sweep, want only the live one", left)
-	}
-	if err := st.DB().QueryRow(storetest.Rebind(st,
-		`SELECT COUNT(*) FROM tokens WHERE team = ? AND principal LIKE 'github:%'`), "acme").Scan(&left); err != nil {
-		t.Fatal(err)
-	}
-	if left != 1 {
-		t.Fatalf("%d GitHub Actions token rows after the sweep, want only the live one", left)
-	}
-}
-
-func TestGitHubRunnerCredentialRemembersItsPush(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	binding, err := registerGitHubEnrollment(t, st, acme, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, tok, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", mainPush,
-		[]string{"nodes.claim"}, time.Hour, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if push, err := acme.GitHubRunnerCredentialPush(ctx, tok.Prefix); err != nil || push != mainPush {
-		t.Fatalf("push = %+v, %v; want %+v", push, err, mainPush)
-	}
-	if _, err := other.GitHubRunnerCredentialPush(ctx, tok.Prefix); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("another team read the credential's push: %v", err)
-	}
-	for name, push := range map[string]store.GitHubRunnerPush{"no branch": {SHA: mainPush.SHA}, "no commit": {Branch: "main"}} {
-		if _, _, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", push,
-			[]string{"nodes.claim"}, time.Hour, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
-			t.Errorf("%s: mint = %v, want ErrInvalidInput", name, err)
-		}
 	}
 }
