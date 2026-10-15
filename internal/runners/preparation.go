@@ -2,7 +2,6 @@ package runners
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -46,15 +45,10 @@ func (p NodePreparation) Prepare(ctx context.Context, unit controllerwire.Claime
 	if routes.RunID != unit.RunID || routes.JobID != unit.JobID || routes.Routes.URL == "" || routes.Routes.Bearer == "" || routes.Routes.Bearer == unit.Capability {
 		return nil, input, closeResources, errors.New("node preparation requires delegated routes for the awarded job")
 	}
-	accepted := unit.Accepted
-	input.Accepted = nodehost.AcceptedRun{RunID: unit.RunID, SpecHash: string(accepted.Spec.Hash), PlanHash: string(accepted.PlanHash)}
 	var err error
-	input.Accepted.Spec, err = json.Marshal(accepted.Spec)
-	if err == nil {
-		err = json.Unmarshal(accepted.Plan, &input.Accepted.Plan)
-	}
+	input.Accepted, err = acceptedInput(unit.RunID, *unit.Accepted)
 	if err != nil {
-		return nil, input, closeResources, errors.New("node preparation requires the accepted spec and plan")
+		return nil, input, closeResources, err
 	}
 	if err := context.Cause(ctx); err != nil {
 		return nil, input, closeResources, err
@@ -63,7 +57,7 @@ func (p NodePreparation) Prepare(ctx context.Context, unit controllerwire.Claime
 	if acquire == nil {
 		acquire = acquireExecution
 	}
-	input.Entry, releaseSource, err = acquire(ctx, accepted.Spec, p.Source)
+	input.Entry, releaseSource, err = acquire(ctx, unit.Accepted.Spec, p.Source)
 	if err != nil {
 		return nil, input, closeResources, err
 	}

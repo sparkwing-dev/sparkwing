@@ -59,6 +59,13 @@ func (c *storedRunnerW8) Finish(ctx context.Context, run string, body controller
 
 type runnerStorePolicyW8 struct{}
 
+type identityRunW8 func(nodehost.RunInput)
+
+func (host identityRunW8) Run(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+	host(input)
+	return nodehost.RunCompletion{}, nil
+}
+
 func (runnerStorePolicyW8) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
 	if spec.RegistrationID != "runner-store-fixture" {
 		return errors.New("unregistered fixture origin")
@@ -103,7 +110,9 @@ func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*controller.Engi
 	unit := runnerAuthorityAwardW8(capability.UnitNode)
 	unit.Request.Request.Team = string(store.DefaultTeam)
 	unit.Request.Request.Git.Repository.Key = "gh:1"
+	unit.Request.Hash = "request"
 	unit.Accepted.Spec.Request = unit.Request
+	unit.Accepted.Spec.Hash = "spec"
 	request, err := json.Marshal(unit.Request)
 	if err != nil {
 		t.Fatal(err)
@@ -190,8 +199,17 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 			}
 			host.PrepareRun = func(ctx context.Context, unit controllerwire.ClaimedUnit, bound controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
 				held = unit
-				return runnerRunW8(func() {
+				return identityRunW8(func(input nodehost.RunInput) {
 					executed = true
+					var request runspec.SealedRequest
+					if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
+						t.Error(err)
+						return
+					}
+					if input.RunID != unit.RunID || input.RequestHash != string(unit.Request.Hash) || request.Hash != unit.Request.Hash || input.Accepted == nil || input.Accepted.SpecHash != string(unit.Accepted.Spec.Hash) || input.Accepted.PlanHash != string(unit.Accepted.PlanHash) {
+						t.Error("run host input lost the awarded first or second seal")
+						return
+					}
 					if _, err := bound.Finish(ctx, unit.RunID, controllerwire.FinishRequest{Outcome: "success"}); err != nil {
 						t.Error(err)
 					}

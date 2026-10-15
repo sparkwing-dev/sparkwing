@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestRunnerAuthorityW8Components(t *testing.T) {
@@ -176,6 +177,7 @@ func runnerAuthorityAwardW8(kind capability.UnitKind) controllerwire.ClaimedUnit
 		Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect,
 		Binding:        capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Holder: "holder", Generation: 1},
 		LeaseExpiresAt: time.Now().Add(time.Minute),
+		Request:        runspec.SealedRequest{RunID: "run", Hash: "request-hash", Request: runspec.Request{Team: "team"}},
 	}
 	if kind == capability.UnitNode {
 		unit.Purpose, unit.JobID = capability.PurposeWork, "job"

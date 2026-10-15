@@ -27,7 +27,14 @@ Bound host services supply the job hash, delegated routes, storage and replay.
 The preparation overwrites source, accepted run, execution settings, engine,
 runner and claim identity from the award. `NewManagedRunner` composes one claim
 client and award clients over the same HTTP transport with separate bearers.
-Concrete shared host constructors and run/plan/eval inputs remain with W3.
+Concrete shared host constructors and run/plan/eval execution identities remain
+with W3.
+
+For trigger and here awards, Hosting constructs RunInput's run ID, first seal
+and accepted second seal before renewal or preparation. Prepared host services
+supply storage, authority, engine resolution and plan caching. They cannot
+replace the awarded seals or add an accepted plan to a new run. Trigger and node
+preparation share the accepted-plan projection.
 
 Reconciliation supports MaterializeOnly: an authorized cache/retry hit is committed,
 while a miss returns Dispatch without stealing remote execution. Private execution

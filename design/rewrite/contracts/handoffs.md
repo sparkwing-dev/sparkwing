@@ -7,6 +7,13 @@ client with the unified loop or launcher. `Hosting.HTTP` and `BootstrapHost.HTTP
 retain the caller's HTTP/api.sock transport for awarded and exchanged clients.
 Launcher construction always selects `EngineOptions.Launcher`.
 
+W8 now constructs trigger/here RunInput seals from the award before callbacks
+run. The SQLite/controller lifecycle component checks those inputs through
+RunHost and persisted completion. Generated cases cover new runs, resume,
+prepared replacements and mutation after capture. This completes W8's awarded
+run/seal projection; W3's run/plan/eval runner-identity fields and shared host
+constructors remain open.
+
 `runners.NodePreparation.Prepare` fills accepted executor input, acquires the
 accepted source and retains partial cleanup until the keeper joins. Its default
 uses W3's `ForExecution`/`Acquire`; components inject that boundary while it is a
@@ -174,3 +181,5 @@ and validates the complete unordered decision set before retiring any live Job.
 The two-Job wire-adapter acceptance component passes. The controller-side
 `EngineController.SyncLauncher` remains a stub owned by W2; launcher components
 test that contract with a fake rather than invoking the stub.
+
+**Lead decision for W3: "the W4 expansion-concurrency mismatch question" is settled by c3-protocol-notes.md line 66.** A generated job's concurrency membership must match the existing plan or job definition of that group on capacity, scope and on_limit; cost may differ; a mismatch refuses the expansion with `plan_invalid` naming the field path. The host supplies existing definitions through `ExistingConcurrency`. W3 implements this in the strict raw-bytes expansion validation (handoff "W3 expansion acceptance"). If a W4 membership test accepts a mismatch on capacity, scope or on_limit, W3 corrects that test as a minimal shared-file edit and lists it. No further lead input is needed.

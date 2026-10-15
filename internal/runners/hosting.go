@@ -39,8 +39,15 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 		return err
 	}
 	var execution nodeExecution
+	var sealedRun nodehost.RunInput
 	if unit.Unit == capability.UnitNode {
 		execution = executionFor(unit)
+	} else {
+		var err error
+		sealedRun, err = runInputFor(unit)
+		if err != nil {
+			return err
+		}
 	}
 	if err := limits.CheckRenewal(h.Interval, h.Lease); err != nil {
 		return err
@@ -124,6 +131,8 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 		if host == nil {
 			return errors.New("runner preparation returned no run host")
 		}
+		input.RunID, input.RequestHash = sealedRun.RunID, sealedRun.RequestHash
+		input.SealedRequest, input.Accepted = sealedRun.SealedRequest, sealedRun.Accepted
 		_, err = host.Run(unitCtx, input)
 		return err
 	}

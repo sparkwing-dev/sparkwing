@@ -704,3 +704,77 @@ commits and the real HTTP, native-platform, deployment and full placement proofs
 The migrated orchestrator's socket-free TestHostedRetryPolicy_ selection also
 passes. Git config has no local identity or core.worktree override. Worker
 scratch is removed after all checks finish.
+
+
+## Continuation: awarded trigger input construction
+
+The handoff conflict from the integration merge is resolved in the working file.
+Both sides' entries survive. Worker Git writes are prohibited, so the lead must
+stage that file and finish the merge.
+
+Invariant: a trigger or here execution receives the run and seals awarded by the
+controller, regardless of prepared input or later mutation of the award.
+Hosting now captures RunInput's run ID, sealed request/hash and accepted spec/plan
+before renewal and preparation. It refuses mismatched run/team/request seals
+before acquisition. New runs discard any prepared accepted plan. Resume consumes
+the awarded second seal. Bound authority, storage, engine resolver and plan cache
+still come from host services. The shared accepted-plan projection replaces the
+node preparer's duplicate serialization.
+
+FuzzHostingRunInputKeepsAwardSeals failed both seeds on the prior production code
+and passes after the change. The SQLite/controller lifecycle component now
+checks the trigger RunInput before real persisted completion. Its fixture now
+populates the request/spec hashes stored beside its JSON. No foreign production
+caller or contract shape changed. The shared callers edited are
+`tests/acceptance/runner_authority_w8_test.go` and
+`tests/acceptance/runner_store_w8_test.go`. Contract prose changed in
+`c3-protocol-sdk.md` and `handoffs.md`.
+
+This continuation adds 50 production lines and deletes 9. No whole legacy file
+is deleted. Earlier cluster, dispatcher, daemon and socket-client cuts remain
+removed. No new T1 port or native catalog cell is claimed.
+
+The approved cancellation fix was already committed and both retained regressions
+pass. Recounting decce44f0's first parent against this tree confirms stop logic
+84 -> 75 lines: the pending wait, policy classifier/check helper and their three
+call sites. The pending wait is 44 -> 40; loop.go is 408 -> 401.
+
+Every W8 amendment row and handoff was rechecked. A1-11/39 now include the awarded
+trigger-input projection. A1-19 still needs W3's run/plan/eval runner-identity
+fields and actual hello construction. The remaining rows retain the
+component/native boundary recorded above.
+
+Real integration remains open for W3's source.ForRequest/ForExecution/Acquire,
+Entry.Close, lease.Keeper.Run and shared host constructors; W9's NewEngineClient,
+NewDataClient, final factories and launcher grammar; W1/W2's elected local
+store/queue/maintenance and policy-handler adapter, plan/eval resource awards and
+EngineController.SyncLauncher; and W3/W7's workspace-off binary-cache contract.
+The declared defaults still target those owners. Components fake those contracts
+rather than adding another implementation or undeclared constructor. Native
+HTTP/api.sock, Windows/macOS, deployed Cloud enforcement/cleanup, placement cells
+and real-repository QA remain unverified. No new cross-area contract change is
+requested; the existing requests remain open.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, go -C,
+-p 4 and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8.
+
+- Whole-repository build and W8/acceptance vet pass.
+- Full runners/... and engine/... suites pass.
+- tests/acceptance passes in 39.009 seconds; internal/acceptance has no test files.
+- Both original cancellation regressions pass on production code.
+- Commentcheck is clean across 1,190 Go files.
+- The runner composition/regression race selection passes.
+- The new awarded-input property passes 1,026 generated executions; the existing
+  interruption property passes 1,000, including its twenty baseline seeds.
+- Focused local-runtime and client suites pass. Cluster passes with the native
+  metrics-listener test excluded because this sandbox blocks sockets.
+
+No T1 inventory test was newly ported. No product or contract question was
+resolved outside W8. The remaining questions are the construction and native
+integration points listed above. Git config has no local identity or
+core.worktree override. No Sparkwing executable, pipeline, Git write, deployment
+or release ran. Check processes finished; worker scratch was removed.
+
+No public docs impact: this implements the internal awarded-input contract;
+CLI grammar, settings and wire signatures are unchanged. Source contract prose
+records the behavior. The lead retains commits, review and native verification.
