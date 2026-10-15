@@ -81,7 +81,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.(localState).ReleaseDebugPause":             defaultTeamState,
 	"internal/orchestrator.(localState).ResolveApproval":               defaultTeamState,
 	"internal/orchestrator.(localState).SetNodeArtifactManifest":       defaultTeamState,
-	"internal/orchestrator.(localState).SetNodeStatus":                 defaultTeamState,
 	"internal/orchestrator.(localState).SetNodeSummary":                defaultTeamState,
 	"internal/orchestrator.(localState).SetStepSummary":                defaultTeamState,
 	"internal/orchestrator.(localState).SkipNodeStep":                  defaultTeamState,

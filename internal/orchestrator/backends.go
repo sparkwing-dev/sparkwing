@@ -276,10 +276,6 @@ func (l localState) ListDebugPauses(ctx context.Context, runID string) ([]*store
 	return l.st.ListDebugPauses(ctx, runID)
 }
 
-func (l localState) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	return l.st.SetNodeStatus(ctx, runID, nodeID, status)
-}
-
 func (l localState) CreateApproval(ctx context.Context, a store.Approval) error {
 	return l.st.CreateApproval(ctx, a)
 }

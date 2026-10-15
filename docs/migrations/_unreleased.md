@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Node state writes use transitions
+
+`SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
+The per-node `status` and `revoke-ready` HTTP endpoints are removed with them.
+Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies
+`To: NodePending`, `Cause: CauseRevoke` and the current run owner's authority.
+Only ready, unclaimed jobs can be withdrawn. A competing claim or stale owner
+returns an error without changing state or events. An identical committed
+transition replays.
+
+Debug pauses write `paused` to activity detail and clear it on resume.
+They preserve the job's lifecycle status, start timestamp and claim.
+
 ## Owner leases replace run heartbeats
 
 `TouchRunHeartbeat` and `TouchNodeHeartbeat` on Store, Tenant and Client, plus

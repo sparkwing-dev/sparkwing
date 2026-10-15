@@ -4,6 +4,16 @@
 
 ## Amendment 1: authority and execution seams
 
+`SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed
+with their legacy HTTP handlers. Debug pauses use `status_detail` through
+activity writes and leave lifecycle state intact. Queue withdrawal uses
+`Tenant.TransitionNode` with `CauseRevoke` under the current owner fence.
+Claimed, running and terminal jobs cannot be withdrawn. Refused transitions
+change neither state nor events. The SQLite
+`lifecycle-transition-replay-and-fencing/store-sqlite` proof covers withdrawal,
+reopening, holder exclusion, cleared terminal claims and exact replay.
+The raw readiness publisher remains pending its caller migrations.
+
 `Store.TouchRunHeartbeat`, its Tenant twin, `Client.TouchRunHeartbeat` and
 `Run.LastHeartbeatAt` are removed with the independent scheduler ticker,
 legacy HTTP handler and Doctor's heartbeat-age run finalizer. `TouchNodeHeartbeat`

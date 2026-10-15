@@ -156,10 +156,10 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 		{"start the node", func() error { return c.StartNode(ctx, trig.ID, "build") }},
 		{"annotate the node", func() error { return c.AppendNodeAnnotation(ctx, trig.ID, "build", "compiling") }},
 		{"pause the node", func() error {
-			return c.SetNodeStatus(ctx, trig.ID, "build", "paused")
+			return c.UpdateNodeActivity(ctx, trig.ID, "build", "paused")
 		}},
 		{"resume the node", func() error {
-			return c.SetNodeStatus(ctx, trig.ID, "build", "running")
+			return c.UpdateNodeActivity(ctx, trig.ID, "build", "")
 		}},
 		{"finish the node", func() error {
 			return c.FinishNode(ctx, trig.ID, "build", "success", "", nil)
@@ -212,9 +212,6 @@ func TestRunnerScopes_TriggerHolderControlsReadiness(t *testing.T) {
 
 	if err := c.MarkNodeReady(held, trigger.ID, "build"); err != nil {
 		t.Fatalf("MarkNodeReady holding the trigger claim: %v", err)
-	}
-	if _, err := c.RevokeNodeReady(held, trigger.ID, "build"); err != nil {
-		t.Fatalf("RevokeNodeReady holding the trigger claim: %v", err)
 	}
 
 	err = client.NewWithToken(f.url, nil, strangerRaw).MarkNodeReady(held, trigger.ID, "build")

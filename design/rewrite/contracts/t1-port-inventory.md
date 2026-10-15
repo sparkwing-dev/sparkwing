@@ -446,3 +446,19 @@ API contention fixture uses its existing activity route instead of the removed
 touch route. These are caller migrations, not final native proofs.
 
 The package selection is in `../w1-session21-tests.txt`.
+
+## W1 raw node status and withdrawal retirement
+
+`SetNodeStatus` and `RevokeNodeReady` are removed from Store, Tenant and Client
+with their HTTP handlers. Debug pauses use activity detail. The raw readiness
+publisher remains pending its caller migrations.
+
+| Retired coverage | Final proof or remaining integration |
+| --- | --- |
+| `TestNodeClaim_RevokeOnlyWhenUnclaimed` and the HTTP revoke assertions | `TestReadinessWithdrawalPreservesHolderAndAuthorityProperty` varies 32 sequences of withdrawal, replay and republication before probing expired or forged owners and claimed, running or terminal jobs. Refused transactions preserve the complete snapshot and event list. |
+| Ready withdrawal, holder exclusion and terminal replay | `TestLifecycle/lifecycle-transition-replay-and-fencing/store-sqlite` uses real admission, plan acceptance, claims and transitions. It checks withdrawal after reopening, stale-start refusal, cleared terminal claims, absorbing terminal state and one continuous event sequence. Enrollment is a contract fake. |
+| Raw status writes in client, scope and tenant fixtures | Redundant status writes retire. Existing activity writes carry debug detail. W3's debug fixture still calls CreateRun against the final schema and fails on the removed args_json column before reaching a pause. Production debug lifecycle evidence remains open with that integration. |
+| `TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome` | Retired with the raw setter's two-write terminal state. Final completion records outcome and terminal state atomically. The adjacent missing-Job tests retain the Kubernetes dispatch behavior. Native Job and launcher correlation remain W8/W9 obligations. |
+
+The package selection is in `../w1-session22-tests.txt`. Native route and
+platform cells remain pending.

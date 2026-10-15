@@ -2028,25 +2028,6 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type revokeResp struct {
-	Revoked bool `json:"revoked"`
-}
-
-func (s *Server) handleRevokeNodeReady(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	ok, err := tenant.RevokeNodeReady(r.Context(), runID, nodeID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, revokeResp{Revoked: ok})
-}
-
 func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -2461,29 +2442,4 @@ func auditPrincipal(r *http.Request) string {
 		return p.Name
 	}
 	return "anonymous"
-}
-
-func (s *Server) handleSetNodeStatus(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	var body struct {
-		Status string `json:"status"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if body.Status == "" {
-		writeError(w, http.StatusBadRequest, errors.New("status is required"))
-		return
-	}
-	if err := tenant.SetNodeStatus(r.Context(), runID, nodeID, body.Status); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }

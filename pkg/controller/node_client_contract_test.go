@@ -79,9 +79,6 @@ func runContractSurface(t *testing.T, c *client.Client) {
 	if err := c.StartNode(ctx, runID, "produce"); err != nil {
 		t.Fatalf("StartNode: %v", err)
 	}
-	if err := c.SetNodeStatus(ctx, runID, "produce", "running"); err != nil {
-		t.Fatalf("SetNodeStatus: %v", err)
-	}
 	if err := c.UpdateNodeActivity(ctx, runID, "produce", "compiling"); err != nil {
 		t.Fatalf("UpdateNodeActivity: %v", err)
 	}

@@ -172,3 +172,17 @@ to `EngineController.Renew`. Production watched-job delivery remains with that
 integration. W1b implementation files are unchanged. The remaining legacy API
 cuts and previously recorded foreign gaps remain open. See
 `../w1-session21-progress.md` for ports, shared caller files and verification.
+
+W1's raw node-status and readiness-withdrawal cut is complete. `SetNodeStatus`
+and `RevokeNodeReady` are removed from Store, Tenant and Client with their HTTP
+handlers and retry entries. Debug pauses use activity detail. Queue withdrawal
+uses `TransitionNode` with `CauseRevoke`. A generated property preserves holders,
+state and events under refused writes. The SQLite
+`lifecycle-transition-replay-and-fencing/store-sqlite` cell passes through
+withdrawal, reopening, stale-start refusal and terminal replay. The retry-policy
+fixture also drops its stale run-heartbeat assertion. W3's debug fixture fails
+before a pause because CreateRun still writes the removed args_json column.
+W4/W9's SDK symbol-doc drift remains separate. StateStoreOld, CreatePlanNode,
+raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
+open, along with the earlier foreign contract gaps. W1b implementation files
+are unchanged. See `../w1-session22-progress.md` for evidence and shared files.

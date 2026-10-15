@@ -1243,21 +1243,6 @@ func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error 
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
 
-// RevokeNodeReady atomically clears ready_at IFF the node is not
-// currently claimed. Returns true on success; false means a warm
-// runner claimed the node in the meantime.
-func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/revoke-ready",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	var resp struct {
-		Revoked bool `json:"revoked"`
-	}
-	if err := c.post(ctx, path, nil, http.StatusOK, &resp); err != nil {
-		return false, err
-	}
-	return resp.Revoked, nil
-}
-
 // HeartbeatNodeClaim extends the claim lease for holderID, optionally
 // refreshing the box's advertised headroom. ErrLockHeld when the caller
 // isn't the current claim holder.
@@ -1393,14 +1378,6 @@ func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.De
 		return nil, err
 	}
 	return out, nil
-}
-
-func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/status",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	return c.post(ctx, path,
-		map[string]string{"status": status},
-		http.StatusNoContent, nil)
 }
 
 // SetNodeArtifactManifest records the content-addressed digest of the

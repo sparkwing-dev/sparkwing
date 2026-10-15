@@ -1646,41 +1646,6 @@ UPDATE nodes SET status = ?, started_at = ?
 	return fencedRows(res, fenced)
 }
 
-// SetNodeStatus updates only the status column.
-func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	return s.defaultTenant().SetNodeStatus(ctx, runID, nodeID, status)
-}
-
-// SetNodeStatus is [Store.SetNodeStatus] confined to t's team.
-func (t *Tenant) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	var found int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
-		string(t.team), runID, nodeID).Scan(&found)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
-		status, string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // UpdateNodeDeps rewrites a node's stored dependency list.
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	return s.defaultTenant().UpdateNodeDeps(ctx, runID, nodeID, deps)
@@ -2476,43 +2441,6 @@ func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error 
 		return err
 	}
 	return tx.Commit()
-}
-
-// RevokeNodeReady withdraws an unclaimed job from the queue.
-func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	return s.defaultTenant().RevokeNodeReady(ctx, runID, nodeID)
-}
-
-// RevokeNodeReady is [Store.RevokeNodeReady] confined to t's team.
-func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
-		  WHERE team = ? AND run_id = ? AND node_id = ?
-		    AND claimed_by IS NULL AND `+nodeNotDone,
-		string(t.team), runID, nodeID,
-	)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if n == 0 {
-		if err := tx.Commit(); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // ClaimNextReadyNode flips the oldest claimable node to holderID with

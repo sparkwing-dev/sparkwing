@@ -205,6 +205,7 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **store + controller (Breaking):** Removed `SetNodeStatus`, `RevokeNodeReady` and their legacy HTTP handlers. Debug pauses use activity detail. Queue withdrawal uses the owner-fenced node transition. See [migration guide](docs/migrations/_unreleased.md#node-state-writes-use-transitions).
 - **store + controller + doctor (Breaking):** Removed `TouchRunHeartbeat`, `TouchNodeHeartbeat`, `Run.LastHeartbeatAt`, the independent timestamp heartbeat loops and their legacy HTTP handlers. Run liveness follows the owner lease. Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`. The elected unit reaper owns expired-owner recovery.
 - **store + controller (Breaking):** Removed `Store.ExpiredOutputRuns`, `Store.ReleaseRunOutputs`, `Store.ForgetRunOutputs`, `ExpiredOutputRun` and the store's duplicate `OutputRetention` constant. The controller no longer runs the old output-key sweep. Leased record expiry and blob reachability GC own output lifetime and preserve live copies after their source run expires.
 - **store + controller + cli (Breaking):** Remove dispatch snapshots and `sparkwing debug rerun`

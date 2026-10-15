@@ -700,26 +700,6 @@ paths:
         "204": {description: Stamped.}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: runs.state
-      tags: [nodes]
-      summary: Atomically null `ready_at` iff the node is not claimed.
-      responses:
-        "200":
-          description: Whether the revoke won the race.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.revokeResp
-                type: object
-                required: [revoked]
-                properties:
-                  revoked: {type: boolean}
-
   /api/v1/runs/{id}/nodes/{nodeID}/heartbeat:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
@@ -768,27 +748,6 @@ paths:
         "204": {description: Lease extended.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: Caller is not the current claim holder.}
-
-  /api/v1/runs/{id}/nodes/{nodeID}/status:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: runs.state
-      tags: [nodes]
-      summary: Override a node's status (debug / repair).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSetNodeStatus.body
-              type: object
-              required: [status]
-              properties:
-                status: {type: string}
-      responses:
-        "204": {description: Updated.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/release:
     parameters:
