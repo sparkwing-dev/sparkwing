@@ -1048,6 +1048,27 @@ These ports use the final process/store interfaces with scripted fakes. Native
 generated recovery, retry and placement remain acceptance work. The retained
 legacy SQLite scheduler fixtures still require W3's final store migration.
 
+## W8 legacy runner client retirement
+
+The retired launcher and pod hosts left unused client methods for launch claims,
+name-only synchronization, source credentials, claim renewal/start/report and
+child execution. Those methods and the unused caller-identity, capacity-report
+and pacing helpers are removed. The retained claim-input reader and output/log
+path helpers have consumers and remain in separate files.
+
+| Removed test | Final disposition |
+| --- | --- |
+| `client.TestRunnerIdentity_EveryClaimMethodNamesItsRunner` and `TestRunnerIdentity_IsSafeToSetWhileTheClientServes` | Caller-selected runner identity is removed. `TestRunnerAuthorityW8Components`, `TestNativeStoreOwnerW8` and `FuzzStoreLauncherAuthorityW8` exercise granted identity, live authority and denial before execution. The launcher property uses the real engine client, HTTP handlers and store. |
+| `client.TestUnavailableBackoff_*`, `TestAdvisedPoll_*`, `TestShedLog_*` and `TestPacer_*` | The unused polling helper implementation is retired. `TestLoopHonorsConfiguredPollInterval`, `TestLoopLongPollDoesNotDelayLifecycleOrPolicy` and the interruption properties cover the shared loop. `TestEngineClientOneTimeAuthorityDoesNotReplay` covers claim/exchange refusal without automatic replay. The common keeper retains renewal backpressure and exact terminal causes. No hourly parking or custom jitter helper is retained. |
+| `client.TestSourceCredential_MarksOnlyServerFailures` | Retired with the unused claim-token source client and its private error sentinel. Source access uses `source.SourceAccess` and C2's source-release policy. The production remote source adapter remains open. This deletion does not close native source-release evidence. |
+
+`TestStoreLauncherW8` now uses `NewLauncher`'s default engine client through the
+shared controller HTTP handlers. The remote native-store and Cloud bootstrap
+components use the same client and handlers for renewal and exchange. Exchange
+sends the required empty JSON object. Component transport, sync reader, source,
+process and deployment boundaries remain fixtures. A1-38 and native placement
+cells remain open.
+
 ## W8 separate local consumer retirement
 
 `orchestrator.ServeConsumer`, its dashboard contention entry point and the

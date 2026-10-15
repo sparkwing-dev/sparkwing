@@ -32,6 +32,17 @@ running unless `--force` is selected. Replacement preserves the home, dashboard
 address and stay policy, waits for shutdown, and refuses an unready or
 wrong-version replacement.
 
+## Separate trigger consumer removed
+
+The `runs consumer` commands and internal `__runs-consume` process are removed.
+The local controller owns the queue and claim renewal. Detached and scheduled
+startup use its lifecycle and wait for readiness. Submission receipts no longer
+contain `consumer_pid` or `consumer_started`. The separate dashboard store
+opener is removed too.
+
+The native service binder and sealed local intake still need integration.
+See [local execution](../local-execution.md) for that boundary.
+
 ## Job failure reports
 
 Replace `JobResult.error` with `failure: {job, stage, error}`. The nested error
@@ -583,10 +594,26 @@ is the award's unit ID. Renewal cannot start a job without its start transition.
 
 Claim, exchange and reconciliation responses carry bearer material once. Do not
 retry a lost response automatically. The unused award recovers through its lease.
-Launcher sync uses `{observed:[{unit_id,job_name,node_uid}]}` and returns awards
-with empty capabilities plus job names to remove. Embedded controllers must
-supply `EngineController.Launcher`. Missing snapshot wiring returns
+Launcher sync observations carry `award:{kind,id,holder,generation}`,
+`job:{namespace,name,uid}` and `node_uid`. It returns awards with empty capabilities
+and complete Job instances to remove. Controllers must supply
+`EngineController.Launcher`. Missing snapshot wiring returns
 `policy_missing` and exposes no award.
+
+Go runner and launcher callers use `client.NewEngineClient` and
+`controllerwire.Controller`. The retired pod paths no longer expose
+`Client.ClaimLaunch`, `LauncherSync`, `SourceCredential`, `HeartbeatClaim`,
+`StartClaimExecution`, `ReportAttempt`, `EnqueueChildRun`, `GetChildRun` or
+`ChildRun`. Source access binds through the host's `source.SourceAccess` contract.
+The client also removes `WithRunnerIdentity`, `RunnerIdentity`, `ProcessIdentity`,
+`ClaimResources` and `WithClaimResources`. Enrollment grants execution identity.
+Claim requests supply current capacity directly.
+
+The old loop helpers `Pacer`, `Pace`, `NewPacer`, `UnavailableBackoff`,
+`AdvisedPoll`, `PollAdvisor`, `ShedLog` and `NewShedLog` are removed with
+`MaxClaimBackoff`, `ShedWarnInterval`, `FailureBackoffBase`, `FailureBackoffCap`,
+`DeadTokenRetry` and `ErrControllerFailed`. The shared runner loop and lease keeper own their lifetimes.
+Claims and exchanges still refuse automatic replay after a lost response.
 
 The standalone artifact-manifest write is removed. Publish manifests through
 record and result commits. Legacy remote state clients cannot publish a manifest

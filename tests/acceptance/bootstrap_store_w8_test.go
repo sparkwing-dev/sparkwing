@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -87,11 +89,13 @@ func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.Cl
 func cloudStoreClientW8(t *testing.T, server *controller.EngineController) func(client.EngineOptions) (controllerwire.Controller, error) {
 	t.Helper()
 	return func(options client.EngineOptions) (controllerwire.Controller, error) {
-		bearer, err := options.Bearer(t.Context())
-		if err != nil {
-			return nil, err
-		}
-		return storedRunnerClientW8(t.Context(), server, bearer)
+		handler := controller.New(server.Store, nil).WithEngineController(server).Handler()
+		options.HTTP = &http.Client{Transport: surfaceTransport(func(request *http.Request) (*http.Response, error) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			return response.Result(), nil
+		})}
+		return client.NewEngineClient(options)
 	}
 }
 

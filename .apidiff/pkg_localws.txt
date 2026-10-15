@@ -2,24 +2,12 @@
 
 func LoopbackBind(addr string) bool
 type Options struct {
-	Addr string
-	Home string
-
-	Listener net.Listener
-
-	ReadOnly bool
-
-	AllowRemote bool
-
-	AllowOrigins []string
-
-	Version string
-
-	Instance string
-
-	Bundle fs.FS
+	Addr, Home            string
+	ReadOnly, AllowRemote bool
+	AllowOrigins          []string
+	Version, Instance     string
+	Bundle                fs.FS
 }
-func Run(ctx context.Context, opts Options) (retErr error)
 const SessionExchangePath = "/auth/local/session"
 const SignInCodePath = "/api/v1/local/sign-in-code"
 type VersionInfo struct {

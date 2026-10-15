@@ -36,19 +36,16 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 	}, nil
 }
 
-// StoreController applies shared route policy to embedded runner and launcher requests.
+// StoreController applies shared route policy to the embedded local queue.
 type StoreController struct {
-	Engine   *controller.EngineController
-	Bearer   func(context.Context) (string, error)
-	Launcher bool
+	Engine *controller.EngineController
+	Bearer func(context.Context) (string, error)
 }
 
 // Claim authorizes every selected kind before the controller issues an award.
 func (c StoreController) Claim(ctx context.Context, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	pattern := "/api/v1/runners/claim"
-	if c.Launcher {
-		pattern = "/api/v1/launcher/claim"
-	} else if body.RunID != "" && body.JobID == "" && len(body.Kinds) == 1 && body.Kinds[0] == capability.UnitTrigger {
+	if body.RunID != "" && body.JobID == "" && len(body.Kinds) == 1 && body.Kinds[0] == capability.UnitTrigger {
 		pattern = "/api/v1/runs/{run}/claim"
 	}
 	target := capability.Target{RunID: body.RunID, NodeID: body.JobID, ClaimKinds: slices.Clone(body.Kinds)}
@@ -57,20 +54,6 @@ func (c StoreController) Claim(ctx context.Context, body controllerwire.ClaimReq
 		return controllerwire.ClaimResponse{}, err
 	}
 	return c.Engine.Claim(ctx, authorized, body)
-}
-
-// SyncLauncher reauthorizes the claimant before reading persisted cleanup decisions.
-func (c StoreController) SyncLauncher(ctx context.Context, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-	if !c.Launcher {
-		return controllerwire.LauncherSyncResponse{}, errors.New("embedded launcher transport is required")
-	}
-	target := capability.Target{ClaimKinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}}
-	authorized, err := c.authorize(ctx, "/api/v1/launcher/sync", target)
-	if err != nil {
-		return controllerwire.LauncherSyncResponse{}, err
-	}
-	body.Observed = slices.Clone(body.Observed)
-	return c.Engine.SyncLauncher(ctx, authorized, body)
 }
 
 func (c StoreController) authorize(ctx context.Context, pattern string, target capability.Target) (capability.Authorized, error) {

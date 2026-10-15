@@ -189,8 +189,11 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		return runners.NativeServices{Config: cfg, Close: func() error { closed = true; close(done); return authorities.Close() }}, nil
 	}
 	var executionErr error
-	remote := runners.Hosting{ControllerURL: "https://controller.example", NewController: cloudStoreClientW8(t, server), Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, control controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
-		principal := control.(*storedRunnerW8).authorized.Principal
+	remote := runners.Hosting{ControllerURL: "https://controller.example", NewController: cloudStoreClientW8(t, server), Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, _ controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+		principal, err := s.LookupCapability(ctx, sha256.Sum256([]byte(unit.Capability)))
+		if err != nil {
+			return runners.NativeServices{}, principal, err
+		}
 		tenant, err := s.ForTeam(ctx, store.Team(principal.Capability.Team))
 		if err != nil {
 			return runners.NativeServices{}, principal, err

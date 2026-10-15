@@ -38,11 +38,9 @@ every requested kind before calling the shared controller. Named trigger claims
 use their run's ownership and named route. Other claims use the ordered runner
 route. The controller still owns enrollment, signed version admission, matching
 and issuance.
-`StoreController` supplies the embedded policy adapter for both runners and
-launchers. Launcher requests select the launcher policy and still require
-`claims.launch` from a service credential. Synchronization reauthenticates before
-calling the shared controller's persisted cleanup reader. Revocation and narrowed
-grants take effect on the next request.
+`StoreController` supplies the embedded local queue's policy adapter. Launchers
+use the shared HTTP client and controller handlers for claim and synchronization.
+Each request rechecks its service credential and `claims.launch` authority.
 
 `StoreHosting` authenticates and authorizes the presented award through C2's
 heartbeat policy before binding native services. It selects the authenticated
@@ -112,8 +110,11 @@ paths. The local planner remains in `nodehost/plan_document.go`. Generator ports
 exercise recorded recovery, nested ancestor order, one evaluation per ancestor,
 attempt timeout and a 70-generation lineage through the final executor contract.
 The error-masking property covers both outer layers and output publication.
-These use scripted process and store boundaries. They do not establish native
-Cloud plan/eval hosting or deployed placement.
+These use scripted process and store boundaries. The remote native-store and
+Cloud bootstrap components use the shared HTTP client, controller handlers and
+real store for renewal and exchange. A component transport invokes the handlers
+without sockets. They do not establish native Cloud plan/eval hosting or deployed
+placement.
 
 The orphan `GCWarmRoot` sweeper and orchestrator repository-admission helpers
 are removed. Source projection and machine admission consume sealed source

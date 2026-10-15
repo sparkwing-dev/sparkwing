@@ -3,6 +3,8 @@ package acceptance_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -15,8 +17,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -35,13 +37,21 @@ func TestStoreLauncherW8(t *testing.T) {
 		return false, nil, nil
 	})
 	_, cfg, _ := cloudFixture(launcher.CloudWork)
+	handler := controller.New(server.Store, nil).WithEngineController(server).Handler()
+	var paths []string
 	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
 		Kube: kube, Boundary: boundary, Jobs: cfg,
 		Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30},
 		Bearer: func(context.Context) (string, error) { return root.Raw, nil },
-		NewController: func(options client.EngineOptions) (launcher.LauncherController, error) {
-			return runners.StoreController{Engine: server, Bearer: options.Bearer, Launcher: options.Launcher}, nil
-		},
+		HTTP: &http.Client{Transport: surfaceTransport(func(request *http.Request) (*http.Response, error) {
+			if request.Header.Get("Authorization") != "Bearer "+root.Raw {
+				t.Fatal("launcher lost its service credential on the wire")
+			}
+			paths = append(paths, request.URL.Path)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			return response.Result(), nil
+		})},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +112,9 @@ func TestStoreLauncherW8(t *testing.T) {
 	if err := runtime.Sync(t.Context()); err != nil || boundary.released != 1 || reads != 2 {
 		t.Fatalf("store-backed cleanup: releases=%d reads=%d error=%v", boundary.released, reads, err)
 	}
+	if strings.Join(paths, ",") != "/api/v1/launcher/claim,/api/v1/launcher/sync,/api/v1/launcher/sync" {
+		t.Fatalf("launcher did not use the shared claim/sync routes: %v", paths)
+	}
 }
 
 func FuzzStoreLauncherAuthorityW8(f *testing.F) {
@@ -116,7 +129,7 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 		server, root := storedCloudClaimantW8(t)
 		raw := root.Raw
 		providerFailure := errors.New("credential provider failed")
-		client := runners.StoreController{Engine: server, Launcher: true, Bearer: func(context.Context) (string, error) { return raw, nil }}
+		options := client.EngineOptions{URL: "https://controller.example", Launcher: true, Bearer: func(context.Context) (string, error) { return raw, nil }}
 		called := false
 		server.Launcher = storeLauncherSyncW8(func(_ context.Context, ref capability.AuthorityRef, _ []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
 			called = true
@@ -143,7 +156,10 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 			}
 			raw = issued.Raw
 		case 3:
-			client.Launcher = false
+			options.Launcher = false
+			if sync {
+				want = ""
+			}
 		case 4:
 			var prefix string
 			if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='cloud-operator'`).Scan(&prefix); err != nil {
@@ -155,23 +171,20 @@ func FuzzStoreLauncherAuthorityW8(f *testing.F) {
 			}
 			want = apierr.Unauthenticated
 		case 5:
-			client.Bearer = func(context.Context) (string, error) { return "", providerFailure }
+			options.Bearer = func(context.Context) (string, error) { return "", providerFailure }
 		}
-		var err error
+		wire, err := cloudStoreClientW8(t, server)(options)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if sync {
-			_, err = client.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{})
+			_, err = wire.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{})
 		} else {
-			_, err = client.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
+			_, err = wire.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
 		}
 		if mode%6 == 5 {
 			if !errors.Is(err, providerFailure) || called {
 				t.Fatalf("lost credential provider error: %v", err)
-			}
-			return
-		}
-		if mode%6 == 3 && sync {
-			if err == nil || called {
-				t.Fatal("runner transport reached launcher sync")
 			}
 			return
 		}

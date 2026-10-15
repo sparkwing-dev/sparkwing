@@ -27,14 +27,11 @@ type Client struct {
 	token   string
 	http    *http.Client
 
-	runnerIdentity atomic.Pointer[string]
-
 	triggerNodeRunner string
 	// bug: Old controllers reject allow_repos, platform and resources, so they
 	// are sent only after capability discovery.
-	allowRepos     []string
-	claimResources func() *ClaimResources
-	claimCaps      atomic.Pointer[claimCapabilities]
+	allowRepos []string
+	claimCaps  atomic.Pointer[claimCapabilities]
 
 	pollAdvice atomic.Int64
 
@@ -747,7 +744,6 @@ func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []strin
 	if body != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
-	c.setRunnerIdentity(httpReq)
 	resp, err := c.do(httpReq)
 	if err != nil {
 		return nil, err
@@ -996,7 +992,6 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	c.setRunnerIdentity(req)
 	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
@@ -1166,7 +1161,6 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	c.setRunnerIdentity(req)
 	setNodeClaimFenceHeaders(req, ctx)
 	c.askWatched(req)
 	resp, err := c.do(req)

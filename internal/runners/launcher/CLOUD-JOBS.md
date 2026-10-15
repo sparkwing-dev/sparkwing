@@ -4,10 +4,10 @@
 Cloud boundary. Its client always selects `EngineOptions.Launcher`, independent
 of the requested unit kinds. `Hosting` and `BootstrapHost` keep the caller's
 HTTP transport when opening award or exchange clients. Each uses its own bearer.
-`RuntimeConfig.NewController` can bind an existing controller through
-`StoreController` using the same constructor. It requires only the claim and sync
-operations. `StoreController` authenticates and authorizes each request through
-the shared C2 route policy over its existing store handle.
+The launcher component uses the default engine client, shared HTTP handlers and
+real store. Its transport invokes the handlers without sockets. The embedded
+local queue has no launcher adapter. The controller's transactional launcher
+sync reader remains a fake in this component.
 
 `BuildJob` builds plan, eval and work Jobs from an awarded binding. It checks
 images, resources, deadlines and engine identity before reserving an exclusive

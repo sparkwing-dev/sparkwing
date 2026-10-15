@@ -96,7 +96,6 @@ func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadClos
 	if cursor := storage.LogCursor(ctx); cursor != "" {
 		req.Header.Set("Last-Event-ID", cursor)
 	}
-	l.c.setRunnerIdentity(req)
 	if l.c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+l.c.token)
 	}
