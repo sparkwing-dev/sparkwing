@@ -3,10 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"net/http"
 	"net/url"
-
-	"github.com/sparkwing-dev/sparkwing/internal/api"
 )
 
 // CronRepoRequest is the body of PUT /api/v1/crons/repos: one repository's
@@ -37,8 +36,8 @@ type CronRepoSchedule struct {
 // CronReposResponse is what a push returns: the rows as they now stand, and the
 // display names of the schedules the push withdrew.
 type CronReposResponse struct {
-	Schedules []api.ScheduleView `json:"schedules"`
-	Withdrawn []string           `json:"withdrawn,omitempty"`
+	Schedules []controllerwire.ScheduleView `json:"schedules"`
+	Withdrawn []string                      `json:"withdrawn,omitempty"`
 }
 
 // CronRepoDeleteResponse is what a repository delete returns.
@@ -61,8 +60,8 @@ type CronOverrideRequest struct {
 
 // ListCrons returns the controller's scheduler health and every schedule pushed
 // to it.
-func (c *Client) ListCrons(ctx context.Context) (*api.OverviewView, error) {
-	var out api.OverviewView
+func (c *Client) ListCrons(ctx context.Context) (*controllerwire.ScheduleOverview, error) {
+	var out controllerwire.ScheduleOverview
 	if err := c.getJSON(ctx, c.baseURL+"/api/v1/crons", &out); err != nil {
 		return nil, err
 	}
@@ -71,8 +70,8 @@ func (c *Client) ListCrons(ctx context.Context) (*api.OverviewView, error) {
 
 // GetCron returns one schedule, its recent fires and the instants it matches
 // next. The name may be a schedule id or any name `crons list` prints.
-func (c *Client) GetCron(ctx context.Context, name string) (*api.DetailView, error) {
-	var out api.DetailView
+func (c *Client) GetCron(ctx context.Context, name string) (*controllerwire.DetailView, error) {
+	var out controllerwire.DetailView
 	if err := c.getJSON(ctx, c.baseURL+"/api/v1/crons/"+url.PathEscape(name), &out); err != nil {
 		return nil, err
 	}
@@ -100,23 +99,23 @@ func (c *Client) DeleteCronRepo(ctx context.Context, repoURL string) (*CronRepoD
 }
 
 // PauseCron stops a schedule firing without losing its history.
-func (c *Client) PauseCron(ctx context.Context, name string) (*api.ScheduleView, error) {
+func (c *Client) PauseCron(ctx context.Context, name string) (*controllerwire.ScheduleView, error) {
 	return c.cronAction(ctx, name, "pause")
 }
 
 // ResumeCron lets a paused schedule fire again from its next due instant.
-func (c *Client) ResumeCron(ctx context.Context, name string) (*api.ScheduleView, error) {
+func (c *Client) ResumeCron(ctx context.Context, name string) (*controllerwire.ScheduleView, error) {
 	return c.cronAction(ctx, name, "resume")
 }
 
 // DisarmCron removes one schedule and its history, and returns the row as it
 // stood.
-func (c *Client) DisarmCron(ctx context.Context, name string) (*api.ScheduleView, error) {
+func (c *Client) DisarmCron(ctx context.Context, name string) (*controllerwire.ScheduleView, error) {
 	return c.cronAction(ctx, name, "disarm")
 }
 
-func (c *Client) cronAction(ctx context.Context, name, action string) (*api.ScheduleView, error) {
-	var out api.ScheduleEnvelope
+func (c *Client) cronAction(ctx context.Context, name, action string) (*controllerwire.ScheduleView, error) {
+	var out controllerwire.ScheduleEnvelope
 	path := fmt.Sprintf("/api/v1/crons/%s/%s", url.PathEscape(name), action)
 	if err := c.post(ctx, path, nil, http.StatusOK, &out); err != nil {
 		return nil, err
@@ -126,8 +125,8 @@ func (c *Client) cronAction(ctx context.Context, name, action string) (*api.Sche
 
 // RunCronNow launches a schedule's pipeline immediately and returns the run it
 // started alongside the schedule.
-func (c *Client) RunCronNow(ctx context.Context, name string) (*api.RunEnvelope, error) {
-	var out api.RunEnvelope
+func (c *Client) RunCronNow(ctx context.Context, name string) (*controllerwire.ScheduleRun, error) {
+	var out controllerwire.ScheduleRun
 	path := fmt.Sprintf("/api/v1/crons/%s/run", url.PathEscape(name))
 	if err := c.post(ctx, path, nil, http.StatusOK, &out); err != nil {
 		return nil, err
@@ -137,8 +136,8 @@ func (c *Client) RunCronNow(ctx context.Context, name string) (*api.RunEnvelope,
 
 // SetCronOverride lays the controller's own values over what the repository
 // declared for one schedule.
-func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*api.ScheduleView, error) {
-	var out api.ScheduleEnvelope
+func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*controllerwire.ScheduleView, error) {
+	var out controllerwire.ScheduleEnvelope
 	path := fmt.Sprintf("/api/v1/crons/%s/override", url.PathEscape(name))
 	if err := c.put(ctx, path, req, http.StatusOK, &out); err != nil {
 		return nil, err
@@ -147,8 +146,8 @@ func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverr
 }
 
 // ClearCronOverride returns one schedule to what the repository declared.
-func (c *Client) ClearCronOverride(ctx context.Context, name string) (*api.ScheduleView, error) {
-	var out api.ScheduleEnvelope
+func (c *Client) ClearCronOverride(ctx context.Context, name string) (*controllerwire.ScheduleView, error) {
+	var out controllerwire.ScheduleEnvelope
 	path := fmt.Sprintf("/api/v1/crons/%s/override", url.PathEscape(name))
 	if err := c.deleteJSON(ctx, path, http.StatusOK, &out); err != nil {
 		return nil, err

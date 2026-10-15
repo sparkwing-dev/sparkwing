@@ -305,13 +305,57 @@ func TestNodeLogReadsThroughTheControllerRoutes(t *testing.T) {
 	if got, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{Tail: 1}); err != nil || string(got) != "needle two\n" {
 		t.Fatalf("tail read = %q, %v", got, err)
 	}
-	matches, err := logs.Grep(ctx, "run-d", "a", "needle", 0)
-	if err != nil || len(matches) != 2 || matches[0].LineNo != 2 || matches[1].LineNo != 4 {
-		t.Fatalf("grep = %+v, %v", matches, err)
+	for _, limit := range []int{0, 1} {
+		query := url.Values{"grep": {"needle"}, "line_numbers": {"1"}}
+		if limit > 0 {
+			query.Set("max_matches", fmt.Sprint(limit))
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/api/v1/runs/run-d/logs/a?"+query.Encode(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+f.admin(t))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			t.Fatalf("grep status: %s", resp.Status)
+		}
+		decoder := json.NewDecoder(resp.Body)
+		var numbers []int
+		for {
+			var line struct {
+				LineNo int    `json:"line_no"`
+				Line   string `json:"line"`
+			}
+			err := decoder.Decode(&line)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				resp.Body.Close()
+				t.Fatal(err)
+			}
+			if !strings.Contains(line.Line, "needle") {
+				resp.Body.Close()
+				t.Fatalf("nonmatching line: %+v", line)
+			}
+			numbers = append(numbers, line.LineNo)
+		}
+		if err := resp.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+		want := []int{2, 4}
+		if limit == 1 {
+			want = want[:1]
+		}
+		if !slices.Equal(numbers, want) {
+			t.Fatalf("grep limit %d: %v, want %v", limit, numbers, want)
+		}
 	}
-	if one, err := logs.Grep(ctx, "run-d", "a", "needle", 1); err != nil || len(one) != 1 {
-		t.Fatalf("grep capped at one = %+v, %v", one, err)
-	}
+
 }
 
 func TestCompileLogTakesSegmentsUnderTheTriggerClaim(t *testing.T) {

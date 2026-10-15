@@ -50,7 +50,7 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 | `SPARKWING_CONFIG_ENV` | [machine-config](machine-config.md) |
 | `SPARKWING_DEBUG` | [sdk](sdk.md) |
 | `SPARKWING_FLEET_CONFIG` | [machine-config](machine-config.md) |
-| `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [crons](crons.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
+| `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [schedules](schedules.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
 | `SPARKWING_PROFILES` | [machine-config](machine-config.md) |
 | `SPARKWING_REPOS` | [machine-config](machine-config.md) |
@@ -59,7 +59,7 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 | `SPARKWING_SECRETS_KEY_FILE` | [machine-config](machine-config.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_TOOLCHAIN` | [versioning](versioning.md) |
-| `SPARKWING_WINGD_BIN` | [cli](cli.md), [crons](crons.md), [local-execution](local-execution.md) |
+| `SPARKWING_WINGD_BIN` | [cli](cli.md), [schedules](schedules.md), [local-execution](local-execution.md) |
 
 ## Configuration: release tooling
 

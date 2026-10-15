@@ -46,7 +46,7 @@
         "oidc",
         "limits",
         "hooks",
-        "crons",
+        "schedules",
         "api",
         "api-reference"
       ]

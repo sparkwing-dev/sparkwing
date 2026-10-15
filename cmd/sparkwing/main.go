@@ -405,7 +405,7 @@ func dispatchCommand(args []string) error {
 	case "repos":
 		return runRepos(args[1:])
 	case "schedules":
-		return runCrons(args[1:])
+		return runSchedules(context.Background(), args[1:])
 	case "runners":
 		if len(args) > 1 && args[1] == "list" {
 			return runRunnersList(context.Background(), args[2:])

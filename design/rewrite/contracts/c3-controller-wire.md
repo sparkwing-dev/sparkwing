@@ -304,4 +304,51 @@ Only `member` metadata permits automatic connection-token revocation. Principal
 spelling never supplies credential kind. A lookup/revocation failure retains the
 saved connection. Machine credentials require explicit `--keep-token`.
 
+### Schedule management
+
+`ScheduleManager` uses existing C2 `/api/v1/schedules` routes for both api.sock
+and remote connections. `ScheduleOverview` contains `health`, `schedules` and
+`upcoming`. List query fields are `all=true` and positive `next`. Detail query
+fields are nonnegative `fires` (explicit zero means no history) and positive
+`next`. `DetailView` contains `schedule`, `fires` and upcoming RFC3339 instants.
+The controller computes upcoming times, orders history newest first, applies
+undeclared-row filtering unless `all`, and refuses ambiguous selectors. It
+accepts IDs, display names, pipeline/name pairs and unique pipeline names.
+
+The schedule response types have moved from `internal/api` into this wire owner.
+Their declarations, effective values, override presence, pin identity, timer
+health and fire history remain separate. Callers migrated directly, without
+aliases. `ScheduleOverride.Validate` is the shared cadence-edit validator.
+Pointer fields preserve empty TZ and zero catch-up. A pointer to an argument
+map preserves unset versus explicit empty (`--arg=` in the CLI). The edit replaces the override:
+unset fields use the declaration. No clamping is permitted.
+
+`SetSchedulePaused` posts to `/{schedule}/pause` or `/resume` and requires the
+returned paused bit to match. `OverrideSchedule` puts `/override` and requires
+confirmation of the supplied fields. `ResetSchedule` deletes `/override` and
+requires an empty override field list. `RunSchedule` posts `/run` with a stable
+header idempotency key. `ScheduleRun` preserves canonical run ID, schedule and
+replay. `DeleteSchedule` deletes `/{schedule}` and returns canonical
+`schedule_id` and `deleted`, retaining already-absent results.
+
+`ScheduleRepositoryManager` puts `/schedules/repos` using `ScheduleRepoRequest`:
+repository URL, branch, original SHA or follow policy, and the complete array of
+`ScheduleDeclaration` entries. `ScheduleRepoWritten` retains rows and withdrawn
+display names. Delete uses `repo_url` and returns the same URL and nonnegative
+removed count. These are proposals. C2 derives team/repository authority.
+
+CLI mutations resolve every selector first and deduplicate canonical IDs before
+writing. A failed selection writes nothing. Mutations after selection are
+sequential, with no atomicity claim across schedules. List JSON is compact selection metadata and excludes arguments and history.
+Show JSON retains the complete safe projection. Other JSON is one object per
+row or result. Plain emits IDs, and immediate run emits the run ID.
+
+W2 must serve these projections on its declared routes, including empty/zero
+overrides and idempotent launch. W1/W2 must retain schedule/run identity and
+apply cadence ceilings without clamping. W8 must compose native timer install,
+refresh and __tick with the sole local state owner. Local pin/install paths still
+use older runtime plumbing. No C2 route or authorization alternative changed.
+Fake-backed tests establish transport, selection and rendering, not scheduler
+persistence, timers or native execution.
+
 <!-- design:end -->

@@ -53,7 +53,7 @@ Locally, nothing needs to stay up between runs:
 - **History**: the local store is the history.
 - **Webhooks and remote triggering**: that is the cluster's job.
 - **Background runs**: `sparkwing ... &` works in any shell, and `sparkwing run --sw-detached` hands the run to a consumer that exits when the queue drains.
-- **Schedules**: an OS timer runs `sparkwing crons tick` every minute and sparkwing evaluates the cadences inside that tick, so the machine holds a timer rather than a scheduler. See [crons.md](crons.md).
+- **Schedules**: an OS timer runs `sparkwing __tick` every minute and sparkwing evaluates the cadences inside that tick, so the machine holds a timer rather than a scheduler. See [schedules](schedules.md).
 
 The one daemon on a local machine is `wingd`, the admission daemon. It starts on demand when a pipeline needs a concurrency decision, serves the runs that asked for it, and exits when it goes idle. `sparkwing daemon status` reports it and never starts one.
 

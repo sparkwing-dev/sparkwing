@@ -326,7 +326,7 @@ its needed labels.
 A pipeline declares its cadences with the `schedule` trigger in
 `sparkwing.yaml`, and each entry names the side that fires it with
 `where: local` or `where: controller`. A scheduled run places its nodes
-by the same label rules as any other run. The [crons page](crons.md)
+by the same label rules as any other run. The [schedules page](schedules.md)
 covers every field, arming a host, and controller schedules.
 
 ## Worked examples

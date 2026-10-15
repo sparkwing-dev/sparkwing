@@ -73,7 +73,7 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
-func (c *Client) ClearCronOverride(ctx context.Context, name string) (*api.ScheduleView, error)
+func (c *Client) ClearCronOverride(ctx context.Context, name string) (*controllerwire.ScheduleView, error)
 func (c *Client) Close() error
 func (c *Client) ComputeLimits(ctx context.Context) (json.RawMessage, error)
 func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
@@ -90,7 +90,7 @@ func (c *Client) DeleteCronRepo(ctx context.Context, repoURL string) (*CronRepoD
 func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
 func (c *Client) DeleteSecretForPipeline(ctx context.Context, name, pipeline string) error
-func (c *Client) DisarmCron(ctx context.Context, name string) (*api.ScheduleView, error)
+func (c *Client) DisarmCron(ctx context.Context, name string) (*controllerwire.ScheduleView, error)
 func (c *Client) EnqueueChildRun(ctx context.Context, runID string, child ChildRun) (string, error)
 func (c *Client) EnqueueTrigger(
 	ctx context.Context,
@@ -130,7 +130,7 @@ func (c *Client) GetActiveDebugPause(ctx context.Context, runID, nodeID string) 
 func (c *Client) GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error)
 func (c *Client) GetChildNodeOutput(ctx context.Context, runID, childID, nodeID string) ([]byte, error)
 func (c *Client) GetChildRun(ctx context.Context, runID, childID string) (*store.Run, error)
-func (c *Client) GetCron(ctx context.Context, name string) (*api.DetailView, error)
+func (c *Client) GetCron(ctx context.Context, name string) (*controllerwire.DetailView, error)
 func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
 func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
 func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error)
@@ -149,7 +149,7 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 func (c *Client) KeepsLogSegments(ctx context.Context) (bool, error)
 func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob) ([]store.LaunchJobResult, error)
 func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*store.Approval, error)
-func (c *Client) ListCrons(ctx context.Context) (*api.OverviewView, error)
+func (c *Client) ListCrons(ctx context.Context) (*controllerwire.ScheduleOverview, error)
 func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
 func (c *Client) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error)
 func (c *Client) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error)
@@ -169,7 +169,7 @@ func (c *Client) NodeLogs() NodeLogs
 func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error)
 func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
-func (c *Client) PauseCron(ctx context.Context, name string) (*api.ScheduleView, error)
+func (c *Client) PauseCron(ctx context.Context, name string) (*controllerwire.ScheduleView, error)
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) PollAdvice() time.Duration
 func (c *Client) PutCronRepo(ctx context.Context, req CronRepoRequest) (*CronReposResponse, error)
@@ -185,15 +185,15 @@ func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 func (c *Client) ResetObjectStoreBreaker(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
-func (c *Client) ResumeCron(ctx context.Context, name string) (*api.ScheduleView, error)
+func (c *Client) ResumeCron(ctx context.Context, name string) (*controllerwire.ScheduleView, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (c *Client) RevokeToken(ctx context.Context, prefix string) error
-func (c *Client) RunCronNow(ctx context.Context, name string) (*api.RunEnvelope, error)
+func (c *Client) RunCronNow(ctx context.Context, name string) (*controllerwire.ScheduleRun, error)
 func (c *Client) RunnerIdentity() string
 func (c *Client) SealLog(ctx context.Context, runID, nodeID string, m logseg.Manifest) error
 func (c *Client) SetComputeLimits(ctx context.Context, limits map[string]int64) (json.RawMessage, error)
-func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*api.ScheduleView, error)
+func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*controllerwire.ScheduleView, error)
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
@@ -266,7 +266,7 @@ type CronRepoSchedule struct {
 	Args     map[string]string
 }
 type CronReposResponse struct {
-	Schedules []api.ScheduleView
+	Schedules []controllerwire.ScheduleView
 	Withdrawn []string
 }
 const DeadTokenRetry = time.Hour
@@ -335,6 +335,8 @@ func NewRunPruner(options EngineOptions) (controllerwire.RunPruner, error)
 func NewRunReader(options EngineOptions) (controllerwire.RunReader, error)
 func NewRunReview(options EngineOptions) (controllerwire.RunReview, error)
 func NewRunnerReader(options EngineOptions) (controllerwire.RunnerReader, error)
+func NewScheduleManager(options EngineOptions) (controllerwire.ScheduleManager, error)
+func NewScheduleRepositoryManager(options EngineOptions) (controllerwire.ScheduleRepositoryManager, error)
 func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, error)
 func NewShedLog(every time.Duration) *ShedLog
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error)
@@ -539,6 +541,8 @@ func (c *engineClient) Claim(ctx context.Context, input controllerwire.ClaimRequ
 func (c *engineClient) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error)
 func (c *engineClient) CreateRun(ctx context.Context, input controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
 func (c *engineClient) DeleteRun(ctx context.Context, run string) (controllerwire.RunDeletion, error)
+func (c *engineClient) DeleteSchedule(ctx context.Context, name string) (controllerwire.ScheduleDeletion, error)
+func (c *engineClient) DeleteSchedulesForRepo(ctx context.Context, repo string) (controllerwire.ScheduleRepoDeletion, error)
 func (c *engineClient) DeleteSecret(ctx context.Context, selector controllerwire.SecretSelector) (controllerwire.SecretDeletion, error)
 func (c *engineClient) DisallowPool(ctx context.Context, pool, rule string) (controllerwire.PoolRuleDeletion, error)
 func (c *engineClient) Finish(ctx context.Context, run string, input controllerwire.FinishRequest) (controllerwire.Applied, error)
@@ -546,21 +550,28 @@ func (c *engineClient) ListApprovals(ctx context.Context, run string) (controlle
 func (c *engineClient) ListPools(ctx context.Context) (controllerwire.Pools, error)
 func (c *engineClient) ListRunners(ctx context.Context) (controllerwire.Runners, error)
 func (c *engineClient) ListRuns(ctx context.Context, query controllerwire.RunQuery) (controllerwire.RunPage, error)
+func (c *engineClient) ListSchedules(ctx context.Context, q controllerwire.ScheduleQuery) (controllerwire.ScheduleOverview, error)
 func (c *engineClient) ListSecrets(ctx context.Context) (controllerwire.Secrets, error)
 func (c *engineClient) ListSizing(ctx context.Context, q controllerwire.SizingQuery) (controllerwire.SizingPage, error)
+func (c *engineClient) OverrideSchedule(ctx context.Context, name string, input controllerwire.ScheduleOverride) (controllerwire.ScheduleView, error)
 func (c *engineClient) ReadLogs(ctx context.Context, run string, q controllerwire.LogQuery) (controllerwire.LogPage, error)
 func (c *engineClient) ReadReceipt(ctx context.Context, run string) (controllerwire.Receipt, error)
 func (c *engineClient) ReadRun(ctx context.Context, run string) (controllerwire.RunDetail, error)
+func (c *engineClient) ReadSchedule(ctx context.Context, name string, q controllerwire.ScheduleReadQuery) (controllerwire.DetailView, error)
 func (c *engineClient) ReadSecret(ctx context.Context, selector controllerwire.SecretSelector) (controllerwire.SecretValue, error)
 func (c *engineClient) ReadSnapshot(ctx context.Context, run string) (controllerwire.ScheduleSnapshot, error)
 func (c *engineClient) ReadSteps(ctx context.Context, run string) (controllerwire.RunSteps, error)
 func (c *engineClient) ReconcileJob(ctx context.Context, run, job string, input controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
 func (c *engineClient) Renew(ctx context.Context, claim string, input controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
+func (c *engineClient) ReplaceSchedules(ctx context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error)
+func (c *engineClient) ResetSchedule(ctx context.Context, name string) (controllerwire.ScheduleView, error)
 func (c *engineClient) ResetSizing(context.Context, controllerwire.SizingReset) (controllerwire.SizingResetSummary, error)
 func (c *engineClient) ResolveApproval(ctx context.Context, run, job string, input controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
 func (c *engineClient) Retry(ctx context.Context, run string, input controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
 func (c *engineClient) RotateSecrets(ctx context.Context, input controllerwire.SecretRotationRequest) (controllerwire.SecretRotation, error)
+func (c *engineClient) RunSchedule(ctx context.Context, name, key string) (controllerwire.ScheduleRun, error)
 func (c *engineClient) SearchLogs(ctx context.Context, q controllerwire.LogSearchQuery) (controllerwire.LogSearchPage, error)
+func (c *engineClient) SetSchedulePaused(ctx context.Context, name string, pause bool) (controllerwire.ScheduleView, error)
 func (c *engineClient) TransitionJob(ctx context.Context, run, job string, input controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.SecretWrite) (controllerwire.SecretWritten, error)
 func (c *tokenManager) CreateToken(ctx context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error)
