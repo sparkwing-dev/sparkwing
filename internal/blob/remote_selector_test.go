@@ -17,9 +17,15 @@ func FuzzRemoteCacheSelectsServerDefaultRef(f *testing.F) {
 		f.Add(ref, true)
 	}
 	f.Fuzz(func(t *testing.T, ref string, verified bool) {
+		authority := blob.Authority{CapabilityRef: "user", Principal: blob.Principal("reader:" + ref), Repo: "gh:123"}
 		d := digest("cached")
 		store := blob.NewSignedStore(blob.SignedStoreOptions{
-			Signer: &signer{transfer: blob.SignedTransfer{Digest: d, Size: 6}},
+			Signer: &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
+				if q.Authority != authority {
+					t.Fatalf("download lost bound authority: %+v", q.Authority)
+				}
+				return blob.SignedTransfer{Digest: d, Size: 6}, nil
+			}},
 			HTTPClient: transfer(func(context.Context, blob.SignedTransfer, io.Reader) (io.ReadCloser, error) {
 				return io.NopCloser(strings.NewReader("cached")), nil
 			}),
@@ -27,7 +33,7 @@ func FuzzRemoteCacheSelectsServerDefaultRef(f *testing.F) {
 		lookups := 0
 		r := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
 			lookups++
-			if !q.VerifiedDefaultOnly || q.Key.Team != "" || q.Key.Scope.Ref != (blob.RefScope{}) || q.Authority.Repo != "gh:123" {
+			if !q.VerifiedDefaultOnly || q.Key.Team != "team" || q.Key.Scope.Ref != (blob.RefScope{}) || q.Authority != authority {
 				t.Fatalf("client selected remote scope: %+v", q)
 			}
 			key := q.Key
@@ -36,7 +42,7 @@ func FuzzRemoteCacheSelectsServerDefaultRef(f *testing.F) {
 				Scope: key.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "delivery", SHA: "sha",
 			}}}, nil
 		}}
-		cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", AuthorityRef: "user", Repo: "gh:123", Records: r}, store)
+		cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: authority, Repo: "gh:123", Records: r}, store)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,6 +55,14 @@ func FuzzRemoteCacheSelectsServerDefaultRef(f *testing.F) {
 		record, err := cache.Depcache(t.Context(), blob.DepcacheKey{Repo: "gh:123", Ref: localRef, Name: "modules", Key: "lock"}, budget)
 		if err != nil || record.Digest != d || record.Key.Scope.Ref.Ref != "main" || lookups != 2 {
 			t.Fatalf("default depcache lookup: %+v, %v, lookups=%d", record, err, lookups)
+		}
+		reader, err := cache.Artifact(t.Context(), d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, readErr := io.ReadAll(reader)
+		if closeErr := reader.Close(); readErr != nil || closeErr != nil || !reader.Verified() || string(raw) != "cached" {
+			t.Fatalf("bound artifact: %q: %v: %v", raw, readErr, closeErr)
 		}
 	})
 }

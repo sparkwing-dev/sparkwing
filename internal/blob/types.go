@@ -395,12 +395,13 @@ type BinaryExecution struct {
 	Digest Digest
 }
 
-// safety: RemoteCacheOptions uses the user's existing repo-bound read authority.
+// safety: RemoteCacheOptions retains the authenticated tenant and complete repo-bound read authority.
 type RemoteCacheOptions struct {
-	Profile      string
-	AuthorityRef string
-	Repo         runspec.RepoKey
-	Records      RecordStore
+	Profile   string
+	Team      string
+	Authority Authority
+	Repo      runspec.RepoKey
+	Records   RecordStore
 }
 
 // safety: RemoteCache exposes reads only, with no binary fetch or shared-cache write method.

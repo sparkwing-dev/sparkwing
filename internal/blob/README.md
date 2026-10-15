@@ -257,6 +257,11 @@ executable only after EOF verification and successful close. An upload obtains
 the exact owner/job receipt before committing its binary record. The record
 store assigns provenance. The binding keeps the host's authority in memory.
 
+Remote cache construction carries the authenticated team and full
+`DataBinding.Authority` in `RemoteCacheOptions`. Record lookups and signed byte
+reads retain that exact authority. The returned record must match the selected
+team. The local ref never selects the remote default branch.
+
 Remote host construction must supply the live data binding. Local builds keep
 their machine's binary cache.
 

@@ -97,13 +97,13 @@ func checkStorageRemoteCache(t *testing.T) {
 				result.Record.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: manifest}
 				result.Members = []blob.Member{{Team: i.Team, ManifestDigest: manifest, Digest: artifact, Path: "out", Size: int64(len(payload)), Mode: 0o644}}
 			}
-			faults := []string{"", "repo", "kind", "ref", "manual", "default", "delivery", "sha", "pipeline", "job", "key", "name", "member", "corrupt_output", "missing_output"}
+			faults := []string{"", "team", "repo", "kind", "ref", "manual", "default", "delivery", "sha", "pipeline", "job", "key", "name", "member", "corrupt_output", "missing_output"}
 			if kind == blob.KindMemo {
 				faults = append(faults, "corrupt_manifest", "corrupt_member")
 			}
 			for _, fault := range faults {
 				bad := storageCacheMutation(result, fault)
-				cache := storageOpenCache(t, store, repo, bad)
+				cache := storageOpenCache(t, store, repo, i.Team, bad)
 				restore := storageDamageCache(t, dir, i.Team, bodies, map[string]blob.Digest{
 					"corrupt_output": output, "missing_output": output, "corrupt_manifest": manifest, "corrupt_member": artifact,
 				}[fault], fault == "missing_output")
@@ -132,6 +132,8 @@ func storageCacheMutation(result blob.RecordLookupResult, fault string) blob.Rec
 	bad := result
 	bad.Members = slices.Clone(result.Members)
 	switch fault {
+	case "team":
+		bad.Record.Key.Team += "-other"
 	case "repo":
 		bad.Record.Key.Scope.Repo += "-other"
 	case "kind":
@@ -160,14 +162,14 @@ func storageCacheMutation(result blob.RecordLookupResult, fault string) blob.Rec
 	return bad
 }
 
-func storageOpenCache(t *testing.T, store blob.Store, repo runspec.RepoKey, result blob.RecordLookupResult) blob.RemoteCache {
+func storageOpenCache(t *testing.T, store blob.Store, repo runspec.RepoKey, team string, result blob.RecordLookupResult) blob.RemoteCache {
 	t.Helper()
 	records := storageCacheRecords{result: result, lookup: func(q blob.RecordLookup) {
-		if !q.VerifiedDefaultOnly || q.Authority.CapabilityRef != "user-read" || q.Authority.Repo != repo || q.Key.Scope.Ref != (blob.RefScope{}) {
+		if q.Key.Team != team || !q.VerifiedDefaultOnly || q.Authority.CapabilityRef != "user-read" || q.Authority.Repo != repo || q.Key.Scope.Ref != (blob.RefScope{}) {
 			t.Fatalf("unscoped remote lookup: %+v", q)
 		}
 	}}
-	cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", AuthorityRef: "user-read", Repo: repo, Records: records}, store)
+	cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: team, Authority: blob.Authority{CapabilityRef: "user-read", Principal: "reader", Repo: repo}, Repo: repo, Records: records}, store)
 	if err != nil {
 		t.Fatal(err)
 	}
