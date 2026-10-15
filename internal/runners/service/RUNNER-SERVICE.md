@@ -4,7 +4,9 @@
 Native command inspection and file publication share `service/unitfile` with
 local controller units and timers. Files are private. Registration checks
 refuse another loaded file before install, refresh or uninstall can act on its
-unit name or label. Literal command arguments preserve dollar signs, spaces
+unit name or label. Install, refresh and uninstall share that registration check.
+Install and refresh also share the private file writer. Preflight and mutation
+require absolute native registration paths. Literal command arguments preserve dollar signs, spaces
 and percent signs without a shell.
 Both execute `sparkwing-runner start --config PATH` in the foreground. They
 start at login and restart on failure. Windows installation returns

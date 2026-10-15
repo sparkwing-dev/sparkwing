@@ -711,15 +711,12 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`DialSocket`](../../../internal/wingd/socket_transport.go) | Connects to the platform's private controller transport under the caller's context and timeout. |
 | [`ListenSocket`](../../../internal/wingd/socket_transport.go) | Binds that transport and yields only authenticated APIConn connections. |
 | [`LocalActivity`](../../../internal/wingd/lifecycle.go) | LocalActivity counts live state, not historical runs or configured schedules. |
-| [`MayExitIdle`](../../../internal/wingd/lifecycle.go) | MayExitIdle requires every activity count to be zero and --stay to be false. |
 | [`LocalPeerIdentity`](../../../internal/wingd/lifecycle.go) | LocalPeerIdentity comes from the transport's kernel credentials, never request input. |
 | [`LocalSubject`](../../../internal/wingd/lifecycle.go) | LocalSubject checks the peer against the controller's OS account before minting local authority. |
 | [`LocalStartOptions`](../../../internal/wingd/lifecycle.go) | LocalStartOptions carries spawn plumbing in arguments rather than environment variables. |
 | [`LocalRuntime`](../../../internal/wingd/lifecycle.go) | LocalRuntime uses the same pkg/controller implementation, route policy and state owner. |
 | [`LocalStatus`](../../../internal/wingd/lifecycle.go) | LocalStatus exposes version skew and activity without opening a second writing store handle. |
 | [`ManagedUnitKind`](../../../internal/wingd/lifecycle.go) | ManagedUnitKind gives schedules and the controller one upgrade path. |
-| [`ManagedUnitPolicy`](../../../internal/wingd/lifecycle.go) | ManagedUnitPolicy records stable argv so command renames cannot strand installed timers. |
-| [`ManagedUnitPolicies`](../../../internal/wingd/lifecycle.go) | ManagedUnitPolicies covers every Sparkwing-managed unit, with no socket activation. |
 | [`ManagedUnit`](../../../internal/wingd/lifecycle.go) | ManagedUnit records rendered argv for doctor to detect removed verbs as well as stale versions. |
 | [`ManagedUnitManager`](../../../internal/wingd/lifecycle.go) | ManagedUnitManager is shared by update, dashboard installation and schedule installation. |
 | [`LocalDoctorFinding`](../../../internal/wingd/lifecycle.go) | LocalDoctorFinding makes incompatible stores, version skew and removed unit verbs actionable. |

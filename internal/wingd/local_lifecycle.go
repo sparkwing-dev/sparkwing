@@ -237,11 +237,15 @@ func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]LocalDoc
 }
 
 func validUnitArguments(unit ManagedUnit) bool {
-	for _, policy := range ManagedUnitPolicies() {
-		if policy.Kind == unit.Kind {
-			want := append(slices.Clone(policy.Arguments), "--home", unit.Home)
-			return filepath.IsAbs(unit.Home) && slices.Equal(unit.Arguments, want)
-		}
+	if !filepath.IsAbs(unit.Home) {
+		return false
 	}
-	return false
+	switch unit.Kind {
+	case ManagedController:
+		return slices.Equal(unit.Arguments, []string{"wingd", "run", "--stay", "--home", unit.Home})
+	case ManagedSchedule:
+		return slices.Equal(unit.Arguments, []string{"__tick", "--home", unit.Home})
+	default:
+		return false
+	}
 }

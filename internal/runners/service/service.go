@@ -1,7 +1,4 @@
-// Package service installs and refreshes the runner's per-user systemd service
-// or launchd agent. Units run sparkwing-runner start against an existing machine
-// configuration. Files without Marker remain untouched. Refresh and Uninstall
-// also preserve registrations for another configuration.
+// Package service manages the runner's systemd user service or launchd agent.
 package service
 
 import (
@@ -90,75 +87,128 @@ type State struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// Install writes the service file, starts it, and reports the state that
-// follows. A foreign file is an error and nothing is written.
+// Install writes and starts a managed registration after checking its loaded source.
 func Install(ctx context.Context, h Host) (State, error) {
 	if err := ctx.Err(); err != nil {
 		return State{}, err
 	}
-	switch h.GOOS {
-	case "linux":
-		return installLinux(ctx, h)
-	case "darwin":
-		return installDarwin(ctx, h)
+	path, err := registrationPath(h)
+	if err != nil {
+		return State{}, err
 	}
-	return State{}, unsupported(h.GOOS)
+	if err := requireHost(h); err != nil {
+		return State{}, err
+	}
+	existing, err := readManaged(path)
+	if err != nil {
+		return State{}, err
+	}
+	if existing.foreign() {
+		return foreignState(path), foreignError(path)
+	}
+	loaded, _, err := h.registration(ctx, path)
+	if err != nil {
+		return State{}, err
+	}
+	state := State{Path: path}
+	if err := h.writeRegistration(path); err != nil {
+		return state, err
+	}
+	state.Installed = true
+	if h.GOOS == "linux" {
+		err = runCommand(ctx, h, "systemctl", "--user", "daemon-reload")
+		if err == nil {
+			err = runCommand(ctx, h, "systemctl", "--user", "enable", "--now", ServiceName)
+		}
+	} else {
+		if loaded {
+			err = runCommand(ctx, h, "launchctl", "bootout", h.serviceTarget())
+		}
+		if err == nil {
+			err = runCommand(ctx, h, "launchctl", "bootstrap", h.domainTarget(), path)
+		}
+	}
+	state.Running = err == nil
+	state.Detail = "the runner registration is installed"
+	if err != nil {
+		state.Detail += " but the service manager failed to start it"
+	}
+	return state, err
 }
 
-// Uninstall stops the service and removes the file sparkwing wrote. A foreign
-// file is left in place and reported through State.Foreign.
+// Uninstall stops and removes the managed registration for this configuration.
 func Uninstall(ctx context.Context, h Host) (State, error) {
 	if err := ctx.Err(); err != nil {
 		return State{}, err
 	}
-	switch h.GOOS {
-	case "linux":
-		return uninstallLinux(ctx, h)
-	case "darwin":
-		return uninstallDarwin(ctx, h)
+	path, err := registrationPath(h)
+	if err != nil {
+		return State{}, err
 	}
-	return State{}, unsupported(h.GOOS)
+	existing, err := readManaged(path)
+	if err != nil {
+		return State{}, err
+	}
+	if existing.foreign() {
+		return foreignState(path), nil
+	}
+	state := State{Path: path, Detail: "no sparkwing runner service is installed here"}
+	if !existing.exists {
+		return state, nil
+	}
+	if other := configArgument(unitfile.Arguments(h.GOOS, existing.body)); !sameConfig(other, h.ConfigPath) {
+		return mismatchState(path, other, h.ConfigPath), nil
+	}
+	loaded, _, err := h.registration(ctx, path)
+	if err != nil {
+		return State{}, err
+	}
+	var stopErr error
+	if h.GOOS == "linux" {
+		out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", ServiceName)
+		if err != nil && !notLoaded(out) {
+			stopErr = fmt.Errorf("runner service: disable %s: %w: %s", ServiceName, err, strings.TrimSpace(out))
+		}
+	} else if loaded {
+		stopErr = runCommand(ctx, h, "launchctl", "bootout", h.serviceTarget())
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return state, errors.Join(stopErr, fmt.Errorf("runner service: remove %s: %w", path, err))
+	}
+	state.Detail = "the sparkwing runner service is stopped and removed"
+	if stopErr != nil {
+		state.Detail = "the registration is removed but the service manager failed to stop it"
+	}
+	if h.GOOS == "linux" {
+		stopErr = errors.Join(stopErr, runCommand(ctx, h, "systemctl", "--user", "daemon-reload"))
+	}
+	return state, stopErr
 }
 
-// Preflight reports whether this machine can run the service at all: the
-// binary and config paths resolve, and the service manager answers. Call it
-// before doing anything expensive or irreversible, so a host that cannot
-// supervise a runner fails before the work rather than after it.
+// Preflight validates native paths and checks that the service manager answers.
 func Preflight(ctx context.Context, h Host) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	switch h.GOOS {
-	case "linux":
-		if err := requireHost(h); err != nil {
-			return err
-		}
-		if h.ConfigHome == "" {
-			return errors.New("runner service: Host.ConfigHome is required on linux")
-		}
-		if out, err := h.run(ctx, "systemctl", "--user", "show", "-p", "Version", "--value"); err != nil {
-			return fmt.Errorf("runner service: systemd user session is unreachable (systemctl --user show): %w: %s",
-				err, strings.TrimSpace(out))
-		}
-		return nil
-	case "darwin":
-		if err := requireHost(h); err != nil {
-			return err
-		}
-		if h.Home == "" {
-			return errors.New("runner service: Host.Home is required on darwin")
-		}
-		if out, err := h.run(ctx, "launchctl", "print", h.domainTarget()); err != nil {
-			return fmt.Errorf("runner service: launchd domain %s is unreachable (launchctl print): %w: %s",
-				h.domainTarget(), err, strings.TrimSpace(out))
+	if _, err := registrationPath(h); err != nil {
+		return err
+	}
+	if err := requireHost(h); err != nil {
+		return err
+	}
+	if h.GOOS == "linux" {
+		if err := runCommand(ctx, h, "systemctl", "--user", "show", "-p", "Version", "--value"); err != nil {
+			return fmt.Errorf("runner service: systemd user session is unreachable: %w", err)
 		}
 		return nil
 	}
-	return unsupported(h.GOOS)
+	if err := runCommand(ctx, h, "launchctl", "print", h.domainTarget()); err != nil {
+		return fmt.Errorf("runner service: launchd domain %s is unreachable: %w", h.domainTarget(), err)
+	}
+	return nil
 }
 
-// DefaultExec runs a command and returns its output, stdout and stderr
-// combined, for a Host that talks to the real machine.
+// DefaultExec runs a native service command and returns its combined output.
 func DefaultExec(ctx context.Context, name string, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
@@ -174,158 +224,22 @@ func PlistPath(h Host) string {
 	return filepath.Join(h.Home, "Library", "LaunchAgents", PlistName)
 }
 
-func installLinux(ctx context.Context, h Host) (State, error) {
-	if err := requireHost(h); err != nil {
-		return State{}, err
+func (h Host) registration(ctx context.Context, path string) (bool, string, error) {
+	if h.GOOS == "linux" {
+		return true, "", unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, path)
 	}
-	if h.ConfigHome == "" {
-		return State{}, errors.New("runner service: Host.ConfigHome is required on linux")
-	}
-	path := UnitPath(h)
-	existing, err := readManaged(path)
-	if err != nil {
-		return State{}, err
-	}
-	if existing.foreign() {
-		return foreignState(path), foreignError(path)
-	}
-	if err := unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, path); err != nil {
-		return State{}, err
-	}
-	if err := writeManaged(path, serviceUnit(h)); err != nil {
-		return State{Path: path}, err
-	}
-
-	state := State{Installed: true, Path: path}
-	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
-		state.Detail = "the unit is written but systemd did not reload it"
-		return state, fmt.Errorf("runner service: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out))
-	}
-	if out, err := h.run(ctx, "systemctl", "--user", "enable", "--now", ServiceName); err != nil {
-		state.Detail = "the unit is written but systemd did not start it"
-		return state, fmt.Errorf("runner service: systemctl --user enable --now %s: %w: %s", ServiceName, err, strings.TrimSpace(out))
-	}
-	state.Running = true
-	state.Detail = fmt.Sprintf("%s is enabled and running %s start", ServiceName, h.Binary)
-	return state, nil
+	return agentRegistration(ctx, h)
 }
 
-func uninstallLinux(ctx context.Context, h Host) (State, error) {
-	if h.ConfigHome == "" {
-		return State{}, errors.New("runner service: Host.ConfigHome is required on linux")
-	}
-	path := UnitPath(h)
-	existing, err := readManaged(path)
-	if err != nil {
-		return State{}, err
-	}
-	if existing.foreign() {
-		return foreignState(path), nil
-	}
-	if !existing.exists {
-		return State{Path: path, Detail: "no sparkwing runner service is installed here"}, nil
-	}
-	if other := unitConfigPath(existing.body); !sameConfig(other, h.ConfigPath) {
-		return mismatchState(path, other, h.ConfigPath), nil
-	}
-	if err := unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, path); err != nil {
-		return State{}, err
-	}
-
-	var stopErr error
-	if out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", ServiceName); err != nil && !notLoaded(out) {
-		stopErr = fmt.Errorf("runner service: systemctl --user disable --now %s: %w: %s", ServiceName, err, strings.TrimSpace(out))
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return State{Path: path}, errors.Join(stopErr, fmt.Errorf("runner service: remove %s: %w", path, err))
-	}
-	state := State{Path: path, Detail: "the sparkwing runner service is stopped and removed"}
-	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
-		return state, errors.Join(stopErr, fmt.Errorf("runner service: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out)))
-	}
-	if stopErr != nil {
-		state.Detail = "the unit is removed but systemd reported an error stopping it"
-	}
-	return state, stopErr
-}
-
-func installDarwin(ctx context.Context, h Host) (State, error) {
-	if err := requireHost(h); err != nil {
-		return State{}, err
-	}
-	if h.Home == "" {
-		return State{}, errors.New("runner service: Host.Home is required on darwin")
-	}
-	path := PlistPath(h)
-	existing, err := readManaged(path)
-	if err != nil {
-		return State{}, err
-	}
-	if existing.foreign() {
-		return foreignState(path), foreignError(path)
-	}
-	loaded, _, err := agentRegistration(ctx, h)
-	if err != nil {
-		return State{}, err
-	}
-	if err := ensureLogDir(h.LogPath); err != nil {
-		return State{Path: path}, err
-	}
-	if err := writeManaged(path, agentPlist(h)); err != nil {
-		return State{Path: path}, err
-	}
-
-	state := State{Installed: true, Path: path}
-	if loaded {
-		if err := runRefresh(ctx, h, "launchctl", "bootout", h.serviceTarget()); err != nil {
-			return state, err
+func (h Host) writeRegistration(path string) error {
+	body := serviceUnit(h)
+	if h.GOOS == "darwin" {
+		if err := ensureLogDir(h.LogPath); err != nil {
+			return err
 		}
+		body = agentPlist(h)
 	}
-	if out, err := h.run(ctx, "launchctl", "bootstrap", h.domainTarget(), path); err != nil {
-		state.Detail = "the plist is written but launchd did not load it"
-		return state, fmt.Errorf("runner service: launchctl bootstrap %s %s: %w: %s",
-			h.domainTarget(), path, err, strings.TrimSpace(out))
-	}
-	state.Running = true
-	state.Detail = fmt.Sprintf("%s is loaded and running %s start", Label, h.Binary)
-	return state, nil
-}
-
-func uninstallDarwin(ctx context.Context, h Host) (State, error) {
-	if h.Home == "" {
-		return State{}, errors.New("runner service: Host.Home is required on darwin")
-	}
-	path := PlistPath(h)
-	existing, err := readManaged(path)
-	if err != nil {
-		return State{}, err
-	}
-	if existing.foreign() {
-		return foreignState(path), nil
-	}
-	if !existing.exists {
-		return State{Path: path, Detail: "no sparkwing runner service is installed here"}, nil
-	}
-	if other := plistConfigPath([]byte(existing.body)); !sameConfig(other, h.ConfigPath) {
-		return mismatchState(path, other, h.ConfigPath), nil
-	}
-
-	loaded, _, err := agentRegistration(ctx, h)
-	if err != nil {
-		return State{}, err
-	}
-	var stopErr error
-	if loaded {
-		stopErr = runRefresh(ctx, h, "launchctl", "bootout", h.serviceTarget())
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return State{Path: path}, errors.Join(stopErr, fmt.Errorf("runner service: remove %s: %w", path, err))
-	}
-	state := State{Path: path, Detail: "the sparkwing runner service is stopped and removed"}
-	if stopErr != nil {
-		state.Detail = "the plist is removed but launchd reported an error unloading it"
-	}
-	return state, stopErr
+	return unitfile.Write(path, body)
 }
 
 func (h Host) serviceTarget() string { return fmt.Sprintf("gui/%d/%s", h.UID, Label) }
@@ -380,10 +294,6 @@ func foreignError(path string) error {
 	return fmt.Errorf("runner service: %s was not written by sparkwing (it lacks %q); move it aside before installing", path, Marker)
 }
 
-func writeManaged(path, body string) error {
-	return unitfile.Write(path, body)
-}
-
 // safety: launchd's StandardOutPath creates the log file but not its directory.
 func ensureLogDir(logPath string) error {
 	if logPath == "" {
@@ -431,20 +341,6 @@ func describeConfig(found string) string {
 		return "(none it could read)"
 	}
 	return found
-}
-
-// safety: the unit is the only record of the config it runs; nothing keeps a sidecar.
-func unitConfigPath(unit string) string {
-	return configArgument(unitArguments(unit))
-}
-
-func unitArguments(unit string) []string {
-	return unitfile.Arguments("linux", unit)
-}
-
-// safety: the plist is the only record of the config it runs; nothing keeps a sidecar.
-func plistConfigPath(body []byte) string {
-	return configArgument(unitfile.PlistArguments(body))
 }
 
 func configArgument(words []string) string {

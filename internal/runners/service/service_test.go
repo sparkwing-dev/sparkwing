@@ -103,8 +103,8 @@ func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
-		t.Errorf("unit mode = %04o, want %04o", info.Mode().Perm(), 0600)
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Errorf("unit mode = %04o, want %04o", info.Mode().Perm(), 0o600)
 	}
 	want := []string{
 		"systemctl --user show -p FragmentPath --value sparkwing-runner.service",
@@ -334,21 +334,21 @@ func TestUninstallLeavesAServiceRunningAnotherConfig(t *testing.T) {
 
 func TestUnitConfigPathReadsQuotedAndEscapedArguments(t *testing.T) {
 	h := Host{Binary: "/opt/my runner/sparkwing-runner", ConfigPath: "/home/a b/.config/sparkwing/config.yaml"}
-	if got := unitConfigPath(serviceUnit(h)); got != h.ConfigPath {
+	if got := configArgument(unitfile.Arguments("linux", serviceUnit(h))); got != h.ConfigPath {
 		t.Errorf("unitConfigPath = %q, want %q", got, h.ConfigPath)
 	}
 	h = Host{Binary: "/opt/100%/sparkwing-runner", ConfigPath: "/home/a/100%/config.yaml"}
-	if got := unitConfigPath(serviceUnit(h)); got != h.ConfigPath {
+	if got := configArgument(unitfile.Arguments("linux", serviceUnit(h))); got != h.ConfigPath {
 		t.Errorf("unitConfigPath with a specifier = %q, want %q", got, h.ConfigPath)
 	}
-	if got := unitConfigPath("[Service]\nExecStart=/usr/bin/true\n"); got != "" {
+	if got := configArgument(unitfile.Arguments("linux", "[Service]\nExecStart=/usr/bin/true\n")); got != "" {
 		t.Errorf("unitConfigPath of a unit with no --config = %q, want empty", got)
 	}
 }
 
 func TestPlistConfigPathReadsProgramArguments(t *testing.T) {
 	h := Host{Binary: "/usr/local/bin/sparkwing-runner", ConfigPath: "/Users/a b/.config/sparkwing/config.yaml", Home: "/Users/a b"}
-	if got := plistConfigPath([]byte(agentPlist(h))); got != h.ConfigPath {
+	if got := configArgument(unitfile.PlistArguments([]byte(agentPlist(h)))); got != h.ConfigPath {
 		t.Errorf("plistConfigPath = %q, want %q", got, h.ConfigPath)
 	}
 }
@@ -410,7 +410,7 @@ func TestXMLTextEscapesMarkupAndKeepsSpaces(t *testing.T) {
 	if err := xml.Unmarshal([]byte(body), &parsed); err != nil {
 		t.Fatalf("a plist with an ampersand is not well-formed: %v", err)
 	}
-	if got := plistConfigPath([]byte(body)); got != h.ConfigPath {
+	if got := configArgument(unitfile.PlistArguments([]byte(body))); got != h.ConfigPath {
 		t.Errorf("plistConfigPath after escaping = %q, want %q", got, h.ConfigPath)
 	}
 }

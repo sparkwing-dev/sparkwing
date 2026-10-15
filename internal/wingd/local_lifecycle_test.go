@@ -13,23 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-func TestLocalIdleHolds(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	idle := LocalActivity{IdleSince: now.Add(-limits.LocalControllerIdleTimeout)}
-	if !MayExitIdle(now, idle, false) {
-		t.Fatal("idle controller must exit at the boundary")
-	}
-	if MayExitIdle(now.Add(-time.Nanosecond), idle, false) || MayExitIdle(now, idle, true) || MayExitIdle(now, LocalActivity{}, false) {
-		t.Fatal("controller exited before idle eligibility")
-	}
-	for _, hold := range []LocalActivity{{Runs: 1}, {QueuedTriggers: 1}, {HeldLeases: 1}, {DashboardConnections: 1}, {Runs: -1}} {
-		hold.IdleSince = idle.IdleSince
-		if MayExitIdle(now, hold, false) {
-			t.Fatalf("exited with activity: %+v", hold)
-		}
-	}
-}
-
 func TestLocalSubject(t *testing.T) {
 	uid, foreign := uint32(1000), uint32(1001)
 	for _, goos := range []string{"linux", "darwin"} {
@@ -91,6 +74,14 @@ func TestLocalDaemonActivityAndProbeIdle(t *testing.T) {
 	}
 	if err := d.SetLocalActivity(LocalActivity{Runs: -1}); err == nil {
 		t.Fatal("negative count was accepted")
+	}
+	now = now.Add(-time.Nanosecond)
+	if d.beginIdleShutdown(limits.LocalControllerIdleTimeout) {
+		t.Fatal("controller exited before its idle boundary")
+	}
+	now = now.Add(time.Nanosecond)
+	if !d.beginIdleShutdown(limits.LocalControllerIdleTimeout) {
+		t.Fatal("controller did not exit at its idle boundary")
 	}
 }
 

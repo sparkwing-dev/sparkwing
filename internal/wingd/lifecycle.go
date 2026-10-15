@@ -4,22 +4,12 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // LocalActivity counts live state, not historical runs or configured schedules.
 type LocalActivity struct {
 	Runs, QueuedTriggers, HeldLeases, DashboardConnections int
 	IdleSince                                              time.Time
-}
-
-// MayExitIdle requires every activity count to be zero and --stay to be false.
-func MayExitIdle(now time.Time, activity LocalActivity, stay bool) bool {
-	return !stay && !activity.IdleSince.IsZero() &&
-		activity.Runs == 0 && activity.QueuedTriggers == 0 &&
-		activity.HeldLeases == 0 && activity.DashboardConnections == 0 &&
-		now.Sub(activity.IdleSince) >= limits.LocalControllerIdleTimeout
 }
 
 // LocalPeerIdentity comes from the transport's kernel credentials, never request input.
@@ -87,23 +77,6 @@ const (
 	ManagedController ManagedUnitKind = "controller"
 	ManagedSchedule   ManagedUnitKind = "schedule"
 )
-
-// ManagedUnitPolicy records stable argv so command renames cannot strand installed timers.
-type ManagedUnitPolicy struct {
-	Kind             ManagedUnitKind
-	Arguments        []string
-	StartAtLogin     bool
-	RestartOnFailure bool
-	SocketActivation bool
-}
-
-// ManagedUnitPolicies covers every Sparkwing-managed unit, with no socket activation.
-func ManagedUnitPolicies() []ManagedUnitPolicy {
-	return []ManagedUnitPolicy{
-		{Kind: ManagedController, Arguments: []string{"wingd", "run", "--stay"}, StartAtLogin: true, RestartOnFailure: true},
-		{Kind: ManagedSchedule, Arguments: []string{"__tick"}},
-	}
-}
 
 // ManagedUnit records rendered argv for doctor to detect removed verbs as well as stale versions.
 type ManagedUnit struct {

@@ -4,26 +4,11 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 func TestLocalControllerW8Components(t *testing.T) {
-	t.Run("four_holds_and_stay", func(t *testing.T) {
-		now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-		for _, activity := range []wingd.LocalActivity{{Runs: 1}, {QueuedTriggers: 1}, {HeldLeases: 1}, {DashboardConnections: 1}} {
-			activity.IdleSince = now.Add(-2 * limits.LocalControllerIdleTimeout)
-			if wingd.MayExitIdle(now, activity, false) {
-				t.Fatalf("controller exited with %+v", activity)
-			}
-		}
-		idle := wingd.LocalActivity{IdleSince: now.Add(-limits.LocalControllerIdleTimeout)}
-		if !wingd.MayExitIdle(now, idle, false) || wingd.MayExitIdle(now, idle, true) {
-			t.Fatal("idle or stay policy did not hold")
-		}
-	})
 	t.Run("kernel_identity_required", func(t *testing.T) {
 		uid := uint32(1000)
 		for _, goos := range []string{"linux", "darwin", "windows"} {
