@@ -1,13 +1,37 @@
 # W8 implementation handoff
 
-Latest continuation: integration merge and award-bound shared controllers are
-recorded at the end. W8 remains incomplete.
+W8 remains incomplete. The continuation at `da5917c98` is the latest implemented
+work. All 26 W8 amendment rows and both W8 handoffs retain their recorded status.
+This continuation corrects the Cloud documentation and records the remaining
+boundaries. It adds no production code, test ports or acceptance cells and
+deletes no old code.
 
-W8 remains incomplete. The runner, engine, launcher and local process runtime
-are exercised with component fixtures. Installed process composition, the shared
-controller adapter and native/Cloud acceptance remain open. The
-acceptance catalog's native cells are still skipped. Component tests do not
-count as native, Windows, Actions or Kubernetes evidence.
+| Owner | Remaining boundary | Evidence in this checkout |
+| --- | --- | --- |
+| W3 | Declare host construction, delegated node routes, generated-code replay loading and run/plan/eval execution identity inputs. | `RunHost` and `NodeHost` are interfaces without final constructors. `RunInput` has no granted runner field. Plan/eval inputs and their shared process constructor are undeclared. |
+| W3/W9 | Implement the declared source, keeper, remote owner and HTTP/data clients, then bind the installed runner and Cloud entrypoints. | `source.Acquire`, `source.ForRequest`, `source.ForExecution`, `lease.Keeper.Run`, `RemoteOwnerStore`, `NewEngineClient` and `NewDataClient` still panic. W8 already consumes these interfaces through component fakes. |
+| W1/W2/W9 | Supply Cloud plan/eval resources and launcher sync, the elected local controller services/activity, and CLI composition. | `EngineController.SyncLauncher` still panics. Plan/eval claims clear `Execution`. `LocalRuntimeConfig.Open` has no production shared-controller implementation. The shared bootstrap parser requires a job for plan units. |
+| W3/W7 | Declare workspace-off binary-cache hashing. | `sdkinstall` builds with `GOWORK=off`, while `bincache.PipelineCacheKey` follows the ambient workspace. The existing request remains open. |
+| W8/T1/lead | Complete Windows SID transport, deployment probes/node cleanup and native placement/real-repository acceptance. | Windows peer credential lookup returns no identity. `KubernetesBoundary` requires deployment-owned Probe/Clear implementations. Native catalog cells remain skipped. |
+
+Missing shared implementations remain behind their declared interfaces and fake
+component proofs. Missing shared declarations prevent the remaining W8
+composition because the swarm brief forbids changing another area's contract.
+The existing node-award constructor, private Cloud award transport and real
+controller/SQLite components remain implemented. Installed execution, actual
+hello and native deployment proofs remain open.
+
+Verification used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4` and
+private cache/temp directories under `/tmp/sw-astra-W8`. Whole-repository
+`go build -p 4 ./...` passed. Vet passed for runners, engine, cluster, wingd and
+both acceptance packages. Full runners/engine/component-acceptance tests passed.
+Cluster passed with its socket-listener test excluded. Focused local-runtime,
+lifecycle, managed-unit and client tests passed. Commentcheck passed across
+1,015 files. Sleepcheck and `git diff --check` passed. No new runtime behavior
+requires a documentation drift-test change. Shared production files and APIs
+changed: none. No new mechanism or product question was introduced. No
+Sparkwing binary, pipeline or Git write ran. Shared Git config has no local
+author or `core.worktree` override. Worker scratch was deleted after checks.
 
 ## Completed before this continuation
 

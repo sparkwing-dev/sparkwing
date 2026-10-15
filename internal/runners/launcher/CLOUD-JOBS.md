@@ -124,10 +124,10 @@ node isolation, native sidecar shutdown or scratch accounting. Those checks
 also need real images, an explicit Kubernetes context and bootstrap/host
 composition from the owning areas.
 
-The bootstrap component consumes the original CloudJobAward in memory. The
-container still needs a declared transport for that award and its source input.
-The shared CLI registry also rejects the builder's unit/attempt/engine/source-fence
-flags and requires a job for plan units. Those grammar and handoff contracts
-remain open. Component exchange tests do not establish a working pod entrypoint.
+The private files carry the original CloudJobAward and its source input to the
+containers. The builder's eval/work arguments pass the shared CLI parser. The
+parser still requires a job for plan units, which have no job ID. Production
+entrypoints still need source acquisition, the shared host constructors and the
+HTTP client. Component exchange tests do not establish a working pod entrypoint.
 
 <!-- design:end -->
