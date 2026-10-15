@@ -178,7 +178,6 @@ func (c *Client) RecordWaitObservation(ctx context.Context, pipeline string, wai
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) ReportAttempt(ctx context.Context, runID, nodeID string, report store.AttemptReport) error
-func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 func (c *Client) ResetObjectStoreBreaker(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
@@ -268,6 +267,13 @@ type CronReposResponse struct {
 	Withdrawn []string
 }
 const DeadTokenRetry = time.Hour
+type EngineOptions struct {
+	URL    string
+	HTTP   *http.Client
+	Bearer func(context.Context) (string, error)
+
+	Launcher bool
+}
 var ErrControllerFailed = errors.New("the controller failed to answer")
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
@@ -322,6 +328,8 @@ const MaxClaimBackoff = 30 * time.Second
 const MaxPollAdvice = 8 * time.Second
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
+func NewDataClient(options EngineOptions) (blob.DataSigner, blob.RecordStore, error)
+func NewEngineClient(options EngineOptions) (controllerwire.Controller, error)
 func NewPacer(floor time.Duration) *Pacer
 func NewShedLog(every time.Duration) *ShedLog
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client

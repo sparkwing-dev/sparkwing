@@ -239,7 +239,11 @@ func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upl
 
 // CommittedObjectFor resolves one immutable object using the reader's build trust policy.
 func (s *Store) CommittedObjectFor(ctx context.Context, team Team, key string, cloud bool) (Upload, error) {
-	trust, err := s.TrustLocalBuilds(ctx, team)
+	tenant, err := s.ForTeam(ctx, team)
+	if err != nil {
+		return Upload{}, err
+	}
+	trust, err := tenant.TrustLocalBuilds(ctx)
 	if err != nil {
 		return Upload{}, err
 	}
@@ -276,7 +280,11 @@ func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud
 			return Upload{}, ErrInvalidInput
 		}
 	}
-	trust, err := s.TrustLocalBuilds(ctx, team)
+	tenant, err := s.ForTeam(ctx, team)
+	if err != nil {
+		return Upload{}, err
+	}
+	trust, err := tenant.TrustLocalBuilds(ctx)
 	if err != nil {
 		return Upload{}, err
 	}
@@ -402,32 +410,6 @@ func smallOutputWithoutSlotTx(ctx context.Context, tx *storeTx, team Team, u Upl
 		return false, err
 	}
 	return used+u.Size <= MaxSmallOutputOverage, nil
-}
-
-// TrustLocalBuilds reports whether the team permits cloud runners to execute
-// a locally uploaded binary. The default is false.
-func (s *Store) TrustLocalBuilds(ctx context.Context, team Team) (bool, error) {
-	var n int64
-	err := s.queryRow(ctx, `SELECT trust_local_builds FROM team_build_trust WHERE team = ?`, string(NormalizeTeam(team))).Scan(&n)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return n != 0, err
-}
-
-// SetTrustLocalBuilds changes a team's local binary execution policy.
-func (s *Store) SetTrustLocalBuilds(ctx context.Context, team Team, trust bool) error {
-	if team == "" {
-		return ErrInvalidInput
-	}
-	n := 0
-	if trust {
-		n = 1
-	}
-	_, err := s.exec(ctx, `INSERT INTO team_build_trust (team, trust_local_builds) VALUES (?, ?)
-        ON CONFLICT (team) DO UPDATE SET trust_local_builds = excluded.trust_local_builds`,
-		string(NormalizeTeam(team)), n)
-	return err
 }
 
 // TriggerRepoID returns the GitHub repository ID team's trigger id recorded,

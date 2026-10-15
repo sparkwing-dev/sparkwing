@@ -197,45 +197,6 @@ func TestFinishRoute_RefusesInlineOutputBytes(t *testing.T) {
 	}
 }
 
-func TestPruneExpiredOutputs_DeletesBytesAndRowsPastRetention(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx := context.Background()
-	old := time.Now().Add(-store.OutputRetention - time.Hour)
-	for _, run := range []struct{ id, status string }{{"run-expired", "failed"}, {"run-pinned", "success"}} {
-		if err := st.CreateRun(ctx, store.Run{ID: run.id, Pipeline: "p", Status: "running", StartedAt: old}); err != nil {
-			t.Fatal(err)
-		}
-		if err := st.CreateNode(ctx, store.Node{RunID: run.id, NodeID: "n", Status: "running"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := st.FinishNode(ctx, run.id, "n", "success", "", []byte(`"`+run.id+`"`)); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := st.DB().Exec(`UPDATE runs SET status = ?, finished_at = ? WHERE id = ?`, run.status, old.UnixNano(), run.id); err != nil {
-			t.Fatal(err)
-		}
-	}
-	expired, _ := st.GetNode(ctx, "run-expired", "n")
-	path := store.OutputPath(st.OutputDir(), expired.OutputRef.Key)
-	srv := New(st, nil)
-	if err := srv.pruneExpiredOutputs(ctx, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("an expired run's output file survived: %v", err)
-	}
-	if out, err := st.GetNodeOutput(ctx, "run-expired", "n"); err != nil || out != nil {
-		t.Fatalf("an expired run's output still reads: %s, %v", out, err)
-	}
-	if out, err := st.GetNodeOutput(ctx, "run-pinned", "n"); err != nil || string(out) != `"run-pinned"` {
-		t.Fatalf("the pipeline's newest success lost its output: %s, %v", out, err)
-	}
-}
-
 // A filesystem commit refused a slot leaves the file it moved into place,
 // and a retry once the team has room finds that file and commits it.
 func TestFsOutputCommitRefusedASlotCommitsOnRetry(t *testing.T) {

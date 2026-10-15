@@ -229,7 +229,11 @@ func TestClaimNodeByID_FinishBeforeExecutionRefundsTheReservation(t *testing.T) 
 				t.Fatalf("FinishNode: %v", err)
 			}
 
-			balance, err := f.store.CreditBalanceMicro(ctx)
+			billingTenant, err := f.store.ForTeam(ctx, store.DefaultTeam)
+			if err != nil {
+				t.Fatal(err)
+			}
+			balance, err := billingTenant.CreditBalanceMicro(ctx)
 			if err != nil {
 				t.Fatalf("CreditBalanceMicro: %v", err)
 			}

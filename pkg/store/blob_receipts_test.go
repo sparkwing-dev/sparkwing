@@ -44,6 +44,7 @@ func TestBlobPersistencePublishedAttemptDataSelectors(t *testing.T) {
 	publisher.Data = &capability.DataScope{Use: capability.DataPublish, RepositoryKey: "gh:1", RunID: attempt.RunID, ReadRefs: []string{"manual:"}, WriteRef: "manual:"}
 	authorityPersist(t, s, publisher)
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET intake_mode='publish' WHERE team='a' AND id=?", attempt.RunID)
+	rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET finished_at=2,outcome='success' WHERE team='a' AND run_id=?", attempt.RunID)
 	selected := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}
 	intent := blob.UploadIntent{
 		Authority: blob.Authority{CapabilityRef: publisher.Prefix, Attempt: selected},

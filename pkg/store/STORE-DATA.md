@@ -1,6 +1,34 @@
 # Store data persistence
 
+Build trust uses `Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds`.
+Their raw Store methods are removed. Missing policy defaults to false, invalid
+flags return an error, and writes cannot change another tenant's opt-in.
+Policy survives reopening and cannot change persisted upload provenance.
+Execution still needs W7's binary check and W3's adapter.
+
 Financial writes use the same transaction as the state change that caused them.
+Balances use `Tenant.CreditBalanceMicro`. Billing state and grant history use
+`Tenant.CreditState` and `Tenant.ListCreditGrants`. Their raw Store twins are removed. Burn windows use
+the store clock and include charges at the window's lower boundary.
+`Tenant.ListCreditCharges` reads the final `capability_prefix` column into
+`CreditCharge.TokenPrefix`. Both history methods return the selected tenant
+on every row and preserve ledger metadata after run retention. Equal timestamps
+sort by descending row ID. Default and maximum history sizes are unchanged.
+`Tenant.CreditUsageByRun` nets reservation, usage and refund rows by run. Storage
+and runless charges affect the balance but stay outside this report. Per-run
+usage survives operational run retention and reopening.
+`Store.CreditLedgerTotals` reads deployment-wide grants and charges in one
+snapshot. Open metered awards exclude their refundable seconds using C2's
+calculator and immutable intervals. A report cannot advance charged checkpoints,
+close intervals or write settlement. It counts no storage seconds and consults
+no node, trigger or current credential rows. Settled and unmetered awards need
+no calculator call. C2's production calculator is still an integration dependency.
+Open intervals stop at `charged_through` in reports. Closed intervals use their
+persisted finish time. This keeps a late disruption from refunding time that a
+report counted only because the reaper had not run yet.
+Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
+Rate-table writes use `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
+The separate `SetCreditRateTable` wrapper is removed.
 `recordBillingAwardTx` stores immutable provenance and a reservation charge. The
 charge snapshots the CPU class, rate and card fingerprint. Its caller must pass
 server-derived authority, pricing and reservation size after taking claim locks.
@@ -53,6 +81,20 @@ completion, quota settlement and per-replica usage in one transaction. A job
 receipt retains team, run, job, attempt, generation and capability. Owner and
 publication identities remain tagged.
 
+The owner-receipt SQLite acceptance proof uploads through trigger and plan
+awards before jobs exist. It checks refused verification, exact receipt replay,
+reopening and refusal to transfer the receipt or ticket to a job in the same run.
+Its awards and physical verification are contract fixtures. Eval upload tests
+also check the source attempt and unit generation independently, using explicit
+fake write authority. Issued eval awards retain their read-only data grant.
+Signed transfers and EOF verification remain physical-backend integration work.
+
+Attempt-scoped publication requires an imported terminal attempt with a persisted
+finish time. Reservation, lookup, commit, abort, data checks and log commits use
+the same authority resolver. An unfinished row cannot authorize those operations,
+even if the publisher holds a ticket reserved before that row changed. Run-scoped
+publication uploads retain their separate identity.
+
 Only a new blob counts bytes and an object. A readable duplicate reserves zero
 additional bytes, so it can be uploaded at the quota ceiling. Unreadable bytes
 still require a full reservation, which prevents a quota-based existence oracle.
@@ -70,6 +112,20 @@ authority inside the record transaction. The shared blob package owns namespace
 encoding and the pure edge rule. The direct `Tenant` record methods use those
 same rules and have no manifest reader. Manifest operations through them fail
 until the caller uses the configured record store.
+
+Record commits return UTC expiry instants and zero values for unset optional
+expiry and manifest fields. Equivalent metadata replays after reopening, including
+an expiry expressed in another timezone. Changing the expiry instant still
+conflicts with an immutable output or manifest record.
+
+`SetResultBlobRecords(manifestReader)` configures result attachment before the
+store is shared. The result transaction verifies each output or manifest key
+against the current tenant, run, job, attempt and generation. It reads existing
+records, verified manifest members, reference authority and existence through
+that transaction. An absent, expired, corrupt or mismatched record prevents
+attempt closure, terminal state and the result event from committing. The event
+retains the verified record keys. Attachment requires `data.write` and rechecks
+authority after manifest I/O. It leaves commit and rollback to the state owner.
 
 The record naming conventions are:
 
@@ -104,7 +160,26 @@ that transaction's receipt, reference, revocation and holder changes and leave
 commit or rollback to the caller. `Tenant` uses the same checks. Supplied
 principal fields cannot widen persisted capability authority.
 
+Record commits and lookups recheck live authority after verified manifest I/O.
+A read that crosses the job lease, leaf capability or ancestor expiry returns
+no authorized result. It cannot publish a record or attach memo outputs.
+SQLite checks exercise both data binding rules through `Store.CheckBinding`
+and through the transaction that owns receipt changes.
+
+`ReadableBlobs` returns each readable digest once in request order, including
+large requests. It checks the budget after its final read and returns an empty
+presence result with `blob.ErrBudget` when the deadline has passed.
+
 `MarkBlobTombstones` and `CollectBlobTombstones` require the maintenance lease.
+Leased record expiry and reachability GC replace `ExpiredOutputRuns`,
+`ReleaseRunOutputs` and `ForgetRunOutputs`. The controller's output-key sweep
+and its separate `output_runs` and `output_tombstones` bookkeeping are removed.
+Copied output records keep their bytes and manifest members after the source
+run is deleted. Collection removes the graph after its last record disappears.
+Collection checks its persisted holder, generation and expiry before selecting
+candidates, including empty passes and passes with only grace-period tombstones.
+Each deletion rechecks the fence in its own transaction. A supplied expiry cannot
+extend an expired lease or revive a generation replaced by the same holder.
 Records and live receipts root the graph, including transitive manifest members.
 Collection waits `limits.BlobGCGrace`, takes the same blob lock as writers,
 rechecks reachability and calls `BlobDeleter`. A deletion failure preserves the
@@ -117,6 +192,11 @@ seal even empty streams, and only identical final bodies replay. Job tail grace
 uses the persisted finish time and original writer. Trigger, plan and eval logs
 retain their own live fences. A reader with run-read authority can read historical
 segments after the writer ends. Log incompleteness never changes the job result.
+Segment replay counts retained bytes once. Refused content and byte-limit
+violations preserve the committed inventory. Run deletion cascades streams and
+segments. A later job finish cannot extend an attempt's persisted tail grace.
+The unused raw `Store.RunFinished` pruning query is removed. Leased retention
+and tagged-stream maintenance own log lifetime.
 
 `SealAbandonedLogStreams` closes existing execution streams as incomplete under
 the maintenance lease. Finished job attempts keep their final tail grace through
