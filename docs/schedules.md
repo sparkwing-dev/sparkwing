@@ -96,8 +96,10 @@ set and withdraws entries removed from the project file. Installing with
 their pins, overrides and pause state. A selection that runs elsewhere makes no
 declaration changes on the selected controller.
 
-Installation is intended to capture the installing environment and pin a proved
-binary unless `--unpinned` is selected. Linux and macOS managed timers are
+Local installation records the selected declarations and captured environment
+identity durably. Proofs and later pin changes use that captured environment.
+Environment values stay in private host storage and do not appear in schedule
+views. Installation pins a proved binary unless `--unpinned` is selected. Linux and macOS managed timers are
 intended to invoke the stable hidden `sparkwing __tick` entrypoint and start the
 local controller on demand. Windows schedules are intended to run through that
 controller. Managed-unit refresh and native timer integration remain part of

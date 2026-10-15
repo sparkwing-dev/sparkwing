@@ -52,24 +52,15 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if err != nil {
 		return capability.Issued{}, err
 	}
-	var secret [32]byte
-	if _, err = rand.Read(secret[:]); err != nil {
+	seed := ""
+	if request.Provision != nil {
+		seed = request.Provision.Seed
+	}
+	issued, err := persistIssuedCapabilityTx(ctx, tx, c, seed)
+	if err != nil {
 		return capability.Issued{}, err
 	}
-	prefix := capability.ControllerPrefix
-	if c.Audience == capability.NodeHost {
-		prefix = capability.NodeHostPrefix
-	}
-	raw := prefix + base64.RawURLEncoding.EncodeToString(secret[:])
-	if request.Provision != nil && request.Provision.Seed != "" {
-		raw = request.Provision.Seed
-	}
-	c.Prefix = raw[:16]
-	c.Digest = sha256.Sum256([]byte(raw))
-	c.IssuedAt = tx.now()
-	if err := persistCapabilityTx(ctx, tx, c); err != nil {
-		return capability.Issued{}, err
-	}
+	c = issued.Capability
 	if request.Provision != nil {
 		if err := recordProvisionCreatorTx(ctx, tx, *request.Provision, c); err != nil {
 			return capability.Issued{}, err
@@ -84,6 +75,28 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 		if err := persistUnitBillingTx(ctx, tx, c); err != nil {
 			return capability.Issued{}, err
 		}
+	}
+	return issued, nil
+}
+
+func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, seed string) (capability.Issued, error) {
+	var secret [32]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		return capability.Issued{}, err
+	}
+	prefix := capability.ControllerPrefix
+	if c.Audience == capability.NodeHost {
+		prefix = capability.NodeHostPrefix
+	}
+	raw := prefix + base64.RawURLEncoding.EncodeToString(secret[:])
+	if seed != "" {
+		raw = seed
+	}
+	c.Prefix = raw[:16]
+	c.Digest = sha256.Sum256([]byte(raw))
+	c.IssuedAt = tx.now()
+	if err := persistCapabilityTx(ctx, tx, c); err != nil {
+		return capability.Issued{}, err
 	}
 	return capability.Issued{Raw: raw, Capability: c}, nil
 }

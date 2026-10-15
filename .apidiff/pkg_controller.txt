@@ -323,6 +323,11 @@ type LimitsProfileValues struct {
 	EnforceIdleClaimPoll bool
 }
 const LiveLogWatchLease = 30 * time.Second
+type LocalScheduleEnvironments interface {
+	Capture(context.Context, []string) (runspec.EnvSnapshot, error)
+	Load(context.Context, runspec.EnvSnapshot) ([]string, error)
+}
+type LocalScheduleProver func(context.Context, string, string, []string) (crons.Proof, error)
 func LongestHonoredIdlePoll(d time.Duration) time.Duration
 const MaxHonoredIdleClaimPoll = 8 * time.Second
 type MetricWriter interface {
@@ -470,6 +475,7 @@ func (s *Server) MultiTeam() bool
 func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Registrations() []string
+func (s *Server) ScheduleLauncher() crons.Launcher
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 func (s *Server) WithAccountReader(reader AccountReader) *Server
@@ -510,6 +516,7 @@ func (s *Server) WithIdleClaimPollEnforced(on bool) *Server
 func (s *Server) WithLicense(lic *license.License) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
+func (s *Server) WithLocalSchedules(service *crons.Service, prove LocalScheduleProver, environments LocalScheduleEnvironments) *Server
 func (s *Server) WithLogRetention(days map[store.Team]int) *Server
 func (s *Server) WithMailer(m mailer.Mailer) *Server
 func (s *Server) WithMetricWriter(resolve func(context.Context, store.Team) (MetricWriter, error)) *Server

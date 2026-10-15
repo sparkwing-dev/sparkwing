@@ -30,9 +30,24 @@ type EnrollRunnerRequest struct {
 	Grants        []string
 	ExpiresAt     *time.Time
 }
+type LocalHostClient struct {
+}
+func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.ReconciledNode) error
+func (c *LocalHostClient) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error
+func (c *LocalHostClient) Close() error
+func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish store.FinishRunRequest) (store.Applied, error)
+func (c *LocalHostClient) NodeController(ctx context.Context, ref store.NodeRef) (controllerwire.Controller, error)
+func (c *LocalHostClient) Principal(ctx context.Context) (capability.Principal, error)
+func (c *LocalHostClient) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
+func (c *LocalHostClient) ReadNode(ctx context.Context, ref store.NodeRef) (store.NodeRow, error)
+func (c *LocalHostClient) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error)
+func (c *LocalHostClient) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error)
+func (c *LocalHostClient) TransitionRun(ctx context.Context, change store.RunTransition) (store.Applied, error)
 func NewDataClient(options EngineOptions) (blob.DataSigner, blob.RecordStore, error)
 func NewDebugReader(options EngineOptions) (controllerwire.DebugReader, error)
 func NewEngineClient(options EngineOptions) (controllerwire.Controller, error)
+func NewLocalHostClient(options EngineOptions, runID string) (*LocalHostClient, error)
+func NewLocalScheduleManager(options EngineOptions) (controllerwire.LocalScheduleManager, error)
 func NewLogReader(options EngineOptions) (controllerwire.LogReader, error)
 func NewOperatorManager(options EngineOptions) (controllerwire.OperatorManager, error)
 func NewPoolManager(options EngineOptions) (controllerwire.PoolManager, error)
@@ -108,6 +123,7 @@ func (c *engineClient) ReadSnapshot(ctx context.Context, run string) (controller
 func (c *engineClient) ReadSteps(ctx context.Context, run string) (controllerwire.RunSteps, error)
 func (c *engineClient) ReconcileJob(ctx context.Context, run, job string, input controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
 func (c *engineClient) RecordStep(ctx context.Context, run, job string, input controllerwire.StepReportRequest) error
+func (c *engineClient) RegisterLocalSchedules(ctx context.Context, input controllerwire.LocalScheduleRegistration) (controllerwire.ScheduleRepoWritten, error)
 func (c *engineClient) Renew(ctx context.Context, claim string, input controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
 func (c *engineClient) ResetObjectStoreBreaker(ctx context.Context, key string) (controllerwire.ObjectStoreBreaker, error)
 func (c *engineClient) ResetSchedule(ctx context.Context, name string) (controllerwire.ScheduleView, error)
@@ -118,8 +134,10 @@ func (c *engineClient) RotateSecrets(ctx context.Context, input controllerwire.S
 func (c *engineClient) RunSchedule(ctx context.Context, name, key string) (controllerwire.ScheduleRun, error)
 func (c *engineClient) SearchLogs(ctx context.Context, q controllerwire.LogSearchQuery) (controllerwire.LogSearchPage, error)
 func (c *engineClient) SetGroupPriority(ctx context.Context, group string, input controllerwire.QueuePriorityWrite) (controllerwire.QueuePriorityResult, error)
+func (c *engineClient) SetLocalSchedulePinned(ctx context.Context, name string, pin bool) (controllerwire.ScheduleView, error)
 func (c *engineClient) SetSchedulePaused(ctx context.Context, name string, pause bool) (controllerwire.ScheduleView, error)
 func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
+func (c *engineClient) TickLocalSchedules(ctx context.Context, dryRun bool) (controllerwire.TickView, error)
 func (c *engineClient) TransitionJob(ctx context.Context, run, job string, input controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func (c *engineClient) WriteOperatorLimits(ctx context.Context, input controllerwire.OperatorLimitsWrite) (controllerwire.OperatorLimits, error)
 func (c *engineClient) WriteSchedules(ctx context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error)

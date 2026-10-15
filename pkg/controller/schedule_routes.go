@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -53,6 +54,10 @@ func (s *Server) scheduleWriter(r *http.Request, a capability.Authorized) (Sched
 
 func (s *Server) scheduleEndpoints() []Endpoint {
 	return []Endpoint{
+		{Method: "PUT", Pattern: "/api/v1/schedules/local/repos", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRegisterLocalSchedules},
+		{Method: "POST", Pattern: "/api/v1/schedules/local/tick", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTickLocalSchedules},
+		{Method: "POST", Pattern: "/api/v1/schedules/{schedule}/pin", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePinLocalSchedule},
+		{Method: "POST", Pattern: "/api/v1/schedules/{schedule}/unpin", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePinLocalSchedule},
 		{Method: "PUT", Pattern: "/api/v1/schedules/repos", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePutCronRepo},
 		{Method: "DELETE", Pattern: "/api/v1/schedules/repos", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteCronRepo},
 		{Method: "POST", Pattern: "/api/v1/schedules/{schedule}/pause", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePauseSchedule},
@@ -130,6 +135,26 @@ func (s *Server) handleDeleteCronRepo(w http.ResponseWriter, r *http.Request, a 
 }
 
 func (s *Server) handlePauseSchedule(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.localSchedules != nil {
+		service, err := s.localScheduleService(r, a)
+		if err != nil {
+			return err
+		}
+		row, err := service.Resolve(r.Context(), r.PathValue("schedule"))
+		if err != nil {
+			return engineLookupError(err)
+		}
+		if r.Pattern == "POST /api/v1/schedules/{schedule}/pause" {
+			err = service.Pause(r.Context(), row.ID)
+		} else {
+			err = service.Resume(r.Context(), row.ID)
+		}
+		if err != nil {
+			return engineLookupError(err)
+		}
+		return s.writeScheduleView(w, r, a, row.ID)
+	}
+
 	writer, err := s.scheduleWriter(r, a)
 	if err != nil {
 		return err
@@ -151,6 +176,36 @@ func (s *Server) handleScheduleOverride(w http.ResponseWriter, r *http.Request, 
 		if err := body.Validate(); err != nil {
 			return invalidEngineBody(err.Error())
 		}
+	}
+	if s.localSchedules != nil {
+		service, err := s.localScheduleService(r, a)
+		if err != nil {
+			return err
+		}
+		row, err := service.Resolve(r.Context(), r.PathValue("schedule"))
+		if err != nil {
+			return engineLookupError(err)
+		}
+		if body == nil {
+			_, err = service.ClearOverride(r.Context(), row.ID)
+		} else {
+			override := crons.Override{Cron: body.Cron, TZ: body.TZ, Overlap: body.Overlap}
+			if body.Args != nil {
+				override.Args = *body.Args
+			}
+			if body.CatchUp != nil {
+				duration, parseErr := time.ParseDuration(*body.CatchUp)
+				if parseErr != nil {
+					return invalidEngineBody("invalid catch-up duration")
+				}
+				override.CatchUp = &duration
+			}
+			_, err = service.SetOverride(r.Context(), row.ID, override)
+		}
+		if err != nil {
+			return engineLookupError(err)
+		}
+		return s.writeScheduleView(w, r, a, row.ID)
 	}
 	writer, err := s.scheduleWriter(r, a)
 	if err != nil {
@@ -185,6 +240,27 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request, a capa
 }
 
 func (s *Server) handleDisarmCron(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.localSchedules != nil {
+		service, err := s.localScheduleService(r, a)
+		if err != nil {
+			return err
+		}
+		var id string
+		err = service.WithLocalLock(r.Context(), func() error {
+			row, err := service.Resolve(r.Context(), r.PathValue("schedule"))
+			if err != nil {
+				return err
+			}
+			id = row.ID
+			return service.Disarm(r.Context(), id)
+		})
+		if err != nil {
+			return engineLookupError(err)
+		}
+		writeJSON(w, http.StatusOK, controllerwire.ScheduleDeletion{ScheduleID: id, Deleted: true})
+		return nil
+	}
+
 	writer, err := s.scheduleWriter(r, a)
 	if err != nil {
 		return err

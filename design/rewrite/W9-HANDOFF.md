@@ -1,141 +1,189 @@
-# W9 handoff
+# W9 local integrator handoff
 
-STATUS: CONTINUE
+The 17:15 integration checkpoint is reached. The production probes for local
+foreground run, controller startup and schedules now reach concrete owners and
+fail on sandbox socket syscalls. The persisted-peer claimant probe passes.
+The lead must run the command probes natively. Native execution still has the
+contract and owner gaps listed below.
 
-Base: 4e497c640. Production composition and doctor cleanup remain open.
-The owner constructors on this checkout still require missing dependencies.
-No production factory was replaced with a fake. No Git write, Sparkwing
-executable, service or installer ran.
+Base: `444cab1ac`. No Git write, Sparkwing candidate execution, installer,
+pipeline, deployment or release ran. The only Sparkwing executable invocation
+was the required read-only `info --for-agent`.
 
-## This continuation
+## Implemented
 
-Changed the doctor regression in
-`cmd/sparkwing/review_integration_unix_test.go` to invoke public `runDoctor`
-with an isolated home and the real local-services resolver. It no longer
-substitutes the runtime, lifecycle or machine inspector. It closes the fixture
-store before invoking the command, decodes the JSON report and checks the
-`unrecorded_step_outcome` finding and completed controller diagnostics.
-The test remains under `rewrite_integration` because production is incomplete.
+- Verified local peers authenticate through a persisted default-team root. The
+  shared issuer mints it once and ordinary delegation issues queue authority.
+  Reopen retains its reference. Revocation ends descendant authentication,
+  relation checks and further delegation without replacing the root. Peer
+  intake and named/queued claim authorization use the shared relation checks.
+- The CLI foreground binder constructs W8's `NativeServices` and W3's native
+  host over authenticated private transport. It opens no state store. A shared
+  award validator compares the award with persisted authority. Named local
+  claims report available CPU. Captured environment loading, process delegation,
+  lease renewal and cleanup use the existing owners.
+- Seven local-only host endpoints supply private snapshots, node reads,
+  transitions, authentication, relation checks and atomic run/unit completion.
+  Mutations derive actors, fences and runner metadata from server facts. The
+  ordinary transition endpoint accepts only run start. Typed policy refusal
+  survives atomic completion. Holder observations and step reports work while
+  draining cancellation. Adopted node bearers stay private and authorize node
+  reports independently from the run owner.
+- Local schedule registration transports explicit replace/upsert mode, selected
+  declarations, project configuration, native environment bytes and proof/follow
+  choice. Existing private snapshots retain environment values. A private
+  per-schedule registration file associates their seal with the project and
+  checkout. Pin/unpin, tick, local pause/override and deletion reach the elected
+  service. Registration, evaluation and pin/unpin/delete share the existing
+  schedule lock. Proofs use verified source acquisition under the captured
+  controller home. Acquisition cleanup follows pin copying and propagates errors,
+  including when a later proof fails.
+- The controller probe now starts the real runtime and joins its workers. The
+  local-run probe exercises foreground mode. API inventory, OpenAPI, schedule
+  source docs and embedded mirrors are refreshed. Three acceptance fixtures now
+  check the complete trigger owner reference, whose Name is empty, rather than
+  treating the trigger unit ID as a controller singleton lease name.
 
-Before this change, the existing probe reproduced the cleanup failure without
-sockets: doctor returned `controller_checked:true`, left the pruned run's session
-record and emitted no warning. The public probe now reaches the actual lifecycle
-client and fails because this sandbox refuses its Unix socket connection.
-That is a native execution limit, not evidence that cleanup works.
+## Invariants and evidence
 
-The production execution probes still fail before sockets:
+Verified peer roots remain tenant scoped and revocation closes their ancestry.
+Generated forged-selector tests check that invalid peer lookup never persists
+an authority, and actual intake/claim authorization refuses foreign teams.
 
-- Local run: `local run integration requires the local controller and shared host binding`.
-- Local controller: `elected local controller factory is unavailable in this build`.
-- Local schedules: `local schedules require the local schedule service factory`.
+Private host operations remain within the authenticated run and its separately
+awarded nodes. Real SQLite awards pass through the actual HTTP handlers and
+client using a socket-free RoundTripper. Tests cover node start/step/result,
+foreign digest/class/audience probes, hosted-route absence, cancellation drain,
+atomic normal/policy finish and terminal-transition bypass refusal. The
+foreign-authority fuzz property passed 3,485 executions.
 
-`TestDaemonLifecycleMissingAndCancelledRuntime` was already fixed and passes.
-`TestProcessLivenessRegressionDoesNotSleep` and the legacy opsview sweep facade
-were already deleted. No finished test port or deletion was repeated.
-
-## Contract implementations needed in other areas
-
-1. **W2/W8 local controller:** implement the object returned by
-   `LocalRuntimeConfig.Open`. It must supply `RunStore`, orphan reconciliation,
-   workers and activity reporting, `TypeSafeAPIKey`, HTTP/UI and joined cleanup.
-   `NewLocalRuntime` requires this callback. There is still no production
-   implementation of `wingd.LocalController`. `Server.ServeWith` starts its own
-   TCP listener and private workers and cannot be used as this object.
-2. **W2 peer credentials:** bind verified local-peer identity to production
-   authority. `policyStoreReader.ReadAuthentication` forwards `CredentialPeer`
-   to the store. `authenticationAuthorityTx` accepts only bearer/session classes
-   and refuses the peer. W2's peer fixtures supply a fake reader. The CLI cannot
-   mint itself a replacement bearer to bypass this gap.
-3. **W2/W3 native host:** provide authenticated private `ReadSnapshot`,
-   `ReadNode`, `TransitionRun` and `TransitionNode` operations and concrete
-   captured-environment, process-delegation, data/log and owner-policy bindings.
-   `cliHostState` already adapts the declared plan, step, finish and renewal wire.
-   `NewNativeHost` consumes these dependencies. The public scheduling projection
-   cannot replace private execution state or discard transition extras.
-4. **W2/W8 schedules:** expose local checkout/environment registration, proof and
-   pin transactions, and tick with dry-run input. `ScheduleRepositoryManager`
-   carries remote repository declarations. Its contract and C2 routes have no
-   local registration, proof, pin or tick operation.
-5. **W8 doctor:** expose controller-owned cleanup with dry-run input and findings.
-   `LocalLifecycle.Doctor(ctx, version)` only reads status and managed units.
-   It has no sweep operation or dry-run argument. Sweep success must survive
-   recording failures as `unrecorded_step_outcome` warnings. Sweep failures must
-   remain errors. W9 can forward and render that operation once declared.
-
-The swarm brief requires reporting foreign contract changes instead of making
-them in W9. These are the same missing operations found in the previous session,
-verified against this checkout. No new product decision is requested. Existing
-fake-backed native-host composition tests remain component evidence.
-
-## Verification
+Schedule selection must match the supplied project before host capture.
+Registration tests verify replacement/upsert boundaries and preservation after
+proof failure. Real SQLite HTTP tests use a fake compiler and snapshot owner to
+exercise registration, pin/unpin, dry tick, pause, override and delete. A
+channel-driven overlap test verifies that pin/unpin/delete cannot read stale
+captured inputs during registration. Environment transport preserves arbitrary
+native bytes. Its fuzz property passed 2,400 executions.
 
 All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false,
-GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and TMPDIR/GOTMPDIR=/tmp/sw-astra-W9.
-Tests use at most -p 4.
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and at most -p 4. Go scratch stayed under
+/tmp/sw-astra-W9.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- Scoped vet passes for cmd/sparkwing, opsview, clisurface, controllerwire and
-  controller/client. The integration-tagged CLI also passes vet.
-- Full opsview, clisurface, controllerwire and controller/client suites pass.
-- Short CLI diagnostic: **956 top-level pass, 15 skip, 0 fail**, with the socket
-  exclusions below. No assertion or repository skip changed.
-- `go test -p 4 ./tests/acceptance -run '^TestSurface' -count=1` passes.
-- `go run ./internal/commentcheck -base main .` passes across 2,130 files.
-- Production execution and public doctor probes remain red as described above.
-- An unnecessary full acceptance-package run was interrupted. It supplies no
-  acceptance result. No whole-repository test run was started.
+- Vet passes for cmd/sparkwing, controller, controller/client, store, crons,
+  runners, localhostwire and controllerwire.
+- Full short client, controllerwire, clisurface and localcontroller suites pass.
+- Focused CLI host/local-run/owner/schedule tests pass. Peer/authentication/
+  authority store tests pass. Focused private-host and local-schedule service,
+  HTTP and wire tests pass. The controller's Engine/LocalHost/LocalSchedule
+  selection also passes.
+- `tests/acceptance -run '^TestSurface|^TestEngine'` passes. No native cell was
+  unskipped and no archived test was newly ported.
+- API reference/OpenAPI/doc drift checks pass. The controller and client API
+  snapshots are regenerated. Commentcheck is clean across
+  2,274 files. `git diff --check` passes.
+- Tagged `TestLocalClaimantW8UsesPersistedPeerAuthority` passes.
+- Tagged local run and schedules install fail at `dial unix ... d.sock:
+  connect: operation not permitted`. Controller startup reaches elected store
+  reconciliation and workers, then fails at Unix listener setup and the version
+  policy worker's DNS socket. Both are sandbox syscall refusals. Public doctor's
+  real probe also remains blocked at its daemon socket.
 
-The short CLI diagnostic uses `-short -count=1` and this `-skip` expression:
+Production probes for the lead:
 
+```sh
+GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache GOMAXPROCS=4 \
+  go test -p 4 -tags rewrite_integration ./cmd/sparkwing ./internal/wingd/localcontroller \
+  -run '^TestReview(ProductionExecutionBindings|PublicDoctorSweepsAndWarnsForPrunedRun)$|^TestLocalClaimantW8UsesPersistedPeerAuthority$' -count=1
 ```
-^(TestDocsMigrationsValidatesWebBoundsBeforeFetching|TestDownloadAndInstall_.*|TestDownloadFile_BoundsBodySize|TestMaterialize_ColdCacheContactsNoController|TestResolveSparks_WithManifest_WritesOverlay|TestRunDocsListVersions_Web.*|TestRunDocsMigrations_VersionWebFetches|TestRunDocsRead_Web.*|TestRunUpdateBinary_Failure_SpawnsNoGo|TestRun_PinnedPipelineRunsWithTheNetworkDenied)$
-```
 
-Production probe invocation:
+Native test builds need the release-version stamp used by the signed runner
+policy. The local-run probe reads `installedVersion()` instead of a fixture
+version. Source builds with an unknown version cannot establish runner policy.
 
-```
-go test -p 4 -tags rewrite_integration ./cmd/sparkwing -run '^TestReview(ProductionExecutionBindings|PublicDoctorSweepsAndWarnsForPrunedRun)$' -count=1
-```
+## Real integration points left open
 
-No native acceptance cell was newly passed or unskipped. No new archived test was
-ported. This continuation adds/deletes **0 production Go lines**. W9 versus main
-remains **+15,606 / -23,758, net -8,152**, within its -2,900 budget.
-No API was removed, no callers in another package needed migration, and no shared
-source file or lead-owned contract file changed. Only the tagged W9 regression
-and this report changed. No production mechanism was added.
+1. **DESIGN: foreground reservation.** After intake, the background local queue
+   can claim the trigger before the CLI's named claim. The sealed request has
+   no foreground/detached discriminator. Excluding all local origins breaks
+   detached runs. A new boolean alone can strand an intake when the CLI exits
+   before claiming, and retries retain the immutable original request. The lead
+   needs one persisted reservation/first-claim contract, including expiry, CLI
+   loss and retry behavior. Reuse the existing here/claim-by machinery if its
+   semantics fit. No new reservation policy or schema was invented here.
+2. **W1/W2 terminal wire replay.** The first node report commits. Repeating it
+   returns unauthenticated because store authentication does not populate
+   `BindingState.Result` for `LiveResult`. The client retains terminal actor
+   identity so it does not block the eventual shared fix. Successful terminal
+   wire replay remains unproved.
+3. **W1 scheduled sealed intake.** `Server.ScheduleLauncher()` exposes the
+   existing shared cron launcher. That launcher still uses legacy intake and
+   assumes a clone URL. W1 must consume `crons.ReadLocalRegistration(ctx, home,
+   scheduleID)`, load its environment seal through `FileEnvironmentSnapshots`,
+   and join the selected checkout/pin to the single sealed intake. No alternate
+   scheduled intake was added.
+4. **W3/W8 pin representation.** `crons.Proof` and the stored pin represent one
+   executable. TypeScript acquisition returns a command and its dependency
+   closure. The current representation cannot pin that closure or deliver it
+   through scheduled intake. Following without proof remains expressible. This
+   does not establish native TypeScript pinning.
+5. **W3/W7/W8 native services.** Output/data bindings, process service relations,
+   controller log projection and remaining owner policies retain W8's recorded
+   gaps. The shared native constructors remain their owners. Native source,
+   engine, admission, runtime and teardown evidence stays with the lead/T1.
 
-## Assignment audit and retained work
+The preceding W9 work and deletions remain in W9-LEGACY-CUT-FILES.md and
+W9-CLIENT-CUT-FILES.md. A1-03/08/09/13-18/22/38/55 transports and replay/fence
+components, A1-41 managed-home wiring, A1-43 engine notices, A1-51 generated
+schemas and A1-52 release packaging remain implemented at their recorded
+boundaries. This continuation adds the local A1-40/49/50 composition. Initial
+here reason/environment retention, authorized bundle/publication, debug resume,
+remote cache/native hosting and native platform acceptance retain their named
+owner integration dependencies. No prior native claim is upgraded to passed.
 
-| Assignments | Implemented W9 boundary and remaining integration |
-| --- | --- |
-| A1-03/08/09/13-18/22/38/55 | Final errors, claim/execution/failure/expansion/cloud transports, source ordinals, fenced steps and Job-instance sync. Native owner and launcher cleanup integration remains. |
-| A1-10/11/19; identity and alias handoffs | Separate execution/pipeline commits, source preflight, resolved alias/entrypoint and selected-engine inspection. Native composition through hello remains. |
-| A1-20/39/40/41/49 | Credential, runner enrollment, lifecycle, managed-unit and home adapters. Native controller/runner/service composition remains. |
-| A1-29/30/34/37/50 | Signed-data, opt-in cache, sealed here resume and intake components. Public cache/publication/here/local bindings remain. Publication failure must stay separate from the local outcome. |
-| A1-43/45/47 | Exact resolver dispatch, notices, upgrades, explicit settings and shared guard grammar. Native selected-source hosting and scheduled intake remain. |
-| A1-51 | Protocol v2 schemas, final client APIs, safe public debug readers, source guides and legacy client/host retirement. Native debug resume, remaining runtime and API-reference integration remain. Duplicate credential metadata was already removed. |
-| A1-52; Windows packaging handoff | Windows bridge assembly, native workflow and publication dependencies implemented. Native Windows execution and publication remain unverified. |
-| A1-53 | Component evidence only. Native placement/backend/platform cells and real-repository QA remain with T1/lead. |
-| 07:40 step windows and launcher grammar | Sealed StartAt/StopAt/Only, --docker-image, removal of --deadline and plan awards without a job are already implemented. |
-| 07:40 route removals | Final source guide and migration removal details retained. Auth guide route drift was already fixed. |
-| 12:35 composition and doctor | Production probes remain red, with the missing owner operations listed above. |
+## Shared files and mechanisms
 
-Other outstanding A1-50 contracts remain the immutable initial here reason,
-authorized pre-intake source bundles and publication, and the debug-resume
-release route. Initial trigger preparation still refuses unavailable here,
-source-bundle and captured-environment retention. Profile enrollment with scope,
-run annotations and relative priority admission also retain their named owner
-gaps. No unsupported path was made falsely successful.
+Foreign production edits are limited to:
 
-## Friction and next handoff
+- `pkg/store/authentication_contract.go`, `authority_binding.go` and
+  `authority_issue.go` for persisted peer authority and shared relation checks.
+- `internal/capability/routes.go` for the local route policies.
+- `pkg/controller/local_http.go`, `engine_intake.go`, `server.go`, `crons.go`,
+  `schedule_routes.go`, plus new `private_host.go` and `schedules_local.go` for
+  local handlers, service attachment and trigger lease identity.
+- `internal/runners/store_host.go` exports the existing award validator so the
+  CLI and store-host composition use one rule.
+- `internal/crons/arm.go` and new `local.go` reuse the schedule service and lock.
+- New `internal/localhostwire/private_host.go` carries the store-shaped private
+  DTOs because store already imports controllerwire and adding them there would
+  introduce an import cycle.
 
-The installed Overwing binary reports that it is stale. Socket execution is
-restricted here. The constructors present on this branch are dependency
-constructors, and do not supply the missing controller, credential, host,
-schedule or cleanup operations. A newer owner implementation, or a lead-owned
-cross-area contract change, is required to finish the corresponding wiring.
+Shared tests changed in controller route expectations and the three acceptance
+fixtures named above. Generated controller/client `.apidiff` snapshots also
+changed. All cmd/sparkwing, controller/client and controllerwire
+edits are in W9's area. Only W9's c3 contract was amended. Lead-owned handoffs
+and amendments were read and left untouched.
 
-Scratch `/tmp/sw-astra-W9` is removed at session end. The shared build cache
-`/tmp/sw-gocache` is retained.
+Mechanisms added are the persisted peer bootstrap through the shared mint
+helper, authenticated private transport/finish adapter, and schedule registration
+association through existing private snapshot storage. Each replaces a named
+missing boundary. No dependency, environment variable, background worker,
+compatibility path or separate intake was added. Independent review accepted
+these mechanisms and the reuse of the existing schedule lock. It found the
+foreground reservation and terminal replay gaps above.
 
-STATUS: CONTINUE
+No whole production file was deleted in this continuation. The old foreground
+binding refusal, unbound schedule callbacks and duplicate local registration
+struct are removed. With the lead's production exclusions, this session adds
+1,375 and removes 58 Go lines across all areas, net +1,317. W9-owned paths add
+599 and remove 23, net +576. W9 versus main is +16,485 / -23,764, net -7,279,
+within its -2,900 budget. These counts include untracked source files and exclude
+tests, testdata, acceptance and contract declaration paths.
+
+Friction: native sockets are forbidden, Overwing reports an outdated installed
+binary, and shared Go cache entries vanished during one check before a rebuild
+succeeded. The cache was retained. Worker scratch is removed after all checks
+and workers join. Shared Git config has no local identity or core.worktree
+override.
+
+STATUS: COMPLETE

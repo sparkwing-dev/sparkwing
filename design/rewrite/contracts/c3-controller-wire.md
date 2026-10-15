@@ -777,13 +777,9 @@ only to the shared transport. The old local socket and direct-store secret
 sources and the legacy orchestrator host/consumer/backend graph are also removed.
 W3's retained scheduler still uses `StateStoreOld`.
 
-The controller's step handler does not yet consume `StepReportRequest` or return
-`StepRecorded`. It accepts the former body and returns an empty 204. A W9 overlay
-component passing the contracted report through the real EngineController with
-fake authentication and persistence fails with `invalid engine request` before a
-write. W2 must implement the existing declared contract. No old-body fallback is
-provided. Private execution snapshots, the elected controller factory and native
-host/data/log composition remain integration points.
+The controller's step handler consumes `StepReportRequest` and returns
+`StepRecorded`. CLI execution reports steps under the independently awarded node
+bearer. Owner authority never substitutes for that node's reporting fence.
 
 <!-- design:end -->
 
@@ -799,3 +795,30 @@ selected declarations run elsewhere. Local registration carries the same mode.
 The client rejects missing or unknown modes and a withdrawal in an upsert receipt.
 W2/W1 must apply the mode atomically; neither route authorization nor repository
 authority changes. Native repository handlers remain an integration dependency.
+
+### Local host and schedule transport
+
+The elected controller exposes private execution state under
+`/api/v1/runs/{run}/local-host`. Its snapshot and node reads carry complete C1
+execution state. They are separate from the public scheduling projection.
+Only awarded local owner or node credentials can use these routes. Reads remain
+available while a current holder drains cancellation. The hosted controller
+does not register these endpoints.
+
+`client.NewLocalHostClient` implements private state reads, transitions,
+authentication and relational binding checks without opening the store. The
+controller derives mutation actors and fences from the authenticated bearer.
+The run transition endpoint accepts the start edge. Terminal completion uses
+the atomic finish endpoint, including typed admission refusal. Authentication
+lookups are confined to the owner and its independently awarded current nodes.
+Private authentication responses retain digest sidecars because public
+capability JSON omits them. No reusable raw bearer appears in those responses.
+
+`LocalScheduleManager` carries checkout registration, pin/unpin and dry-run tick
+through the same authenticated socket transport. Registration carries explicit
+replace/upsert mode, the selected project declarations, captured environment
+and proof/follow choices. Local mutations require verified OS-peer provenance.
+`crons.ReadLocalRegistration` loads the durable association between a schedule,
+its checkout/project and its environment seal. Private environment values remain
+with `FileEnvironmentSnapshots`. W1's scheduled sealed intake consumes this
+association and the pin. Its launcher integration is a separate handoff.

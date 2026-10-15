@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	runtimehost "runtime"
 	"strings"
 	"syscall"
 
@@ -200,7 +201,7 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 	if err := ctx.Err(); err != nil {
 		return completion, err
 	}
-	response, err := runtime.controller.Claim(ctx, controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: version})
+	response, err := runtime.controller.Claim(ctx, controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: version, AvailableCores: float64(runtimehost.NumCPU())})
 	if err != nil {
 		return completion, err
 	}
