@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -23,7 +24,7 @@ func SetLocalStay(ctx context.Context, home string, stay bool) (wingd.LocalStatu
 }
 
 func localControl(ctx context.Context, home string, stay *bool) (wingd.LocalStatus, error) {
-	nc, sock, err := dialLocalController(ctx, home)
+	nc, sock, err := dialLocalController(ctx, home, probeTimeout)
 	if err != nil {
 		return wingd.LocalStatus{}, err
 	}
@@ -31,7 +32,7 @@ func localControl(ctx context.Context, home string, stay *bool) (wingd.LocalStat
 	return exchangeLocalControl(ctx, nc, sock, stay)
 }
 
-func dialLocalController(ctx context.Context, home string) (net.Conn, string, error) {
+func dialLocalController(ctx context.Context, home string, timeout time.Duration) (net.Conn, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
 	}
@@ -39,7 +40,7 @@ func dialLocalController(ctx context.Context, home string) (net.Conn, string, er
 	if err != nil {
 		return nil, "", err
 	}
-	nc, err := dial(ctx, sock, probeTimeout)
+	nc, err := dial(ctx, sock, timeout)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, "", ctx.Err()

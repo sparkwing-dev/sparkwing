@@ -58,15 +58,7 @@ func (l *localLifecycle) EnsureStarted(ctx context.Context, opts LocalStartOptio
 		return LocalStatus{}, err
 	}
 	if status.Running {
-		if opts.Standalone {
-			return LocalStatus{}, errors.New("wingd: standalone cannot open a store owned by a running controller")
-		}
-		if opts.Stay && !status.Stay {
-			if err := l.runtime.SetStay(ctx, true); err != nil {
-				return LocalStatus{}, err
-			}
-		}
-		return l.Status(ctx)
+		return l.reuse(ctx, opts, status)
 	}
 	if l.run != nil {
 		select {
@@ -90,9 +82,34 @@ func (l *localLifecycle) EnsureStarted(ctx context.Context, opts LocalStartOptio
 	if err := l.awaitReady(ctx, run); err != nil {
 		cancel()
 		<-run.done
+		if errors.Is(err, ErrNotElected) && run.err == ErrNotElected {
+			status, queryErr := l.runtime.Status(ctx)
+			if queryErr != nil {
+				return LocalStatus{}, errors.Join(err, queryErr)
+			}
+			if status.Running {
+				return l.reuse(ctx, opts, status)
+			}
+		}
 		return LocalStatus{}, err
 	}
 	status, err = l.Status(ctx)
+	if err == nil && !status.Running {
+		err = errors.New("wingd: controller stopped during startup")
+	}
+	return status, err
+}
+
+func (l *localLifecycle) reuse(ctx context.Context, opts LocalStartOptions, status LocalStatus) (LocalStatus, error) {
+	if opts.Standalone {
+		return LocalStatus{}, errors.New("wingd: standalone cannot open a store owned by a running controller")
+	}
+	if opts.Stay && !status.Stay {
+		if err := l.runtime.SetStay(ctx, true); err != nil {
+			return LocalStatus{}, err
+		}
+	}
+	status, err := l.Status(ctx)
 	if err == nil && !status.Running {
 		err = errors.New("wingd: controller stopped during startup")
 	}

@@ -16,7 +16,7 @@ func StartLocalDashboard(ctx context.Context, home, address string) error {
 	if address == "" {
 		return errors.New("wingd/client: dashboard address is required")
 	}
-	nc, sock, err := dialLocalController(ctx, home)
+	nc, sock, err := dialLocalController(ctx, home, probeTimeout)
 	if err != nil {
 		return err
 	}

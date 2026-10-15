@@ -111,10 +111,31 @@ error, including cancellation during the switch from handshake to readiness.
 The handshake has the existing probe budget. Readiness follows the caller's
 context because dashboard startup can take longer than a health probe.
 
-The CLI must bind status, stay, dashboard startup and drain to its owner lifecycle
-and process startup. `NewLocalRuntime` refuses a foreign election before opening
-its store. Windows transport still refuses API access when it cannot supply a
-client SID.
+`client.NewLocalLifecycle` composes these operations with an in-process runtime.
+It reuses a ready owner, promotes stay, starts the dashboard and drains the
+elected process. The adapter binds one home before any owner query. An empty
+start Home selects that bound home. Another home is refused before mutation.
+Standalone refuses an existing owner. Status and version skew never cause a
+takeover, and unreachable, stalled or unsupported owners remain errors.
+
+An absent owner delegates startup to the in-process runtime. If another process
+wins the election, the lifecycle joins its own startup cleanup before querying
+and reusing the ready winner. A winner still starting returns the election
+error, so the caller can retry readiness. A joined cleanup failure remains an
+error. Startup success requires the owner to remain ready after stay promotion.
+Starting or draining local processes keep lifecycle operations until cleanup
+finishes, even though they no longer report ready.
+
+The adapter supplies process composition without a detached launcher. The CLI
+must use it with the shared-controller factory and supply detached startup once
+its argument contract is defined. The older admission spawner still names the
+removed `wingd supervise` command and cannot supply that startup.
+`NewLocalRuntime` refuses a foreign election before opening its store. Windows
+transport still refuses API access when it cannot supply a client SID.
+
+Drain preserves cancellation and unreachable-owner errors and requires a
+`drain_ack` on the current admission protocol. A successful drain then waits for
+the socket and election lock to close. It never starts a replacement process.
 
 `ManagedUnitManager` remains the service-management port. Its policies specify
 `dashboard start --stay` and `__tick`. The CLI contract must settle how installed
@@ -132,6 +153,10 @@ covers starting the UI on an existing owner, failed binds, readiness and joined
 shutdown. Its wire tests also cover probe refusal, peer cancellation and service
 failure during a remote start. The wire shape and round-trip tests cover the
 status/stay and dashboard messages.
+`TestLocalLifecycle*` in the client package exercises foreign-owner composition,
+election races, home binding, concurrent reuse and refusal paths through the
+lifecycle interface with process-boundary fakes. `TestLocalDrain*` uses
+`net.Pipe` to cover acknowledgement validation and cancelled handshakes.
 The process/store
 scenarios remain open: local controller
 idle lifecycle, health-probe process exit, dashboard install/update, Windows

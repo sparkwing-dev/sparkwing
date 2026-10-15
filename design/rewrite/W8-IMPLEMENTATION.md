@@ -178,8 +178,8 @@ cross-area contracts listed below remain explicit integration work.
 ## Remaining integration and contract changes needed
 
 The fourth and fifth sessions below complete status/stay transport and dynamic
-dashboard startup in process and through the admission client. Foreign-owner
-startup and dashboard commands still need CLI composition.
+dashboard startup. The seventh supplies an owner-aware lifecycle adapter.
+Detached startup and dashboard commands still need CLI composition.
 
 1. **W3/W9 runner composition.** Bind `RunnerFactory` to the authenticated
    controller, `Hosting` preparation/renewal callbacks, source acquisition,
@@ -208,10 +208,11 @@ startup and dashboard commands still need CLI composition.
    lease methods remain stubs. W1 needs a local activity projection and a typed
    incompatible-store error. Preserve local secret sealing and stray-session
    cleanup in the final adapters; the deleted server no longer supplies them.
-7. **W8/W9 local transport and services.** Bind `client.QueryLocalController`,
-   `client.SetLocalStay` and admission drain into the foreign-owner lifecycle.
-   `client.StartLocalDashboard` now supplies the foreign-owner dashboard
-   operation. Implement native managed units once W9 specifies
+7. **W8/W9 local transport and services.** Bind `client.NewLocalLifecycle` into
+   CLI composition. It supplies foreign-owner query, stay, dashboard startup
+   and drain. Replace the older admission spawner, which still invokes removed
+   `wingd supervise`, once W9 specifies detached process arguments.
+   Implement native managed units once W9 specifies
    Home and foreground arguments for `dashboard start --stay` and `__tick`.
    Native runner replacement needs actual service registration hooks. Windows
    needs a native SID-authenticated transport; missing identity still refuses.
@@ -527,3 +528,79 @@ No Sparkwing executable, pipeline or git-writing command ran.
 No local Git identity or worktree configuration override was introduced.
 Worker scratch was deleted after checks and review finished. Changes remain
 uncommitted for the lead.
+
+## Seventh session: compose the foreign-owner lifecycle
+
+`client.NewLocalLifecycle` binds one home and composes the existing elected
+runtime with authenticated owner query, stay, dashboard startup and drain.
+Ready foreign owners are reused without process replacement. Standalone and
+another home are refused before mutation. Missing owners delegate startup to
+the in-process runtime. Unreachable, stalled and unsupported owners remain
+errors instead of authorizing another store opener.
+
+If local startup loses the election, cleanup joins before querying and reusing
+the ready winner. A winner still starting returns the election error for the
+caller to retry. Joined cleanup errors remain errors. An owner that stops
+during stay promotion cannot satisfy startup. Local starting and draining
+processes retain operations until their own cleanup finishes.
+
+The existing drain now preserves cancellation and unreachable-owner failures.
+It requires the current admission protocol and a valid `DrainAck` before
+waiting for the socket and election lock to close. It never spawns a successor.
+
+### Seventh-session contracts and assumptions
+
+The new constructor is W8-owned composition of existing lifecycle and wire
+contracts. Its private process-owner interface lets tests fake the OS process
+boundary because native sockets are unavailable. Putting the composition in
+`wingd` would create an import cycle with its client. Removing this adapter
+restores the in-process-only lifecycle and leaves foreign-owner routing to
+every CLI caller. No setting, environment variable, timeout or wire message was
+added, and no other area's contract changed.
+
+This remains in-process startup plus foreign-owner reuse. W9 must bind the
+constructor and shared-controller factory, then define Home and foreground
+arguments for detached startup and installed units. The existing admission
+spawner still invokes removed `wingd supervise`; it is not a valid controller
+startup integration. W1/W2/W3 services and authenticated host transports,
+Cloud bootstrap grammar and source handoff, native Windows SID identity,
+managed services and deployed Cloud probes/cleanup remain open.
+
+No public API was removed. There are no external caller migrations or shared
+product-file edits. Product changes stay in `internal/wingd` and its client.
+Source documentation is `internal/wingd/LOCAL-CONTROLLER.md`; this handoff is
+the only shared edit. This session deletes **0 obsolete files and 0 legacy
+subsystem lines**. It replaces existing lifecycle and drain fragments. No
+additional T1 inventory port or native catalog activation is claimed.
+
+### Seventh-session evidence
+
+- Whole-repository `go build -p 4 ./...` passed.
+- Vet passed for wingd and its subpackages, engine, runners and launcher,
+  cluster and both acceptance packages.
+- `go test -race -p 2 ./internal/wingd/client ./internal/wingd -run '^TestLocal'
+  -count=1 -timeout 120s` passed. The new lifecycle tests cover owner reuse,
+  stay/dashboard/drain routing, standalone and wrong-home refusal, concurrent
+  reuse, election loss, cancellation and failure preservation.
+- Full engine, runners, launcher and component acceptance tests passed.
+  Cluster passed with only `TestStartMetricsListener_ServesMetrics` excluded
+  because its native socket remains unavailable in this sandbox.
+  `internal/acceptance` compiles and has no runtime tests.
+- Election reuse, owner exit during promotion and joined election-cleanup
+  regressions ran red before their fixes. Drain uses `net.Pipe` for malformed
+  acknowledgement and cancelled-handshake coverage.
+- Commentcheck and sleepcheck passed. No native socket, installed service,
+  Windows execution or Kubernetes evidence is claimed.
+- The client tests cross-compiled for Windows/amd64. The docs mirror drift
+  check and `git diff --check` passed.
+- Independent review of a frozen snapshot found no concrete correctness or
+  simplification finding. It was static review; it added no runtime evidence.
+
+All Go commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and private
+`GOCACHE`, `GOTMPDIR` and `TMPDIR` under `/tmp/sw-astra-W8/`. Test package
+parallelism is at most four. The lead must commit the changes.
+No git metadata was written, and no local identity or worktree config override
+was found. An initial installed `sparkwing info --for-agent` discovery ran
+before the swarm brief's no-binary rule was loaded. No candidate, pipeline or
+stateful Sparkwing command followed. Worker scratch was removed after all
+checks and independent review finished.
