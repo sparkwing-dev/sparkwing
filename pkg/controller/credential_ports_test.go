@@ -121,7 +121,7 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 		engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 403)
 		engineClaimHTTP(t, h, raw, "GET", "/api/v1/runs/run", "", 200)
 		status := 401
-		switch mutation % 4 {
+		switch mutation % 5 {
 		case 0:
 			status = 200
 		case 1:
@@ -145,6 +145,12 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 			} else {
 				engineSQL(t, e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run' AND node_id='job'`)
 			}
+		case 4:
+			if trigger {
+				engineSQL(t, e.Store, `UPDATE triggers SET lease_expires_at=1 WHERE team='a' AND id='run'`)
+			} else {
+				engineSQL(t, e.Store, `UPDATE nodes SET lease_expires_at=1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+			}
 		}
 		r := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run", nil)
 		r.Header.Set("Authorization", "Bearer "+raw)
@@ -155,7 +161,7 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != status {
-			t.Logf("mutation %d: %d %s", mutation%4, w.Code, w.Body)
+			t.Logf("mutation %d: %d %s", mutation%5, w.Code, w.Body)
 			return false
 		}
 		if status == 401 {
