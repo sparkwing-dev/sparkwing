@@ -6,7 +6,6 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -19,9 +18,7 @@ func (h *OwnerEvaluator) withProcess(ctx context.Context, input EvaluationInput,
 		}
 		if process != nil {
 			closeErr := process.Close()
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.CleanupTimeout)
-			defer cancel()
-			err = errors.Join(err, closeErr, process.Cleanup(cleanupCtx))
+			err = errors.Join(err, closeErr, process.Cleanup(context.WithoutCancel(ctx)))
 		}
 	}()
 	resolved, err := h.deps.EnsureEngine(ctx, spec.Resolved.Engine, input.Engine.Target)
@@ -53,7 +50,7 @@ func (h *OwnerEvaluator) withProcess(ctx context.Context, input EvaluationInput,
 		return errors.New("SDK evaluator returned no process")
 	}
 	session := &executorSession{process: process}
-	code := NodeInput{Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding, Replay: input.Replay}
+	code := NodeInput{Storage: input.Storage, Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding, Replay: input.Replay}
 	if err = h.hello(ctx, session, code); err != nil {
 		return err
 	}

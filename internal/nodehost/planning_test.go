@@ -186,6 +186,7 @@ func TestPlanInitialIncompleteInputsBypassCache(t *testing.T) {
 		t.Fatalf("ineligible plan = %+v, %v; fixture = %+v", result, err, f)
 	}
 	f.input.Cache = nil
+	f.input.Disabled = true
 	result, err = PlanInitial(t.Context(), f.input, f.functions())
 	if err != nil || result.CacheHit || result.MissReason == "" || f.plans != 2 || len(f.cache.calls) != 0 {
 		t.Fatalf("disabled cache = %+v, %v; fixture = %+v", result, err, f)

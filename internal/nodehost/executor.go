@@ -78,6 +78,7 @@ type ExecutorDependencies struct {
 	ReadFailure   func(context.Context, store.NodeRef, int64) (*nodeproto.JobFailure, error)
 	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
 	Mask          func(string) string
+	Masks         *MaskRegistry
 }
 
 type nodeExecutor struct {
@@ -107,7 +108,13 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 	defer func() {
 		err = maskHostError(err, h.deps.Mask)
 	}()
+	if err := h.deps.Masks.initializeSeal(input.Accepted); err != nil {
+		return err
+	}
 	if err := executorLostAuthority(ctx); err != nil {
+		return err
+	}
+	if err := h.deps.Masks.initializeAccepted(ctx, h.deps.Store, input.Accepted); err != nil {
 		return err
 	}
 	spec, row, job, err := h.accepted(ctx, input)

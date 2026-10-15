@@ -202,8 +202,9 @@ func validatePlanCacheHit(entry PlanCacheEntry, inputs PlanCacheInputs, validati
 }
 
 // PlanningInput supplies the same cache boundary to local, runner, here, Actions
-// and controller-owned planning. A nil cache is an explicit host policy, not the default.
+// and controller-owned planning. Disabled is the explicit host opt-out.
 type PlanningInput struct {
+	Disabled   bool
 	Cache      PlanCache
 	Inputs     PlanCacheInputs
 	Validation nodeproto.ValidationContext

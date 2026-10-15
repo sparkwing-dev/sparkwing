@@ -58,9 +58,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		}
 		if process != nil {
 			closeErr := process.Close()
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(parent), limits.CleanupTimeout)
-			cleanupErr := process.Cleanup(cleanupCtx)
-			cleanupCancel()
+			cleanupErr := process.Cleanup(context.WithoutCancel(parent))
 			if cleanupFailure := errors.Join(closeErr, cleanupErr); cleanupFailure != nil {
 				err = errors.Join(err, cleanupFailure)
 				result = h.failure(err)
@@ -131,7 +129,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	}
 	if input.Attempt == 1 {
 		for _, closure := range job.Closures.BeforeRun {
-			if _, err = h.eval(ctx, session, input, closure, nil, nil); err != nil {
+			if _, err = h.eval(ctx, session, input, closure, "before_run", nil, nil); err != nil {
 				return h.failure(err), err
 			}
 		}
@@ -159,7 +157,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	}
 	if bodyErr == nil && timeout == nil && job.Closures.Verify != "" {
 		stage = "verify"
-		if _, verifyErr := h.eval(ctx, session, input, job.Closures.Verify, nil, nil); verifyErr != nil {
+		if _, verifyErr := h.eval(ctx, session, input, job.Closures.Verify, "verify", nil, nil); verifyErr != nil {
 			result = h.failureAt(verifyErr, stage)
 		}
 	}
@@ -201,7 +199,7 @@ func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, i
 		return err
 	}
 	for _, closure := range job.Closures.AfterRun {
-		if _, err := h.eval(ctx, session, input, closure, payload, nil); err != nil {
+		if _, err := h.eval(ctx, session, input, closure, "after_run", payload, nil); err != nil {
 			return err
 		}
 	}
