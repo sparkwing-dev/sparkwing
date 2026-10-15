@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **TypeScript SDK release:** required native Windows x64 and arm64 bridge builds feed one version-stamped package assembly. Publication uses the checked package, and missing or skipped native verification blocks assembly. Windows execution still requires CI evidence.
+- **API documentation:** OpenAPI is generated from the final capability policy and shared JSON types. Removed legacy trigger routes and handler/store schemas are deleted. Operations without a documented success body are marked explicitly.
+
 - **upgrade:** verification calls the selected engine's SDK installer before Go compilation or TypeScript type checking and describe/plan checks. Captured install/check environments share a masker for proxy credentials. Native engine resolution and upgrade staging remain integration requirements.
 - **API documentation:** the HTTP reference is generated from the final capability policy, retaining credential alternatives, grants, binding, liveness, audience and retry rules. API, signed-data and versioning guides describe the frozen contracts and name native integration boundaries.
 

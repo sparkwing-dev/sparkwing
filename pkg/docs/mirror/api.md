@@ -6,6 +6,13 @@ socket. The [HTTP reference](api-reference.md) is generated from the shared
 capability table. It includes node-host and external-proof routes with their
 separate audiences.
 
+The repository's `api/openapi.yaml` is generated from the same policy and the
+shared wire types. Each operation retains its complete authorization alternatives
+under `x-sparkwing-policy`. JSON schemas preserve omitted fields, nulls and byte
+encoding. Shared validators enforce constraints beyond those serialization shapes.
+Operations without a documented success body carry `x-sparkwing-wire: undocumented`.
+They do not inherit a body from a removed endpoint.
+
 This page describes the frozen wire contract. Native controller registration,
 transactional authorization and signed storage still require integration. Client
 transport fixtures establish message handling, not those server guarantees.

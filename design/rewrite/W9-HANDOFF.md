@@ -1,3 +1,151 @@
+# W9 OpenAPI and Windows release packaging continuation
+
+Started clean at c7e91e446. W9 remains incomplete. Changes stay in this worktree
+and /tmp/sw-astra-W9, which is removed at handoff. The lead owns commits, native
+acceptance, pipelines and landing. No release or live service was changed.
+
+## Delivered
+
+- OpenAPI now generates from capability.Routes and compiled shared wire types.
+  It includes all 239 policy operations, 75 mapped success-body contracts and
+  235 nested component schemas. Complete credential/grant/binding/liveness
+  alternatives remain together with audience, owner, authentication and retry.
+  The canonical error envelope and additive code registry have one source.
+- Replaced the legacy route-registration rewrite and AST handler/store schema
+  scanner. Serialization schemas retain embedded fields, omission, explicit zero,
+  pointer/collection nulls, byte encoding, timestamps and opaque JSON. Duplicate
+  policies, normalized-path collisions, orphan body bindings and unsupported
+  serialization fail before output. Short writes and output errors fail.
+- The remaining 164 operations have no body mapping in this generator and carry
+  x-sparkwing-wire: undocumented. This is remaining documentation work, not proof
+  that every owner lacks a body declaration. No legacy body was carried forward.
+- Required Windows x64 and arm64 release jobs install matching Node/Go/MSVC,
+  verify downloaded Node headers/import libraries against their checksums, and
+  invoke the existing SDK release:native command. That command stamps the engine
+  version and requires TestNativeProtocol and TestNativeConformance without skips.
+  Each job uploads its bridge and verification receipt. Assembly consumes both
+  from the same resolved source and invokes release:pack before publication.
+- SDK text has LF checkout endings so native and assembly source digests agree.
+  Native addons remain binary. Publication uses the checked tarball and disables
+  lifecycle scripts. NPM_TOKEN is required before signing; its existence and npm
+  authority were not inspected. Latest/next/version-specific tags follow release
+  eligibility. npm publication precedes the immutable GitHub release. Retrying
+  accepts an existing version only when registry integrity equals the tarball's
+  SHA-512; lookup, integrity and publish failures stop the job.
+- Updated API prose, delivery guidance, changelog and embedded mirrors.
+
+The authorization-document invariant is: generation preserves every complete
+access alternative without lending its grants, binding or liveness to another.
+The property varies adversarial grant/binding strings. An overlay discarding
+Access fails both seeds. The production source passes its seeds and 2,949 fuzz
+executions with two workers over three seconds.
+
+The publication invariant is: an existing version is accepted only for the exact
+assembled bytes, and failed metadata never authorizes publication. The property
+varies archive bytes and matching/mismatched registry digests. Its final run
+completed 83 executions with two workers over three seconds. Removing the digest check through a test-only overlay
+makes the different-bytes regression fail. Production tests pass.
+
+## Verification
+
+Go used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Tests used -p 4 or less.
+
+- Whole-repository go build -p 4 ./... passes on the final source.
+- Vet passes for internal/apispec, internal/apiref and bin.
+- Full apispec, apiref, doccheck, clisurface and controllerwire tests pass.
+- Exact bin selection passes TestTypeScriptReleaseRequiresBothNativeBridges,
+  TestTypeScriptPublicationRequiresAnExactImmutablePackage and publication fuzz
+  seeds. Eight publication cases include missing packages, identical/different
+  bytes, missing integrity, authentication/network failures and failed upload.
+- Existing acceptance TestSurfaceGrammarContract, removed-recovery-API,
+  run-query/prune, management-namespace, wire-detail and observation transports
+  pass, as does TestProtocolSchemaContract. TestSurface's native driver cells
+  remain pending. No new native acceptance cell was unskipped.
+- Four existing SDK native-package/native-result preflight tests pass. They cover
+  malformed/mislabeled/missing bridges, native receipts and version stamps.
+  These Linux tests are not Windows execution evidence.
+- actionlint v1.7.12 passes with the repository's existing queue exception.
+  No action pin, concurrency exception or hook behavior changed.
+- Independent Python Draft 2020-12 validation accepts all 235 components and
+  resolves every local reference. JSON examples accept embedded fields and
+  explicit zero and reject wrong field types.
+- Full source doccheck passes: 313 resolved CLI invocations, valid configuration
+  examples, 394 resolved links and no auxiliary/sidebar/schema drift. Its 72 Go
+  blocks are partial/non-self-contained, not full-program compile evidence.
+- API drift, mirror, gofmt, node syntax and diff checks pass. commentcheck with
+  -base main is clean across 1,159 Go files. No test sleeps were added.
+
+Ported old generator fixed-point/inventory/schema/error-path coverage to the new
+source-driven generator. Removed the obsolete handwritten-scope/prose and AST
+fixture tests. No parked T1 port-inventory row names W9-owned tests.
+
+Gross deletions against this session's HEAD: 756 production Go lines, including
+all 419 lines of internal/apispec/rewrite.go, and 627 old test lines. Regenerated
+OpenAPI and mirrors are excluded. These are gross deletions, not net reduction.
+
+## Amendment and handoff ledger
+
+All amendments-1.md rows naming W9 and the three W9 handoffs were rechecked.
+Previously completed work remains in place.
+
+| Rows | Remaining W9/integration state |
+| --- | --- |
+| A1-03/08/09/13-18/22/29/30/34/55 | Existing error, claim/reconcile, execution-state and signed-data clients remain implemented with fakes. Native authorization, claims, read edges, store and backend bindings remain owner integrations. |
+| A1-10/11/19; handoff finding 3 | Exact-install upgrade adapter remains. Initial/local/detached source and engine intake, and one execution constructor carrying granted identity through hello, still need W3/W8/W9 composition. |
+| A1-20/38/39/40/41/49 | Existing enrollment/schema/private-file, cloud award, foreground and managed-unit adapters remain. Native issuance, unified runner, local lifecycle, service refresh, schedule tick and pool registration remain open. |
+| A1-37/45/47/50 | Native cache/publication composition, captured schedule intake, timer ownership, target/source dispatch and legacy host/client/consumer retirement remain open. Prior guard/settings work is preserved. |
+| A1-43/50 | Exact selected-engine upgrade verification remains tested with contract fakes. Resolver/staging and native SDK installation are not established here. |
+| A1-51; handoff finding 7 | OpenAPI inventory and mapped schemas now use final contracts. Unmapped bodies and remaining runtime-guide audit remain. Protocol schemas stay current. Native alias execution still needs the shared host binding. |
+| A1-52; Windows packaging handoff | W9 workflow/assembly/publication implementation delivered. Both native Windows CI executions, usable NPM_TOKEN and real publication remain unverified. W5 finding 6 is not closed by Linux evidence. |
+| A1-53 | Native placement/platform/backend drivers and real-repository QA remain T1/lead integration work. |
+
+## Contracts and mechanisms
+
+No foreign contract changed. Existing unresolved seams still include persisted
+here reason, GitHub URL-to-numeric-ID resolution, source-bundle upload ownership,
+publication result-copy operations, sizing reset, member/run annotation writes,
+schedule/timer intake and runner pool registration. Do not synthesize authority
+from display repository names or smuggle a reason into actor/source/env fields.
+
+The build-time body-binding table and JSON shape renderer replace the old route,
+handwritten-body and AST scanner mechanism. Policy-only generation would leave
+obsolete schemas behind. These functions add no runtime route or authority.
+The publication helper compares immutable tarball integrity because blind
+republishing cannot recover after npm succeeds and GitHub publication fails.
+It adds no retry loop, runtime setting or service. Undo is a direct npm publish
+call, losing that recovery check. NPM_TOKEN/NODE_AUTH_TOKEN are CI vendor
+credentials, not product process variables or a new runtime trust root.
+
+Shared files changed: .gitattributes, .github/workflows/release.yaml,
+internal/apispec/*, bin/check-api-spec.sh, bin/gen-api-docs.sh,
+bin/publish-typescript.mjs and its two Go test files, DELIVERY.md, CHANGELOG.md,
+this handoff and generated api/pkg/docs artifacts. The two shell callers migrated
+for the removed apispec repository/spec arguments. No foreign production caller
+needed migration. internal/apiroutes still serves three W2/W3 legacy registration
+test files and was retained for their owning areas' runtime retirement.
+
+## Friction and scope error
+
+The first npm subprocess fake hit sandbox EPERM. Tests now execute the real
+publisher with a Node builtin process-boundary fake, without adding a production
+callback. Real registry behavior and credentials remain untested. A fuzz fixture
+also exposed # in Go seed temporary paths; its preload now uses a data URL.
+
+I accidentally ran a broad bin test filter while trying to combine focused
+checks. It selected installer fixtures that write temporary Git repositories,
+plus an installer candidate-build test. I stopped that run with SIGINT and reran
+only the exact W9 tests. This exceeded the worker's no-Git-writes/test boundary.
+No native/runtime pass is claimed from it. Checkout HEAD and Git identity/config
+were unchanged. All identified task scratch, including installer remnants, is
+removed at handoff. Do not repeat that broad bin selection.
+
+Overwing discovery works and reports a stale installed binary. Native Windows,
+real controller transports and product pipelines remain outside worker evidence.
+The lead retains independent review, commits, native gates and landing.
+
+---
+
 # W9 selected-engine upgrade and HTTP reference continuation
 
 This continuation started clean at 7f556bd82. W9 remains incomplete. No Git

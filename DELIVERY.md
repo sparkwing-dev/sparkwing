@@ -50,6 +50,28 @@ The five-minute target includes runner queueing and publication. It has not
 yet been measured for this workflow; local fixtures establish its contracts,
 not hosted latency.
 
+TypeScript SDK publication also requires native Windows x64 and arm64 jobs.
+Each uses matching Node, Go and MSVC tools, builds its protocol bridge, runs
+`TestNativeProtocol` and `TestNativeConformance` without skips, and uploads the
+bridge with its verification receipt. Both jobs check out the resolved release
+source. SDK text uses LF endings so source digests agree across operating systems.
+Assembly checks both receipts against that source and the engine release version,
+then packs the SDK. The publication job depends on assembly and publishes that
+tarball without rebuilding it. Stable releases eligible for GitHub Latest use the
+npm `latest` tag. Prereleases use `next`, and older stable rebuilds use a
+version-specific `release-` tag.
+
+npm publication runs before the immutable GitHub release becomes public. A retry
+accepts an existing SDK version only when its registry integrity matches the packed
+tarball. Different bytes, missing integrity, failed lookup and failed publication
+stop the job. Package lifecycle scripts run during assembly, with publishing scripts
+disabled when uploading the checked tarball.
+
+The release repository needs an `NPM_TOKEN` Actions secret authorized to publish
+`@sparkwing/sdk`. An empty secret fails before the publication job signs assets. Native workflow
+definitions and local graph checks do not establish Windows runtime support.
+Both Windows jobs must execute successfully before that evidence is claimed.
+
 ### Check tiers
 
 Canonical hosted jobs retain a `canonical-timings` JSON artifact for 30 days
