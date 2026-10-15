@@ -5808,32 +5808,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "429": {description: "The team's day is spent; Retry-After names the seconds until midnight UTC."}
 
-  /internal/egress/totals:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Keep a service's day and month egress totals.
-      description: |
-        Only the cache's `storage.count` service token reaches it. Each
-        stored total keeps the larger of itself and what the call reports, and the answer is
-        the stored totals, so a restarted cache reports zeros to read back
-        where its day and month stood.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EgressTotals"
-      responses:
-        "200":
-          description: The stored totals.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/EgressTotals"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
   /api/v1/team/billing:
     get:
       x-sparkwing-scope: runs.read
@@ -7926,17 +7900,6 @@ components:
         event_bytes: {type: integer, format: int64, description: "What the team's retained run events hold."}
         cache_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the cache, as the controller counts it."}
         log_bytes: {type: integer, format: int64, description: "What the team stores in log segments and holds reserved, as the controller counts it."}
-    EgressTotals:
-      x-sparkwing-go-type: pkg/store.EgressTotals
-      type: object
-      description: What one service sent in a UTC day and in that day's month.
-      required: [service, day, month]
-      properties:
-        service: {type: string}
-        day: {type: string, description: "2006-01-02"}
-        day_bytes: {type: integer, format: int64}
-        month: {type: string, description: "2006-01"}
-        month_bytes: {type: integer, format: int64}
     ComputeLimits:
       x-sparkwing-go-type: pkg/controller.computeLimitsJSON
       type: object

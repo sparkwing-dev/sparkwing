@@ -186,7 +186,6 @@ var apiWriteRoutes = []string{
 	"POST /internal/storage/commit",
 	"POST /internal/storage/release",
 	"POST /internal/downloads/charge",
-	"POST /internal/egress/totals",
 	"GET /api/v1/signups",
 	"PUT /api/v1/signups",
 	"GET /.well-known/jwks.json",

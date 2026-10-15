@@ -76,6 +76,8 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store + controller (Breaking):** Remove the cache service's `POST /internal/egress/totals` endpoint and `Store.RecordEgressTotals` / `PruneEgressTotals`. Cache-service totals stay in memory. Tenant usage uses additive replica rows.
+- **store:** Record lookups with `VerifiedDefaultOnly` exclude entries without persisted verified default-branch evidence before reading their bytes. Remote-cache credentials retain that restriction even when the request flag is false.
 - **store + controller (Breaking):** Remove `SetNodeArtifactManifestCharged` from Store and Tenant and the legacy `artifact-manifest` endpoint. Records and result commits own manifest publication. Verified blob uploads own byte and object quota charges, so publishing another record pointer adds no storage usage.
 - **store (Breaking):** Retained-storage billing uses `Operator.ChargeRetainedStorage` under a maintenance lease and counts unique blobs plus committed log bytes. A team's free allowance applies once to the combined total, and billing watermarks commit with ledger charges. The principal-based `Store.ChargeRetainedStorage` API is removed.
 - **runner + cli:** A guard that names `git:branch=default` refuses the run when the repository's default branch cannot be resolved, instead of treating the token as unmatched

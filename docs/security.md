@@ -751,8 +751,8 @@ with `--disable-proxy`, which drops `/proxy/` and `/stats`, and
 route to.
 
 In the other direction the cache counts each team's storage and downloads on
-the controller's `/internal/storage/...`, `/internal/downloads/charge` and
-`/internal/egress/totals` routes with a `service` token holding only the
+the controller's `/internal/storage/...` and `/internal/downloads/charge`
+routes with a `service` token holding only the
 `storage.count` scope, the file `controller-token` in its `--credentials-dir`.
 It is an ordinary hashed row in the tokens table: `sparkwing cluster tokens
 list --type service` shows it, and rotating it is minting a new one and

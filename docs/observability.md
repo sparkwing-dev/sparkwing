@@ -948,14 +948,9 @@ store on the maintenance sweep and reloads both at startup, so a restart
 resumes the month and the day rather than hiding a crash loop's spend from
 the alarm, and no response costs a store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
-on every tick. A cache with `--controller` keeps its own totals for the
-UTC day and the UTC month in the controller's database with
-`POST /internal/egress/totals`, written at most once a minute and at
-shutdown and read back at start, so a restart keeps the day's alarm
-and `global_month_bytes` counting. Each team's download day is the
-controller's own row and needs no saving. A cache without a controller
-counts in memory alone: its counters are per process and start over on a
-restart.
+on every tick. Each team's download day is the controller's own row and
+needs no saving. Cache-service counters remain in memory and start over on
+restart. The controller does not accept cache-service egress-total reports.
 
 Read the controller's meter from `/metrics` (`sparkwing_egress_day_bytes`
 and `sparkwing_egress_daily_alarm`); `/api/v1/health` reports only whether

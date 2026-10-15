@@ -148,9 +148,6 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	if _, err := s.store.PruneDownloadDays(ctx, utc.AddDate(0, 0, -7).Format("2006-01-02")); err != nil {
 		errs = append(errs, fmt.Errorf("prune download days: %w", err))
 	}
-	if _, err := s.store.PruneEgressTotals(ctx, utc.AddDate(0, -1, 0).Format("2006-01")); err != nil {
-		errs = append(errs, fmt.Errorf("prune egress totals: %w", err))
-	}
 	return errors.Join(errs...)
 }
 

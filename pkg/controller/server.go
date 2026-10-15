@@ -1112,7 +1112,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
 	router.Handle("POST /api/v1/data/download", noStore(http.HandlerFunc(s.handleDataDownload)))
-	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))

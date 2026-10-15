@@ -51,7 +51,10 @@ These declarations leave transaction implementation with W1.
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
 against the exact job/attempt/generation, owner lease or published attempt.
 `RecordLookup.VerifiedDefaultOnly` selects only the authorized repository's
-verified default-branch entries. The default ref comes from persisted verified
+verified default-branch entries before required bytes or member metadata are read.
+An excluded record is a miss. The evidence retains the App event key, SHA and
+matching verified ref/default branch. A bound reader's sealed default branch
+must match when present. The default ref comes from persisted verified
 facts. Setting the flag false cannot weaken DataRemoteCache authority. Returned
 `RecordLookupResult.Members` includes committed path/size/mode metadata after
 read-edge checks. Internal member reads confer no client read authority.
@@ -248,6 +251,13 @@ subject and run. `ReadLogSegments` and `LogTransport.ReadLog` reauthorize the sa
 subject, proxy bytes through the controller, meter egress and apply the log
 exception to download caps. Persisted segments fill gaps or stalls in the ring.
 
+The `storage-hasmany-read-set/store-data-sqlite` proof uses exact imported job
+attempts under a preseeded publication capability. It checks hidden unrelated and
+foreign existence, budget expiry, reservation and failed-commit refusal, independent
+verified receipts, deduplicated replica charging and persistence after reopening.
+Presence metadata consumes neither download nor egress bytes. Physical verification,
+job-holder transports and native placements remain integration obligations.
+
 The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
 immutable job segments, transactional rollback of a gapped batch, reopening,
 offset reads, final incomplete seals, exact replay, retained-byte accounting,
@@ -367,6 +377,10 @@ from a run. Removing a run must not restore spent credit. Award snapshots surviv
 capability pruning. Plan/eval compute has no minimum; job compute retains its
 60-second minimum; customer-runner waits produce no billable interval. Billing
 keys are configuration, so test-key and live-key deployments use the same schema.
+
+The cache service's egress-total endpoint, its high-water-mark store methods,
+client bridge and fake route are removed. Tenant usage has no service-selected
+counter owner.
 
 Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;

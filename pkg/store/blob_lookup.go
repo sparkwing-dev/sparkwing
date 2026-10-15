@@ -25,7 +25,7 @@ func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLooku
 	if err != nil {
 		return blob.RecordLookupResult{}, err
 	}
-	hit, err := r.lookupRecordTx(ctx, tx, a, request.Key)
+	hit, err := r.lookupRecordTx(ctx, tx, a, request)
 	if err != nil {
 		return hit, err
 	}
@@ -35,8 +35,9 @@ func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLooku
 	return hit, tx.Commit()
 }
 
-func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobActor, key blob.RecordKey) (blob.RecordLookupResult, error) {
+func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobActor, request blob.RecordLookup) (blob.RecordLookupResult, error) {
 	result := blob.RecordLookupResult{}
+	key := request.Key
 	if key.Team != string(r.tenant.team) || key.Scope.Repo != a.authority.Repo {
 		return result, blob.ErrDigestNotReadable
 	}
@@ -50,6 +51,12 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	}
 	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now())) {
 		return result, nil
+	}
+	if request.VerifiedDefaultOnly {
+		facts := record.RefFacts
+		if !facts.DefaultBranchVerified || !facts.Scope.Verified || facts.Scope.Ref == "" || facts.Scope.Ref != facts.DefaultBranch || facts.AppDeliveryKey == "" || facts.SHA == "" || (a.authority.Ref.DefaultBranch != "" && facts.Scope.Ref != a.authority.Ref.DefaultBranch) {
+			return result, nil
+		}
 	}
 	if err := blobRecordReadableTx(ctx, tx, a, key, namespace); err != nil {
 		return result, err
@@ -209,7 +216,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				return result, blob.ErrBudget
 			}
 			recordKey := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}, Name: name}
-			hit, err := r.lookupRecordTx(ctx, tx, a, recordKey)
+			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey})
 			if cacheMissError(err) {
 				continue
 			}
@@ -281,7 +288,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 			return result, nil
 		}
 		key := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindDepcache, Scope: blob.Scope{Repo: a.authority.Repo, Ref: fallback.ref, Key: request.Key.Key}, Name: request.Key.Name}
-		hit, err := r.lookupRecordTx(ctx, tx, a, key)
+		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key})
 		if cacheMissError(err) {
 			continue
 		}

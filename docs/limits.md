@@ -190,7 +190,6 @@ second run over the same data removes nothing more.
 | Cron fire history | beyond 200 per schedule | controller, on each fire | none |
 | Egress usage rows | older than 13 months | controller, monthly | none |
 | Team download days | older than 7 days | controller, hourly storage pass | none |
-| The cache's egress totals | days and months before last month | controller, hourly storage pass | none |
 | Storage reservations | an hour after a writer took one it never committed or released | controller, on the team's next write and in the hourly storage pass | none |
 
 Every rule keys on when a run finished or when a file or object was last

@@ -770,13 +770,6 @@ type DownloadCharged struct {
 
 	CapBytes int64
 }
-type EgressTotals struct {
-	Service    string
-	Day        string
-	DayBytes   int64
-	Month      string
-	MonthBytes int64
-}
 type EgressUsage struct {
 	Principal string
 
@@ -2427,7 +2420,6 @@ func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ []NodeLog, err error)
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
-func (s *Store) PruneEgressTotals(ctx context.Context, month string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, error)
@@ -2445,7 +2437,6 @@ func (s *Store) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error)
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
-func (s *Store) RecordEgressTotals(ctx context.Context, t EgressTotals) (_ EgressTotals, err error)
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
