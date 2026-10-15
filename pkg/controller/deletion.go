@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -240,7 +239,7 @@ var teamPurgeDelay = 2 * max(tokenCacheTTL, tenantCacheTTL)
 // verified by its signature alone and writes into the team's storage until it
 // expires, so the cache tree and logs are deleted once more after the
 // longest-lived of them has lapsed.
-const teamRecheckDelay = max(authwire.CacheGrantTTL, logSegmentURLTTL) + time.Hour
+const teamRecheckDelay = logSegmentURLTTL + time.Hour
 
 // safety: A stopped replica keeps a deletion lease only until another can resume it.
 const teamDeletionLease = 5 * time.Minute

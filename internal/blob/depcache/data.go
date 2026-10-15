@@ -43,7 +43,14 @@ func (b *dataBackend) lookup(ctx context.Context, key string) (blob.DepcacheHit,
 	if err := ctx.Err(); err != nil {
 		return blob.DepcacheHit{}, err
 	}
-	return b.data.Records.LookupDepcache(ctx, blob.DepcacheLookup{Authority: b.data.Authority, Key: blob.DepcacheKey{Repo: b.data.Authority.Repo, Ref: b.data.Authority.Ref.Scope, Name: key, Key: key}, Budget: b.data.Budget})
+	hit, err := b.data.Records.LookupDepcache(ctx, blob.DepcacheLookup{Authority: b.data.Authority, Key: blob.DepcacheKey{Repo: b.data.Authority.Repo, Ref: b.data.Authority.Ref.Scope, Name: key, Key: key}, Budget: b.data.Budget})
+	if err != nil {
+		return blob.DepcacheHit{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return blob.DepcacheHit{}, err
+	}
+	return hit, nil
 }
 
 func (b *dataBackend) Exists(ctx context.Context, key string) (bool, error) {
@@ -65,14 +72,20 @@ func (b *dataBackend) Fetch(ctx context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
+	return restoreArchive(ctx, r, dir)
+}
+
+func restoreArchive(ctx context.Context, r blob.VerifiedReader, dir string) (n int64, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, errors.Join(err, r.Close())
+	}
 	f, err := os.CreateTemp("", "sparkwing-depcache-*")
 	if err != nil {
 		return 0, errors.Join(err, r.Close())
 	}
-	defer os.Remove(f.Name())
-	defer f.Close()
-	n, err := io.Copy(f, io.LimitReader(r, limits.CacheArchiveBytes+1))
-	err = errors.Join(err, r.Close())
+	defer func() { err = errors.Join(err, f.Close(), os.Remove(f.Name())) }()
+	n, err = io.Copy(f, io.LimitReader(r, limits.CacheArchiveBytes+1))
+	err = errors.Join(err, r.Close(), ctx.Err())
 	if err != nil {
 		return n, err
 	}
@@ -86,12 +99,18 @@ func (b *dataBackend) Fetch(ctx context.Context, key, dir string) (int64, error)
 	if _, err = f.Seek(0, io.SeekStart); err != nil {
 		return n, err
 	}
-	return n, depcache.ExtractArchiveStaged(f, dir)
+	return n, depcache.ExtractArchiveStaged(ctx, f, dir)
 }
 
-func (b *dataBackend) Store(ctx context.Context, key, dir string) (int64, error) {
+func (b *dataBackend) Store(ctx context.Context, key, dir string) (size int64, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if b.data.Records == nil || b.data.Bytes == nil {
 		return 0, fmt.Errorf("dependency cache requires records and bytes")
+	}
+	if err := blob.AuthorizeUpload(b.data.Authority, b.data.Identity, blob.KindDepcache); err != nil {
+		return 0, err
 	}
 	recordKey, err := blob.ResolveWriteKey(b.data.Authority, blob.WriteScopeIntent{Kind: blob.KindDepcache, Name: key, Key: key})
 	if err != nil {
@@ -101,13 +120,12 @@ func (b *dataBackend) Store(ctx context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	defer os.Remove(f.Name())
-	defer f.Close()
+	defer func() { err = errors.Join(err, f.Close(), os.Remove(f.Name())) }()
 	sum := sha256.New()
 	if err = depcache.WriteArchive(io.MultiWriter(f, sum), dir); err != nil {
 		return 0, err
 	}
-	size, err := f.Seek(0, io.SeekCurrent)
+	size, err = f.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return 0, err
 	}
@@ -118,10 +136,22 @@ func (b *dataBackend) Store(ctx context.Context, key, dir string) (int64, error)
 		return 0, err
 	}
 	digest := blob.Digest(hex.EncodeToString(sum.Sum(nil)))
-	_, err = b.data.Bytes.Put(ctx, blob.PutRequest{Identity: b.data.Identity, Authority: b.data.Authority, Digest: digest, Size: size, Body: f})
+	receipt, err := b.data.Bytes.Put(ctx, blob.PutRequest{Identity: b.data.Identity, Authority: b.data.Authority, Digest: digest, Size: size, Body: f})
 	if err != nil {
 		return 0, err
 	}
-	_, err = b.data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Source: b.data.Identity, Authority: b.data.Authority, Key: recordKey, Digest: digest})
-	return size, err
+	if receipt.Digest != digest || receipt.Identity != b.data.Identity {
+		return 0, blob.ErrIntegrity
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	record, err := b.data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Source: b.data.Identity, Authority: b.data.Authority, Key: recordKey, Digest: digest})
+	if err != nil {
+		return 0, err
+	}
+	if record.Key != recordKey || record.Digest != digest || record.Source != b.data.Identity {
+		return 0, blob.ErrIntegrity
+	}
+	return size, nil
 }

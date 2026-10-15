@@ -53,10 +53,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/crons/{id}/pause` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/resume` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
-| `GET` | `/api/v1/data/capabilities` | `public` |
-| `POST` | `/api/v1/data/commit` | `public` |
-| `POST` | `/api/v1/data/download` | `public` |
-| `POST` | `/api/v1/data/upload` | `public` |
 | `DELETE` | `/api/v1/github-app/installations/{installation_id}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
@@ -102,7 +98,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}/request` | `admin` |
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/cache-grant` | `claim` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/cancel` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/children` | `claim` |
 | `GET` | `/api/v1/runs/{id}/children/{childID}` | `claim` |
@@ -241,11 +236,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
-| `POST` | `/internal/downloads/charge` | `public` |
-| `POST` | `/internal/egress/totals` | `public` |
-| `POST` | `/internal/storage/commit` | `public` |
-| `POST` | `/internal/storage/release` | `public` |
-| `POST` | `/internal/storage/reserve` | `public` |
 | `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
 

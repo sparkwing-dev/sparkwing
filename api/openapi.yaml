@@ -2639,13 +2639,11 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [health]
-      summary: Announce the data download and dashboard URLs a client should use.
+      summary: Announce the dashboard URL and deployment mode.
       description: |
         Any valid bearer satisfies this route, and every client that reads
-        it already holds one. A field is absent when the controller was
-        started without the matching configuration; `data_download_url` is
-        absent when the controller cannot sign downloads on the request's path;
-        a public-ingress request needs CloudFront signing configured. A co-located laptop
+        it already holds one. Dashboard is absent when no external dashboard
+        URL is configured. A co-located laptop
         deployment announces no service URLs, because there the controller
         URL is already the right answer. `multi_team` is true on a controller
         that may hold more than one team, which answers 200 even with no URL
@@ -2659,10 +2657,8 @@ paths:
                 x-sparkwing-go-type: pkg/controller.ServicesResponse
                 type: object
                 properties:
-                  data_download_url: {type: string, description: Controller endpoint for requesting signed team-object downloads.}
                   dashboard: {type: string}
                   multi_team: {type: boolean}
-                  direct_data: {type: boolean, description: Direct S3 uploads and committed-object reads are available.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: This controller announces no services.}
 
@@ -4593,19 +4589,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: The slug is taken.}
 
-  /api/v1/runs/{id}/cache-grant:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: claim or nodes.claim or triggers.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
-      responses:
-        default: {description: Undescribed.}
-
   /api/v1/invitations/{id}/accept:
     post:
       x-sparkwing-scope: authenticated
@@ -5563,192 +5546,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /internal/storage/reserve:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Reserve room in a team's cache or log store before a write.
-      description: |
-        Only the cache's `storage.count` service token may call it, for any
-        team. A free team is held to its share of the allowance, three
-        quarters for the cache and three sixteenths for logs, counting what
-        it stores and every reservation still held; a funded team is counted
-        without a limit. `up_to` grants as much of `bytes` as the team has room for,
-        zero or less asking for all of it. A reservation expires after an
-        hour unless it is committed or released.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              x-sparkwing-go-type: pkg/controller.storageReserveReq
-              required: [team, store, bytes]
-              properties:
-                team: {type: string}
-                store: {type: string, enum: [cache, logs]}
-                bytes: {type: integer, format: int64}
-                up_to: {type: boolean}
-      responses:
-        "200":
-          description: The reservation. A single-team controller answers funded with no id.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/store.StorageReservation
-                properties:
-                  reservation: {type: string}
-                  tier: {type: string, enum: [funded, free]}
-                  granted_bytes: {type: integer, format: int64}
-                  unlimited: {type: boolean}
-                  expires_at: {type: string, format: date-time}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "402": {description: The team has neither credits nor a free-tier slot.}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "413": {description: The write would pass the team's free share of this store.}
-
-  /internal/storage/commit:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Count what a write stored and drop its reservation.
-      description: |
-        `bytes` is what the write added to the store: its size, or for an
-        overwrite the difference from what it replaced, which may be
-        negative. A reservation that already expired, or that is not the
-        named team's, drops nothing and the bytes still count. Callers are
-        authorized as for the reserve route. `next_bytes` above zero also
-        reserves up to that many bytes more in the same transaction and
-        answers the new reservation, for a writer that draws many small
-        writes from one block; the commit lands even when the next block is
-        refused.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              x-sparkwing-go-type: pkg/controller.storageCommitReq
-              required: [team, store, bytes]
-              properties:
-                team: {type: string}
-                store: {type: string, enum: [cache, logs]}
-                reservation: {type: string}
-                bytes: {type: integer, format: int64}
-                next_bytes: {type: integer, format: int64}
-      responses:
-        "200":
-          description: Counted, and the next block when `next_bytes` asked for one.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/store.StorageReservation
-                properties:
-                  reservation: {type: string}
-                  tier: {type: string, enum: [funded, free]}
-                  granted_bytes: {type: integer, format: int64}
-                  unlimited: {type: boolean}
-                  expires_at: {type: string, format: date-time}
-        "204": {description: Counted.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "402": {description: "The next block was refused: the team has neither credits nor a free-tier slot. The commit landed."}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "413": {description: "The next block was refused: the team's share is spent. The commit landed."}
-
-  /internal/storage/release:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Give back a reservation whose write stored nothing.
-      description: A reservation already committed, released or expired is not an error.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              x-sparkwing-go-type: pkg/controller.storageReleaseReq
-              required: [team, reservation]
-              properties:
-                team: {type: string}
-                reservation: {type: string}
-      responses:
-        "204": {description: Released.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /internal/downloads/charge:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Charge a download to its team's UTC day.
-      description: |
-        Only the cache's `storage.count` service token reaches it. A
-        download whose size is known is charged whole before its first byte and refused when it
-        would pass the team's daily cap, `--team-daily-download-free-bytes`
-        or `--team-daily-download-funded-bytes` by whether the team pays.
-        Zero `bytes` checks that room is left. `record` charges a finished
-        stream whatever the cap says. The operator's team has no cap.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              x-sparkwing-go-type: pkg/controller.downloadChargeReq
-              required: [team, bytes]
-              properties:
-                team: {type: string}
-                bytes: {type: integer, format: int64}
-                record: {type: boolean}
-      responses:
-        "200":
-          description: The team's day after the charge.
-          content:
-            application/json:
-              schema:
-                type: object
-                x-sparkwing-go-type: pkg/store.DownloadCharged
-                properties:
-                  tier: {type: string, enum: [funded, free]}
-                  day_bytes: {type: integer, format: int64}
-                  cap_bytes: {type: integer, format: int64, description: The cap the charge was held to; zero is none.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "429": {description: "The team's day is spent; Retry-After names the seconds until midnight UTC."}
-
-  /internal/egress/totals:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Keep a service's day and month egress totals.
-      description: |
-        Only the cache's `storage.count` service token reaches it. Each
-        stored total keeps the larger of itself and what the call reports, and the answer is
-        the stored totals, so a restarted cache reports zeros to read back
-        where its day and month stood.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EgressTotals"
-      responses:
-        "200":
-          description: The stored totals.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/EgressTotals"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
   /api/v1/team/billing:
     get:
       x-sparkwing-scope: runs.read
@@ -5987,89 +5784,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/data/capabilities:
-    get:
-      x-sparkwing-scope: public
-      tags: [artifacts]
-      summary: Report whether direct uploads and committed-object downloads are available.
-      responses:
-        "200":
-          description: Direct data capabilities.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                properties:
-                  upload: {type: boolean}
-                  download: {type: boolean}
-                  source: {type: boolean}
-        "404": {description: Direct uploads are unavailable.}
-
-  /api/v1/data/upload:
-    post:
-      x-sparkwing-scope: public
-      tags: [artifacts]
-      summary: Reserve storage and sign a checksum-bound S3 PUT.
-      description: A binary or artifact requires a cache grant minted for an exact live claim. A source bundle requires a user bearer authorized to start runs before a run exists, and an empty run_id. A raw runner token cannot sign.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.directUploadRequest
-              type: object
-              required: [kind, key, size, sha256, run_id]
-              properties:
-                kind: {type: string, enum: [binary, artifact, source]}
-                key: {type: string}
-                size: {type: integer, format: int64, minimum: 1}
-                sha256: {type: string}
-                run_id: {type: string}
-      responses:
-        "200":
-          description: Pending-object PUT and required signed headers.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.DirectUploadResponse
-                type: object
-                required: [upload_id, url, headers, expires_at]
-                properties:
-                  upload_id: {type: string}
-                  url: {type: string, format: uri}
-                  headers: {type: object, additionalProperties: {type: string}}
-                  expires_at: {type: string, format: date-time}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: The immutable object already exists.}
-        "413": {description: The upload exceeds its size or storage allowance.}
-        "429": {description: The team already holds 100 uncommitted uploads.}
-
-  /api/v1/data/commit:
-    post:
-      x-sparkwing-scope: public
-      tags: [artifacts]
-      summary: Verify the pending S3 object and publish it under an immutable key.
-      description: Requires the same live claim-bound cache grant, or for a pretrigger source bundle the same user bearer, used to reserve the upload.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.directCommitRequest
-              type: object
-              required: [upload_id, run_id]
-              properties:
-                upload_id: {type: string}
-                run_id: {type: string}
-      responses:
-        "204": {description: The committed object is visible to authorized readers.}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: The pending object is absent or its final key holds other content.}
-        "422": {description: The pending object's size or checksum differs from the reservation.}
-
   /api/v1/team/build-trust:
     get:
       x-sparkwing-scope: runs.read
@@ -6103,50 +5817,6 @@ paths:
       responses:
         "200": {description: The stored build trust setting.}
         "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/data/download:
-    post:
-      x-sparkwing-scope: public
-      tags: [artifacts]
-      summary: Sign a short-lived URL for one team object.
-      description: >-
-        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.dataDownloadRequest
-              type: object
-              required: [kind, key]
-              properties:
-                kind: {type: string, enum: [binary, artifact, source]}
-                key: {type: string, description: Team-relative object key.}
-      responses:
-        "200":
-          description: The signed URL and the object metadata.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.DataDownloadResponse
-                type: object
-                required: [url, sha256, size, expires]
-                properties:
-                  url: {type: string, format: uri}
-                  sha256: {type: string, description: Stored object digest; binary downloads always include a valid SHA-256 digest.}
-                  size: {type: integer, format: int64}
-                  expires: {type: string, format: date-time}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "429":
-          description: The team's daily download cap was reached; `Retry-After` gives the delay before retrying.
-          headers:
-            Retry-After:
-              schema: {type: integer}
-              description: Seconds until the cap resets.
-        "503": {description: No signer is configured for the selected request path.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/attempt:
     parameters:

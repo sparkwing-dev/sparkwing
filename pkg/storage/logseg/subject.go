@@ -272,7 +272,6 @@ func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error {
 	subject := cloneSubject(u.data.Subject)
 	m.Subject = &subject
 	m.Version = ManifestVersion
-	m.Run, m.Node, m.Attempt, m.Generation = "", "", 0, 0
 	m.Bytes, m.Lines, m.FirstSeq, m.LastSeq = u.bytes, u.lastSeq(), 0, u.lastSeq()
 	if len(u.segments) > 0 {
 		m.FirstSeq = u.segments[0].FirstSeq

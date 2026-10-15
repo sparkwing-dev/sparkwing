@@ -6,6 +6,13 @@ that identity before requesting URLs. A job attempt and a trigger, plan or eval
 unit use separate object prefixes. Eval includes its own lease generation and
 the immutable source generation.
 
+`Options.Subject` is required. The sink copies it before opening its spool,
+so changes to the caller's value cannot retag the log. Every stored manifest
+requires a valid subject. Flat run, node, attempt and generation fields are
+removed. `Open` checks that the manifest's subject produces the requested
+`SubjectPrefix`. `SealAbandoned` checks that binding before reading or writing
+objects. `AttemptPrefix` is removed.
+
 `SubjectUploader` verifies compressed bytes, raw size and line coverage before
 signing. Batches contain up to `limits.LogUploadBatch` segment slots and one
 manifest URL. Every URL carries its required signed headers. A batch must
@@ -65,6 +72,7 @@ These proofs do not count as native acceptance receipts.
 The store's transactional authorization and log persistence, controller routes,
 egress settlement, retention scheduling and host bindings still need integration.
 S3 log signing still needs admission for future slots whose payload size and
-digest are unknown. The existing controller and host paths still
-use the older attempt-only uploader and manifest fields. Those paths have no
-adapter into the tagged implementation.
+digest are unknown. The existing job-only controller and host transport uses
+tagged manifest identities and prefixes. It still signs individual segments.
+Owner-unit transport, batch-signing routes and transactional record bindings
+remain separate integration work.

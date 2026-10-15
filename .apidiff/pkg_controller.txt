@@ -36,11 +36,6 @@ type BoundCipher interface {
 
 	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
-type CacheGrantResponse struct {
-	Grant     string
-	Team      string
-	ExpiresAt time.Time
-}
 func CacheObjectMaxAge(team string) time.Duration
 const CardBillingCapability = "card-billing-v1"
 const CardBillingInterval = 30 * time.Second
@@ -55,7 +50,6 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
-const ClaimCacheGrantTTL = 5 * time.Minute
 const ClaimPollInterval = 500 * time.Millisecond
 const CloudRetentionDays = 30
 func CompliantClaimPollsPerMinute() int
@@ -79,12 +73,17 @@ type Dashboard struct {
 
 	InsecureCookies bool
 }
-type DataDownloadResponse struct {
-	URL     string
-	SHA256  string
-	Size    int64
-	Expires time.Time
+type DataBinding struct {
+	Authority blob.Authority
+	Signer    blob.DataSigner
+	Records   blob.RecordStore
 }
+type DataController struct {
+	Store   *store.Store
+	Objects blob.ObjectBackend
+}
+func (s *DataController) BindData(ctx context.Context, authorized capability.Authorized) (DataBinding, error)
+func (s *DataController) DataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error)
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
 const DefaultLiveLogNodeBytes = 512 << 10
@@ -94,28 +93,34 @@ const DefaultRunnersPerToken = 64
 const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 const DefaultTeamDailyDownloadFreeBytes int64 = 5 << 30
 const DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
-type DirectUploadResponse struct {
-	UploadID  string
-	URL       string
-	Headers   map[string]string
-	ExpiresAt time.Time
-}
 const DisputeConflictCode = "dispute_conflict"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
+type Endpoint struct {
+	Method         string
+	Pattern        string
+	Authentication capability.Authentication
+	Decode         func(*http.Request) (capability.RequestEvidence, error)
+	Verify         func(*http.Request) error
+	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
+}
 type EngineController struct{ Store *store.Store }
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (s *EngineController) AcceptPlan(ctx context.Context, authorized capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
 func (s *EngineController) Cancel(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
+func (s *EngineController) CancelJob(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error)
 func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
+func (s *EngineController) Exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error)
 func (s *EngineController) Finish(ctx context.Context, authorized capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error)
+func (s *EngineController) ReadFailure(ctx context.Context, authorized capability.Authorized) (*nodeproto.JobFailure, error)
 func (s *EngineController) ReconcileJob(ctx context.Context, authorized capability.Authorized, body controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
 func (s *EngineController) Renew(ctx context.Context, authorized capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
 func (s *EngineController) Retry(ctx context.Context, authorized capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
 func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error)
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error)
+func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (s *EngineController) TransitionJob(ctx context.Context, authorized capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
 func EnsureCheckoutToken(ctx context.Context, st *store.Store, raw string, now time.Time) (bool, error)
@@ -205,6 +210,7 @@ const MaxHonoredIdleClaimPoll = 8 * time.Second
 const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
+func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter
 const NoPayableChargeCode = "no_payable_charge"
 type OIDCTokenRequest struct {
 	Audience string
@@ -232,6 +238,11 @@ func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, erro
 func OperatorReason(reason string) (string, error)
 const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 const PaymentWarnedCode = "payment_warned"
+type PolicyRouter struct{}
+func (router *PolicyRouter) Register(endpoint Endpoint) error
+func (router *PolicyRouter) Registrations() []string
+func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request)
+func (router *PolicyRouter) Validate() error
 type Principal struct {
 	Name        string
 	Kind        string
@@ -257,6 +268,12 @@ type RequestBudget struct {
 	RunnersPerToken     int
 }
 const RequestIDHeader = "X-Request-Id"
+type RouteAuthorization struct {
+	Authenticator capability.Authenticator
+	Bindings      capability.BindingChecker
+	Identify      func(*http.Request) (capability.Presentation, error)
+	CheckCSRF     func(*http.Request, capability.Principal) error
+}
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
@@ -268,7 +285,6 @@ const ScopeRunsRead = store.ScopeRunsRead
 const ScopeRunsState = store.ScopeRunsState
 const ScopeRunsWrite = store.ScopeRunsWrite
 const ScopeSecretsRead = store.ScopeSecretsRead
-const ScopeStorageCount = store.StorageCountScope
 const ScopeTeamAdmin = store.ScopeTeamAdmin
 const ScopeTriggersClaim = store.ScopeTriggersClaim
 const ScopeTriggersRead = store.ScopeTriggersRead
@@ -296,7 +312,6 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
-func (s *Server) WithCacheGrantKey(key string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
@@ -336,13 +351,9 @@ func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyAddr(addr string) *Server
 type ServicesResponse struct {
-	DataDownloadURL string
-
 	Dashboard string
 
 	MultiTeam bool
-
-	DirectData bool
 }
 const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"

@@ -26,7 +26,7 @@ const (
 	KindSourceBundle Kind = "source_bundle"
 )
 
-// safety: Kinds is the complete record-kind registry for schema and wire drift checks.
+// Kinds is the complete record-kind registry for schema and wire drift checks.
 var Kinds = []Kind{KindOutput, KindManifest, KindMemo, KindDepcache, KindBinary, KindSourceBundle}
 
 // safety: Blob is existence truth; object storage alone cannot establish a live blob.
@@ -132,7 +132,7 @@ const (
 	EdgeMemoScope         EdgeKind = "memo_scope"
 )
 
-// safety: EdgeKinds is complete so authorization tests cannot silently omit an edge.
+// EdgeKinds is complete so authorization tests cannot silently omit an edge.
 var EdgeKinds = []EdgeKind{EdgeOwnUpload, EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope}
 
 // safety: ReadEdge records a server-derived ancestry or scoped-cache entitlement.
@@ -158,7 +158,7 @@ type Authority struct {
 	Attempt       runspec.Optional[runspec.AttemptIdentity]
 	Repo          runspec.RepoKey
 	Ref           RefFacts
-	// Upload binds owner and publication writes, which have no job attempt.
+	// Upload binds owner and publication writes, which may have no job attempt.
 	Upload runspec.Optional[UploadIdentity]
 }
 
@@ -356,7 +356,7 @@ type RestoreRule struct {
 	RequireVerifiedProvenance bool
 }
 
-// safety: DepcacheRestoreOrder is the complete ordered restore policy.
+// DepcacheRestoreOrder is the complete ordered restore policy.
 var DepcacheRestoreOrder = []RestoreRule{{RestoreOwnRef, false}, {RestorePRBase, true}, {RestoreDefaultBranch, true}}
 
 // safety: DepcacheLookup never accepts a caller-selected repo outside its data grant.
@@ -391,7 +391,7 @@ type FailureRule struct {
 	Action FailureAction
 }
 
-// safety: FailureRules is the complete per-use failure policy.
+// FailureRules is the complete per-use failure policy.
 var FailureRules = []FailureRule{{UseMemo, FailureMiss}, {UseStaging, FailureError}, {UseOutput, FailureError}, {UseDepcache, FailureCold}}
 
 // safety: BuildTrust preserves the team-owned opt-in for local binary provenance.
@@ -441,16 +441,16 @@ type PublishPolicy struct {
 	Trust             BuildTrust
 }
 
-// safety: ErrBudget follows FailureRules instead of being treated as successful absence.
+// ErrBudget follows FailureRules instead of being treated as successful absence.
 var ErrBudget = errors.New("blob budget exhausted")
 
-// safety: ErrNotFound makes missing committed bytes loud at required-read boundaries.
+// ErrNotFound makes missing committed bytes loud at required-read boundaries.
 var ErrNotFound = errors.New("blob not found")
 
-// safety: ErrIntegrity prevents corrupt bytes from being accepted as a successful read.
+// ErrIntegrity prevents corrupt bytes from being accepted as a successful read.
 var ErrIntegrity = errors.New("blob integrity mismatch")
 
-// safety: ErrDigestNotReadable maps through C2 to forbidden with reason digest_not_readable.
+// ErrDigestNotReadable maps through C2 to forbidden with reason digest_not_readable.
 var ErrDigestNotReadable = errors.New("digest_not_readable")
 
 // safety: RecordLookup combines a logical key with authority instead of accepting a bare CAS digest.
@@ -459,7 +459,8 @@ type RecordLookup struct {
 	Authority Authority
 	Key       RecordKey
 	Budget    Budget
-	// VerifiedDefaultOnly resolves the ref from sealed default-branch evidence.
+	// VerifiedDefaultOnly requires the store to resolve sealed default-branch evidence.
+	// The caller's key cannot manufacture that evidence or widen its repo read scope.
 	VerifiedDefaultOnly bool
 }
 
@@ -555,7 +556,7 @@ type UploadRule struct {
 	RecordKinds        []Kind
 }
 
-// safety: UploadRules is the complete identity/record-kind policy, rechecked at commit.
+// UploadRules is the complete identity/record-kind policy, rechecked at commit.
 // Publication with an imported attempt follows the final row rather than non-job publication.
 var UploadRules = []UploadRule{
 	{UploadJob, true, false, false, []Kind{KindOutput, KindManifest, KindMemo, KindDepcache, KindBinary, KindSourceBundle}},

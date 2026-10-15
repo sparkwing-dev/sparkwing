@@ -94,7 +94,6 @@ type Server struct {
 	externalURL  string
 	oidc         oidcState
 
-	cacheGrantKey                string
 	downloadFree, downloadFunded int64
 
 	mailer             mailer.Mailer
@@ -260,13 +259,6 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 // the announcement.
 func (s *Server) WithDashboardURL(url string) *Server {
 	s.dashboardURL = url
-	return s
-}
-
-// WithCacheGrantKey sets the key the controller signs cache grants with and
-// verifies a grant presented to it with. Empty mints and accepts no grants.
-func (s *Server) WithCacheGrantKey(key string) *Server {
-	s.cacheGrantKey = key
 	return s
 }
 
@@ -848,7 +840,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/runs/{id}/cache-grant", newClaimSensitiveRoute(claimSourceKinds, nil, s.handleRunCacheGrant(s.runTeam)).orElse(requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim)))
 	mux.Handle("POST /api/v1/runs/{id}/source-credential", newClaimSensitiveRoute(claimSourceCredentialKinds, nil, http.HandlerFunc(s.handleRunSourceCredential)))
 	mux.Handle("POST /api/v1/runs/{id}/oidc-token", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(handleClaimOIDCToken)).orElse(requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim)))
 
@@ -1070,21 +1061,10 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: the cache proves itself with its storage.count service token,
-	// which these handlers check.
-	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
-	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
-	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
-	router.HandleFunc("GET /api/v1/data/capabilities", s.handleDirectCapabilities)
 	// safety: these carry a URL signature this process minted, not a bearer.
 	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", s.handleOutputBlobPut)
 	router.HandleFunc("GET /api/v1/outputs/objects/{key...}", s.handleOutputBlobGet)
 	router.HandleFunc("PUT /api/v1/log-segments/{key...}", s.handleLogSegmentPut)
-	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
-	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
-	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
-	router.Handle("POST /api/v1/data/download", noStore(http.HandlerFunc(s.handleDataDownload)))
-	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))

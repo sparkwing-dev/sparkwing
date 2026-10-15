@@ -72,8 +72,10 @@ func TestFilesystemSignedCommit(t *testing.T) {
 	}
 }
 
-var _ io.Closer = (*blob.Filesystem)(nil)
-var _ capability.DataSigner = (*blob.Filesystem)(nil)
+var (
+	_ io.Closer             = (*blob.Filesystem)(nil)
+	_ capability.DataSigner = (*blob.Filesystem)(nil)
+)
 
 func TestFilesystemRefusesInvalidTransfers(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)

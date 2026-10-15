@@ -2,10 +2,6 @@ package storeurl
 
 import (
 	"context"
-	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -71,99 +67,15 @@ func TestOpenArtifactStore_FS(t *testing.T) {
 	}
 }
 
-func TestOpenArtifactStore_HTTP(t *testing.T) {
-	t.Parallel()
-	blobs := map[string]string{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := strings.TrimPrefix(r.URL.Path, "/bin/")
-		switch r.Method {
-		case http.MethodPut:
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			blobs[key] = string(body)
-			w.WriteHeader(http.StatusCreated)
-		case http.MethodGet:
-			body, ok := blobs[key]
-			if !ok {
-				http.NotFound(w, r)
-				return
-			}
-			_, _ = w.Write([]byte(body))
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	}))
-	defer srv.Close()
-
-	s, err := OpenArtifactStore(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if err := s.Put(context.Background(), "artifact-key", strings.NewReader("payload")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	rc, err := s.Get(context.Background(), "artifact-key")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer rc.Close()
-	got, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if string(got) != "payload" {
-		t.Fatalf("payload = %q, want payload", got)
-	}
-}
-
 func TestOpen_BadScheme(t *testing.T) {
 	t.Parallel()
 	if _, err := OpenArtifactStore(context.Background(), "no-scheme"); err == nil {
 		t.Error("expected err for missing scheme")
 	}
-	_, err := OpenArtifactStore(context.Background(), "ftp://x")
-	if err == nil || !strings.Contains(err.Error(), "ftp") {
-		t.Errorf("err = %v, want mention of ftp", err)
-	}
-	_ = errors.New
-}
-
-func TestOpenArtifactStore_HTTPSendsTheCacheGrant(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_GRANT", "s3cret")
-	seen := map[string]string{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen[r.Method] = r.Header.Get("Authorization")
-		if r.Method == http.MethodPut {
-			w.WriteHeader(http.StatusCreated)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	s, err := OpenArtifactStore(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	ctx := context.Background()
-	if err := s.Put(ctx, "artifact-key", strings.NewReader("payload")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	rc, err := s.Get(ctx, "artifact-key")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	rc.Close()
-	if _, err := s.Has(ctx, "artifact-key"); err != nil {
-		t.Fatalf("Has: %v", err)
-	}
-
-	for _, method := range []string{http.MethodPut, http.MethodGet, http.MethodHead} {
-		if seen[method] != "Bearer s3cret" {
-			t.Errorf("%s Authorization = %q, want the cache bearer", method, seen[method])
+	for _, scheme := range []string{"ftp", "http", "https"} {
+		_, err := OpenArtifactStore(t.Context(), scheme+"://objects.invalid")
+		if err == nil || !strings.Contains(err.Error(), scheme) {
+			t.Errorf("%s: err = %v, want an unsupported scheme", scheme, err)
 		}
 	}
 }

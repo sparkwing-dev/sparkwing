@@ -362,7 +362,7 @@ func TestDirKeyIncludesPath(t *testing.T) {
 func TestStagedExtractLeavesDirCleanOnFailure(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "target")
 	truncated := bytes.NewReader([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00})
-	if err := ExtractArchiveStaged(truncated, dir); err == nil {
+	if err := ExtractArchiveStaged(t.Context(), truncated, dir); err == nil {
 		t.Fatal("truncated archive extracted without error")
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {

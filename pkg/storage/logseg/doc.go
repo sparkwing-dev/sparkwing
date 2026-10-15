@@ -1,5 +1,5 @@
-// Package logseg stores one node attempt's log as numbered, compressed
-// segment objects sealed by a manifest.
+// Package logseg stores job-attempt and owner-unit logs as numbered, compressed
+// segments sealed by a manifest with one tagged subject.
 //
 // A [Sink] runs beside the node. It appends every record to a local
 // spool file, cuts a segment every [SegmentInterval] or [SegmentBytes],
@@ -12,10 +12,12 @@
 // order, verifies every segment against the manifest's digest, and
 // reports a [Completeness] verdict.
 //
-// Keys follow one layout, built by [AttemptPrefix]:
+// Keys are built by [SubjectPrefix]:
 //
-//	logs/r<days>/teams/<team>/runs/<run>/<node>/a<attempt>-g<gen>/seg-000001.ndjson.gz
-//	logs/r<days>/teams/<team>/runs/<run>/<node>/a<attempt>-g<gen>/manifest.json
+//	logs/r<days>/teams/<team>/runs/<run>/jobs/<job>/a<attempt>-g<gen>/
+//	logs/r<days>/teams/<team>/runs/<run>/units/trigger/g<gen>/
+//	logs/r<days>/teams/<team>/runs/<run>/units/plan/g<gen>/
+//	logs/r<days>/teams/<team>/runs/<run>/units/eval/<source>/s<source-gen>-g<gen>/
 //
 // The retention class leads the key so one object lifecycle rule per
 // class expires every team's logs.

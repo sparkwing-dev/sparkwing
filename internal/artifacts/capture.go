@@ -38,8 +38,14 @@ type Data struct {
 // and returns the committed record. A wildcard match outside the workspace is
 // skipped with a warning; a literal outside match fails.
 func Capture(ctx context.Context, data Data, workspace string, globs []string, warn func(msg string)) (blob.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return blob.Record{}, err
+	}
 	if data.Bytes == nil || data.Records == nil || warn == nil {
 		return blob.Record{}, fmt.Errorf("artifact data requires bytes, records and warning sink")
+	}
+	if err := blob.AuthorizeUpload(data.Authority, data.Identity, blob.KindManifest); err != nil {
+		return blob.Record{}, err
 	}
 	job := ""
 	if data.Identity.Attempt.Set {
@@ -113,6 +119,9 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 	if walkErr != nil {
 		return blob.Record{}, walkErr
 	}
+	if err := ctx.Err(); err != nil {
+		return blob.Record{}, err
+	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	manifestBytes, merr := json.Marshal(blob.Manifest{Entries: entries})
@@ -121,16 +130,23 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 	}
 	sum := sha256.Sum256(manifestBytes)
 	digest := blob.Digest(hex.EncodeToString(sum[:]))
-	if _, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: int64(len(manifestBytes)), Body: bytes.NewReader(manifestBytes)}); err != nil {
+	receipt, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: int64(len(manifestBytes)), Body: bytes.NewReader(manifestBytes)})
+	if err = errors.Join(err, ctx.Err()); err != nil {
 		return blob.Record{}, fmt.Errorf("store manifest: %w", err)
+	}
+	if receipt.Digest != digest || receipt.Identity != data.Identity {
+		return blob.Record{}, blob.ErrIntegrity
 	}
 	members := make([]blob.Member, 0, len(entries))
 	for _, entry := range entries {
 		members = append(members, blob.Member{Team: key.Team, ManifestDigest: digest, Digest: entry.Digest, Path: entry.Path, Size: entry.Size, Mode: entry.Mode})
 	}
 	record, err := data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Source: data.Identity, Authority: data.Authority, Key: key, Digest: digest, Members: members})
-	if err != nil {
+	if err = errors.Join(err, ctx.Err()); err != nil {
 		return blob.Record{}, fmt.Errorf("commit artifact manifest: %w", err)
+	}
+	if record.Key != key || record.Digest != digest || record.Source != data.Identity {
+		return blob.Record{}, blob.ErrIntegrity
 	}
 	return record, nil
 }
@@ -182,8 +198,15 @@ func storeArtifactFile(ctx context.Context, data Data, root *os.Root, name strin
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", 0, err
 	}
-	if _, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: n, Body: f}); err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", 0, err
+	}
+	receipt, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: n, Body: f})
+	if err = errors.Join(err, ctx.Err()); err != nil {
+		return "", 0, err
+	}
+	if receipt.Digest != digest || receipt.Identity != data.Identity {
+		return "", 0, blob.ErrIntegrity
 	}
 	return digest, n, nil
 }

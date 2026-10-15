@@ -33,50 +33,15 @@ it for another team returns `409` and leaves both teams’ balances and grants u
 
 ## Data downloads
 
-`POST /api/v1/data/download` signs a short-lived download for an object. Send
-`{ "kind": "binary", "key": "bin/<input-hash>" }` for a committed binary,
-`{ "kind": "artifact", "key": "artifacts/blobs/<sha256>" }` for a committed
-artifact, or `bins/<hash>` for a legacy cache binary. Use a reader token or a
-run-scoped cache grant minted while its runner holds an exact trigger or node
-claim. The controller checks the grant's claim generation and holder against
-the live claim on each signing request. A grant from an earlier claimant or
-one minted without a claim cannot sign. The controller also checks the live
-run, team-owned key, committed object or legacy cache object, and team's daily download allowance
-before it returns `{ "url": "...", "sha256": "...", "size": 123,
-"expires": "..." }`. It charges the recorded object size when it signs the
-URL.
+The cache-grant download, upload and commit routes have been removed. The
+controller no longer advertises `data_download_url` or `direct_data`, and
+there is no cache-service fallback.
 
-Artifact downloads accept only committed keys under `artifacts/`. Other keys
-return `400`. Node outputs use their run's output routes, which check the claim's
-node dependencies.
+The verified byte-storage components use signed object URLs. Their authenticated
+controller adapter is still being implemented. See [Data storage](data-uploads.md)
+for the available components and the remaining integration.
 
-Node logs are not signed downloads; read them through the log routes below.
-Revoking a claimant's token stops its cache grant from signing new URLs.
-
-A `source` download names the exact `sources/<sha256>/<submission-id>` key
-bound to the claim's run. User and raw runner bearers cannot sign it. A user
-token with `runs.write` may reserve and commit that source before triggering;
-the controller binds it to one run during trigger admission. See
-[Direct data uploads](data-uploads.md).
-
-The URL expires after 60 seconds and names one exact object. A request that
-reaches the controller through the in-cluster Service gets a regional S3
-presigned URL; a request through the public ingress gets a CloudFront signed
-URL. The controller selects the path from the presence of `X-Forwarded-For`
-or `X-Forwarded-Host`. Configure the ingress to overwrite these headers. A
-local filesystem store continues serving bytes directly through its existing
-artifact route. Treat the returned URL as a temporary
-bearer credential.
-
-Binary clients discover this route through `GET /api/v1/services`. The controller
-omits it on public ingress if CloudFront signing is unavailable. An S3-backed
-controller also announces direct uploads through `direct_data` and
-`GET /api/v1/data/capabilities`. Runners use the cache service when an older
-controller has no direct route. Cloud runners read committed cloud binaries,
-or local binaries when the team enables `trust_local_builds`. They do not read
-legacy cache binaries when direct uploads are active. See
-[Direct data uploads](data-uploads.md), [Tenant limits](limits.md), and
-[Self-hosting](self-hosting.md).
+Node logs use controller-proxied log reads, separate from byte-storage downloads.
 
 ## Webhooks
 

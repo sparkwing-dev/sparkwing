@@ -28,7 +28,7 @@ type segmentNode struct {
 }
 
 func (s *segmentLogStore) prefix(runID, nodeID string) string {
-	p, err := logseg.AttemptPrefix(logseg.ClassStandard, "acme", runID, nodeID, 1, 1)
+	p, err := logseg.SubjectPrefix(logseg.ClassStandard, keySubject("acme", runID, nodeID, 1, 1))
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func (s *segmentLogStore) Append(ctx context.Context, runID, nodeID string, data
 	if n == nil {
 		n = &segmentNode{up: newMemUploader(s.objs, s.prefix(runID, nodeID)), clock: &manualTimer{}}
 		sink, err := logseg.NewSink(ctx, n.up, logseg.Options{
-			Run: runID, Node: nodeID, SpoolDir: s.t.TempDir(),
+			Subject: keySubject("acme", runID, nodeID, 1, 1), SpoolDir: s.t.TempDir(),
 			AfterFunc: n.clock.after,
 		})
 		if err != nil {

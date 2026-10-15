@@ -22,7 +22,7 @@ func (s *S3) SignLogPut(ctx context.Context, key string, expiry time.Time) (stri
 	if _, err := logObjectLimit(key); err != nil {
 		return "", nil, err
 	}
-	lifetime := expiry.Sub(time.Now())
+	lifetime := time.Until(expiry)
 	if lifetime <= 0 || lifetime > limits.LogUploadURLTTL {
 		return "", nil, fmt.Errorf("invalid log upload expiry")
 	}

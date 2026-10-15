@@ -606,11 +606,11 @@ func runSparksWarmup(args []string) error {
 			result.LogicalRemovedBytes, result.ReclaimedEntries)
 	}
 
-	_, cfg, err := projectconfig.DiscoverPipelines(sparkwingDir)
+	_, cfg, err := projectconfig.Discover(sparkwingDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warn: no pipelines discovered: %v\n", err)
 	} else {
-		fmt.Fprintf(os.Stdout, "warming up %d pipeline(s)\n", len(cfg.Pipelines))
+		fmt.Fprintf(os.Stdout, "warming up %d pipeline(s)\n", len(cfg.Registry().Pipelines))
 	}
 
 	key, err := bincache.PipelineCacheKey(sparkwingDir)

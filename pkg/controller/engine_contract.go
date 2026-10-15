@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -53,6 +54,26 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 // Claim calls engine.EvaluateRunner against signed policy before a new award, derives total
 // capacity from registration and uses reported availability with the shared matcher.
 func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+	panic("unimplemented: controller-wire")
+}
+
+// SyncLauncher returns only this launcher's held awards, with bearer material omitted.
+func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+	panic("unimplemented: controller-wire")
+}
+
+// Exchange consumes the authenticated bootstrap once and returns its original unit policy.
+func (s *EngineController) Exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error) {
+	panic("unimplemented: controller-wire")
+}
+
+// CancelJob requests the named job's cancellation without overwriting a live holder's result.
+func (s *EngineController) CancelJob(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
+	panic("unimplemented: controller-wire")
+}
+
+// ReadFailure derives the source and generation from authorized.Target and checks its recovery edge.
+func (s *EngineController) ReadFailure(ctx context.Context, authorized capability.Authorized) (*nodeproto.JobFailure, error) {
 	panic("unimplemented: controller-wire")
 }
 

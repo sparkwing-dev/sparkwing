@@ -213,3 +213,27 @@ func (s unverifiedOutputStore) Get(context.Context, blob.GetRequest) (blob.Verif
 type unverifiedOutput struct{ *remoteBody }
 
 func (unverifiedOutput) Verified() bool { return false }
+
+type cancelledOutputUpload struct {
+	blob.Store
+	cancel context.CancelFunc
+}
+
+func (s cancelledOutputUpload) Put(ctx context.Context, q blob.PutRequest) (blob.Receipt, error) {
+	receipt, err := s.Store.Put(ctx, q)
+	s.cancel()
+	return receipt, err
+}
+
+func TestOutputCancellationAfterUploadPreventsRecordCommit(t *testing.T) {
+	data, records, signer := newOutputData(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	data.Bytes = cancelledOutputUpload{Store: data.Bytes, cancel: cancel}
+	if record, err := data.Put(ctx, []byte("result")); record.Digest != "" || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled output = %+v, %v", record, err)
+	}
+	if signer.commits != 1 || records.request.Digest != "" {
+		t.Fatal("record commit followed a cancelled upload")
+	}
+}

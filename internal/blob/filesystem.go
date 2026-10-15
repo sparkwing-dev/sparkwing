@@ -85,7 +85,7 @@ func (f *Filesystem) signObject(object capability.ObjectToSign) (capability.Sign
 
 func (f *Filesystem) signature(token string) string {
 	mac := hmac.New(sha256.New, f.key)
-	_, _ = io.WriteString(mac, f.endpoint.Path+"\n"+token)
+	_, _ = io.WriteString(mac, f.endpoint.Path+"\n"+token) //nolint:errcheck // hash.Hash.Write cannot fail.
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
@@ -142,7 +142,7 @@ func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.get(w, r, object)
 }
 
-func (f *Filesystem) put(r *http.Request, object capability.ObjectToSign) error {
+func (f *Filesystem) put(r *http.Request, object capability.ObjectToSign) (err error) {
 	if r.ContentLength >= 0 && r.ContentLength != object.Size {
 		return ErrIntegrity
 	}
@@ -154,8 +154,8 @@ func (f *Filesystem) put(r *http.Request, object capability.ObjectToSign) error 
 	if err != nil {
 		return err
 	}
-	defer f.root.Remove(temp)
-	rd := newVerifiedReader(r.Body, SignedTransfer{Digest: Digest(object.SHA256), Size: object.Size})
+	defer func() { err = errors.Join(err, f.root.Remove(temp)) }()
+	rd := newVerifiedReader(r.Context(), r.Body, SignedTransfer{Digest: Digest(object.SHA256), Size: object.Size})
 	_, err = io.Copy(file, &contextReader{ctx: r.Context(), reader: rd})
 	err = errors.Join(err, file.Close())
 	if err != nil {
@@ -190,7 +190,7 @@ func (f *Filesystem) get(w http.ResponseWriter, r *http.Request, object capabili
 	w.Header().Set("Cache-Control", "no-store")
 	// safety: clients verify EOF; a failed copy must not look like a complete response.
 	if _, err := io.Copy(w, &contextReader{ctx: r.Context(), reader: file}); err != nil {
-		panic(http.ErrAbortHandler)
+		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http catches this sentinel and aborts the incomplete response.
 	}
 }
 

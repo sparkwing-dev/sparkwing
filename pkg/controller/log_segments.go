@@ -21,7 +21,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -449,7 +451,7 @@ func (s *Server) handleLogManifest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if m.Run != r.PathValue("id") || m.Node != r.PathValue("nodeID") || m.Attempt < 1 || m.SealedBy != logseg.SealedByNode {
+	if m.Subject.Kind != blob.LogJobAttempt || m.Subject.RunID != r.PathValue("id") || m.Subject.Attempt.NodeID != r.PathValue("nodeID") || m.SealedBy != logseg.SealedByNode {
 		writeError(w, http.StatusBadRequest, errors.New("the manifest must name this run, node and a writer's attempt, sealed by the node"))
 		return
 	}
@@ -457,7 +459,11 @@ func (s *Server) handleLogManifest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	want, ok := s.logWriterAttempt(w, r, team, m.Attempt, m.Generation)
+	if m.Subject.Team != string(team) {
+		writeError(w, http.StatusBadRequest, errors.New("the manifest must name the writer's team"))
+		return
+	}
+	want, ok := s.logWriterAttempt(w, r, team, m.Subject.Attempt.Attempt, m.Subject.Attempt.Generation)
 	if !ok {
 		return
 	}
@@ -537,7 +543,7 @@ func (s *Server) openNodeLog(w http.ResponseWriter, r *http.Request, want store.
 		writeError(w, http.StatusServiceUnavailable, err)
 		return store.NodeLog{}, false
 	}
-	if want.Prefix, err = logseg.AttemptPrefix(class, string(want.Team), want.RunID, want.NodeID, want.Attempt, want.Generation); err != nil {
+	if want.Prefix, err = logseg.SubjectPrefix(class, nodeLogSubject(want)); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return store.NodeLog{}, false
 	}
@@ -624,7 +630,7 @@ func (s *Server) sealAbandonedLogs(ctx context.Context, now time.Time) {
 
 func (s *Server) sealNodeLog(ctx context.Context, objs logObjectStore, rec store.NodeLog, now time.Time) (*logseg.Manifest, error) {
 	m, err := logseg.SealAbandoned(ctx, objs, rec.Prefix, logseg.Manifest{
-		Run: rec.RunID, Node: rec.NodeID, Attempt: rec.Attempt, Generation: rec.Generation,
+		Subject: new(nodeLogSubject(rec)),
 	}, logseg.ReasonRunnerLost, objs.putIfAbsent)
 	if err != nil {
 		return nil, err
@@ -639,4 +645,9 @@ func (s *Server) sealNodeLog(ctx context.Context, objs logObjectStore, rec store
 	s.logger.Info("sealed a node log", "run_id", rec.RunID, "node_id", rec.NodeID, "attempt", rec.Attempt,
 		"sealed_by", m.SealedBy, "status", m.Status, "segments", len(m.Segments))
 	return m, nil
+}
+
+func nodeLogSubject(rec store.NodeLog) blob.LogSubject {
+	return blob.LogSubject{Kind: blob.LogJobAttempt, Team: string(rec.Team), RunID: rec.RunID,
+		Attempt: &runspec.AttemptIdentity{Team: string(rec.Team), RunID: rec.RunID, NodeID: rec.NodeID, Attempt: rec.Attempt, Generation: rec.Generation}}
 }

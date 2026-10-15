@@ -59,9 +59,6 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/auth/whoami": resNone,
 
-	"POST /api/v1/cache/store-ceiling/measure": resNone,
-	"POST /api/v1/cache/store-ceiling/thaw":    resNone,
-
 	"GET /api/v1/capacity/profiles":         resNone,
 	"GET /api/v1/capacity/profiles/explain": resNone,
 
@@ -153,7 +150,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/approvals/{nodeID}":                      resRun,
 	"POST /api/v1/runs/{id}/approvals/{nodeID}/request":              resRun,
 	"GET /api/v1/runs/{id}/attempts":                                 resRun,
-	"POST /api/v1/runs/{id}/cache-grant":                             resRun,
 	"POST /api/v1/runs/{id}/cancel":                                  resRun,
 	"POST /api/v1/runs/{id}/children":                                resRun,
 	"GET /api/v1/runs/{id}/children/{childID}":                       resRun,

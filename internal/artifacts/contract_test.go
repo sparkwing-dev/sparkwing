@@ -26,6 +26,9 @@ type testBytes struct {
 	closeErr    error
 	closeDigest blob.Digest
 	onPut       func()
+	onGet       func(context.Context, blob.GetRequest)
+	onClose     func(blob.Digest)
+	receipt     func(blob.Receipt) blob.Receipt
 }
 
 func (b *testBytes) Put(_ context.Context, q blob.PutRequest) (blob.Receipt, error) {
@@ -41,10 +44,17 @@ func (b *testBytes) Put(_ context.Context, q blob.PutRequest) (blob.Receipt, err
 	}
 	b.puts = append(b.puts, q)
 	b.values[q.Digest] = bytes.Clone(contents)
-	return blob.Receipt{Identity: q.Identity, Digest: q.Digest}, nil
+	receipt := blob.Receipt{Identity: q.Identity, Digest: q.Digest}
+	if b.receipt != nil {
+		receipt = b.receipt(receipt)
+	}
+	return receipt, nil
 }
 
-func (b *testBytes) Get(_ context.Context, q blob.GetRequest) (blob.VerifiedReader, error) {
+func (b *testBytes) Get(ctx context.Context, q blob.GetRequest) (blob.VerifiedReader, error) {
+	if b.onGet != nil {
+		b.onGet(ctx, q)
+	}
 	b.gets = append(b.gets, q)
 	if b.getErr != nil {
 		return nil, b.getErr
@@ -53,7 +63,7 @@ func (b *testBytes) Get(_ context.Context, q blob.GetRequest) (blob.VerifiedRead
 	if !ok {
 		return nil, blob.ErrNotFound
 	}
-	r := &testVerified{Reader: bytes.NewReader(contents), want: q.Digest}
+	r := &testVerified{Reader: bytes.NewReader(contents), want: q.Digest, onClose: b.onClose}
 	if q.Digest == b.closeDigest {
 		r.closeErr = b.closeErr
 	}
@@ -66,6 +76,7 @@ type testVerified struct {
 	hash     []byte
 	eof      bool
 	closeErr error
+	onClose  func(blob.Digest)
 }
 
 func (r *testVerified) Read(p []byte) (int, error) {
@@ -76,7 +87,14 @@ func (r *testVerified) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
-func (r *testVerified) Close() error   { return r.closeErr }
+
+func (r *testVerified) Close() error {
+	if r.onClose != nil {
+		r.onClose(r.want)
+	}
+	return r.closeErr
+}
+
 func (r *testVerified) Verified() bool { return r.eof && digestOf(r.hash) == r.want }
 
 type testRecords struct {
@@ -85,6 +103,8 @@ type testRecords struct {
 	commits   []blob.CommitRecordRequest
 	commitErr error
 	lookupErr error
+	onLookup  func(context.Context)
+	record    func(blob.Record) blob.Record
 }
 
 func (r *testRecords) CommitRecord(_ context.Context, q blob.CommitRecordRequest) (blob.Record, error) {
@@ -92,10 +112,17 @@ func (r *testRecords) CommitRecord(_ context.Context, q blob.CommitRecordRequest
 	if r.commitErr != nil {
 		return blob.Record{}, r.commitErr
 	}
-	return blob.Record{Key: q.Key, Digest: q.Digest}, nil
+	record := blob.Record{Key: q.Key, Digest: q.Digest, Source: q.Source}
+	if r.record != nil {
+		record = r.record(record)
+	}
+	return record, nil
 }
 
-func (r *testRecords) LookupRecord(_ context.Context, _ blob.RecordLookup) (blob.RecordLookupResult, error) {
+func (r *testRecords) LookupRecord(ctx context.Context, _ blob.RecordLookup) (blob.RecordLookupResult, error) {
+	if r.onLookup != nil {
+		r.onLookup(ctx)
+	}
 	return r.result, r.lookupErr
 }
 

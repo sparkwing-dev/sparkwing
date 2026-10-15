@@ -25,25 +25,41 @@ type Edge struct {
 
 // Stage looks up each record under the caller's authority and writes its verified
 // members into workspace. A missing, unauthorized or corrupt record fails.
-func Stage(ctx context.Context, data Data, workspace string, edges []Edge) (int, error) {
+// Budget covers lookup, download and file publication.
+func Stage(ctx context.Context, data Data, workspace string, edges []Edge) (staged int, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if len(edges) == 0 {
 		return 0, nil
 	}
 	if data.Bytes == nil || data.Records == nil {
 		return 0, fmt.Errorf("artifact data requires bytes and records")
 	}
+	if data.Budget.Deadline.IsZero() {
+		return 0, blob.ErrBudget
+	}
+	ctx, cancel := context.WithDeadline(ctx, data.Budget.Deadline)
+	defer cancel()
+	defer func() {
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = errors.Join(blob.ErrBudget, err)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = root.Close() }()
-	staged := 0
 	for _, edge := range edges {
 		if _, err := stageRel(edge.Into, "."); err != nil {
 			return staged, err
 		}
 		result, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: data.Authority, Key: edge.Record, Budget: data.Budget})
-		if err != nil {
+		if err = errors.Join(err, ctx.Err()); err != nil {
 			return staged, fmt.Errorf("artifact record: %w", err)
 		}
 		if !result.Found {
@@ -89,7 +105,7 @@ func readManifest(ctx context.Context, data Data, digest blob.Digest, team strin
 		return blob.Manifest{}, err
 	}
 	b, err := io.ReadAll(r)
-	err = errors.Join(err, r.Close())
+	err = errors.Join(err, r.Close(), ctx.Err())
 	if err != nil {
 		return blob.Manifest{}, err
 	}
@@ -100,6 +116,9 @@ func readManifest(ctx context.Context, data Data, digest blob.Digest, team strin
 }
 
 func stageMember(ctx context.Context, data Data, root *os.Root, member blob.Member, rel string) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if member.Size < 0 {
 		return blob.ErrIntegrity
 	}
@@ -126,7 +145,11 @@ func stageMember(ctx context.Context, data Data, root *os.Root, member blob.Memb
 	if err != nil {
 		return err
 	}
-	defer func() { _ = root.Remove(tmp) }()
+	defer func() {
+		if removeErr := root.Remove(tmp); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
+		}
+	}()
 	hash := sha256.New()
 	n, copyErr := io.CopyN(io.MultiWriter(f, hash), r, member.Size)
 	if copyErr != nil {
@@ -139,15 +162,18 @@ func stageMember(ctx context.Context, data Data, root *os.Root, member blob.Memb
 	if closeErr != nil {
 		return closeErr
 	}
-	if n != member.Size || extraN != 0 || endErr != io.EOF || !r.Verified() || blob.Digest(hex.EncodeToString(hash.Sum(nil))) != member.Digest {
+	if n != member.Size || extraN != 0 || !errors.Is(endErr, io.EOF) || !r.Verified() || blob.Digest(hex.EncodeToString(hash.Sum(nil))) != member.Digest {
 		return blob.ErrIntegrity
 	}
-	err = r.Close()
+	err = errors.Join(r.Close(), ctx.Err())
 	r = nil
 	if err != nil {
 		return err
 	}
 	if err := root.Chmod(tmp, os.FileMode(member.Mode).Perm()); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return replaceVerifiedFile(root, tmp, rel)

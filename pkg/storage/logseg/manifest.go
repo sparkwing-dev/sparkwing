@@ -38,15 +38,11 @@ const (
 	SealedByController = "controller"
 )
 
-// Manifest seals one node attempt's log: which segments it holds, what
+// Manifest seals one subject's log: which segments it holds, what
 // each one covers and its digest, and whether the log is whole.
 type Manifest struct {
-	Subject      *blob.LogSubject `json:"subject,omitempty"`
+	Subject      *blob.LogSubject `json:"subject"`
 	Version      int              `json:"version"`
-	Run          string           `json:"run,omitempty"`
-	Node         string           `json:"node,omitempty"`
-	Attempt      int64            `json:"attempt,omitempty"`
-	Generation   int64            `json:"generation,omitempty"`
 	Status       string           `json:"status"`
 	Reason       string           `json:"reason"`
 	SealedBy     string           `json:"sealed_by"`
@@ -82,6 +78,12 @@ type Gap struct {
 
 // Marshal encodes m for upload.
 func (m Manifest) Marshal() ([]byte, error) {
+	if m.Subject == nil {
+		return nil, ErrBadManifest
+	}
+	if err := m.Subject.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrBadManifest, err)
+	}
 	if m.Gaps == nil {
 		m.Gaps = []Gap{}
 	}
@@ -103,6 +105,12 @@ func ParseManifest(raw []byte) (*Manifest, error) {
 	}
 	if m.Version != ManifestVersion {
 		return nil, fmt.Errorf("%w: version %d", ErrBadManifest, m.Version)
+	}
+	if m.Subject == nil {
+		return nil, ErrBadManifest
+	}
+	if err := m.Subject.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrBadManifest, err)
 	}
 	switch m.Status {
 	case StatusComplete, StatusIncomplete, StatusCutOff:

@@ -2,6 +2,86 @@
 
 <!-- design:begin -->
 
+## Amendment 1: authority and execution seams
+
+[Amendments 1](amendments-1.md) records the worker requests and assignments.
+These declarations leave transaction implementation with W1.
+
+- `plan_secret_contract.go` declares `PlanSecretOpener`. The controller installs
+  the trusted decryptor before serving. Acceptance selects tenant/pipeline secrets
+  in its transaction and passes plaintext only to validation. Neither intake facts
+  nor secret values arrive as trusted planner JSON. `Resolved.SecretArgs` retains
+  every classification sealed at intake. Describe may add classifications.
+- `enrollment_contract.go` declares `ClaimProfileResolver`. It resolves persisted
+  enrollment from authenticated root/subject identity. Granted runner name/type,
+  pools, repository authority and metering never come from labels, environment or
+  a caller-selected runner name. Enrollment configuration and claim observation
+  remain separate. No new registration table is required by this seam.
+- `authentication_contract.go` implements the declaration of C2's
+  `AuthenticationReader` on Store. A single committed snapshot includes store time,
+  ancestry, current membership and route-specific unit/result/log facts. Binding,
+  data-edge and source-release checks also run on the transaction owning the write.
+  A source credential is released only after its authorization audit commits.
+- Trusted root provisioning is the root-only Delegate variant. Roots have no
+  revocation parent. `ProvisionSpec.Authority` is their authorizer, whose current
+  rights constrain provisioning. Membership still governs account-root liveness.
+  Here awards retain the requester's session/token ancestry and current runs.write.
+- Claim selection checks every requested kind's grant before one ordered scan.
+  Runner selection accepts trigger/node, launcher selection plan/eval/node. The
+  named trigger path retains the exact here reservation's trigger.host exception. Unknown,
+  duplicate, empty or unauthorized kinds are refused. A new award is delivered once.
+  A lost claim reply recovers through the held lease, not a second automatic award.
+- `ReconcileRequest.MaterializeOnly` preserves terminal/holder decisions and may
+  materialize an authorized source. A source miss returns `Dispatch` without
+  self-claim or bearer. `ReconciledNode.Bearer` is private delivery for a fresh
+  execution award, never persisted or placed in public status.
+- `ReadFailure` returns a recorded `nodeproto.JobFailure` under a declared recovery
+  edge and the immutable source generation. It preserves stage, code, masked
+  message and details. It cannot manufacture a failure from a terminal status.
+- Run-host cancellation is scoped to its own live owner lease. Pending work can
+  end immediately. Held work receives only cancel_requested_at and one request
+  event, then its holder drains. It grants no right to overwrite holder results.
+- Attempt starts at zero. First execution start establishes one. A started
+  disruption's successor starts the next ordinal. An unstarted release consumes
+  none. Application retry advances under the same generation. Start/retry return
+  the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
+
+### Upload and record persistence
+
+`blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
+against the exact job/attempt/generation, owner lease or published attempt.
+`RecordLookup.VerifiedDefaultOnly` selects only the authorized repository's
+verified default-branch entries. The default ref comes from persisted verified
+facts. Setting the flag false cannot weaken DataRemoteCache authority. Returned
+`RecordLookupResult.Members` includes committed path/size/mode metadata after
+read-edge checks. Internal member reads confer no client read authority.
+
+`upload_contract.go` defines ReserveBlobUpload, LookupBlobUpload, CommitBlobUpload
+and AbortBlobUpload using the existing uploads table. Reservation binds tenant,
+uploader, digest, size, expiry, provenance and ref facts before signing. The
+physical backend verifies size/digest before W1 commits existence and the exact
+receipt with quota settlement. Commit repeats live authority and fence checks.
+Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
+leased retention releases uncommitted reservations without deleting a live blob.
+
+`blob.ObjectBackend` owns signed physical transfers, verified immutable publication
+and deletion. Both filesystem and S3 implementations consume stored bytes through
+verified EOF and successful close. S3 fences its copy to the verified source ETag,
+creates the final key only if absent, and verifies final bytes before returning.
+A physical commit grants no record, existence row or receipt. Those remain W1's
+transactional responsibility after the controller repeats authorization.
+
+LookupRecord, LookupMemo, LookupDepcache, CommitRecord and CopyMemo remain the
+only record owners. W1 integrates receipt/read-set checks, members, unique-byte
+accounting, newest-success pins and reachability retention. Artifacts require
+read authority. The cloud-provenance execution restriction applies to binaries.
+Claim/start/reap/finish transactions invoke the shared billing owner with immutable
+award facts. Plan/eval have no minimum, job and host minima remain separate, and
+customer-runner waiting is excluded. Verified payment events settle committed
+checkouts idempotently. No caller-selected team or credit amount reaches settlement.
+
+
+
 This document specifies the rewrite target. Functions marked `unimplemented`
 are signatures for the implementation swarm, not working runtime behavior.
 The authority is the frozen architecture v4, especially sections 3, 4, 7.5 and
@@ -270,9 +350,13 @@ are exempt from download quota. Deferred plan counters add no enforcement here.
 Environment snapshots persist names and a digest, not values. Raw argument
 storage retains the execution/retry contract; secret argument classification
 controls display. Before describe has classified arguments, display redacts all
-requested values. Reproduction and display omit secret values and public hashes
+requested values. The second seal must retain every secret name classified at
+intake. Display and reproduction fail closed if those classifications disagree.
+Reproduction and display omit secret values and public hashes
 of secret-bearing input. App trust comes only from verified, deduplicated webhook
-facts. Origin HEAD can fill a missing default branch without manufacturing trust.
+facts. Intake copies an available App default branch into the request and refuses
+a conflicting supplied branch. Origin HEAD can fill a missing default branch
+without manufacturing trust.
 
 Repository identity is distinct from access. GitHub uses its numeric ID;
 other hosts lowercase the host and preserve ports and path case, except
@@ -316,6 +400,13 @@ separate signed upload path and controller-proxied reads. Cloud binary execution
 checks committed digest and cloud provenance unless trust_local_builds is set.
 Local remote-cache opt-in uses the user's repo-bound read grant and returns only
 verified default-branch memo, artifacts and depcache, with no writes or binaries.
+
+`depcacheblob.NewRemoteReader` adapts that `blob.RemoteCache` to `depcache.Reader`
+with an explicit repository and lookup budget. `depcache.WithRemoteReader`
+keeps local archives first and saves locally. The remote interface has no write
+method. Both dependency-archive backends use the same verified-download and staged
+extraction path. A copied memo without an explicit output digest is a miss,
+including for followers. Explicit empty output remains a valid hit.
 
 ## Publication and retry interpretation
 

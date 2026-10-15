@@ -473,10 +473,10 @@ func TestSinkQueueCountsDrops(t *testing.T) {
 	defer func(old int) { sinkQueueBytes = old }(sinkQueueBytes)
 	sinkQueueBytes = 1000
 	sink := &blockingSink{release: make(chan struct{})}
-	q := newSinkQueue()
+	q := newSinkQueue(LevelInfo, nil)
 	go q.run(sink)
 	for i := range 50 {
-		q.push(sinkItem{level: LevelInfo, text: strings.Repeat("x", 90) + strconv.Itoa(i), size: 92})
+		q.push(sinkItem{text: strings.Repeat("x", 90) + strconv.Itoa(i), size: 92})
 	}
 	close(sink.release)
 	q.close()

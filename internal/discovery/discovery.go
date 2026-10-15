@@ -11,8 +11,6 @@ import (
 )
 
 type Services struct {
-	DataDownloadURL string `json:"data_download_url,omitempty"`
-
 	Dashboard string `json:"dashboard,omitempty"`
 
 	MultiTeam bool `json:"multi_team,omitempty"`

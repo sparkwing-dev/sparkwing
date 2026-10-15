@@ -15,6 +15,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -42,12 +43,17 @@ func TestS3SigningAndCommit(t *testing.T) {
 			response := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}
 			key := strings.TrimPrefix(r.URL.Path, "/bucket/")
 			switch r.Method {
-			case http.MethodHead:
+			case http.MethodGet:
 				if sum, ok := objects[key]; ok {
 					response.Header.Set("Content-Length", "5")
 					response.ContentLength = 5
 					response.Header.Set("x-amz-checksum-sha256", sum)
 					response.Header.Set("ETag", `"staged-version"`)
+					body := "hello"
+					if sum != checksum {
+						body = "jello"
+					}
+					response.Body = io.NopCloser(strings.NewReader(body))
 				} else {
 					response.StatusCode = http.StatusNotFound
 				}

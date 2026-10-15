@@ -22,7 +22,7 @@ const (
 // log object sits under a team prefix.
 const NoTeam = "_"
 
-// ManifestName is the manifest's object name within an attempt prefix.
+// ManifestName is the manifest's object name within a subject prefix.
 const ManifestName = "manifest.json"
 
 const (
@@ -74,24 +74,6 @@ func SubjectPrefix(class string, subject blob.LogSubject) (string, error) {
 	return fmt.Sprintf("%sunits/%s/g%d/", run, u.Kind, u.Generation), nil
 }
 
-// AttemptPrefix is the key prefix of one node attempt's segments and
-// manifest. The node ID is escaped into one key segment: a hierarchical
-// ID such as build/linux becomes build_2flinux, and no two node IDs
-// share an escape.
-func AttemptPrefix(class, team, runID, nodeID string, attempt, generation int64) (string, error) {
-	run, err := RunPrefix(class, team, runID)
-	if err != nil {
-		return "", err
-	}
-	if err := storage.SafeRelPath(nodeID); err != nil {
-		return "", err
-	}
-	if attempt < 1 || generation < 0 {
-		return "", fmt.Errorf("logseg: attempt %d generation %d is not an execution attempt", attempt, generation)
-	}
-	return fmt.Sprintf("%s%s/a%d-g%d/", run, EscapeNode(nodeID), attempt, generation), nil
-}
-
 // EscapeNode turns a node ID into one key segment that
 // storage.SafeArtifactKey accepts. Letters, digits, '-' and a '.' that
 // does not lead pass through; every other byte becomes '_' and two hex
@@ -110,13 +92,13 @@ func EscapeNode(nodeID string) string {
 	return b.String()
 }
 
-// SegmentKey is segment n's key within an attempt prefix. Numbers are
+// SegmentKey is segment n's key within a subject prefix. Numbers are
 // six digits and dense from 1, so a listing sorts in write order.
 func SegmentKey(prefix string, n int) string {
 	return fmt.Sprintf("%s%s%06d%s", prefix, segmentPrefix, n, segmentSuffix)
 }
 
-// ManifestKey is the manifest's key within an attempt prefix.
+// ManifestKey is the manifest's key within a subject prefix.
 func ManifestKey(prefix string) string { return prefix + ManifestName }
 
 // SegmentNumber parses the number out of a key [SegmentKey] built under

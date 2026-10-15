@@ -47,7 +47,7 @@ func (f *Filesystem) ExpireLogs(ctx context.Context) (int, error) {
 			return nil
 		}
 		if _, err := logObjectLimit(key); err != nil {
-			return nil
+			return nil //nolint:nilerr // Other layouts and upload temporaries have no log retention class.
 		}
 		info, err := entry.Info()
 		if errors.Is(err, fs.ErrNotExist) {

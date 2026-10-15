@@ -2,18 +2,24 @@ package depcache
 
 import (
 	"context"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
+
+// Reader restores archives without granting permission to publish them.
+type Reader interface {
+	Exists(context.Context, string) (bool, error)
+	Fetch(context.Context, string, string) (int64, error)
+}
 
 // Backend stores dependency archives. Hosts supply remote implementations explicitly.
 type Backend interface {
+	Reader
 	Label() string
-	Exists(context.Context, string) (bool, error)
-	Fetch(context.Context, string, string) (int64, error)
 	Store(context.Context, string, string) (int64, error)
 }
 
@@ -22,6 +28,44 @@ type backendKey struct{}
 // WithBackend binds a host-provided backend to one run without ambient credentials.
 func WithBackend(ctx context.Context, backend Backend) context.Context {
 	return context.WithValue(ctx, backendKey{}, backend)
+}
+
+// WithRemoteReader lets a local run restore an opted-in remote cache after a
+// local miss. Saves remain local; the remote binding has no write method.
+func WithRemoteReader(ctx context.Context, remote Reader) context.Context {
+	if remote == nil {
+		return ctx
+	}
+	return WithBackend(ctx, &localWithRemote{remote: remote})
+}
+
+type localWithRemote struct {
+	localBackend
+	remote Reader
+}
+
+func (b localWithRemote) Label() string { return "local+remote" }
+
+func (b localWithRemote) Exists(ctx context.Context, key string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if found, err := b.localBackend.Exists(ctx, key); err != nil || found {
+		return found, err
+	}
+	return b.remote.Exists(ctx, key)
+}
+
+func (b localWithRemote) Fetch(ctx context.Context, key, dir string) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if found, err := b.localBackend.Exists(ctx, key); err != nil {
+		return 0, err
+	} else if found {
+		return b.localBackend.Fetch(ctx, key, dir)
+	}
+	return b.remote.Fetch(ctx, key, dir)
 }
 
 func selectBackend(ctx context.Context) Backend {
@@ -57,7 +101,7 @@ func (l *localBackend) Exists(_ context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-func (l *localBackend) Fetch(_ context.Context, key, dir string) (int64, error) {
+func (l *localBackend) Fetch(ctx context.Context, key, dir string) (int64, error) {
 	p, err := l.archivePath(key)
 	if err != nil {
 		return 0, err
@@ -71,7 +115,7 @@ func (l *localBackend) Fetch(_ context.Context, key, dir string) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
-	if err := ExtractArchiveStaged(f, dir); err != nil {
+	if err := ExtractArchiveStaged(ctx, f, dir); err != nil {
 		return 0, err
 	}
 	return fi.Size(), nil

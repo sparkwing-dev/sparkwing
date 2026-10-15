@@ -117,7 +117,7 @@ func TestFilesystemTaggedLogRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sink := newSink(t, u, logseg.Options{SegmentBytes: 8})
+			sink := newSink(t, u, logseg.Options{Subject: subject, SegmentBytes: 8})
 			for i := 1; i <= 20; i++ {
 				if err := sink.Append([]byte("line\n"), "writer", int64(i), int64(i)); err != nil {
 					t.Fatal(err)

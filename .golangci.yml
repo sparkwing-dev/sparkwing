@@ -95,7 +95,6 @@ linters:
         thin-binaries-no-dispatch:
           list-mode: lax
           files:
-            - "**/cmd/sparkwing-cache/**"
             - "**/cmd/sparkwing-controller/**"
             - "**/internal/backend/**"
             - "**/internal/web/**"
@@ -151,17 +150,6 @@ linters:
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/cluster
               desc: "internal/cluster is the warm-runner pool's implementation; only cmd/sparkwing-runner should import it. Other binaries that need a shared concept should consume it through a neutral package."
-
-        cache-binary-only:
-          list-mode: lax
-          files:
-            - "**"
-            - "!**/cmd/sparkwing-cache/**"
-            - "!**/internal/cache/**"
-            - "!**/*_test.go"
-          deny:
-            - pkg: github.com/sparkwing-dev/sparkwing/internal/cache
-              desc: "internal/cache is the sparkwing-cache HTTP server's implementation; only cmd/sparkwing-cache should import it."
 
         runners-dispatcher-only:
           list-mode: lax

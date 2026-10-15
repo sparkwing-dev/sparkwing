@@ -6,12 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -28,24 +33,35 @@ type signer struct {
 	intent   blob.UploadIntent
 	commits  int
 	transfer blob.SignedTransfer
+	upload   func(context.Context, blob.UploadIntent) (blob.UploadTicket, error)
+	commit   func(context.Context, blob.CommitUpload) (blob.Receipt, error)
 	download func(blob.GetRequest) (blob.SignedTransfer, error)
 	has      func(context.Context, blob.HasManyRequest) (blob.Presence, error)
 }
 
-func (s *signer) Upload(_ context.Context, i blob.UploadIntent) (blob.UploadTicket, error) {
+func (s *signer) Upload(ctx context.Context, i blob.UploadIntent) (blob.UploadTicket, error) {
 	s.intent = i
+	if s.upload != nil {
+		return s.upload(ctx, i)
+	}
 	return blob.UploadTicket{ID: "ticket", Transfer: blob.SignedTransfer{Digest: i.Digest, Size: i.Size}}, nil
 }
-func (s *signer) Commit(_ context.Context, _ blob.CommitUpload) (blob.Receipt, error) {
+
+func (s *signer) Commit(ctx context.Context, request blob.CommitUpload) (blob.Receipt, error) {
 	s.commits++
+	if s.commit != nil {
+		return s.commit(ctx, request)
+	}
 	return blob.Receipt{Identity: s.intent.Identity, Digest: s.intent.Digest}, nil
 }
+
 func (s *signer) Download(_ context.Context, request blob.GetRequest) (blob.SignedTransfer, error) {
 	if s.download != nil {
 		return s.download(request)
 	}
 	return s.transfer, nil
 }
+
 func (s *signer) HasMany(ctx context.Context, req blob.HasManyRequest) (blob.Presence, error) {
 	return s.has(ctx, req)
 }
@@ -106,8 +122,10 @@ func TestDownloadRequiresVerifiedEOF(t *testing.T) {
 		early      bool
 		want       bool
 	}{
-		{"intact", "hello", false, true}, {"equal size corruption", "jello", false, false},
-		{"truncated", "hell", false, false}, {"oversize", "hello!", false, false},
+		{"intact", "hello", false, true},
+		{"equal size corruption", "jello", false, false},
+		{"truncated", "hell", false, false},
+		{"oversize", "hello!", false, false},
 		{"early close", "hello", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,5 +199,83 @@ func TestHasManyLargeAndDuplicate(t *testing.T) {
 	got, err := blob.NewSignedStore(blob.SignedStoreOptions{Signer: s}).HasMany(t.Context(), blob.HasManyRequest{Digests: ds, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}})
 	if err != nil || !slices.Equal(got.Present, want) {
 		t.Fatalf("HasMany=%d, %v", len(got.Present), err)
+	}
+}
+
+func TestCommitAfterInterruptedUpload(t *testing.T) {
+	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	backend, err := blob.NewFilesystem(blob.FilesystemOptions{
+		Directory: dir, Endpoint: "https://objects.invalid/data",
+		SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	settlementLost := errors.New("settlement did not commit")
+	i := identity()
+	object := blob.Blob{Team: i.Team, Digest: digest("hello"), Size: 5}
+	var ticket, pending string
+	var uploads, receipts int
+	s := &signer{}
+	s.upload = func(ctx context.Context, intent blob.UploadIntent) (blob.UploadTicket, error) {
+		uploads++
+		ticket = fmt.Sprintf("ticket-%d", uploads)
+		pending = "teams/team/pending/" + ticket
+		signed, err := backend.Sign(ctx, capability.ObjectToSign{
+			Method: http.MethodPut, Key: pending, Size: intent.Size,
+			SHA256: string(intent.Digest), ExpiresAt: now.Add(time.Minute),
+		})
+		return blob.UploadTicket{ID: ticket, Transfer: blob.SignedTransfer{
+			URL: signed.URL, Digest: intent.Digest, Size: intent.Size, ExpiresAt: signed.ExpiresAt,
+		}}, err
+	}
+	s.commit = func(ctx context.Context, request blob.CommitUpload) (blob.Receipt, error) {
+		if request.TicketID != ticket || request.Authority.Principal != i.Principal {
+			t.Fatal("commit lost the current ticket or principal")
+		}
+		if err := backend.CommitObject(ctx, pending, object); err != nil {
+			return blob.Receipt{}, err
+		}
+		if uploads == 1 {
+			return blob.Receipt{}, settlementLost
+		}
+		receipts++
+		return blob.Receipt{Identity: i, Digest: object.Digest}, nil
+	}
+	bytes := blob.NewSignedStore(blob.SignedStoreOptions{Signer: s, HTTPClient: blob.TransferClient{
+		Transport: roundTrip(func(request *http.Request) (*http.Response, error) {
+			response := httptest.NewRecorder()
+			backend.ServeHTTP(response, request)
+			return response.Result(), nil
+		}),
+	}})
+	put := func() (blob.Receipt, error) {
+		return bytes.Put(t.Context(), blob.PutRequest{
+			Identity: i, Authority: blob.Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt},
+			Digest: object.Digest, Size: object.Size, Body: strings.NewReader("hello"),
+		})
+	}
+	if receipt, err := put(); !errors.Is(err, settlementLost) || receipt != (blob.Receipt{}) || receipts != 0 {
+		t.Fatalf("interrupted commit = %+v, %v, receipts %d", receipt, err, receipts)
+	}
+	if err := backend.DeleteObject(t.Context(), pending); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Hour)
+	i.Principal, i.CapabilityRef = "new-principal", "new-capability"
+	if receipt, err := put(); err != nil || receipt.Identity != i || receipts != 1 || uploads != 2 {
+		t.Fatalf("new uploader retry = %+v, %v, uploads/receipts %d/%d", receipt, err, uploads, receipts)
+	}
+	final, err := blob.ObjectKey(object.Team, object.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(final)), []byte("jello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := put(); !errors.Is(err, blob.ErrIntegrity) || receipt != (blob.Receipt{}) || receipts != 1 {
+		t.Fatalf("corrupt existing object = %+v, %v, receipts %d", receipt, err, receipts)
 	}
 }

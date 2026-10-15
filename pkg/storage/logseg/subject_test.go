@@ -537,7 +537,7 @@ func TestSubjectSinkPublishesAttributedManifest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sink := newSink(t, u, logseg.Options{SegmentBytes: 8})
+		sink := newSink(t, u, logseg.Options{Subject: subject, SegmentBytes: 8})
 		for i := 1; i <= 4; i++ {
 			if err := sink.Append([]byte("line\n"), "writer", int64(i), int64(i)); err != nil {
 				t.Fatal(err)
@@ -551,7 +551,7 @@ func TestSubjectSinkPublishesAttributedManifest(t *testing.T) {
 		if err := json.Unmarshal(f.bodies["https://objects.test/manifest"], &manifest); err != nil {
 			t.Fatal(err)
 		}
-		if manifest.Subject == nil || !reflect.DeepEqual(*manifest.Subject, subject) || manifest.Lines != 4 || manifest.Bytes != 20 || manifest.FirstSeq != 1 || manifest.LastSeq != 4 || manifest.Run != "" || manifest.Node != "" || manifest.Attempt != 0 || manifest.Generation != 0 {
+		if manifest.Subject == nil || !reflect.DeepEqual(*manifest.Subject, subject) || manifest.Lines != 4 || manifest.Bytes != 20 || manifest.FirstSeq != 1 || manifest.LastSeq != 4 {
 			t.Fatalf("manifest = %+v", manifest)
 		}
 	}

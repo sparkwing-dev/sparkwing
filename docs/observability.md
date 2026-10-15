@@ -880,9 +880,8 @@ Every service reads these budgets from its flags alone.
 
 The controller counts each team's UTC day in its database. A team is the
 one the caller's credential belongs to, never a token's name, which is free
-text two teams may share. The controller charges its own artifact and git
-proxy downloads there directly, and the cache charges every `GET` it serves
-a grant with `POST /internal/downloads/charge`.
+text two teams may share. The controller charges its artifact downloads
+there directly.
 
 A download is refused before its first byte only when the team is already at
 its cap. It is then charged the bytes it actually delivers, 8 MiB at a time as
@@ -940,14 +939,8 @@ store on the maintenance sweep and reloads both at startup, so a restart
 resumes the month and the day rather than hiding a crash loop's spend from
 the alarm, and no response costs a store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
-on every tick. A cache with `--controller` keeps its own totals for the
-UTC day and the UTC month in the controller's database with
-`POST /internal/egress/totals`, written at most once a minute and at
-shutdown and read back at start, so a restart keeps the day's alarm
-and `global_month_bytes` counting. Each team's download day is the
-controller's own row and needs no saving. A cache without a controller
-counts in memory alone: its counters are per process and start over on a
-restart.
+on every tick. Each team's download day is the controller's own row and
+needs no separate cache-service report.
 
 Read the controller's meter from `/metrics` (`sparkwing_egress_day_bytes`
 and `sparkwing_egress_daily_alarm`); `/api/v1/health` reports only whether

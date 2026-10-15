@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -24,7 +23,6 @@ const (
 	credCloudFrontKey          = "cloudfront-key"
 	credBillingToken           = "billing-token"
 	credCreditsToken           = "credits-token"
-	credCacheGrantKey          = authwire.CacheGrantKeyCredential
 )
 
 type controllerCredentials struct {
@@ -42,7 +40,6 @@ type controllerCredentials struct {
 	CloudFrontKey          string
 	BillingToken           string
 	CreditsToken           string
-	CacheGrantKey          string
 }
 
 func readCredentials(path string) (controllerCredentials, error) {
@@ -62,7 +59,6 @@ func readCredentials(path string) (controllerCredentials, error) {
 		credCloudFrontKey:          &c.CloudFrontKey,
 		credBillingToken:           &c.BillingToken,
 		credCreditsToken:           &c.CreditsToken,
-		credCacheGrantKey:          &c.CacheGrantKey,
 	} {
 		if *dst, err = readCredential(dir, name); err != nil {
 			return c, err

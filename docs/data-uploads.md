@@ -1,90 +1,35 @@
-# Direct data uploads
+# Data storage
 
-When the controller has an S3 `--cache-blob-store`, runners can move binary
-and artifact bytes between themselves and the bucket. The controller handles
-small requests and the storage ledger. `GET /api/v1/services` announces
-`direct_data`; a runner with only a cache grant can probe
-`GET /api/v1/data/capabilities`. An `fs://` artifact store uses its existing
-local byte path; it does not issue S3 or CloudFront URLs. This signing route
-serves claimed runners.
-Source bundles have a separate pretrigger user-token path described below.
+The `swcg` cache-grant protocol and its upload, commit, download and capability
+probe routes are removed. Controllers no longer read a `cache-grant-key`
+credential or announce `data_download_url` and `direct_data` through services.
 
-The runner must hold a live claim on `run_id` for each request and send a
-cache grant minted for that claim. The runner's raw token cannot sign uploads.
-A signing grant carries the exact node or trigger claim, including its
-generation. Reserve, commit and download check that claim and its token again.
-Revoking the token stops new signed URLs, even while the claim remains live.
-Signing requests share the team's controller request budget across grants and
-answer `429` with `Retry-After` when it is spent.
-The pending row fixes the run ID and claimant. The
-operator's metered marker classifies a token as cloud for build trust. Keep
-cloud tokens on trusted machines because that marker controls provenance.
+The byte-storage components share `blob.Store` for binaries, source bundles,
+outputs, artifact manifests, memo and dependency caches. `NewSignedStore` uses
+an authenticated `DataSigner` for upload tickets, commits, downloads and presence
+queries. `RecordStore` owns logical names and authorized reference edges.
+Controller and remote-client adapters for these interfaces remain incomplete.
+The removed grant endpoints have no fallback.
 
-1. `POST /api/v1/data/upload` takes `{kind,key,size,sha256,run_id}`. `kind` is
-   `binary` or `artifact`. Binary keys are `bin/<input-hash>/<sha256>`;
-   artifact keys are `artifacts/blobs/<sha256>` or
-   `artifacts/manifests/<sha256>`. The controller reserves the declared bytes
-   in the team's cache share and returns `{upload_id,url,headers,expires_at}`.
-   The URL addresses exactly `pending/<upload_id>`. Its SigV4 signature covers
-   `Content-Length` and `x-amz-checksum-sha256`.
-2. The runner sends a PUT to that URL with the returned headers and exactly
-   the declared bytes. It sends no controller bearer to S3.
-3. `POST /api/v1/data/commit` takes `{upload_id,run_id}`. The controller HEADs
-   the pending object with checksum mode enabled. Size and SHA-256 must match
-   the declaration. It copies to the team's immutable key with
-   `If-None-Match: *`, storing uploader, provenance, digest and upload ID as
-   object metadata. The final key includes `cloud/` or `local/` after the team
-   prefix. The controller then publishes a database object row and moves the
-   reservation into used bytes. Direct readers cannot see the key until that
-   row commits. If a copy completed before the database commit, a new
-   reservation can adopt it only when S3 reports the same size, checksum and
-   provenance. The committed row keeps the original uploader from S3 metadata;
-   the new reservation records who recovered it.
+The filesystem and S3 backends sign one-object transfers. A PUT binds the expected
+size and SHA-256 to a staging object. Commit verifies stored bytes through EOF
+and successful close before publishing an immutable `teams/<team>/cas/<sha256>`
+object. Retrying an interrupted commit verifies an existing final object too.
+Object metadata and a successful physical copy cannot establish a receipt.
+The store must recheck live authority and settle the reservation before it
+records existence and the exact uploader's receipt.
 
-For `kind: source`, a user token with `runs.write` may reserve and commit
-`sources/<bundle-sha256>/<random-submission-id>` before a run exists, with
-`run_id: ""`. The source takes a free-team slot without incrementing the run
-count; the later trigger uses that same slot. The controller atomically binds
-the committed upload row to exactly one run from the same team, uploader and
-token. Only that run's live trigger or node claim can sign a source download.
-A retry must upload a new bundle. `runs retry` and Cloud
-`RunAndAwait` children cannot inherit an older run's one-run bundle; both
-are refused before admission. Submit a new Cloud run from the checkout
-(`sparkwing pipeline trigger <pipeline> --profile <cloud-profile> --working-tree`) to upload fresh bytes. A source consumes the cache share of the
-team's 1 GiB free allowance and is limited to 500 MiB. The hourly storage
-pass removes an unused source 24 hours after commit, or a bound source 24
-hours after the run finishes. Pending and running runs retain their sources until the bucket's absolute
-90-day lifecycle backstop, including unusually long active runs. It deletes S3 first, then removes the upload and object rows and reconciles
-the byte count.
+Downloads verify size and SHA-256 at EOF. Artifact staging fails on missing or
+corrupt bytes. Memo becomes a miss and dependency caches run cold. HasMany may
+report presence only within the caller's authorized read set.
 
-The bucket's one-day `pending/` lifecycle removes abandoned bytes. The
-controller's hourly storage pass releases expired reservations and removes
-their upload rows. Uploads are limited to 500 MiB per object. Unknown-length
-artifacts spool to a temporary file before reserve.
+Local remote-cache reads require explicit profile opt-in. They read authorized
+verified-default-branch memo, artifacts and dependency caches, never write shared
+records, and never fetch executable pipeline binaries.
 
-For a binary, the final key includes its content hash. `POST /api/v1/data/download`
-takes `{kind,key}` and returns `{url,sha256,size,expires}`. A binary read uses
-`bin/<input-hash>` as its key; an artifact read names the committed key. The
-route applies the team's daily download cap to both paths. In-cluster callers
-receive an S3 URL, and callers through the
-public ingress receive a CloudFront URL. Cloud runners receive only cloud-built
-binaries unless the team owner sets
-`trust_local_builds` with `PUT /api/v1/team/build-trust`. The default is
-false. `GET /api/v1/team/build-trust` reports the team's choice. Runners
-verify the committed digest while reading.
+Logs have a separate signed segment path and controller-proxied reads. Tagged
+subjects distinguish job attempts from trigger, plan and eval units. Controller
+batch signing and record integration are still being implemented.
 
-Launcher claim tokens follow this cloud provenance policy for both binaries and
-artifacts. Their source bundle remains readable through its exact run binding.
-
-A controller-dispatched node's claim token writes cache under its run's
-GitHub repository ID and git ref, which the controller reads from the run and
-never from the request, as GitHub Actions scopes caches: `GITHUB_REF` for a
-GitHub App trigger, otherwise the run's branch. Its binary reads take the
-first binary its repository holds under its own ref, then its pull request's
-base branch, then the repository's default branch, so another repository's
-binary, or a feature branch's, never reaches `main`. A repository's ref holds
-one binary per input hash: the first committed wins, and a second is refused
-`409`. A claim whose run names no repository or ref writes no binary, and
-still writes artifacts. Every other caller
-writes and reads only binaries no claim wrote, and a claim never reads theirs.
-Artifact keys name their content hash exactly, so they are not scoped.
+The existing output and job-log handlers retain their own S3 transfer setup.
+Those handlers do not restore the removed cache-grant protocol.

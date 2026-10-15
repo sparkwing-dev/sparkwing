@@ -50,7 +50,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 		cfg.Sink = discardSink{}
 	}
 	scfg := dryRunSession(cfg, req.Run.DryRun)
-	scfg.HoldOutput = true
+	scfg.HoldOutput, scfg.Masker = true, req.Masker
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return PlannedRun{}, err
@@ -61,7 +61,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	if err == nil && req.CheckArgs != nil {
 		err = req.CheckArgs(out.Args)
 	}
-	err = releaseDescribed(sess, known, req.Masker, err)
+	err = releaseDescribed(sess, known, err)
 	if err == nil {
 		out.Doc, out.JSON, err = planRun(ctx, sess, req.Pipeline, out.Args, req.Run)
 	}
@@ -82,9 +82,9 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	var perr *nodeproto.Error
 	if err == nil && errors.As(cerr, &perr) {
 		// safety: a process that broke the protocol after its reply cannot vouch for that plan.
-		return PlannedRun{}, cerr
+		return PlannedRun{}, maskErr(req.Masker, cerr)
 	}
-	return out, err
+	return out, maskErr(req.Masker, err)
 }
 
 // safety: placement labels from the pipeline's YAML are the host's, so plan
@@ -146,21 +146,17 @@ func podRun(cfg *Config) *Run {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Run{
-		ID: cfg.Run.RunID, Pipeline: cfg.Pipeline, Args: cfg.Args, Context: cfg.Run,
-		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger,
+	if cfg.Attempts != nil {
+		cfg.State, cfg.Logger = maskState(cfg.State, cfg.Attempts.Masker), maskLogger(cfg.Logger, cfg.Attempts.Masker)
 	}
+	return newRun(cfg, nodeproto.PlanDocOld{}, cfg.Args, nil)
 }
 
 func podHost(ctx context.Context, cfg *Config, run *Run, nodeID string, res Result) Result {
 	if res.Outcome == sparkwing.Failed && ctx.Err() != nil {
 		res.Outcome = sparkwing.Cancelled
 	}
-	if res.Err != nil && cfg.Attempts != nil {
-		// safety: a plan failure quotes the SDK, so it is masked like an attempt's.
-		res.Err = errors.New(cfg.Attempts.Masker.Mask(res.Err.Error()))
-	}
-	return podFinish(ctx, run, nodeID, res)
+	return recordResult(ctx, run, nodeID, res)
 }
 
 func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string, attempt int, dispatched bool) Result {
@@ -286,21 +282,4 @@ func podChain(cfg *Config, layers []Layer) Executor {
 		exec = layers[i](cfg, exec)
 	}
 	return exec
-}
-
-// safety: as the scheduler's finish, a refused output fails the node and a
-// result the store never took never reads as a success.
-func podFinish(ctx context.Context, run *Run, id string, res Result) Result {
-	writeCtx := context.WithoutCancel(ctx)
-	err := run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(res.Err), res.Output, res.Reason, nil)
-	if errors.Is(err, store.ErrOutputNotStored) {
-		res = Result{Outcome: sparkwing.Failed, Err: err}
-		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(err), nil, store.FailureUnknown, nil)
-	}
-	if err != nil {
-		run.Logger.Error("nodehost: record node result", "node", id, "err", err)
-		res.Outcome, res.Err = sparkwing.Failed, errors.Join(res.Err, fmt.Errorf("record node result: %w", err))
-	}
-	nodeEndEvent(writeCtx, run, id, res)
-	return res
 }

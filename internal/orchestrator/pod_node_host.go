@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
@@ -24,7 +23,6 @@ import (
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -89,7 +87,6 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	if err != nil {
 		return nodehost.Result{}, err
 	}
-	defer planSink.end()
 	flags := runflags.FromInvocation(run.Invocation)
 	args, _, err := checkoutRunArgs(p.dir, run.Pipeline, run.Args)
 	if err != nil {
@@ -168,27 +165,22 @@ func prepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string, dst io.
 	if err != nil {
 		return nil, err
 	}
-	out, finish, err := maskedInstallOutput(ctx, masker, dst)
+	out, err := maskedInstallOutput(ctx, masker, dst)
 	if err != nil {
 		return nil, err
 	}
-	defer finish()
+	defer out.Flush()
 	return pipelineentry.Prepare(ctx, sparkwingDir, env, out)
 }
 
-// safety: npm's output goes through the node-host log sink, which holds back
-// the tail of a long line's piece so a credential split across pieces is
-// masked whole; finish runs once npm has exited, so the held tail is complete.
-func maskedInstallOutput(ctx context.Context, masker *secrets.Masker, dst io.Writer) (io.Writer, func(), error) {
+// safety: npm's output is masked as one stream, so a credential split across
+// a long line's pieces is masked whole; flush it once npm has exited.
+func maskedInstallOutput(ctx context.Context, masker *secrets.Masker, dst io.Writer) (*nodehost.LineWriter, error) {
 	sink, err := newPodPlanSink(ctx, "pipeline-install", masker, dst)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	w := &nodehost.LineWriter{Sink: sink.LogSink, Level: nodehost.LevelWarn}
-	return w, func() {
-		w.Flush()
-		sink.Flush()
-	}, nil
+	return nodehost.NewLineWriter(sink, nodehost.LevelWarn, masker), nil
 }
 
 func podEnvNames() []string {
@@ -289,22 +281,20 @@ func maskUserinfo(masker *secrets.Masker, s string) {
 // file or entry. The host joins them to the plan, which plan code cannot
 // drop them from.
 func PipelineRequires(dir, pipeline string) ([]string, error) {
-	path, cfg, err := projectconfig.DiscoverOld(dir)
+	path, cfg, err := projectconfig.Discover(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read the pipeline's placement: %w", err)
 	}
 	if path == "" || cfg == nil {
 		return nil, nil
 	}
-	p := (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline)
-	switch {
-	case p == nil:
-		return nil, nil
-	case len(p.Requires) == 0:
-		// safety: a pipeline that names no requires takes the project's defaults, as the dispatcher's did.
+	if p := cfg.Registry().Find(pipeline); p != nil {
+		return slices.Clone(p.Requires), nil
+	}
+	if cfg.Defaults != nil {
 		return slices.Clone(cfg.Defaults.Requires), nil
 	}
-	return slices.Clone(p.Requires), nil
+	return nil, nil
 }
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.
@@ -396,53 +386,24 @@ func (l *podNodeLog) seal(ctx context.Context, stopped bool) {
 }
 
 // safety: plan code's output goes to out, the container's stderr, through a
-// node-host log sink, which masks a value even across the session's split of
-// a long line; the planning claim has no node log. Call end once the plan
-// process ends.
-func newPodPlanSink(ctx context.Context, runID string, masker *secrets.Masker, out io.Writer) (podPlanSink, error) {
-	log := &podPlanLog{out: out}
-	sink, err := nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
-		RunID: runID, NodeID: store.PlanNodeID, Log: log, State: podPlanState{}, Masker: masker,
+// node-host log sink, which masks its records as a node's; the planning claim
+// has no node log.
+func newPodPlanSink(ctx context.Context, runID string, masker *secrets.Masker, out io.Writer) (*nodehost.LogSink, error) {
+	return nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
+		RunID: runID, NodeID: store.PlanNodeID, Log: &podPlanLog{out: out}, Masker: masker,
 	})
-	return podPlanSink{LogSink: sink, log: log}, err
 }
-
-type podPlanSink struct {
-	*nodehost.LogSink
-	log *podPlanLog
-}
-
-// safety: ending drops the held tail of a split line and every later line
-// rather than flushing them, since a queue the session abandoned can still
-// deliver the rest of a secret whose start a flush would print.
-func (s podPlanSink) end() { s.log.ended.Store(true) }
 
 type podPlanLog struct {
-	mu    sync.Mutex
-	out   io.Writer
-	ended atomic.Bool
+	mu  sync.Mutex
+	out io.Writer
 }
 
 func (l *podPlanLog) Emit(rec sparkwing.LogRecord) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.ended.Load() {
-		return
-	}
-	if _, err := fmt.Fprintln(l.out, rec.Msg); err != nil {
-		return
-	}
+	_, _ = fmt.Fprintln(l.out, rec.Msg)
 }
-
-// safety: plan code has no node row, so its annotations and summaries are dropped.
-type podPlanState struct{}
-
-func (podPlanState) AppendNodeAnnotation(context.Context, string, string, string) error { return nil }
-func (podPlanState) AppendStepAnnotation(context.Context, string, string, string, string) error {
-	return nil
-}
-func (podPlanState) SetNodeSummary(context.Context, string, string, string) error         { return nil }
-func (podPlanState) SetStepSummary(context.Context, string, string, string, string) error { return nil }
 
 // safety: a secret is released only through the claim, under the plan's
 // declaration, as the controller rules for the claim's kind.

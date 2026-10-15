@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Log identities use tagged subjects
+
+- **Before:** log manifests carried separate run, node, attempt and generation
+  fields. `logseg.AttemptPrefix` built an attempt-only key.
+- **After:** manifests require `subject`, which identifies a job attempt or a
+  trigger, plan or eval unit. Job keys include `/jobs/`. Owner keys include
+  `/units/`. Readers reject a manifest whose subject differs from its key.
+- **Upgrade steps:** pass `Options.Subject` when creating a log sink and use
+  `SubjectPrefix` for object keys. Update readers and writers together. Existing
+  untagged manifests require a fresh run. There is no old-format reader.
+
 ## Direct source fetches own their Git objects
 
 - **Before:** direct fetches reused a bare mirror per remote and checked out
@@ -429,83 +440,13 @@ To upgrade:
   runner, reads through the trigger's claim token; its release event names
   the run and no node.
 
-## The cache's static operator token is removed
+## Cache-service accounting is removed
 
-- **Before:** one static secret had two names. The cache read it as the file
-  `cache-token` under `--credentials-dir` (the runner-bundle chart's
-  `cache.tokenSecret`) and accepted it on every route; the controller read it
-  as `SPARKWING_CACHE_TOKEN`, sent it on its git-cache proxy and team purges,
-  and accepted it on the storage counter routes
-  (`/internal/storage/reserve`, `commit`, `release`,
-  `/internal/downloads/charge` and `/internal/egress/totals`), where the cache
-  sent it back. An operator could also send it to the cache from a shell, and
-  the CLI, git clones, `.CacheDir` and the artifact store fell back to
-  `SPARKWING_CACHE_TOKEN` when no `SPARKWING_CACHE_GRANT` was set.
-- **After:** the cache accepts cache grants only, signed with
-  `cache-grant-key`. For its own calls (the git-cache proxy, team purges, and
-  the new `POST /api/v1/cache/store-ceiling/measure` and `thaw` routes) the
-  controller signs a five-minute operator grant with its own
-  `cache-grant-key` credential. The cache authenticates to the controller's
-  counter routes with a `service` token holding only the new operator-only
-  `storage.count` scope, read from the file `controller-token` under
-  `--credentials-dir`; a cache with `--controller` refuses to start without
-  it. A cache refuses to start without `cache-grant-key` unless
-  `--allow-unauthenticated` is set. The controller ignores
-  `SPARKWING_CACHE_TOKEN`, and so does every client. The runner-bundle chart
-  drops `cache.tokenSecret`, refuses to render while it is set, and requires
-  `cache.grantKeySecret` for a cache-enabled install unless
-  `cache.allowUnauthenticated=true`. A person reaches the cache only through
-  the controller with an `admin` bearer.
-- **Operator steps:**
-  1. If the cache runs with `--controller`, mint its counter token as the
-     operator and store it in a Secret:
-
-     ```bash
-     sparkwing cluster tokens create --type service --principal cache \
-       --scope storage.count --profile prod
-     kubectl -n sparkwing create secret generic sparkwing-cache-controller-token \
-       --from-literal=token=<the sws_ token>
-     ```
-
-     Mount it as the file `controller-token` in the cache's
-     `--credentials-dir`, beside `cache-grant-key`. The charts do not start
-     the cache with `--controller`, so a chart install skips this step.
-  2. Make sure the cache and the controller hold the same grant key:
-     `cache.grantKeySecret` in the runner-bundle chart (the full chart mounts
-     it into the controller's credentials directory too), or the
-     `cache-grant-key` file in both services' `--credentials-dir` in your own
-     manifests.
-     An install that had only the cache token creates one:
-
-     ```bash
-     kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
-       --from-literal=key="$(openssl rand -hex 32)"
-     ```
-
-  3. Unset `cache.tokenSecret` (or
-     `sparkwing-runner-bundle.cache.tokenSecret` in the full chart), set
-     `cache.grantKeySecret.name`, and upgrade the cache and controller
-     together, since an older controller sends the cache a token it no longer
-     takes.
-  4. Remove `SPARKWING_CACHE_TOKEN` from the controller's environment and from
-     operators' shells, remove the `cache-token` file from the cache's
-     credentials, and delete the old Secret:
-     `kubectl -n sparkwing delete secret sparkwing-cache-token`.
-  5. Replace any `curl` against the cache with the controller's routes and an
-     `admin` bearer: `POST /api/v1/gitcache/git/register` to register a
-     mirror, and `POST /api/v1/cache/store-ceiling/measure` or `thaw` for the
-     store ceiling.
-- **Edge cases:** rotating the counter token is minting a new one, swapping
-  the Secret and revoking the old prefix with
-  `sparkwing cluster tokens revoke`. A single-team controller without a grant
-  key calls the cache with no bearer, which only a cache started with
-  `--allow-unauthenticated` serves. `sparkwing spark` and a laptop's compile
-  no longer upload binaries to a cache with an operator's token; only a run's
-  grant writes there. Every authenticated cache now has a grant key, so two
-  rules that applied only to a cache with one now apply to all: a cache with
-  `--blob-store` needs `--controller` and its `controller-token`, and the
-  daily egress alarm defaults to 200 GiB unless `--egress-daily-alarm-bytes`
-  is set (the alarm reports in `/health` and the metrics and refuses nothing).
+The cache service and its accounting client have been deleted. Remove the
+cache deployment and its `controller-token` credential. The controller no longer
+registers the cache's storage-reserve, commit, release, download-charge or
+egress-total routes. The `storage.count` service scope has been removed.
+Storage and download accounting stays in the controller's database.
 
 ## The source-token route is removed
 
@@ -691,3 +632,17 @@ script that called the binary directly moves to the CLI:
 [{"name": ..., "required": true}]}` (or `"optional": true`), read from
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
+
+## Cache grants are removed
+
+The `swcg` protocol, `cache-grant-key` controller credential and
+`POST /api/v1/runs/{id}/cache-grant` route are gone. The grant-authenticated
+`/api/v1/data/upload`, `/commit`, `/download` and `/capabilities` endpoints
+are removed with them. Services no longer announce `data_download_url` or
+`direct_data`.
+
+Byte-storage consumers use the `blob.Store`, `DataSigner` and `RecordStore`
+contracts. Their authenticated controller and remote-client adapters still need
+integration. There is no compatibility endpoint or cache-service fallback.
+Existing output and job-log handlers keep their separate transfer setup until
+their own cutover.

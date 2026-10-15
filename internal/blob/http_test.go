@@ -18,7 +18,7 @@ func (r roundTrip) RoundTrip(q *http.Request) (*http.Response, error) { return r
 func TestSignedTransferHTTP(t *testing.T) {
 	for _, status := range []int{200, 201, 302, 404, 500} {
 		client := blob.TransferClient{Transport: roundTrip(func(q *http.Request) (*http.Response, error) {
-			if q.Method != "PUT" || q.ContentLength != 5 || q.Header.Get("X-Signed") != "value" || q.Header.Get("Authorization") != "" {
+			if q.Method != http.MethodPut || q.ContentLength != 5 || q.Header.Get("X-Signed") != "value" || q.Header.Get("Authorization") != "" {
 				t.Fatalf("wrong signed request: %v", q)
 			}
 			return &http.Response{StatusCode: status, Header: http.Header{"Location": []string{"http://other.example/object"}}, Body: io.NopCloser(strings.NewReader(""))}, nil

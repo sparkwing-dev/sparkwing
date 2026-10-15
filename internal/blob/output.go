@@ -53,6 +53,9 @@ func (d OutputData) Put(ctx context.Context, body []byte) (Record, error) {
 	if receipt.Digest != digest || receipt.Identity != d.Identity {
 		return Record{}, ErrIntegrity
 	}
+	if err := ctx.Err(); err != nil {
+		return Record{}, err
+	}
 	record, err := d.Records.CommitRecord(ctx, CommitRecordRequest{Authority: d.Authority, Source: d.Identity, Key: key, Digest: digest})
 	if err != nil {
 		return Record{}, err

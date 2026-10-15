@@ -2,6 +2,7 @@ package blob_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,7 +99,7 @@ func TestS3LogLifecycleReadiness(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := backend.LogClassReady(ctx, "r90"); err != context.Canceled {
+	if err := backend.LogClassReady(ctx, "r90"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled readiness = %v", err)
 	}
 }

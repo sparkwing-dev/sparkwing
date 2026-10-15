@@ -202,6 +202,7 @@ func (st *Run) restore(ctx context.Context, workdir string) {
 	start := time.Now()
 	size, err := b.Fetch(ctx, key, dir)
 	if err != nil {
+		st.missed = true
 		slog.Warn("depcache: restore failed; running uncached",
 			"node", st.node, "cache", st.spec.Name, "key", key, "err", err)
 		return

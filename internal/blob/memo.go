@@ -43,13 +43,13 @@ func MaterializeMemo(ctx context.Context, bytes Store, records RecordStore, requ
 }
 
 func readMemoBytes(ctx context.Context, bytes Store, authority Authority, team string, hit MemoHit) ([]byte, error) {
-	var output []byte
-	if hit.Output.Set {
-		var err error
-		output, err = readOutputBytes(ctx, bytes, authority, hit.Output.Value)
-		if err != nil {
-			return nil, err
-		}
+	// safety: empty outputs have an explicit record; an absent result must rerun.
+	if !hit.Output.Set {
+		return nil, ErrNotFound
+	}
+	output, err := readOutputBytes(ctx, bytes, authority, hit.Output.Value)
+	if err != nil {
+		return nil, err
 	}
 	if !hit.Manifest.Set {
 		if len(hit.Members) != 0 {

@@ -51,7 +51,10 @@ func (s *S3) Sign(ctx context.Context, object capability.ObjectToSign) (capabili
 	var signed *v4.PresignedHTTPRequest
 	var err error
 	if object.Method == http.MethodPut {
-		raw, _ := hex.DecodeString(object.SHA256)
+		raw, decodeErr := hex.DecodeString(object.SHA256)
+		if decodeErr != nil {
+			return capability.SignedObject{}, decodeErr
+		}
 		signed, err = s.presign.PresignPutObject(ctx, &s3.PutObjectInput{
 			Bucket: aws.String(s.bucket), Key: aws.String(object.Key), ContentLength: aws.Int64(object.Size),
 			ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(raw)),
@@ -76,21 +79,24 @@ func signedHeaders(signed http.Header) map[string]string {
 	return headers
 }
 
-func (s *S3) head(ctx context.Context, key string, expected Blob) (*s3.HeadObjectOutput, error) {
-	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
-		Bucket: aws.String(s.bucket), Key: aws.String(key), ChecksumMode: types.ChecksumModeEnabled,
-	})
+func (s *S3) verify(ctx context.Context, key string, expected Blob) (string, error) {
+	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
 	if s3Error(err, "NoSuchKey", "NotFound") {
-		return nil, ErrNotFound
+		return "", ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	raw, _ := hex.DecodeString(string(expected.Digest))
-	if head.ContentLength == nil || *head.ContentLength != expected.Size || aws.ToString(head.ChecksumSHA256) != base64.StdEncoding.EncodeToString(raw) {
-		return nil, ErrIntegrity
+	if object.Body == nil {
+		return "", ErrIntegrity
 	}
-	return head, nil
+	if object.ContentLength == nil || *object.ContentLength != expected.Size {
+		return "", errors.Join(ErrIntegrity, object.Body.Close())
+	}
+	if err := verifyObject(ctx, object.Body, expected); err != nil {
+		return "", err
+	}
+	return aws.ToString(object.ETag), nil
 }
 
 // CommitObject seals verified bytes under a key that cannot overwrite another object.
@@ -106,25 +112,25 @@ func (s *S3) CommitObject(ctx context.Context, pending string, expected Blob) er
 	if err := validatePending(pending, expected.Team); err != nil {
 		return err
 	}
-	head, err := s.head(ctx, pending, expected)
+	etag, err := s.verify(ctx, pending, expected)
 	if errors.Is(err, ErrNotFound) {
-		_, err = s.head(ctx, final, expected)
+		_, err = s.verify(ctx, final, expected)
 		return err
 	}
 	if err != nil {
 		return err
 	}
-	if aws.ToString(head.ETag) == "" {
+	if etag == "" {
 		return fmt.Errorf("staging object has no version fence")
 	}
 	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket: aws.String(s.bucket), Key: aws.String(final), CopySource: aws.String(url.PathEscape(s.bucket + "/" + pending)),
-		CopySourceIfMatch: head.ETag, IfNoneMatch: aws.String("*"), MetadataDirective: types.MetadataDirectiveReplace,
+		CopySourceIfMatch: aws.String(etag), IfNoneMatch: aws.String("*"), MetadataDirective: types.MetadataDirectiveReplace,
 	})
 	if err != nil && !s3Error(err, "PreconditionFailed") {
 		return err
 	}
-	_, err = s.head(ctx, final, expected)
+	_, err = s.verify(ctx, final, expected)
 	return err
 }
 

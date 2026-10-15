@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -127,42 +126,5 @@ func TestRunSourceCredential_NeedsTheGitHubApp(t *testing.T) {
 	var out map[string]any
 	if code := f.call("POST", "/api/v1/runs/run-bare/source-credential", "Bearer "+tok, nil, &out); code != http.StatusNotFound {
 		t.Fatalf("uncovered = %d %v, want 404", code, out)
-	}
-}
-
-// A claim token gets a cache grant bound to its claim: every controller use
-// of the grant re-checks the claim, so it stops working when the run is
-// cancelled, and a plan claim's grant uploads only a binary.
-func TestRunCacheGrant_IsBoundToTheClaim(t *testing.T) {
-	f := newAppFixture(t)
-	f.srv.WithCacheGrantKey("claim-grant-signing-key")
-	olga := f.ghUser(501, "olga")
-	tok := f.launchedRun(olga, "run-grant", "acme", "widgets")
-	var out controller.CacheGrantResponse
-	if code := f.call("POST", "/api/v1/runs/run-grant/cache-grant", "Bearer "+tok, map[string]any{}, &out); code != http.StatusOK {
-		t.Fatalf("cache grant = %d", code)
-	}
-	claim, err := f.store.AuthorizeClaimToken(context.Background(), tok, store.ClaimResult, out.ExpiresAt)
-	if err != nil || claim.ExpiresAt.Sub(out.ExpiresAt) < time.Hour-controller.ClaimCacheGrantTTL-time.Minute {
-		t.Fatalf("the grant expires %s, the claim token %s (%v); want the grant within %s of its mint",
-			out.ExpiresAt, claim.ExpiresAt, err, controller.ClaimCacheGrantTTL)
-	}
-	grant, err := authwire.VerifyCacheGrant("claim-grant-signing-key", out.Grant, time.Now())
-	if err != nil || grant.Claim == nil || grant.Claim.Kind != authwire.CacheClaimToken || grant.Team != olga.team ||
-		grant.Run != "run-grant" || grant.Claim.NodeID != store.PlanNodeID {
-		t.Fatalf("grant = %+v, %v", grant, err)
-	}
-	ctx := context.Background()
-	if binaryOnly, err := controller.VerifyLiveDataGrant(ctx, f.srv, out.Grant); err != nil || !binaryOnly {
-		t.Fatalf("live plan grant = %v, %v; want accepted and binary-only", binaryOnly, err)
-	}
-	if err := f.teamOf(olga).RequestCancel(ctx, "run-grant"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := controller.VerifyLiveDataGrant(ctx, f.srv, out.Grant); err == nil {
-		t.Fatal("the grant outlived the claim's cancel")
-	}
-	if code := f.call("POST", "/api/v1/runs/run-grant/cache-grant", "Bearer "+tok, map[string]any{}, &out); code != http.StatusForbidden {
-		t.Fatalf("cache grant after cancel = %d, want 403", code)
 	}
 }

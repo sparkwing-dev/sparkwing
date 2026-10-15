@@ -24,6 +24,9 @@ func newSignedStore(options SignedStoreOptions) Store {
 }
 
 func (s *signedStore) Put(ctx context.Context, req PutRequest) (Receipt, error) {
+	if err := ctx.Err(); err != nil {
+		return Receipt{}, err
+	}
 	if s.signer == nil {
 		return Receipt{}, fmt.Errorf("blob signer is required")
 	}
@@ -37,11 +40,15 @@ func (s *signedStore) Put(ctx context.Context, req PutRequest) (Receipt, error) 
 	if ticket.ID == "" || ticket.Transfer.Digest != req.Digest || ticket.Transfer.Size != req.Size {
 		return Receipt{}, ErrIntegrity
 	}
-	reader := newVerifiedReader(io.NopCloser(req.Body), ticket.Transfer)
+	if err := ctx.Err(); err != nil {
+		return Receipt{}, err
+	}
+	reader := newVerifiedReader(ctx, io.NopCloser(req.Body), ticket.Transfer)
 	response, err := s.client.Transfer(ctx, ticket.Transfer, reader)
 	if response != nil {
 		err = errors.Join(err, response.Close())
 	}
+	err = errors.Join(err, ctx.Err())
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -70,6 +77,9 @@ func (s *signedStore) Put(ctx context.Context, req PutRequest) (Receipt, error) 
 }
 
 func (s *signedStore) Get(ctx context.Context, req GetRequest) (VerifiedReader, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s.signer == nil {
 		return nil, fmt.Errorf("blob signer is required")
 	}
@@ -83,17 +93,21 @@ func (s *signedStore) Get(ctx context.Context, req GetRequest) (VerifiedReader, 
 	if transfer.Digest != req.Digest || transfer.Size < 0 {
 		return nil, ErrIntegrity
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	body, err := s.client.Transfer(ctx, transfer, nil)
+	err = errors.Join(err, ctx.Err())
 	if err != nil {
 		if body != nil {
-			_ = body.Close()
+			err = errors.Join(err, body.Close())
 		}
 		return nil, err
 	}
 	if body == nil {
 		return nil, fmt.Errorf("blob transfer returned no body")
 	}
-	return newVerifiedReader(body, transfer), nil
+	return newVerifiedReader(ctx, body, transfer), nil
 }
 
 func (s *signedStore) HasMany(ctx context.Context, req HasManyRequest) (Presence, error) {
@@ -149,6 +163,7 @@ func budgetError(err error) error {
 }
 
 type verifiedReader struct {
+	ctx              context.Context
 	body             io.ReadCloser
 	want             Digest
 	size, count      int64
@@ -157,8 +172,8 @@ type verifiedReader struct {
 	err              error
 }
 
-func newVerifiedReader(body io.ReadCloser, transfer SignedTransfer) *verifiedReader {
-	return &verifiedReader{body: body, want: transfer.Digest, size: transfer.Size, hash: sha256.New()}
+func newVerifiedReader(ctx context.Context, body io.ReadCloser, transfer SignedTransfer) *verifiedReader {
+	return &verifiedReader{ctx: ctx, body: body, want: transfer.Digest, size: transfer.Size, hash: sha256.New()}
 }
 
 func (r *verifiedReader) Read(p []byte) (int, error) {
@@ -168,10 +183,18 @@ func (r *verifiedReader) Read(p []byte) (int, error) {
 	if r.err != nil {
 		return 0, r.err
 	}
+	if err := r.ctx.Err(); err != nil {
+		r.err = err
+		return 0, err
+	}
 	if r.verified {
 		return 0, io.EOF
 	}
 	n, err := r.body.Read(p)
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		r.err = errors.Join(err, ctxErr)
+		return n, r.err
+	}
 	_, _ = r.hash.Write(p[:n])
 	if int64(n) > r.size-r.count {
 		r.err = ErrIntegrity

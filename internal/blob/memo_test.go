@@ -23,7 +23,7 @@ func (r memoRecords) CopyMemo(ctx context.Context, q blob.CopyMemoRequest) (blob
 }
 
 func TestMemoMaterializationFailures(t *testing.T) {
-	for _, failure := range []string{"none", "follower_output", "manifest_commit", "missing_bytes", "refused_edge", "corrupt_output", "corrupt_member", "member_size", "manifest_members", "budget"} {
+	for _, failure := range []string{"none", "empty_output", "missing_output_record", "follower_output", "manifest_commit", "missing_bytes", "refused_edge", "corrupt_output", "corrupt_member", "member_size", "manifest_members", "budget"} {
 		t.Run(failure, func(t *testing.T) {
 			i := identity()
 			a := blob.Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt}
@@ -33,7 +33,8 @@ func TestMemoMaterializationFailures(t *testing.T) {
 				manifestBody = `{"entries":[]}`
 			}
 			manifest := digest(manifestBody)
-			hit := blob.MemoHit{Found: true,
+			hit := blob.MemoHit{
+				Found:    true,
 				Output:   runspec.Optional[blob.Digest]{Set: true, Value: output},
 				Manifest: runspec.Optional[blob.Digest]{Set: true, Value: manifest},
 				Members:  []blob.Member{{Team: i.Team, ManifestDigest: manifest, Digest: member, Path: "file", Size: 4, Mode: 0o644}},
@@ -62,6 +63,11 @@ func TestMemoMaterializationFailures(t *testing.T) {
 				return hit, nil
 			}}
 			switch failure {
+			case "empty_output":
+				hit.Output.Value = digest("")
+				bodies[hit.Output.Value], sizes[hit.Output.Value] = "", 0
+			case "missing_output_record":
+				hit.Output = runspec.Optional[blob.Digest]{}
 			case "follower_output":
 				delete(bodies, output)
 			case "missing_bytes":
@@ -93,8 +99,12 @@ func TestMemoMaterializationFailures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if failure == "none" {
-				if !got.Hit.Found || string(got.Output) != `"result"` || gets != 3 {
+			if failure == "none" || failure == "empty_output" {
+				want := `"result"`
+				if failure == "empty_output" {
+					want = ""
+				}
+				if !got.Hit.Found || string(got.Output) != want || gets != 3 {
 					t.Fatalf("materialized %+v with %d reads", got, gets)
 				}
 			} else if got.Hit.Found || len(got.Output) != 0 {

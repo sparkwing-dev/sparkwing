@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
-const testPrefix = "logs/r90/teams/acme/runs/run-1/build/a1-g1/"
+const testPrefix = "logs/r90/teams/acme/runs/run-1/jobs/build/a1-g1/"
 
 type manualTimer struct {
 	mu sync.Mutex
@@ -46,7 +46,10 @@ func (m *manualTimer) fire() bool {
 
 func newSink(t *testing.T, up logseg.Uploader, opts logseg.Options) *logseg.Sink {
 	t.Helper()
-	opts.Run, opts.Node, opts.SpoolDir = "run-1", "build", t.TempDir()
+	opts.SpoolDir = t.TempDir()
+	if opts.Subject.Kind == "" {
+		opts.Subject = keySubject("acme", "run-1", "build", 1, 1)
+	}
 	if opts.AfterFunc == nil {
 		opts.AfterFunc = (&manualTimer{}).after
 	}
@@ -167,7 +170,7 @@ func TestRunnerKilledMidNodeLosesAtMostOneSegment(t *testing.T) {
 	}
 
 	m, err := logseg.SealAbandoned(context.Background(), objs, testPrefix,
-		logseg.Manifest{Run: "run-1", Node: "build", Attempt: 1, Generation: 1},
+		logseg.Manifest{Subject: new(keySubject("acme", "run-1", "build", 1, 1))},
 		logseg.ReasonRunnerLost, objs.putIfAbsent)
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +337,7 @@ func TestNodeSealLosesToControllerSeal(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitStored(t, up, 1)
-	if _, err := logseg.SealAbandoned(context.Background(), objs, testPrefix, logseg.Manifest{},
+	if _, err := logseg.SealAbandoned(context.Background(), objs, testPrefix, logseg.Manifest{Subject: new(keySubject("acme", "run-1", "build", 1, 1))},
 		logseg.ReasonRunnerLost, objs.putIfAbsent); err != nil {
 		t.Fatal(err)
 	}

@@ -3,19 +3,21 @@ package logseg_test
 import (
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
-func TestAttemptPrefixLayout(t *testing.T) {
-	got, err := logseg.AttemptPrefix(logseg.ClassFree, "acme", "run-1", "build/linux", 2, 7)
+func TestJobSubjectPrefixLayout(t *testing.T) {
+	got, err := logseg.SubjectPrefix(logseg.ClassFree, keySubject("acme", "run-1", "build/linux", 2, 7))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "logs/r30/teams/acme/runs/run-1/build_2flinux/a2-g7/"; got != want {
+	if want := "logs/r30/teams/acme/runs/run-1/jobs/build_2flinux/a2-g7/"; got != want {
 		t.Fatalf("prefix %q, want %q", got, want)
 	}
-	other, err := logseg.AttemptPrefix(logseg.ClassFree, "acme", "run-1", "build__linux", 2, 7)
+	other, err := logseg.SubjectPrefix(logseg.ClassFree, keySubject("acme", "run-1", "build__linux", 2, 7))
 	if err != nil || other == got {
 		t.Fatalf("hierarchical and flat node IDs share a prefix: %q, %v", other, err)
 	}
@@ -36,7 +38,7 @@ func TestAttemptPrefixLayout(t *testing.T) {
 	}
 }
 
-func TestAttemptPrefixRefusesBadParts(t *testing.T) {
+func TestJobSubjectPrefixRefusesBadParts(t *testing.T) {
 	for name, args := range map[string]struct {
 		class, team, run, node string
 		attempt                int64
@@ -47,11 +49,15 @@ func TestAttemptPrefixRefusesBadParts(t *testing.T) {
 		"node":    {logseg.ClassStandard, "acme", "r", "a/../b", 1},
 		"attempt": {logseg.ClassStandard, "acme", "r", "n", 0},
 	} {
-		if _, err := logseg.AttemptPrefix(args.class, args.team, args.run, args.node, args.attempt, 1); err == nil {
+		if _, err := logseg.SubjectPrefix(args.class, keySubject(args.team, args.run, args.node, args.attempt, 1)); err == nil {
 			t.Errorf("%s: accepted %+v", name, args)
 		}
 	}
-	if _, err := logseg.AttemptPrefix(logseg.ClassStandard, logseg.NoTeam, "r", "n", 1, 0); err != nil {
+	if _, err := logseg.SubjectPrefix(logseg.ClassStandard, keySubject(logseg.NoTeam, "r", "n", 1, 1)); err != nil {
 		t.Fatalf("teamless run refused: %v", err)
 	}
+}
+
+func keySubject(team, runID, nodeID string, attempt, generation int64) blob.LogSubject {
+	return blob.LogSubject{Kind: blob.LogJobAttempt, Team: team, RunID: runID, Attempt: &runspec.AttemptIdentity{Team: team, RunID: runID, NodeID: nodeID, Attempt: attempt, Generation: generation}}
 }

@@ -389,9 +389,7 @@ func TestIdentityTeamTokensNeverCarryAdmin(t *testing.T) {
 	if _, _, err := tn.CreateToken(ctx, "ops", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
 		t.Fatalf("team mint with claims.launch = %v, want ErrAdminScopeOnTeamToken", err)
 	}
-	if _, _, err := tn.CreateToken(ctx, "cache", store.TokenKindService, []string{store.StorageCountScope}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
-		t.Fatalf("team mint with storage.count = %v, want ErrAdminScopeOnTeamToken", err)
-	}
+
 	for _, scopes := range [][]string{{"admin"}, {"nodes.claim", store.LaunchScope}, {"runs.read", "admin"}} {
 		if _, _, err := tn.CreateMachineToken(ctx, "x", scopes, u.Account.ID, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
 			t.Fatalf("machine mint with %v = %v, want ErrInvalidInput", scopes, err)

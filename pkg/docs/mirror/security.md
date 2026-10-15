@@ -34,8 +34,8 @@ who reaches them, not the name, and a service that reads these names must not
 treat one as a boundary.
 
 **Operators and service credentials have separate authority.** `admin` is
-deployment authority. Service scopes such as `credits.grant`, `claims.launch`
-and `storage.count` cross teams for their documented operations. Team membership
+deployment authority. Service scopes such as `credits.grant` and `claims.launch`
+cross teams for their documented operations. Team membership
 does not grant them, and `admin` does not stand in for `credits.grant`.
 Operator powers over a team's billing standing and the sign-up waitlist answer
 only a listed operator's own console session, never a bearer token; see
@@ -99,13 +99,10 @@ role, so put nobody but operators in it. Customer pipelines belong on runners
 whose token's team they own, launched through controller dispatch, which gives
 each Job a claim token for its own work and no Kubernetes API token.
 
-**Cache and source sharing have their own provenance requirements.** A source
-URL and a cache grant alone do not establish that every Git object in a shared
-mirror is public. Other teams read only the cache's separate public mirrors,
-which it fills from origin without a credential; the operator's mirrors may
-still hold objects an earlier release seeded. Assess those separately from
-controller API permissions. This guide makes no tenant-isolation guarantee
-for those shared mirrors.
+**Source and byte storage use separate authority checks.** Source acquisition
+uses a run checkout and its released source credential. The cache service,
+shared mirrors and cache-grant protocol have been removed. A stored digest
+alone grants no byte-storage read authority.
 
 Execution on a self-hosted machine keeps the agent OS user's file,
 network, and process permissions. It can read the agent's
@@ -159,7 +156,7 @@ it. Only a claim token of the run receives a source credential, through
 `POST /api/v1/runs/{id}/source-credential`, and each issue is recorded with
 the team's git credential releases. The operator's launcher token
 receives claim tokens for every team's ready nodes, so whoever holds it reaches
-every team's run secrets, source credentials and cache grants; keep it
+every team's run secrets and source credentials; keep it
 operator-only. Which secrets a run may read through a claim token is declared
 by that run's own plan, so the boundary is the secret's pipeline or shared
 scope, not the declaration. The masker covers step output that goes through

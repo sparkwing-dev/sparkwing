@@ -2,6 +2,7 @@ package blob
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,16 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
-
-// ObjectBackend signs authorized transfers and publishes verified immutable bytes.
-// The controller must reauthorize the upload ticket before CommitObject and then
-// commit the live blob and exact uploader receipt in the store transaction.
-// A successful object operation alone grants neither existence nor read authority.
-type ObjectBackend interface {
-	capability.DataSigner
-	CommitObject(context.Context, string, Blob) error
-	DeleteObject(context.Context, string) error
-}
 
 func validateObject(o capability.ObjectToSign, now time.Time) error {
 	if o.Size < 0 || !validDigest(Digest(o.SHA256)) || !o.ExpiresAt.After(now) {
@@ -81,9 +72,9 @@ func validateDeleteKey(key string) error {
 }
 
 func verifyObject(ctx context.Context, body io.ReadCloser, expected Blob) error {
-	r := newVerifiedReader(body, SignedTransfer{Digest: expected.Digest, Size: expected.Size})
-	defer r.Close()
-	_, err := io.Copy(io.Discard, &contextReader{ctx: ctx, reader: r})
+	r := newVerifiedReader(ctx, body, SignedTransfer{Digest: expected.Digest, Size: expected.Size})
+	_, err := io.Copy(io.Discard, r)
+	err = errors.Join(err, r.Close(), ctx.Err())
 	if err != nil {
 		return err
 	}

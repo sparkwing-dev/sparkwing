@@ -50,12 +50,12 @@ func TestTenantRoutes_WildcardsNameTheirResource(t *testing.T) {
 // row, so the route itself has to demand authority that crosses teams.
 func TestTenantRoutes_DeploymentRoutesNeedDeploymentAuthority(t *testing.T) {
 	crossTeam := map[string]bool{
-		ScopeAdmin: true, ScopeCreditsGrant: true, ScopeClaimsLaunch: true, ScopeStorageCount: true,
+		ScopeAdmin: true, ScopeCreditsGrant: true, ScopeClaimsLaunch: true,
 		apiroutes.Operator: true,
 	}
 	routes, err := apiroutes.Parse("server.go", map[string]string{
 		"ScopeAdmin": ScopeAdmin, "ScopeCreditsGrant": ScopeCreditsGrant,
-		"ScopeClaimsLaunch": ScopeClaimsLaunch, "ScopeStorageCount": ScopeStorageCount,
+		"ScopeClaimsLaunch": ScopeClaimsLaunch,
 	})
 	if err != nil {
 		t.Fatal(err)

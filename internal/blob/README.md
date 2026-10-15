@@ -9,6 +9,8 @@ Uploads check the signed digest and size, consume and verify the source, then
 commit the ticket. The returned receipt must match the signed uploader and
 digest. Downloads verify size and SHA-256 at EOF. Reading the expected number
 of bytes and closing is insufficient. Consumers must read EOF and check errors.
+Cancelled uploads stop before ticket commit. Downloads retain their caller's
+context through EOF verification and fail if it is cancelled during a read.
 `HasMany` carries the caller's deadline and rejects unsolicited result digests.
 The controller remains responsible for filtering its results by the live read set.
 
@@ -52,6 +54,10 @@ it with their bound clients and install it through `depcache.WithBackend`.
 `internal/depcache` cannot import blob because protocol declarations import its
 cache specification. A download is verified before archive extraction publishes
 files. Without an injected backend, dependency caches use local files.
+`ExtractArchiveStaged(ctx, reader, dir)` consumes the gzip trailer before
+publishing, so checksum errors and truncated trailers preserve the destination.
+Cancellation during extraction also preserves it. A failed restore runs cold
+and can replace the failed archive after successful work.
 
 Record transactions, read-set construction, unique-byte accounting, GC and
 retention belong to `pkg/store`. Controller authorization and upload tickets belong
@@ -74,11 +80,24 @@ staging and memo reads. This includes each file's path, digest, size and mode.
 `MaterializeMemo` asks `RecordStore.CopyMemo` for an atomic, authorized copy,
 then verifies the output, manifest and every member within the lookup budget.
 Missing or corrupt bytes, a refused edge or a failed copy produces a miss.
+An absent output digest also produces a miss. Empty output remains valid when
+its explicit blob and output record were copied.
 Caller cancellation remains an error. Hosts query records before coordinating
 a cold execution, so verified default-branch fallback does not depend on an
 old run or a concurrency-cache row. A promoted waiter checks records again.
 The host resolves a fresh storage binding after execution before publishing
 artifacts, because an application retry advances the upload attempt.
+
+`depcacheblob.NewRemoteReader` adapts an opted-in `RemoteCache` to dependency
+archive restores under an explicit repository and lookup budget. It uses
+`RemoteCache.Depcache` to resolve verified default-branch records and
+`RemoteCache.Artifact` to read only the accepted digest. The download must reach
+verified EOF and close successfully before extraction replaces local files.
+`depcache.WithRemoteReader` checks local archives first and uses that reader
+after a local miss. Saves remain on local disk because the remote reader has no
+write method. W3/W9 still need to install this binding from the selected cache
+profile. Cloud and hosted-job writes continue through the separate signed-data
+backend.
 
 `NewFilesystem` and `NewS3` implement `capability.DataSigner` and `ObjectBackend`.
 The controller passes an authorized `ObjectToSign` after reserving quota.
@@ -89,8 +108,9 @@ data downloads lasting longer than sixty seconds.
 
 The filesystem backend serves its configured endpoint using an injected signing
 key. It verifies the complete upload before publishing the staging file. S3 PUTs
-sign the content length and checksum. Commit checks the S3 checksum and length,
-then copies with a source ETag fence and a destination create-only condition.
+sign the content length and checksum. Commit reads and verifies staging bytes
+through EOF and successful close, then copies with the verified source ETag
+and a destination create-only condition. It verifies the final bytes too.
 Both backends verify an existing final object before adopting it on a retry.
 Filesystem reads remain subject to the client's EOF verification.
 
@@ -140,6 +160,15 @@ be uploaded by principals with different trust.
 Artifact staging and dependency-cache restore close each verified stream before
 publishing the downloaded files. A close failure returns an error and preserves
 the destination for that download.
+Artifact staging applies its caller's explicit budget to record lookup, downloads
+and file publication. Cancellation before replacement preserves the existing file.
+Capture checks the exact uploader receipt for each file and the manifest, then
+checks the committed record's key, digest and source identity before returning it.
+Dependency-cache saves check uploader authority before creating the archive. They
+check the returned receipt and committed record against the expected digest, key
+and exact uploader. Output and dependency-cache writes cancelled after upload
+return an error before committing a record.
+Archive spools and filesystem upload temporary files report cleanup errors.
 
 `bincache.BinaryData` binds remote pipeline binaries to these same byte and
 record contracts. A download checks the exact repo/ref/build record and team
@@ -161,6 +190,7 @@ transfers or imports remove staging and preserve an existing checkout.
 The CLI and old hosts have no source storage binding. Working-tree triggers
 fail before upload or submission. Intake must supply live upload authority
 before the CLI can commit and seal the source digest. Hosts must pass their
-live data authority and sealed digest. The cache-grant request client and
-legacy source byte transport are deleted. Old controller storage handlers
-still need replacement against the store's upload transaction.
+live data authority and sealed digest. The cache-grant request client,
+legacy source byte transport and grant-based controller data handlers are
+deleted. The authenticated controller adapter and remaining output handlers
+still need binding to the store's upload transaction.

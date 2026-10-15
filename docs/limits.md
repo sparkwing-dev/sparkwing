@@ -38,18 +38,10 @@ still write logs and events, and a team that stores only artifacts gets 768
 MiB rather than the whole gibibyte. The operator's own team and a team with
 credits are never held to a share.
 
-A write reserves its size with `POST /internal/storage/reserve`, commits what
-it stored with `POST /internal/storage/commit`, and gives the room back with
-`POST /internal/storage/release` when it stored nothing. The reserve locks
-the team's row, so writers on any number of cache replicas see each
-other's reservations, and two writers racing for the last bytes of a share
-cannot both win. A reservation a crashed writer never settled expires after an
-hour. A commit with a reservation ID counts once for 24 hours; hourly
-storage maintenance prunes older receipts, after which a replay counts
-again. A renewal retry returns the same next reservation while it is
-active. The cache calls these routes with its `storage.count` service token and makes one
-reserve and one commit or release per object. The cache's service token can
-commit a negative overwrite delta when an object shrinks.
+The controller owns storage reservations, committed bytes and download charges
+in its database. Concurrent reservations lock the team's row, so two writers
+cannot both reserve its last available bytes. The cache service's counter routes
+and service credential have been removed.
 
 The controller charges node log segments itself. When a runner asks for a
 node's first upload URLs, the controller reads the team's standing, which

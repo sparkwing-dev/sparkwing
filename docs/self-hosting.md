@@ -120,7 +120,6 @@ these file names, mounted whole.
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
 | `credits-token` | The checkout service's own token (`sws_`), seeded as a `credits.grant` service token; see [Buying credits](auth.md#buying-credits) | the checkout service has no token |
-| `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
 
 Keep the directory readable by the controller's user alone (`0700`, files
 `0600`); a Kubernetes projected volume with `defaultMode: 0400` does this.
@@ -129,10 +128,10 @@ Keep the directory readable by the controller's user alone (`0700`, files
 
 For object-store downloads through a public ingress, configure the controller
 with a CloudFront distribution domain, trusted key pair ID, and private key.
-Point `--cache-blob-store` at the cache service's S3 bucket and prefix; the
-controller announces `data_download_url` to in-cluster callers when that store
-is configured, and to public-ingress callers when CloudFront signing is also
-configured.
+Point `--cache-blob-store` at the S3 bucket and prefix used by the existing
+output handlers. This configuration supplies their signed downloads.
+The cache-grant data routes and service announcements have been removed.
+The new byte-storage controller adapter remains incomplete.
 Pass `--cloudfront-domain` and `--cloudfront-key-pair-id`, then put the
 signing key in the `cloudfront-key`
 [credential](#controller-credentials). Keep it out of Helm values, command
@@ -374,68 +373,15 @@ reach the repository with its configured Git credentials.
 service requirement. Install and start Docker only on machines assigned jobs
 that invoke it.
 
-## Object storage for the cache
+## Storage accounting
 
-`sparkwing-cache` keeps its data on a volume by default. Pointed at an S3
-bucket with `--blob-store s3://bucket/cache`, it keeps its durable data there
-instead, one namespace per team, and the volume shrinks to working space. It
-never writes at the bucket root or lists outside its prefix, so an IAM policy
-scoped to the prefix is enough. Region and credentials come from the AWS
-default chain (IRSA on EKS, with `AWS_REGION` set); no static keys are read.
-The AWS SDK's own `AWS_ENDPOINT_URL_S3` points it at an S3-compatible store.
+Sparkwing no longer ships a cache service. Remove its deployment and
+`controller-token` credential. Storage reservations, download charges and egress
+accounting belong to the controller's database. There is no cache-service
+counter API or service scope to configure.
 
-| Service | Flag | Keys |
-|---|---|---|
-| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator grant's own under `cache/{bins,cache,artifacts}/...` |
-| `sparkwing-controller` | `--cache-blob-store s3://bucket/cache` | node log segments under `cache/logs/<class>/teams/<team>/runs/...`; see [Node log retention](#node-log-retention) |
-
-**The cache** moves its binary, dependency-archive and artifact stores to the
-bucket. Git mirrors, workspace uploads and the registry proxy stay on
-`--data-dir`, because git needs a real filesystem and the others are
-short-lived working state, so the volume and its `--max-store-bytes` ceiling
-remain, sized for the mirrors. A binary is staged under `--data-dir/tmp` to
-learn its digest before it is written. Uploads above 64 MiB go up in 16 MiB
-parts, and an upload that fails or runs past its size cap is aborted, so no
-partial object is ever readable. Every read is served through the pod, never
-redirected to the bucket, so the egress meter and the request budget see every
-byte.
-
-The cache does not count what each team holds in its bucket: the controller
-does, in its database, and the cache asks it for room before a team's
-write and charges each team's download to its day there
-([Tenant limits](limits.md)). The cache's store ceiling covers its
-volume alone; the controller's `--bucket-store` measurement covers the
-bucket. On a multi-team deployment give the cache `--controller` and a
-`service` token holding only the `storage.count` scope, minted with
-`sparkwing cluster tokens create --type service --principal cache --scope storage.count`
-and mounted as the file `controller-token` in its `--credentials-dir`; a cache
-with a `cache-grant-key` and `--blob-store` refuses to start without
-`--controller`, and one with `--controller` refuses to start without the
-token. Give the controller `--cache-blob-store`, the same URL the cache uses,
-and its hourly storage pass lists it to reconcile the counts, cache objects
-and log segments alike, and expires a team's cache objects 30 days after
-their last write. The controller's role then needs `s3:ListBucket`,
-`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` and
-`s3:GetLifecycleConfiguration` on the cache's prefix.
-`GET /api/v1/storage` shows a team what it holds.
-
-Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
-cache, and the controller deletes the team's log segments, both idempotent. A
-team's credential never reaches another team's namespace: the cache takes the
-team from the controller-signed grant.
-
-The cache does not retry on its own. The SDK sends at most four attempts per
-request, and every attempt spends the process's object-store request budget.
-A `403` on a write or a listing, which is what a bucket-level deny returns,
-pauses it for a minute, doubling to five while the deny lasts, and one
-request probes when each pause ends; three other failures in a row pause it
-for five seconds, doubling to two minutes. Reads and deletes keep working
-through a pause. The cache answers a paused write with `503` and
-`Retry-After`.
-
-Moving an existing deployment: a volume's blobs are not read once
-`--blob-store` is set, so copy them first or accept the misses (dependency
-archives and binaries are caches and repopulate).
+`GET /api/v1/storage` shows a team what it holds. See [Tenant limits](limits.md)
+for the storage shares and download caps.
 
 ## Bound storage growth
 

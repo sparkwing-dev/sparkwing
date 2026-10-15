@@ -57,9 +57,10 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 			if n == 2 {
 				cancel()
 			}
-		case r.URL.Path == "/api/v1/runs/trigger-1/cache-grant":
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/trigger-1/finish":
 			firstOnce.Do(func() { close(firstInFlight) })
-			<-r.Context().Done()
+			<-ctx.Done()
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/trigger-1/heartbeat":
 			_ = json.NewEncoder(w).Encode(map[string]bool{"cancel_requested": false})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/trigger-2/heartbeat":

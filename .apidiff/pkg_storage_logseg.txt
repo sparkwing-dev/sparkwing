@@ -1,7 +1,6 @@
 # pkg/storage/logseg
 
 func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness
-func AttemptPrefix(class, team, runID, nodeID string, attempt, generation int64) (string, error)
 type BatchSigner struct {
 	Objects    LogPutSigner
 	ClassReady func(context.Context, string) error
@@ -57,15 +56,11 @@ func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]
 func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error)
 func (l *Log) Verify(ctx context.Context, objs Objects) error
 type LogPutSigner interface {
-	SignLogPut(context.Context, string, time.Time) (string, error)
+	SignLogPut(context.Context, string, time.Time) (string, map[string]string, error)
 }
 type Manifest struct {
 	Subject      *blob.LogSubject
 	Version      int
-	Run          string
-	Node         string
-	Attempt      int64
-	Generation   int64
 	Status       string
 	Reason       string
 	SealedBy     string
@@ -98,7 +93,7 @@ type Objects interface {
 }
 func Open(ctx context.Context, objs Objects, prefix string) (*Log, error)
 type Options struct {
-	Run, Node string
+	Subject blob.LogSubject
 
 	SpoolDir     string
 	Interval     time.Duration
@@ -176,6 +171,8 @@ type SubjectUploader struct {
 func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error
 func (u *SubjectUploader) PutSegment(ctx context.Context, seg Segment, body []byte) error
 const TruncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
+type UploadVerifier struct{ Objects SegmentObjects }
+func (v UploadVerifier) Verify(ctx context.Context, check blob.LogUploadCheck, class string) error
 type Uploader interface {
 	PutSegment(ctx context.Context, seg Segment, body []byte) error
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -53,6 +54,9 @@ func Open(ctx context.Context, objs Objects, prefix string) (*Log, error) {
 		if perr != nil {
 			return nil, perr
 		}
+		if err := m.checkPrefix(prefix); err != nil {
+			return nil, err
+		}
 		l.Manifest, l.Segments = m, m.Segments
 		return l, nil
 	case !errors.Is(err, storage.ErrNotFound):
@@ -60,6 +64,18 @@ func Open(ctx context.Context, objs Objects, prefix string) (*Log, error) {
 	}
 	l.Segments, err = listSegments(ctx, objs, prefix)
 	return l, err
+}
+
+func (m Manifest) checkPrefix(prefix string) error {
+	parts := strings.SplitN(prefix, "/", 3)
+	if m.Subject == nil || len(parts) != 3 || parts[0] != "logs" {
+		return ErrBadManifest
+	}
+	want, err := SubjectPrefix(parts[1], *m.Subject)
+	if err != nil || want != prefix {
+		return ErrBadManifest
+	}
+	return nil
 }
 
 func listSegments(ctx context.Context, objs Objects, prefix string) ([]Segment, error) {
@@ -229,6 +245,9 @@ func (l *Log) Completeness(node NodeProgress, now time.Time) Completeness {
 func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manifest, reason string,
 	put func(ctx context.Context, key string, body []byte) error,
 ) (*Manifest, error) {
+	if err := base.checkPrefix(prefix); err != nil {
+		return nil, err
+	}
 	found, err := Open(ctx, objs, prefix)
 	if err != nil {
 		return nil, err

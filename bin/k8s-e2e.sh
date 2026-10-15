@@ -460,10 +460,6 @@ sparkwing-runner-bundle:
   controller:
     tokenSecret:
       name: sparkwing-token
-  cache:
-    grantKeySecret:
-      name: sparkwing-cache-grant-key
-    allowUnauthenticated: false
 EOF
 
 helm_e2e lint "$repo_root/charts/sparkwing-full" -f "$bootstrap_values"
@@ -553,8 +549,6 @@ admin_token="$(jq -er '.token' <<<"$token_response")"
 
 create_owned_secret sparkwing-token \
   --from-literal="token=$admin_token"
-create_owned_secret sparkwing-cache-grant-key \
-  --from-literal="key=$(openssl rand -base64 32)"
 helm_e2e upgrade "$release_name" "$repo_root/charts/sparkwing-full" \
   --namespace "$namespace" -f "$bootstrap_values" -f "$authenticated_values" --timeout 5m --wait
 kube --namespace "$namespace" wait deployment \

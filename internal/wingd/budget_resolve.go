@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -17,7 +18,7 @@ const (
 )
 
 type ResolvedBudget struct {
-	Budget Budget
+	Budget userconfig.Budget
 
 	Source BudgetSource
 
@@ -41,7 +42,7 @@ func ResolveBudget(flagValue string) (ResolvedBudget, error) {
 }
 
 func parseBudgetFrom(raw string, src BudgetSource, origin string) (ResolvedBudget, error) {
-	b, err := ParseBudget(raw)
+	b, err := userconfig.ParseBudget(raw)
 	if err != nil {
 		return ResolvedBudget{}, fmt.Errorf("machine budget from %s: %w", origin, err)
 	}

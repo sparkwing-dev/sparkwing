@@ -59,7 +59,7 @@ func run(args []string) error {
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
 				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-				credBillingToken, credCreditsToken, credCacheGrantKey,
+				credBillingToken, credCreditsToken,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	dashboardURL := fs.String("dashboard-url", "",
@@ -450,7 +450,6 @@ func run(args []string) error {
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
-		WithCacheGrantKey(creds.CacheGrantKey).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).

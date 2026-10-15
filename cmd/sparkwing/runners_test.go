@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -172,7 +173,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 		t.Errorf("service calls = %v, want %v", *f.calls, wantCalls)
 	}
 	for _, want := range []string{
-		minted.Prefix, "wrote the agent section of " + f.config, "runners remove --profile prod",
+		minted.Prefix, "wrote the runner section of " + f.config, "runners remove --profile prod",
 		"docs read --topic threat-model",
 	} {
 		if !strings.Contains(out, want) {
@@ -200,11 +201,29 @@ func TestRunnersAddSkipsTheServiceWhenAsked(t *testing.T) {
 	if !strings.Contains(out, "agent --config "+f.config) {
 		t.Errorf("output does not name the manual start command:\n%s", out)
 	}
+	cfg, err := userconfig.ReadConfig(f.config)
+	if err != nil || cfg.Runner == nil || cfg.Runner.CredentialsDir == nil {
+		t.Fatalf("enrollment did not write the final runner schema: %+v %v", cfg.Runner, err)
+	}
+	credentialPath := filepath.Join(*cfg.Runner.CredentialsDir, "agent-token")
+	private, err := fssecure.OpenPrivateConfig(credentialPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = private.Close()
+	token, err := os.ReadFile(credentialPath)
+	if err != nil || !strings.HasPrefix(string(token), f.runnerTokens(t)[0].Prefix) {
+		t.Fatalf("minted credential was not saved privately: %v", err)
+	}
+	body, err := os.ReadFile(f.config)
+	if err != nil || strings.Contains(string(body), string(token)) {
+		t.Fatalf("credential leaked into YAML: %v", err)
+	}
 }
 
 func TestRunnersAddRefusesAnExistingConfigAndMintsNothing(t *testing.T) {
 	f := newRunnersFixture(t)
-	if err := fssecure.WriteFile(f.config, []byte("agent:\n  controller: http://elsewhere\n  token: keep-me\n")); err != nil {
+	if err := fssecure.WriteFile(f.config, []byte("runner:\n  controller: http://elsewhere\n  holder_prefix: keep-me\n")); err != nil {
 		t.Fatal(err)
 	}
 	err := runRunners([]string{"add", "--profile", "prod", "--name", "desk", "--config", f.config})
@@ -225,7 +244,7 @@ func TestRunnersAddRefusesAnExistingConfigAndMintsNothing(t *testing.T) {
 
 func TestRunnersAddForceReplacesTheConfig(t *testing.T) {
 	f := newRunnersFixture(t)
-	if err := fssecure.WriteFile(f.config, []byte("# desk\nrepos:\n  fallback_paths: [~/desk]\nagent:\n  controller: http://elsewhere\n  token: replace-me\n")); err != nil {
+	if err := fssecure.WriteFile(f.config, []byte("# desk\nrepos:\n  fallback_paths: [~/desk]\nrunner:\n  controller: http://elsewhere\n  holder_prefix: replace-me\n")); err != nil {
 		t.Fatal(err)
 	}
 	captureStdout(t, func() {
@@ -309,6 +328,12 @@ func TestRunnersAddNamesTheRevokeCommandWhenTheServiceInstallFails(t *testing.T)
 	})
 	if err == nil {
 		t.Fatal("a failed service install reported success")
+	}
+	if !strings.Contains(err.Error(), "No medium found") || !slices.Contains(*f.calls, "systemctl --user daemon-reload") {
+		t.Fatalf("failure did not reach service installation: %v, calls %v", err, *f.calls)
+	}
+	if _, err := userconfig.ReadConfig(f.config); err != nil {
+		t.Fatalf("service failure left invalid configuration: %v", err)
 	}
 
 	tokens := f.runnerTokens(t)
@@ -465,8 +490,7 @@ func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	body := fmt.Sprintf("agent:\n  controller: http://localhost:4344\n  token: %s\n  holder_prefix: desk\n", raw)
-	if err := fssecure.WriteFile(f.config, []byte(body)); err != nil {
+	if err := writeAgentConfig(f.config, agentFileConfig{Controller: "http://localhost:4344", Token: raw, HolderPrefix: "desk", MaxConcurrent: 1}, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -522,7 +546,7 @@ func TestRunnersAddRefusesABadAllowPatternBeforeMinting(t *testing.T) {
 		"add", "--profile", "prod", "--name", "dev-laptop", "--config", f.config,
 		"--allow-repo", "https://github.com/acme/*",
 	})
-	if err == nil || !strings.Contains(err.Error(), "allow_repos") {
+	if err == nil || !strings.Contains(err.Error(), "runner.repos") || !strings.Contains(err.Error(), "invalid repository allow-list") {
 		t.Fatalf("runners add = %v, want the pattern refused", err)
 	}
 	if n := len(f.runnerTokens(t)); n != 0 {
