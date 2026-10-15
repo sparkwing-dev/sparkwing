@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove the unused node queue and named trigger claim APIs, trigger heartbeat/finish writers and duplicate claim matcher. Current capability claims own their lifecycle. Console runner metering commits against the current operator session and leaves existing awards unchanged. Runner inventory honors rotation grace. See [migration guide](docs/migrations/_unreleased.md#sole-claim-queue-and-console-metering).
+
 - **store (Breaking):** Remove unused token-table credential readers and mutations, the raw here issuer and unused claim-origin readers. Capability snapshots, management and sealed intake own their replacements. Shared job claims honor configured local-first preferences using live persisted runner polls. See [migration guide](docs/migrations/_unreleased.md#store-credential-readers-and-local-first-claims).
 
 - **store (Breaking):** Commit the seeded deployment administrator once through capability issuance. The persisted gate survives restart, rotation, revocation and credential retention. Startup checks current administrator ancestry. The token-table bootstrap issuer is removed. See [migration guide](docs/migrations/_unreleased.md#verified-billing-events-and-deployment-bootstrap).
@@ -119,6 +121,14 @@ unlock.
   Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 ### Fixed
 
+- **repos update:** Honor checkout selection, explicit previews and fleet confirmation
+  Updates apply to the current checkout by default. `--dry-run` previews it;
+  `--all-repos --yes` applies across the fleet. A sibling directory whose name
+  starts with a registered checkout's name cannot select that checkout.
+- **cli:** Accept the documented example and spark selectors
+  `examples --example` and sparks add/remove `--spark` reach their handlers.
+  Plain output prints names or the selected example's source. Scaffold tips
+  and generated project instructions use the current commands and flags.
 - **controller authorization:** Preserve capability-derived browser-session ancestry and lifetime during credential issuance, and require direct sign-in for account-consent routes.
 - **dashboard API:** Send final run, job and pause routes with JSON cancellation and retry requests. Reporting read failures propagate to callers.
 

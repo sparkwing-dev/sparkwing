@@ -1,4 +1,4 @@
-# ci-embedded mode
+# Running inside an existing CI job
 
 Run sparkwing pipelines **inside** an existing CI job (GitHub Actions,
 Buildkite, GitLab CI, CircleCI, ...) without standing up a sparkwing
@@ -8,16 +8,9 @@ those records go away with the CI VM. A CI job that wants run history and
 a dashboard in a shared place triggers the pipeline on a controller
 instead; see [sharing results](#sharing-results).
 
-## When to use
-
-| Scenario | Mode |
-| -------- | ---- |
-| Laptop dev loop, fast feedback | `local` (default) |
-| Migrating from GHA / Buildkite, want better DX without changing CI vendor | **`ci-embedded`** |
-| Self-hosted cluster with runners, fan-out | `distributed` |
-
-ci-embedded is the migration wedge: keep your CI vendor's job orchestration,
-let sparkwing handle the pipeline DSL and caching.
+Use the same local command as on a laptop. No mode flag is required. The
+existing CI provider starts the run and receives its exit status. To execute
+on controller-managed runners, use `sparkwing pipeline trigger` instead.
 
 ## Quick start (GitHub Actions)
 
@@ -37,51 +30,39 @@ jobs:
       - run: curl -fsSL https://sparkwing.dev/install.sh | bash
 
       - name: Run sparkwing release pipeline
-        run: sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
+        run: sparkwing run release-prod --sw-workers=4
 ```
 
 State, cache, and logs stay on the CI runner's disk under `~/.sparkwing`.
 
-A pipeline node that fails fails the GHA job (exit code propagates).
+A pipeline job that fails fails the GHA job (exit code propagates).
 
-## How it works
+## Local execution
 
-1. `sparkwing run` hosts the run itself and holds `--sw-mode` and
-   `--sw-workers` as run state.
-2. The orchestrator records run and node state in the runner's local
-   SQLite store, per-node logs under `~/.sparkwing/runs/<id>/`, and cache
-   entries on local disk.
-3. The run records `mode` among its invocation flags.
+`sparkwing run` uses the local controller and shared run host. The controller
+owns local state and admission. The host executes the pipeline on this CI
+runner. `--sw-workers=N` selects a positive foreground worker count and cannot
+be combined with `--sw-detached`.
 
-## Flags
+Keep the pipeline module and any resolved sparks overlay in the checkout.
+Use `sparkwing pipeline sparks update` to refresh declared libraries before
+committing the overlay. The pipeline's SDK pin selects its matching engine.
 
-| Flag | Default | Description |
-| ---- | ------- | ----------- |
-| `--sw-mode=ci-embedded` | (off) | Enables this mode. |
-| `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. A hosted runner has far fewer cores than a workstation, so a value picked for local use over-subscribes it -- pick deliberately. |
+### Using the committed sparks overlay
 
-### Recommended: `--sw-no-update` in CI
-
-If your `.sparkwing/sparkwing.yaml` declares a `sparks:` block, sparkwing
-auto-refreshes the resolved overlay at run time by default. That
-shells out to `go env` / `go list`, which means CI runners would
-need a Go toolchain even on a cache hit. **Pass `--sw-no-update` to
-`sparkwing run` in the CI step** so the runner trusts the committed
-`.resolved.mod` overlay and never resolves on its own.
-
-Workflow then becomes:
+For a project with a `sparks:` block, `--sw-no-update` uses the committed
+`.resolved.mod` overlay without refreshing library resolution during the run:
 
 ```sh
-# locally, when you want a fresh resolve
-sparkwing pipeline sparks update
-git diff .sparkwing/.resolved.mod
-git commit -am "bump sparks-core"
-git push                          # triggers publish + run with frozen overlay
+sparkwing run release-prod --sw-no-update --sw-workers=4
 ```
 
-CI never re-resolves; the publish step on your laptop (or in a
-publish-on-merge workflow) is the deliberate "go fresh" surface.
-Repos without a `sparks:` block ignore the flag -- it's a no-op.
+Refresh the overlay before committing a library update:
+
+```sh
+sparkwing pipeline sparks update
+git diff .sparkwing/.resolved.mod
+```
 
 ## Sharing results
 
@@ -99,24 +80,20 @@ the run until it finishes and exits non-zero when the run fails. See
 
 ## Exit codes
 
-- `0` if every pipeline node succeeds.
-- `1` if any node fails or the orchestrator errors.
+- `0` if every pipeline job succeeds.
+- `1` if a job fails or execution errors.
 
 The exit code is what the wrapping CI job sees, so a failed sparkwing
-node fails the CI step.
+job fails the CI step.
 
-## Caveats
+## Caching
 
-- **No webhooks**. ci-embedded mode is invoked by the host CI; let
-  GitHub Actions / Buildkite handle the trigger.
-- **Caching across runs** depends on stable `bincache.PipelineCacheKey`
-  output (sha256 over source + go toolchain). Same source tree on the
-  same Go version = warm cache. The cache lives on the runner's disk, so
-  a fresh VM starts cold unless the CI job persists the sparkwing home
-  between runs.
-- **Worker count vs CPU**. GHA hosted runners default to 2 CPUs.
-  `--sw-workers=NumCPU` (the default) usually fits fine; larger numbers
-  trade memory pressure for less queueing.
+Local caches live on the CI runner. A fresh VM starts cold unless the CI
+provider restores those cache files. To read authorized CI memo results,
+artifacts and dependency caches from a controller, select
+`sparkwing run --sw-cache-from PROFILE`. This option only reads verified
+default-branch records. It never uploads local results or fetches pipeline
+binaries.
 
 ## Buildkite
 
@@ -124,7 +101,7 @@ node fails the CI step.
 steps:
   - label: "release"
     command: |
-      sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
+      sparkwing run release-prod --sw-workers=4
 ```
 
 ## GitLab CI
@@ -136,5 +113,5 @@ release:
     - apk add --no-cache curl
     - curl -fsSL https://sparkwing.dev/install.sh | sh
   script:
-    - sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
+    - sparkwing run release-prod --sw-workers=4
 ```

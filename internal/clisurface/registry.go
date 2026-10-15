@@ -142,7 +142,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing examples", Flags: []Flag{
 			{Name: "example", Argument: "EXAMPLE"},
-			{Name: "body"},
+			{Name: "body", Requires: []string{"example"}},
 			{Name: "category", Argument: "CATEGORY"},
 			{Name: "cloud", Argument: "CLOUD"},
 		}},
@@ -231,7 +231,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing pipeline sparks", Flags: []Flag{}},
 		{Path: "sparkwing pipeline sparks add", Flags: []Flag{
-			{Name: "source", Argument: "PATH"},
+			{Name: "source", Argument: "PATH", Required: true},
 			{Name: "version", Argument: "VER"},
 			{Name: "spark", Argument: "NAME"},
 		}},
@@ -249,7 +249,7 @@ func Registry() []Command {
 			{Name: "no-resolve"},
 		}},
 		{Path: "sparkwing pipeline sparks remove", Flags: []Flag{
-			{Name: "spark", Argument: "NAME"},
+			{Name: "spark", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing pipeline sparks update", Flags: []Flag{}},
 		{Path: "sparkwing pipeline trigger", PipelineArgument: true, PipelineArgsAfterSeparator: true, PipelineOptionalOnResume: true, Rules: []string{"Flags including --profile may precede the verb; unknown engine flags before -- are usage errors.", "--resume reattaches only a here run; --runner must be absent or here. The existing sealed spec is authoritative; reject new args, reason, source flags and detach on resume.", "Without --resume, one pipeline positional is required. Runner accepts here, a runner name, or label=<label>."}, Flags: []Flag{

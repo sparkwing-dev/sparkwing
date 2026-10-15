@@ -10,42 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// A frozen team's metered claims are refused however much it holds, until
-// every freeze on it is released; an unmetered claim is not affected.
-func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant, _ := fundedMeteredNode(t, s, "run-frozen")
-	now := time.Now()
-	if _, err := s.HoldTeamForDispute(ctx, store.DefaultTeam, "dp_1", "", "dispute opened", now); err != nil {
-		t.Fatalf("hold: %v", err)
-	}
-	_, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
-	var refused *store.InsufficientCreditsError
-	if !errors.As(err, &refused) || !refused.Frozen || !errors.Is(err, store.ErrInsufficientCredits) {
-		t.Fatalf("a frozen team's claim = %v, want a frozen refusal", err)
-	}
-
-	pool := meteredClaimant(t, s, "agent:pool")
-	pendingTrigger(t, s, "run-trig")
-	if _, err := s.ClaimSpecificTriggerFor(ctx, "run-trig", pool, 0); !errors.As(err, &refused) || !refused.Frozen {
-		t.Fatalf("a frozen team's trigger claim = %v, want a frozen refusal", err)
-	}
-	if _, err := s.ClaimSpecificTriggerFor(ctx, "run-trig", unmeteredClaimant(t, s, "agent:laptop"), 0); err != nil {
-		t.Fatalf("an unmetered claim on a frozen team: %v", err)
-	}
-
-	if _, err := s.ReleaseCreditFreezes(ctx, store.DefaultTeam, "dp_1", "", "", now); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	if n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil || n == nil {
-		t.Fatalf("a claim after the release = %v, %v", n, err)
-	}
-	if _, err := s.HoldTeamForDispute(ctx, "nobody", "dp_x", "", "", now); !errors.Is(err, store.ErrUnknownTeam) {
-		t.Fatalf("holding an unknown team = %v, want ErrUnknownTeam", err)
-	}
-}
-
 // A freeze is one row per dispute and the team stays frozen while any is
 // unreleased: releasing one dispute leaves the other's hold, and holding a
 // dispute again, however often it is replayed, never undoes a release.

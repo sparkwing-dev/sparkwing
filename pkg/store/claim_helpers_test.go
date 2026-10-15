@@ -30,30 +30,6 @@ func ackNodeAttempt(t *testing.T, s *store.Store, n *store.Node, identity store.
 	}
 }
 
-func claimNode(t *testing.T, s *store.Store, runID string, identity store.ClaimIdentity, holder string) *store.Node {
-	t.Helper()
-	n, err := s.ClaimNextReadyNode(context.Background(), identity, holder, time.Minute, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n.RunID != runID {
-		t.Fatalf("claimed run %q, want %q", n.RunID, runID)
-	}
-	return n
-}
-
-func claimRetryNode(t *testing.T, s *store.Store, runID string, identity store.ClaimIdentity, holder string) *store.Node {
-	t.Helper()
-	n := claimNode(t, s, runID, identity, holder)
-	if _, err := s.DB().ExecContext(context.Background(), storetest.Rebind(s, `UPDATE nodes
-   SET executor_location = 'local'
- WHERE run_id = ? AND node_id = ?`), n.RunID, n.NodeID); err != nil {
-		t.Fatal(err)
-	}
-	n.ExecutorLocation = "local"
-	return n
-}
-
 func createRetryRunAndReadyNode(t *testing.T, s *store.Store, runID string, retries int) {
 	t.Helper()
 	plan, _ := json.Marshal(map[string]any{

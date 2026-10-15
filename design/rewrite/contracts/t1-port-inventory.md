@@ -2045,3 +2045,29 @@ granted-name preferences against forged labels. Held polls preserve the entire
 node and award count. `TestEngineClaimHTTPLocalFirstUsesPersistedPoll` carries
 server configuration through the real HTTP handler and store with only enrollment
 and software-policy fakes. No native cell is newly claimed.
+The retired node queue and named trigger claims use the current
+`TestClaimUnitNamedAndQueuedUseCapacityAndIdentity`,
+`TestClaimUnitRejectsForeignAndMissingRequirements`,
+`TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement`,
+`TestClaimUnitGrantedProfileKeys`, `TestClaimUnitHereWindowAndReclaim`,
+`TestClaimUnitMismatchPreservesQueueAndDoesNotHideEligibleWork`,
+`TestClaimQueueMismatchPreservesPositionProperty`,
+`TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty`,
+`TestCapabilityClaimLivenessProperty` and `TestReaperFenceProperty`.
+The final-schema `TestMeteredUnit*` proofs retain atomic reservation, concurrent
+spend, immutable awards, checkpoint, unstarted refund, retry and reaper settlement
+coverage. Legacy tests that called the deleted APIs are retired with them.
+Their token-table, mutable credit-window and old claim-column assertions are not
+current acceptance evidence. Card cap/fraud/warm-pool regressions from those
+fixtures still need final-schema ports by the accounting owner. Native PostgreSQL
+concurrent-claim evidence remains open.
+
+`TestRunnerMeteringChangesOnlyFutureAwards` uses real provisioning, claim,
+release, readiness and billing persistence. Origin verification and C2's billing
+calculator are fakes. The generated console-authority property refuses expired,
+revoked, delegated, forged and delisted authority without changing the root.
+`TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession` uses the production
+router, authentication, CSRF verification and store writer. Only provisioning
+origin verification is faked. `TestRegisteredAgentsHonorRotationGraceProperty`
+covers randomized deadlines and exact expiry. These are package tests. They add
+no native acceptance claim.

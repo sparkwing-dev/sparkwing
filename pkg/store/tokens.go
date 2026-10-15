@@ -398,6 +398,8 @@ var machineTokenScopes = []string{ScopeNodesClaim, ScopeTriggersClaim, ScopeRuns
 // MachineTokenScopes returns the scopes a machine team token may carry.
 func MachineTokenScopes() []string { return slices.Clone(machineTokenScopes) }
 
+const agentPrincipalPrefix = "agent:"
+
 // ActingKind resolves a legacy team credential's member or runner kind.
 func ActingKind(kind, principal string) string {
 	if kind != TokenKindTeam {

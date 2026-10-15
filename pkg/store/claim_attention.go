@@ -97,7 +97,7 @@ func (t *Tenant) ListRegisteredAgents(ctx context.Context) ([]RegisteredAgent, e
 func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at FROM capabilities
  WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
- AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, tx.now().UnixNano())
+ AND (revoked_at IS NULL OR revoked_at>?) AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, tx.now().UnixNano(), tx.now().UnixNano())
 	if err != nil {
 		return nil, err
 	}

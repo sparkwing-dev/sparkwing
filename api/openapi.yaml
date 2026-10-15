@@ -3097,6 +3097,8 @@ components:
           type: string
         follow:
           type: boolean
+        mode:
+          type: string
         repo_url:
           type: string
         schedules:
@@ -3108,6 +3110,7 @@ components:
         sha:
           type: string
       required:
+        - mode
         - repo_url
         - follow
         - schedules
@@ -5436,7 +5439,7 @@ components:
         capability:
           type: string
         new:
-          $ref: '#/components/schemas/pkg.controller.client.TokenInfo'
+          $ref: '#/components/schemas/internal.capability.Metadata'
         old_prefix:
           type: string
         old_revoked_at:
@@ -5449,71 +5452,6 @@ components:
         - old_revoked_at
       type: object
       x-sparkwing-go-type: client.RotatedToken
-    pkg.controller.client.TokenInfo:
-      additionalProperties: true
-      properties:
-        audience:
-          type: string
-        created_by:
-          type: string
-        expires_at:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
-        git_credentials:
-          type: boolean
-        grants:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        issued_at:
-          format: date-time
-          type: string
-        last_used_at:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
-        metered:
-          type: boolean
-        prefix:
-          type: string
-        revoked_at:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
-        subject:
-          $ref: '#/components/schemas/pkg.controller.client.TokenSubject'
-        team:
-          type: string
-      required:
-        - prefix
-        - team
-        - subject
-        - audience
-        - grants
-        - created_by
-        - issued_at
-        - git_credentials
-        - metered
-      type: object
-      x-sparkwing-go-type: client.TokenInfo
-    pkg.controller.client.TokenSubject:
-      additionalProperties: true
-      properties:
-        id:
-          type: string
-        kind:
-          type: string
-      required:
-        - kind
-        - id
-      type: object
-      x-sparkwing-go-type: client.TokenSubject
     pkg.wingwire.BudgetState:
       additionalProperties: true
       properties:

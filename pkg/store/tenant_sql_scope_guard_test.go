@@ -19,6 +19,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
 	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
 	"loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
+	"(*Operator).SetRunnerMetered":  "a console-authorized deployment mutation resolves one enrolled root by its globally unique public prefix, validates its complete ancestry, and updates only that root's tenant row",
 	"persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
 	"deleteRetentionCapabilitiesTx": "the elected deployment pass removes ended credentials across teams while preserving cross-team ancestry",
 
@@ -60,12 +61,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).NodeOutputKey":   "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
 		"the run ID is global and the row takes that node's team",
-	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
-		"a scope that is not exactly one team is refused there",
-	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
-		"it is of the row the award just proved in team",
-	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
-		"read after the award is of the row the scoped update just proved in team",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).countRuns": "shares listRuns' predicate builder and its refusal",
@@ -80,8 +75,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).mintCSRFKey":         "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"(*Store).resolveSignInOnce":   "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"(*Store).approveOneOnce":      "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
-	"cancelRequeuedCancelledTriggersTx": "finalizes every team's cancelled triggers that lapsed back to the " +
-		"queue, because a claim that settled only its own team would leave the rest pending forever",
 	"settleTriggerCreditsTx": "asks which team owns a trigger id and whether its claim holds a credit " +
 		"reservation; the settlement that follows is scoped to that team",
 	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
@@ -110,8 +103,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"account deletion can tell sole ownership from shared",
 	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
 		"run's team",
-	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +
-		"token prefix is unique across teams",
 
 	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
 		"selected, in the order the claim path names, and read nothing back",

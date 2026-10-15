@@ -39,75 +39,6 @@ func spentOn(t *testing.T, s *store.Store, team string, day time.Time, cents int
 	}
 }
 
-func claimLimit(t *testing.T, s *store.Store, claimant store.ClaimIdentity) string {
-	t.Helper()
-	_, err := s.ClaimNextReadyNode(context.Background(), claimant, "pod-1", time.Minute, nil)
-	var short *store.InsufficientCreditsError
-	if err == nil {
-		return ""
-	}
-	if !errors.As(err, &short) {
-		t.Fatalf("claim: %v", err)
-	}
-	return short.Limit
-}
-
-// A New team's claim stops at its daily cap even with balance left, and the
-// same spend on an earlier day leaves today's cap untouched.
-func TestANewTeamStopsAtItsDailyCap(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		day   time.Time
-		limit string
-	}{
-		{"today", time.Now(), store.SpendLimitDailyCap},
-		{"yesterday", time.Now().Add(-24 * time.Hour), ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s := storetest.Open(t)
-			claimant, _ := fundedMeteredNode(t, s, "run-cap")
-			if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantPaid, dollarsMicro(30), "pay_more", "admin"); err != nil {
-				t.Fatal(err)
-			}
-			spentOn(t, s, "default", tc.day, store.NewDailyCapCents)
-			if got := claimLimit(t, s, claimant); got != tc.limit {
-				t.Fatalf("claim refused by %q, want %q", got, tc.limit)
-			}
-		})
-	}
-}
-
-// A trusted team with a card runs below zero on its card's credit; without
-// the card, or once a charge fails, it stops at its balance.
-func TestACardLetsATrustedTeamRunBelowZero(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	readyNode(t, s, "run-1", "build")
-	def, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := claimLimit(t, s, claimant); got != store.SpendLimitBalance {
-		t.Fatalf("an unfunded New team's claim refused by %q, want balance", got)
-	}
-	if _, _, err := def.SetBillingTrust(ctx, store.BillingTrustChange{
-		Trust: store.BillingTrustGranted, Actor: "korey", Reason: "known",
-	}, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if got := claimLimit(t, s, claimant); got != store.SpendLimitBalance {
-		t.Fatalf("a trusted team without a card was refused by %q, want balance", got)
-	}
-	trustWithCard(t, def, time.Now())
-	if got := claimLimit(t, s, claimant); got != "" {
-		t.Fatalf("a trusted team with a card was refused by %q", got)
-	}
-	if bal, err := def.CreditBalanceMicro(ctx); err != nil || bal >= 0 {
-		t.Fatalf("balance = %d, %v; want below zero", bal, err)
-	}
-}
-
 // Debt past the rung opens one charge with one attempt, however often the
 // worker asks; the payment settles it once, a repeat grants nothing, and the
 // team's balance is whole again.
@@ -613,76 +544,6 @@ func TestASetupAfterAnUnorderedSaveIsNotStale(t *testing.T) {
 	}
 }
 
-// A decline holds the team, drops an operator's grant back to New and stops
-// every claim, prepaid balance or not; the retries still run under the hold,
-// and paying the charge lifts it.
-func TestADeclineHoldsATeamWithPrepaidBalanceAtNew(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	acme := teamHandle(t, s, "acme")
-	trustWithCard(t, acme, now)
-	spend(t, s, "acme", "ch_1", 15_000)
-	w := dueCharge(t, s, now)
-	if _, _, err := s.FailCardAttempt(ctx, w.AttemptID, "pi_declined", "card_declined", now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantFree, 400*store.MicroCreditsPerCredit*1000, "promo", "admin"); err != nil {
-		t.Fatal(err)
-	}
-	if b, err := acme.BillingStanding(ctx, now); err != nil || b.Trusted {
-		t.Fatalf("standing = %+v, %v; want the granted team back at New while held", b, err)
-	}
-	claimant := meteredTeamClaimant(t, acme, "agent:cloud")
-	readyTeamNode(t, s, acme, "run-held", "build")
-	if limit := claimLimit(t, s, claimant); limit != store.SpendLimitChargeFailed {
-		t.Fatalf("claim while held = %q, want refused as a failed charge", limit)
-	}
-	retry := dueCharge(t, s, now.Add(25*time.Hour))
-	if _, _, err := s.SettleCardPayment(ctx, store.CardPayment{
-		ChargeID: retry.ChargeID, AttemptID: retry.AttemptID, PaymentIntent: "pi_retry", AmountCents: 15_000,
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	if freeze, err := acme.CreditFreeze(ctx); err != nil || freeze.Frozen {
-		t.Fatalf("freeze after paying = %+v, %v; want released", freeze, err)
-	}
-	if b, err := acme.BillingStanding(ctx, now); err != nil || !b.Trusted {
-		t.Fatalf("standing after paying = %+v, %v; want trusted again", b, err)
-	}
-}
-
-// One card's spend counts against its limits across every team it pays for:
-// a claim by one team writes the card's bucket, and the card's cap binds the
-// other team.
-func TestOneCardSpendsItsLimitsOnceAcrossTeams(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	acme := teamHandle(t, s, "acme")
-	globex := teamHandle(t, s, "globex")
-	trustWithCard(t, acme, now)
-	trustWithCard(t, globex, now)
-	readyTeamNode(t, s, acme, "run-acme", "build")
-	if _, err := s.ClaimNextReadyNode(ctx, meteredTeamClaimant(t, acme, "agent:cloud"), "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("acme's claim: %v", err)
-	}
-	st, err := globex.SpendStanding(ctx, now)
-	if err != nil || st.CardSpentTodayMicro <= 0 || st.SpentTodayMicro != 0 {
-		t.Fatalf("globex standing = %+v, %v; want acme's reservation on the shared card only", st, err)
-	}
-	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE card_spend_days SET amount_micro = ? WHERE fingerprint = 'fp_1'`),
-		store.TrustedDailyCapCents*store.MicroCreditsPerCent); err != nil {
-		t.Fatal(err)
-	}
-	if st, err = globex.SpendStanding(ctx, now); err != nil {
-		t.Fatal(err)
-	}
-	if room, limit := st.Headroom(); room > 0 || limit != store.SpendLimitCardDailyCap {
-		t.Fatalf("globex headroom = %d %q; want the shared card's daily cap spent", room, limit)
-	}
-}
-
 // Settlement pays a charge only through its own live attempt at the frozen
 // amount. Money that arrives any other way is granted and queued for a
 // refund, and an attempt of another charge is refused.
@@ -937,47 +798,6 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	}
 	if due, err := s.DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
 		t.Fatalf("a succeeded refund = %+v, %v; want done", due, err)
-	}
-}
-
-// With no guard set, a team still holds at most the default Cloud nodes, and
-// an operator can raise one granted team's cap.
-func TestTheTeamRunnerCapDefaultsAndIsRaisedPerTeam(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	acme := teamHandle(t, s, "acme")
-	claimant := meteredTeamClaimant(t, acme, "agent:cloud")
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_acme", "admin"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE teams SET billing_runner_cap = 0 WHERE name = 'acme'`)); err != nil {
-		t.Fatal(err)
-	}
-	if err := acme.CreateRun(ctx, store.Run{ID: "held", Pipeline: "demo", Status: "running", StartedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	for i := range store.DefaultTeamCloudNodes {
-		if err := s.CreateNode(ctx, store.Node{RunID: "held", NodeID: fmt.Sprintf("n%d", i), Status: "running"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.DB().Exec(`UPDATE nodes SET credit_charged_through = 1 WHERE run_id = 'held'`); err != nil {
-		t.Fatalf("hold the seeded nodes: %v", err)
-	}
-	readyTeamNode(t, s, acme, "run-next", "build")
-	_, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
-	refused := limitRefusal(t, err, store.ComputeLimitConcurrentRunners)
-	if refused.Cap != store.DefaultTeamCloudNodes {
-		t.Fatalf("refusal = %+v, want the default cap", refused)
-	}
-	if _, _, err := acme.SetBillingTrust(ctx, store.BillingTrustChange{
-		Trust: store.BillingTrustGranted, Actor: "korey", Reason: "big build farm", RunnerCap: 200,
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-2", time.Minute, nil); err != nil {
-		t.Fatalf("claim under a raised cap: %v", err)
 	}
 }
 

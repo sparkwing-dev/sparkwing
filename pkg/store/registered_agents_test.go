@@ -2,6 +2,8 @@ package store
 
 import (
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"slices"
 	"testing"
 	"time"
@@ -10,6 +12,34 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
+
+func TestRegisteredAgentsHonorRotationGraceProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(433, 800))
+	for i := range 32 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			s := authorityStore(t)
+			start := time.Unix(1700000000+random.Int64N(1000000), random.Int64N(1000000000)).UTC()
+			deadline := start.Add(time.Duration(1 + random.Int64N(int64(time.Hour))))
+			now := start
+			s.clock = func() time.Time { return now }
+			root := authorityRoot("runner", "a")
+			root.RevokedAt = &deadline
+			authorityPersist(t, s, root)
+			tenant := &Tenant{s: s, team: "a"}
+			for _, at := range []time.Time{start, deadline.Add(-time.Nanosecond), deadline, deadline.Add(time.Duration(random.Int64N(int64(time.Hour))))} {
+				now = at
+				agents, err := tenant.ListRegisteredAgents(t.Context())
+				want := 0
+				if now.Before(deadline) {
+					want = 1
+				}
+				if err != nil || len(agents) != want {
+					t.Fatalf("at %v deadline %v: %d agents, %v; want %d", now, deadline, len(agents), err, want)
+				}
+			}
+		})
+	}
+}
 
 func TestRegisteredAgentsUseLiveCapabilityIdentityAndSavedLabels(t *testing.T) {
 	s := authorityStore(t)

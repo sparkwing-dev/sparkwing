@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -115,46 +114,6 @@ func TestAddNodeUsageConcurrentWritersRespectBoundary(t *testing.T) {
 	}
 }
 
-func TestAddNodeUsagePreservesClaimFenceAndMissingNode(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := t.Context()
-	usage := store.NodeUsage{CPUTime: time.Second, Wall: 2 * time.Second, MaxRSSBytes: 4096}
-	if err := st.AddNodeUsage(ctx, "missing", "missing", usage); err != nil {
-		t.Fatalf("unfenced missing node: %v", err)
-	}
-	missing := store.WithNodeClaimFence(ctx, store.NodeClaimFence{})
-	if err := st.AddNodeUsage(missing, "missing", "missing", usage); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("fenced missing node: %v", err)
-	}
-	seedRunAndNode(t, st, "fenced", "node")
-	if err := st.MarkNodeReady(ctx, "fenced", "node"); err != nil {
-		t.Fatal(err)
-	}
-	claimant := store.ClaimIdentity{Principal: "runner", TokenPrefix: "runner-token"}
-	node, err := st.ClaimNextReadyNode(ctx, claimant, "holder", time.Minute, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if node == nil {
-		t.Fatal("node was not claimed")
-	}
-	fence := store.NodeClaimFence{Claimant: claimant, HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID, ReservationID: node.ReservationID, ClaimGeneration: node.ClaimGeneration}
-	if err := st.AddNodeUsage(store.WithNodeClaimFence(ctx, fence), "fenced", "node", usage); err != nil {
-		t.Fatal(err)
-	}
-	fence.ClaimGeneration++
-	if err := st.AddNodeUsage(store.WithNodeClaimFence(ctx, fence), "fenced", "node", usage); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("wrong generation: %v", err)
-	}
-	node, err = st.GetNode(ctx, "fenced", "node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if node.CPUNanos != int64(usage.CPUTime) || node.ProcessWallNanos != int64(usage.Wall) || node.MaxRSSBytes != usage.MaxRSSBytes {
-		t.Fatalf("rejected claim changed totals: CPU=%d wall=%d RSS=%d", node.CPUNanos, node.ProcessWallNanos, node.MaxRSSBytes)
-	}
-}
-
 func TestAddNodeUsageRejectsNegativeStoredTotals(t *testing.T) {
 	for _, column := range []string{"cpu_nanos", "process_wall_nanos"} {
 		t.Run(column, func(t *testing.T) {
@@ -179,42 +138,5 @@ func TestAddNodeUsageRejectsNegativeStoredTotals(t *testing.T) {
 				t.Fatal("rejected observation changed stored usage")
 			}
 		})
-	}
-}
-
-func TestAddNodeUsagePreservesTriggerFence(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := t.Context()
-	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "runner-token"}
-	if err := st.CreateTrigger(ctx, store.Trigger{ID: "trigger", Pipeline: "test", Status: "pending", CreatedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	trigger, err := st.ClaimSpecificTriggerFor(ctx, "trigger", identity, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trigger == nil {
-		t.Fatal("trigger was not claimed")
-	}
-	seedRunAndNode(t, st, "trigger", "node")
-	fence := store.TriggerClaimFence{Claimant: identity, ClaimGeneration: trigger.ClaimSeq}
-	fenced := store.WithTriggerClaimFence(ctx, fence)
-	usage := store.NodeUsage{CPUTime: 1, Wall: 2, MaxRSSBytes: 4096}
-	if err := st.AddNodeUsage(fenced, "trigger", "node", usage); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.AddNodeUsage(fenced, "trigger", "missing", usage); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("missing node: %v", err)
-	}
-	fence.ClaimGeneration++
-	if err := st.AddNodeUsage(store.WithTriggerClaimFence(ctx, fence), "trigger", "node", usage); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("wrong generation: %v", err)
-	}
-	node, err := st.GetNode(ctx, "trigger", "node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if node.CPUNanos != 1 || node.ProcessWallNanos != 2 || node.MaxRSSBytes != 4096 {
-		t.Fatalf("rejected claim changed usage: %d/%d/%d", node.CPUNanos, node.ProcessWallNanos, node.MaxRSSBytes)
 	}
 }

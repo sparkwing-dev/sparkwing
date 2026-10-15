@@ -171,6 +171,9 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	}
 	if st != nil {
 		srv.credentialIssuer = st
+		st.SetConsolePolicy(func(p capability.Principal, now time.Time) bool {
+			return srv.MultiTeam() && srv.consoleAccount(p) && !srv.sessionExpired(p.Capability.IssuedAt, now)
+		})
 	}
 	srv.authorization = srv.storeRouteAuthorization()
 	srv.recordQueueActivity(time.Now())

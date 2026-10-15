@@ -7,55 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
-
-// A runner places a run's Jobs by the team a claim and a read return, so
-// both must report the trigger's own team rather than an empty one.
-func TestTrigger_ClaimAndReadReturnTheOwningTeam(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-
-	acme := teamHandle(t, s, "acme")
-	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "t-acme", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-	if tr, err := s.ClaimSpecificTrigger(ctx, "t-acme", time.Minute); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("default-team claim = %+v, %v; want nothing", tr, err)
-	}
-
-	_, tok, err := acme.CreateToken(ctx, "acme-runner", store.TokenKindRunner, []string{"triggers.claim"}, time.Hour, time.Now())
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	claimed, err := s.ClaimSpecificTriggerFor(ctx, "t-acme",
-		store.ClaimIdentity{Principal: "acme-runner", TokenPrefix: tok.Prefix}, time.Minute)
-	if err != nil {
-		t.Fatalf("ClaimSpecificTriggerFor: %v", err)
-	}
-	if claimed.ID != "t-acme" || claimed.Team != "acme" {
-		t.Fatalf("claimed %s team = %q, want t-acme in acme", claimed.ID, claimed.Team)
-	}
-	read, err := acme.GetTrigger(ctx, "t-acme")
-	if err != nil {
-		t.Fatalf("GetTrigger: %v", err)
-	}
-	if read.Team != "acme" {
-		t.Fatalf("read team = %q, want acme", read.Team)
-	}
-
-	seedPending(t, s, "t-legacy")
-	legacy, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, "t-legacy")
-	if err != nil {
-		t.Fatalf("GetTrigger: %v", err)
-	}
-	if legacy.Team != store.DefaultTeam {
-		t.Fatalf("unscoped trigger team = %q, want %q", legacy.Team, store.DefaultTeam)
-	}
-}
 
 // A trigger's idempotency key and signed replay digest are
 // unique within its team, so one team holding a value neither refuses another

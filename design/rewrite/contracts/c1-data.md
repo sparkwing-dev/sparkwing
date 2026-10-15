@@ -1,5 +1,33 @@
 # C1 data contract
 
+## Sole claim queue and console runner metering
+
+`Store.ClaimNextReadyNode`, `ClaimSpecificTrigger`, `ClaimSpecificTriggerFor`,
+`PrincipalHoldsTriggerClaim` and `Tenant.TriggerClaimant` are removed.
+`Tenant.HeartbeatTrigger` and `FinishTrigger` are removed too. `ClaimUnit`
+owns named and queued job and owner awards. `RenewUnit`, `ReleaseUnit` and
+`FinishRunAndUnit` own the awarded lifecycle. The old token-table scope fallback,
+second matcher, queue scanner, placement hold and claim-token minting helpers are
+deleted. `WithClaimProfile` and the store's `RepoFilter` alias are removed.
+Claimant identity and repository authority come from current enrollment.
+
+`Operator.SetRunnerMetered(ctx, Authorized, prefix, bool)` implements C2's
+console-only writer. The public selector names an enrolled machine root by its
+capability prefix. The transaction rechecks the direct account session, selected
+console route rule, controller account/lifetime policy and the root's current
+ancestry. It updates that root's metering projection and authority envelope
+together. Existing awards and their immutable billing facts do not change.
+
+The C1-local `Store.SetConsolePolicy` accepts the controller's current console
+predicate before concurrent use. `Server.New` supplies its existing direct-session,
+configured-account, license and absolute-lifetime checks. No new credential class
+or operator list is stored. Missing policy refuses the mutation. Roleless direct
+sessions can be operators when the same controller policy permits them.
+
+`ListRegisteredAgents` keeps a rotated credential until its revocation deadline.
+Its snapshot still resolves full ancestry, membership and claimant grants.
+The generated grace test covers both sides of the exact deadline.
+
 ## Capability readers and configured job placement
 
 `Store.LookupToken`, `LookupTokenByPrefix`, `ListTokens` and `RevokeToken` are

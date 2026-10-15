@@ -130,52 +130,6 @@ func seedLiveLog(t *testing.T, f egressFixture, runID, nodeID, text string) {
 	}
 }
 
-func claimRunForRunner(t *testing.T, f egressFixture, runID string) {
-	t.Helper()
-	ctx := context.Background()
-	if err := f.store.CreateTrigger(ctx, store.Trigger{
-		ID: runID, Pipeline: "p", CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-	claimed, err := f.store.ClaimSpecificTriggerFor(ctx, runID, f.runnerID, time.Minute)
-	if err != nil {
-		t.Fatalf("ClaimSpecificTriggerFor: %v", err)
-	}
-	if claimed == nil || claimed.ID != runID {
-		t.Fatalf("claimed trigger = %+v, want %s", claimed, runID)
-	}
-}
-
-func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4})
-	seedLiveLog(t, f, "r1", "n1", "hello\n")
-
-	// safety: a runner reads a node's logs on its claim scope, which is the
-	// path a metered route must not break.
-	claimRunForRunner(t, f, "r1")
-	runnerLogs := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.runner)
-	if runnerLogs.status != http.StatusOK || !strings.Contains(string(runnerLogs.body), "hello") {
-		t.Fatalf("runner log read = %d, body %q", runnerLogs.status, runnerLogs.body)
-	}
-
-	logs := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.reader)
-	if logs.status != http.StatusOK || !strings.Contains(string(logs.body), "hello") {
-		t.Fatalf("CLI log read = %d, body %q", logs.status, logs.body)
-	}
-
-	state := f.meter.State()
-	if state.GlobalMonthBytes < int64(len(runnerLogs.body)+len(logs.body)) {
-		t.Errorf("metered %d bytes, want at least the two bodies", state.GlobalMonthBytes)
-	}
-	if len(state.Top) != 2 {
-		t.Errorf("top consumers = %+v, want the runner and the CLI counted apart", state.Top)
-	}
-}
-
 func TestDownloadRoutesRefuseARequestWithoutABearer(t *testing.T) {
 	f := newEgressFixture(t, egress.Config{})
 	seedLiveLog(t, f, "r1", "n1", "hello\n")

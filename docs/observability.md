@@ -215,7 +215,7 @@ parse the error string:
 {
   "node": "build",
   "outcome": "failed",
-  "error": "build: command failed (exit 2): go build ./...\n… earlier output omitted (see: sparkwing runs logs --run run-... --node build)\npkg/thing/file_300.go:12: undefined: Helper\nFAIL",
+  "error": "build: command failed (exit 2): go build ./...\n… earlier output omitted (see: sparkwing runs logs --run run-... --job build)\npkg/thing/file_300.go:12: undefined: Helper\nFAIL",
   "log_excerpt": "pkg/thing/file_300.go:12: undefined: Helper\nFAIL",
   "log_excerpt_truncated": true
 }
@@ -416,7 +416,7 @@ the stored attempt and matching claim have no usable executor identity.
 - **Capacity page**: the same host ledger with the subtraction behind
   each Available cell written out, then every measured pipeline with the
   charge it resolves to (the live form of `sparkwing runs stats
-  --capacity`), and, per pipeline, the stored sample window with the run
+  --sizing`), and, per pipeline, the stored sample window with the run
   each percentile charge was ranked out of marked. Use it to check a
   charge by hand: the p95 the panel marks and the price it shows come
   from the rows on screen, so a charge no sample supports is visible

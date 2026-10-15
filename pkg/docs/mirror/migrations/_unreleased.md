@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Sole claim queue and console metering
+
+`Store.ClaimNextReadyNode`, `ClaimSpecificTrigger`, `ClaimSpecificTriggerFor`,
+`PrincipalHoldsTriggerClaim` and `Tenant.TriggerClaimant` are removed.
+`Tenant.HeartbeatTrigger` and `FinishTrigger` are removed too. Use `ClaimUnit`
+for named or queued jobs and owner units, then `RenewUnit`, `ReleaseUnit` and
+`FinishRunAndUnit` with the current award. `WithClaimProfile` and the store's
+`RepoFilter` alias are removed. Current enrollment owns repository authority.
+
+The console's runner metering route now commits through
+`Operator.SetRunnerMetered`. Its selector is the enrolled root's public
+capability prefix. A current operator account session and CSRF proof are
+required. Existing awards retain their original billing facts. Runner inventory
+keeps rotated credentials until their grace deadline.
+
 ## Legacy claim authentication and writers
 
 `Store.AuthorizeClaimToken`, `AuthorizeRunnerClaim`, `ReplayClaimResult`,

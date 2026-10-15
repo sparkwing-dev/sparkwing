@@ -2,7 +2,7 @@ package store_test
 
 import (
 	"context"
-	"slices"
+
 	"strconv"
 	"testing"
 	"time"
@@ -17,38 +17,6 @@ func ageReadyNode(t *testing.T, s *store.Store, runID string, age time.Duration)
 		`UPDATE nodes SET ready_at = ?, placement_hold_from = ? WHERE run_id = ?`),
 		time.Now().Add(-age).UnixNano(), time.Now().Add(-age).UnixNano(), runID); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// The attention reason shows on the run while the node waits and is gone the
-// moment an agent claims it.
-func TestNodeAttentionShowsOnTheRunUntilAClaim(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedMatchNode(t, s, "run-tf", "", 1, "tool:terraform")
-	ageReadyNode(t, s, "run-tf", time.Minute)
-	waiting, err := s.AsOperator().ListWaitingNodes(ctx, time.Now().Add(-30*time.Second), [2]string{}, 10)
-	if err != nil || len(waiting) != 1 || !slices.Equal(waiting[0].Selector, []string{"tool:terraform"}) {
-		t.Fatalf("waiting = %+v, %v", waiting, err)
-	}
-	const reason = "node work needs tool:terraform; no agent in team default has it"
-	if err := s.AsOperator().SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-tf", NodeID: "work", Reason: reason}}); err != nil {
-		t.Fatal(err)
-	}
-	run, err := s.GetRun(ctx, "run-tf")
-	if err != nil || run.NeedsAttention != reason {
-		t.Fatalf("run = %+v, %v; want the attention reason", run, err)
-	}
-	runs, err := s.ListRuns(ctx, store.RunFilter{Limit: 10})
-	if err != nil || len(runs) != 1 || runs[0].NeedsAttention != reason {
-		t.Fatalf("run list = %+v, %v; want the attention reason", runs, err)
-	}
-	agent := store.ClaimIdentity{Principal: "agent:box", TokenPrefix: "swr_box"}
-	if _, err := s.ClaimNextReadyNode(ctx, agent, "box:1", time.Minute, []string{"tool:terraform"}); err != nil {
-		t.Fatal(err)
-	}
-	if run, err = s.GetRun(ctx, "run-tf"); err != nil || run.NeedsAttention != "" {
-		t.Fatalf("run after a claim = %+v, %v; want no attention", run, err)
 	}
 }
 

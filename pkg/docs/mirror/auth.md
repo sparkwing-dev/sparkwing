@@ -93,13 +93,12 @@ actors and fences from the credential. Unknown or ended credentials get
 `unauthenticated`. A live
 credential without the grant or binding gets `forbidden`.
 
-The legacy `/api/v1/triggers` family and `/api/v1/runs/{run}/nodes`
-family are removed. So is raw `POST /api/v1/runs/{run}/events`. Intake uses
-`POST /api/v1/runs`, plan insertion uses `/runs/{run}/plan`, and job state
-uses `/runs/{run}/jobs/{job}/transition`. Run and job renewal use their
-`heartbeat` routes. Outputs use the authorized `/api/v1/data` upload,
-commit and record operations. Retired claim tokens and caller-supplied
-execution fences have no execution route.
+Create a run with `POST /api/v1/runs`, submit its plan to
+`POST /api/v1/runs/{run}/plan`, and report job state through
+`POST /api/v1/runs/{run}/jobs/{job}/transition`. Renew the awarded claim through
+`POST /api/v1/claims/{claim}/heartbeat`. Outputs use the authorized
+`/api/v1/data` upload, commit and record operations. The controller derives
+execution fences from the authenticated claim.
 
 An absent route returns the shared `not_found` error before credential
 lookup. A method with no handler on a registered path returns
@@ -532,20 +531,16 @@ Checkout, payment history, card operations, payment holds and reversals retain
 their account authorization. A signed payment event authorizes only its declared
 payment operation. It grants no general team or operator power.
 
-## Removed credential routes
+## GitHub Actions enrollment and runner metering
 
 GitHub Actions enrollment uses `GET` and `POST /api/v1/runners/github` and
-`DELETE /api/v1/runners/github/{repository}`. The three
-`/api/v1/team/github-runners` registrations are removed. The dashboard uses
-the final paths. `POST /api/v1/tokens/{prefix}/metered` is removed. Runner
-metering uses the console-only
+`DELETE /api/v1/runners/github/{repository}`. The dashboard uses these paths.
+Runner metering uses the console-only
 `POST /api/v1/operator/runners/{runner}/metered`, selecting an enrolled root's
 capability prefix.
 
-The eight `credits.grant` service registrations for cards, card payments,
-refunds, freezes, warnings, unit reports and payment lookup are removed.
-Automated outcomes enter through the signed provider callback. No service
-bearer can submit a team or credit grant through the removed routes.
+Automated payment outcomes enter through the signed provider callback.
+Service credentials cannot submit provider outcomes or grant team credit.
 
 ## Deployment bootstrap
 

@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -40,24 +38,8 @@ type RunnerPresence struct {
 	// Available is the capacity the runner said it has free now, read only in
 	// the dimensions its Profile reports a capacity for.
 	Available match.Resources
-	// TokenPrefix is the credential the runner last claimed with. The store
-	// reads the runner's team off that credential's row, so a live runner of
-	// another team never holds a node back; empty is the unauthenticated
-	// local runner, which belongs to [DefaultTeam].
+	// TokenPrefix selects the persisted capability and its current ancestry.
 	TokenPrefix string
-}
-
-func (r RunnerPresence) profile() match.Profile {
-	p := r.Profile
-	p.Labels = match.SelfAsserted(r.Labels)
-	return p
-}
-
-func liveRunnerCould(r RunnerPresence, d match.Demand) bool {
-	if r.FreeSlots < 1 || !match.Fits(r.Profile.Capacity, r.Available, d.Request).OK() {
-		return false
-	}
-	return match.Evaluate(r.profile(), d).OK()
 }
 
 // ClaimPlacement is the local-first policy applied to a job claim. A node
@@ -103,128 +85,4 @@ func (p ClaimPlacement) prefersFor(nodePrefers []string) []string {
 type placementDecision struct {
 	reason string
 	hold   bool
-	// safety: a preference the plan declared is worth recording per node; one
-	// the controller supplies for every node is not.
-	nodeOwned bool
-}
-
-func (p ClaimPlacement) decide(demand match.Demand, nodePrefers, runnerLabels []string, holdFrom *time.Time, now time.Time) placementDecision {
-	prefers := p.prefersFor(nodePrefers)
-	nodeOwned := len(nodePrefers) > 0
-	switch {
-	case len(prefers) == 0:
-		return placementDecision{reason: PlacementNone}
-	case preferenceMet(prefers, runnerLabels):
-		return placementDecision{reason: PlacementPreferred, nodeOwned: nodeOwned}
-	case p.Hold > 0 && holdFrom != nil && now.Before(holdFrom.Add(p.Hold)) && p.someLiveRunnerCanTakeIt(demand, prefers):
-		return placementDecision{hold: true, nodeOwned: nodeOwned}
-	default:
-		return placementDecision{reason: PlacementFallback, nodeOwned: nodeOwned}
-	}
-}
-
-// safety: another team's runner can never claim this node, so it earns no
-// hold. Its team comes off its token row, never off what it asserted, and a
-// runner whose team cannot be established holds nothing back.
-func (s *Store) placementForTeam(ctx context.Context, p ClaimPlacement, team Team) (ClaimPlacement, error) {
-	if p.Hold <= 0 || len(p.Live) == 0 {
-		return p, nil
-	}
-	teams, err := s.runnerTeams(ctx, p.Live)
-	if err != nil {
-		return ClaimPlacement{}, err
-	}
-	live := make([]RunnerPresence, 0, len(p.Live))
-	var sole *Team
-	for _, runner := range p.Live {
-		owner := teams[runner.TokenPrefix]
-		if owner == "" && sole == nil {
-			// safety: a prefix no token row backs belongs to the sole team of a
-			// single-team install, exactly as [Store.claimScope] places it.
-			scope, err := s.soleTeamScope(ctx)
-			if err != nil && !errors.Is(err, ErrClaimantHasNoTeam) {
-				return ClaimPlacement{}, err
-			}
-			sole = &scope.team
-		}
-		if owner == "" {
-			owner = *sole
-		}
-		if owner != "" && owner == team {
-			live = append(live, runner)
-		}
-	}
-	p.Live = live
-	return p, nil
-}
-
-// safety: an unauthenticated runner is the local path, which the tenant
-// migration put in [DefaultTeam]; a prefix no row backs maps to no team.
-func (s *Store) runnerTeams(ctx context.Context, live []RunnerPresence) (_ map[string]Team, err error) {
-	teams := map[string]Team{"": DefaultTeam}
-	var prefixes []any
-	for _, runner := range live {
-		if _, seen := teams[runner.TokenPrefix]; !seen {
-			teams[runner.TokenPrefix] = ""
-			prefixes = append(prefixes, runner.TokenPrefix)
-		}
-	}
-	if len(prefixes) == 0 {
-		return teams, nil
-	}
-	rows, err := s.query(ctx, `SELECT prefix, team FROM tokens WHERE prefix IN (`+
-		strings.TrimSuffix(strings.Repeat("?,", len(prefixes)), ",")+`)`, prefixes...)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	for rows.Next() {
-		var prefix, owner string
-		if err := rows.Scan(&prefix, &owner); err != nil {
-			return nil, err
-		}
-		teams[prefix] = NormalizeTeam(Team(owner))
-	}
-	return teams, rows.Err()
-}
-
-// safety: a runner that cannot execute the node is no reason to withhold it
-// from one that can, so the preference alone never earns a hold.
-func (p ClaimPlacement) someLiveRunnerCanTakeIt(demand match.Demand, prefers []string) bool {
-	for _, runner := range p.Live {
-		if liveRunnerCould(runner, demand) && preferenceMet(prefers, runner.Labels) {
-			return true
-		}
-	}
-	return false
-}
-
-func preferenceMet(prefers, labels []string) bool {
-	asserted := match.Profile{Labels: labels}
-	for _, term := range prefers {
-		if term != "" && match.TermSatisfied(asserted, term) {
-			return true
-		}
-	}
-	return false
-}
-
-// safety: the node's repository costs a read, so it is looked up only when some
-// live runner's list could turn on it.
-func (p ClaimPlacement) needsRunRepository() bool {
-	if p.Hold <= 0 {
-		return false
-	}
-	for _, runner := range p.Live {
-		if runner.Profile.Accept != nil {
-			return true
-		}
-	}
-	return false
-}
-
-type nodePlacementEvent struct {
-	HolderID string   `json:"holder_id"`
-	Reason   string   `json:"reason"`
-	Prefers  []string `json:"prefers,omitempty"`
 }

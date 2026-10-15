@@ -18,7 +18,7 @@ func TestSurfaceRunnerEnrollmentCredentialTransport(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		t.Run(endpoint, func(t *testing.T) {
 			grants := []string{string(capability.NodesClaim), string(capability.TriggersClaim), string(capability.RunsState)}
-			metadata := client.TokenInfo{Prefix: "swk_00000001", Team: "team", Subject: client.TokenSubject{Kind: "machine", ID: "desktop"}, Audience: "controller", Grants: grants, IssuedAt: time.Unix(100, 0).UTC()}
+			metadata := capability.Metadata{Prefix: "swk_00000001", Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsState}, IssuedAt: time.Unix(100, 0).UTC()}
 			enrollment := client.EnrollRunnerRequest{Name: "desktop", Repos: []string{"github.com/acme/*"}, ReservedPools: []string{"prod"}}
 			calls := 0
 			transport := &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -144,21 +143,6 @@ func TestLocalExecutionAttempt_ReopeningTheSameAttemptIsANoOp(t *testing.T) {
 	}
 	if len(attempts) != 1 || attempts[0].Outcome != "success" {
 		t.Fatalf("attempts = %+v, want one success", attempts)
-	}
-}
-
-func TestLocalExecutionAttempt_RefusesAClaimedNode(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedRunAndNode(t, s, "run-1", "build")
-	setNodeReadyAt(t, s, "run-1", "build", time.Now())
-	if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{}, "agent:one", time.Minute, nil); err != nil {
-		t.Fatalf("ClaimNextReadyNode: %v", err)
-	}
-
-	if err := s.AcknowledgeNodeExecutionStart(ctx, "run-1", "build", store.ClaimIdentity{},
-		localStart(1)); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("local start on a claimed node: err = %v, want ErrLockHeld", err)
 	}
 }
 
