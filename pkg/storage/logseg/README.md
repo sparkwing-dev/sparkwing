@@ -69,6 +69,11 @@ They cover segment and manifest conflicts, verified recovery after lost PUT
 responses and failed record commits, and refusal when current authority is lost.
 These proofs do not count as native acceptance receipts.
 
+`TestStorage/storage-log-segments-and-fallback/storage-components` generates
+job and trigger/plan/eval subjects over real filesystem signed uploads and reads.
+It covers lost PUT responses, offset resume, subject mismatch and corrupt bytes.
+Its authorization, lifecycle readiness and record persistence are fakes.
+
 The store's transactional authorization and log persistence, controller routes,
 egress settlement, retention scheduling and host bindings still need integration.
 S3 log signing still needs admission for future slots whose payload size and

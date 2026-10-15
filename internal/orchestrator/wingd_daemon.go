@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -37,13 +36,6 @@ type WingdOptions struct {
 	BudgetOrigin          string
 	AdmissionPolicy       *wingd.AdmissionPolicy
 	AdmissionPolicySource string
-	// ArtifactStore backs the controller API's artifact routes. Nil leaves
-	// them unregistered, which is what a machine with no cache configured
-	// gets from a run's own controller today.
-	ArtifactStore storage.ArtifactStore
-	// ArtifactStoreError is why no artifact store resolved. The daemon serves
-	// without artifact routes and reports the reason in its handshake.
-	ArtifactStoreError string
 	// Secrets seals and opens the secrets the controller API stores. Nil
 	// loads this machine's keyring when the daemon starts.
 	Secrets *localsecrets.Keyring
@@ -85,7 +77,7 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	api := newWingdAPI(runs, opts.ArtifactStore, opts.Logger, ring)
+	api := newWingdAPI(runs, opts.Logger, ring)
 	typeSafeKey := ""
 	if admissionPolicy.Mode == admission.ModeJev {
 		typeSafeKey = readTypeSafeAPIKey(runs.paths.StateDB(), logf)
@@ -102,13 +94,9 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		Runs:               runs,
 		StoreSchemaVersion: store.ExpectedSchemaVersion(),
 		ServeAPI:           api.serve,
-		ArtifactStoreError: opts.ArtifactStoreError,
 		Logf:               logf,
 	}
 	logf("admission mode %s (%s)", admissionPolicy.Mode, admissionSource)
-	if opts.ArtifactStoreError != "" {
-		logf("cache backend unavailable, serving no artifact routes: %s", opts.ArtifactStoreError)
-	}
 	if tune != nil {
 		tune(&cfg, runs)
 	}

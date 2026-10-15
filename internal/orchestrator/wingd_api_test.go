@@ -403,35 +403,3 @@ func getHealth(t *testing.T, httpClient *http.Client) (int, map[string]any) {
 	}
 	return resp.StatusCode, body
 }
-
-func TestDaemonServesWhenTheCacheURLWillNotResolve(t *testing.T) {
-	t.Setenv(ArtifactStoreEnvVar, "bogus-scheme://nowhere")
-	art, fault := WingdArtifactStore(context.Background())
-	if art != nil {
-		t.Fatalf("a cache URL that will not open resolved to %T", art)
-	}
-	if fault == "" {
-		t.Fatal("a cache URL that will not open reported no fault")
-	}
-
-	home := wingdTestHome(t)
-	createStore(t, home)
-	startAPIDaemon(t, home, func(cfg *wingd.Config) { cfg.ArtifactStoreError = fault })
-
-	sock, err := wingd.SocketPath(home)
-	if err != nil {
-		t.Fatalf("socket path: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	info, err := wingdclient.Probe(ctx, sock)
-	if err != nil {
-		t.Fatalf("the daemon did not serve with an unresolvable cache URL: %v", err)
-	}
-	if info.ArtifactStoreError != fault {
-		t.Fatalf("the daemon reports artifact store error %q, want %q", info.ArtifactStoreError, fault)
-	}
-	if info.APIReady == nil || !*info.APIReady {
-		t.Fatalf("the daemon reports api_ready %v, want true", info.APIReady)
-	}
-}

@@ -101,7 +101,7 @@ func TestTriggerHost_LayersTheCheckoutsYAMLArgsUnderTheTriggers(t *testing.T) {
 // their artifacts to an aggregator dispatched to a host of its own, in a
 // checkout where neither producer ran.
 func TestTriggerHost_AnAggregatorStagesCachedProducersArtifacts(t *testing.T) {
-	t.Setenv(ArtifactStoreEnvVar, "fs://"+t.TempDir())
+	t.Setenv("SPARKWING_CACHE_URL", "fs://"+t.TempDir())
 	out := filepath.Join(t.TempDir(), "combined")
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "shards": out}
 	first := newHostedTrigger(t, args)

@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -38,7 +37,6 @@ type peerUIDKey struct{}
 
 type wingdAPI struct {
 	runs           *HeldRunStore
-	artifact       storage.ArtifactStore
 	secrets        *localsecrets.Keyring
 	logger         *slog.Logger
 	requestTimeout time.Duration
@@ -137,13 +135,12 @@ func routeSet(routes []string) *http.ServeMux {
 	return mux
 }
 
-func newWingdAPI(runs *HeldRunStore, artifact storage.ArtifactStore, logger *slog.Logger, ring *localsecrets.Keyring) *wingdAPI {
+func newWingdAPI(runs *HeldRunStore, logger *slog.Logger, ring *localsecrets.Keyring) *wingdAPI {
 	if logger == nil {
 		logger = loopbackLogger()
 	}
 	return &wingdAPI{
 		runs:           runs,
-		artifact:       artifact,
 		secrets:        ring,
 		logger:         logger,
 		requestTimeout: APIRequestTimeout,
@@ -376,7 +373,6 @@ func (a *wingdAPI) split(rw, ro *store.Store, cipher controller.Cipher) http.Han
 func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator, cipher controller.Cipher) http.Handler {
 	return controller.New(st, a.logger).
 		WithOutputSignKey(a.outputKey).
-		WithArtifactStore(a.artifact).
 		WithSecretsCipher(cipher).
 		WithAuthenticator(auth).
 		WithPeerPrincipal(peerPrincipal).

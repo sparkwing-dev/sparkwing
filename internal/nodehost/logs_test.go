@@ -238,7 +238,7 @@ func TestLogSinkWritesTheLocalRunDirectoryLog(t *testing.T) {
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
 	}
-	writeThrough(t, orchestrator.LocalBackends(paths, nil, nil).Logs)
+	writeThrough(t, orchestrator.LocalBackends(paths, nil).Logs)
 	raw, err := os.ReadFile(paths.NodeLog("run-1", "build"))
 	if err != nil {
 		t.Fatal(err)

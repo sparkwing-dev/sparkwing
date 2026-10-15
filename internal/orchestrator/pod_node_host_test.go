@@ -451,9 +451,9 @@ func TestLaunchedNode_MemoHitsThroughTheClaim(t *testing.T) {
 func podMemoRuns(t *testing.T, publish, objects bool, want sparkwing.Outcome, bodies string) {
 	t.Helper()
 	if objects {
-		t.Setenv(ArtifactStoreEnvVar, "fs://"+t.TempDir())
+		t.Setenv("SPARKWING_CACHE_URL", "fs://"+t.TempDir())
 	} else {
-		t.Setenv(ArtifactStoreEnvVar, "")
+		t.Setenv("SPARKWING_CACHE_URL", "")
 	}
 	marker := filepath.Join(t.TempDir(), "memo")
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "memo": marker}
@@ -539,7 +539,7 @@ func TestLaunchedNode_HonorsTheTriggersRunFlags(t *testing.T) {
 // safety: --sw-no-cache reaches the memo of a node a claim hosts, so the node runs its body over a stored result.
 func TestLaunchedNode_NoCacheMissesTheMemo(t *testing.T) {
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
-	t.Setenv(ArtifactStoreEnvVar, "")
+	t.Setenv("SPARKWING_CACHE_URL", "")
 	marker := filepath.Join(t.TempDir(), "memo")
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "memo": marker}
 	first := newLaunchedRun(t, args)

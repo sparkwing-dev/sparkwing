@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -71,16 +70,14 @@ func apiSocketTransport(sock string) *http.Transport {
 
 // HostedBackends are the backends of a local run whose state lives behind
 // the daemon's API socket. The run opens no store: state and concurrency
-// travel over sock, while logs and artifacts stay on this machine's own
-// files as they are for a run that opens the store directly. The returned
-// function releases the connections the run held.
-func HostedBackends(paths Paths, sock string, art storage.ArtifactStore) (Backends, func()) {
+// travel over sock and logs stay on local files. The returned function
+// releases the connections the run held.
+func HostedBackends(paths Paths, sock string) (Backends, func()) {
 	httpClient := NewAPISocketClient(sock)
 	return Backends{
 		State:             client.New(HostedAPIBaseURL, httpClient),
 		Logs:              localLogs{paths: paths},
 		Concurrency:       NewHTTPConcurrency(HostedAPIBaseURL, httpClient, "", store.DefaultConcurrencyLease),
-		Artifact:          art,
 		LocalCoordination: true,
 		APISocket:         sock,
 	}, httpClient.CloseIdleConnections
@@ -282,7 +279,7 @@ func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) (Back
 	if sel.sock == "" {
 		return Backends{}, sel, noop, nil
 	}
-	hosted, release := HostedBackends(paths, sel.sock, nil)
+	hosted, release := HostedBackends(paths, sel.sock)
 	return hosted, sel, release, nil
 }
 

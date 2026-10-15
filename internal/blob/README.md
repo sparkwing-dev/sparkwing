@@ -195,9 +195,15 @@ legacy source byte transport and grant-based controller data handlers are
 deleted. The authenticated controller adapter and remaining output handlers
 still need binding to the store's upload transaction.
 
-The acceptance suite runs seven `storage-components` checks for receipt and
-namespace isolation, binary trust, verified streams, presence budgets and memo
-failure policy. Generated properties exercise the real storage functions with
-fake signing, transfer and record dependencies. These component checks run
-separately from the skipped native targets, whose controller, transaction,
-physical-backend and placement assertions still need their real drivers.
+The acceptance suite runs eight `storage-components` checks for receipt and
+namespace isolation, binary trust, verified streams, presence budgets, memo
+failure policy and tagged logs. Generated filesystem properties exercise signed
+HTTP handlers, immutable CAS recovery and log uploads/reads on real files.
+Controller authorization and transactional records use fakes. These component
+checks run separately from the skipped native targets, whose transport,
+transaction, backend matrix and placement assertions need their real drivers.
+
+Local host construction does not open an artifact backend from
+`SPARKWING_CACHE_URL` or create an unused raw artifact cache. The final host
+contract takes live byte and record clients through `nodehost.StorageBinding`.
+Runtime bindings still need integration.

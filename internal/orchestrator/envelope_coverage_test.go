@@ -233,7 +233,7 @@ func newEnvelopeRig(t *testing.T, daemon bool) *envelopeRig {
 		startWingd(t, home, 16)
 		r.daemon = &watchedAdmitter{
 			Admitter: &hostedAdmitter{
-				la: testWingdAdmission(home, nil), backends: LocalBackends(paths, st, nil), pipeline: "envelope",
+				la: testWingdAdmission(home, nil), backends: LocalBackends(paths, st), pipeline: "envelope",
 				plan: func() *nodeproto.PlanDocOld { return nil },
 			},
 			queued: make(chan string, 64), refused: make(chan string, 64),

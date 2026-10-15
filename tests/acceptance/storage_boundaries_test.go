@@ -21,14 +21,21 @@ import (
 // safety: component proofs do not replace the native target's transaction and transport evidence.
 func storageBoundaryChecks() map[string]func(*testing.T) {
 	return map[string]func(*testing.T){
-		"storage-cas-integrity":                          checkStorageStreams,
+		"storage-cas-integrity":                          checkStorageCAS,
 		"storage-reference-edge-laundering":              checkStorageReceipts,
 		"storage-memo-and-depcache-scope":                checkStorageNamespaces,
 		"storage-binary-provenance":                      checkStorageBinaryTrust,
 		"storage-owner-receipts-and-stream-verification": checkStorageOwnerReceipts,
 		"storage-hasmany-large-budget":                   checkStoragePresence,
 		"storage-memo-materialization-failures":          checkStorageMemoFailures,
+		"storage-log-segments-and-fallback":              checkStorageLogs,
 	}
+}
+
+func checkStorageCAS(t *testing.T) {
+	t.Run("streams", checkStorageStreams)
+	t.Run("filesystem", checkStorageFilesystemCAS)
+	t.Run("signatures", checkStorageFilesystemSignatures)
 }
 
 func storageProperty(t *testing.T, property any) {
