@@ -23,10 +23,10 @@ func (GenVerifyTeardown) Examples() []sw.Example {
 
 func (GenVerifyTeardown) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	fixture := sw.Job(plan, "fixture", genFixtureStart).
-		Verify(genFixtureReady).
-		OnFailure("teardown-on-fixture-fail", func(ctx context.Context, _ sw.Failure) error {
-			return genFixtureTeardown(ctx)
-		})
+		Verify(genFixtureReady)
+	fixture.OnFailure("teardown-on-fixture-fail", func(ctx context.Context, _ sw.Failure) error {
+		return genFixtureTeardown(ctx)
+	})
 
 	sw.Job(plan, "test", genFixtureSuite).
 		Needs(fixture).

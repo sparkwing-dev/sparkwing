@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"slices"
@@ -19,6 +20,9 @@ func hostPlanned(t *testing.T, ctx context.Context, st *store.Store, runID strin
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
+	}
+	if adm != nil && adm.BoxID == nil {
+		adm.BoxID = func() string { return testBox }
 	}
 	cfg := Config{Execute: exec, Admission: adm}
 	run := &Run{ID: runID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
@@ -46,9 +50,8 @@ func (d *fakeDaemon) lease(runID string) *fakeLease {
 	return d.leases[runID]
 }
 
-func planGrouped(key, onLimit string, nodes ...string) nodeproto.PlanDoc {
-	parts := strings.Split(key, ":")
-	concurrency := nodeproto.ConcurrencySpec{Group: parts[len(parts)-1], Scope: new(parts[0]), Capacity: new(1)}
+func planGrouped(scope, onLimit string, nodes ...string) nodeproto.PlanDoc {
+	concurrency := nodeproto.ConcurrencySpec{Group: "deploys", Scope: new(scope), Capacity: new(1)}
 	if onLimit != "" {
 		concurrency.OnLimit = new(onLimit)
 	}
@@ -61,13 +64,27 @@ func planGrouped(key, onLimit string, nodes ...string) nodeproto.PlanDoc {
 
 var boxKey = scopedConcurrencyKey("deploys", "box", "", testBox)
 
+func TestPlanGroupFixtureDeclaresScopeWithoutHostKey(t *testing.T) {
+	raw, err := json.Marshal(planGrouped("box", "queue", "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ConcurrencyKey(doc.Concurrency[0], "run-1", testBox); got != "box:box-1:deploys" {
+		t.Fatalf("group targets %q, want the occupied box:box-1:deploys", got)
+	}
+}
+
 func TestPlanGroupBoundsTwoRuns(t *testing.T) {
 	for _, c := range []struct {
-		name, key string
-		daemon    bool
+		name, scope, key string
+		daemon           bool
 	}{
-		{"store", "global:deploys", false},
-		{"daemon", boxKey, true},
+		{"store", "global", "global:deploys", false},
+		{"daemon", "box", boxKey, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			st := openStore(t)
@@ -84,7 +101,7 @@ func TestPlanGroupBoundsTwoRuns(t *testing.T) {
 				queued = d.queued
 			}
 			g := newGauge()
-			doc := planGrouped(c.key, "queue", "a")
+			doc := planGrouped(c.scope, "queue", "a")
 			first := make(chan RunResult, 1)
 			go func() {
 				res, release := hostPlanned(t, ctx, st, "run-1", doc, adm, g.exec)
@@ -162,9 +179,9 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 			defer cancel()
 			d := newFakeDaemon()
 			adm := &Admission{Slots: storeSlots{st: st}}
-			key := "global:deploys"
+			key, scope := "global:deploys", "global"
 			if c.daemon {
-				adm.Daemon, key = d, boxKey
+				adm.Daemon, key, scope = d, boxKey, "box"
 			}
 			g := newGauge()
 			if c.evict == nil {
@@ -180,7 +197,7 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 					c.evict(t, st, d)
 				}()
 			}
-			res, release := hostPlanned(t, ctx, st, testRunID, planGrouped(key, c.onLimit, "a", "b"), adm, g.exec)
+			res, release := hostPlanned(t, ctx, st, testRunID, planGrouped(scope, c.onLimit, "a", "b"), adm, g.exec)
 			release()
 			if res.Status != c.status || (c.err == "") != (res.Err == nil) || !strings.Contains(errText(res.Err), c.err) {
 				t.Fatalf("run %s %v, want %s with %q", res.Status, res.Err, c.status, c.err)
@@ -230,8 +247,8 @@ func TestPlanGroupReleasedOnEveryExit(t *testing.T) {
 			defer cancel()
 			d := newFakeDaemon()
 			adm := &Admission{Daemon: d, Slots: storeSlots{st: st}}
-			doc := planGrouped("global:deploys", "queue", "a")
-			doc.Concurrency = append(doc.Concurrency, nodeproto.ConcurrencySpec{Group: boxKey, Capacity: new(int(1))})
+			doc := planGrouped("global", "queue", "a")
+			doc.Concurrency = append(doc.Concurrency, nodeproto.ConcurrencySpec{Group: "deploys", Scope: new("box"), Capacity: new(int(1))})
 			exec := c.exec
 			runCtx, cancelRun := context.WithCancelCause(ctx)
 			defer cancelRun(nil)
@@ -264,7 +281,7 @@ func TestRunLeaseIsTheNodeLeasesOwner(t *testing.T) {
 	front := 7
 	doc := nodeproto.PlanDoc{
 		AdmissionClass: new("critical"), Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}},
-		Concurrency: []nodeproto.ConcurrencySpec{{Group: boxKey, Capacity: new(int(2)), Cost: new(int(1)), OnLimit: new(string("queue")), QueueTimeoutMS: new(int64(5000))}},
+		Concurrency: []nodeproto.ConcurrencySpec{{Group: "deploys", Scope: new("box"), Capacity: new(int(2)), Cost: new(int(1)), OnLimit: new(string("queue")), QueueTimeoutMS: new(int64(5000))}},
 	}
 	res, release := hostPlanned(t, ctx, st, testRunID, doc, &Admission{Daemon: d, Priority: &front}, nil)
 	release()
@@ -304,7 +321,7 @@ func TestPlanGroupWithoutAStoreFailsTheRun(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res, release := hostPlanned(t, ctx, st, testRunID, planGrouped("global:deploys", "queue", "a"), &Admission{}, nil)
+	res, release := hostPlanned(t, ctx, st, testRunID, planGrouped("global", "queue", "a"), &Admission{}, nil)
 	release()
 	if res.Status != "failed" || !strings.Contains(errText(res.Err), "no coordination store") {
 		t.Fatalf("run %s %v", res.Status, res.Err)
