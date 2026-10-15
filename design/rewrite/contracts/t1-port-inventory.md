@@ -83,10 +83,12 @@ Each release admits exactly one queued competitor. Enrollment is a contract fake
 Native processes and placement transports remain required.
 
 `recovery_test.go:TestRecovery/recovery-application-retry-ordinal/store-sqlite`
-adds persistence evidence for a failed attempt followed by a successful retry.
+adds persistence evidence for two identical failed attempts followed by success.
 It checks the unchanged holder, generation and lease, zero disruptions, distinct
-attempt ordinals, terminal replay and exactly one retry event. Native process
-continuity remains required. The old local
+source ordinals, delayed-report refusal, retry replay after reopening, terminal
+replay and exactly two retry events. `TestHolderReportsAffectOnlyTheirSourceAttemptProperty`
+generates repeated failures, replay counts and invalid source ordinals at the
+same store boundary. Native process continuity remains required. The old local
 `TestReapExpiredNodeClaims_KeepsTheClaimGeneration` fixture is deleted because
 the active unstarted-lapse and reconciler cells already check exact generation
 preservation on reaping and advancement on each next award.

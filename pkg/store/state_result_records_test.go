@@ -36,7 +36,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 				}
 				return nil
 			})
-			change := NodeTransition{Ref: NodeRef{"run", "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &record}}}
+			change := NodeTransition{Ref: NodeRef{"run", "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &record}}}
 			_, err := tenant.TransitionNode(t.Context(), change)
 			if (scenario == "success") != (err == nil) {
 				t.Fatalf("%s: %v", scenario, err)

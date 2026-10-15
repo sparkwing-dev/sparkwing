@@ -20,7 +20,7 @@ func checkRecoveryStartedCap(ctx context.Context, root string) (err error) {
 	ref := store.NodeRef{RunID: "run", NodeID: "job"}
 	var kinds []string
 	for ordinal := 1; ordinal <= 3; ordinal++ {
-		started, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart})
+		started, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: recoverySourceAttempt(int64(ordinal - 1))})
 		if err != nil {
 			return err
 		}

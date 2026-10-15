@@ -119,7 +119,7 @@ VALUES (?,'run','job','pending',?,?,'runner','holder',2,?,?)`, []any{store.Defau
 		return f, err
 	}
 	if started {
-		if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart}); err != nil {
+		if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: recoverySourceAttempt(0)}); err != nil {
 			return f, err
 		}
 	}
@@ -184,7 +184,11 @@ func (f storeRecoveryFixture) refuseLateReports(ctx context.Context) error {
 		return err
 	}
 	for _, actor := range []store.Actor{f.owner, f.holder} {
-		if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport}); err == nil {
+		change := store.NodeTransition{Ref: before.Ref, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport}
+		if actor.Kind == store.ActorHolder {
+			change.SourceAttempt = recoverySourceAttempt(before.Attempt)
+		}
+		if _, err := f.tenant.TransitionNode(ctx, change); err == nil {
 			return errors.New("late holder or adopting host overwrote the job")
 		}
 	}

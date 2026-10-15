@@ -42,7 +42,7 @@ func controllerJobActor(t *testing.T, tenant *Tenant, runID string) Actor {
 		t.Fatal(err)
 	}
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{runID, "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{runID, "job"}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	return actor
@@ -52,7 +52,7 @@ func TestControllerReconcileResumesReportsAcrossLeaseGap(t *testing.T) {
 	tenant, request, now := controllerPlanFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}, {ID: "next", Needs: []string{"job"}}}})
 	actor := controllerJobActor(t, tenant, request.RunID)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE leases SET until=? WHERE name='controller.owner'`, now.UnixNano())
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
 	next, err := tenant.ReadNode(t.Context(), NodeRef{request.RunID, "next"})
@@ -287,7 +287,7 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 		t.Fatalf("initial approval: %+v, %v", before, err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, "UPDATE leases SET until=? WHERE name='controller.owner'", now.UnixNano())
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{request.RunID, "job"}, To: NodeSuccess, Cause: CauseReport, Actor: actor, SourceAttempt: sourceAttempt(1)}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "eval_units", 0)

@@ -327,13 +327,15 @@ dispatch, unique lifecycle events, and persistence across reopening. Authority i
 preseeded in the final schema and enrollment uses a contract fake. These cells
 do not replace the native placement cells below.
 
-`TestRecovery/recovery-application-retry-ordinal/store-sqlite` checks a failed
-attempt followed by a successful retry under one holder, generation and lease.
-Both completed attempt records and the three exact lifecycle events survive
-reopening. Terminal replay emits no extra event and a conflicting result fails.
-The repeated-identical-failure contract gap in `handoffs.md` remains open.
-This cell proves one application retry at the store boundary. Native process,
-backoff and launcher-Job continuity still require their placement cells.
+`TestRecovery/recovery-application-retry-ordinal/store-sqlite` checks two identical
+failures followed by success under one holder, generation and lease. Explicit
+source ordinals separate their replay identities. Delayed failure and success
+reports cannot affect a newer attempt. Retry replay after reopening creates no
+attempt or event. All three completed attempts and the four exact lifecycle
+events survive reopening. Terminal replay emits no extra event and a conflicting
+result fails. W9's source-ordinal wire amendment remains open in `handoffs.md`.
+Native process, backoff and launcher-Job continuity still require their placement
+cells.
 
 The nine skeleton groups are `TestLifecycle`, `TestRecovery`, `TestPlacement`,
 `TestCredentials`, `TestStorage`, `TestProtocol`, `TestEnvironment`, `TestSurface`

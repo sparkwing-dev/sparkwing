@@ -66,6 +66,22 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
+`NodeTransition.SourceAttempt` is a required nonnegative ordinal pointer for
+holder start, retry, report and unstarted release. It names the persisted ordinal
+before the edge. Initial start supplies an explicit zero. A resumed claim supplies
+the last ordinal it retained through disruption. Start and retry return the new
+ordinal in `Applied.Attempt`. An unstarted report or release allocates none.
+Other actors and causes must omit the pointer.
+
+The source ordinal participates in the transition digest. An exact replay of the
+last committed transition returns its recorded result, including after retry has
+advanced the ordinal. Every other holder execution transition must match the
+locked row's current ordinal. Missing or negative ordinals return bad_request.
+A mismatched ordinal loses holder rights. Delayed reports cannot close a newer
+attempt under the same claim generation. W9 must add the corresponding optional
+wire field and preserve its presence through the adapter. The store never derives
+an externally reported source ordinal from current authentication state.
+
 `Store.ReapUnits` is the sole unit-expiry entry point. Every pass requires the
 current `controller.reaper` lease and rechecks it in each unit transaction.
 `Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,

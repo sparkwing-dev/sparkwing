@@ -35,7 +35,7 @@ func TestAuthenticationSnapshotReadsAncestryAndCurrentJob(t *testing.T) {
 
 func TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState(t *testing.T) {
 	tenant, _, actor := liveHolderFixture(t)
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,prefix,retention_class,sealed_at,created_at,updated_at) VALUES ('a','run','job-stream','job_attempt','job',3,2,'logs','r30',1,1,1)`)

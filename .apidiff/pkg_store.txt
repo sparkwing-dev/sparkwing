@@ -1791,11 +1791,12 @@ type NodeStep struct {
 const NodeSuccess NodeState = "success"
 const NodeSuperseded NodeState = "superseded"
 type NodeTransition struct {
-	Ref   NodeRef
-	To    NodeState
-	Actor Actor
-	Cause TransitionCause
-	Extra TransitionExtra
+	Ref           NodeRef
+	To            NodeState
+	Actor         Actor
+	Cause         TransitionCause
+	SourceAttempt *int64
+	Extra         TransitionExtra
 }
 func NodeTransitions() []NodeEdge
 type NodeUsage struct {

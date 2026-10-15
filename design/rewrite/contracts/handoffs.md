@@ -59,18 +59,21 @@ and `settleExpiredClaimTx` helper can retire after this cut is merged.
 
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
 
-**Contract change needed, W1/W9/W3: attempt identity on job transitions.**
+**W1 done, W9/W3 contract change needed: attempt identity on job transitions.**
 Invariant: an execution report affects only the attempt it names, and replay of
-that report cannot consume another attempt. C1 `NodeTransition` and C3
-`JobTransitionRequest` carry claim generation but no source attempt ordinal.
-Two successive identical retry failures therefore hash identically. A direct
-store probe with retry budget two starts attempt four, then the next failure
-returns `Replayed:true, Attempt:4` instead of starting five. A delayed report
-also lacks an attempt fence after retry under the same claim. Carry the source
-attempt through the request and adapter, check it in the committing transaction,
-and include it in replay identity. Start, unstarted refusal and reaper semantics
-must remain explicit. W1 has not changed the foreign wire shape. The reproducer
-and command are in `../w1-session12-progress.md`.
+that report cannot consume another attempt. C1 `NodeTransition.SourceAttempt`
+now requires an explicit nonnegative ordinal on holder start, retry, report and
+unstarted release. It participates in the digest and must match the locked row
+unless the complete transition replays. Other causes and actors omit it.
+Initial start uses zero, resumed start uses the retained ordinal, and unstarted
+refusal/release consumes none. The generated store property and strengthened
+SQLite retry cell prove repeated identical failures and delayed-report refusal.
+W9 must add the ordinal to `JobTransitionRequest` and its adapter. W3 must send
+the captured source ordinal and consume `Applied.Attempt`. W1 has not changed
+the foreign wire shape. Its omission now fails loudly, so the two controller
+execution-path tests remain blocked on that amendment. W1b must also supply the
+existing attempt in its `blobResultFixture` transition. See
+`../w1-session16-progress.md` for evidence and the exact pending callers.
 
 **DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.
 
@@ -94,3 +97,11 @@ not the Job instance. A sync adapter cannot distinguish a former award's Job fro
 its replacement using these fields. W8/W9 must supply the immutable award fence
 and Kubernetes instance correlation before W1 can implement safe cleanup.
 `EngineController.SyncLauncher` remains a stub. No foreign wire type was changed.
+
+**DESIGN approved (lead): W1b record mutation authorization.** Invariant: no record, manifest or memo copy persists unless the writer, ancestor and holder authority is current at the moment of the write. Record publication has one transaction-local mutation owner used by both CommitRecord and CopyMemo: prepare namespaces and verified members first (any I/O happens here), then take the existing blob locks, recheck current authority against the store clock inside the same transaction, and persist the complete destination batch through that owner. That final recheck is the linearization boundary; nothing writes after it without passing it. Preserve immutable replay, all-or-nothing output and manifest copies, and caller-owned rollback. Remove the scattered per-path checks this replaces. TestBlobRecordsMutationCannotOutliveAuthority must go green with its full generated-case run.
+
+**W1b may make two catalog edits in W1 files (lead).** W1b deletes `output_runs` and `output_tombstones` from `tenantTables` in `pkg/store/tenant.go`, and the `(*Store).ExpiredOutputRuns` entry from `reviewedUnscopedSQL` in `pkg/store/tenant_sql_scope_guard_test.go`. These are exactly the two edits listed in W1b-HANDOFF.md; nothing else in W1's files.
+
+**W1b priority (lead).** After the two items above, prioritize legacy cutovers and real integration over more test coverage: retire the legacy claim-credit, raw storage, output, direct-upload and log paths you own, migrating callers with the smallest change (the W1 scope note above applies to you in the other direction for caller migration only), and join W1's real issuance/start/finish transactions to the billing helpers (A1-27).
+
+**DESIGN approved (lead): W8 pending-claim outcomes.** Invariant: a committed award is always owned, and every independent stop reason (policy refusal, cancellation, idle, claim deadline, version) stays observable to the caller. The pending claim returns the award and the stop reason as independent results. Run adopts any returned award first, then applies the stop reason, joins the held hosts, and returns that reason; the joining defer never replaces a stop reason with success. Existing owners of cancellation, idle, claim-deadline and version checks stay as they are. `TestLoopPendingAwardPreservesPolicyDenial` must go green, plus a property test over interleavings of award delivery and each stop reason.

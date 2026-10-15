@@ -67,7 +67,7 @@ func checkRecoveryCapacity(ctx context.Context, root string) (err error) {
 			return fmt.Errorf("live %s capacity admitted competitor: %+v, %v", group.key, promoted, err)
 		}
 	}
-	if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport}); err != nil {
+	if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: recoverySourceAttempt(1)}); err != nil {
 		return err
 	}
 	if err := checkCapacityWinner(ctx, f.tenant, "node"); err != nil {
