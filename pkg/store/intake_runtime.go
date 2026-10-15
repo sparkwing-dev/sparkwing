@@ -54,6 +54,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	}
 	if request.IdempotencyKey != "" {
 		replay, found, err := replayAdmissionTx(ctx, tx, team, scope, request.IdempotencyKey, string(digest))
+		if err == nil && found {
+			_, err = intakeAuthorityTx(ctx, tx, team, request)
+		}
 		if err != nil || found {
 			return replay, err
 		}
@@ -76,6 +79,19 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		input, err := trustedIntakeRequest(request, principal, team, policy)
 		if err != nil {
 			return AdmissionResult{}, err
+		}
+		if replayKey := appReplayKey(input); input.Mode == runspec.IntakeExecute && replayKey != "" {
+			var previous string
+			err := tx.QueryRowContext(ctx, `SELECT id FROM triggers WHERE team=? AND webhook_replay_key<>'' AND webhook_replay_key=?`, team, replayKey).Scan(&previous)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return AdmissionResult{}, err
+			}
+			if err == nil {
+				if _, err := intakeAuthorityTx(ctx, tx, team, request); err != nil {
+					return AdmissionResult{}, err
+				}
+				return admissionResultTx(ctx, tx, team, previous)
+			}
 		}
 		pools, err := intakePoolsTx(ctx, tx, team, &input, policy.RepositoryAuthorized)
 		if err != nil {
@@ -304,9 +320,14 @@ func replayAdmissionTx(ctx context.Context, tx *storeTx, team Team, scope, key, 
 	if previous != digest {
 		return AdmissionResult{}, true, authorityError(apierr.Conflict, "idempotency key has different intake inputs")
 	}
+	result, err := admissionResultTx(ctx, tx, team, id)
+	return result, true, err
+}
+
+func admissionResultTx(ctx context.Context, tx *storeTx, team Team, id string) (AdmissionResult, error) {
 	run, err := readRunTx(ctx, tx, team, id)
 	if err != nil {
-		return AdmissionResult{}, true, err
+		return AdmissionResult{}, err
 	}
 	result := AdmissionResult{RunID: id, Number: run.Number, Request: run.Request, OwnerUnit: run.Owner, Replayed: true}
 	if run.Request.Request.Mode == runspec.IntakePublish {
@@ -315,10 +336,10 @@ func replayAdmissionTx(ctx context.Context, tx *storeTx, team Team, scope, key, 
 	if run.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
 		err = tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE team=? AND bind_run=? AND award_purpose='here' ORDER BY created_at LIMIT 1`, team, id).Scan(&result.HereCapabilityPrefix)
 		if err != nil {
-			return AdmissionResult{}, true, err
+			return AdmissionResult{}, err
 		}
 	}
-	return result, true, nil
+	return result, nil
 }
 
 func appReplayKey(input runspec.Request) string {

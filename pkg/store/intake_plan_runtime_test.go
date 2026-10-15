@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"testing"
+	"time"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
-	"reflect"
-	"testing"
-	"time"
 )
 
 func TestAdmissionRefusesForeignAuthorityBeforePersistence(t *testing.T) {
@@ -48,6 +49,7 @@ func (fakeIntakeContracts) SealRequest(in runspec.Request, facts runspec.IntakeF
 	out.Hash = runspec.Hash(hash)
 	return out, err
 }
+
 func (fakeIntakeContracts) SealSpec(in runspec.SealInput) (runspec.Spec, error) {
 	hash, err := (fakePlanContracts{}).CanonicalHash(in.Plan)
 	if err != nil {
@@ -59,9 +61,11 @@ func (fakeIntakeContracts) SealSpec(in runspec.SealInput) (runspec.Spec, error) 
 	out.SealedAt = in.Now
 	return out, err
 }
+
 func (fakeIntakeContracts) CarryRetry(in runspec.RetryInput) (runspec.RetrySnapshot, error) {
 	return runspec.RetrySnapshot{Request: in.Request, Spec: in.Spec, Plan: in.Plan, Lineage: runspec.Lineage{RetryOf: in.SourceRunID, Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: in.Retrier}}}, nil
 }
+
 func (f fakeIntakeContracts) ResolvePlan(in settings.PlanInputs) (runspec.ExecutionSettings, error) {
 	if f.resolve != nil {
 		return f.resolve(in)
@@ -776,6 +780,47 @@ func TestAdmissionRetryKeepsVerifiedAppFactsAndDoesNotReplayDelivery(t *testing.
 	}
 }
 
+func TestAdmissionDeduplicatesVerifiedAppDeliveryWithoutClientKey(t *testing.T) {
+	tenant, request, now := intakeFixture(t)
+	request.VerifiedDeliveryID = "delivery"
+	tenant.s.SetIntakePolicy(fakeIntakePolicy(func(context.Context, capability.AuthorityResolver, IntakeRequest) (IntakePolicyFacts, error) {
+		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30, RepositoryAuthorized: true, Delivery: &VerifiedRunDelivery{Actor: runspec.Actor{Kind: "github", ID: "original-actor"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "verified-sha", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "delivery", RepositoryID: 1, Ref: "main", SHA: "verified-sha", DefaultBranch: "main", DefaultBranchPush: true, VerifiedAt: *now}}}}}, nil
+	}))
+	first, err := tenant.AdmitRun(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := tenant.AdmitRun(t.Context(), request)
+	if err != nil || !replay.Replayed || replay.RunID != first.RunID || !reflect.DeepEqual(replay.Request, first.Request) {
+		t.Fatalf("delivery replay = %q, replayed=%v, %v", replay.RunID, replay.Replayed, err)
+	}
+	type admission struct {
+		result AdmissionResult
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan admission, 4)
+	for range 4 {
+		go func() {
+			<-start
+			result, err := tenant.AdmitRun(t.Context(), request)
+			results <- admission{result, err}
+		}()
+	}
+	close(start)
+	for range 4 {
+		got := <-results
+		if got.err != nil || !got.result.Replayed || got.result.RunID != first.RunID {
+			t.Errorf("concurrent redelivery = %q, replayed=%v, %v", got.result.RunID, got.result.Replayed, got.err)
+		}
+	}
+	request.Request.Pipeline = "other"
+	other, err := tenant.AdmitRun(t.Context(), request)
+	if err != nil || other.Replayed || other.RunID == first.RunID || other.Number != first.Number+1 {
+		t.Fatalf("delivery's other pipeline = %q, number=%d, replayed=%v, %v", other.RunID, other.Number, other.Replayed, err)
+	}
+}
+
 func TestAdmissionSealsServerResolvedOptionsAndCeilings(t *testing.T) {
 	tenant, request, _ := intakeFixture(t)
 	ceiling := runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 4}, Origin: runspec.SettingOrigin{Layer: runspec.LayerOperatorTeam, Key: "operator.max_priority"}}
@@ -796,6 +841,37 @@ func TestAdmissionSealsServerResolvedOptionsAndCeilings(t *testing.T) {
 type expiringPlanHash struct {
 	planContracts
 	expire func()
+}
+
+type intakeHashClock struct {
+	planContracts
+	now *time.Time
+}
+
+func (f intakeHashClock) CanonicalHash(v any) (runspec.Hash, error) {
+	*f.now = f.now.Add(time.Second)
+	return f.planContracts.CanonicalHash(v)
+}
+
+func TestAdmissionIdempotentReplayRechecksAuthorityAfterHashing(t *testing.T) {
+	tenant, request, now := intakeFixture(t)
+	request.IdempotencyKey = "invocation"
+	if _, err := tenant.AdmitRun(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	root := authorityRoot("short-member", "a")
+	root.Subject.ID = "member"
+	root.Grants = []capability.Grant{capability.RunsWrite}
+	expires := now.Add(time.Second)
+	root.ExpiresAt = &expires
+	authorityPersist(t, tenant.s, root)
+	request.Authority.ID = root.Prefix
+	tenant.s.plans = intakeHashClock{planContracts: tenant.s.plans, now: now}
+	_, err := tenant.AdmitRun(t.Context(), request)
+	var denied *apierr.Error
+	if !errors.As(err, &denied) || denied.Code != apierr.Unauthenticated {
+		t.Fatalf("expired replay authority = %v", err)
+	}
 }
 
 func (f expiringPlanHash) CanonicalHash(v any) (runspec.Hash, error) {

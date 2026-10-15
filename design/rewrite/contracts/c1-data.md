@@ -45,6 +45,10 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
 1. Intake creates the run and its executable owner unit together, except for
    publish intake, which has no executable owner. Run numbers allocate under
    the team lock and are unique per team; IDs remain globally unique.
+   Verified App redelivery returns the original run for that delivery and
+   pipeline, even without a client idempotency key. The unique
+   `(team, webhook_replay_key)` index enforces this identity. The provider's
+   unsigned delivery header is audit data and has no uniqueness constraint.
 2. Intake seals the requested inputs. Acceptance validates the C3 plan,
    resolves C4 settings and ceilings, performs server-side secret preflight,
    seals the resolved spec and inserts nodes in one transaction. Different

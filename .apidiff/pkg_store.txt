@@ -2669,7 +2669,7 @@ func (t *Tenant) FailNodeForUnpricedClass(
 ) error
 func (t *Tenant) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
-func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
+func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey string) (*Trigger, error)
 func (t *Tenant) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error
 func (t *Tenant) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error
@@ -2943,7 +2943,6 @@ type TriggerFilter struct {
 const TriggerGenerationHeader = "X-Sparkwing-Trigger-Generation"
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 func TriggerNamesGitHubRepo(tr *Trigger, repo GitHubRepo) bool
-const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
 const TrustedDailyCapCents = 20_000
 const TrustedPurchaseLimitCents = 50_000

@@ -3849,30 +3849,11 @@ type Trigger struct {
 	// claim token that reads the run's declared secrets while the claim
 	// lives.
 	ClaimToken string `json:"claim_token,omitempty"`
-	// WebhookDelivery is the provider's delivery id for the webhook that
-	// created this trigger, empty for every other submission path. At
-	// most one trigger may carry any given non-empty value across the
-	// whole store -- a partial unique index enforces it -- so replaying
-	// a signed delivery, whether at the pipeline it was sent to or at
-	// another one, is refused instead of producing a second run.
-	//
-	// The scope is global and not the pipeline because a delivery id
-	// names one event at the provider, not one caller's intent: the same
-	// id arriving at two pipelines is a replay, not two requests.
+	// WebhookDelivery records the provider's delivery header for audit.
+	// One delivery can start several pipelines. WebhookReplayKey owns deduplication.
 	WebhookDelivery string `json:"webhook_delivery,omitempty"`
-	// WebhookReplayKey is a digest of the material the webhook's
-	// signature covered -- the pipeline and the request body -- and it
-	// carries the replay decision. At most one trigger may hold any
-	// given non-empty value, so re-sending a body that was already
-	// accepted is refused however its delivery id reads.
-	//
-	// WebhookDelivery cannot carry that decision alone: it is a header
-	// the sender picks and the HMAC does not cover, so anyone who
-	// captured one delivery could re-send it under an id of their own.
-	//
-	// The store writes this field and never reads it back: it exists for
-	// the unique constraint, and [Tenant.FindTriggerByWebhookReplay]
-	// resolves a collision to the trigger that won it.
+	// WebhookReplayKey identifies verified delivery material and its pipeline.
+	// It is unique within the team, regardless of the unsigned delivery header.
 	WebhookReplayKey string `json:"webhook_replay_key,omitempty"`
 	// Team owns the trigger and the run it becomes. A claim and a read
 	// return it so the runner that executes the run can place its work
@@ -4010,9 +3991,6 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		if t.WebhookReplayKey != "" && strings.Contains(err.Error(), triggerWebhookReplayKeyColumn) {
 			return fmt.Errorf("%w: replay key %q", ErrDuplicateWebhookDelivery, t.WebhookReplayKey)
 		}
-		if t.WebhookDelivery != "" && strings.Contains(err.Error(), triggerWebhookDeliveryColumn) {
-			return fmt.Errorf("%w: delivery %q", ErrDuplicateWebhookDelivery, t.WebhookDelivery)
-		}
 		if t.IdempotencyKey != "" && strings.Contains(err.Error(), "idempotency_key") {
 			return fmt.Errorf("%w: idempotency key %q", ErrDuplicateIdempotencyKey, t.IdempotencyKey)
 		}
@@ -4026,10 +4004,8 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 // and the caller resolves it with [Store.FindTriggerByIdempotencyKey].
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 
-// ErrDuplicateWebhookDelivery reports that a trigger insert carried a
-// webhook delivery id an earlier trigger already holds. The delivery is
-// a replay of work the store has already accepted, so the caller
-// refuses it rather than starting a second run.
+// ErrDuplicateWebhookDelivery reports a signed replay key already accepted
+// by a trigger in the same team. The caller returns that original run.
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 
 func isUniqueViolation(err error) bool {
@@ -5602,12 +5578,6 @@ const nodeExecutionUnsealed = `COALESCE(execution_policy_hash, '') = ''
 // TriggerIdempotencyIndexName is the unique index enforcing at most one
 // trigger per (pipeline, idempotency key).
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
-
-// TriggerWebhookDeliveryIndexName is the unique index enforcing at most
-// one trigger per webhook delivery id.
-const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
-
-const triggerWebhookDeliveryColumn = "webhook_delivery"
 
 // TriggerWebhookReplayKeyIndexName is the unique index enforcing at most
 // one trigger per digest of the signed material a webhook delivery

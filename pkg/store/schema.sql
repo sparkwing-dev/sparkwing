@@ -1405,8 +1405,6 @@ CREATE INDEX idx_invitations_email ON invitations(team,email);
 
 CREATE UNIQUE INDEX idx_cron_schedules_repo_pipeline_name ON cron_schedules(team, repo_path, pipeline, schedule_name);
 
-CREATE UNIQUE INDEX idx_triggers_webhook_delivery ON triggers(team, webhook_delivery) WHERE webhook_delivery != '';
-
 CREATE UNIQUE INDEX idx_triggers_webhook_replay_key ON triggers(team, webhook_replay_key) WHERE webhook_replay_key != '';
 
 CREATE UNIQUE INDEX idx_credit_grants_team_reference ON credit_grants(team, kind, reference) WHERE reference != '';

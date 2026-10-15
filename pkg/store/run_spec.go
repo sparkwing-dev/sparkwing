@@ -87,6 +87,8 @@ type AcceptedExpansion struct {
 // The canonical input digest (including retry lineage) and key commit on runs for
 // executable and published intake alike. Same key/body returns the original result;
 // a changed body conflicts. An empty key requests a distinct invocation.
+// Verified App redeliveries return the original run for that delivery and pipeline,
+// including when the caller supplies no idempotency key.
 // Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
 	var result AdmissionResult
