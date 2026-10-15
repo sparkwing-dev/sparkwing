@@ -221,12 +221,6 @@ func explainEvent(r journal.Record) string {
 		return "Daemon finished draining"
 	case "headroom_sample":
 		return "Available capacity sampled: " + field("target_cores") + " cores"
-	case "probe_failure_start":
-		return "Supervisor probe failures began: " + field("error")
-	case "probe_failure_end":
-		return "Supervisor probe failures ended after " + field("duration_ms") + "ms"
-	case "replacement":
-		return "Supervisor replaced the daemon after " + field("failed_probes") + " failed probes"
 	case "handshake_refused":
 		reason := field("reason")
 		if reason == "" {

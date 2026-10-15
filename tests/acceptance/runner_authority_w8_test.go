@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -57,10 +57,9 @@ func TestRunnerDeadlineW8Components(t *testing.T) {
 		})
 	}
 	for _, bound := range []string{"binding", "owner", "parent_credential", "caller"} {
-		t.Run(bound+"_cancels_execution", func(t *testing.T) {
+		t.Run(bound+"_cancels_binding", func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				now := time.Now()
-				first, later := now.Add(time.Second), now.Add(time.Hour)
+				first, later := time.Now().Add(time.Second), time.Now().Add(time.Hour)
 				unit := runnerAuthorityAwardW8(capability.UnitNode)
 				unit.Binding.Deadline, unit.OwnerDeadline, unit.ParentCapabilityExpiry = &later, &later, &later
 				ctx := t.Context()
@@ -71,44 +70,23 @@ func TestRunnerDeadlineW8Components(t *testing.T) {
 				} else {
 					setRunnerDeadlineW8(&unit, bound, &first)
 				}
-				executed, joined, cleaned := false, false, false
-				host := runners.Hosting{
-					ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-					NewController: runnerControllerFactoryW8(func(ctx context.Context) (lease.Beat, error) {
-						if deadline, ok := ctx.Deadline(); !ok || !deadline.Equal(first) {
-							t.Fatalf("renewal deadline = %v, present=%v, want %v", deadline, ok, first)
-						}
-						return lease.Beat{}, nil
-					}),
-					StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
-						return ctx, func() { joined = true }
-					},
-					PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-						return runnerDeadlineNodeW8(func(ctx context.Context) {
-								executed = true
-								<-ctx.Done()
-							}), runnerIdentityInputW8(unit), func() error {
-								if !joined {
-									t.Error("source closed before keeper joined")
-								}
-								cleaned = true
-								return nil
-							}, nil
-					},
-				}
-				if err := host.Host(ctx, unit); !errors.Is(err, context.DeadlineExceeded) || !executed || !joined || !cleaned {
-					t.Fatalf("deadline result = %v, executed=%v, joined=%v, cleaned=%v", err, executed, joined, cleaned)
+				boundNative, closed := false, false
+				host := runners.Hosting{ControllerURL: "https://controller.example", NewController: runnerControllerFactoryW8(func(ctx context.Context) (lease.Beat, error) {
+					if deadline, ok := ctx.Deadline(); !ok || !deadline.Equal(first) {
+						t.Fatal("renewal lost the earliest deadline")
+					}
+					return lease.Beat{}, nil
+				}), Bind: func(ctx context.Context, _ controllerwire.ClaimedUnit, _ controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+					boundNative = true
+					<-ctx.Done()
+					return runners.NativeServices{Close: func() error { closed = true; return nil }}, capability.Principal{}, context.Cause(ctx)
+				}}
+				if err := host.Host(ctx, unit); !errors.Is(err, context.DeadlineExceeded) || !boundNative || !closed {
+					t.Fatalf("bound=%v closed=%v error=%v", boundNative, closed, err)
 				}
 			})
 		})
 	}
-}
-
-type runnerDeadlineNodeW8 func(context.Context)
-
-func (run runnerDeadlineNodeW8) Execute(ctx context.Context, _ nodehost.NodeInput) error {
-	run(ctx)
-	return nil
 }
 
 func setRunnerDeadlineW8(unit *controllerwire.ClaimedUnit, bound string, deadline *time.Time) {
@@ -189,30 +167,21 @@ func runnerAuthorityAwardW8(kind capability.UnitKind) controllerwire.ClaimedUnit
 
 func assertRunnerAuthorityW8(t *testing.T, unit controllerwire.ClaimedUnit, allowed bool) {
 	t.Helper()
-	reached := errors.New("host preparation reached")
-	renewed, prepared := false, false
+	reached := errors.New("native binding reached")
+	renewed, bound := false, false
 	host := runners.Hosting{
-		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-		NewController: runnerControllerFactoryW8(func(context.Context) (lease.Beat, error) {
-			renewed = true
-			return lease.Beat{}, nil
-		}),
-		StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-		PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-			prepared = true
-			return nil, nodehost.RunInput{}, nil, reached
-		},
-		PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-			prepared = true
-			return nil, nodehost.NodeInput{}, nil, reached
+		ControllerURL: "https://controller.example", NewController: runnerControllerFactoryW8(func(context.Context) (lease.Beat, error) { renewed = true; return lease.Beat{}, nil }),
+		Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+			bound = true
+			return runners.NativeServices{}, capability.Principal{}, reached
 		},
 	}
 	err := host.Host(t.Context(), unit)
 	if allowed {
-		if !errors.Is(err, reached) || !renewed || !prepared {
-			t.Fatalf("direct award never reached preparation: %v, renewed=%v, prepared=%v", err, renewed, prepared)
+		if !errors.Is(err, reached) || !renewed || !bound {
+			t.Fatalf("direct award: renew=%v bind=%v error=%v", renewed, bound, err)
 		}
-	} else if err == nil || errors.Is(err, reached) || renewed || prepared {
-		t.Fatalf("invalid award reached hosting: %v, renewed=%v, prepared=%v", err, renewed, prepared)
+	} else if err == nil || renewed || bound {
+		t.Fatalf("invalid award: renew=%v bind=%v error=%v", renewed, bound, err)
 	}
 }

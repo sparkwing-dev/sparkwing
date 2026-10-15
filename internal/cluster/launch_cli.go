@@ -5,17 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
-	flag "github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 )
 
 const agentTokenCredential = "agent-token"
@@ -27,31 +22,30 @@ type LauncherFactory func(context.Context, launcher.CloudJobConfig, string) (*la
 // RunLaunchCLI accepts the final Job configuration and refuses to start without
 // both an award transport and a boundary that establishes isolation at runtime.
 func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) error {
-	fs, err := runnerflags.Parse("launch", args, os.Stderr)
+	fs, err := commandFlags("launch", args)
 	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
+		return parsedHelp(err)
 	}
-	value := func(name string) string { v, _ := fs.GetString(name); return v }
-	cfg := launcher.CloudJobConfig{ControllerURL: value("controller"), Namespace: "sparkwing-jobs", RunnerImage: value("image"), DockerImage: value("docker-image")}
+	cfg := launcher.CloudJobConfig{
+		ControllerURL: textFlag(fs, "controller"), Namespace: "sparkwing-jobs",
+		RunnerImage: textFlag(fs, "image"), DockerImage: textFlag(fs, "docker-image"),
+	}
 	if fs.Changed("namespace") {
-		cfg.Namespace = value("namespace")
+		cfg.Namespace = textFlag(fs, "namespace")
 	}
 	var poll time.Duration
 	if fs.Changed("poll") {
-		poll, err = time.ParseDuration(value("poll"))
+		poll, err = time.ParseDuration(textFlag(fs, "poll"))
 		if err != nil || poll <= 0 {
 			return errors.New("--poll must be a positive duration")
 		}
 	}
-	cpuQuantity, err := resource.ParseQuantity(value("cpu-ceiling"))
+	cpuQuantity, err := resource.ParseQuantity(textFlag(fs, "cpu-ceiling"))
 	if err != nil {
 		return fmt.Errorf("--cpu-ceiling: %w", err)
 	}
 	cfg.CPUCeiling = cpuQuantity.AsApproximateFloat64()
-	memoryQuantity, err := resource.ParseQuantity(value("memory-ceiling"))
+	memoryQuantity, err := resource.ParseQuantity(textFlag(fs, "memory-ceiling"))
 	if err != nil {
 		return fmt.Errorf("--memory-ceiling: %w", err)
 	}
@@ -65,7 +59,7 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	if factory == nil {
 		return errors.New("launcher runtime is unavailable: wire the controller Cloud awards and verified node/network boundary before launching Jobs")
 	}
-	creds, err := credentials.Open(value(credentials.FlagName))
+	creds, err := credentials.Open(textFlag(fs, credentials.FlagName))
 	if err != nil {
 		return err
 	}
@@ -87,10 +81,4 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 		runner.Poll = poll
 	}
 	return runner.Run(ctx)
-}
-
-func runLaunchCLI(args []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return RunLaunchCLI(ctx, args, nil)
 }

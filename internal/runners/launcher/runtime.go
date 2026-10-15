@@ -21,7 +21,7 @@ type RuntimeConfig struct {
 	Demand        controllerwire.ClaimRequest
 	HTTP          *http.Client
 	Bearer        func(context.Context) (string, error)
-	NewController func(client.EngineOptions) (controllerwire.Controller, error)
+	NewController func(client.EngineOptions) (LauncherController, error)
 	Poll          time.Duration
 	Logger        *slog.Logger
 }
@@ -39,7 +39,9 @@ func NewLauncher(ctx context.Context, cfg RuntimeConfig) (*Launcher, error) {
 	}
 	open := cfg.NewController
 	if open == nil {
-		open = client.NewEngineClient
+		open = func(options client.EngineOptions) (LauncherController, error) {
+			return client.NewEngineClient(options)
+		}
 	}
 	wire, err := open(client.EngineOptions{URL: cfg.Jobs.ControllerURL, HTTP: cfg.HTTP, Bearer: cfg.Bearer, Launcher: true})
 	if err != nil {

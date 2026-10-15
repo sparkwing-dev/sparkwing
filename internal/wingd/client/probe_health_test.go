@@ -1,55 +1,23 @@
 package client
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestHealthProbeCompletesAfterHandshake(t *testing.T) {
+func TestProbeCompletesAfterHandshake(t *testing.T) {
 	t.Parallel()
-	home, _ := startHealthProbeServer(t, wingd.ProtocolMajor)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := HealthProbe(ctx, home); err != nil {
-		t.Fatalf("health probe waited for queue-state work after a successful handshake: %v", err)
+	_, socket := startHealthProbeServer(t, wingd.ProtocolMajor)
+	info, err := Probe(t.Context(), socket)
+	if err != nil {
+		t.Fatalf("probe waited for queue-state work after a successful handshake: %v", err)
 	}
-}
-
-func TestHealthProbeRequiresCompatibleProtocol(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name          string
-		protocolMajor int
-		wantErr       bool
-	}{
-		{name: "current", protocolMajor: wingd.ProtocolMajor},
-		{name: "lower", protocolMajor: wingd.ProtocolMajor - 1, wantErr: true},
-		{name: "higher", protocolMajor: wingd.ProtocolMajor + 1, wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			_, sock := startHealthProbeServer(t, tt.protocolMajor)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			err := healthProbeOnce(ctx, sock)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("health probe with protocol %d error = %v, want incompatible protocol error", tt.protocolMajor, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("health probe with protocol %d: %v", tt.protocolMajor, err)
-			}
-		})
+	if info.ProtocolMajor != wingd.ProtocolMajor || info.BinaryVersion != "test" {
+		t.Fatalf("probe lost handshake status: %+v", info)
 	}
 }
 

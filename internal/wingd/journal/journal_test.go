@@ -3,6 +3,7 @@ package journal
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -202,7 +203,7 @@ func TestJournalReadSkipsCorruptLines(t *testing.T) {
 	a, _ := json.Marshal(Record{Kind: "a", TS: time.Unix(1, 0)})
 	b, _ := json.Marshal(Record{Kind: "b", TS: time.Unix(2, 0)})
 	body := bytes.Join([][]byte{a, []byte("{bad"), bytes.Repeat([]byte{'x'}, maxRecordBytes+1), b, []byte(`{"kind":`)}, []byte{'\n'})
-	if err := os.WriteFile(filepath.Join(dir, supervisorFile), body, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, daemonFile), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	records, skipped, err := ReadWithStats(dir)
@@ -229,18 +230,6 @@ func TestJournalReadOrdersEqualTimestampsByIncarnationAndSeq(t *testing.T) {
 	records, _, err := ReadWithStats(dir)
 	if err != nil || len(records) != 3 || records[0].Kind != "first" || records[1].Kind != "middle" || records[2].Kind != "last" {
 		t.Fatalf("ordered records = %+v, %v", records, err)
-	}
-}
-
-func TestJournalSupervisorPreservesAssignedTimestamp(t *testing.T) {
-	dir := t.TempDir()
-	ts := time.Unix(12, 34).UTC()
-	if err := AppendSupervisor(dir, Record{TS: ts, Kind: "elected"}); err != nil {
-		t.Fatal(err)
-	}
-	records, _, err := ReadWithStats(dir)
-	if err != nil || len(records) != 1 || !records[0].TS.Equal(ts) || records[0].Source != "supervisor" {
-		t.Fatalf("records = %+v, %v", records, err)
 	}
 }
 
@@ -285,8 +274,25 @@ func TestJournalWriterPersistsAcrossEvents(t *testing.T) {
 	}
 }
 
-// Read returns all retained records, including records written by the supervisor.
 func Read(dir string) ([]Record, error) {
 	records, _, err := ReadWithStats(dir)
 	return records, err
+}
+
+func appendRecord(dir, name string, maxSize int64, files int, r Record) error {
+	a := &appender{dir: dir, name: name, maxSize: maxSize, files: files}
+	err := a.append(r)
+	return errors.Join(err, a.close())
+}
+
+func Incarnation(dir string) uint64 {
+	b, err := os.ReadFile(filepath.Join(dir, "incarnation"))
+	if err != nil {
+		return 0
+	}
+	n, err := parseIncarnation(b)
+	if err != nil {
+		return 0
+	}
+	return n
 }

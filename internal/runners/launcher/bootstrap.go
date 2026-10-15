@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -22,7 +23,7 @@ type BootstrapHost struct {
 }
 
 // Run presents a bootstrap once and leaves renewal, source acquisition and execution to Host.
-func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
+func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) (result error) {
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
@@ -32,12 +33,18 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
 	if strings.TrimSpace(h.ControllerURL) == "" || h.Host == nil {
 		return errors.New("Cloud bootstrap requires a controller URL and unit host")
 	}
-	binding, bootstrap := award.Binding, string(award.Bootstrap)
-	var identity *engine.Identity
-	if award.Engine != nil {
-		value := *award.Engine
-		identity = &value
+	award, err := captureAward(award)
+	if err != nil {
+		return err
 	}
+	deadline, err := cloudDeadline(time.Now(), award.Binding)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	defer func() { result = errors.Join(result, context.Cause(ctx)) }()
+	binding, bootstrap := award.Binding, string(award.Bootstrap)
 	open := h.NewController
 	if open == nil {
 		open = client.NewEngineClient
@@ -72,14 +79,18 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
 	if !sameBinding(binding, exchanged) || unit.Capability == "" || unit.Capability == bootstrap || unit.LeaseExpiresAt.IsZero() {
 		return errors.New("Cloud exchange returned different binding or unusable authority")
 	}
-	if identity != nil && (unit.Engine == nil || *unit.Engine != *identity) {
+	if !reflect.DeepEqual(unit.Engine, award.Engine) {
 		return errors.New("Cloud exchange changed the accepted engine")
 	}
-	if binding.Kind != CloudPlan && (unit.Accepted == nil || unit.Engine == nil || unit.Accepted.Spec.Request.RunID != binding.RunID || unit.Accepted.Spec.Request.Request.Team != binding.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine) {
-		return errors.New("Cloud exchange is missing its matching accepted run")
+	projected, err := cloudSource(unit)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(projected, award.Source) {
+		return errors.New("Cloud exchange changed the awarded source")
 	}
 	if unit.Execution == nil || !unit.Execution.Resources.Set || !unit.Execution.Resources.Value.Cores.Set || !unit.Execution.Resources.Value.MemoryBytes.Set || unit.Execution.Resources.Value.Cores.Value != award.CPUCores || unit.Execution.Resources.Value.MemoryBytes.Value != award.Memory {
 		return errors.New("Cloud exchange changed awarded execution resources")
 	}
-	return errors.Join(h.Host.Host(ctx, unit), context.Cause(ctx))
+	return h.Host.Host(ctx, unit)
 }

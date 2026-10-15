@@ -3,21 +3,22 @@ package runners
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 // RuntimeConfig composes one authenticated claim loop and its award-bound hosts.
 type RuntimeConfig struct {
 	Controller      client.EngineOptions
+	NewController   func(client.EngineOptions) (controllerwire.Controller, error)
 	Loop            LoopConfig
-	Hosting         Hosting
+	Hosting         UnitHost
+	Repositories    sourceurl.RepoAllowlist
 	Versions        SoftwarePolicy
 	Installation    RunnerInstallation
 	Target          releaseasset.Target
@@ -31,25 +32,10 @@ func NewManagedRunner(ctx context.Context, cfg RuntimeConfig) (*ManagedRunner, e
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(cfg.Controller.URL) == "" || cfg.Controller.Bearer == nil || cfg.Controller.Launcher || cfg.Versions == nil || cfg.Target.Binary != releaseasset.SparkwingRunner || cfg.Loop.Version == "" || cfg.Loop.MaxConcurrent < 1 {
+	if strings.TrimSpace(cfg.Controller.URL) == "" || cfg.Controller.Bearer == nil || cfg.Controller.Launcher || cfg.Versions == nil || cfg.Target.Binary != releaseasset.SparkwingRunner || cfg.Loop.Version == "" || cfg.Loop.MaxConcurrent < 1 || cfg.Hosting == nil {
 		return nil, errors.New("runner composition requires claimant transport, signed policy, runner target and loop settings")
 	}
-	host := cfg.Hosting
-	kinds := cfg.Loop.Kinds
-	if kinds == nil {
-		kinds = []capability.UnitKind{capability.UnitTrigger}
-		if cfg.Loop.RunID == "" {
-			kinds = append(kinds, capability.UnitNode)
-		}
-	}
-	if (slices.Contains(kinds, capability.UnitTrigger) && host.PrepareRun == nil) || (slices.Contains(kinds, capability.UnitNode) && host.PrepareNode == nil) {
-		return nil, errors.New("runner composition requires the shared hosts for its requested unit kinds")
-	}
-	if err := limits.CheckRenewal(host.Interval, host.Lease); err != nil {
-		return nil, err
-	}
-	host.ControllerURL, host.HTTP = cfg.Controller.URL, cfg.Controller.HTTP
-	open := host.NewController
+	open := cfg.NewController
 	if open == nil {
 		open = client.NewEngineClient
 	}
@@ -61,7 +47,7 @@ func NewManagedRunner(ctx context.Context, cfg RuntimeConfig) (*ManagedRunner, e
 		return nil, errors.New("runner controller factory returned no client")
 	}
 	return &ManagedRunner{
-		Loop:     &Loop{Config: cfg.Loop, Controller: controller, Host: host, RequestCapacity: cfg.RequestCapacity, OnError: cfg.OnError},
+		Loop:     &Loop{Config: cfg.Loop, Controller: controller, Host: machineHost{host: cfg.Hosting, repositories: cfg.Repositories}, RequestCapacity: cfg.RequestCapacity, OnError: cfg.OnError},
 		Versions: cfg.Versions, Installation: cfg.Installation, Target: cfg.Target, Notices: cfg.Notices,
 	}, nil
 }

@@ -9,81 +9,46 @@ import (
 	"strings"
 )
 
+type plistElement struct {
+	XMLName  xml.Name
+	Text     string         `xml:",chardata"`
+	Elements []plistElement `xml:",any"`
+}
+
 // PlistArguments reads one complete ProgramArguments array, refusing duplicates and malformed XML.
 func PlistArguments(body []byte) []string {
 	decoder := xml.NewDecoder(bytes.NewReader(body))
-	depth, roots, found := 0, 0, 0
-	want := false
+	var root plistElement
+	if decoder.Decode(&root) != nil || decoder.Decode(new(plistElement)) != io.EOF ||
+		root.XMLName.Local != "plist" || len(root.Elements) != 1 || root.Elements[0].XMLName.Local != "dict" {
+		return nil
+	}
+	entries := root.Elements[0].Elements
+	if len(entries)%2 != 0 {
+		return nil
+	}
 	var args []string
-	for {
-		token, err := decoder.Token()
-		if err == io.EOF && depth == 0 && roots == 1 && found == 1 && !want {
-			return args
-		}
-		if err != nil {
+	found := false
+	for i := 0; i < len(entries); i += 2 {
+		key, value := entries[i], entries[i+1]
+		if key.XMLName.Local != "key" || len(key.Elements) != 0 {
 			return nil
 		}
-		switch token := token.(type) {
-		case xml.StartElement:
-			if depth == 0 {
-				roots++
-				if roots != 1 || token.Name.Local != "plist" {
-					return nil
-				}
+		if key.Text != "ProgramArguments" {
+			continue
+		}
+		if found || value.XMLName.Local != "array" || strings.TrimSpace(value.Text) != "" {
+			return nil
+		}
+		found = true
+		for _, argument := range value.Elements {
+			if argument.XMLName.Local != "string" || len(argument.Elements) != 0 {
+				return nil
 			}
-			if depth == 2 && token.Name.Local == "key" {
-				var key string
-				if decoder.DecodeElement(&key, &token) != nil || want {
-					return nil
-				}
-				want = key == "ProgramArguments"
-				continue
-			}
-			if depth == 2 && want {
-				if token.Name.Local != "array" || found != 0 {
-					return nil
-				}
-				var ok bool
-				args, ok = plistStrings(decoder)
-				if !ok {
-					return nil
-				}
-				found++
-				want = false
-				continue
-			}
-			depth++
-		case xml.EndElement:
-			depth--
+			args = append(args, argument.Text)
 		}
 	}
-}
-
-func plistStrings(decoder *xml.Decoder) ([]string, bool) {
-	var args []string
-	for {
-		token, err := decoder.Token()
-		if err != nil {
-			return nil, false
-		}
-		switch token := token.(type) {
-		case xml.StartElement:
-			if token.Name.Local != "string" {
-				return nil, false
-			}
-			var arg string
-			if decoder.DecodeElement(&arg, &token) != nil {
-				return nil, false
-			}
-			args = append(args, arg)
-		case xml.EndElement:
-			return args, token.Name.Local == "array"
-		case xml.CharData:
-			if strings.TrimSpace(string(token)) != "" {
-				return nil, false
-			}
-		}
-	}
+	return args
 }
 
 // SystemdWords decodes literal native argv, refusing incomplete quotes and invalid escapes.

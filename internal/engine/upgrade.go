@@ -18,21 +18,58 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// PrepareUpgrade previews concrete native pin edits in a private staging checkout.
-func (r *Resolver) PrepareUpgrade(ctx context.Context, request UpgradeRequest) (plan UpgradePlan, result error) {
-	stage, plan, _, err := r.prepareUpgrade(ctx, request)
-	if err != nil {
-		return UpgradePlan{}, err
-	}
-	defer func() { result = errors.Join(result, os.RemoveAll(stage)) }()
-	return plan, nil
+// UpgradeRequest chooses an exact release or the signed index's latest permitted release.
+type UpgradeRequest struct {
+	Checkout string
+	SDK      SDKKind
+	Version  string
+	DryRun   bool
+}
+
+// PinEdit preserves the source digest so an upgrade cannot overwrite concurrent user edits.
+type PinEdit struct {
+	Path         string
+	BeforeDigest string
+	After        []byte
+}
+
+// UpgradePlan contains concrete pin edits and the matching verified engine selection.
+type UpgradePlan struct {
+	Before       Pin
+	After        Pin
+	Edits        []PinEdit
+	Engine       Identity
+	Notices      []Notice
+	inputDigests map[string]string
+}
+
+// UpgradeVerifier checks dependency resolution, Go compilation or TypeScript type checking,
+type UpgradeVerifier interface {
+	Verify(context.Context, string, Resolved) error
+}
+
+// UpgradeResult reports verification separately from a dry-run preview.
+type UpgradeResult struct {
+	Plan     UpgradePlan
+	Applied  bool
+	Verified bool
+	DryRun   bool
+}
+
+// SoftwareUpdate keeps a verified runner replacement separate from an SDK-matched pipeline engine.
+type SoftwareUpdate struct {
+	CurrentVersion string
+	Version        string
+	Release        VerifiedRelease
+	Required       bool
+	Notices        []Notice
 }
 
 // Upgrade verifies staged code before applying digest-fenced manifest and lockfile edits.
@@ -228,7 +265,7 @@ func (r *Resolver) nativeCommand(ctx context.Context, dir, name string, args ...
 	command := exec.Command(name, args...)
 	if name == "npm" {
 		var err error
-		command, err = npmcmd.Command(args...)
+		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return fmt.Errorf("resolve npm: %w", err)
 		}
@@ -431,19 +468,7 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 		return update, err
 	}
 	if ok {
-		metadata, err := os.ReadFile(filepath.Join(filepath.Dir(cached.Executable), "verification.json"))
-		if err != nil {
-			return update, err
-		}
-		var bundle ReleaseBundle
-		if err := json.Unmarshal(metadata, &bundle); err != nil {
-			return update, err
-		}
-		bundle.Asset, err = os.ReadFile(cached.Executable)
-		if err != nil {
-			return update, err
-		}
-		update.Release, err = VerifyRelease(version, target, bundle)
+		update.Release, err = readCachedRelease(version, target, cached.Executable)
 		return update, err
 	}
 	update.Release, err = r.fetchRelease(ctx, version, target)

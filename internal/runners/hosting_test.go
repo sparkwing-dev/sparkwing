@@ -3,8 +3,6 @@ package runners
 import (
 	"context"
 	"errors"
-	"reflect"
-	"runtime"
 	"testing"
 	"time"
 
@@ -12,23 +10,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
-
-type runHostFunc func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error)
-
-func (f runHostFunc) Run(ctx context.Context, in nodehost.RunInput) (nodehost.RunCompletion, error) {
-	return f(ctx, in)
-}
-
-type nodeHostFunc func(context.Context, nodehost.NodeInput) error
-
-func (f nodeHostFunc) Execute(ctx context.Context, in nodehost.NodeInput) error { return f(ctx, in) }
 
 func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	binding := capability.Binding{RunID: "run", Holder: "holder", Generation: 2, Kind: capability.BindingTrigger}
@@ -48,162 +33,6 @@ func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	return unit
 }
 
-func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
-	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
-		t.Run(string(kind), func(t *testing.T) {
-			award := hostingAward(kind)
-			var events []string
-			host := Hosting{ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second}
-			host.NewController = hostingClient(func(context.Context) (lease.Beat, error) {
-				events = append(events, "renew")
-				return lease.Beat{}, nil
-			})
-			host.StartKeeper = func(ctx context.Context, k lease.Keeper) (context.Context, func()) {
-				if k.Lease != time.Minute || k.Interval != 10*time.Second {
-					t.Fatal("keeper timing changed")
-				}
-				events = append(events, "keeper")
-				return ctx, func() { events = append(events, "join") }
-			}
-			cleanup := func() error { events = append(events, "close"); return nil }
-			host.PrepareRun = func(_ context.Context, got controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-				if !reflect.DeepEqual(got, award) {
-					t.Fatal("run preparation lost award")
-				}
-				events = append(events, "prepare")
-				return runHostFunc(func(_ context.Context, in nodehost.RunInput) (nodehost.RunCompletion, error) {
-					if kind != capability.UnitTrigger || in.RunID != "run" {
-						t.Fatal("wrong run dispatch")
-					}
-					events = append(events, "run")
-					return nodehost.RunCompletion{Outcome: "passed"}, nil
-				}), nodehost.RunInput{RunID: "run"}, cleanup, nil
-			}
-			host.PrepareNode = func(_ context.Context, got controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-				if !reflect.DeepEqual(got, award) {
-					t.Fatal("node preparation lost award")
-				}
-				events = append(events, "prepare")
-				return nodeHostFunc(func(_ context.Context, in nodehost.NodeInput) error {
-					if kind != capability.UnitNode || in.NodeID != "job" {
-						t.Fatal("wrong node dispatch")
-					}
-					events = append(events, "run")
-					return nil
-				}), hostingInput(got), cleanup, nil
-			}
-			if err := host.Host(t.Context(), award); err != nil {
-				t.Fatal(err)
-			}
-			if want := []string{"renew", "keeper", "prepare", "run", "join", "close"}; !reflect.DeepEqual(events, want) {
-				t.Fatalf("events %v, want %v", events, want)
-			}
-		})
-	}
-}
-
-func hostingInput(unit controllerwire.ClaimedUnit) nodehost.NodeInput {
-	return nodehost.NodeInput{Entry: &source.Entry{Engine: engine.Resolved{Identity: *unit.Engine, Executable: "/selected/engine", Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}}}
-}
-
-func TestHostingCapturesExecutionIdentityBeforePreparation(t *testing.T) {
-	unit := hostingAward(capability.UnitNode)
-	unit.Runner.Labels = []string{"pool=granted"}
-	input := hostingInput(unit)
-	executed := false
-	host := Hosting{
-		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-		NewController: hostingClient(func(context.Context) (lease.Beat, error) {
-			unit.Engine.Version = "v9.9.9"
-			unit.Accepted.Spec.Resolved.Engine.Version = "v9.9.9"
-			unit.Runner.Labels[0] = "pool=ambient"
-			return lease.Beat{}, nil
-		}),
-		StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-		PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-			return nodeHostFunc(func(_ context.Context, got nodehost.NodeInput) error {
-				executed = true
-				if got.Engine.Identity.Version != "v0.20.0" || got.GrantedRunner.Labels[0] != "pool=granted" {
-					t.Error("execution reread changed award data after admission")
-				}
-				return nil
-			}), input, nil, nil
-		},
-	}
-	if err := host.Host(t.Context(), unit); err != nil || !executed {
-		t.Fatalf("captured identity: executed=%v error=%v", executed, err)
-	}
-}
-
-func TestHostingPreparationFailureStopsKeeperAndClosesPartialSource(t *testing.T) {
-	failure, cleanupFailure := errors.New("acquisition failed"), errors.New("cleanup failed")
-	var stopped, closed bool
-	host := Hosting{
-		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-		NewController: hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }),
-		StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
-			return ctx, func() { stopped = true }
-		},
-		PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-			return nil, nodehost.RunInput{}, func() error {
-				if !stopped {
-					t.Error("source cleanup raced keeper")
-				}
-				closed = true
-				return cleanupFailure
-			}, failure
-		},
-	}
-	err := host.Host(t.Context(), hostingAward(capability.UnitTrigger))
-	if !errors.Is(err, failure) || !errors.Is(err, cleanupFailure) || !stopped || !closed {
-		t.Fatalf("failure=%v stopped=%v closed=%v", err, stopped, closed)
-	}
-}
-
-func TestHostingLostLeaseDuringPreparationCannotExecute(t *testing.T) {
-	ctx, cancel := context.WithCancelCause(t.Context())
-	host := Hosting{
-		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-		NewController: hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }),
-		StartKeeper:   func(context.Context, lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-		PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-			cancel(lease.ErrLeaseLost)
-			return nodeHostFunc(func(context.Context, nodehost.NodeInput) error { t.Error("executed after lease loss"); return nil }), nodehost.NodeInput{}, nil, nil
-		},
-	}
-	if err := host.Host(t.Context(), hostingAward(capability.UnitNode)); !errors.Is(err, lease.ErrLeaseLost) {
-		t.Fatalf("Host = %v", err)
-	}
-}
-
-func TestHostingRefusesInvalidAuthorityBeforeRenewal(t *testing.T) {
-	for _, change := range []func(*controllerwire.ClaimedUnit){
-		func(u *controllerwire.ClaimedUnit) { u.Binding.RunID = "other" },
-		func(u *controllerwire.ClaimedUnit) { u.Binding.NodeID = "other" },
-		func(u *controllerwire.ClaimedUnit) { u.Binding.Holder = "" },
-		func(u *controllerwire.ClaimedUnit) { u.Binding.Generation = 0 },
-		func(u *controllerwire.ClaimedUnit) { u.Binding.Attempt = -1 },
-		func(u *controllerwire.ClaimedUnit) { u.LeaseExpiresAt = time.Time{} },
-		func(u *controllerwire.ClaimedUnit) {
-			deadline := time.Now().Add(-time.Minute)
-			u.Binding.Deadline = &deadline
-		},
-	} {
-		u := hostingAward(capability.UnitNode)
-		change(&u)
-		host := Hosting{ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second, NewController: hostingClient(func(context.Context) (lease.Beat, error) {
-			t.Error("renewed invalid award")
-			return lease.Beat{}, nil
-		}), PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-			t.Error("prepared invalid award")
-			return nil, nodehost.NodeInput{}, nil, nil
-		}}
-		if err := host.Host(t.Context(), u); err == nil {
-			t.Fatal("invalid authority accepted")
-		}
-	}
-}
-
 type hostingRenewalClient struct {
 	controllerwire.Controller
 	renew func(context.Context) (lease.Beat, error)
@@ -211,7 +40,7 @@ type hostingRenewalClient struct {
 
 func (c *hostingRenewalClient) Renew(ctx context.Context, _ string, _ controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
 	beat, err := c.renew(ctx)
-	return controllerwire.RenewalResponse{CancelRequested: beat.CancelRequested, Watched: beat.Watched, WatchedJobs: beat.WatchedNodes}, err
+	return controllerwire.RenewalResponse{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedJobs: beat.WatchedNodes}, err
 }
 
 func hostingClient(renew func(context.Context) (lease.Beat, error)) func(client.EngineOptions) (controllerwire.Controller, error) {
@@ -220,7 +49,7 @@ func hostingClient(renew func(context.Context) (lease.Beat, error)) func(client.
 	}
 }
 
-func TestHostingControllerFailuresPreventPreparation(t *testing.T) {
+func TestHostingFailuresPreventBinding(t *testing.T) {
 	failure := errors.New("controller unavailable")
 	for _, tc := range []struct {
 		name string
@@ -229,24 +58,106 @@ func TestHostingControllerFailuresPreventPreparation(t *testing.T) {
 		{"connect", func(client.EngineOptions) (controllerwire.Controller, error) { return nil, failure }},
 		{"no_client", func(client.EngineOptions) (controllerwire.Controller, error) { return nil, nil }},
 		{"confirm", hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, failure })},
+		{"cancel", hostingClient(func(context.Context) (lease.Beat, error) {
+			return lease.Beat{CancelRequested: true, CancelReason: "owner request"}, nil
+		})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			host := Hosting{
-				ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-				NewController: tc.open,
-				StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
-					t.Error("started keeper without controller authority")
-					return ctx, func() {}
-				},
-				PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-					t.Error("prepared source without controller authority")
-					return nil, nodehost.NodeInput{}, nil, nil
+			h := Hosting{
+				ControllerURL: "https://controller.example", NewController: tc.open,
+				Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+					t.Fatal("unauthorized award reached native binding")
+					return NativeServices{}, capability.Principal{}, nil
 				},
 			}
-			err := host.Host(t.Context(), hostingAward(capability.UnitNode))
-			if err == nil || tc.name != "no_client" && !errors.Is(err, failure) {
-				t.Fatalf("controller failure = %v", err)
+			err := h.Host(t.Context(), hostingAward(capability.UnitNode))
+			if err == nil {
+				t.Fatal("host accepted failed confirmation")
+			}
+			if tc.name == "cancel" {
+				var cancelled *lease.CancelError
+				if !errors.As(err, &cancelled) || cancelled.Reason != "owner request" {
+					t.Fatal(err)
+				}
 			}
 		})
 	}
+}
+
+func TestHostingPartialBindingClosesServices(t *testing.T) {
+	bindErr, closeErr := errors.New("bind failed"), errors.New("close failed")
+	for _, cancelled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "failed", true: "cancelled"}[cancelled], func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			closed := 0
+			h := Hosting{
+				ControllerURL: "https://controller.example", NewController: hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }),
+				Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+					err := bindErr
+					if cancelled {
+						cancel(lease.ErrLeaseLost)
+					}
+					return NativeServices{Close: func() error { closed++; return closeErr }}, capability.Principal{}, err
+				},
+			}
+			err := h.Host(ctx, hostingAward(capability.UnitNode))
+			want := bindErr
+			if cancelled {
+				want = lease.ErrLeaseLost
+			}
+			if !errors.Is(err, want) || !errors.Is(err, closeErr) || !errors.Is(err, bindErr) || closed != 1 {
+				t.Fatalf("close=%d error=%v", closed, err)
+			}
+		})
+	}
+}
+
+func TestHostingInterruptedConfirmationCannotBind(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	stop := errors.New("caller stopped")
+	host := Hosting{ControllerURL: "https://controller.example", NewController: hostingClient(func(context.Context) (lease.Beat, error) { cancel(stop); return lease.Beat{}, nil }), Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+		t.Fatal("interrupted confirmation reached native binding")
+		return NativeServices{}, capability.Principal{}, nil
+	}}
+	if err := host.Host(ctx, hostingAward(capability.UnitTrigger)); !errors.Is(err, stop) {
+		t.Fatal(err)
+	}
+}
+
+func FuzzHostingRejectsIncompleteNodeAwards(f *testing.F) {
+	for missing := uint8(0); missing < 8; missing++ {
+		f.Add(missing)
+	}
+	f.Fuzz(func(t *testing.T, missing uint8) {
+		unit := hostingAward(capability.UnitNode)
+		missing &= 7
+		if missing&1 != 0 {
+			unit.Accepted = nil
+		}
+		if missing&2 != 0 {
+			unit.Engine = nil
+		}
+		if missing&4 != 0 {
+			unit.Execution = nil
+		}
+		confirmed := false
+		confirmation := errors.New("confirmed complete award")
+		host := Hosting{
+			ControllerURL: "https://controller.example",
+			NewController: hostingClient(func(context.Context) (lease.Beat, error) {
+				confirmed = true
+				return lease.Beat{}, confirmation
+			}),
+			Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+				t.Fatal("award reached native binding")
+				return NativeServices{}, capability.Principal{}, nil
+			},
+		}
+		err := host.Host(t.Context(), unit)
+		if err == nil || confirmed != (missing == 0) || errors.Is(err, confirmation) != (missing == 0) {
+			t.Fatalf("missing=%d confirmed=%v error=%v", missing, confirmed, err)
+		}
+	})
 }

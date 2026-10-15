@@ -3,16 +3,19 @@ package engine
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
+
+	strictjson "sigs.k8s.io/json"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
-	"golang.org/x/mod/semver"
 )
 
 // VerifyIndex checks signature and policy invariants before accepting authority.
@@ -33,6 +36,7 @@ func VerifyIndex(signed SignedIndex, now time.Time) (VerifiedIndex, error) {
 	}
 	return VerifiedIndex{index: policy, signed: SignedIndex{Body: bytes.Clone(signed.Body), Signature: bytes.Clone(signed.Signature)}, verifiedAt: now}, nil
 }
+
 func validatePolicy(p VersionIndex) error {
 	if p.Format != VersionIndexFormat || p.PublishedAt.IsZero() || !releaseVersion(p.Latest) || len(p.Versions) == 0 {
 		return fmt.Errorf("version index has missing or unsupported fields")
@@ -75,6 +79,7 @@ func validatePolicy(p VersionIndex) error {
 	}
 	return nil
 }
+
 func validateRestriction(r Restriction, p VersionIndex, minimum bool) error {
 	if !releaseVersion(r.Version) || strings.TrimSpace(r.Reason) == "" || r.AnnouncedAt.IsZero() || r.EffectiveAt.IsZero() || r.EffectiveAt.Before(r.AnnouncedAt) || r.AnnouncedAt.After(p.PublishedAt) {
 		return fmt.Errorf("restriction has invalid reason or dates")
@@ -123,6 +128,7 @@ func evaluate(index VerifiedIndex, version string, now time.Time, hint string) (
 	}
 	return evaluatePolicy(index.index, version, now, hint)
 }
+
 func evaluatePolicy(p VersionIndex, version string, now time.Time, hint string) ([]Notice, error) {
 	var notices []Notice
 	found := false
@@ -159,62 +165,25 @@ func evaluatePolicy(p VersionIndex, version string, now time.Time, hint string) 
 	}
 	return notices, nil
 }
+
 func restrictionError(code apierr.Code, version string, r Restriction, hint string) error {
 	return &apierr.Error{Code: code, Message: fmt.Sprintf("Release %s is blocked: %s", version, r.Reason), Hint: hint, Details: map[string]any{"version": version, "minimum": r.Version, "reason": r.Reason, "security": r.Security}}
 }
+
 func restrictionNotice(version string, r Restriction, hint string) Notice {
 	at := r.EffectiveAt
 	return Notice{Kind: NoticeEnforcement, Version: version, Reason: r.Reason, Hint: hint, EnforceAt: &at}
 }
+
 func integrity(err error) error {
 	return &apierr.Error{Code: apierr.IntegrityFailure, Message: err.Error(), Hint: "Retry with the official signed release; do not execute unverified bytes."}
 }
+
 func decodeUniqueJSON(body []byte, out any) error {
-	d := json.NewDecoder(bytes.NewReader(body))
-	d.UseNumber()
-	if err := uniqueJSONValue(d); err != nil {
+	var document any
+	failures, err := strictjson.UnmarshalStrict(body, &document, strictjson.DisallowDuplicateFields)
+	if err := errors.Join(err, errors.Join(failures...)); err != nil {
 		return err
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return fmt.Errorf("trailing JSON data")
 	}
 	return json.Unmarshal(body, out)
-}
-func uniqueJSONValue(d *json.Decoder) error {
-	token, err := d.Token()
-	if err != nil {
-		return err
-	}
-	delimiter, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delimiter {
-	case '{':
-		seen := map[string]bool{}
-		for d.More() {
-			key, err := d.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok || seen[name] {
-				return fmt.Errorf("duplicate or invalid JSON key")
-			}
-			seen[name] = true
-			if err := uniqueJSONValue(d); err != nil {
-				return err
-			}
-		}
-	case '[':
-		for d.More() {
-			if err := uniqueJSONValue(d); err != nil {
-				return err
-			}
-		}
-	default:
-		return fmt.Errorf("unexpected JSON delimiter")
-	}
-	_, err = d.Token()
-	return err
 }

@@ -2,18 +2,23 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 const installerFixtureSource = `package main
-import("encoding/json";"fmt";"os";"path/filepath")
+import("encoding/json";"fmt";"os";"path/filepath";"strings")
 var Version="dev"
 func main(){
  if len(os.Args)!=2 || os.Args[1]!="__sdk-install" { os.Exit(20) }
@@ -22,7 +27,7 @@ func main(){
  if dec.Decode(&req)!=nil { os.Exit(21) }
  if os.Getenv("SPARKWING_TOKEN")!="" || os.Getenv("AMBIENT_INSTALL_TEST")!="" { os.Exit(22) }
  if err:=os.WriteFile(os.Getenv("INSTALL_MARKER"),[]byte(req.SDK),0600);err!=nil { os.Exit(23) }
- if os.Getenv("INSTALL_FAILURE")!="" { fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));os.Exit(24) }
+ if os.Getenv("INSTALL_FAILURE")!="" { fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));fmt.Fprintln(os.Stderr,strings.Repeat("a",(1<<20)-5)+os.Getenv("REGISTRY_NOTE"));os.Exit(24) }
  if reply:=os.Getenv("INSTALL_REPLY");reply!="" { fmt.Print(reply);return }
  dir:=filepath.Join(req.Directory,req.PipelineDir)
  json.NewEncoder(os.Stdout).Encode(map[string]any{"directory":dir,"command":[]string{filepath.Join(dir,"pipeline")}})
@@ -46,7 +51,7 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 		t.Run(string(sdk), func(t *testing.T) {
 			checkout := t.TempDir()
 			pipeline := filepath.Join(checkout, ".sparkwing")
-			if err := os.Mkdir(pipeline, 0700); err != nil {
+			if err := os.Mkdir(pipeline, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			writeInstallPin(t, pipeline, sdk)
@@ -108,4 +113,42 @@ func writeInstallPin(t *testing.T, dir string, sdk SDKKind) {
 	}
 	writeFixture(t, dir, "package.json", []byte(`{"dependencies":{"@sparkwing/sdk":"0.20.0"}}`))
 	writeFixture(t, dir, "package-lock.json", []byte(`{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"0.20.0"}},"node_modules/@sparkwing/sdk":{"version":"0.20.0"}}}`))
+}
+
+func TestInstallSDKPreservesRegisteredSecretsProperty(t *testing.T) {
+	key := testSigningKey(t)
+	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	version := "v0.20.0"
+	bundle := signedBundle(t, key, version, target, fixtureExecutableSource(t, version, target, installerFixtureSource))
+	release, err := VerifyRelease(version, target, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewResolver(Config{CacheDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkout := t.TempDir()
+	writeInstallPin(t, checkout, GoSDK)
+	pin, err := ReadPin(checkout, GoSDK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolver.StoreVerified(t.Context(), pin, release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for seed := 0; seed < 16; seed++ {
+		sum := sha256.Sum256([]byte(fmt.Sprint(seed)))
+		secret := hex.EncodeToString(sum[:])
+		masker := secrets.NewMasker()
+		environment, err := procenv.Build(procenv.Install, procenv.Base{Ambient: []string{"REGISTRY_NOTE=" + secret, "INSTALL_MARKER=" + filepath.Join(checkout, "installed"), "INSTALL_FAILURE=1"}, SubmitEnvAllow: []string{"REGISTRY_NOTE", "INSTALL_MARKER", "INSTALL_FAILURE"}, Masker: masker}, procenv.Runtime{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = resolved.InstallSDK(t.Context(), SDKInstallRequest{Directory: checkout, SDK: GoSDK, Environment: environment, Masker: masker})
+		if err == nil || strings.Contains(err.Error(), secret) {
+			t.Fatalf("registered install secret survived at seed %d", seed)
+		}
+	}
 }

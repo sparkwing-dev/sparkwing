@@ -13,6 +13,12 @@ It preserves response statuses and bodies and performs no application retries.
 Callers supply it as `EngineOptions.HTTP` and `APIBaseURL` as `EngineOptions.URL`;
 the shared clients' route policy owns any retry. Close idle connections when finished.
 
+`wingd/client.Probe` supplies daemon readiness, draining and API diagnostics.
+Admission clients retain the connected daemon version for connection diagnostics.
+The admission wire's stats-reset operation clears its persisted event window.
+`TestStatsReset_ClearsTheEventWindow` exercises that operation over in-memory
+connections and checks that the granted holder survives the reset.
+
 `ListenSocket` yields `APIConn` only after checking the kernel identity against
 the controller account. Unix supplies the socket peer UID. Windows reads one
 transport preamble byte, obtains the pipe client's identification token and

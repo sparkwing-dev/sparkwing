@@ -10,9 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -40,39 +39,33 @@ func (runtimePolicy) PrepareRunnerUpdate(context.Context, string, releaseasset.T
 }
 
 func TestManagedRunnerCompositionSeparatesClaimantAndHeldTransport(t *testing.T) {
-	unit := hostingAward(capability.UnitTrigger)
+	unit := repositoryAward(capability.UnitTrigger, "https://github.com/acme/app.git")
+	repositories, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	index, _ := runnerPolicyFixtures(t)
 	transport := &http.Client{}
-	var clients, executed, joined int
+	clients, hosted := 0, 0
 	config := RuntimeConfig{
 		Controller: client.EngineOptions{URL: "http://private", HTTP: transport, Bearer: func(context.Context) (string, error) { return "root", nil }},
-		Loop:       LoopConfig{Version: "v0.10.0", MaxConcurrent: 1, MaxClaims: 1}, Versions: runtimePolicy{index: index}, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
-		Hosting: Hosting{
-			Lease: time.Minute, Interval: time.Second,
-			NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
-				bearer, err := options.Bearer(t.Context())
-				want := "root"
-				if clients > 0 {
-					want = unit.Capability
-				}
-				if err != nil || bearer != want || options.HTTP != transport || options.URL != "http://private" || options.Launcher {
-					t.Fatalf("wrong client options: client=%d error=%v", clients, err)
-				}
-				clients++
-				return runtimeController{award: unit}, nil
-			},
-			StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() { joined++ } },
-			PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-				return runHostFunc(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
-					executed++
-					return nodehost.RunCompletion{}, nil
-				}), nodehost.RunInput{}, nil, nil
-			},
-			PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-				t.Fatal("wrong host")
-				return nil, nodehost.NodeInput{}, nil, nil
-			},
+		NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
+			bearer, err := options.Bearer(t.Context())
+			if err != nil || bearer != "root" || options.HTTP != transport || options.URL != "http://private" || options.Launcher {
+				t.Fatal("claimant transport changed")
+			}
+			clients++
+			return runtimeController{award: unit}, nil
 		},
+		Loop: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1, MaxClaims: 1}, Versions: runtimePolicy{index: index}, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
+		Repositories: repositories,
+		Hosting: hostFunc(func(_ context.Context, got controllerwire.ClaimedUnit) error {
+			if got.Capability != unit.Capability {
+				t.Fatal("host lost its award bearer")
+			}
+			hosted++
+			return nil
+		}),
 	}
 	runner, err := NewManagedRunner(t.Context(), config)
 	if err != nil {
@@ -81,7 +74,7 @@ func TestManagedRunnerCompositionSeparatesClaimantAndHeldTransport(t *testing.T)
 	if err := runner.Run(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if clients != 2 || executed != 1 || joined != 1 {
-		t.Fatalf("clients=%d executed=%d joined=%d", clients, executed, joined)
+	if clients != 1 || hosted != 1 {
+		t.Fatalf("clients=%d hosted=%d", clients, hosted)
 	}
 }

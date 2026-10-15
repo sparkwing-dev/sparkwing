@@ -9,7 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -22,10 +22,8 @@ type LauncherController interface {
 
 // ControllerControl projects controller awards without running source or pipeline code.
 type ControllerControl struct {
-	client       LauncherController
-	demand       controllerwire.ClaimRequest
-	forRequest   func(runspec.SealedRequest) (source.Spec, error)
-	forExecution func(runspec.Spec) (source.Spec, error)
+	client LauncherController
+	demand controllerwire.ClaimRequest
 }
 
 // NewControllerControl captures only observations; the controller supplies each award's identity.
@@ -41,7 +39,7 @@ func NewControllerControl(client LauncherController, demand controllerwire.Claim
 		seen[kind] = true
 	}
 	demand.Kinds, demand.Labels = slices.Clone(demand.Kinds), slices.Clone(demand.Labels)
-	return &ControllerControl{client: client, demand: demand, forRequest: source.ForRequest, forExecution: source.ForExecution}, nil
+	return &ControllerControl{client: client, demand: demand}, nil
 }
 
 // Claim delivers a bootstrap once; uncertain transport delivery recovers through lease expiry.
@@ -71,23 +69,33 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 	if err := validateAward(*award); err != nil {
 		return nil, err
 	}
-	if binding.Kind == CloudPlan {
-		award.Source, err = c.forRequest(unit.Request)
-	} else {
-		if unit.Accepted == nil || unit.Accepted.Spec.Request.RunID != unit.RunID || unit.Accepted.Spec.Request.Request.Team != binding.Team || *unit.Engine != unit.Accepted.Spec.Resolved.Engine {
-			return nil, errors.New("Cloud execution award does not match its accepted engine and run")
-		}
-		award.Source, err = c.forExecution(unit.Accepted.Spec)
-	}
+	award.Source, err = cloudSource(unit)
 	if err != nil {
 		return nil, err
 	}
-	return award, nil
+	captured, err := captureAward(*award)
+	if err != nil {
+		return nil, err
+	}
+	return &captured, nil
+}
+
+func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {
+	if unit.Unit == capability.UnitPlan {
+		return source.ForRequest(unit.Request)
+	}
+	if unit.Accepted == nil || unit.Engine == nil || *unit.Engine != unit.Accepted.Spec.Resolved.Engine {
+		return source.Spec{}, errors.New("Cloud execution award does not match its accepted engine and run")
+	}
+	return source.ForExecution(unit.Accepted.Spec)
 }
 
 func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryPurpose) (CloudJobBinding, error) {
+	if err := runners.ValidateAwardIdentity(unit); err != nil {
+		return CloudJobBinding{}, err
+	}
 	fence := unit.Binding
-	if unit.Delivery != delivery || unit.UnitID == "" || unit.RunID == "" || unit.Request.RunID != unit.RunID || fence.RunID != unit.RunID || unit.Request.Request.Team == "" || fence.Generation <= 0 || fence.Attempt < 0 || unit.ParentCapabilityExpiry == nil || unit.ParentCapabilityExpiry.IsZero() {
+	if unit.Delivery != delivery || unit.UnitID == "" || fence.Generation <= 0 || fence.Attempt < 0 || unit.ParentCapabilityExpiry == nil || unit.ParentCapabilityExpiry.IsZero() {
 		return CloudJobBinding{}, errors.New("controller returned an invalid Cloud award binding")
 	}
 	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: fence.Holder, Generation: fence.Generation, Attempt: fence.Attempt, OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}
@@ -140,16 +148,14 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		return nil, err
 	}
 	request := controllerwire.LauncherSyncRequest{}
-	byJob, byUnit := make(map[string]int), make(map[string]int)
+	jobs := make([]controllerwire.LauncherJobRef, len(observations))
+	byJob, byAward := make(map[string]int), make(map[capability.LeaseRef]int)
 	for i, observation := range observations {
 		if observation.JobNamespace == "" || observation.JobUID == "" || observation.Binding.UnitID == "" || observation.JobName != jobName(observation.Binding) || observation.NodeUID == "" {
 			return nil, errors.New("Cloud observation is missing its persisted unit, Job or node identity")
 		}
 		if _, ok := byJob[observation.JobName]; ok {
 			return nil, errors.New("duplicate Cloud Job observation")
-		}
-		if _, ok := byUnit[observation.Binding.UnitID]; ok {
-			return nil, errors.New("duplicate Cloud unit observation")
 		}
 		observed := controllerwire.LauncherObservation{
 			Award:   capability.LeaseRef{ID: observation.Binding.UnitID, Holder: observation.Binding.Holder, Generation: observation.Binding.Generation},
@@ -167,7 +173,11 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if err := observed.Validate(); err != nil {
 			return nil, err
 		}
-		byJob[observation.JobName], byUnit[observation.Binding.UnitID] = i, i
+		if _, ok := byAward[observed.Award]; ok {
+			return nil, errors.New("duplicate Cloud award observation")
+		}
+		byJob[observation.JobName], byAward[observed.Award] = i, i
+		jobs[i] = observed.Job
 		request.Observed = append(request.Observed, observed)
 	}
 	if len(observations) == 0 {
@@ -177,33 +187,31 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	if err != nil {
 		return nil, err
 	}
-	states, seen := make([]CloudJobState, len(observations)), make(map[int]bool)
+	if len(response.Awards)+len(response.Remove) != len(observations) {
+		return nil, errors.New("controller sync omitted or added Cloud Job decisions")
+	}
+	states := make([]CloudJobState, len(observations))
 	for _, unit := range response.Awards {
 		if unit.Capability != "" {
 			return nil, errors.New("controller sync unexpectedly returned credential material")
-		}
-		i, ok := byUnit[unit.UnitID]
-		if !ok {
-			continue
 		}
 		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 		if err != nil {
 			return nil, err
 		}
-		if seen[i] || !sameBinding(binding, observations[i].Binding) {
+		fence := capability.LeaseRef{Kind: unit.Unit, ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
+		i, ok := byAward[fence]
+		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
 			return nil, errors.New("controller sync returned duplicate or changed Cloud bindings")
 		}
-		seen[i], states[i].Binding = true, observations[i].Binding
+		states[i].Binding = observations[i].Binding
 	}
 	for _, job := range response.Remove {
 		i, ok := byJob[job.Name]
-		if !ok || seen[i] || job != request.Observed[i].Job {
+		if !ok || states[i].Binding.UnitID != "" || job != jobs[i] {
 			return nil, errors.New("controller sync returned unknown or contradictory Cloud cleanup")
 		}
-		seen[i], states[i] = true, CloudJobState{Binding: observations[i].Binding, Delete: true}
-	}
-	if len(seen) != len(observations) {
-		return nil, errors.New("controller sync omitted a Cloud Job decision")
+		states[i] = CloudJobState{Binding: observations[i].Binding, Delete: true}
 	}
 	return states, nil
 }

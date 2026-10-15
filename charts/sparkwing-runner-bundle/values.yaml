@@ -49,6 +49,8 @@ launcher:
 #    triggers + nodes, and execute pipeline DAGs.
 # -----------------------------------------------------------------------
 runner:
+  repos: []
+
   # Pool size. RollingUpdate strategy means a `helm upgrade` doesn't
   # drop all pods at once; one in-flight claim's worth of work may
   # need to retry but the pool stays available.
@@ -154,8 +156,7 @@ runner:
   extraVolumeMounts: []
 
 # -----------------------------------------------------------------------
-# 4. ServiceAccount. The runner's
-#    account is bound to the chart's Role.
+# 4. ServiceAccount. Runners use controller HTTP without Kubernetes permissions.
 # -----------------------------------------------------------------------
 serviceAccount:
   # Create one (true) or use an existing SA you've already RBAC'd.
@@ -167,14 +168,6 @@ serviceAccount:
   # ECR / S3 access on the runner side.
   #   eks.amazonaws.com/role-arn: arn:aws:iam::123:role/sparkwing-runner
   annotations: {}
-
-# RBAC. The chart is namespace-scoped: a Role + RoleBinding only.
-# The runners reach the controller over HTTP
-# and never call the Kubernetes API, so the Role carries no rules and
-# no pod mounts a ServiceAccount token by default. Pipelines that
-# must reach the API should bring their own Role outside this chart.
-rbac:
-  create: true
 
 # -----------------------------------------------------------------------
 # 5. Image pull secrets for the runner.

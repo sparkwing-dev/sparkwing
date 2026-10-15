@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -55,8 +57,10 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 	}
 	if err == nil {
 		command.Env, command.Dir = env, input.Entry.Directory
-		if output, err := command.Output(); err == nil {
-			if dir := strings.TrimSpace(string(output)); dir != "" && dir != "undefined" {
+		var output bytes.Buffer
+		command.Stdout = &output
+		if err := gotoolchain.Run(ctx, command); err == nil {
+			if dir := strings.TrimSpace(output.String()); dir != "" && dir != "undefined" {
 				return filepath.Clean(dir), nil
 			}
 		}

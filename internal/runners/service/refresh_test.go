@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,60 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
+
+func FuzzRefreshPreservesInstalledSettings(f *testing.F) {
+	f.Add(false, []byte("credentials $USER 100%"))
+	f.Add(true, []byte("credentials $USER 100%"))
+	f.Fuzz(func(t *testing.T, darwin bool, value []byte) {
+		exec := &fakeExec{}
+		makeHost := linuxHost
+		if darwin {
+			makeHost = darwinHost
+		}
+		h := makeHost(t, exec)
+		state, err := Install(t.Context(), h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(state.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		setting := "$USER 100% " + hex.EncodeToString(value)
+		args := []string{h.Binary, "start", "--config", filepath.Join(h.Home, "superseded.yaml"), "--config", h.ConfigPath, "--repos", "github.com/team/*", "--checkout", filepath.Join(h.Home, setting), "--output", "plain"}
+		installed, err := unitfile.RewriteCommand(h.GOOS, string(body), args, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy := "Environment=" + unitfile.Assignment("CUSTOM_SETTING", setting) + "\nRestartSec=17\n"
+		if darwin {
+			policy = "<key>CustomSetting</key><string>" + unitfile.XMLText(setting) + "</string>"
+			installed = strings.Replace(installed, "</dict>\n</plist>", policy+"</dict>\n</plist>", 1)
+		} else {
+			installed = strings.Replace(installed, "ExecStart=", "ExecStart=\nExecStart= \t\nExecStart=", 1)
+			installed += policy
+		}
+		if err := os.WriteFile(state.Path, []byte(installed), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		h.Binary = filepath.Join(h.Home, "updated $USER 100%", "sparkwing-runner")
+		state, err = Refresh(t.Context(), h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, err := os.ReadFile(state.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args[0] = h.Binary
+		if !slices.Equal(unitfile.Arguments(h.GOOS, string(updated)), args) || !strings.Contains(string(updated), policy) || state.Binary != h.Binary || !slices.Equal(state.Arguments, args[1:]) {
+			t.Fatalf("refresh discarded installed settings: state=%+v body=%s", state, updated)
+		}
+		if inspected, err := Inspect(t.Context(), h); err != nil || inspected.Mismatch || inspected.Binary != h.Binary || !slices.Equal(inspected.Arguments, args[1:]) {
+			t.Fatalf("refreshed registration is unusable: %+v: %v", inspected, err)
+		}
+	})
+}
 
 func TestRefreshLeavesForeignAndOtherRegistrationsUntouched(t *testing.T) {
 	for _, fixture := range []struct {
@@ -27,7 +82,7 @@ func TestRefreshLeavesForeignAndOtherRegistrationsUntouched(t *testing.T) {
 				}
 				path := fixture.path(h)
 				if foreign {
-					if err := os.WriteFile(path, []byte("operator registration"), 0600); err != nil {
+					if err := os.WriteFile(path, []byte("operator registration"), 0o600); err != nil {
 						t.Fatal(err)
 					}
 				} else {
@@ -154,7 +209,7 @@ func TestRegistrationConfigUsesTheFinalFlag(t *testing.T) {
 			} else {
 				body = []byte(strings.Replace(string(body), "  </array>", "    <string>--config="+unitfile.XMLText(other)+"</string>\n  </array>", 1))
 			}
-			if err := os.WriteFile(fixture.path(h), body, 0600); err != nil {
+			if err := os.WriteFile(fixture.path(h), body, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			exec.calls = nil
@@ -186,7 +241,7 @@ func TestRegistrationConfigConsumesValuesUsingTheRunnerGrammar(t *testing.T) {
 		"start --repos --config=" + h.ConfigPath,
 	} {
 		body := []byte("# " + Marker + "\n[Service]\nExecStart=" + unitfile.SystemdWord(h.Binary) + " " + args + "\n")
-		if err := os.WriteFile(UnitPath(h), body, 0600); err != nil {
+		if err := os.WriteFile(UnitPath(h), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		exec.calls = nil
@@ -275,14 +330,24 @@ func TestInspectRefusesMalformedManagedRegistration(t *testing.T) {
 	if _, err := Install(t.Context(), h); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(UnitPath(h), []byte("# "+Marker+"\n[Service]\nExecStart=\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	exec.calls = nil
-	if _, err := Refresh(t.Context(), h); err == nil {
-		t.Fatal("malformed unit was replaced")
-	}
-	if len(exec.calls) != 0 {
-		t.Fatalf("malformed registration reached manager: %v", exec.calls)
+	valid := "ExecStart=" + unitfile.Command([]string{h.Binary, "start", "--config", h.ConfigPath}) + "\n"
+	for _, command := range []string{"", ":", `"unfinished`, `trailing\`, `"bad\q"`} {
+		body := []byte("# " + Marker + "\n[Service]\nExecStart=" + command + "\n")
+		if command != "" {
+			body = append(body, valid...)
+		}
+		if err := os.WriteFile(UnitPath(h), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		exec.calls = nil
+		for _, operation := range []func(context.Context, Host) (State, error){Inspect, Refresh, Uninstall} {
+			if _, err := operation(t.Context(), h); err == nil {
+				t.Fatalf("accepted malformed registration %q", command)
+			}
+		}
+		after, err := os.ReadFile(UnitPath(h))
+		if err != nil || !slices.Equal(body, after) || len(exec.calls) != 0 {
+			t.Fatalf("malformed registration changed: %v calls=%v", err, exec.calls)
+		}
 	}
 }

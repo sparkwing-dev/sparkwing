@@ -157,7 +157,7 @@ func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.La
 
 func (c *engineClient) Exchange(ctx context.Context) (controllerwire.ExchangeResponse, error) {
 	var result controllerwire.ExchangeResponse
-	err := c.request(ctx, "POST", "/api/v1/claims/exchange", "/api/v1/claims/exchange", "", nil, &result)
+	err := c.request(ctx, "POST", "/api/v1/claims/exchange", "/api/v1/claims/exchange", "", struct{}{}, &result)
 	return result, err
 }
 

@@ -40,10 +40,6 @@ type localRunDependencies struct {
 	version string
 }
 
-func resolveLocalRunRuntime(context.Context, localRunOptions) (localRunRuntime, error) {
-	return localRunRuntime{}, &apierr.Error{Code: apierr.Unavailable, Message: "local run integration requires the local controller and shared host binding", Hint: "source preparation, captured environment storage, authorized storage and lease renewal must be bound before intake"}
-}
-
 func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args []string, out io.Writer, deps localRunDependencies) (resultErr error) {
 	masker := secrets.NewMasker()
 	for _, token := range args {

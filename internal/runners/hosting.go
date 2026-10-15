@@ -2,151 +2,113 @@ package runners
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-// Hosting binds each award's controller to its shared host and lease keeper.
+// Hosting binds remote awards to the shared native hosts and their authenticated store adapter.
 type Hosting struct {
 	ControllerURL string
 	HTTP          *http.Client
 	NewController func(client.EngineOptions) (controllerwire.Controller, error)
-	PrepareRun    func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error)
-	PrepareNode   func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error)
-	Observe       func(controllerwire.ClaimedUnit, lease.Beat)
-	Lease         time.Duration
-	Interval      time.Duration
-	// StartKeeper supplies the shared lease runtime; nil uses lease.Keeper.Run.
-	StartKeeper func(context.Context, lease.Keeper) (context.Context, func())
+	Bind          func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error)
 }
 
-// Host keeps acquisition and execution under one keeper and joins it before
-// releasing source resources. Lost authority remains an error even when the
-// underlying host returns successfully while cancellation is being delivered.
-func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (result error) {
+// Host confirms live authority before binding services; native hosts own acquisition and renewal.
+func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+	if strings.TrimSpace(h.ControllerURL) == "" || h.Bind == nil {
+		return errors.New("runner host requires a controller URL and native service binding")
+	}
+	return hostAward(ctx, unit, h.bind)
+}
+
+func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(context.Context, controllerwire.ClaimedUnit, controllerwire.ClaimedUnit, nodehost.RunInput) (NativeServices, storeInputs, error)) (result error) {
 	if err := validateHostedAward(unit); err != nil {
 		return err
 	}
-	var execution nodeExecution
-	var sealedRun nodehost.RunInput
-	var err error
-	if unit.Unit == capability.UnitNode {
-		execution, err = executionFor(unit)
-	} else {
-		sealedRun, err = nodehost.NewRunInput(unit)
-	}
+	captured, err := captureUnit(unit)
 	if err != nil {
 		return err
 	}
-	if err := limits.CheckRenewal(h.Interval, h.Lease); err != nil {
+	input, err := nodehost.NewRunInput(captured)
+	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(h.ControllerURL) == "" || (unit.Unit == capability.UnitTrigger && h.PrepareRun == nil) || (unit.Unit == capability.UnitNode && h.PrepareNode == nil) {
-		return errors.New("runner host requires a controller URL and host preparation")
-	}
-	ctx, cancel := unit.HostContext(ctx)
+	ctx, cancel := captured.HostContext(ctx)
 	defer cancel()
+	defer func() { result = errors.Join(result, context.Cause(ctx)) }()
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
-	controller, err := h.controller(unit.Capability)
-	if err != nil {
-		return err
-	}
-	ctx, computing := lease.Bind(ctx, lease.Identity{Kind: unit.Unit, RunID: unit.RunID, NodeID: unit.JobID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation})
-	renew := func(ctx context.Context) (lease.Beat, error) {
-		response, err := controller.Renew(ctx, unit.UnitID, controllerwire.RenewalRequest{Executing: computing()})
-		if err != nil {
-			return lease.Beat{}, err
-		}
-		return lease.Beat{CancelRequested: response.CancelRequested, Watched: response.Watched, WatchedNodes: slices.Clone(response.WatchedJobs)}, nil
-	}
-	// safety: A delayed award must prove its lease is still live before source acquisition.
-	beat, err := renew(ctx)
-	if err != nil {
-		return fmt.Errorf("confirm runner award: %w", err)
-	}
-	if beat.CancelRequested {
-		return &lease.CancelError{Reason: "controller requested cancellation"}
-	}
-	observe := func(beat lease.Beat) {
-		if h.Observe != nil {
-			h.Observe(unit, beat)
-		}
-	}
-	observe(beat)
-	start := h.StartKeeper
-	if start == nil {
-		start = func(ctx context.Context, keeper lease.Keeper) (context.Context, func()) { return keeper.Run(ctx) }
-	}
-	unitCtx, stop := start(ctx, lease.Keeper{Renew: renew, Lease: h.Lease, Interval: h.Interval, Observe: observe})
-	var closeSource func() error
+	services, inputs, err := bind(ctx, captured, unit, input)
 	defer func() {
-		// safety: Preserve lease loss before stop supplies its own cancellation cause.
-		cause := context.Cause(unitCtx)
-		stop()
-		if cause == nil {
-			cause = context.Cause(unitCtx)
-			if cause == context.Canceled {
-				cause = context.Cause(ctx)
-			}
-		}
-		result = errors.Join(result, cause)
-		if closeSource != nil {
-			result = errors.Join(result, closeSource())
+		if services.Close != nil {
+			result = errors.Join(result, services.Close())
 		}
 	}()
-	if err := context.Cause(unitCtx); err != nil {
-		return err
-	}
-	if unit.Unit == capability.UnitTrigger {
-		var host nodehost.RunHost
-		var input nodehost.RunInput
-		host, input, closeSource, err = h.PrepareRun(unitCtx, unit, controller)
-		if err != nil {
-			return err
-		}
-		if err := context.Cause(unitCtx); err != nil {
-			return err
-		}
-		if host == nil {
-			return errors.New("runner preparation returned no run host")
-		}
-		input.RunID, input.RequestHash = sealedRun.RunID, sealedRun.RequestHash
-		input.SealedRequest, input.Accepted = sealedRun.SealedRequest, sealedRun.Accepted
-		input.GrantedRunner = sealedRun.GrantedRunner
-		input.Owner.Kind, input.Owner.Owner = sealedRun.Owner.Kind, sealedRun.Owner.Owner
-		_, err = host.Run(unitCtx, input)
-		return err
-	}
-	var host nodehost.NodeHost
-	var input nodehost.NodeInput
-	host, input, closeSource, err = h.PrepareNode(unitCtx, unit, controller)
 	if err != nil {
 		return err
 	}
-	if err := context.Cause(unitCtx); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return err
 	}
-	if host == nil {
-		return errors.New("runner preparation returned no node host")
-	}
-	input, err = execution.input(input)
+	owner, claimed, _, err := nodehost.NewNativeHost(services.Config)
 	if err != nil {
 		return err
 	}
-	return host.Execute(unitCtx, input)
+	if captured.Unit == capability.UnitNode {
+		inputs.node.Storage = services.Storage
+		return claimed.Execute(ctx, inputs.node)
+	}
+	inputs.run.Storage = services.Storage
+	_, err = owner.Run(ctx, inputs.run)
+	return err
+}
+
+func captureUnit(unit controllerwire.ClaimedUnit) (controllerwire.ClaimedUnit, error) {
+	data, err := json.Marshal(unit)
+	var captured controllerwire.ClaimedUnit
+	if err == nil {
+		err = json.Unmarshal(data, &captured)
+	}
+	return captured, err
+}
+
+func (h Hosting) bind(ctx context.Context, unit, original controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {
+	controller, err := h.controller(unit.Capability)
+	if err != nil {
+		return NativeServices{}, storeInputs{}, err
+	}
+	beat, err := controller.Renew(ctx, unit.UnitID, controllerwire.RenewalRequest{})
+	if err != nil {
+		return NativeServices{}, storeInputs{}, err
+	}
+	if beat.CancelRequested {
+		return NativeServices{}, storeInputs{}, &lease.CancelError{Reason: beat.CancelReason}
+	}
+	if err := context.Cause(ctx); err != nil {
+		return NativeServices{}, storeInputs{}, err
+	}
+	services, principal, err := h.Bind(ctx, original, controller)
+	if err == nil {
+		err = context.Cause(ctx)
+	}
+	if err != nil {
+		return services, storeInputs{}, err
+	}
+	if !principalMatches(unit, principal) || services.Config.Store == nil {
+		return services, storeInputs{}, awardMismatch()
+	}
+	inputs, err := nativeInputs(ctx, services.Config.Store, unit, principal, input)
+	return services, inputs, err
 }
 
 func (h Hosting) controller(bearer string) (controllerwire.Controller, error) {
@@ -170,6 +132,9 @@ func (h Hosting) controller(bearer string) (controllerwire.Controller, error) {
 }
 
 func validateHostedAward(unit controllerwire.ClaimedUnit) error {
+	if err := ValidateAwardIdentity(unit); err != nil {
+		return err
+	}
 	if err := validateUnit(unit); err != nil {
 		return err
 	}
@@ -177,21 +142,21 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 		return errors.New("runner hosting requires a directly usable award")
 	}
 	binding := unit.Binding
-	if binding.RunID != unit.RunID || binding.Holder == "" || binding.Generation <= 0 {
+	if binding.Holder == "" || binding.Generation <= 0 {
 		return errors.New("runner award has an invalid run or claim fence")
 	}
 	if unit.Unit == capability.UnitNode {
 		if unit.Purpose != capability.PurposeWork || binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
 			return errors.New("runner award has an invalid job or attempt binding")
 		}
-		if unit.Engine == nil || unit.Accepted == nil || unit.Request.RunID != unit.RunID || unit.Request.Request.Team == "" || unit.Accepted.Spec.Request.RunID != unit.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
-			return errors.New("runner award is missing its matching accepted engine and run")
+		if unit.Engine == nil || unit.Accepted == nil || unit.Execution == nil || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
+			return errors.New("runner award is missing its matching accepted engine, execution settings and run")
+		}
+		if unit.Runner.Name == "" || unit.Runner.Type == "" {
+			return errors.New("runner award is missing its granted runner identity")
 		}
 	} else if (unit.Purpose != capability.PurposeTrigger && unit.Purpose != capability.PurposeHere) || binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {
 		return errors.New("runner award has an invalid trigger binding")
-	}
-	if unit.Runner.Name == "" || unit.Runner.Type == "" || unit.Runner.Labels == nil {
-		return errors.New("runner award is missing its granted runner identity")
 	}
 	if unit.LeaseExpiresAt.IsZero() {
 		return errors.New("runner award is missing its lease expiry")

@@ -29,7 +29,7 @@ func TestLauncherCompositionSelectsLauncherTransport(t *testing.T) {
 		Kube: kube, Boundary: boundary,
 		Jobs: base.Config, Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.20.0", Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}},
 		HTTP: httpClient, Bearer: func(context.Context) (string, error) { return "launcher-root", nil },
-		NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
+		NewController: func(options client.EngineOptions) (LauncherController, error) {
 			bearer, err := options.Bearer(t.Context())
 			if err != nil || bearer != "launcher-root" || !options.Launcher || options.HTTP != httpClient || options.URL != base.Config.ControllerURL {
 				t.Fatal("launcher transport lost its route selection or credentials")
@@ -48,7 +48,7 @@ func TestLauncherCompositionSelectsLauncherTransport(t *testing.T) {
 		t.Fatalf("award=%v claims=%d error=%v", awarded, wire.claims, err)
 	}
 	failure := errors.New("transport failed")
-	cfg.NewController = func(client.EngineOptions) (controllerwire.Controller, error) { return nil, failure }
+	cfg.NewController = func(client.EngineOptions) (LauncherController, error) { return nil, failure }
 	if _, err := NewLauncher(t.Context(), cfg); !errors.Is(err, failure) {
 		t.Fatalf("lost transport error: %v", err)
 	}

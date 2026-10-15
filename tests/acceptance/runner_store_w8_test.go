@@ -5,21 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"path/filepath"
-	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -62,13 +57,6 @@ func (c *storedRunnerW8) Finish(ctx context.Context, run string, body controller
 
 type runnerStorePolicyW8 struct{}
 
-type identityRunW8 func(nodehost.RunInput)
-
-func (host identityRunW8) Run(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
-	host(input)
-	return nodehost.RunCompletion{}, nil
-}
-
 func (runnerStorePolicyW8) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
 	if spec.RegistrationID != "runner-store-fixture" {
 		return errors.New("unregistered fixture origin")
@@ -99,6 +87,11 @@ func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*controller.Engi
 			t.Error(err)
 		}
 	})
+	return seedStoredRunnerW8(t, s, kind)
+}
+
+func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) (*controller.EngineController, capability.Issued) {
+	t.Helper()
 	s.SetProvisionPolicy(runnerStorePolicyW8{})
 	s.SetClaimProfileResolver(runnerStorePolicyW8{})
 	operator, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "runner-store-fixture", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
@@ -113,6 +106,8 @@ func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*controller.Engi
 	unit := runnerAuthorityAwardW8(capability.UnitNode)
 	unit.Request.Request.Team = string(store.DefaultTeam)
 	unit.Request.Request.Git.Repository.Key = "gh:1"
+	unit.Request.Request.Git.SHA = strings.Repeat("a", 40)
+	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo.git", PipelineDir: ".sparkwing"}
 	unit.Request.Hash = "request"
 	unit.Accepted.Spec.Request = unit.Request
 	unit.Accepted.Spec.Hash = "spec"
@@ -158,137 +153,6 @@ func storedRunnerClientW8(ctx context.Context, server *controller.EngineControll
 	return &storedRunnerW8{server: server, authorized: capability.Authorized{Principal: principal, Binding: c.Binding, Target: capability.Target{Team: c.Team, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID}}}, nil
 }
 
-func TestRunnerStoreLifecycleW8Components(t *testing.T) {
-	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
-		t.Run(string(kind), func(t *testing.T) {
-			server, root := newStoredRunnerW8(t, kind)
-			claimant, err := storedRunnerClientW8(t.Context(), server, root.Raw)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if kind == capability.UnitNode {
-				owner, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
-				if err != nil || owner.Claim == nil {
-					t.Fatalf("owner acquisition: present=%v error=%v", owner.Claim != nil, err)
-				}
-			}
-			joined, closed, executed := false, false, false
-			transport, clients := &http.Client{}, 0
-			var held controllerwire.ClaimedUnit
-			host := runners.Hosting{
-				ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-				NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
-					bearer, err := options.Bearer(t.Context())
-					if err != nil {
-						return nil, err
-					}
-					if options.HTTP != transport || options.Launcher || options.URL != "https://controller.example" || ((clients == 0) != (bearer == root.Raw)) {
-						t.Error("runner composition changed transport or mixed claimant and award authority")
-					}
-					clients++
-					return storedRunnerClientW8(t.Context(), server, bearer)
-				},
-				StartKeeper: func(ctx context.Context, keeper lease.Keeper) (context.Context, func()) {
-					if _, err := keeper.Renew(ctx); err != nil {
-						t.Error(err)
-					}
-					return ctx, func() { joined = true }
-				},
-			}
-			cleanup := func() error {
-				if !joined {
-					t.Error("source released before keeper joined")
-				}
-				closed = true
-				return nil
-			}
-			host.PrepareRun = func(ctx context.Context, unit controllerwire.ClaimedUnit, bound controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-				held = unit
-				return identityRunW8(func(input nodehost.RunInput) {
-					executed = true
-					var request runspec.SealedRequest
-					if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
-						t.Error(err)
-						return
-					}
-					if input.RunID != unit.RunID || input.RequestHash != string(unit.Request.Hash) || request.Hash != unit.Request.Hash || input.Accepted == nil || input.Accepted.SpecHash != string(unit.Accepted.Spec.Hash) || input.Accepted.PlanHash != string(unit.Accepted.PlanHash) {
-						t.Error("run host input lost the awarded first or second seal")
-						return
-					}
-					if _, err := bound.Finish(ctx, unit.RunID, controllerwire.FinishRequest{Outcome: "success"}); err != nil {
-						t.Error(err)
-					}
-				}), nodehost.RunInput{}, cleanup, nil
-			}
-			host.PrepareNode = func(ctx context.Context, unit controllerwire.ClaimedUnit, bound controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-				held = unit
-				executor := identityNodeW8(func(input nodehost.NodeInput) {
-					executed = true
-					if input.Engine.Identity != *unit.Engine || input.GrantedRunner.Name != unit.Runner.Name || input.Generation != unit.Binding.Generation || input.Attempt != unit.Binding.Attempt || input.Accepted.SpecHash != string(unit.Accepted.Spec.Hash) || input.Accepted.PlanHash != string(unit.Accepted.PlanHash) || !reflect.DeepEqual(input.Execution, *unit.Execution) {
-						t.Error("host input lost its granted execution identity")
-						return
-					}
-					started, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start"})
-					if err != nil || started.Attempt != 1 || unit.Binding.Attempt != 0 {
-						t.Errorf("initial start: attempt=%d error=%v", started.Attempt, err)
-						return
-					}
-					if _, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
-						t.Error(err)
-					}
-				})
-				input := runnerIdentityInputW8(unit)
-				input.SpecHash = "fixture-job-hash"
-				input.RouteBinding = nodeproto.ProcessBinding{RunID: unit.RunID, JobID: unit.JobID, Routes: nodeproto.ProcessRoutes{URL: "http://node", Bearer: "fixture-delegated-node"}}
-				preparation := runners.NodePreparation{Host: executor, Input: input, Acquire: func(_ context.Context, spec runspec.Spec, _ source.Options) (*source.Entry, func() error, error) {
-					if spec.Request.RunID != unit.RunID || spec.Resolved.Engine != *unit.Engine {
-						t.Error("source acquisition lost the accepted run or engine")
-					}
-					return input.Entry, cleanup, nil
-				}}
-				return preparation.Prepare(ctx, unit, bound)
-			}
-			runner, err := runners.NewManagedRunner(t.Context(), runners.RuntimeConfig{
-				Controller: client.EngineOptions{URL: host.ControllerURL, HTTP: transport, Bearer: func(context.Context) (string, error) { return root.Raw, nil }},
-				Loop:       runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1, MaxClaims: 1}, Hosting: host,
-				Versions: runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
-				RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := runner.Run(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if !executed || !joined || !closed || clients != 2 || held.Unit != kind || held.Runner.Name != "runner" {
-				t.Fatalf("lifecycle: executed=%v joined=%v closed=%v kind=%s runner=%s", executed, joined, closed, held.Unit, held.Runner.Name)
-			}
-			tenant, err := server.Store.ForTeam(t.Context(), store.DefaultTeam)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if kind == capability.UnitNode {
-				row, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: held.RunID, NodeID: held.JobID})
-				if err != nil || row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.Generation != held.Binding.Generation || row.ClaimedBy != "" {
-					t.Fatalf("persisted completion: outcome=%s attempt=%d generation=%d error=%v", row.Outcome, row.Attempt, row.Generation, err)
-				}
-			} else {
-				row, err := tenant.ReadRun(t.Context(), held.RunID)
-				if err != nil || row.State != store.RunSuccess {
-					t.Fatalf("persisted completion: state=%s error=%v", row.State, err)
-				}
-			}
-			bound, err := storedRunnerClientW8(t.Context(), server, held.Capability)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := bound.Renew(t.Context(), held.UnitID, controllerwire.RenewalRequest{}); err == nil {
-				t.Fatal("completed unit renewed")
-			}
-		})
-	}
-}
-
 func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 	server, root := newStoredRunnerW8(t, capability.UnitTrigger)
 	claimant, err := storedRunnerClientW8(t.Context(), server, root.Raw)
@@ -297,10 +161,6 @@ func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 	}
 	response, err := claimant.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30})
 	if err != nil || response.Claim == nil {
-		t.Fatalf("claim: present=%v error=%v", response.Claim != nil, err)
-	}
-	bound, err := storedRunnerClientW8(t.Context(), server, response.Claim.Capability)
-	if err != nil {
 		t.Fatal(err)
 	}
 	rootRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}
@@ -311,20 +171,17 @@ func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: rootRef, CapabilityPrefix: rootRef.ID}, rootRef); err != nil {
 		t.Fatal(err)
 	}
-	prepared, renewed := false, false
-	host := runners.Hosting{
-		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-		NewController: func(client.EngineOptions) (controllerwire.Controller, error) { return bound, nil },
-		StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
-			renewed = true
-			return ctx, func() {}
-		},
-		PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-			prepared = true
-			return nil, nodehost.RunInput{}, nil, nil
-		},
-	}
-	if err := host.Host(t.Context(), *response.Claim); err == nil || prepared || renewed {
-		t.Fatalf("revoked root reached hosting: error=%v prepared=%v keeper=%v", err, prepared, renewed)
+	host := runners.Hosting{ControllerURL: "https://controller.example", NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
+		bearer, err := options.Bearer(t.Context())
+		if err != nil {
+			return nil, err
+		}
+		return storedRunnerClientW8(t.Context(), server, bearer)
+	}, Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+		t.Fatal("revoked award reached native binding")
+		return runners.NativeServices{}, capability.Principal{}, nil
+	}}
+	if err := host.Host(t.Context(), *response.Claim); err == nil {
+		t.Fatal("revoked root reached hosting")
 	}
 }

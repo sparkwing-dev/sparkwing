@@ -731,43 +731,32 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | --- | --- |
 | [`DialSocket`](../../../internal/wingd/socket_transport.go) | Connects to the platform's private controller transport under the caller's context and timeout. |
 | [`ListenSocket`](../../../internal/wingd/socket_transport.go) | Binds that transport and yields only authenticated APIConn connections. |
-| [`KeepAliveReason`](../../../internal/wingd/lifecycle_contract.go#L9) | KeepAliveReason separates the four activity holds from the explicit --stay policy. |
-| [`KeepAliveReasons`](../../../internal/wingd/lifecycle_contract.go#L19) | KeepAliveReasons is exhaustive; health probes alone must not prevent idle exit. |
-| [`LocalActivity`](../../../internal/wingd/lifecycle_contract.go#L24) | LocalActivity counts live state, not historical runs or configured schedules. |
-| [`MayExitIdle`](../../../internal/wingd/lifecycle_contract.go#L31) | MayExitIdle requires every activity count to be zero and --stay to be false. |
-| [`LocalPlatformPolicy`](../../../internal/wingd/lifecycle_contract.go#L36) | LocalPlatformPolicy keeps Windows SID authentication and daemon schedules explicit. |
-| [`LocalPlatformPolicies`](../../../internal/wingd/lifecycle_contract.go#L46) | LocalPlatformPolicies is the complete supported-platform table; unknown platforms fail closed. |
-| [`LocalPeerIdentity`](../../../internal/wingd/lifecycle_contract.go#L56) | LocalPeerIdentity comes from the transport's kernel credentials, never request input. |
-| [`LocalSubject`](../../../internal/wingd/lifecycle_contract.go#L63) | LocalSubject checks the peer against the controller's OS account before minting local authority. |
-| [`LocalStartOptions`](../../../internal/wingd/lifecycle_contract.go#L69) | LocalStartOptions carries spawn plumbing in arguments rather than environment variables. |
-| [`LocalRuntime`](../../../internal/wingd/lifecycle_contract.go#L78) | LocalRuntime uses the same pkg/controller implementation, route policy and state owner. |
-| [`LocalStatus`](../../../internal/wingd/lifecycle_contract.go#L83) | LocalStatus exposes version skew and activity without opening a second writing store handle. |
-| [`ManagedUnitKind`](../../../internal/wingd/lifecycle_contract.go#L91) | ManagedUnitKind gives schedules and the controller one upgrade path. |
-| [`ManagedUnitPolicy`](../../../internal/wingd/lifecycle_contract.go#L99) | ManagedUnitPolicy records stable argv so command renames cannot strand installed timers. |
-| [`ManagedUnitPolicies`](../../../internal/wingd/lifecycle_contract.go#L108) | ManagedUnitPolicies covers every Sparkwing-managed unit, with no socket activation. |
-| [`ManagedUnit`](../../../internal/wingd/lifecycle_contract.go#L116) | ManagedUnit records rendered argv for doctor to detect removed verbs as well as stale versions. |
-| [`ManagedUnitManager`](../../../internal/wingd/lifecycle_contract.go#L127) | ManagedUnitManager is shared by update, dashboard installation and schedule installation. |
-| [`LocalDoctorFinding`](../../../internal/wingd/lifecycle_contract.go#L135) | LocalDoctorFinding makes incompatible stores, version skew and removed unit verbs actionable. |
-| [`LocalLifecycle`](../../../internal/wingd/lifecycle_contract.go#L142) | LocalLifecycle starts on demand and shares the runtime used by explicit dashboard commands. |
-| [`NewLocalLifecycle`](../../../internal/wingd/lifecycle_contract.go#L151) | NewLocalLifecycle keeps service management outside controller request handling. |
+| [`LocalActivity`](../../../internal/wingd/lifecycle.go) | LocalActivity counts live state, not historical runs or configured schedules. |
+| [`LocalPeerIdentity`](../../../internal/wingd/lifecycle.go) | LocalPeerIdentity comes from the transport's kernel credentials, never request input. |
+| [`LocalSubject`](../../../internal/wingd/lifecycle.go) | LocalSubject checks the peer against the controller's OS account before minting local authority. |
+| [`LocalStartOptions`](../../../internal/wingd/lifecycle.go) | LocalStartOptions carries spawn plumbing in arguments rather than environment variables. |
+| [`LocalRuntime`](../../../internal/wingd/lifecycle.go) | LocalRuntime uses the same pkg/controller implementation, route policy and state owner. |
+| [`LocalStatus`](../../../internal/wingd/lifecycle.go) | LocalStatus exposes version skew and activity without opening a second writing store handle. |
+| [`ManagedUnitKind`](../../../internal/wingd/lifecycle.go) | ManagedUnitKind gives schedules and the controller one upgrade path. |
+| [`ManagedUnit`](../../../internal/wingd/lifecycle.go) | ManagedUnit records rendered argv for doctor to detect removed verbs as well as stale versions. |
+| [`ManagedUnitManager`](../../../internal/wingd/lifecycle.go) | ManagedUnitManager is shared by update, dashboard installation and schedule installation. |
+| [`LocalDoctorFinding`](../../../internal/wingd/lifecycle.go) | LocalDoctorFinding makes incompatible stores, version skew and removed unit verbs actionable. |
+| [`LocalLifecycle`](../../../internal/wingd/lifecycle.go) | LocalLifecycle starts on demand and shares the runtime used by explicit dashboard commands. |
+| [`NewLocalLifecycle`](../../../internal/wingd/lifecycle.go) | NewLocalLifecycle keeps service management outside controller request handling. |
 
 ### internal/runners/launcher
 
 | Export | Purpose |
 | --- | --- |
-| [`CloudUnitKind`](../../../internal/runners/launcher/pod_contract.go#L14) | CloudUnitKind selects host work without weakening the common Cloud isolation contract. |
-| [`CloudUnitPolicy`](../../../internal/runners/launcher/pod_contract.go#L23) | CloudUnitPolicy makes Docker and bootstrap delivery mandatory even for planning and evaluation. |
-| [`CloudUnitPolicies`](../../../internal/runners/launcher/pod_contract.go#L34) | CloudUnitPolicies covers every Cloud Job; callers cannot opt out of root or DinD. |
-| [`CloudJobConfig`](../../../internal/runners/launcher/pod_contract.go#L44) | CloudJobConfig accepts operator-owned images and ceilings, never pipeline-supplied pod fragments. |
-| [`CloudJobBinding`](../../../internal/runners/launcher/pod_contract.go#L52) | CloudJobBinding is derived from an awarded row, not the launcher's requested team or fence. |
-| [`CloudJobAward`](../../../internal/runners/launcher/pod_contract.go#L64) | CloudJobAward carries only a single-use bootstrap, never the launcher's root credential. |
-| [`CloudNodeReservation`](../../../internal/runners/launcher/pod_contract.go#L73) | CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped. |
-| [`CloudNetworkEvidence`](../../../internal/runners/launcher/pod_contract.go#L79) | CloudNetworkEvidence comes from enforcement probes, not the presence of NetworkPolicy YAML. |
-| [`CloudBoundary`](../../../internal/runners/launcher/pod_contract.go#L90) | CloudBoundary reserves one Job per team-dedicated node and verifies enforced network isolation. |
-| [`CloudJobResources`](../../../internal/runners/launcher/pod_contract.go#L97) | CloudJobResources couples Secret cleanup and node ownership with the Job it authorizes. |
-| [`CloudPodInvariant`](../../../internal/runners/launcher/pod_contract.go#L107) | CloudPodInvariant names an acceptance obligation for every builder output. |
-| [`CloudPodInvariants`](../../../internal/runners/launcher/pod_contract.go#L112) | CloudPodInvariants is the complete common pod contract, including external execution gates. |
-| [`BuildJob`](../../../internal/runners/launcher/pod_contract.go#L138) | BuildJob is the sole builder for plan, eval and work, including run-host-dispatched work. |
+| [`CloudUnitKind`](../../../internal/runners/launcher/job_types.go) | CloudUnitKind selects host work without weakening the common Cloud isolation contract. |
+| [`CloudJobConfig`](../../../internal/runners/launcher/job_types.go) | CloudJobConfig accepts operator-owned images and ceilings, never pipeline-supplied pod fragments. |
+| [`CloudJobBinding`](../../../internal/runners/launcher/job_types.go) | CloudJobBinding is derived from an awarded row, not the launcher's requested team or fence. |
+| [`CloudJobAward`](../../../internal/runners/launcher/job_types.go) | CloudJobAward carries only a single-use bootstrap, never the launcher's root credential. |
+| [`CloudNodeReservation`](../../../internal/runners/launcher/job_types.go) | CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped. |
+| [`CloudNetworkEvidence`](../../../internal/runners/launcher/job_types.go) | CloudNetworkEvidence comes from enforcement probes, not the presence of NetworkPolicy YAML. |
+| [`CloudBoundary`](../../../internal/runners/launcher/job_types.go) | CloudBoundary reserves one Job per team-dedicated node and verifies enforced network isolation. |
+| [`CloudJobResources`](../../../internal/runners/launcher/job_types.go) | CloudJobResources couples Secret cleanup and node ownership with the Job it authorizes. |
+| [`BuildJob`](../../../internal/runners/launcher/job.go) | BuildJob is the sole builder for plan, eval and work, including run-host-dispatched work. |
 
 ## File inventory
 
@@ -791,13 +780,13 @@ New contract and test files:
 - `internal/procenv/contracts.go`
 - `internal/procenv/contracts_test.go`
 - `internal/procenv/registry.go`
-- `internal/runners/launcher/pod_contract.go`
+- `internal/runners/launcher/job_types.go`
 - `internal/settings/contract.go`
 - `internal/settings/contract_test.go`
 - `internal/settings/resolvers.go`
 - `internal/settings/table.go`
 - `internal/userconfig/contract.go`
-- `internal/wingd/lifecycle_contract.go`
+- `internal/wingd/lifecycle.go`
 - `pkg/projectconfig/contract.go`
 
 This document is the new contract report. Existing files changed only for colliding

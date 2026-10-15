@@ -26,24 +26,6 @@ func newContainerSensor(root string) *containerSensor {
 	return &containerSensor{root: root, now: time.Now}
 }
 
-// ProcessCapacity reports the most CPU and memory this process could ever use:
-// the smallest cgroup limit along its cgroup ancestry, or the host's totals
-// where no cgroup limits it. A dimension it cannot read is zero.
-func ProcessCapacity() (cores float64, memBytes uint64) {
-	host, err := sampleHost()
-	if err != nil {
-		return 0, 0
-	}
-	cores, memBytes = newContainerSensor("/").capacityLimits()
-	if cores == 0 || cores > host.TotalCores {
-		cores = host.TotalCores
-	}
-	if memBytes == 0 || memBytes > host.TotalMemoryBytes {
-		memBytes = host.TotalMemoryBytes
-	}
-	return cores, memBytes
-}
-
 func containerSensorFor(cfg Config) *containerSensor {
 	switch {
 	case cfg.ContainerRoot != "":

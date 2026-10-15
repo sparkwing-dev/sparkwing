@@ -2,9 +2,7 @@ package launcher
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -112,15 +110,6 @@ func TestCloudAwardTransportRequiresSourceMetadata(t *testing.T) {
 				t.Fatal("missing source metadata returned usable bootstrap authority")
 			}
 		})
-	}
-}
-
-func TestBootstrapFileCancellationPrecedesAcquisition(t *testing.T) {
-	ctx, cancel := context.WithCancelCause(t.Context())
-	failure := errors.New("host stopped")
-	cancel(failure)
-	if err := (BootstrapHost{}).RunFile(ctx, filepath.Join(t.TempDir(), "absent")); !errors.Is(err, failure) {
-		t.Fatal("cancelled host attempted private file acquisition")
 	}
 }
 

@@ -12,6 +12,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+func probeHome(ctx context.Context, home string) error {
+	socket, err := wingd.SocketPath(home)
+	if err != nil {
+		return err
+	}
+	_, err = client.Probe(ctx, socket)
+	return err
+}
+
 func startProbeLoop(t *testing.T, interval time.Duration, probe func(context.Context) error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -51,12 +60,12 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 
 	firstCtx, firstDone := context.WithTimeout(context.Background(), 2*time.Second)
 	defer firstDone()
-	if err := client.HealthProbe(firstCtx, home); err != nil {
+	if err := probeHome(firstCtx, home); err != nil {
 		t.Fatalf("health probe against a serving daemon: %v", err)
 	}
 
 	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
-		return client.HealthProbe(ctx, home)
+		return probeHome(ctx, home)
 	})
 
 	if err := td.waitExit(t, 3*time.Second); err != nil {
@@ -182,7 +191,7 @@ func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
 		GraceWindow: 500 * time.Millisecond,
 	})
 	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
-		return client.HealthProbe(ctx, home)
+		return probeHome(ctx, home)
 	})
 
 	select {

@@ -158,17 +158,6 @@ func (r *Resolver) Cached(ctx context.Context, identity Identity, target release
 		return Resolved{}, false, err
 	}
 	dir = filepath.Join(dir, identity.ManifestDigest)
-	metadata, err := os.ReadFile(filepath.Join(dir, "verification.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return Resolved{}, false, nil
-	}
-	if err != nil {
-		return Resolved{}, false, err
-	}
-	var bundle ReleaseBundle
-	if err := json.Unmarshal(metadata, &bundle); err != nil {
-		return Resolved{}, false, nil
-	}
 	name, err := target.NameForVersion(version)
 	if err != nil {
 		return Resolved{}, false, err
@@ -184,18 +173,34 @@ func (r *Resolver) Cached(ctx context.Context, identity Identity, target release
 	if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0) {
 		return Resolved{}, false, nil
 	}
-	bundle.Asset, err = os.ReadFile(executable)
-	if os.IsNotExist(err) {
+	release, err := readCachedRelease(version, target, executable)
+	var failure *apierr.Error
+	if errors.Is(err, os.ErrNotExist) || errors.As(err, &failure) && failure.Code == apierr.IntegrityFailure {
 		return Resolved{}, false, nil
 	}
 	if err != nil {
 		return Resolved{}, false, err
 	}
-	release, err := VerifyRelease(version, target, bundle)
-	if err != nil || digest(bundle.Manifest) != identity.ManifestDigest {
+	if digest(release.bundle.Manifest) != identity.ManifestDigest {
 		return Resolved{}, false, nil
 	}
 	return Resolved{Identity: identity, Target: target, AssetDigest: release.asset.Digest(), Executable: executable}, true, nil
+}
+
+func readCachedRelease(version string, target releaseasset.Target, executable string) (VerifiedRelease, error) {
+	metadata, err := os.ReadFile(filepath.Join(filepath.Dir(executable), "verification.json"))
+	if err != nil {
+		return VerifiedRelease{}, err
+	}
+	var bundle ReleaseBundle
+	if err := decodeUniqueJSON(metadata, &bundle); err != nil {
+		return VerifiedRelease{}, integrity(errors.New("invalid cached release verification record"))
+	}
+	bundle.Asset, err = os.ReadFile(executable)
+	if err != nil {
+		return VerifiedRelease{}, err
+	}
+	return VerifyRelease(version, target, bundle)
 }
 
 // StoreVerified publishes a complete verified cache entry by an atomic directory rename.

@@ -1,7 +1,6 @@
 package wingd
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -9,165 +8,74 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-type admissionConfigFile struct {
-	Budget string                 `yaml:"budget"`
-	Mode   string                 `yaml:"mode"`
-	Custom admissionCustomFile    `yaml:"custom"`
-	Jev    admissionJevConfigFile `yaml:"jev"`
-}
-
-type admissionCustomFile struct {
-	BackfillDelay    map[string]string  `yaml:"backfill_delay"`
-	ClassWeight      map[string]int     `yaml:"class_weight"`
-	AgingEvery       *uint64            `yaml:"aging_every"`
-	InteractiveBurst admissionBurstFile `yaml:"interactive_burst"`
-}
-
-type admissionBurstFile struct {
-	Cores      *float64 `yaml:"cores"`
-	MaxP99     string   `yaml:"max_p99"`
-	MinSamples *int     `yaml:"min_samples"`
-}
-
-type admissionJevConfigFile struct {
-	Model          string  `yaml:"model"`
-	Endpoint       string  `yaml:"endpoint"`
-	Timeout        string  `yaml:"timeout"`
-	MinConfidence  float64 `yaml:"min_confidence"`
-	MinProbability float64 `yaml:"min_probability"`
-	MaxBackfill    string  `yaml:"max_backfill"`
-}
-
-func readAdmissionSection() (admissionConfigFile, string, error) {
-	path, err := userconfig.Path()
-	if err != nil {
-		return admissionConfigFile{}, "", err
-	}
-	var raw admissionConfigFile
-	found, err := userconfig.Read(path, userconfig.Admission, &raw)
-	if err != nil || !found {
-		return admissionConfigFile{}, "", err
-	}
-	return raw, path, nil
-}
-
-// ResolveAdmissionPolicy reads the optional machine-local policy from the
-// admission section of config.yaml. An absent section selects Classic,
-// preserving the admission behavior from before modes.
+// ResolveAdmissionPolicy reads the shared machine configuration and selects local scheduling policy.
 func ResolveAdmissionPolicy() (AdmissionPolicy, string, error) {
-	raw, path, err := readAdmissionSection()
-	if err != nil {
-		return AdmissionPolicy{}, "", fmt.Errorf("admission policy: %w", err)
-	}
-	if path == "" {
-		return DefaultAdmissionPolicy(), "default", nil
-	}
-	policy, err := admissionPolicyFrom(raw)
+	path, err := userconfig.Path()
 	if err != nil {
 		return AdmissionPolicy{}, "", err
 	}
-	return policy, path, nil
+	cfg, err := userconfig.ReadConfig(path)
+	if err != nil {
+		return AdmissionPolicy{}, "", err
+	}
+	if cfg.Admission == nil {
+		return DefaultAdmissionPolicy(), "default", nil
+	}
+	policy, err := admissionPolicyFrom(*cfg.Admission)
+	return policy, path, err
 }
 
-func admissionPolicyFrom(raw admissionConfigFile) (AdmissionPolicy, error) {
+func admissionPolicyFrom(raw userconfig.AdmissionConfig) (AdmissionPolicy, error) {
 	policy := DefaultAdmissionPolicy()
-	if raw.Mode != "" {
-		policy.Mode = admission.Mode(strings.ToLower(strings.TrimSpace(raw.Mode)))
-	}
-	switch policy.Mode {
-	case admission.ModeClassic, admission.ModeOff:
-		policy.Scheduling = admission.SchedulingPolicy{}
-	case admission.ModeAuto, admission.ModeJev, admission.ModeCustom:
+	policy.Mode = admission.Mode(configured(raw.Mode, string(policy.Mode)))
+	if policy.Mode == admission.ModeAuto || policy.Mode == admission.ModeJev || policy.Mode == admission.ModeCustom {
 		policy.Scheduling = admission.AutoPolicy()
-	default:
-		return AdmissionPolicy{}, fmt.Errorf("admission policy: mode %q must be classic, off, auto, jev, or custom", raw.Mode)
 	}
-	if policy.Mode == admission.ModeCustom || policy.Mode == admission.ModeJev {
-		for name, value := range raw.Custom.BackfillDelay {
-			class := admission.WorkloadClass(strings.ToLower(strings.TrimSpace(name)))
-			if admission.NormalizeWorkloadClass(class) != class {
-				return AdmissionPolicy{}, fmt.Errorf("admission policy: unknown workload class %q", name)
+	type durationSetting struct {
+		value  *string
+		target *time.Duration
+	}
+	var durations []durationSetting
+	if custom := raw.Custom; custom != nil && (policy.Mode == admission.ModeCustom || policy.Mode == admission.ModeJev) {
+		for name, value := range custom.BackfillDelay {
+			duration, err := time.ParseDuration(value)
+			if err != nil {
+				return AdmissionPolicy{}, err
 			}
-			d, err := time.ParseDuration(strings.TrimSpace(value))
-			if err != nil || d < 0 {
-				return AdmissionPolicy{}, fmt.Errorf("admission policy: custom.backfill_delay.%s must be a non-negative duration", name)
-			}
-			policy.Scheduling.BackfillDelay[class] = d
+			policy.Scheduling.BackfillDelay[admission.WorkloadClass(name)] = duration
 		}
-		for name, weight := range raw.Custom.ClassWeight {
-			class := admission.WorkloadClass(strings.ToLower(strings.TrimSpace(name)))
-			if admission.NormalizeWorkloadClass(class) != class {
-				return AdmissionPolicy{}, fmt.Errorf("admission policy: unknown workload class %q", name)
-			}
-			if weight < 0 || weight > 1000 {
-				return AdmissionPolicy{}, fmt.Errorf("admission policy: custom.class_weight.%s must be between 0 and 1000", name)
-			}
-			policy.Scheduling.ClassWeight[class] = weight
+		for name, weight := range custom.ClassWeight {
+			policy.Scheduling.ClassWeight[admission.WorkloadClass(name)] = weight
 		}
-		if raw.Custom.AgingEvery != nil {
-			policy.Scheduling.AgingEvery = *raw.Custom.AgingEvery
-		}
-		if err := applyBurstConfig(&policy.Scheduling.Burst, raw.Custom.InteractiveBurst); err != nil {
-			return AdmissionPolicy{}, err
+		policy.Scheduling.AgingEvery = configured(custom.AgingEvery, policy.Scheduling.AgingEvery)
+		if burst := custom.InteractiveBurst; burst != nil {
+			policy.Scheduling.Burst.MaxCores = configured(burst.Cores, policy.Scheduling.Burst.MaxCores)
+			policy.Scheduling.Burst.MinSamples = configured(burst.MinSamples, policy.Scheduling.Burst.MinSamples)
+			durations = append(durations, durationSetting{burst.MaxP99, &policy.Scheduling.Burst.MaxP99})
 		}
 	}
-	if err := applyJevConfig(&policy.Jev, raw.Jev); err != nil {
-		return AdmissionPolicy{}, err
+	if jev := raw.Jev; jev != nil {
+		policy.Jev.Model = strings.TrimSpace(configured(jev.Model, policy.Jev.Model))
+		policy.Jev.Endpoint = strings.TrimSpace(configured(jev.Endpoint, policy.Jev.Endpoint))
+		policy.Jev.MinConfidence = configured(jev.MinConfidence, policy.Jev.MinConfidence)
+		policy.Jev.MinProbability = configured(jev.MinProbability, policy.Jev.MinProbability)
+		durations = append(durations, durationSetting{jev.Timeout, &policy.Jev.Timeout}, durationSetting{jev.MaxBackfill, &policy.Jev.MaxBackfill})
+	}
+	for _, setting := range durations {
+		if setting.value != nil {
+			duration, err := time.ParseDuration(*setting.value)
+			if err != nil {
+				return AdmissionPolicy{}, err
+			}
+			*setting.target = duration
+		}
 	}
 	return policy, nil
 }
 
-func applyBurstConfig(dst *admission.BurstPolicy, raw admissionBurstFile) error {
-	if raw.Cores != nil {
-		if *raw.Cores < 0 || *raw.Cores > 4 {
-			return fmt.Errorf("admission policy: custom.interactive_burst.cores must be between 0 and 4")
-		}
-		dst.MaxCores = *raw.Cores
+func configured[T any](value *T, fallback T) T {
+	if value != nil {
+		return *value
 	}
-	if raw.MaxP99 != "" {
-		d, err := time.ParseDuration(strings.TrimSpace(raw.MaxP99))
-		if err != nil || d < 0 {
-			return fmt.Errorf("admission policy: custom.interactive_burst.max_p99 must be a non-negative duration")
-		}
-		dst.MaxP99 = d
-	}
-	if raw.MinSamples != nil {
-		if *raw.MinSamples < 1 {
-			return fmt.Errorf("admission policy: custom.interactive_burst.min_samples must be positive")
-		}
-		dst.MinSamples = *raw.MinSamples
-	}
-	return nil
-}
-
-func applyJevConfig(dst *JevPolicy, raw admissionJevConfigFile) error {
-	dst.Model = strings.TrimSpace(raw.Model)
-	dst.Endpoint = strings.TrimSpace(raw.Endpoint)
-	if raw.Timeout != "" {
-		d, err := time.ParseDuration(strings.TrimSpace(raw.Timeout))
-		if err != nil || d <= 0 {
-			return fmt.Errorf("admission policy: jev.timeout must be a positive duration")
-		}
-		dst.Timeout = d
-	}
-	if raw.MinConfidence != 0 {
-		if raw.MinConfidence < 0 || raw.MinConfidence > 1 {
-			return fmt.Errorf("admission policy: jev.min_confidence must be between 0 and 1")
-		}
-		dst.MinConfidence = raw.MinConfidence
-	}
-	if raw.MinProbability != 0 {
-		if raw.MinProbability < 0 || raw.MinProbability > 1 {
-			return fmt.Errorf("admission policy: jev.min_probability must be between 0 and 1")
-		}
-		dst.MinProbability = raw.MinProbability
-	}
-	if raw.MaxBackfill != "" {
-		d, err := time.ParseDuration(strings.TrimSpace(raw.MaxBackfill))
-		if err != nil || d < 0 {
-			return fmt.Errorf("admission policy: jev.max_backfill must be a non-negative duration")
-		}
-		dst.MaxBackfill = d
-	}
-	return nil
+	return fallback
 }

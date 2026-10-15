@@ -8,21 +8,27 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-func Main() {
-	MainWithVersion("")
+// Runtime supplies the shared service bindings used by every runner command.
+type Runtime struct {
+	Runner    RunnerCLI
+	Launcher  LauncherFactory
+	Bootstrap BootstrapRuntime
 }
 
 // MainWithVersion runs the runner CLI with its linker-stamped release version.
 func MainWithVersion(version string) {
+	MainWithRuntime(version, Runtime{})
+}
+
+// MainWithRuntime runs the executable with its capability, source and native host bindings.
+func MainWithRuntime(version string, runtime Runtime) {
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
 		os.Exit(2)
@@ -32,11 +38,11 @@ func MainWithVersion(version string) {
 	defer stop()
 	switch os.Args[1] {
 	case "start", "warm":
-		err = (RunnerCLI{}).Run(ctx, os.Args[1], os.Args[2:], version)
+		err = runtime.Runner.Run(ctx, os.Args[1], os.Args[2:], version)
 	case "run-node", "fetch-source":
-		err = RunBootstrapCLI(ctx, os.Args[1], os.Args[2:], nil)
+		err = runtime.Bootstrap.Run(ctx, os.Args[1], os.Args[2:])
 	case "launch":
-		err = runLaunchCLI(os.Args[2:])
+		err = RunLaunchCLI(ctx, os.Args[2:], runtime.Launcher)
 	case "version":
 		err = runRunnerVersion(os.Stdout, os.Args[2:], version)
 	case "-h", "--help", "help":
@@ -72,25 +78,12 @@ func runRunnerVersion(writer io.Writer, args []string, version string) error {
 }
 
 func runRunnerVersionIO(writer, diagnostics io.Writer, args []string, version string) error {
-	fs := flag.NewFlagSet("version", flag.ContinueOnError)
-	fs.SetOutput(diagnostics)
-	fs.Usage = func() {
-		fmt.Fprintln(diagnostics, "usage: sparkwing-runner version [-o pretty|json|plain] [--offline]")
-		fs.PrintDefaults()
-	}
-	output := fs.StringP("output", "o", "", "pretty | json | plain")
-	_ = fs.Bool("offline", false, "skip network access (the runner identity never uses the network)")
-	if err := fs.Parse(args); err != nil {
-		if err == flag.ErrHelp {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() != 0 {
-		return fmt.Errorf("unexpected positional %q", fs.Arg(0))
+	fs, err := runnerflags.Parse("version", args, diagnostics)
+	if err != nil {
+		return parsedHelp(err)
 	}
 	identity := buildinfo.Read("sparkwing-runner", version)
-	format := strings.ToLower(strings.TrimSpace(*output))
+	format := textFlag(fs, "output")
 	if format == "" {
 		format = "json"
 		if color.IsInteractiveStdout() {
@@ -116,6 +109,6 @@ func runRunnerVersionIO(writer, diagnostics io.Writer, args []string, version st
 			identity.Binary, identity.Version, identity.GOOS, identity.GOARCH, commit)
 		return nil
 	default:
-		return fmt.Errorf("--output must be pretty, json, or plain (got %q)", *output)
+		return fmt.Errorf("--output must be pretty, json, or plain (got %q)", format)
 	}
 }

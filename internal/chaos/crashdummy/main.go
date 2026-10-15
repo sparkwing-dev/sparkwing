@@ -65,7 +65,7 @@ func runDaemon(args []string) {
 		IdleTimeout:      time.Duration(*idleMS) * time.Millisecond,
 		HeadroomFraction: -1,
 		Sampler:          fixedSampler{cores: *totalCores, mem: uint64(*totalMemMB) << 20},
-		Runs:             &wingd.FuncRunStore{Finalize: finalizeLogger(*home)},
+		Runs:             finalizeStore(finalizeLogger(*home)),
 	})
 	if err != nil {
 		fail("new daemon: %v", err)
@@ -79,6 +79,18 @@ func runDaemon(args []string) {
 	if err := d.Run(ctx); err != nil && err != wingd.ErrNotElected {
 		fail("run: %v", err)
 	}
+}
+
+type finalizeStore func(string)
+
+func (finalizeStore) IsRunTerminal(string) (bool, error) { return false, nil }
+func (finalizeStore) Ready() error                       { return nil }
+func (f finalizeStore) FinalizeRun(runID string)         { f(runID) }
+func (f finalizeStore) FinalizeCancelledRuns(runIDs []string, _ string) error {
+	for _, runID := range runIDs {
+		f(runID)
+	}
+	return nil
 }
 
 func finalizeLogger(home string) func(string) {

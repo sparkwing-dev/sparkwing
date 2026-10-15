@@ -20,7 +20,8 @@ func TestRunnerServiceW8Components(t *testing.T) {
 		t.Run(goos, func(t *testing.T) {
 			root := t.TempDir()
 			var calls []string
-			host := service.Host{GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"),
+			host := service.Host{
+				GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"),
 				Binary:     filepath.Join(root, "bin with spaces", "sparkwing-runner"),
 				ConfigPath: filepath.Join(root, "config", "runner.yaml"), UID: 501,
 				Exec: func(_ context.Context, name string, args ...string) (string, error) {
@@ -29,7 +30,8 @@ func TestRunnerServiceW8Components(t *testing.T) {
 						return "path = " + filepath.Join(root, "Library", "LaunchAgents", service.PlistName) + "\nstate = running\n", nil
 					}
 					return "", nil
-				}}
+				},
+			}
 			credentials, err := fssecure.MkdirPrivateTemp(root, "credentials-")
 			if err != nil {
 				t.Fatal(err)
@@ -38,10 +40,10 @@ func TestRunnerServiceW8Components(t *testing.T) {
 				t.Fatal(err)
 			}
 			config := []byte("runner:\n  controller: https://controller.example.com\n  credentials_dir: " + credentials + "\n")
-			if err := os.MkdirAll(filepath.Dir(host.ConfigPath), 0700); err != nil {
+			if err := os.MkdirAll(filepath.Dir(host.ConfigPath), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(host.ConfigPath, config, 0600); err != nil {
+			if err := os.WriteFile(host.ConfigPath, config, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if state, err := service.Refresh(t.Context(), host); err != nil || state.Installed || len(calls) != 0 {
@@ -59,14 +61,14 @@ func TestRunnerServiceW8Components(t *testing.T) {
 			}
 			reachedRuntime := errors.New("reached the unified runner")
 			cli := cluster.RunnerCLI{
-				Factory: func(ctx context.Context, options cluster.RunnerOptions) (*runners.ManagedRunner, error) {
+				Factory: func(ctx context.Context, options cluster.RunnerOptions) (runners.RuntimeConfig, error) {
 					if options.Bearer == nil {
 						t.Fatal("installed command did not load its private credential")
 					}
 					if bearer, err := options.Bearer(ctx); err != nil || bearer != "private-runner-credential" {
 						t.Fatalf("installed command lost its credential: %v", err)
 					}
-					return nil, reachedRuntime
+					return runners.RuntimeConfig{}, reachedRuntime
 				},
 			}
 			if err := cli.Run(t.Context(), state.Arguments[0], state.Arguments[1:], "v0.20.0"); !errors.Is(err, reachedRuntime) {

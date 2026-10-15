@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"reflect"
 	"slices"
@@ -9,14 +10,16 @@ import (
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktesting "k8s.io/client-go/testing"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	batchv1 "k8s.io/api/batch/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	ktesting "k8s.io/client-go/testing"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type launcherWireFake struct {
@@ -46,6 +49,8 @@ func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 		}}}},
 		OwnerDeadline: &deadline, AttemptDeadline: &deadline, ParentCapabilityExpiry: &deadline, Engine: &identity,
 	}
+	unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: "git:github.com/team/repo"}, SHA: strings.Repeat("a", 40)}
+	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}
 	unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: identity}}}
 	switch kind {
 	case capability.UnitPlan:
@@ -76,18 +81,14 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			projected := source.Spec{RepoKey: "gh:42", SHA: "sealed-sha", RemoteURL: "https://github.com/acme/repo", PipelineDir: ".sparkwing"}
-			control.forRequest = func(request runspec.SealedRequest) (source.Spec, error) {
-				if kind != capability.UnitPlan || !reflect.DeepEqual(request, unit.Request) {
-					t.Fatal("planning lost the sealed request")
-				}
-				return projected, nil
+			var projected source.Spec
+			if kind == capability.UnitPlan {
+				projected, err = source.ForRequest(unit.Request)
+			} else {
+				projected, err = source.ForExecution(unit.Accepted.Spec)
 			}
-			control.forExecution = func(spec runspec.Spec) (source.Spec, error) {
-				if kind == capability.UnitPlan || !reflect.DeepEqual(spec, unit.Accepted.Spec) {
-					t.Fatal("execution lost the accepted spec")
-				}
-				return projected, nil
+			if err != nil {
+				t.Fatal(err)
 			}
 			award, err := control.Claim(t.Context())
 			if err != nil || award == nil || calls != 1 {
@@ -113,6 +114,70 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 	if award, err := control.Claim(t.Context()); award != nil || !errors.Is(err, failure) || calls != 1 {
 		t.Fatalf("lost one-time delivery was replayed: calls=%d err=%v", calls, err)
 	}
+}
+
+func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
+	for kind := uint8(0); kind < 3; kind++ {
+		for mutation := uint8(0); mutation < 5; mutation++ {
+			f.Add(kind, []byte("original-run"), mutation)
+		}
+	}
+	f.Fuzz(func(t *testing.T, kind uint8, origin []byte, mutation uint8) {
+		unit := wireAward([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kind%3])
+		unit.Request.RunID = "source-" + hex.EncodeToString(origin)
+		unit.Request.Hash = "request-hash"
+		if unit.Accepted != nil {
+			unit.Accepted.Spec.Request = unit.Request
+		}
+		control, err := NewControllerControl(launcherWireFake{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			return controllerwire.ClaimResponse{Claim: &unit}, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{unit.Unit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		award, err := control.Claim(t.Context())
+		if err != nil || award == nil || award.Binding.RunID != unit.RunID || award.Source.RepoKey != string(unit.Request.Request.Git.Repository.Key) || award.Source.SHA != unit.Request.Request.Git.SHA {
+			t.Fatalf("retry lost its execution fence or original source: award=%+v error=%v", award, err)
+		}
+		mutation %= 5
+		switch mutation {
+		case 1:
+			unit.Binding.RunID = unit.Request.RunID
+		case 2, 3, 4:
+			if unit.Accepted == nil {
+				unit.Request.RunID = ""
+			} else {
+				switch mutation {
+				case 2:
+					unit.Accepted.Spec.Request.RunID += "foreign"
+				case 3:
+					unit.Accepted.Spec.Request.Hash += "foreign"
+				case 4:
+					unit.Accepted.Spec.Request.Request.Team += "foreign"
+				}
+			}
+		}
+		if _, err := control.Claim(t.Context()); (err != nil) != (mutation != 0) {
+			t.Fatalf("claim mutation=%d error=%v", mutation, err)
+		}
+		exchanged := unit
+		exchanged.Delivery, exchanged.Capability, exchanged.LeaseExpiresAt = capability.DeliveryDirect, "exchanged", *unit.ParentCapabilityExpiry
+		hosted := false
+		host := BootstrapHost{ControllerURL: "https://controller.example", NewController: func(client.EngineOptions) (controllerwire.Controller, error) {
+			return bootstrapController{exchange: func(context.Context) (controllerwire.ExchangeResponse, error) {
+				return controllerwire.ExchangeResponse{Claim: exchanged}, nil
+			}}, nil
+		}, Host: bootstrapUnitHost(func(_ context.Context, got controllerwire.ClaimedUnit) error {
+			hosted = true
+			if got.RunID != unit.RunID || got.Request.RunID != unit.Request.RunID || !reflect.DeepEqual(got.Binding, unit.Binding) {
+				t.Fatal("bootstrap lost the original seals or execution fence")
+			}
+			return nil
+		})}
+		if err := host.Run(t.Context(), *award); hosted != (mutation == 0) || (err != nil) != (mutation != 0) {
+			t.Fatalf("exchange mutation=%d hosted=%v error=%v", mutation, hosted, err)
+		}
+	})
 }
 
 func TestControllerSyncUsesPersistedObservationsAndExactFences(t *testing.T) {
@@ -207,10 +272,6 @@ func TestControllerClaimRejectsIncompleteOrConflictingAwards(t *testing.T) {
 			}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
 			if err != nil {
 				t.Fatal(err)
-			}
-			control.forExecution = func(runspec.Spec) (source.Spec, error) {
-				t.Fatal("invalid award reached source projection")
-				return source.Spec{}, nil
 			}
 			if award, err := control.Claim(t.Context()); award != nil || err == nil || strings.Contains(err.Error(), "one-time-bootstrap") {
 				t.Fatalf("invalid award accepted or exposed: %v", err)
@@ -382,44 +443,39 @@ func TestCloudJobNamesSeparateAwardedUnits(t *testing.T) {
 	}
 }
 
-func FuzzControllerSyncPreservesAwardAndJobInstance(f *testing.F) {
-	f.Add("instance", "replacement", int64(7), true)
-	f.Add("same-instance", "same-instance", int64(3), false)
-	f.Fuzz(func(t *testing.T, uid, replacement string, generation int64, replace bool) {
-		if uid == "" || replacement == "" || generation <= 0 {
-			return
-		}
+func FuzzControllerSyncRetainsObservedIdentity(f *testing.F) {
+	for field := range uint8(3) {
+		f.Add(field, "replacement")
+		f.Add(field, "")
+	}
+	f.Fuzz(func(t *testing.T, field uint8, replacement string) {
 		unit := wireAward(capability.UnitNode)
-		unit.Binding.Generation = generation
 		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 		if err != nil {
 			t.Fatal(err)
 		}
-		observation := CloudJobObservation{Binding: binding, JobName: jobName(binding), JobNamespace: "cloud", JobUID: uid, NodeUID: "node-uid"}
+		observation := CloudJobObservation{Binding: binding, JobNamespace: "cloud", JobName: jobName(binding), JobUID: "job-uid", NodeUID: "node-uid"}
+		original := controllerwire.LauncherJobRef{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID}
+		var removed controllerwire.LauncherJobRef
 		control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-			if len(request.Observed) != 1 {
-				t.Fatal("award observation missing")
+			switch field % 3 {
+			case 0:
+				request.Observed[0].Job.Namespace = replacement
+			case 1:
+				request.Observed[0].Job.Name = replacement
+			case 2:
+				request.Observed[0].Job.UID = replacement
 			}
-			got := request.Observed[0]
-			want := capability.LeaseRef{Kind: capability.UnitNode, ID: binding.UnitID, Holder: binding.Holder, Generation: generation}
-			if got.Award != want || got.Job.Namespace != "cloud" || got.Job.Name != observation.JobName || got.Job.UID != uid || got.NodeUID != observation.NodeUID {
-				t.Fatal("award or Job instance changed")
-			}
-			if replace {
-				got.Job.UID = replacement
-			}
-			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{got.Job}}, nil
+			removed = request.Observed[0].Job
+			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{removed}}, nil
 		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		states, err := control.Sync(t.Context(), []CloudJobObservation{observation})
-		if replace && replacement != uid {
-			if err == nil || len(states) != 0 {
-				t.Fatal("replacement Job cleanup was accepted")
-			}
-		} else if err != nil || len(states) != 1 || !states[0].Delete || !sameBinding(states[0].Binding, binding) {
-			t.Fatalf("original instance was not retained: %+v %v", states, err)
+		valid := removed == original
+		if (err == nil) != valid || (len(states) == 1) != valid {
+			t.Fatal("transport changed the persisted Job identity used for cleanup")
 		}
 	})
 }

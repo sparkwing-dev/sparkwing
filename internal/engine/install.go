@@ -18,7 +18,45 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func (r Resolved) installSDK(ctx context.Context, request SDKInstallRequest) (SDKCommand, error) {
+// SDKInstallRequest gives the verified matching engine its acquired source and filtered install base.
+type SDKInstallRequest struct {
+	Directory   string          `json:"directory"`
+	PipelineDir string          `json:"pipeline_dir"`
+	SDK         SDKKind         `json:"sdk"`
+	Environment []string        `json:"-"`
+	Masker      *secrets.Masker `json:"-"`
+}
+
+// UnmarshalJSON refuses ambiguous requests and credentials sent through the input pipe.
+func (r *SDKInstallRequest) UnmarshalJSON(body []byte) error {
+	var fields map[string]json.RawMessage
+	if err := decodeUniqueJSON(body, &fields); err != nil {
+		return err
+	}
+	for field := range fields {
+		switch field {
+		case "directory", "pipeline_dir", "sdk":
+		default:
+			return errors.New("unknown SDK install request field")
+		}
+	}
+	type request SDKInstallRequest
+	var decoded request
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return err
+	}
+	*r = SDKInstallRequest(decoded)
+	return nil
+}
+
+// SDKCommand names the locally built Go command or Node/main command without protocol argv.
+type SDKCommand struct {
+	Directory string   `json:"directory"`
+	Command   []string `json:"command"`
+}
+
+// InstallSDK installs the SDK using its verified matching engine and filtered environment.
+func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (SDKCommand, error) {
 	if err := ctx.Err(); err != nil {
 		return SDKCommand{}, err
 	}
@@ -36,7 +74,10 @@ func (r Resolved) installSDK(ctx context.Context, request SDKInstallRequest) (SD
 	if err := r.verifyInstalledEngine(); err != nil {
 		return SDKCommand{}, err
 	}
-	masker := secrets.NewMasker()
+	masker := request.Masker
+	if masker == nil {
+		masker = secrets.NewMasker()
+	}
 	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: request.Environment, Masker: masker}, procenv.Runtime{})
 	if err != nil {
 		return SDKCommand{}, err
@@ -101,23 +142,11 @@ func (r Resolved) verifyInstalledEngine() error {
 	if version != r.Identity.Version || !validDigest(r.Identity.ManifestDigest) || !validDigest(r.AssetDigest) || !filepath.IsAbs(r.Executable) || r.Target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		return integrity(errors.New("SDK installation requires this machine's exact verified Sparkwing engine"))
 	}
-	metadata, err := os.ReadFile(filepath.Join(filepath.Dir(r.Executable), "verification.json"))
+	release, err := readCachedRelease(version, r.Target, r.Executable)
 	if err != nil {
 		return integrity(err)
 	}
-	var bundle ReleaseBundle
-	if err := decodeUniqueJSON(metadata, &bundle); err != nil {
-		return integrity(errors.New("invalid selected engine verification record"))
-	}
-	bundle.Asset, err = os.ReadFile(r.Executable)
-	if err != nil {
-		return integrity(err)
-	}
-	release, err := VerifyRelease(version, r.Target, bundle)
-	if err != nil {
-		return err
-	}
-	if digest(bundle.Manifest) != r.Identity.ManifestDigest || release.Asset().Digest() != r.AssetDigest {
+	if digest(release.bundle.Manifest) != r.Identity.ManifestDigest || release.Asset().Digest() != r.AssetDigest {
 		return integrity(errors.New("installed engine differs from the selected release"))
 	}
 	return nil

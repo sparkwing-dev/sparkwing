@@ -161,8 +161,8 @@ func TestLauncherCloudPodContract(t *testing.T) {
 				t.Fatal("missing bootstrap")
 			}
 			want := award.Binding.AttemptDeadline.Add(limits.JobSlack)
-			if resources.JobDeadline != want || resources.ClaimDeadline != want {
-				t.Fatalf("deadline = %v/%v", resources.JobDeadline, resources.ClaimDeadline)
+			if resources.JobDeadline != want {
+				t.Fatalf("deadline = %v", resources.JobDeadline)
 			}
 			args := strings.Join(pod.Containers[0].Args, " ")
 			for _, flag := range []string{"--controller", "--run", "--generation", "--source-dir", "--module-cache", "--bootstrap-file"} {

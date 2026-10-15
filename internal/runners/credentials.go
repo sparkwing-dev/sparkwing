@@ -8,9 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 )
 
-// FileBearer reads the private agent-token file once for a controller transport.
-// The returned closure retains the credential in memory rather than printable options.
-// Machine files require the private-file policy; service projections retain their native layout.
+// FileBearer reads agent-token once and retains it in a controller transport callback.
 func FileBearer(directory string, machine bool) (func(context.Context) (string, error), error) {
 	if strings.TrimSpace(directory) == "" {
 		return nil, errors.New("runner credentials_dir is required")

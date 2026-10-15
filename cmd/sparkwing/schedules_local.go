@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -39,8 +40,40 @@ type localScheduleServices struct {
 	uninstallTimer func(context.Context) error
 }
 
-func resolveLocalScheduleServices(context.Context, string) (localScheduleServices, error) {
-	return localScheduleServices{}, scheduleUnavailable("the local schedule service factory")
+func resolveLocalScheduleServices(ctx context.Context, home string) (localScheduleServices, error) {
+	if err := context.Cause(ctx); err != nil {
+		return localScheduleServices{}, err
+	}
+	home, err := wingd.HomeDir(home)
+	if err != nil {
+		return localScheduleServices{}, err
+	}
+	host, err := localServiceHost(home)
+	if err != nil {
+		return localScheduleServices{}, err
+	}
+	config, err := resolveLocalRuntimeConfig(home)
+	if err != nil {
+		return localScheduleServices{}, err
+	}
+	services, err := composeLocalServices(ctx, config, host)
+	if err != nil {
+		return localScheduleServices{}, err
+	}
+	return localScheduleServices{
+		lifecycle: services.lifecycle, units: services.units, options: services.options,
+		installTimer: func(ctx context.Context, options wingd.LocalStartOptions) error {
+			if options.Home != host.SparkwingHome || options.Executable != host.Binary || options.Version != host.Version {
+				return fmt.Errorf("schedule timer differs from the captured local controller")
+			}
+			_, err := crontimer.Install(ctx, host)
+			return err
+		},
+		uninstallTimer: func(ctx context.Context) error {
+			_, err := crontimer.Uninstall(ctx, host)
+			return err
+		},
+	}, nil
 }
 
 func validateLocalSchedules(services localScheduleServices) error {

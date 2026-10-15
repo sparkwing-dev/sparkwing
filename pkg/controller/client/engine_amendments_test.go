@@ -131,8 +131,11 @@ func TestEngineClientRecoveryAndLauncherMethods(t *testing.T) {
 				if req.Method != tt.method || req.URL.RequestURI() != tt.path {
 					t.Fatalf("request = %s %s", req.Method, req.URL)
 				}
-				if tt.name == "exchange" && req.ContentLength != 0 {
-					t.Fatal("exchange sent caller-selected binding")
+				if tt.name == "exchange" {
+					var input map[string]json.RawMessage
+					if err := json.NewDecoder(req.Body).Decode(&input); err != nil || input == nil || len(input) != 0 || req.Header.Get("Content-Type") != "application/json" {
+						t.Fatal("exchange requires an empty JSON object without caller-selected binding")
+					}
 				}
 				if tt.name == "launcher-sync" {
 					var input controllerwire.LauncherSyncRequest

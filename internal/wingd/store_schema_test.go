@@ -37,14 +37,9 @@ func TestTerminalCheckEvictionCarriesTheStoreFailureVerbatim(t *testing.T) {
 	}
 }
 
-func TestHandshakeAdvertisesTheDaemonStoreSchema(t *testing.T) {
+func TestProbeAdvertisesTheDaemonStoreSchema(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, StoreSchemaVersion: 17})
-
-	cl := ensure(t, home, "")
-	if got := cl.DaemonStoreSchema(); got != 17 {
-		t.Fatalf("advertised store schema = %d, want 17", got)
-	}
 
 	sock, err := wingd.SocketPath(home)
 	if err != nil {

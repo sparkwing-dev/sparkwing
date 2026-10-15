@@ -22,19 +22,8 @@ import (
 
 var ErrNotElected = errors.New("wingd: another daemon is already elected")
 
-// FinalizeDrainWindow bounds the admission daemon's warning about a slow
-// finalizer. The local runtime still joins that finalizer before closing its
-// store. The supervisor's termination grace must outlast this window.
-//
-// Health probes run every 2s with a 3s timeout. A failed probe needs three
-// samples and 60s without heartbeat progress before replacement; continuous
-// failures have a 5m ceiling. A successor holds restored leases for 2m after
-// startup. Clients have 12m to reattach across replacements, while each
-// handshake can wait 60s for an overloaded daemon.
+// FinalizeDrainWindow bounds admission's warning before the local runtime joins finalizers.
 const FinalizeDrainWindow = 10 * time.Second
-
-// HeartbeatStaleWindow bounds a failed health probe episode without daemon progress.
-const HeartbeatStaleWindow = time.Minute
 
 const (
 	DefaultIdleTimeout = limits.LocalControllerIdleTimeout
@@ -347,51 +336,6 @@ func socketDirPrefix() string {
 	return fmt.Sprintf("sparkwing-%d-", uid)
 }
 
-// PeerSockets lists the other daemons answering in the shared socket base.
-//
-// safety: discovery never unlinks a socket. A dial cannot tell a dead socket
-// from one a starting daemon has bound but not yet listened on, so unlinking
-// what looked dead deleted live daemons' sockets. A killed daemon's socket
-// stays until that home's next daemon replaces it under its election lock.
-func PeerSockets(home string) ([]string, error) {
-	own, err := SocketPath(home)
-	if err != nil {
-		return nil, err
-	}
-	base, err := socketBaseDir()
-	if err != nil {
-		return nil, err
-	}
-	dirs, err := filepath.Glob(filepath.Join(base, socketDirPrefix()+"*"))
-	if err != nil {
-		return nil, fmt.Errorf("wingd: scan daemon sockets: %w", err)
-	}
-	var peers []string
-	for _, dir := range dirs {
-		sock := filepath.Join(dir, "d.sock")
-		if sock != own && socketAlive(sock) {
-			peers = append(peers, sock)
-		}
-	}
-	return peers, nil
-}
-
-func socketAlive(sock string) bool {
-	// safety: a directory this user does not own can hold an impostor listener,
-	// so leave it alone rather than opening a connection to it.
-	if err := ValidateSocketDir(sock); err != nil {
-		return false
-	}
-	if !socketPresent(sock) {
-		return false
-	}
-	c, err := DialSocket(context.Background(), sock, 100*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	return c.Close() == nil
-}
-
 func maxSunPath() int {
 	if runtime.GOOS == "darwin" {
 		return 104
@@ -464,15 +408,6 @@ func LogPath(home string) (string, error) {
 		return "", err
 	}
 	return l.log, nil
-}
-
-// HeartbeatPath reports the daemon progress file for a home.
-func HeartbeatPath(home string) (string, error) {
-	l, err := resolveLayout(home)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(l.dir, "heartbeat"), nil
 }
 
 const ProtocolMajor = wingwire.ProtocolMajor
