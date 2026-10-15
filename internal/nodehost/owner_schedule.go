@@ -226,8 +226,15 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		}
 		return nil
 	}
-	if local && h.Admit != nil {
-		return h.Admit(ctx, accepted, row, work)
+	if kind != store.DecisionApproval && h.Admit != nil {
+		err := h.Admit(ctx, accepted, row, work)
+		if refused, ok := err.(*AdmissionFailure); ok && refused.Outcome == store.NodeSkipped {
+			_, err = h.Store.TransitionNode(ctx, store.NodeTransition{
+				Ref: row.Ref, Actor: input.Owner, To: store.NodeSkipped, Cause: store.CauseDependency,
+				Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: refused.Reason}},
+			})
+		}
+		return err
 	}
 	return work(ctx)
 }

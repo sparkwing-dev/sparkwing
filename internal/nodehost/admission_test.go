@@ -539,46 +539,6 @@ func TestAdmissionCancelWhileWaitingForHost(t *testing.T) {
 	}
 }
 
-func TestAdmissionLeaseEndings(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		grouped bool
-		send    func(l *fakeLease)
-		want    sparkwing.Outcome
-		errHas  string
-	}{
-		{"evicted", true, func(l *fakeLease) {
-			l.evict <- wingwire.Evicted{Key: "db", SupersededBy: "newer", Policy: wingwire.PolicyCancelOthers}
-		}, sparkwing.Superseded, "newer"},
-		{"daemon cancel", false, func(l *fakeLease) { l.cancel <- wingwire.Cancel{Reason: "operator said stop"} }, sparkwing.Cancelled, "operator said stop"},
-		{"rejected after restart", false, func(l *fakeLease) { l.lose <- wingdclient.ErrReattachRejected }, sparkwing.Superseded, "lease lost"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			st := openStore(t)
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
-			d, g := newFakeDaemon(), newGauge()
-			afterAdmissionEvent(t, ctx, g.entered, func(context.Context) error {
-				if l := d.only(t); l != nil {
-					c.send(l)
-				}
-				return nil
-			})
-			nodes := []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}
-			if c.grouped {
-				nodes = grouped("box", "cancel_others", 1, 0, "a")
-			}
-			res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Jobs: nodes}, &Admission{Daemon: d}, g.exec)
-			if got := res.Nodes["a"]; got.Outcome != c.want || !strings.Contains(errText(got.Err), c.errHas) {
-				t.Fatalf("result %+v, want %s with %q", got, c.want, c.errHas)
-			}
-			if live, _, released := d.counts(); live != 0 || released != 1 {
-				t.Fatalf("live=%d released=%d", live, released)
-			}
-		})
-	}
-}
-
 func TestAdmissionDaemonQueueCancelTimeoutAndPolicies(t *testing.T) {
 	key := scopedConcurrencyKey("db", "box", testRunID, testBox)
 	for _, c := range []struct {

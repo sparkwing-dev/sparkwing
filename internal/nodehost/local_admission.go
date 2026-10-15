@@ -19,9 +19,10 @@ import (
 
 // LocalAdmission holds machine resources and local concurrency under sealed settings.
 type LocalAdmission struct {
-	Daemon Admitter
-	BoxID  string
-	Queued func(context.Context, store.NodeRef, wingwire.Queued)
+	storeGroups bool
+	Daemon      Admitter
+	BoxID       string
+	Queued      func(context.Context, store.NodeRef, wingwire.Queued)
 }
 
 type localRunLease struct {
@@ -108,6 +109,9 @@ func (a *LocalAdmission) claims(groups []runspec.Concurrency, runID string) ([]w
 	claims := make([]wingwire.SemaphoreClaim, 0, len(groups))
 	for _, group := range groups {
 		if group.Scope != "run" && group.Scope != "box" {
+			if a.storeGroups {
+				continue
+			}
 			return nil, errors.New("local admission requires a store adapter for nonlocal concurrency")
 		}
 		if group.Scope == "box" && a.BoxID == "" {
@@ -142,13 +146,13 @@ func (a *LocalAdmission) hold(parent context.Context, ref store.NodeRef, request
 	joined := make(chan error, 1)
 	go func() {
 		err := held.Watch(func(evicted wingwire.Evicted) {
-			cancel(&lease.CancelError{Reason: fmt.Sprintf("admission on %q superseded by %s", evicted.Key, evicted.SupersededBy)})
+			cancel(&AdmissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: fmt.Sprintf("admission on %q superseded by %s", evicted.Key, evicted.SupersededBy)}})
 		}, func(stopped wingwire.Cancel) {
 			cancel(&lease.CancelError{Reason: stopped.Reason})
 		})
 		if err != nil {
 			if errors.Is(err, wingdclient.ErrReattachRejected) {
-				cancel(&lease.CancelError{Reason: "local admission lease lost"})
+				cancel(&AdmissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: "local admission lease lost"}})
 			} else {
 				cancel(err)
 			}

@@ -36,6 +36,7 @@ type NativeHostConfig struct {
 	Evaluation    EvaluationDependencies
 	Planner       SDKPlanner
 	Admission     *LocalAdmission
+	Capacity      *StoreAdmission
 }
 
 // NewNativeHost configures its owned transport and returns shared hosts and an evaluator for owner policies.
@@ -92,9 +93,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.Computing = processes.computing
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
 	owner.Executor, owner.Planner = executor, &planner
-	if config.Admission != nil {
-		owner.Around, owner.Admit = config.Admission.Run, config.Admission.Node
-	}
+	configureNativeAdmission(&owner, config.Admission, config.Capacity)
 	owner.Planning.Validation = validation
 	layers := owner.Layer
 	owner.Layer = func(ctx context.Context, layer LayerSpec, input EvaluationInput, row store.NodeRow, storage StorageBinding) (OwnerLayerResult, error) {
@@ -104,7 +103,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		if layer.Name == "approval" {
 			return OwnerLayerResult{}, nil
 		}
-		if layer.Name == "admission" && config.Admission != nil && owner.Local != nil && owner.Local(row) {
+		if layer.Name == "admission" && (config.Capacity != nil || config.Admission != nil && owner.Local != nil && owner.Local(row)) {
 			return OwnerLayerResult{}, nil
 		}
 		if layers == nil {

@@ -983,3 +983,15 @@ restart, atomic rollback and serialized table-update checks through that owner.
 `TestStoreDataUnmeteredSettlementNeedsNoCalculator` closes the shared settlement
 helper's dependency on a calculator for unmetered work. No native cell is newly
 marked complete by these caller migrations.
+
+## W3 store admission and lease-ending port
+
+`internal/nodehost/local_admission_test.go:TestAdmissionLeaseEndings` replaces
+its legacy admission_test.go body. All three cases execute the common node
+executor and check the fenced terminal report, process close/cleanup and both
+lease releases. Box-group eviction and rejected reattachment report superseded.
+Daemon cancellation reports cancelled. The first port reproduced cancelled
+reports in both supersession cases. The 39-line legacy function and its trailing
+blank line are deleted. Other legacy admission tests remain because their full
+terminal-state and waiter-cleanup assertions still need owner policy integration.
+No acceptance cell is added, unskipped or marked complete.

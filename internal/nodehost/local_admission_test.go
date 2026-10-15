@@ -278,16 +278,32 @@ func TestAdmissionHostLeaseIsWatchedWhileTheNodeRuns(t *testing.T) {
 	}
 }
 
-func TestLocalAdmissionLeaseEndings(t *testing.T) {
+func TestAdmissionLeaseEndings(t *testing.T) {
 	for _, mode := range []string{"evicted", "daemon cancel", "rejected after restart"} {
 		t.Run(mode, func(t *testing.T) {
 			d := newFakeDaemon()
 			admission := LocalAdmission{Daemon: d}
-			accepted := localAdmissionSeal(t, localAdmissionOptions())
-			_, err := admission.Run(localAdmissionContext(t), accepted, func(ctx context.Context) (RunCompletion, error) {
-				return RunCompletion{}, admission.Node(ctx, accepted, localAdmissionRow("a"), func(ctx context.Context) error {
+			input, state, deps, processes := executorFixture(t)
+			if mode == "evicted" {
+				input.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "box", Capacity: 1, Cost: 1, OnLimit: "cancel_others"}}
+				state.row.Execution = input.Execution
+				var spec runspec.Spec
+				if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+					t.Fatal(err)
+				}
+				spec.Resolved.Settings.Jobs[input.NodeID] = input.Execution
+				input.Accepted.Spec, _ = json.Marshal(spec)
+				admission.BoxID = testBox
+			}
+			start := deps.Start
+			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+				process, err := start(ctx, in, activity)
+				if err != nil {
+					return process, err
+				}
+				process.(*executorProcess).onRun = func(ctx context.Context) {
 					d.mu.Lock()
-					held := d.leases[wingwire.NodeHostParticipant(testRunID, "a")]
+					held := d.leases[wingwire.NodeHostParticipant(in.Accepted.RunID, in.NodeID)]
 					d.mu.Unlock()
 					switch mode {
 					case "evicted":
@@ -298,11 +314,32 @@ func TestLocalAdmissionLeaseEndings(t *testing.T) {
 						held.lose <- wingdclient.ErrReattachRejected
 					}
 					<-ctx.Done()
-					return context.Cause(ctx)
+				}
+				return process, nil
+			}
+			executor, err := NewNodeExecutor(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = admission.Run(localAdmissionContext(t), input.Accepted, func(ctx context.Context) (RunCompletion, error) {
+				return RunCompletion{}, admission.Node(ctx, input.Accepted, state.row, func(ctx context.Context) error {
+					return executor.Execute(ctx, input)
 				})
 			})
 			if err == nil || mode == "evicted" && !strings.Contains(err.Error(), "newer") || mode == "daemon cancel" && !strings.Contains(err.Error(), "operator said stop") || mode == "rejected after restart" && !strings.Contains(err.Error(), "lease lost") {
 				t.Fatalf("ending=%s error=%v", mode, err)
+			}
+			want := store.NodeSuperseded
+			if mode == "daemon cancel" {
+				want = store.NodeCancelled
+			}
+			if len(state.changes) != 2 || state.changes[0].To != store.NodeRunning || state.changes[1].To != want || state.changes[1].Cause != store.CauseReport {
+				t.Fatalf("ending=%s changes=%+v", mode, state.changes)
+			}
+			for _, process := range *processes {
+				if process.closed != 1 || process.cleaned != 1 {
+					t.Fatal("host returned before process cleanup")
+				}
 			}
 			if live, granted, released := d.counts(); live != 0 || granted != 2 || released != 2 {
 				t.Fatalf("leases=%d/%d/%d", live, granted, released)

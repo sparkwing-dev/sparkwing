@@ -323,3 +323,35 @@ func releasedRequest(h *OwnerHost, ctx context.Context, input RunInput, accepted
 	})
 	return result, err
 }
+
+func TestOwnerHostAdmissionSkipDoesNotHideIndependentFailure(t *testing.T) {
+	for _, joined := range []bool{false, true} {
+		t.Run(map[bool]string{false: "skip", true: "independent_error"}[joined], func(t *testing.T) {
+			fixture, host, input := newOwnerFixture(t, true)
+			row := store.NodeRow{Ref: store.NodeRef{RunID: input.RunID, NodeID: "job"}, Status: store.StatusPending}
+			fixture.snapshot.Nodes = []store.NodeRow{row}
+			host.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+				return OwnerLayerResult{}, nil
+			}
+			independent := errors.New("admission cleanup refused")
+			host.Admit = func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error {
+				failure := &AdmissionFailure{Outcome: store.NodeSkipped, Err: errors.New("full group")}
+				if joined {
+					return errors.Join(failure, independent)
+				}
+				return failure
+			}
+			request, err := releasedRequest(&host, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
+			if request != nil {
+				t.Fatal("refused admission reached execution")
+			}
+			if joined {
+				if !errors.Is(err, independent) || len(fixture.trace) != 0 {
+					t.Fatalf("lost independent failure: trace=%v error=%v", fixture.trace, err)
+				}
+			} else if err != nil || !reflect.DeepEqual(fixture.trace, []string{"skipped"}) {
+				t.Fatalf("skip did not commit before readiness: trace=%v error=%v", fixture.trace, err)
+			}
+		})
+	}
+}
