@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestJobDeadline(t *testing.T) {
+func TestJobDeadlineBoundsAndExpiry(t *testing.T) {
 	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, tt := range []struct {
 		name                 string

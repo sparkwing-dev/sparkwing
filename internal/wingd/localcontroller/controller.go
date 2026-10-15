@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -34,6 +35,14 @@ type Binding struct {
 	Store      *store.Store
 	Tenant     *store.Tenant
 	Controller *controller.EngineController
+}
+
+// NewQueue binds the shared runner and native hosts to this elected controller.
+func (b Binding) NewQueue(cfg runners.StoreRunnerConfig) (*runners.Loop, error) {
+	if b.Controller == nil || b.Controller.Store != b.Store || b.Store == nil {
+		return nil, errors.New("wingd: queue requires the elected controller store")
+	}
+	return runners.NewStoreRunner(b.Controller, cfg)
 }
 
 // Services binds shared authorization, host execution and local state to one process.

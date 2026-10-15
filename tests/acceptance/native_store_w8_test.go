@@ -20,12 +20,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func nativeStoreAwardW8(t *testing.T, kind capability.UnitKind) (*store.Store, controllerwire.ClaimedUnit) {
+func nativeStoreFixtureW8(t *testing.T, kind capability.UnitKind) (*controller.EngineController, capability.Issued) {
 	t.Helper()
 	server, root := newStoredRunnerW8(t, kind)
 	tenant, err := server.Store.ForTeam(t.Context(), store.DefaultTeam)
@@ -50,6 +50,12 @@ func nativeStoreAwardW8(t *testing.T, kind capability.UnitKind) (*store.Store, c
 			t.Fatal(err)
 		}
 	}
+	return server, root
+}
+
+func nativeStoreAwardW8(t *testing.T, kind capability.UnitKind) (*store.Store, controllerwire.ClaimedUnit) {
+	t.Helper()
+	server, root := nativeStoreFixtureW8(t, kind)
 	claimant, err := storedRunnerClientW8(t.Context(), server, root.Raw)
 	if err != nil {
 		t.Fatal(err)
@@ -71,15 +77,6 @@ func nativeStoreAwardW8(t *testing.T, kind capability.UnitKind) (*store.Store, c
 
 type nativeStoreEnginesW8 struct{}
 
-type nativeStoreClaimW8 struct {
-	controllerwire.Controller
-	unit controllerwire.ClaimedUnit
-}
-
-func (c nativeStoreClaimW8) Claim(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-	return controllerwire.ClaimResponse{Claim: &c.unit}, nil
-}
-
 func (nativeStoreEnginesW8) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("unexpected engine resolution")
 }
@@ -89,13 +86,28 @@ func (nativeStoreEnginesW8) Ensure(context.Context, engine.Identity, releaseasse
 }
 
 func TestNativeStoreOwnerW8(t *testing.T) {
-	s, unit := nativeStoreAwardW8(t, capability.UnitTrigger)
+	t.Run("embedded_queue", func(t *testing.T) { checkNativeStoreOwnerW8(t, false) })
+	t.Run("award_snapshot", func(t *testing.T) { checkNativeStoreOwnerW8(t, true) })
+}
+
+func checkNativeStoreOwnerW8(t *testing.T, direct bool) {
+	t.Helper()
+	var server *controller.EngineController
+	var root capability.Issued
+	var s *store.Store
+	var unit controllerwire.ClaimedUnit
+	if direct {
+		s, unit = nativeStoreAwardW8(t, capability.UnitTrigger)
+	} else {
+		server, root = nativeStoreFixtureW8(t, capability.UnitTrigger)
+		s = server.Store
+	}
 	expected := unit.Runner
 	expected.Labels = append([]string{}, unit.Runner.Labels...)
 	bound, acquired, closed := false, false, false
-	host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+	bind := func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 		bound = true
-		if binding.Tenant.Team() != store.DefaultTeam || binding.Principal.Capability.Binding.Holder != unit.Binding.Holder {
+		if binding.Tenant.Team() != store.DefaultTeam || binding.Principal.Capability.Binding.Holder == "" {
 			t.Fatal("native service binding lost authenticated tenant or holder")
 		}
 		authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: s, Bindings: s})
@@ -103,7 +115,9 @@ func TestNativeStoreOwnerW8(t *testing.T) {
 			t.Fatal(err)
 		}
 		router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
-		unit.Runner.Labels[0] = "ambient"
+		if direct {
+			unit.Runner.Labels[0] = "ambient"
+		}
 		cfg := nodehost.NativeHostConfig{
 			Lease: lease.Keeper{Lease: time.Minute, Interval: time.Second}, Source: source.Options{Engines: nativeStoreEnginesW8{}},
 			Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), Router: router,
@@ -120,41 +134,52 @@ func TestNativeStoreOwnerW8(t *testing.T) {
 					return nil, errors.New("unexpected output read")
 				},
 			},
-			Owner: nodehost.OwnerHost{Wait: func(context.Context, store.RunSnapshot) error { return errors.New("unexpected state wait") },
+			Owner: nodehost.OwnerHost{
+				Wait: func(context.Context, store.RunSnapshot) error { return errors.New("unexpected state wait") },
 				Acquire: func(ctx context.Context, input nodehost.RunInput) (*source.Entry, error) {
 					acquired = true
-					if !reflect.DeepEqual(input.GrantedRunner, expected) || input.Owner.Authority != binding.Principal.Authority || input.Owner.Owner.Generation != unit.Binding.Generation {
+					if direct && !reflect.DeepEqual(input.GrantedRunner, expected) || input.GrantedRunner.Name != "runner" || input.Owner.Authority != binding.Principal.Authority || input.Owner.Owner.Generation != binding.Principal.Capability.Binding.Generation {
 						t.Error("native owner received a changed runner or fence")
 					}
 					if _, err := binding.Tenant.ReadSnapshot(ctx, input.RunID); err != nil {
 						t.Error(err)
 					}
-					return &source.Entry{Engine: engine.Resolved{Identity: *unit.Engine}}, nil
-				}},
+					var spec runspec.Spec
+					if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+						return nil, err
+					}
+					return &source.Entry{Engine: engine.Resolved{Identity: spec.Resolved.Engine}}, nil
+				},
+			},
 		}
 		return runners.NativeServices{Config: cfg, Close: func() error { closed = true; return authorities.Close() }}, nil
-	}}
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	runner, err := runners.NewManagedRunner(ctx, runners.RuntimeConfig{
-		Controller: client.EngineOptions{URL: "http://local-controller", Bearer: func(context.Context) (string, error) { return "claimant", nil }},
-		NewController: func(client.EngineOptions) (controllerwire.Controller, error) {
-			return nativeStoreClaimW8{unit: unit}, nil
-		},
-		Loop:    runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
-		Hosting: host, Versions: runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
-	})
-	if err != nil {
-		t.Fatal(err)
+	var executionErr error
+	if direct {
+		executionErr = (runners.StoreHosting{Store: s, Bind: bind}).Host(ctx, unit)
+	} else {
+		runner, err := (localcontroller.Binding{Store: s, Controller: server}).NewQueue(runners.StoreRunnerConfig{
+			Bearer:          func(context.Context) (string, error) { return root.Raw, nil },
+			Loop:            runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
+			Bind:            bind,
+			RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		executionErr = runner.Run(ctx)
 	}
-	if err := runner.Run(ctx); err != nil {
-		t.Fatal(err)
+	if executionErr != nil {
+		t.Fatal(executionErr)
 	}
+
 	tenant, err := s.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := tenant.ReadRun(t.Context(), unit.RunID)
+	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil || run.State != store.RunSuccess || !bound || !acquired || !closed {
 		t.Fatalf("state=%s bound=%v acquired=%v closed=%v error=%v", run.State, bound, acquired, closed, err)
 	}

@@ -22,8 +22,15 @@ starts. A losing election opens no store and returns `ErrNotElected`.
 `localcontroller.Config.Open` supplies that factory's store ownership and
 maintenance. It opens `<home>/state.db`, selects `DefaultTeam`, and gives the
 shared service binder that store, tenant and `EngineController`. The binder
-returns the shared policy handlers, queue and state projection. It must return
-cleanup for partially constructed services even when binding fails. Cleanup
+returns the shared policy handlers, queue and state projection.
+`Binding.NewQueue` constructs that queue from the shared controller and
+`runners.StoreRunnerConfig`. It rejects another controller store and supplies
+`StoreHosting` over the owned handle. The controller needs its signed runner
+admission policy and the store needs its enrollment resolver. The bearer provider
+supplies a provisioned claimant credential.
+The native service binder supplies W3's source, process, logging and storage
+services. Cleanup must accompany partially constructed services even when
+binding fails. Cleanup
 closes those services before the store. An incomplete binding fails startup.
 
 Before readiness, this composition acquires the store's `controller.reaper`
@@ -103,7 +110,9 @@ secrets read, startup reconciliation and live activity observation. The binder
 also supplies the authenticated API and dashboard handlers and the shared queue.
 The SQLite composition tests substitute these foreign boundaries. They prove
 store ownership and leased maintenance, but do not establish working policy
-routes, a production activity projection or an executable local queue.
+routes or a production activity projection. The embedded queue constructor and
+its real claim-to-owner completion are exercised separately with fixture
+enrollment, version policy and source services.
 
 The controller composition supplies `LocalController` from the shared
 `pkg/controller` implementation. Its `Run` method reports all four activity
@@ -113,10 +122,10 @@ dashboard connection count. Its API server consumes the kernel identity on
 `APIConn`. Its dashboard server retains browser authentication. Local runs
 continue to execute in the CLI.
 
-The final controller routes, capability authorization, store reads, leased
-maintenance and local consumer are still unbound here. Their implementations
-must replace the controller fixture used by the runtime tests. The final store
-also needs an activity projection and a typed incompatible-store error. No
+The final state projection, peer authorization and native service binder remain
+unbound here. `Binding.NewQueue` supplies the shared consumer over the elected
+store. The runtime tests still substitute its surrounding services.
+The final store also needs an activity projection and a typed incompatible-store error. No
 compatibility router or second store opener supplies those gaps.
 
 `client.QueryLocalController` discovers the owner through the authenticated

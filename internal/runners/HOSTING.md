@@ -1,10 +1,19 @@
 # Runner hosting
 
 `NewManagedRunner` takes a `UnitHost`. `RuntimeConfig.NewController` opens the
-claimant transport. The host owns each award's execution lifetime. A local
-controller can supply `StoreHosting` with its existing `Binding.Store` handle.
+claimant transport. The host owns each award's execution lifetime. An embedded
+controller uses `NewStoreRunner` with its existing `EngineController` and store.
+The local controller exposes that construction through `Binding.NewQueue`.
 An HTTP placement supplies `Hosting` with its award-specific controller factory,
 source preparation and shared host adapters.
+
+`StoreRunnerConfig` supplies the claimant bearer provider, loop settings and
+native service binder. The queue authenticates each claim through C2 and checks
+every requested kind before calling the shared controller. Named trigger claims
+use their run's ownership and named route. Other claims use the ordered runner
+route. The controller still owns enrollment, signed version admission, matching
+and issuance.
+Revocation and narrowed grants take effect on the next claim.
 
 `StoreHosting` authenticates and authorizes the presented award through C2's
 heartbeat policy before binding native services. It selects the authenticated
@@ -27,9 +36,14 @@ with its own label slice. It reaches both planning and self-claimed work. A node
 selected executable is acquired by the shared host from the accepted engine
 identity before SDK execution.
 
-`TestNativeStoreOwnerW8` runs the managed loop through real C2 authentication,
-the native owner and real C1 completion. The claimant transport, source entry and
-unused process services are fixtures. `TestNativeStorePartialBindingW8` covers
+`TestNativeStoreOwnerW8` constructs the embedded queue through the local binding
+and runs real C2 claim authentication, shared controller issuance, the native
+owner and C1 completion. Enrollment, version policy, source entry and unused
+process services are fixtures. `FuzzStoreQueueClaimAuthorityW8` checks named and
+ordered claims against revoked, changed and narrowed credentials, duplicate and
+unsupported kinds, and omitted selection. Refusals leave the queue unclaimed.
+The direct-award case retains the runner-label mutation regression.
+`TestNativeStorePartialBindingW8` covers
 both owner and job construction. `FuzzNativeStoreAwardW8` rejects changed fences,
 seals, settings and bearers before service construction. These checks do not
 establish native placement, SDK-process or deployed Cloud behavior.
