@@ -34,8 +34,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-const doctorRunOrphanGrace = 2 * time.Minute
-
 const doctorRunDirGrace = 10 * time.Minute
 
 const doctorRejectionPatternThreshold = 3
@@ -82,8 +80,6 @@ type DoctorReport struct {
 	PermissionRepairs []fssecure.Change `json:"permission_repairs,omitempty"`
 
 	PermissionAuditUnverified bool `json:"permission_audit_unverified,omitempty"`
-
-	OrphanedRuns []string `json:"orphaned_runs,omitempty"`
 
 	StrayStepSessions []DoctorStraySession `json:"stray_step_sessions,omitempty"`
 
@@ -282,7 +278,6 @@ func (r DoctorReport) Clean() bool {
 		!r.Daemon.APIUnserved() &&
 		len(r.PermissionRepairs) == 0 &&
 		!r.PermissionAuditUnverified &&
-		len(r.OrphanedRuns) == 0 &&
 		len(r.StrayStepSessions) == 0 &&
 		len(r.DanglingRunDirs) == 0 &&
 		len(r.StaleRefWorktrees) == 0 &&
@@ -361,15 +356,11 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 
 	report.Daemon = probeDaemonBudgeted(ctx, home)
 	queueState, queueRead := probeDaemonQueueBudgeted(ctx, &report)
-	daemonLive := liveDaemonRuns(queueState, queueRead)
 
 	if err := diagnoseStraySessions(ctx, p, st, dryRun, &report); err != nil {
 		return report, err
 	}
 	if st != nil {
-		if err := diagnoseOrphanRuns(ctx, st, daemonLive, report.Daemon.Blind(), dryRun, &report); err != nil {
-			return report, err
-		}
 		if err := diagnoseDanglingRunDirs(ctx, st, runsRoot, localStoreOwnsRunRows(ctx, p, st), dryRun, &report); err != nil {
 			return report, err
 		}
@@ -1043,20 +1034,6 @@ func rejectionExplanation(cause string) string {
 	}
 }
 
-func liveDaemonRuns(queueState wingwire.QueueState, queueRead bool) map[string]struct{} {
-	live := map[string]struct{}{}
-	if !queueRead {
-		return live
-	}
-	for _, h := range queueState.Holders {
-		live[h.RunID] = struct{}{}
-	}
-	for _, w := range queueState.Waiters {
-		live[w.RunID] = struct{}{}
-	}
-	return live
-}
-
 func probeDaemonQueue(ctx context.Context, report *DoctorReport) (wingwire.QueueState, bool) {
 	if !report.Daemon.Reachable {
 		return wingwire.QueueState{}, false
@@ -1113,38 +1090,6 @@ func diagnoseStraySessions(ctx context.Context, p paths.Paths, st *store.Store, 
 	}
 	if errs := sessionledger.RecordOutcomes(ctx, st, "doctor", outcomes); len(errs) > 0 {
 		return errs[0]
-	}
-	return nil
-}
-
-func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive map[string]struct{}, blind, dryRun bool, report *DoctorReport) error {
-	if blind {
-		return nil
-	}
-	running, err := st.ListRuns(ctx, store.RunFilter{Statuses: []string{"running"}, Limit: 1000})
-	if err != nil {
-		return err
-	}
-	cutoff := time.Now().Add(-doctorRunOrphanGrace)
-	for _, r := range running {
-		if _, ok := daemonLive[r.ID]; ok {
-			continue
-		}
-		anchor := r.StartedAt
-		if r.LastHeartbeatAt != nil {
-			anchor = *r.LastHeartbeatAt
-		}
-		if anchor.IsZero() || !anchor.Before(cutoff) {
-			continue
-		}
-		report.OrphanedRuns = append(report.OrphanedRuns, r.ID)
-		if dryRun {
-			continue
-		}
-		if err := st.FinishRun(ctx, r.ID, "cancelled",
-			"interrupted: no live process or daemon lease (finalized by sparkwing doctor)"); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -1396,7 +1341,6 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		permissionUnverified = 1
 	}
 	fmt.Fprintf(w, "permission_audit_unverified\t%d\n", permissionUnverified)
-	fmt.Fprintf(w, "orphaned_runs\t%d\n", len(r.OrphanedRuns))
 	fmt.Fprintf(w, "stray_step_sessions\t%d\n", len(r.StrayStepSessions))
 	fmt.Fprintf(w, "dangling_run_dirs\t%d\n", len(r.DanglingRunDirs))
 	fmt.Fprintf(w, "unknown_run_dirs\t%d\n", len(r.UnknownRunDirs))
@@ -1496,9 +1440,6 @@ func renderDoctorPretty(w io.Writer, r DoctorReport) error {
 			permissionVerb = "found"
 		}
 		fmt.Fprintf(tw, "private paths %s\t%d\n", permissionVerb, n)
-	}
-	if n := len(r.OrphanedRuns); n > 0 {
-		fmt.Fprintf(tw, "orphaned runs finalized\t%d\n", n)
 	}
 	if n := len(r.StrayStepSessions); n > 0 {
 		sessionVerb := "ended"

@@ -420,3 +420,29 @@ by this cut, and no additional archived T1 source identity is claimed closed.
 
 The selected package files are in `../w1-session19-tests.txt`. The session report
 lists the remaining legacy surfaces and shared caller changes.
+
+## W1 run-row heartbeat retirement
+
+`TouchRunHeartbeat`, `TouchNodeHeartbeat`, `Run.LastHeartbeatAt`, and the
+independent scheduler and Kubernetes dispatcher timestamp loops are removed with
+Doctor's heartbeat-age finalizer. The following ports replace
+those mechanisms' retained concerns. They close no additional archived T1
+source-function identity or native placement cell.
+
+| Retired concern | Retained evidence |
+| --- | --- |
+| Owner liveness, heartbeat expiry and unrelated job activity | `TestOwnerLeaseAloneDeterminesLivenessProperty` varies 24 renewal timelines through real claims. The exact owner lease alone controls recovery. Expired renewal refuses without changing work. Remote renewal preserves only the remote claim. |
+| Doctor orphan finalization and recent-run grace | `TestRecovery/recovery-local-orphans/store-sqlite` uses the elected reaper, store clock and owner execution state through reopening. Started local orphans fail in place. Unstarted owners requeue. A separate heartbeat-age grace no longer governs recovery. |
+| Owner renewal persistence and stale-host refusal | `TestRecovery/recovery-unstarted-lapse/store-sqlite` checks committed owner renewal before expiry, then recovery/reclaim and stale renewal/plan refusal through reopening. |
+| Viewer notifications | Existing unit renewal fields and `EngineController.Renew` retain the owner transport contract. The legacy node-claim observer test retains node watch delivery. Real owner watched-job delivery and W2's production route binding remain integration obligations. |
+
+The two Kubernetes dispatch-loop tests retire with that loop. The final store
+renewal tests retain revoked, expired and stale-fence refusal. Native host shutdown
+on renewal loss still needs W8's lease-keeper integration. The PostgreSQL
+execution-start contention fixture now races its existing activity mutation
+against starts. It remains a legacy fixture and has not been run here. The node
+ordering fixture still updates rows in reverse order through StartNode. The local
+API contention fixture uses its existing activity route instead of the removed
+touch route. These are caller migrations, not final native proofs.
+
+The package selection is in `../w1-session21-tests.txt`.

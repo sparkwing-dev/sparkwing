@@ -644,8 +644,8 @@ the lease and never widens list routes.
 Run-definition writes -- run create and finish, plan snapshot, node create, and
 run-level events -- require the source trigger's exact live generation.
 Per-node writes accept either the node's exact live claim or that source
-trigger generation. A run heartbeat likewise accepts one exact live node claim
-from the run or the source trigger generation. A runner with `runs.state` but
+trigger generation. Run liveness follows the exact owner lease. A job claim
+cannot keep the run owner alive. A runner with `runs.state` but
 without the applicable fence gets `403 claim_required`; a stale generation
 gets `409 Conflict`.
 
@@ -689,7 +689,7 @@ claim:
   missing. The child is claimed like any other run and never holds the
   parent's claim token. Anything else answers `403 claim_mismatch`.
 - It reads any node of its run but writes only to its own node. Of the
-  run-level writes it makes only a node's own: events, the run heartbeat, the
+  run-level writes it makes only a node's own: events, the
   cache grant, the run's workload OIDC token, the run's source credential and
   the run's Git proxy. Run
   create and finish, plan, node create and the readiness routes answer
@@ -746,8 +746,7 @@ already lapsed, because a lapsed row proves nothing about who is calling. The
 `admin` bypasses all of it.
 
 A `nodes.claim` token also reaches only the runs it is working on. The node
-read routes (`GET nodes/{id}`, `nodes/{id}/output`) and
-`POST /runs/{id}/heartbeat` answer `403 claim_required` unless the caller holds
+read routes (`GET nodes/{id}`, `nodes/{id}/output`) answer `403 claim_required` unless the caller holds
 an unexpired claim on some node of that run. `admin` bypasses; so does
 `runs.read` on the reads, which already grants the wider view through
 `GET /runs/{id}/nodes`.

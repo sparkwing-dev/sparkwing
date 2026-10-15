@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -89,36 +87,4 @@ func TestRunNode_MissingJobWithADeadTokenIsALostClaim(t *testing.T) {
 	if n.Outcome != "" {
 		t.Fatalf("node outcome = %q; a dispatcher that lost its claim must not write one", n.Outcome)
 	}
-}
-
-type countingHeartbeater struct {
-	calls atomic.Int64
-	err   error
-}
-
-func (c *countingHeartbeater) TouchNodeHeartbeat(context.Context, string, string) error {
-	c.calls.Add(1)
-	return c.err
-}
-
-func TestHeartbeatLoop_StopsOnADeadToken(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		hb := &countingHeartbeater{err: &client.TokenDeadError{State: "revoked"}}
-		heartbeatLoop(t.Context(), hb, "run-1", "build", slog.New(slog.DiscardHandler))
-		if got := hb.calls.Load(); got != 1 {
-			t.Fatalf("beat %d times on a dead token, want 1", got)
-		}
-	})
-}
-
-func TestHeartbeatLoop_KeepsBeatingThroughOtherFailures(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		hb := &countingHeartbeater{err: errors.New("controller 500: boom")}
-		ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
-		defer cancel()
-		heartbeatLoop(ctx, hb, "run-1", "build", slog.New(slog.DiscardHandler))
-		if got := hb.calls.Load(); got != 3 {
-			t.Fatalf("beat %d times in 12s through a 500, want 3", got)
-		}
-	})
 }

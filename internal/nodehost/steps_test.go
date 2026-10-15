@@ -123,7 +123,7 @@ func TestHostDrivesSteps(t *testing.T) {
 			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 			Pipeline: "steps", Args: map[string]string{"set": set},
 			Run:   nodeproto.RunContext{RunID: runID},
-			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+			State: h.st, Logger: slog.New(slog.DiscardHandler),
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
 				OpenLog: func(_ context.Context, _, node string) (NodeLog, error) {

@@ -87,8 +87,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.(localState).SkipNodeStep":                  defaultTeamState,
 	"internal/orchestrator.(localState).StartNode":                     defaultTeamState,
 	"internal/orchestrator.(localState).StartNodeStep":                 defaultTeamState,
-	"internal/orchestrator.(localState).TouchNodeHeartbeat":            defaultTeamState,
-	"internal/orchestrator.(localState).TouchRunHeartbeat":             defaultTeamState,
 	"internal/orchestrator.(localState).UpdateNodeActivity":            defaultTeamState,
 	"internal/orchestrator.(localState).UpdateNodeDeps":                defaultTeamState,
 	"internal/orchestrator.JobErrors":                                  defaultTeamView,

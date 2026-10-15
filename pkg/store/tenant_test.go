@@ -170,9 +170,6 @@ func TestTenantWritesReportNotFoundForAnotherTeamsRun(t *testing.T) {
 	if err := beta.FinishRunsIfActive(ctx, []string{"run-alpha"}, "cancelled", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("beta.FinishRunsIfActive(run-alpha) = %v, want ErrNotFound", err)
 	}
-	if err := beta.TouchRunHeartbeat(ctx, "run-alpha"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("beta.TouchRunHeartbeat(run-alpha) = %v, want ErrNotFound", err)
-	}
 	if err := beta.FinishRun(ctx, "run-nowhere", "failed", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("beta.FinishRun(run-nowhere) = %v, want ErrNotFound", err)
 	}

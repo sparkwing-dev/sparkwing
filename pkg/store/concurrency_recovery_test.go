@@ -213,10 +213,6 @@ func TestConcurrency_PromotePreservesFreshRunningRunWithNullHeartbeat(t *testing
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
-		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`), "queued"); err != nil {
-		t.Fatalf("clear heartbeat: %v", err)
-	}
 	if r := acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "queued", RunID: "queued", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,

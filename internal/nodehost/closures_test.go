@@ -44,7 +44,7 @@ func TestClosures(t *testing.T) {
 		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 		Pipeline: "attempts", Args: args,
 		Run:   nodeproto.RunContext{RunID: "run-hooks"},
-		State: openStore(t), Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+		State: openStore(t), Logger: slog.New(slog.DiscardHandler),
 		Attempts: attempts,
 		Debug:    Debug{PauseBefore: []string{"skipped"}, PauseTimeout: time.Millisecond},
 	}

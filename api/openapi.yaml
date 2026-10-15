@@ -324,35 +324,19 @@ paths:
   /api/v1/runs/{id}/plan:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
-      x-sparkwing-scope: claim or runs.state
+      x-sparkwing-scope: runs.state
       tags: [runs]
-      summary: Upload the run's plan-snapshot blob, or accept a plan claim's plan.
+      summary: Upload the run's plan-snapshot blob.
       description: |
-        With a scoped bearer the body is opaque bytes (typically JSON
-        serialized plan) that replace the stored snapshot; Content-Type is
-        ignored.
-
-        With the claim token of the run's planning claim the body is the plan
-        document. The controller validates it, inserts its nodes, finishes the
-        planning node and releases the nodes with no dependencies, all in one
-        commit. A run accepts one plan: the identical body replays 200 after
-        the claim ends, and any other body is 409. A plan the controller will
-        not run is 422 and writes nothing, as is a plan declaring a required
-        secret that is neither set for the run's pipeline nor shared
-        team-wide; that refusal names only the declared secrets the run
-        cannot read, and records the reason for each as a
-        `secret_preflight_refused` run event. The claim route answers with a
-        status only.
+        The body is opaque bytes that replace the stored snapshot. Content-Type
+        is ignored. Plan validation and acceptance use Tenant.AcceptPlan.
       requestBody:
         required: true
         content:
           application/octet-stream:
             schema: {type: string, format: binary}
       responses:
-        "200": {description: "The claim's plan was accepted or replayed."}
         "204": {description: Plan stored.}
-        "409": {description: "The run accepted a different plan, or the claim ended without submitting this one."}
-        "422": {description: "The plan was refused; the error names the first reason, or every required secret the run cannot read."}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/cancel:
@@ -614,17 +598,6 @@ paths:
       responses:
         "204": {description: Updated.}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/touch:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Update the node's last-heartbeat timestamp.
-      responses:
-        "204": {description: Touched.}
-
   /api/v1/runs/{id}/nodes/{nodeID}/annotations:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
@@ -795,39 +768,6 @@ paths:
         "204": {description: Lease extended.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: Caller is not the current claim holder.}
-
-  /api/v1/runs/{id}/heartbeat:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [runs]
-      summary: Stamp the run's liveness clock.
-      description: |
-        Keeps the reaper from declaring the run lost while its nodes are
-        between claims. The caller must hold a live claim on one of the
-        run's nodes. A caller that sends `X-Sparkwing-Log-Watch: 1` is
-        answered `200` with the run's nodes a viewer has open.
-      parameters:
-        - in: header
-          name: X-Sparkwing-Log-Watch
-          required: false
-          schema: {type: string, enum: ["1"]}
-          description: Ask which of the run's nodes a viewer watches.
-      responses:
-        "200":
-          description: Heartbeat recorded; lists the watched nodes.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.runHeartbeatResp
-                type: object
-                properties:
-                  watched_nodes: {type: array, items: {type: string}}
-        "204": {description: Heartbeat recorded. Empty body.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/status:
     parameters:
@@ -7136,12 +7076,6 @@ components:
         annotations:
           type: array
           items: {type: string}
-        last_heartbeat_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: >-
-            Most recent run-level liveness ping from the dispatching orchestrator. Absent for rows that predate the column and for backends that ping per node instead (local and S3 modes).
         admission:
           type: string
           enum: [planning, admitted]

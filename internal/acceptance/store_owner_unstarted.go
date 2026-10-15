@@ -32,6 +32,17 @@ func checkOwnerUnstartedRecovery(ctx context.Context, root string) (err error) {
 		return err
 	}
 	for range 3 {
+		beat, err := s.RenewUnit(ctx, plan.Actor.CapabilityPrefix, false)
+		if err != nil {
+			return err
+		}
+		var expiry int64
+		if err := s.DB().QueryRowContext(ctx, `SELECT lease_expires_at FROM triggers WHERE team=? AND id=?`, store.DefaultTeam, plan.RunID).Scan(&expiry); err != nil {
+			return err
+		}
+		if expiry != beat.ExpiresAt.UnixNano() {
+			return errors.New("owner renewal did not persist its lease")
+		}
 		if reaped, err := s.ReapUnits(ctx, lease, 10); err != nil || len(reaped) != 0 {
 			return fmt.Errorf("live owner recovered: %+v: %v", reaped, err)
 		}

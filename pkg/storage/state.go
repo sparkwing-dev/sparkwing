@@ -29,7 +29,6 @@ type StateStoreOld interface {
 	UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 	GetRun(ctx context.Context, runID string) (*store.Run, error)
 	GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
-	TouchRunHeartbeat(ctx context.Context, runID string) error
 
 	// Nodes.
 	CreateNode(ctx context.Context, n store.Node) error
@@ -41,7 +40,6 @@ type StateStoreOld interface {
 	SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
 	SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
-	TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 	SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 

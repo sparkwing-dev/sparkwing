@@ -693,11 +693,6 @@ type Run struct {
 	AnnotationCount int      `json:"annotation_count,omitempty"`
 	TopAnnotation   string   `json:"top_annotation,omitempty"`
 	Annotations     []string `json:"annotations,omitempty"`
-	// LastHeartbeatAt is the most recent run-level liveness ping from
-	// the dispatching orchestrator. NULL for rows that predate the
-	// column or come from backends that don't ping it (local + S3
-	// modes use per-node heartbeats for orphan detection instead).
-	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
 	// NeedsAttention says why a ready node of the run waits with no agent
 	// able to claim it; empty when none does.
 	NeedsAttention string `json:"needs_attention,omitempty"`
@@ -791,10 +786,6 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	if created.IsZero() {
 		created = r.StartedAt
 	}
-	var heartbeat sql.NullInt64
-	if r.Status == runStatusRunning {
-		heartbeat = sql.NullInt64{Int64: time.Now().UnixNano(), Valid: true}
-	}
 	// safety: a terminal run with no finish time is indistinguishable from an
 	// earlier attempt's leftover row, and every caller that reads one to decide
 	// whether work ended reads it wrongly.
@@ -813,8 +804,8 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	// primary key on id; a (team, id) target would race that key's own
 	// violation on a same-team re-create.
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, created_principal)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -836,7 +827,6 @@ ON CONFLICT(id) DO UPDATE SET
     replay_of_run_id  = excluded.replay_of_run_id,
     replay_of_node_id = excluded.replay_of_node_id,
     invocation_json   = excluded.invocation_json,
-    last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at),
     created_principal = CASE WHEN runs.created_principal = '' THEN excluded.created_principal ELSE runs.created_principal END
 WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`' AND runs.finished_at IS NULL`,
 		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
@@ -844,7 +834,7 @@ WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`' AND run
 		r.DeclaredRepo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource,
 		r.ReplayOfRunID, r.ReplayOfNodeID,
-		invocationJSON, heartbeat, creatingPrincipal(ctx),
+		invocationJSON, creatingPrincipal(ctx),
 	)
 	if err != nil {
 		return err
@@ -957,15 +947,6 @@ func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status,
 	return s.defaultTenant().FinishRunsIfActive(ctx, runIDs, status, errMsg)
 }
 
-// TouchRunHeartbeat stamps last_heartbeat_at=now for the run row. The
-// dispatching orchestrator calls this on a ticker while the run is
-// active so the controller's reaper can detect a fully-orphaned run
-// (laptop closed, network gone, process killed) and flip it to
-// failed instead of leaving status='running' forever.
-func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
-	return s.defaultTenant().TouchRunHeartbeat(ctx, runID)
-}
-
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
 	return s.updatePlanSnapshot(ctx, DefaultTeam, runID, snapshot)
@@ -1031,7 +1012,7 @@ func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error {
 
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
-const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission, ` + runAttentionColumn
+const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, admission, ` + runAttentionColumn
 
 // GetRun fetches a single default-team run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
@@ -1386,7 +1367,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
 	var argsJSON, planJSON, invocationJSON, annotationsJSON []byte
 	var createdNS, startedNS int64
-	var finishedNS, heartbeatNS sql.NullInt64
+	var finishedNS sql.NullInt64
 	var parent sql.NullString
 	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
 		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
@@ -1395,7 +1376,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
 		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
-		&heartbeatNS, &r.Admission, &r.NeedsAttention)
+		&r.Admission, &r.NeedsAttention)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("run", "")
@@ -1411,10 +1392,6 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if finishedNS.Valid {
 		t := time.Unix(0, finishedNS.Int64)
 		r.FinishedAt = &t
-	}
-	if heartbeatNS.Valid {
-		t := time.Unix(0, heartbeatNS.Int64)
-		r.LastHeartbeatAt = &t
 	}
 	if parent.Valid {
 		r.ParentRunID = parent.String
@@ -2982,22 +2959,6 @@ func (t *Tenant) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
 		`UPDATE nodes SET status_detail = ?, last_heartbeat = ?
 		  WHERE team = ? AND run_id = ? AND node_id = ?`, detail, time.Now().UnixNano(), string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	return fencedRows(res, fenced)
-}
-
-// TouchNodeHeartbeat stamps last_heartbeat=now.
-func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	return s.defaultTenant().TouchNodeHeartbeat(ctx, runID, nodeID)
-}
-
-// TouchNodeHeartbeat is [Store.TouchNodeHeartbeat] confined to t's team.
-func (t *Tenant) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET last_heartbeat = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
-		time.Now().UnixNano(), string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}

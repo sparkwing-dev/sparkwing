@@ -2101,10 +2101,6 @@ type nodeHeartbeatResp struct {
 	Watched bool `json:"watched"`
 }
 
-type runHeartbeatResp struct {
-	WatchedNodes []string `json:"watched_nodes"`
-}
-
 func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
@@ -2322,20 +2318,6 @@ func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
 }
 
-func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	if err := tenant.TouchNodeHeartbeat(r.Context(), runID, nodeID); err != nil {
-		s.writeNodeStoreError(w, "touch node heartbeat", runID, nodeID, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) writeNodeStoreError(w http.ResponseWriter, operation, runID, nodeID string, err error) {
 	s.logger.Error(operation, "run_id", runID, "node_id", nodeID, "err", err)
 	var sqlErr interface{ SQLState() string }
@@ -2348,32 +2330,6 @@ func (s *Server) writeNodeStoreError(w http.ResponseWriter, operation, runID, no
 		}
 	}
 	writeError(w, http.StatusInternalServerError, err)
-}
-
-func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	if _, err := tenant.GetRun(r.Context(), runID); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := tenant.TouchRunHeartbeat(r.Context(), runID); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	// safety: a dispatcher that predates the watched flag reads any answer but 204 as a failed beat.
-	if r.Header.Get(store.LogWatchHeader) == "1" {
-		writeJSON(w, http.StatusOK, runHeartbeatResp{WatchedNodes: s.liveLogs.WatchedNodes(runID)})
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) {

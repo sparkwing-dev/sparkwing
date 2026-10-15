@@ -134,9 +134,6 @@ func TestDiagnose_NamesADaemonThatAnswersNothing(t *testing.T) {
 	if report.Clean() {
 		t.Error("a wedged daemon read as a clean machine")
 	}
-	if len(report.OrphanedRuns) != 0 {
-		t.Errorf("a blind sweep finalized %v; the wedged daemon may still hold those leases", report.OrphanedRuns)
-	}
 }
 
 func TestDiagnose_NamesADaemonThatWedgesBehindItsHandshake(t *testing.T) {

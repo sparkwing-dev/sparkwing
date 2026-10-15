@@ -85,12 +85,7 @@ func runContractSurface(t *testing.T, c *client.Client) {
 	if err := c.UpdateNodeActivity(ctx, runID, "produce", "compiling"); err != nil {
 		t.Fatalf("UpdateNodeActivity: %v", err)
 	}
-	if err := c.TouchNodeHeartbeat(ctx, runID, "produce"); err != nil {
-		t.Fatalf("TouchNodeHeartbeat: %v", err)
-	}
-	if err := c.TouchRunHeartbeat(ctx, runID); err != nil {
-		t.Fatalf("TouchRunHeartbeat: %v", err)
-	}
+
 	if err := c.AppendNodeAnnotation(ctx, runID, "produce", "note"); err != nil {
 		t.Fatalf("AppendNodeAnnotation: %v", err)
 	}

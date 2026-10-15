@@ -4,7 +4,6 @@ package nodehost
 
 import (
 	"context"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -71,7 +72,7 @@ func (f *retryFixture) run(ctx context.Context, id string, r *Rehydration, state
 	cfg := Config{
 		Session:  SessionConfig{Entry: pipelineentry.Binary(f.bin), Dir: f.dir, Grace: time.Second, Env: append(engineenv.Strip(os.Environ()), "GORACE=atexit_sleep_ms=0"), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 		Pipeline: "probe", Args: map[string]string{"mode-file": filepath.Join(f.dir, "mode"), "trace-dir": f.dir},
-		State: state, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour, Rehydrate: r,
+		State: state, Logger: slog.New(slog.DiscardHandler), Rehydrate: r,
 		Attempts: &Attempts{
 			Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(), Claim: outputController(f.t, f.st),
 			OpenLog: func(_ context.Context, runID, node string) (NodeLog, error) {

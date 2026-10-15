@@ -57,7 +57,6 @@ var hostedRoutePolicies = map[string]hostedRetryPolicy{
 
 	"POST /api/v1/runs/{id}/cancel":                       hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/finish":                       hostedRetryRepeatable,
-	"POST /api/v1/runs/{id}/heartbeat":                    hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/plan":                         hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/activity":      hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/deps":          hostedRetryRepeatable,
@@ -69,7 +68,6 @@ var hostedRoutePolicies = map[string]hostedRetryPolicy{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/start":         hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/status":        hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/summary":       hostedRetryRepeatable,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/touch":         hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish":  hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip":    hostedRetryRepeatable,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start":   hostedRetryRepeatable,

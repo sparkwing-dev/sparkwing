@@ -153,7 +153,6 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 		{"append a run event", func() error {
 			return c.AppendEvent(ctx, trig.ID, "build", "node_queued", []byte(`{}`))
 		}},
-		{"heartbeat the run", func() error { return c.TouchRunHeartbeat(ctx, trig.ID) }},
 		{"start the node", func() error { return c.StartNode(ctx, trig.ID, "build") }},
 		{"annotate the node", func() error { return c.AppendNodeAnnotation(ctx, trig.ID, "build", "compiling") }},
 		{"pause the node", func() error {

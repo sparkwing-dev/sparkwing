@@ -298,9 +298,6 @@ func TestCapabilitiesAdvertiseLogSegments(t *testing.T) {
 	}
 }
 
-// A viewer holding a node's stream open marks it watched; the node's
-// claim heartbeat and its run heartbeat report it, and a heartbeat that
-// does not ask keeps its old 204.
 func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	tok := f.claim(t, "a", store.ClaimTokenWork)
@@ -320,24 +317,6 @@ func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
 	f.srv.liveLogs.Watch("run-d", "a")
 	if !beat() {
 		t.Fatal("a viewed node reads unwatched")
-	}
-
-	admin := f.admin(t)
-	runBeat := func(ask bool) (int, []byte) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-d/heartbeat", nil)
-		req.Header.Set("Authorization", "Bearer "+admin)
-		if ask {
-			req.Header.Set(store.LogWatchHeader, "1")
-		}
-		rec := httptest.NewRecorder()
-		f.handler.ServeHTTP(rec, req)
-		return rec.Code, rec.Body.Bytes()
-	}
-	if code, body := runBeat(false); code != http.StatusNoContent {
-		t.Fatalf("run heartbeat that did not ask: %d %s", code, body)
-	}
-	if code, body := runBeat(true); code != http.StatusOK || !strings.Contains(string(body), `"watched_nodes":["a"]`) {
-		t.Fatalf("run heartbeat that asked: %d %s", code, body)
 	}
 }
 

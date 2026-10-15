@@ -123,7 +123,6 @@ func TestNodeClaimOwnership_StrangerTokenCannotWriteAnotherRunnersNode(t *testin
 		{"annotations", "/api/v1/runs/run-1/nodes/only/annotations", `{"message":"hi"}`},
 		{"summary", "/api/v1/runs/run-1/nodes/only/summary", `{"markdown":"# hi"}`},
 		{"activity", "/api/v1/runs/run-1/nodes/only/activity", `{"detail":"working"}`},
-		{"touch", "/api/v1/runs/run-1/nodes/only/touch", ""},
 		{"metrics", "/api/v1/runs/run-1/nodes/only/metrics", `{"cpu_nanos":1}`},
 		{"steps/start", "/api/v1/runs/run-1/nodes/only/steps/start", `{"step_id":"s1","name":"s1"}`},
 		{"steps/finish", "/api/v1/runs/run-1/nodes/only/steps/finish", `{"step_id":"s1","outcome":"success"}`},

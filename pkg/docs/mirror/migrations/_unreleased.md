@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Owner leases replace run heartbeats
+
+`TouchRunHeartbeat` and `TouchNodeHeartbeat` on Store, Tenant and Client, plus
+`Run.LastHeartbeatAt`, are removed. Hosts use `Store.RenewUnit` or
+`Tenant.RenewOwner` with their current owner authority. Owner renewal also
+renews self-claimed jobs. A remotely renewed job
+cannot extend the owner's lease.
+
+Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`.
+The controller's elected `ReapUnits` pass recovers expired owners under the
+store clock. Started local orphans fail in place. Unstarted owners requeue.
+The legacy run-heartbeat and node-touch HTTP handlers are removed. The old
+Kubernetes dispatcher no longer sends advisory heartbeat writes for its pods.
+The pod's own claim renewal supplies its liveness timestamp.
+
 ## Plan acceptance uses tenant seals
 
 `Store.AcceptPlan`, its legacy plan validator and `Client.SubmitPlan` are removed.

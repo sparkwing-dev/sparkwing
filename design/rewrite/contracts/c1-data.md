@@ -4,6 +4,17 @@
 
 ## Amendment 1: authority and execution seams
 
+`Store.TouchRunHeartbeat`, its Tenant twin, `Client.TouchRunHeartbeat` and
+`Run.LastHeartbeatAt` are removed with the independent scheduler ticker,
+legacy HTTP handler and Doctor's heartbeat-age run finalizer. `TouchNodeHeartbeat`
+on Store, Tenant and Client is also removed with the node-touch route and
+Kubernetes dispatcher's advisory heartbeat loop. Job claim renewal supplies
+the job's liveness timestamp. Run liveness is
+the current owner lease. `RenewUnit` and `RenewOwner` renew that exact fence.
+Only the elected `ReapUnits` pass recovers an expired owner. Job renewal never
+extends its run owner's lease. The final C2 owner-heartbeat route remains a
+declaration for W2 to bind to the implemented `EngineController.Renew` adapter.
+
 `Tenant.AcceptPlan` is the sole plan-acceptance API. The raw `Store.AcceptPlan`,
 its separate decoder/validator/inserter and `Client.SubmitPlan` are removed.
 The controller's claim-token acceptance branch and old launched planner are

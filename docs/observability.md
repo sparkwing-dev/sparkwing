@@ -169,8 +169,7 @@ A runner pushes a node's lines to the controller's live ring only while
 a viewer watches the node: the dashboard's log stream or `sparkwing runs
 logs --follow` holds a 30-second watch and renews it while open. The
 runner learns of the watch from replies it already receives: the node
-claim heartbeat (every 3 to 5 seconds), the run heartbeat (every 30
-seconds, for a trigger's in-process nodes) and its segment signing requests.
+claim heartbeat and its segment signing requests.
 On the first watched reply it pushes everything after the last uploaded
 segment, then each new line about every 250 ms, each push carrying its
 byte offset in the log; when the watch lapses it stops. An unwatched

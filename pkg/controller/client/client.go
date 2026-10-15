@@ -374,48 +374,6 @@ func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 		http.StatusNoContent, nil)
 }
 
-// TouchNodeHeartbeat POSTs a zero-change heartbeat so the dashboard
-// can distinguish a stalled runner from one still making progress.
-func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/touch",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	return c.post(ctx, path, nil, http.StatusNoContent, nil)
-}
-
-// TouchRunHeartbeat POSTs a run-level liveness ping. The orchestrator
-// calls this on a ticker while a run is active so the controller's
-// reaper can detect a fully-orphaned dispatcher (closed laptop, lost
-// network, killed process) and flip the run to failed.
-func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/heartbeat", url.PathEscape(runID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
-	if err != nil {
-		return err
-	}
-	setNodeClaimFenceHeaders(req, ctx)
-	c.askWatched(req)
-	resp, err := c.do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusNoContent:
-		return nil
-	case http.StatusOK:
-		var out struct {
-			WatchedNodes []string `json:"watched_nodes"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return fmt.Errorf("decode run heartbeat: %w", err)
-		}
-		c.reportWatch(WatchReport{RunID: runID, WholeRun: true, Nodes: out.WatchedNodes})
-		return nil
-	default:
-		return readHTTPError(resp)
-	}
-}
-
 // AppendNodeAnnotation POSTs a single persistent summary string to
 // append to the node's annotations list. Driven by sparkwing.AnnotateOld.
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {

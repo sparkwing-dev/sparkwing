@@ -159,3 +159,16 @@ exception is used only for legacy credit-test retirement. W1b implementation
 files are unchanged. StateStoreOld, raw lifecycle/readiness and the remaining
 legacy claim/trigger writers still need retirement. See
 `../w1-session20-progress.md` for ports, shared files and evidence.
+
+W1's run-row heartbeat cut is complete. `TouchRunHeartbeat` on Store, Tenant
+and Client, `TouchNodeHeartbeat` on the same handles, `Run.LastHeartbeatAt`,
+the independent scheduler and Kubernetes dispatcher timestamp loops, their legacy
+HTTP handlers and Doctor's heartbeat-age finalizer are removed. The generated
+owner-liveness property proves owner renewal, expiry at the exact boundary,
+remote-job isolation and failed-renewal atomicity. All eight SQLite recovery
+cells pass. The unstarted-owner proof also checks persisted renewal. W2's final
+owner-heartbeat policy route remains declared and needs its production binding
+to `EngineController.Renew`. Production watched-job delivery remains with that
+integration. W1b implementation files are unchanged. The remaining legacy API
+cuts and previously recorded foreign gaps remain open. See
+`../w1-session21-progress.md` for ports, shared caller files and verification.

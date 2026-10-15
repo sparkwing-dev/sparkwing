@@ -130,7 +130,6 @@ func seedConcurrencyRun(t *testing.T, tn *store.Tenant, id string) {
 	now := time.Now()
 	if err := tn.CreateRun(context.Background(), store.Run{
 		ID: id, Pipeline: "ci", Status: "running", StartedAt: now,
-		LastHeartbeatAt: &now,
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", id, err)
 	}
