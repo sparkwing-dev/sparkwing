@@ -3053,7 +3053,6 @@ func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
-func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error)
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error
 func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, report AttemptReport, now time.Time) (replayed bool, err error)

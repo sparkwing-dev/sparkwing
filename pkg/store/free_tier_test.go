@@ -320,10 +320,7 @@ func TestExpiryAndReconcileLowerAFreeTeamsEventBytes(t *testing.T) {
 	}
 }
 
-// The slot is enforced on every commit path: a team that reserved while a
-// slot was open is refused its upload commit and its renewal once another
-// team took the last slot, and counts nothing.
-func TestEveryCommitPathRefusesATeamThatCannotTakeASlot(t *testing.T) {
+func TestUploadCommitRefusesATeamThatCannotTakeASlot(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	if err := st.SetFreeTeamSlots(ctx, 1); err != nil {
@@ -339,10 +336,6 @@ func TestEveryCommitPathRefusesATeamThatCannotTakeASlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := reserve(st, "team-a", store.StorageLogs, 10, now)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := storeBytes(st, "team-b"); err != nil {
 		t.Fatal(err)
 	}
@@ -351,11 +344,6 @@ func TestEveryCommitPathRefusesATeamThatCannotTakeASlot(t *testing.T) {
 	}
 	if _, err := st.CommittedObject(ctx, "team-a", u.Key); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a refused upload was published: %v", err)
-	}
-	_, err = st.RenewStorage(ctx, store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 10, Now: now},
-		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 10, UpTo: true, Now: now})
-	if !errors.Is(err, store.ErrFreeStoragePaused) {
-		t.Fatalf("renewal without a slot = %v, want free storage paused", err)
 	}
 	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
 		if got := usageOf(t, st, "team-a", kind); got.UsedBytes != 0 {

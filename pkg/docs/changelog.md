@@ -76,6 +76,7 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **controller + store (Breaking):** Remove the service-token storage and download counter routes and `Store.RenewStorage`. Verified upload tickets own quota reservation and settlement. The signup slot setting writes the final settings table. See [migration guide](docs/migrations/_unreleased.md#storage-counters-use-verified-upload-tickets).
 - **store:** [(Breaking)](docs/migrations/_unreleased.md#unit-recovery-requires-the-elected-reaper-lease) removed the unfenced node and trigger reapers. `Store.ReapUnits` requires the current `controller.reaper` lease and returns tagged unit recovery results. Remote lease loss recovers within the same run. A started local owner fails in place.
 - **store (Breaking):** Remove the unused `Store.CreditRateTableSet` getter. Read rate-table presence through `CreditSettings.RateTableSet` with the prices from the same snapshot. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
 - **store (Breaking):** Move `TrustLocalBuilds` and `SetTrustLocalBuilds` from Store to Tenant. Build-trust policy stays scoped to the selected team. See [migration guide](docs/migrations/_unreleased.md#build-trust-uses-tenant-handles).

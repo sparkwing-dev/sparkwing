@@ -896,6 +896,19 @@ maintenance coordinator owns the shared retention, quota and GC ordering.
 
 ### Storage policy and reports
 
+The service-token `/internal/storage/reserve`, `/internal/storage/commit`,
+`/internal/storage/release` and `/internal/downloads/charge` routes are removed.
+`Store.RenewStorage`, `storageRenewRequest`, `recordStorageRenewTx` and
+`replayStorageRenewTx` are removed with that transport. Final upload tickets own
+reservation, verified commit, abort and immutable replay. Old cache RPC clients
+still need W7's hard cut. The direct-upload and log paths retain their internal
+legacy reservation code until their consumer cutovers.
+
+`SetFreeTeamSlots` writes the final settings table through the existing checked
+writer. Negative or sealed updates fail without replacing the prior value.
+The persisted setting survives reopening. The controller reads slot availability
+and passes full or unreadable conditions to its signup gate without a counter RPC.
+
 `Tenant.SetStorageQuota`, `StorageQuota`, `SetStorageAllowance`,
 `StorageUsageFor` and `StorageRetainedBytes` replace raw principal-selected
 storage methods. Quota, usage and ranking rows carry `Team`. Write limits and

@@ -79,3 +79,21 @@ func TestTeamLogReadsAreNotRefusedPastTheDownloadCap(t *testing.T) {
 		t.Fatal("team-a's log read past its download cap was refused")
 	}
 }
+
+func freeTeamToken(t *testing.T, st *store.Store, team store.Team) string {
+	t.Helper()
+	ctx := context.Background()
+	if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := st.ForTeam(ctx, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := tenant.CreateToken(ctx, "ci", store.TokenKindUser,
+		[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "Bearer " + raw
+}

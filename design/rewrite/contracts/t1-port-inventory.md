@@ -8,6 +8,17 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+The service-token storage and download counter handlers and their rolling-block
+tests are retired. `pkg/controller/store_data_retirement_internal_test.go` adds
+`FuzzLegacyStorageCountersAreGone` over generated credentials, tenant strings and
+byte counts. Every retired route returns 404. Final ticket tests retain scoped
+quota admission, immutable replay, concurrent-client and abort coverage.
+The two signup source tests use the final SQLite schema without a listener.
+They preserve full-tier and unreadable-source refusal and the server's own gate
+projection. Slot policy persistence and sealed-write refusal are covered in
+`pkg/store/credit_settings_runtime_test.go`. Native signup and data adapters
+remain open. No archived source row or native acceptance cell is newly closed.
+
 The independent bucket-listing storage pass and its tests are retired.
 `pkg/controller/storage_inventory_internal_test.go:TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage`
 checks the replacement maintenance path against the final SQLite schema. It

@@ -274,8 +274,9 @@ func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error {
 	if slots < 0 {
 		return fmt.Errorf("%w: free team slots must not be negative", ErrInvalidInput)
 	}
-	_, err := s.exec(ctx, upsertCreditSettingSQL, metaKeyFreeTeamSlots, formatCreditSetting(slots), time.Now().UnixNano())
-	return err
+	return s.inTx(ctx, func(tx *storeTx) error {
+		return setCreditSettingTx(ctx, tx, metaKeyFreeTeamSlots, formatCreditSetting(slots))
+	})
 }
 
 // FreeSlots reports how many free-tier slots are taken and how many exist.

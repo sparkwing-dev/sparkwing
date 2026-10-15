@@ -1065,9 +1065,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: the cache proves itself with its storage.count service token,
-	// which these handlers check.
-	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
 	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
 	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
 	router.HandleFunc("GET /api/v1/data/capabilities", s.handleDirectCapabilities)
@@ -1075,9 +1072,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", s.handleOutputBlobPut)
 	router.HandleFunc("GET /api/v1/outputs/objects/{key...}", s.handleOutputBlobGet)
 	router.HandleFunc("PUT /api/v1/log-segments/{key...}", s.handleLogSegmentPut)
-	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
-	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
-	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
 	router.Handle("POST /api/v1/data/download", noStore(http.HandlerFunc(s.handleDataDownload)))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))

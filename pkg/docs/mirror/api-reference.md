@@ -239,10 +239,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
-| `POST` | `/internal/downloads/charge` | `public` |
-| `POST` | `/internal/storage/commit` | `public` |
-| `POST` | `/internal/storage/release` | `public` |
-| `POST` | `/internal/storage/reserve` | `public` |
 | `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
 

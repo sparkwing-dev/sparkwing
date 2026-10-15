@@ -1,5 +1,21 @@
 # Migrating to the next release
 
+## Storage counters use verified upload tickets
+
+The `/internal/storage/reserve`, `/internal/storage/commit`,
+`/internal/storage/release` and `/internal/downloads/charge` endpoints are removed.
+Remove cache `controller-token` credentials and service-counter integrations.
+`Store.RenewStorage` and its rolling block receipts are removed.
+
+The final storage adapter reserves quota with `Tenant.ReserveBlobUpload`, verifies
+physical bytes, then commits with `Tenant.CommitBlobUpload`. Signing or transfer
+failure uses `Tenant.AbortBlobUpload`. The ticket binds the exact uploader and
+retains immutable replay state. The signed-data controller adapter remains an
+integration dependency. There is no service-token fallback.
+
+`SetFreeTeamSlots` writes the final settings table and refuses sealed values.
+Its slot count and signup behavior keep their existing meaning.
+
 ## Storage maintenance uses committed inventory
 
 Remove `Server.WithStoragePass` and `Server.RunStoragePass` calls. The controller's
@@ -507,11 +523,9 @@ To upgrade:
   `cache-grant-key`. For its own calls (the git-cache proxy, team purges, and
   the new `POST /api/v1/cache/store-ceiling/measure` and `thaw` routes) the
   controller signs a five-minute operator grant with its own
-  `cache-grant-key` credential. The cache authenticates to the controller's
-  counter routes with a `service` token holding only the new operator-only
-  `storage.count` scope, read from the file `controller-token` under
-  `--credentials-dir`; a cache with `--controller` refuses to start without
-  it. A cache refuses to start without `cache-grant-key` unless
+  `cache-grant-key` credential. The controller's service-token storage and
+  download counter routes are removed. Remove the cache's `controller-token`
+  credential. A cache refuses to start without `cache-grant-key` unless
   `--allow-unauthenticated` is set. The controller ignores
   `SPARKWING_CACHE_TOKEN`, and so does every client. The runner-bundle chart
   drops `cache.tokenSecret`, refuses to render while it is set, and requires
@@ -519,19 +533,7 @@ To upgrade:
   `cache.allowUnauthenticated=true`. A person reaches the cache only through
   the controller with an `admin` bearer.
 - **Operator steps:**
-  1. If the cache runs with `--controller`, mint its counter token as the
-     operator and store it in a Secret:
-
-     ```bash
-     sparkwing cluster tokens create --type service --principal cache \
-       --scope storage.count --profile prod
-     kubectl -n sparkwing create secret generic sparkwing-cache-controller-token \
-       --from-literal=token=<the sws_ token>
-     ```
-
-     Mount it as the file `controller-token` in the cache's
-     `--credentials-dir`, beside `cache-grant-key`. The charts do not start
-     the cache with `--controller`, so a chart install skips this step.
+  1. Remove the cache's `controller-token` credential.
   2. Make sure the cache and the controller hold the same grant key:
      `cache.grantKeySecret` in the runner-bundle chart (the full chart mounts
      it into the controller's credentials directory too), or the

@@ -9,6 +9,35 @@ import (
 	"time"
 )
 
+func TestStoreDataFreeSlotPolicyPersistsAndRejectsInvalidWrites(t *testing.T) {
+	s := authorityStore(t)
+	path := blobAccountingDiskStore(t, s)
+	if err := s.SetFreeTeamSlots(t.Context(), 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFreeTeamSlots(t.Context(), -1); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("negative slot count: %v", err)
+	}
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s.db = blobAccountingDB(t, path)
+	if taken, limit, err := s.FreeSlots(t.Context()); err != nil || taken != 0 || limit != 3 {
+		t.Fatalf("reopened slot policy: %d/%d, %v", taken, limit, err)
+	}
+	rewriteSchemaExec(t, s.db, "UPDATE settings SET sealed=1 WHERE key=?", metaKeyFreeTeamSlots)
+	if err := s.SetFreeTeamSlots(t.Context(), 4); err == nil {
+		t.Fatal("sealed slot policy changed")
+	}
+	var raw []byte
+	if err := s.db.QueryRowContext(t.Context(), "SELECT value FROM settings WHERE key=?", metaKeyFreeTeamSlots).Scan(&raw); err != nil || string(raw) != "3" {
+		t.Fatalf("sealed policy overwritten: %q, %v", raw, err)
+	}
+	if _, _, err := s.FreeSlots(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
+		t.Fatalf("sealed policy selected a fallback: %v", err)
+	}
+}
+
 func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	s := authorityStore(t)
 	s.clock = func() time.Time { return time.Unix(1000, 0).UTC() }
