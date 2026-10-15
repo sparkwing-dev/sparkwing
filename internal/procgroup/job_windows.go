@@ -71,6 +71,10 @@ func NewJob(name string) (*Job, error) {
 // Start starts cmd suspended inside the job and resumes it, so nothing the
 // command spawns exists outside the job.
 func (j *Job) Start(cmd *exec.Cmd) error {
+	return j.start(cmd, windows.ResumeThread)
+}
+
+func (j *Job) start(cmd *exec.Cmd, resume func(windows.Handle) (uint32, error)) error {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -99,9 +103,12 @@ func (j *Job) Start(cmd *exec.Cmd) error {
 		return fmt.Errorf("assign step to job: %w", err)
 	}
 	for _, thread := range threads {
-		if _, err := windows.ResumeThread(thread); err != nil {
-			_ = windows.TerminateJobObject(j.handle, 1)
-			return fmt.Errorf("resume step: %w", err)
+		previous, err := resume(thread)
+		if err == nil && previous != 1 {
+			err = fmt.Errorf("unexpected previous suspend count %d", previous)
+		}
+		if err != nil {
+			return errors.Join(fmt.Errorf("resume step: %w", err), j.Terminate())
 		}
 	}
 	return nil

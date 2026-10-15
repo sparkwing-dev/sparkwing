@@ -2,7 +2,7 @@
 
 `pipeline trigger --runner here` reserves one controller run for the caller's machine. The controller keeps the run history, authorization and results. The shared run host executes the sealed source and plan on that machine.
 
-Initial trigger intake and native shared hosting remain incomplete in this build. The retry and resume adapters use the final contracts below. A missing native host reports `unavailable` before it claims work.
+Initial trigger intake and native shared hosting remain incomplete in this build. Initial here hosting, retries and resume use the same retained-authority handoff and sealed owner claim. A missing native host reports `unavailable` before it claims work.
 
 ```sh
 sparkwing pipeline trigger release --profile prod --runner here --reason "runners unavailable"

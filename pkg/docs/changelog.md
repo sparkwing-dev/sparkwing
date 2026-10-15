@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove raw plan, step, annotation, summary, activity and approval writers, the old cross-run input resolver and unused `StateStoreOld`. Use sealed acceptance and fenced tenant transitions. Closing an attempt now closes its unfinished steps in the same transaction. See [migration guide](docs/migrations/_unreleased.md#fenced-store-metadata-and-approval-transitions).
+
 - **store (Breaking):** Remove legacy execution-attempt writers and the unused GitHub runner scope matcher. Attempt history requires an explicit tenant and reads committed node transitions. Cloud awards are always metered, including awards from unmetered launcher credentials. Verified non-checkout payment events use the final receipt and correlation schema. See [migration guide](docs/migrations/_unreleased.md#execution-attempts-and-cloud-metering).
 
 - **store (Breaking):** Remove the unused node queue and named trigger claim APIs, trigger heartbeat/finish writers and duplicate claim matcher. Current capability claims own their lifecycle. Console runner metering commits against the current operator session and leaves existing awards unchanged. Runner inventory honors rotation grace. See [migration guide](docs/migrations/_unreleased.md#sole-claim-queue-and-console-metering).

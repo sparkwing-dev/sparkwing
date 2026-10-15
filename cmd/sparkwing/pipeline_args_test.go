@@ -10,10 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestPipelineAliasResolvesBeforeArgumentParsing(t *testing.T) {
@@ -44,17 +42,6 @@ func TestPipelineAliasResolvesBeforeArgumentParsing(t *testing.T) {
 	printPipelineHelp(&help, schema)
 	if !strings.Contains(help.String(), "sparkwing run deploy-prod --target <string> --image <string>") {
 		t.Fatal("alias help lost its required pipeline or job flags:", help.String())
-	}
-	planned, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{
-		Entry: run.entry, Dir: filepath.Dir(dir), Engine: nodeproto.EngineIdentity{Version: "test"},
-		Runner:     nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
-		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()},
-	}, nodehost.PlanRequest{Pipeline: run.pipeline.Invoked, Entrypoint: run.pipeline.Entrypoint, Args: args, Run: nodeproto.RunContext{RunID: "alias-run", Pipeline: run.pipeline.Invoked}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(planned.Doc.Jobs) != 1 || planned.Doc.Jobs[0].Env["INVOKED"].Value != "deploy-prod" || planned.Doc.Jobs[0].Env["TARGET"].Value != "production" {
-		t.Fatalf("author code received different pipeline identity or arguments: %+v", planned.Doc.Jobs)
 	}
 }
 

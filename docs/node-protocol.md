@@ -30,6 +30,10 @@ Go package initialization orders this before packages that import the SDK.
 Independent packages can initialize earlier, so pipeline packages should start
 commands inside execution callbacks.
 
+Owner, evaluation and attempt processes use the same platform launcher and
+process-tree cleanup. The Windows host clears inheritance on its protocol-handle
+copies after a successful or failed launch.
+
 Every process receives `hello` first. Its runner is the identity granted by the
 host, including the actual runner name, type and labels. Execution processes also
 receive a binding to one run and job, with a loopback route URL and a delegated
@@ -170,6 +174,10 @@ Approvals support skip conditions and separate recovery jobs.
 before execution. `startup: true` and the engine's fixed interpreter variable
 list apply before process startup. Startup values must leave declarations
 unchanged. Commands and cleanups inherit the attempt environment.
+
+Runner planning and SDK installation use the same remote base and
+`run.submit_env_allow` policy. Install processes receive no job runtime or
+job-declared environment. Proxy credentials are masked before either process starts.
 
 Concurrency entries contain a `group` with optional `scope`, `capacity`, `cost`,
 `on_limit`, `queue_timeout_ms` and `cancel_timeout_ms`. Omitted values resolve to

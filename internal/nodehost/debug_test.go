@@ -3,239 +3,180 @@ package nodehost
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-type debugStore struct {
-	*store.Store
-	paused chan string
-	asked  chan string
+type debugWaitFunc func(context.Context, DebugBoundary) error
 
-	mu     sync.Mutex
-	events []string
+func (f debugWaitFunc) WaitDebugBoundary(ctx context.Context, boundary DebugBoundary) error {
+	return f(ctx, boundary)
 }
 
-func (d *debugStore) CreateDebugPause(ctx context.Context, p store.DebugPause) error {
-	err := d.Store.CreateDebugPause(ctx, p)
-	if err == nil {
-		d.paused <- p.NodeID + ":" + p.Reason
+func debugOptions(reason string) runspec.Options {
+	origin := runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "pause"}
+	pause := runspec.PauseSelection{}
+	pause.Before.Origin, pause.After.Origin, pause.OnFailure.Origin = origin, origin, origin
+	switch reason {
+	case store.PauseReasonBefore:
+		pause.Before.Set, pause.Before.Value = true, []string{"build"}
+	case store.PauseReasonAfter:
+		pause.After.Set, pause.After.Value = true, []string{"build"}
+	case store.PauseReasonOnFailure:
+		pause.OnFailure.Set, pause.OnFailure.Value = true, true
 	}
-	return err
-}
-
-func (d *debugStore) CreateApproval(ctx context.Context, a store.Approval) error {
-	err := d.Store.CreateApproval(ctx, a)
-	if err == nil {
-		d.asked <- a.NodeID
-	}
-	return err
-}
-
-func (d *debugStore) AppendEvent(_ context.Context, _, nodeID, kind string, _ []byte) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.events = append(d.events, nodeID+":"+kind)
-	return nil
-}
-
-// hack: the lifecycle events every node writes are events_test.go's, so these tests read only the debug ones.
-func (d *debugStore) eventList() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return slices.DeleteFunc(slices.Clone(d.events), func(e string) bool {
-		_, kind, _ := strings.Cut(e, ":")
-		return slices.Contains([]string{"node_started", "node_succeeded", "node_failed", "node_cancelled", "node_skipped"}, kind)
-	})
-}
-
-func fastDebugPolls(t *testing.T) {
-	prevPause := debugPausePoll
-	debugPausePoll = time.Millisecond
-	t.Cleanup(func() { debugPausePoll = prevPause })
-}
-
-func hostDebug(t *testing.T, ctx context.Context, ds *debugStore, doc nodeproto.PlanDoc, dbg Debug, exec Executor) RunResult {
-	t.Helper()
-	if err := ds.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	cfg := Config{Execute: exec, Debug: dbg}
-	run := &Run{ID: testRunID, Doc: doc, State: ds, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	s.loop(ctx)
-	res.Status, res.Err = s.verdict(ctx)
-	return res
-}
-
-func newDebugStore(t *testing.T) *debugStore {
-	return &debugStore{Store: openStore(t), paused: make(chan string, 8), asked: make(chan string, 8)}
+	options := runspec.Options{}
+	options.Pause.Set, options.Pause.Value, options.Pause.Origin = true, pause, origin
+	return options
 }
 
 func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
-	fastDebugPolls(t)
-	cases := map[string]struct {
-		dbg     Debug
-		fail    bool
-		reason  string
-		ranOnce bool
-		outcome sparkwing.Outcome
-	}{
-		"before":     {dbg: Debug{PauseBefore: []string{"build"}}, reason: store.PauseReasonBefore, outcome: sparkwing.Success},
-		"after":      {dbg: Debug{PauseAfter: []string{"build"}}, reason: store.PauseReasonAfter, ranOnce: true, outcome: sparkwing.Success},
-		"on failure": {dbg: Debug{PauseOnFailure: true}, fail: true, reason: store.PauseReasonOnFailure, ranOnce: true, outcome: sparkwing.Failed},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			ds := newDebugStore(t)
-			fx := &fakeExec{bodies: map[string]Executor{"build": func(context.Context, *NodeRun) Result {
-				if tc.fail {
-					return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
+	for _, reason := range []string{store.PauseReasonBefore, store.PauseReasonAfter, store.PauseReasonOnFailure} {
+		t.Run(reason, func(t *testing.T) {
+			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "deploy", Needs: []string{"build"}, Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}}
+			f := newStoreHostFixtureOn(t, openStore(t), plan, debugOptions(reason))
+			var mu sync.Mutex
+			var ran []string
+			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+				mu.Lock()
+				ran = append(ran, input.NodeID)
+				mu.Unlock()
+				outcome := store.NodeSuccess
+				if input.NodeID == "build" && reason == store.PauseReasonOnFailure {
+					outcome = store.NodeFailed
 				}
-				return Result{Outcome: sparkwing.Success}
-			}}}
-			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "deploy", Needs: deps("build"), Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+				return f.report(ctx, input, outcome)
+			})
+			var paused []string
+			f.Host.Debug = debugWaitFunc(func(ctx context.Context, b DebugBoundary) error {
+				if b.Ref != (store.NodeRef{RunID: f.Input.RunID, NodeID: "build"}) || b.Reason != reason || b.Actor != f.Actor || b.Timeout != defaultDebugPauseTimeout {
+					return errors.New("pause lost its selected policy or owner authority")
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				if slices.Contains(ran, "build") != (reason != store.PauseReasonBefore) || slices.Contains(ran, "deploy") {
+					t.Errorf("execution at pause: %v", ran)
+				}
+				row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Input.RunID, NodeID: "deploy"})
+				if err != nil || row.ReadyAt != nil || row.ClaimedBy != "" {
+					t.Errorf("downstream released during pause: %+v error=%v", row, err)
+				}
+				paused = append(paused, b.Reason)
+				return nil
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-
-			done := make(chan RunResult, 1)
-			go func() { done <- hostDebug(t, ctx, ds, doc, tc.dbg, fx.run) }()
-			if got := awaitHostedEvent(t, ctx, ds.paused, done); got != "build:"+tc.reason {
-				t.Fatalf("paused %q, want build:%s", got, tc.reason)
+			completion, err := f.Host.Run(ctx, f.Input)
+			want := "success"
+			if reason == store.PauseReasonOnFailure {
+				want = "failed"
 			}
-			if fx.ran("build") != tc.ranOnce {
-				t.Errorf("build ran before release = %v, want %v", fx.ran("build"), tc.ranOnce)
+			if err != nil || completion.Outcome != want || !slices.Equal(paused, []string{reason}) {
+				t.Fatalf("completion=%+v pauses=%v error=%v", completion, paused, err)
 			}
-			if fx.ran("deploy") {
-				t.Error("deploy ran while build was paused")
-			}
-			if row := nodeRow(t, ds.Store, "build"); row.StatusDetail != "paused" {
-				t.Errorf("build row detail %q while paused, want paused", row.StatusDetail)
-			}
-			if err := ds.ReleaseDebugPause(ctx, testRunID, "build", "alice", store.PauseReleaseManual); err != nil {
-				t.Fatal(err)
-			}
-			awaitHostedResult(t, ctx, done)
-			wantRow(t, ds.Store, "build", tc.outcome, "")
-			if !fx.ran("deploy") && tc.outcome == sparkwing.Success {
-				t.Error("deploy never ran after build resumed")
-			}
-			if got, want := ds.eventList(), []string{"build:node_paused", "build:node_resumed"}; !slices.Equal(got, want) {
-				t.Errorf("events %v, want %v", got, want)
+			if !slices.Contains(ran, "deploy") && want == "success" {
+				t.Fatal("downstream never ran after release")
 			}
 		})
 	}
 }
 
-func TestDebugPauseExpiresOnItsTimeout(t *testing.T) {
-	fastDebugPolls(t)
-	ds := newDebugStore(t)
-	fx := &fakeExec{}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-	res := hostDebug(t, ctx, ds, doc, Debug{PauseBefore: []string{"build"}, PauseTimeout: time.Millisecond}, fx.run)
-
-	if res.Status != "success" || !fx.ran("build") {
-		t.Errorf("status %q ran=%v, want success after the pause expired", res.Status, fx.ran("build"))
-	}
-	pauses, err := teststore.ForTeam(t, ds.Store, store.DefaultTeam).ListDebugPauses(ctx, testRunID)
-	if err != nil || len(pauses) != 1 || pauses[0].ReleaseKind != store.PauseReleaseTimeout {
-		t.Errorf("pauses %+v err %v, want one released by timeout", pauses, err)
+func TestDebugPauseUsesSealedTimeoutBeforeExecution(t *testing.T) {
+	options := debugOptions(store.PauseReasonBefore)
+	options.PauseTimeout.Set, options.PauseTimeout.Value = true, time.Minute
+	options.PauseTimeout.Origin = runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "pause_timeout"}
+	f := newStoreHostFixtureOn(t, openStore(t), nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, options)
+	var expired bool
+	f.Host.Debug = debugWaitFunc(func(_ context.Context, b DebugBoundary) error {
+		if b.Timeout != time.Minute {
+			t.Errorf("timeout=%v, want sealed minute", b.Timeout)
+		}
+		expired = true
+		return nil
+	})
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		if !expired {
+			t.Error("executed before the pause adapter released")
+		}
+		return f.report(ctx, input, store.NodeSuccess)
+	})
+	if completion, err := f.Host.Run(t.Context(), f.Input); err != nil || completion.Outcome != "success" || !expired {
+		t.Fatalf("completion=%+v expired=%v error=%v", completion, expired, err)
 	}
 }
 
-func TestDebugCancelDuringAPauseCancelsTheNode(t *testing.T) {
-	fastDebugPolls(t)
-	for _, kind := range []string{store.PauseReasonBefore, store.PauseReasonAfter} {
-		t.Run(kind, func(t *testing.T) {
-			ds := newDebugStore(t)
-			fx := &fakeExec{}
-			dbg := Debug{PauseBefore: []string{"build"}}
-			if kind == store.PauseReasonAfter {
-				dbg = Debug{PauseAfter: []string{"build"}}
+func TestDebugCancellationStopsOwnerWithoutChangingTerminalResult(t *testing.T) {
+	for _, reason := range []string{store.PauseReasonBefore, store.PauseReasonAfter} {
+		t.Run(reason, func(t *testing.T) {
+			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "deploy", Needs: []string{"build"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}}
+			f := newStoreHostFixtureOn(t, openStore(t), plan, debugOptions(reason))
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(context.Canceled)
+			stopped := errors.New("operator stopped waiting")
+			f.Host.Debug = debugWaitFunc(func(context.Context, DebugBoundary) error {
+				cancel(stopped)
+				return stopped
+			})
+			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+				if input.NodeID == "deploy" {
+					t.Error("downstream executed during cancelled pause")
+				}
+				return f.report(ctx, input, store.NodeSuccess)
+			})
+			if _, err := f.Host.Run(ctx, f.Input); !errors.Is(err, stopped) {
+				t.Fatalf("error=%v, want cancellation cause", err)
 			}
-			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "deploy", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
-			runCtx, stop := context.WithCancel(ctx)
-			done := make(chan RunResult, 1)
-			go func() { done <- hostDebug(t, runCtx, ds, doc, dbg, fx.run) }()
-			awaitHostedEvent(t, ctx, ds.paused, done)
-			stop()
-			res := awaitHostedResult(t, ctx, done)
-
-			if res.Status != "failed" {
-				t.Errorf("run status %q, want failed", res.Status)
-			}
-			wantRow(t, ds.Store, "build", sparkwing.Cancelled, "ctx-cancelled")
-			if fx.ran("build") != (kind == store.PauseReasonAfter) || fx.ran("deploy") {
-				t.Errorf("ran build=%v deploy=%v", fx.ran("build"), fx.ran("deploy"))
+			row, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Input.RunID, NodeID: "build"})
+			if err != nil || reason == store.PauseReasonAfter && row.Outcome != store.NodeSuccess || reason == store.PauseReasonBefore && row.Status != store.StatusPending {
+				t.Fatalf("persisted result=%+v error=%v", row, err)
 			}
 		})
 	}
 }
 
-// The dispatcher returns from a recovery node before any debug check, and an
-// approval gate returns before pause-after: neither pauses there.
 func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
-	fastDebugPolls(t)
-	fastApprovalPoll(t)
-	ds := newDebugStore(t)
-	fx := &fakeExec{bodies: map[string]Executor{
-		"deploy": func(context.Context, *NodeRun) Result {
-			return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
-		},
-		"rollback": func(context.Context, *NodeRun) Result {
-			return Result{Outcome: sparkwing.Failed, Err: errors.New("still broke")}
-		},
-	}}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "go?"}},
-		{ID: "deploy", Needs: deps("gate"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "deploy", Needs: []string{"gate"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "rollback", OnFailureOf: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
-	dbg := Debug{PauseBefore: []string{"gate", "rollback"}, PauseAfter: []string{"gate", "rollback"}}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	options := debugOptions(store.PauseReasonBefore)
+	options.Pause.Value.Before.Value = []string{"gate", "rollback"}
+	options.Pause.Value.After.Set, options.Pause.Value.After.Value = true, []string{"gate", "rollback"}
+	f := newStoreHostFixtureOn(t, openStore(t), plan, options)
+	var paused []string
+	f.Host.Debug = debugWaitFunc(func(ctx context.Context, b DebugBoundary) error {
+		paused = append(paused, b.Ref.NodeID+":"+b.Reason)
+		if _, err := f.Tenant.GetApproval(ctx, f.Input.RunID, "gate"); !errors.Is(err, store.ErrNotFound) {
+			return errors.New("approval opened before pause-before released")
+		}
+		return nil
+	})
+	wait := f.Host.Wait
+	f.Host.Wait = func(ctx context.Context, snapshot store.RunSnapshot) error {
+		if row, ok := ownerNode(snapshot, "gate"); ok && row.Status == store.StatusApprovalPending {
+			_, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: row.Ref, Actor: f.Control, To: store.NodeSuccess, Cause: store.CauseApprovalResolve, Extra: store.TransitionExtra{Approval: &store.ApprovalResolution{Decision: store.ApprovalResolutionApproved}}})
+			return err
+		}
+		return wait(ctx, snapshot)
+	}
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error { return f.report(ctx, input, store.NodeFailed) })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	done := make(chan RunResult, 1)
-	go func() { done <- hostDebug(t, ctx, ds, doc, dbg, fx.run) }()
-
-	if got := awaitHostedEvent(t, ctx, ds.paused, done); got != "gate:"+store.PauseReasonBefore {
-		t.Fatalf("paused %q, want the gate before it waits", got)
-	}
-	if _, err := ds.GetApproval(ctx, testRunID, "gate"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("approval row exists while the gate is paused: %v", err)
-	}
-	if err := ds.ReleaseDebugPause(ctx, testRunID, "gate", "alice", store.PauseReleaseManual); err != nil {
-		t.Fatal(err)
-	}
-	awaitHostedEvent(t, ctx, ds.asked, done)
-	if err := resolveAs(store.ApprovalResolutionApproved, "alice", "")(ds.Store); err != nil {
-		t.Fatal(err)
-	}
-	awaitHostedResult(t, ctx, done)
-
-	wantRow(t, ds.Store, "rollback", sparkwing.Failed, "still broke")
-	pauses, err := teststore.ForTeam(t, ds.Store, store.DefaultTeam).ListDebugPauses(ctx, testRunID)
-	if err != nil || len(pauses) != 1 {
-		t.Errorf("pauses %+v err %v, want only the gate's pause-before", pauses, err)
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "failed" || !slices.Equal(paused, []string{"gate:" + store.PauseReasonBefore}) {
+		t.Fatalf("completion=%+v pauses=%v error=%v", completion, paused, err)
 	}
 }

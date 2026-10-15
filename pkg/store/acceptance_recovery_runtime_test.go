@@ -29,8 +29,13 @@ type storeRecoveryFixture struct {
 
 func newStoreRecoveryFixture(t *testing.T, started bool) *storeRecoveryFixture {
 	t.Helper()
+	return newStoreRecoveryFixtureAt(t, started, storetest.NewSQLite(t))
+}
+
+func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Target) *storeRecoveryFixture {
+	t.Helper()
 	ctx := t.Context()
-	f := &storeRecoveryFixture{target: storetest.NewSQLite(t)}
+	f := &storeRecoveryFixture{target: target}
 	var err error
 	f.s, err = f.target.TryOpen()
 	if err != nil {

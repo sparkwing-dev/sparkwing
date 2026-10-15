@@ -151,14 +151,10 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if err := st.CreateNode(ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.teamA.CreateApproval(ctx, store.Approval{RunID: f.runA, NodeID: "n1", RequestedAt: now}); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES (?,?,?,?,?,?)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.teamA.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "deploy", HolderID: "holder-a", RunID: f.runA, NodeID: "n1", Capacity: 1, Lease: time.Minute,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	seedControllerCapacityHolder(t, st, f.teamA.Team(), "deploy", "holder-a", f.runA, "n1", 0)
 	f.victim = "victim-run"
 	seedRun(t, forTeam(t, st, store.DefaultTeam), f.victim, "build-default")
 	return f

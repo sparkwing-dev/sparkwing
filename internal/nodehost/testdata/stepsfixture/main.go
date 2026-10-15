@@ -69,6 +69,10 @@ func (orderJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 }
 
 func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ sparkwing.RunContext) error {
+	if in.Set == "output" {
+		sparkwing.Job(plan, "output", orderJob{})
+		return nil
+	}
 	if in.Set == "dry" {
 		sparkwing.Job(plan, "dry", work(func(w *sparkwing.Work) *sparkwing.WorkStep {
 			sparkwing.Step(w, "with-dry", say("real body")).DryRun(func(context.Context) error {

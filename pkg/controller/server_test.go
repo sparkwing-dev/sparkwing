@@ -110,14 +110,8 @@ func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
 func TestController_ConcurrencyStateOmitsQueueArrivedAtForImmediateHolder(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
-	ctx := context.Background()
 
-	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "state-immediate-slot", HolderID: "holder", RunID: "holder", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	}); err != nil {
-		t.Fatalf("acquire holder: %v", err)
-	}
+	seedControllerCapacityHolder(t, st, store.DefaultTeam, "state-immediate-slot", "holder", "holder", "n", 0)
 
 	resp := mustGet(t, base+"/api/v1/concurrency/state-immediate-slot/state")
 	defer resp.Body.Close()
@@ -141,31 +135,8 @@ func TestController_ConcurrencyStateOmitsQueueArrivedAtForImmediateHolder(t *tes
 func TestController_ConcurrencyStateIncludesQueueArrivedAtForPromotedHolder(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
-	ctx := context.Background()
 
-	for _, id := range []string{"leader", "waiter"} {
-		if err := st.CreateRun(ctx, store.Run{
-			ID: id, Pipeline: "p", Status: "running", StartedAt: time.Now(),
-		}); err != nil {
-			t.Fatalf("seed run %s: %v", id, err)
-		}
-	}
-	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "state-promoted-slot", HolderID: "leader", RunID: "leader", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	}); err != nil {
-		t.Fatalf("acquire leader: %v", err)
-	}
-	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "state-promoted-slot", HolderID: "waiter", RunID: "waiter", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	}); err != nil {
-		t.Fatalf("acquire waiter: %v", err)
-	}
-	if _, _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ReleaseAndNotify(ctx,
-		"state-promoted-slot", "leader", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
-		t.Fatalf("release leader: %v", err)
-	}
+	seedControllerCapacityHolder(t, st, store.DefaultTeam, "state-promoted-slot", "waiter", "waiter", "n", time.Now().UnixNano())
 
 	resp := mustGet(t, base+"/api/v1/concurrency/state-promoted-slot/state")
 	defer resp.Body.Close()
@@ -513,5 +484,16 @@ func mustPostRaw(t *testing.T, url string, body []byte, wantStatus int) {
 	if resp.StatusCode != wantStatus {
 		rbody, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST %s: status=%d want %d (body: %s)", url, resp.StatusCode, wantStatus, rbody)
+	}
+}
+
+func seedControllerCapacityHolder(t *testing.T, s *store.Store, team store.Team, key, holder, run, node string, queueArrival int64) {
+	t.Helper()
+	now := time.Now()
+	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES (?,?,1,?) ON CONFLICT(team,key) DO NOTHING`, team, key, now.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,queue_arrived_at,lease_expires_at,cost,declared_capacity) VALUES (?,?,?,?,?,?,?,?,1,1)`, team, key, holder, run, node, now.UnixNano(), queueArrival, now.Add(time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
 	}
 }

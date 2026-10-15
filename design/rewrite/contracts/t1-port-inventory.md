@@ -196,6 +196,30 @@ profile reopening, filtered claims and persisted award ancestry. Its run and own
 rows remain fixtures. The HTTP root proofs now use the production enrollment
 transaction. Bootstrap origin, provider proof, host observations and native
 placements remain separate integrations. No native cell is newly closed.
+The [W3 unused executor cut](../w3-legacy-executor-cut-progress.md) removes the
+uncalled RunNodeOnce path and ports its blocked credential-release cancellation
+to source.PrepareCheckout. Repository refusal checks retain the live trigger
+policy. Native placement composition and live legacy hosting deletion remain
+incomplete. No acceptance cell is added or activated.
+
+The [W3 package-test cleanup](../w3-harness-cleanup-progress.md) moves the retained
+host checks into `internal/nodehost` and `internal/lease` test files, consolidates
+their fakes and removes duplicate runners. Lifecycle, step and foreign-award
+checks use tenant intake, acceptance and claims. No acceptance cell is added or
+activated. Production placement migration remains incomplete.
+
+The [W3 nodehost green continuation](../w3-nodehost-green-progress.md) ports
+`TestOnlyRunsTheMatchedNodesAndWhatTheyNeed` to tenant intake, claims, accepted
+seals and the shared scheduler. The [W3 merge and selection continuation](../w3-merge-step-window-progress.md)
+now drives those exclusions from sealed Only inputs through final-store
+transitions. Sealed StartAt and StopAt inputs reach the shared executor, with
+native Go SDK process evidence. No acceptance cell is added or activated.
+
+The [W3 owner assembly continuation](w3-owner-assembly-continuation.md) replaces
+the removed pre-intake stalled-describe assertion with native planning under a
+live owner. Failure finishes the owner without accepting topology and joins its
+SDK child. The native assembly fixture now enters `OwnerHost.Run` and finishes
+after self-claimed execution. No acceptance cell is added or activated.
 
 ## W1b raw cancellation writer retirement
 
@@ -807,8 +831,8 @@ The final three comparisons include all changes since the recorded merge base. E
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestTriggerHost_KeepsTheIntakesInvocationKeys` | `TestTriggerHost_KeepsTheIntakesInvocationKeys` | Replace | `lifecycle_test.go:TestLifecycle/lifecycle-request-and-plan-seals/intake_fields`. The host cannot overwrite intake values. Replace invocation upsert with the two sealed records. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestHostedRun_ADefaultBranchGuardReadsTheCheckoutsOriginHead` | `TestHostedRun_ADefaultBranchGuardReadsTheCheckoutsOriginHead` | Keep | `environment_test.go:TestEnvironment/environment-origin-head-and-guards/origin_head`. Discover `trunk` from origin HEAD. `hermetic-checkout-planning/default_reject_feature` and `/default_reject_trunk` port the host guard verdicts. Missing-default when/unless cases fail closed. Direct-source tests cover real origin-HEAD acquisition. Native placement execution remains open. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestHostedRunContext_CarriesThePullRequest` | `TestHostedRunContext_CarriesThePullRequest` | Replace | `lifecycle_test.go:TestLifecycle/lifecycle-request-and-plan-seals/pull_request` and `internal/runspec/spec_test.go:TestPullRequestFields`. Carry number, action, base/head refs and SHAs through the sealed spec. `hermetic-checkout-planning` asserts all six fields in the SDK planning request. The shared projection retains Action and BaseSHA for attempts/evals too. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestLaunchedNode_RefusesASecretDefaultInAGroupName` | `TestLaunchedNode_RefusesASecretDefaultInAGroupName` | Keep | `credentials_test.go:TestCredentials/credentials-secret-identifiers/sdk_default_group`. The planning host knows SDK defaults and refuses the group before persistence, without echoing its value. Host registration and acceptance propagation pass in `credentials-secret-identifiers/hermetic-planning-defaults` through `CheckPlanningDefaults`. The validator and store are fakes. Native placement refusal remains open. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestHosts_RefuseASecretDefaultInANodeID` | `TestHosts_RefuseASecretDefaultInANodeID`, subtests `trigger host`, `launcher` | Keep | `credentials_test.go:TestCredentials/credentials-secret-identifiers/sdk_default_job`. Both hosts refuse through the shared validator and insert no job. Extend to every supported placement. `CheckPlanningDefaults` supplies the host proof for default registration, short secrets and refusal before acceptance. Native placement and real-validator coverage remain open. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestLaunchedNode_RefusesASecretDefaultInAGroupName` | `TestLaunchedNode_RefusesASecretDefaultInAGroupName` | Keep | `internal/nodehost/host_planning_test.go:TestPlanningDefaults` checks SDK-default group refusal through the real shared validator, checkout resolver and SQLite owner lifecycle. Rejection finishes intake without a plan or jobs and returns no secret value. `FuzzPlanningDefaultsRefuseSecretIdentifiers` generates escaped, Unicode and control-bearing defaults across job, group, step and concurrency identifiers. SDK processes and source acquisition are test adapters. Native placement refusal remains open. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `internal/orchestrator/run_inputs_test.go` | `TestHosts_RefuseASecretDefaultInANodeID` | `TestHosts_RefuseASecretDefaultInANodeID`, subtests `trigger host`, `launcher` | Keep | `internal/nodehost/host_planning_test.go:TestPlanningDefaults` supplies the real-validator and SQLite proof for default registration, short secrets and refusal before acceptance. Its safe case verifies persisted SDK defaults and classification. The generated property covers four identifier kinds. Native execution on every supported placement remains open. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/claim_run_test.go` | `TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` | `TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` | Replace | `credentials_test.go:TestCredentials/credentials-matrix-authentication-status/arguments_and_binding`. Planning receives real values for its own run. Replace old trigger routes and 401-on-live-denial answers with final route bindings and 403. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/run_inputs_test.go` | `TestAcceptPlan_NeverDropsAClassifiedSecretArgument` | `TestAcceptPlan_NeverDropsAClassifiedSecretArgument` | Keep | `credentials_test.go:TestCredentials/credentials-secret-display-classification/classification_union` and `pkg/store/run_spec_test.go:TestClassificationNeverShrinks`. A plan cannot remove an intake classification. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/controller/run_inputs_test.go` | `TestTriggerReads_RedactTheRunsSecretArguments` | `TestTriggerReads_RedactTheRunsSecretArguments` | Replace | `credentials_test.go:TestCredentials/credentials-secret-display-classification/run_list_and_detail`. Move deleted `/triggers` list/detail assertions to run views. Preserve classified public arguments and hide every unclassified value. |
@@ -1006,7 +1030,7 @@ their behavior requirements without retaining the removed claimed-mode runtime:
 | `TestLaunchedNode_RunsItsConcurrencyGroupThroughTheClaim` | Replace executor-owned admission with owner admission and claim-renewed holders. Native store/admission integration remains open. |
 | `TestLaunchedNode_PlanKeepsThePipelinesRequires` | Checkout declarations and accepted settings must retain YAML placement. Native configuration/acceptance wiring remains open. |
 | `TestLaunchedNode_MemoHitsThroughTheClaim` | Memo is an owner decision committed by reconciliation. Missing output, missing artifacts and refused manifest edges remain required under `storage-memo-materialization-failures`. Native store/storage materialization remains open. |
-| `TestLaunchedNode_HonorsTheTriggersRunFlags` | `TestSDKPlanningRetainsSealedRunContext` covers DryRun propagation. Native Only and step-range projection and execution remain open. |
+| `TestLaunchedNode_HonorsTheTriggersRunFlags` | `TestSDKPlanningRetainsSealedRunContext` covers DryRun propagation. `TestOnlyRunsTheMatchedNodesAndWhatTheyNeed`, `TestNodeExecutorUsesSealedStepWindow` and `TestNativeExecutorSteps/window` cover sealed selections through the owner, executor and real Go SDK process. Native launcher placement remains open. |
 | `TestLaunchedNode_NoCacheMissesTheMemo` | NoMemo remains an owner-side read bypass. `TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull` covers key evaluation with that bypass. Native memo reads and writes remain open. |
 | `TestLaunchedNode_LayersTheCheckoutsYAMLArgsAndGuards` | `environment-origin-head-and-guards/hermetic-checkout-planning` covers shared YAML argument precedence and guard evaluation through owner acceptance. `TestOwnerHostReadsAcquiredProjectForSharedPlanning` reads real acquired checkout files. Native placement execution remains open. |
 | `TestLaunchedNode_AGuardJudgesTheSDKsDefaults` | The checkout-planning cell evaluates argument guards after SDK describe defaults. Refusals bypass SDK planning and plan cache, then seal refusal evidence through acceptance. Native placement execution remains open. |
@@ -1284,8 +1308,9 @@ step-log assertions to
 `protocol_test.go:TestProtocol/protocol-step-failure-policies/hermetic-native-go-steps`.
 Eleven cases use real Go SDK processes and the common executor. Seven SQLite
 step cases verify committed diagnostic ordering and refused writes. The old
-`TestHostDrivesSteps` becomes `TestHostStepWindows` and retains only the native
-window cases. Native placement and sealed StartAt/StopAt/Only inputs remain open.
+`TestHostDrivesSteps` window cases now use `TestNodeExecutorUsesSealedStepWindow`
+and `TestNativeExecutorSteps/window`, driven by sealed StartAt and StopAt.
+Only uses the owner/store test above. Native placement remains open.
 The same continuation ports the old orchestrator foreign-holder refusal to
 `lifecycle_test.go:TestLifecycle/lifecycle-transition-replay-and-fencing/hermetic-store-foreign-awards`.
 Four SQLite cases refuse changed holder, capability, generation and ordinal
@@ -1648,6 +1673,111 @@ ported to the named-job property and `TestStoreClaimMatching`. The property
 provisions a real second tenant's machine capability before attempting the
 foreign award. Both the complete job snapshot and the award/event counts remain
 unchanged. The matching suite retains granted cloud-tool and repository checks.
+## W3 store admission and lease-ending port
+
+`internal/nodehost/local_admission_test.go:TestAdmissionLeaseEndings` replaces
+its legacy admission_test.go body. All three cases execute the common node
+executor and check the fenced terminal report, process close/cleanup and both
+lease releases. Box-group eviction and rejected reattachment report superseded.
+Daemon cancellation reports cancelled. The first port reproduced cancelled
+reports in both supersession cases. The 39-line legacy function and its trailing
+blank line are deleted. Other legacy admission tests remain because their full
+terminal-state and waiter-cleanup assertions still need owner policy integration.
+No acceptance cell is added, unskipped or marked complete.
+
+
+## W3 real-store native test port
+
+[The native store port report](../w3-native-store-port-progress.md) records the
+retained admission, approval, scheduling, dispatch, generator, retry and masking
+ports. Intake, owner and job awards, transitions, expansion delegation and capacity
+use actual SQLite. SDK compute and selected foreign record boundaries remain
+fakes. Atomic expansion replaces partial batch repair. A skipped source skips its
+generated consumers, following frozen section 3.6.
+
+The [debug port](../w3-debug-store-port-progress.md) replaces the four debug roots' old
+scheduler/store fixture with native owner scheduling and real tenant intake,
+claims and transitions. A fake implements the declared pause boundary. The
+retained host assertions cover before/after/failure ordering, downstream release,
+gate/recovery exceptions, cancellation and sealed timeout propagation. Actual
+pause persistence, expiry, activity and event assertions still need W1's adapter.
+The old cancellation assertion that rewrote a terminal job is removed because
+terminal results are absorbing.
+
+The [service and store continuation](../w3-service-store-port-progress.md) ports
+HTTP service tests to the real policy router and process authorities over an
+in-memory transport. Cleanup tests use native cleanup processes. Generated retry
+tests use native scheduling and real tenant state. The report distinguishes the
+target-side reuse assertions from unverified source materialization and lists
+the retired legacy adapter assertions that still need native integration.
+
+The selection test remains in its old fixture because sealed selection fields
+are absent. The complete nodehost package passes after the retained store ports.
+No native acceptance cell is added, unskipped or claimed complete.
+
+## W3 shared process transport port
+
+[The process transport cut](../w3-process-transport-cut-progress.md) removes
+Session and StartSession. Their retained real-pipe tests, split-secret/EOF/CRLF
+tests, describe withholding, generator fixtures, granted-identity fuzz property
+and step-window fixture now use ProtocolSession. The private writeFailed unit
+test retires with its method. Real-pipe SDK-exit and blocked-write tests remain.
+The late-reply fixture replies after request-pipe shutdown and checks that
+cancellation prevents successful settlement. Concurrent work uses distinct
+jobs because duplicate live job/step requests are refused. This ports transport
+evidence and does not establish native placement composition.
+
+## W3 remote semaphore continuation
+
+[The remote semaphore continuation](../w3-remote-semaphore-progress.md) removes
+the unused Run.Add and Config.Execute surfaces and their unused test fixtures.
+The previously ported native scheduling tests retain their assertions.
+The parent-admission property now exercises local and remote jobs. Native
+dispatch tests use real tenant claims and transitions with the existing fake
+admission daemon. They check run/box lease retention for fresh, ready and held
+jobs, absence of local compute reservations, cancellation intent and holder
+drain before release. A generated-input property refuses foreign or regressed
+remote job snapshots. No acceptance cell is added or activated.
+
+## W3 consumer and intake cut
+
+[The consumer cut](../w3-consumer-cut-progress.md) removes the raw consumer and
+orphan hosting adapters. Detached receipt, replay and retained-environment
+assertions now use the typed intake in run_detached_native_test.go. Alias risk
+checks use the resolved declaration. The schedule launcher delegates source and
+environment selection to ScheduleManager with a stable due-instant key.
+The native nodehost suite remains green. Native workers, source overrides,
+sealed step selections and usage/profile bindings remain open. No additional
+archived inventory row or full native acceptance cell is claimed complete.
+
+## W3 native store composition
+
+`TestNativeHostFromIntakeThroughSDKAndPersistedCompletion` replaces
+`TestNativeHostRunsSharedTransportForOwnerAndClaimedWork` and its fake owner
+state machine. Both roles use real tenant intake, claims, acceptance, starts,
+step/result writes and completion. Acquired local Git source, captured
+environments, the Go SDK and process-authority validators are real. The claimed
+case runs the same accepted work under its own keeper, then resumes its owner
+to settle the run. The typed SDK result now crosses NewSignedStore, signed
+filesystem PUT, verified CAS publication, receipt settlement and record commit.
+The test checks the exact stored result and removal of staged files. One scripted
+DataSigner connects the real tenant and object operations. Engine resolution,
+installation, admission and the in-process HTTP transport remain test adapters.
+Full placement cells remain blocked.
+
+The owner/claimed composition now registers masks through the actual PolicyRouter,
+shared authenticator and SQLite parent relations instead of a registrar fake.
+`TestProcessAuthorityRoutesUsePersistedParentRelations` reproduces the former
+401 and verifies registration, generated selector/fence refusals and revocation
+before terminal reporting. Two duplicate authority-test fakes are removed in
+favor of the existing scripted parent and binding callback. This adds component
+evidence without activating a native placement cell or claiming another archived
+test port.
+
+Scope-label tests and their tuple-injectivity property move beside the shared
+codec in nodehost. The CLI queue fixture uses that codec. The state-path test
+moves to paths when the orchestrator aliases are deleted. These preserve
+existing assertions and claim no additional archived source identity.
 
 W2 account discovery continuation: the GET /me branch of
 TestIdentityRoutesRefuseABearerToken is ported to
@@ -2123,3 +2253,42 @@ Provider-payment fixtures no longer replace the receipt and correlation schema.
 The existing provider payer, mode, replay, rollback and conservation properties
 exercise the installed final tables. `TestTeamPurgeIsolationProperty` also keeps
 unbound warnings and other teams' financial rows across repeated purges.
+
+
+## W1 metadata and approval writer ports
+
+`summary_test.go` moves to `metadata_ports_test.go` through the real sealed
+intake, claim and start fixture. The ports cover job/step overwrite, exact
+repeat, reopen persistence, absent targets and closing unfinished steps for
+success, failure and cancellation. Retry settlement checks both attempt rows.
+The old placeholder behavior is replaced by explicit missing-step refusal.
+
+`annotation_concurrent_test.go` moves to the current metadata ports. Concurrent
+job and step writers retain every distinct entry and the run counter. SQLite
+runs here. The matching PostgreSQL test uses the same native fixture and requires
+a configured database. The old uncommitted-placeholder interleaving has no
+remaining writer. Metadata requires a committed step, and all writes hold the
+run lock. Byte/count limits and refusal rollback are exercised through the
+current API. The generated fence property refuses foreign holder, authority,
+job/run selectors and generations without changing either target.
+
+`step_status_test.go` moves to terminal-step, skipped-step and immutable-replay
+checks through `RecordStep`. `approvals_test.go` moves to
+`TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite` and
+`TestApprovalTransitionsKeepPendingRequestOrder`, alongside the existing
+approval reaper/race/rollback cases. Gate creation, decision attribution,
+comments, lists, tenant isolation, missing targets, exact replay and refusal
+to reopen a resolved gate use the current transitions.
+
+`generated_node_test.go` loses the removed input-resolver fixture. Its sealed
+spec/reference assertions move to
+`TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty`.
+Generated specs retain their canonical hash and declared references, and a
+changed expansion replay cannot replace either. The native controller
+pipeline-latest reference lookup remains open with W2. This property does not
+claim that integration cell.
+
+The orphaned `internal/acceptance/store_recovery.go` is deleted. Its checks
+already run in `acceptance_recovery_*_test.go` beside the store, and W3 has
+migrated its final host consumer. The dead settlement export fixture is removed
+with the unused legacy settlement engine. No native placement cell is enabled.

@@ -1,5 +1,22 @@
 # C1 data contract
 
+## Fenced metadata and legacy settlement retirement
+
+The raw Store/Tenant plan, step, annotation, summary, activity and approval
+writers are removed. `AcceptPlan` and `AcceptExpansion` own declarations.
+`RecordStep`, `WriteAnnotation` and `WriteSummary` require the live holder and
+current attempt. `TransitionNode` closes running steps when their attempt ends,
+scoped by tenant, job, attempt and generation. Retry steps remain separate.
+Approval opening, decisions and timeouts use `TransitionNode`. The old approval
+resolver, settlement engine and its default-team getter are removed.
+
+The unused `StateStoreOld`, `ResolveClaimInput` family, memo-key codec,
+`UpdatePlanSnapshot`, `OwnsRun`, `ListPendingTriggersForParent` and
+`RunExceedsWallClock` are removed. There is no compatibility wrapper. Current
+record/read-set authorization replaces the legacy input reader. The controller's
+native declared-reference lookup remains W2's integration responsibility.
+
+
 ## Placement billing and execution-attempt retirement
 
 Cloud placement is metered regardless of the launcher's root metering flag.

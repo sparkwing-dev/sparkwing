@@ -21,16 +21,6 @@ const runAttentionColumn = `COALESCE((SELECT n.attention_reason FROM nodes n
    AND n.` + nodeNotDone + ` AND n.attention_reason != ''
  ORDER BY n.node_id LIMIT 1), '')`
 
-func planClaimWait(snapshot []byte) int64 {
-	var plan struct {
-		ClaimWaitMS int64 `json:"claim_wait_ms"`
-	}
-	if json.Unmarshal(snapshot, &plan) != nil || plan.ClaimWaitMS <= 0 {
-		return 0
-	}
-	return (time.Duration(plan.ClaimWaitMS) * time.Millisecond).Nanoseconds()
-}
-
 // RecordRunnerPoll stores a live machine's advertised capacity and labels with the store clock.
 func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
 	if !validMatchingResources(observation.Capacity) || !validMatchingResources(observation.Available) {

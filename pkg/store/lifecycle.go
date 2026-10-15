@@ -52,3 +52,11 @@ const runTerminalIn = `status IN ('success','failed','cancelled')`
 func (t Trigger) IsFinished() bool {
 	return t.Status == triggerStatusDone || t.Status == triggerStatusFailed
 }
+
+const (
+	outcomeSuccess    = "success"
+	outcomeFailed     = "failed"
+	outcomeSkipped    = "skipped"
+	outcomeCancelled  = "cancelled"
+	outcomeSuperseded = "superseded"
+)

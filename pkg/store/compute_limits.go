@@ -577,30 +577,6 @@ func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// RunExceedsWallClock reports whether a tenant run exceeds its cloud wall-clock guard.
-func (t *Tenant) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error) {
-	ceiling, err := t.s.creditSetting(ctx, computeLimitKey(ComputeLimitRunSeconds), 0)
-	if err != nil {
-		return 0, false, err
-	}
-	if ceiling <= 0 {
-		return 0, false, nil
-	}
-	var started int64
-	err = t.s.queryRow(ctx, `SELECT started_at FROM runs WHERE team = ? AND id = ?`, string(t.team), runID).Scan(&started)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	if started <= 0 {
-		return 0, false, nil
-	}
-	elapsed := (now.UnixNano() - started) / int64(time.Second)
-	return ceiling, elapsed > ceiling, nil
-}
-
 // OldestWaitingReadyNodeForPrincipal names the ready node a claim by this
 // principal would have been given, so a refusal is recorded against a run that
 // principal owns rather than one it cannot see. A runner's principal name is

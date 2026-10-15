@@ -93,7 +93,7 @@ func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 		t.Fatalf("accepted = %+v, %v", accepted, err)
 	}
 	for _, renew := range []func() (store.LeaseBeat, error){
-		func() (store.LeaseBeat, error) { return state.RenewOwner(t.Context(), request.Actor) },
+		func() (store.LeaseBeat, error) { return state.RenewOwner(t.Context(), request.Actor, false) },
 		func() (store.LeaseBeat, error) {
 			return state.RenewNodeClaim(t.Context(), store.NodeRef{}, request.Actor)
 		},
@@ -173,7 +173,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		state, err := newCLIHostState(wire, &cliOwnerStore{}, "awarded-unit", func() bool { return executing })
+		state, err := newCLIHostState(wire, &cliOwnerStore{}, "awarded-unit", func() bool { return !executing })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +190,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 		if err != nil || !applied.Replayed || applied.StateSeq != 12 || applied.Generation != int64(generation)+1 || applied.Attempt != attempt {
 			return false
 		}
-		_, err = state.RenewOwner(t.Context(), actor)
+		_, err = state.RenewOwner(t.Context(), actor, executing)
 		return err == nil && calls == 3
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {

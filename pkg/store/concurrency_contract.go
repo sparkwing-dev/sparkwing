@@ -62,34 +62,14 @@ func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding Capa
 		return CapacityAdoption{}, err
 	}
 	defer rollbackOrLog(tx)
-	if err := checkOwnerTx(ctx, tx, t.team, actor, binding.RunID, tx.now()); err != nil {
+	fence := capacityFence{binding: binding, actor: actor}
+	if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
 		return CapacityAdoption{}, err
-	}
-	if err := lockStateRunTx(ctx, tx, t.team, binding.RunID); err != nil {
-		return CapacityAdoption{}, err
-	}
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE team = ? AND id = ?`, t.team, binding.RunID).Scan(&status); err != nil {
-		return CapacityAdoption{}, err
-	}
-	if status != string(RunPending) && status != string(RunRunning) {
-		return CapacityAdoption{}, fmt.Errorf("cannot adopt capacity for a terminal run")
-	}
-	if binding.NodeID != "" {
-		var generation int64
-		if err := tx.QueryRowContext(ctx, `SELECT status,generation FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), t.team, binding.RunID, binding.NodeID).Scan(&status, &generation); err != nil {
-			return CapacityAdoption{}, err
-		}
-		if status == string(StatusDone) || generation != binding.Generation {
-			return CapacityAdoption{}, holderRefusal()
-		}
-	} else if binding.Generation != actor.Owner.Generation {
-		return CapacityAdoption{}, holderRefusal()
 	}
 	if err := lockCapacityEntryTx(ctx, tx, t.team, key); err != nil {
 		return CapacityAdoption{}, err
 	}
-	if err := checkOwnerTx(ctx, tx, t.team, actor, binding.RunID, tx.now()); err != nil {
+	if err := checkCapacityFenceTx(ctx, tx, t.team, fence); err != nil {
 		return CapacityAdoption{}, err
 	}
 	adopted, err := adoptCapacityTx(ctx, tx, t.team, key, id, binding)
@@ -100,41 +80,6 @@ func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding Capa
 		return CapacityAdoption{}, err
 	}
 	return adopted, nil
-}
-
-// SupersedeCapacity marks the holder superseded and requests cancellation on its bound work in the same transaction.
-func (t *Tenant) SupersedeCapacity(ctx context.Context, key, holderID string, actor Actor) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	var binding CapacityBinding
-	err = tx.QueryRowContext(ctx, `SELECT run_id,node_id,generation FROM concurrency_holders WHERE team = ? AND key = ? AND holder_id = ?`, t.team, key, holderID).Scan(&binding.RunID, &binding.NodeID, &binding.Generation)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if err := checkCancelActorTx(ctx, tx, t.team, actor, binding.RunID, tx.now()); err != nil {
-		return err
-	}
-	if binding.NodeID != "" {
-		_, err = transitionNodeTx(ctx, tx, t.team, NodeTransition{Ref: NodeRef{RunID: binding.RunID, NodeID: binding.NodeID}, To: NodeCancelled, Actor: actor, Cause: CauseCancel}, tx.now())
-	} else {
-		_, err = transitionRunTx(ctx, tx, t.team, RunTransition{RunID: binding.RunID, To: RunCancelled, Actor: actor, Cause: RunCancel, Reason: "concurrency superseded"}, tx.now())
-	}
-	if err != nil {
-		return err
-	}
-	if err := lockCapacityEntryTx(ctx, tx, t.team, key); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET superseded = 1 WHERE team = ? AND key = ? AND holder_id = ? AND run_id = ? AND node_id = ? AND generation = ?`, t.team, key, holderID, binding.RunID, binding.NodeID, binding.Generation); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func lockCapacityEntryTx(ctx context.Context, tx *storeTx, team Team, key string) error {

@@ -206,7 +206,8 @@ func pipelineDirectory(checkout, relative string) (string, error) {
 	return directory, nil
 }
 
-func (e *Entry) close() error {
+// Close releases acquisition-owned resources and preserves user checkouts.
+func (e *Entry) Close() error {
 	if e == nil || e.ownedDirectory == "" {
 		return nil
 	}

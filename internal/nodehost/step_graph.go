@@ -15,6 +15,7 @@ import (
 
 type stepGraph struct {
 	job      nodeproto.JobSpec
+	skips    map[string]string
 	step     func(context.Context, nodeproto.StepSpec, []string) (json.RawMessage, string, string, error)
 	record   func(context.Context, string, string, string, *time.Time, error) error
 	cancel   func(context.Context, string) error
@@ -96,6 +97,17 @@ func (g stepGraph) run(ctx, parent context.Context) (json.RawMessage, error) {
 					cancelledSteps = append(cancelledSteps, step.ID)
 					lastCancelled = time.Now()
 				}
+				continue
+			}
+			if reason, skip := g.skips[step.ID]; skip {
+				if err := g.record(ctx, step.ID, "skipped", reason, nil, nil); err != nil {
+					writeFailed = true
+					failed[step.ID] = true
+					firstErr = errors.Join(firstErr, err)
+					abort(err)
+				}
+				delete(pending, step.ID)
+				finished[step.ID], changed = true, true
 				continue
 			}
 			delete(pending, step.ID)

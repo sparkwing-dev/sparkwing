@@ -135,16 +135,6 @@ func metricError(err error) error {
 	return engineLookupError(err)
 }
 
-func runLimitStatus(err error) int {
-	switch {
-	case errors.Is(err, store.ErrAnnotationTooLarge), errors.Is(err, store.ErrRunAnnotationBytes):
-		return http.StatusRequestEntityTooLarge
-	case errors.Is(err, store.ErrRunAnnotationLimit), errors.Is(err, store.ErrNodeMetricLimit):
-		return http.StatusTooManyRequests
-	}
-	return 0
-}
-
 type nodeUsageReq struct {
 	CPUTimeNanos int64 `json:"cpu_time_nanos,omitempty"`
 	MaxRSSBytes  int64 `json:"max_rss_bytes,omitempty"`

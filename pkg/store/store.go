@@ -6,10 +6,8 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -579,58 +577,6 @@ func IsProtocolErr(err error) bool {
 		strings.Contains(msg, "sqlite_protocol")
 }
 
-// Annotation bounds. Every node and step annotation is also appended to its
-// run's list, so that list is where the per-run bounds hold.
-const (
-	MaxAnnotationBytes    = 64 << 10
-	MaxRunAnnotations     = 1000
-	MaxRunAnnotationBytes = 4 << 20
-)
-
-var (
-	// ErrAnnotationTooLarge refuses one annotation over [MaxAnnotationBytes].
-	ErrAnnotationTooLarge = errors.New("store: an annotation holds at most 64 KiB")
-	// ErrRunAnnotationLimit refuses an annotation past [MaxRunAnnotations].
-	ErrRunAnnotationLimit = errors.New("store: a run holds at most 1000 annotations")
-	// ErrRunAnnotationBytes refuses an annotation that would take the run's
-	// JSON-encoded annotation list past [MaxRunAnnotationBytes].
-	ErrRunAnnotationBytes = errors.New("store: a run's annotations total at most 4 MiB")
-)
-
-// perf: every append rereads and rewrites the run's whole list, and the
-// node's or step's, so a run's annotations cost O(n^2) bytes written; the
-// bounds above cap that at about 1000 rewrites of at most 4 MiB each.
-func appendRunAnnotation(tx *storeTx, team Team, runID, msg string) error {
-	if len(msg) > MaxAnnotationBytes {
-		return ErrAnnotationTooLarge
-	}
-	var blob []byte
-	err := tx.QueryRow(
-		`SELECT annotations_json FROM runs WHERE team = ? AND id = ?`+tx.forUpdate(), string(team), runID).Scan(&blob)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	var list []string
-	if len(blob) > 0 {
-		if err := json.Unmarshal(blob, &list); err != nil {
-			return fmt.Errorf("read run %s annotations: %w", runID, err)
-		}
-	}
-	if len(list) >= MaxRunAnnotations {
-		return ErrRunAnnotationLimit
-	}
-	list = append(list, msg)
-	next, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	if len(next) > MaxRunAnnotationBytes {
-		return ErrRunAnnotationBytes
-	}
-	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE team = ? AND id = ?`, next, string(team), runID)
-	return err
-}
-
 // Run is one row in the runs table.
 type Run struct {
 	ID            string            `json:"id"`
@@ -652,7 +598,7 @@ type Run struct {
 	// ParentRunID identifies the spawning RunAndAwait caller.
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	// Admission is a controller-dispatched run's admission state, one of
-	// the RunAdmission constants; it is empty for any other run.
+	// the current admission phase; it is empty for any other run.
 	Admission string `json:"admission,omitempty"`
 	// DeclaredRepo is the repository the submitter typed (e.g.
 	// "my-app"). It is metadata for display and filtering, and it
@@ -926,62 +872,6 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 	return tx.Commit()
 }
 
-// UpdatePlanSnapshot replaces the stored plan JSON for a run.
-func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
-	return s.updatePlanSnapshot(ctx, DefaultTeam, runID, snapshot)
-}
-
-// UpdatePlanSnapshot records the plan of one of t's runs. The trigger fence a
-// runner's request carries is checked in t's team, so an orchestrator of any
-// team can record the plan of the run it holds.
-func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
-	return t.s.updatePlanSnapshot(ctx, t.team, runID, snapshot)
-}
-
-func (s *Store) updatePlanSnapshot(ctx context.Context, team Team, runID string, snapshot []byte) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, team, runID); err != nil {
-		return err
-	}
-	var accepted int64
-	err = tx.QueryRowContext(ctx, `SELECT plan_accepted_generation FROM runs WHERE team = ? AND id = ?`+tx.forNoKeyUpdate(),
-		string(team), runID).Scan(&accepted)
-	if errors.Is(err, sql.ErrNoRows) {
-		return notFound("run", runID)
-	}
-	if err != nil {
-		return err
-	}
-	if accepted != 0 {
-		return ErrPlanAccepted
-	}
-	sum := sha256.Sum256(snapshot)
-	planHash := "sha256:" + hex.EncodeToString(sum[:])
-	if _, err := tx.ExecContext(ctx, `INSERT INTO run_definition_plans (team, run_id, plan_hash)
-SELECT team, id, ? FROM runs WHERE team = ? AND id = ?
-ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
- WHERE run_definition_plans.team = excluded.team`, planHash, string(team), runID); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ?, claim_wait_ns = ? WHERE team = ? AND id = ?`,
-		snapshot, planClaimWait(snapshot), string(team), runID)
-	if err != nil {
-		return err
-	}
-	changed, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return notFound("run", runID)
-	}
-	return tx.Commit()
-}
-
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
 const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, admission, ` + runAttentionColumn
@@ -1052,7 +942,6 @@ func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 // by f. The cursor clause depends on that order.
 //
 // Scope: this reads every team. Tenant callers use [Tenant.ListRuns].
-// The raw method remains part of pkg/storage.StateStoreOld.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
 	return s.listRuns(ctx, allTeams(), f)
 }
@@ -1961,90 +1850,6 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	return nil
 }
 
-// AppendNodeAnnotation appends one annotation string to the node's
-// annotations list. Implemented as read-modify-write inside a single
-// transaction that holds the rows it rewrites, which is what keeps
-// concurrent appenders from losing entries: the transaction alone does
-// not, since Postgres runs it at READ COMMITTED.
-func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
-	return s.defaultTenant().AppendNodeAnnotation(ctx, runID, nodeID, msg)
-}
-
-// AppendNodeAnnotation is [Store.AppendNodeAnnotation] confined to t's team.
-func (t *Tenant) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	var current []byte
-	row := tx.QueryRowContext(ctx,
-		`SELECT annotations_json FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
-		string(t.team), runID, nodeID)
-	if err := row.Scan(&current); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return notFound("node", runID+"/"+nodeID)
-		}
-		return err
-	}
-	var list []string
-	if len(current) > 0 {
-		if err := json.Unmarshal(current, &list); err != nil {
-			list = nil
-		}
-	}
-	list = append(list, msg)
-	next, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET annotations_json = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
-		next, string(t.team), runID, nodeID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?`,
-		msg, string(t.team), runID); err != nil {
-		return err
-	}
-	if err := appendRunAnnotation(tx, t.team, runID, msg); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// SetNodeSummary replaces the node's markdown summary with md.
-// Overwrite-on-write: later calls supersede earlier ones. Returns
-// ErrNotFound if the node row doesn't exist. Driven by
-// sparkwing.Summary() emitted outside any step body.
-func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
-	return s.defaultTenant().SetNodeSummary(ctx, runID, nodeID, md)
-}
-
-// SetNodeSummary is [Store.SetNodeSummary] confined to t's team.
-func (t *Tenant) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
-	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET summary = ? WHERE team = ? AND run_id = ? AND node_id = ?`, md, string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 && fenced {
-		return ErrLockHeld
-	}
-	if n == 0 {
-		return notFound("node", runID+"/"+nodeID)
-	}
-	return nil
-}
-
 // Step status constants. Steps are inserted as StepRunning on
 // step_start and transitioned to passed/failed/cancelled on step_end. Skipped
 // steps insert directly as StepSkipped with started_at == finished_at.
@@ -2055,17 +1860,6 @@ const (
 	StepCancelled = "cancelled"
 	StepSkipped   = "skipped"
 )
-
-// ValidateStepTerminalStatus accepts the outcomes a finished WorkStep can
-// persist. StepSkipped has its own transition because it never starts.
-func ValidateStepTerminalStatus(status string) error {
-	switch status {
-	case StepPassed, StepFailed, StepCancelled:
-		return nil
-	default:
-		return fmt.Errorf("step status %q: expected passed, failed, or cancelled", status)
-	}
-}
 
 // NodeStep is one row from the node_steps table: per-step runtime
 // state for the inner-Work DAG. Status moves from running to passed, failed, or
@@ -2082,101 +1876,6 @@ type NodeStep struct {
 	// sparkwing.Summary inside this step's body. Overwrite-on-write:
 	// only the last value is kept.
 	Summary string `json:"summary,omitempty"`
-}
-
-// StartNodeStep inserts a row in the running state, stamping
-// started_at. Idempotent: a repeat call for the same (run, node,
-// step) is a no-op, leaving the original started_at intact so a
-// retry doesn't reset the clock.
-func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	return s.defaultTenant().StartNodeStep(ctx, runID, nodeID, stepID)
-}
-
-// StartNodeStep is [Store.StartNodeStep] confined to t's team.
-func (t *Tenant) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at)
-VALUES (?,?,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
-  WHERE node_steps.team = excluded.team`,
-		string(t.team), runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// FinishNodeStep transitions a running step to passed, failed, or cancelled and
-// stamps finished_at. Skipped steps use SkipNodeStep because they never enter
-// the running state. Creates the row if missing so the rare reorder where
-// step_end lands before step_start still records terminal state.
-func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
-	return s.defaultTenant().FinishNodeStep(ctx, runID, nodeID, stepID, status)
-}
-
-// FinishNodeStep is [Store.FinishNodeStep] confined to t's team.
-func (t *Tenant) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
-	if err := ValidateStepTerminalStatus(status); err != nil {
-		return err
-	}
-	now := time.Now().UnixNano()
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (?,?,?,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
-    status      = excluded.status,
-    finished_at = excluded.finished_at
-  WHERE node_steps.team = excluded.team`,
-		string(t.team), runID, nodeID, stepID, status, now, now); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// SkipNodeStep marks a step as skipped (single insert; no running
-// phase). started_at == finished_at == now so duration computes to 0
-// without special-casing nulls in the wire-shape serializer.
-func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	return s.defaultTenant().SkipNodeStep(ctx, runID, nodeID, stepID)
-}
-
-// SkipNodeStep is [Store.SkipNodeStep] confined to t's team.
-func (t *Tenant) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	now := time.Now().UnixNano()
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (?,?,?,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
-    status      = excluded.status,
-    finished_at = excluded.finished_at
-  WHERE node_steps.team = excluded.team`,
-		string(t.team), runID, nodeID, stepID, StepSkipped, now, now); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // ListNodeSteps returns persisted step observations for a tenant run.
@@ -2212,108 +1911,6 @@ ORDER BY node_id, started_at`, string(t.team), runID)
 		out = append(out, ns)
 	}
 	return out, rows.Err()
-}
-
-// AppendStepAnnotation appends one summary string to a step's
-// annotations list. Inserts a placeholder row if the step doesn't
-// yet exist (annotations may fire before step_start lands in the
-// rare reorder case). Read-modify-write inside one transaction that
-// holds the rows it rewrites, which is what keeps concurrent
-// appenders from losing entries: the placeholder upsert returns the
-// row it locked, so an appender that lost the insert waits for the
-// winner rather than reading past it.
-func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
-	return s.defaultTenant().AppendStepAnnotation(ctx, runID, nodeID, stepID, msg)
-}
-
-// AppendStepAnnotation is [Store.AppendStepAnnotation] confined to t's team.
-func (t *Tenant) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-
-	// safety: only DO UPDATE waits on a conflicting insert that has not
-	// committed; DO NOTHING skips it and the read that followed saw no row,
-	// dropping the annotation. The assignment rewrites status to itself
-	// because the row, not the value, is what this needs.
-	var current []byte
-	if err := tx.QueryRowContext(ctx, `
-INSERT INTO node_steps (team, run_id, node_id, step_id, status)
-VALUES (?,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
-  WHERE node_steps.team = excluded.team
-RETURNING annotations_json`,
-		string(t.team), runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
-		return err
-	}
-	var list []string
-	if len(current) > 0 {
-		if err := json.Unmarshal(current, &list); err != nil {
-			list = nil
-		}
-	}
-	list = append(list, msg)
-	next, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE node_steps SET annotations_json = ?
-WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
-		next, string(t.team), runID, nodeID, stepID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET annotation_count = annotation_count + 1, top_annotation = ? WHERE team = ? AND id = ?`,
-		msg, string(t.team), runID); err != nil {
-		return err
-	}
-	if err := appendRunAnnotation(tx, t.team, runID, msg); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// SetStepSummary replaces a step's markdown summary with md.
-// Overwrite-on-write: later calls supersede earlier ones. Inserts a
-// placeholder row if the step doesn't yet exist (a summary may fire
-// before step_start lands in the rare reorder case), matching the
-// pattern AppendStepAnnotation uses. Driven by sparkwing.Summary()
-// emitted inside a step body.
-func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
-	return s.defaultTenant().SetStepSummary(ctx, runID, nodeID, stepID, md)
-}
-
-// SetStepSummary is [Store.SetStepSummary] confined to t's team.
-func (t *Tenant) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (team, run_id, node_id, step_id, status)
-VALUES (?,?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
-  WHERE node_steps.team = excluded.team`,
-		string(t.team), runID, nodeID, stepID, StepRunning); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE node_steps SET summary = ?
-WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
-		md, string(t.team), runID, nodeID, stepID); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // MarkNodeReady publishes a job to its team's queue.
@@ -2387,22 +1984,6 @@ func closeRowsOrLog(rows *sql.Rows) {
 	}
 }
 
-// UpdateNodeActivity sets status_detail and bumps last_heartbeat.
-func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
-	return s.defaultTenant().UpdateNodeActivity(ctx, runID, nodeID, detail)
-}
-
-// UpdateNodeActivity is [Store.UpdateNodeActivity] confined to t's team.
-func (t *Tenant) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
-	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET status_detail = ?, last_heartbeat = ?
-		  WHERE team = ? AND run_id = ? AND node_id = ?`, detail, time.Now().UnixNano(), string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	return fencedRows(res, fenced)
-}
-
 // Event is one audit/wire record for a run; Seq is per-run monotonic.
 type Event struct {
 	RunID   string          `json:"run_id"`
@@ -2461,16 +2042,6 @@ SELECT run_id, seq, node_id, kind, ts, payload
 // sequence number from MAX(seq)+1. NO KEY UPDATE leaves foreign-key checks
 // on sibling nodes free to proceed while those nodes await their event turn.
 // A missing run leaves nothing to lock; the insert then fails its foreign key.
-func lockRunRow(ctx context.Context, tx *storeTx, runID string) error {
-	var id string
-	err := tx.QueryRowContext(ctx,
-		`SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(), runID).Scan(&id)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	return nil
-}
-
 // AppendEvent writes the run's next event in order.
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	tx, err := s.beginTx(ctx)
@@ -2535,7 +2106,7 @@ func lockEventSequenceTx(ctx context.Context, tx *storeTx, team Team, runID stri
 	if tx.dialect != DialectPostgres {
 		return nil
 	}
-	if _, err := lockTeamRunRowTx(ctx, tx, team, runID); err != nil {
+	if err := lockStateRunTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, runID)
@@ -2928,28 +2499,6 @@ func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]s
 	return out, nil
 }
 
-// ListPendingTriggersForParent returns pending child triggers for a tenant run.
-func (t *Tenant) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
-	now := time.Now()
-	rows, err := t.s.query(ctx, `
-SELECT id FROM triggers
- WHERE team = ? AND status = ? AND parent_run_id = ? AND available_at <= ?
-	ORDER BY created_at ASC`, string(t.team), triggerStatusPending, parentRunID, now.UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
 // GetTrigger returns one tenant trigger.
 func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	var tr Trigger
@@ -3288,64 +2837,6 @@ type Approval struct {
 	Comment     string     `json:"comment,omitempty"`
 }
 
-// CreateApproval inserts a pending approval on a default-team node and flips
-// its status to approval_pending in one txn. Re-runs a gate from scratch.
-func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
-	return s.defaultTenant().CreateApproval(ctx, a)
-}
-
-// CreateApproval inserts a pending approval on a node of one of t's runs and
-// flips the node's status to approval_pending in one txn. Re-runs a gate from
-// scratch. A run of another team reads as [ErrNotFound].
-func (t *Tenant) CreateApproval(ctx context.Context, a Approval) error {
-	if a.OnTimeout == "" {
-		a.OnTimeout = ApprovalOnTimeoutFail
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, a.RunID); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `
-INSERT INTO approvals (team, run_id, node_id, requested_at, message, timeout_ms, on_timeout)
-VALUES (?,?,?,?,?,?,?)
-ON CONFLICT(run_id, node_id) DO UPDATE SET
-    requested_at = excluded.requested_at,
-    message      = excluded.message,
-    timeout_ms   = excluded.timeout_ms,
-    on_timeout   = excluded.on_timeout,
-    approver     = '',
-    resolved_at  = NULL,
-    resolution   = '',
-    comment      = ''
-  WHERE approvals.team = excluded.team`,
-		string(t.team), a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
-		a.Message, a.TimeoutMS, a.OnTimeout)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n == 0 {
-		if err != nil {
-			return err
-		}
-		return notFound("run", a.RunID)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET status = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
-		NodeStatusApprovalPending, string(t.team), a.RunID, a.NodeID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// GetApproval returns the row of a default-team node, or ErrNotFound.
-func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error) {
-	return s.defaultTenant().GetApproval(ctx, runID, nodeID)
-}
-
 // GetApproval returns the row of a node of one of t's runs, or ErrNotFound.
 func (t *Tenant) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error) {
 	row := t.s.queryRow(ctx, `
@@ -3353,55 +2844,6 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
        approver, resolved_at, resolution, comment
   FROM approvals WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID)
 	return scanApproval(row)
-}
-
-// ResolveApproval stamps resolution on a pending default-team row.
-// ErrNotFound when missing; ErrLockHeld when already resolved.
-func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
-	return s.defaultTenant().ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
-}
-
-// ResolveApproval stamps resolution on a pending row of one of t's runs.
-// ErrNotFound when missing or another team's; ErrLockHeld when already
-// resolved.
-func (t *Tenant) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
-	if handled, err := t.s.resolveControllerApproval(ctx, t.team, runID, nodeID, resolution, approver, comment); err != nil {
-		return nil, err
-	} else if handled {
-		return t.GetApproval(ctx, runID, nodeID)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var resolvedNS sql.NullInt64
-	err = tx.QueryRowContext(ctx,
-		`SELECT resolved_at FROM approvals WHERE team = ? AND run_id = ? AND node_id = ?`,
-		string(t.team), runID, nodeID).Scan(&resolvedNS)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, notFound("approval", runID+"/"+nodeID)
-		}
-		return nil, err
-	}
-	if resolvedNS.Valid {
-		return nil, ErrLockHeld
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-UPDATE approvals
-   SET resolution = ?, approver = ?, comment = ?, resolved_at = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND resolved_at IS NULL`,
-		resolution, approver, comment, time.Now().UnixNano(),
-		string(t.team), runID, nodeID); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return t.GetApproval(ctx, runID, nodeID)
 }
 
 // ListApprovalsForRun returns the rows of one of t's runs in request order.
