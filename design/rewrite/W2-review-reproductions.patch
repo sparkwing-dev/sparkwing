@@ -1,0 +1,212 @@
+diff --git a/pkg/controller/intake_review_repro_test.go b/pkg/controller/intake_review_repro_test.go
+new file mode 100644
+--- /dev/null
++++ b/pkg/controller/intake_review_repro_test.go
+@@ -0,0 +1,207 @@
++package controller
++
++import (
++	"context"
++	"crypto/sha256"
++	"encoding/hex"
++	"encoding/json"
++	"net/http/httptest"
++	"path/filepath"
++	"reflect"
++	"testing"
++	"time"
++
++	"github.com/sparkwing-dev/sparkwing/internal/blob"
++	"github.com/sparkwing-dev/sparkwing/internal/capability"
++	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
++	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
++	"github.com/sparkwing-dev/sparkwing/internal/secrets"
++	"github.com/sparkwing-dev/sparkwing/pkg/match"
++	"github.com/sparkwing-dev/sparkwing/pkg/store"
++	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
++)
++
++func reviewIntakeStore(t *testing.T) (*Server, *store.Tenant) {
++	t.Helper()
++	st, err := teststore.Open(filepath.Join(t.TempDir(), "intake.db"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if err := st.Close(); err != nil {
++			t.Error(err)
++		}
++	})
++	if err := st.AsOperator().CreateTeam(t.Context(), "intake-review"); err != nil {
++		t.Fatal(err)
++	}
++	tenant, err := st.ForTeam(t.Context(), "intake-review")
++	if err != nil {
++		t.Fatal(err)
++	}
++	return New(st, nil), tenant
++}
++
++func reviewNativeImplementation[T any](t *testing.T, value any) {
++	t.Helper()
++	name := reflect.TypeFor[T]().Name()
++	t.Run(name, func(t *testing.T) {
++		if _, ok := value.(T); !ok {
++			t.Fatalf("%T does not implement %s", value, name)
++		}
++	})
++}
++
++func TestReviewProductionDependenciesHaveNativeTransactions(t *testing.T) {
++	srv, tenant := reviewIntakeStore(t)
++	reviewNativeImplementation[BootstrapAdminIssuer](t, srv.store)
++	reviewNativeImplementation[LauncherSyncReader](t, srv.store.AsOperator())
++	reviewNativeImplementation[AccountWriter](t, srv.store)
++	reviewNativeImplementation[TeamWriter](t, tenant)
++	reviewNativeImplementation[ScheduleWriter](t, tenant)
++	reviewNativeImplementation[RunControlWriter](t, tenant)
++	reviewNativeImplementation[MetricWriter](t, tenant)
++	reviewNativeImplementation[ConcurrencyStore](t, tenant)
++	reviewNativeImplementation[SizingStore](t, tenant)
++	reviewNativeImplementation[BillingWriter](t, tenant)
++	reviewNativeImplementation[OIDCReader](t, tenant)
++	reviewNativeImplementation[GitHubConnectWriter](t, srv.store)
++	reviewNativeImplementation[GitHubAppWriter](t, tenant)
++	reviewNativeImplementation[RunTransactions](t, tenant)
++	reviewNativeImplementation[DataTransactions](t, tenant)
++	reviewNativeImplementation[PaymentSettler](t, srv.store)
++}
++
++func TestReviewNativeLocalPeerAuthentication(t *testing.T) {
++	srv, _ := reviewIntakeStore(t)
++	snapshot, err := srv.store.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialPeer, Peer: capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}, Audience: capability.Controller}, capability.RequestEvidence{})
++	if err != nil || len(snapshot.Authorities) == 0 {
++		t.Fatalf("native peer authentication: %+v, %v", snapshot, err)
++	}
++}
++
++func TestReviewDeclaredPipelineReferenceUsesNativeChecker(t *testing.T) {
++	e, _ := engineRuntimeStore(t)
++	a := engineRuntimeClaim(t, e, capability.UnitNode)
++	body, err := json.Marshal(nodeproto.JobSpec{ID: "job", References: []nodeproto.PipelineReference{{Pipeline: "producer", Job: "output"}}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, body)
++	if err := e.Store.CheckBinding(t.Context(), a.Principal, capability.BindReadSet, capability.Target{Team: "a", Pipeline: "producer"}); err != nil {
++		t.Fatalf("declared pipeline reference: %v", err)
++	}
++}
++
++func TestReviewDerivedSessionCannotProvisionDetachedRoot(t *testing.T) {
++	e, _ := engineRuntimeStore(t)
++	st := e.Store
++	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.test',1,1)`)
++	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
++	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
++	if err != nil {
++		t.Fatal(err)
++	}
++	st.SetSessionKeyCipher(cipher)
++	raw, _, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "account", Email: "account@example.test"}, "a", time.Hour)
++	if err != nil {
++		t.Fatal(err)
++	}
++	digest := sha256.Sum256([]byte(raw))
++	parent := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
++	limited, err := st.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &parent, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Team: "a", Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	derivedRaw, _, err := st.CreateCapabilitySession(t.Context(), limited.Capability.Prefix, time.Hour)
++	if err != nil {
++		t.Fatal(err)
++	}
++	digest = sha256.Sum256([]byte(derivedRaw))
++	derived := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
++	issued, err := st.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &derived, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Team: "a", Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
++	if err == nil {
++		t.Fatalf("derived session provisioned detached root %s with parent %v", issued.Capability.Prefix, issued.Capability.Parent)
++	}
++}
++
++func TestReviewProductionDataObjectsSupplyLiveAuthority(t *testing.T) {
++	e, _ := engineRuntimeStore(t)
++	a := engineRuntimeClaim(t, e, capability.UnitNode)
++	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(t.TempDir(), "data"), Endpoint: "http://controller.test", SigningKey: make([]byte, 32)})
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if err := objects.Close(); err != nil {
++			t.Error(err)
++		}
++	})
++	srv := New(e.Store, nil).WithDataObjects(objects)
++	if _, err := srv.dataController.BindData(t.Context(), a); err != nil {
++		t.Fatalf("native data signing authority: %v", err)
++	}
++}
++
++func TestReviewLocalFirstPlacementHoldsForLivePreferredRunner(t *testing.T) {
++	e, _ := engineRuntimeStore(t)
++	engineRuntimeClaim(t, e, capability.UnitTrigger)
++	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',?,?,?)`, time.Now().UnixNano(), []byte(`{"id":"job"}`), []byte(`{}`))
++	e.Store.SetClaimProfileResolver(engineEnrollmentFunc(func(_ context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
++		location := "cloud"
++		if p.Capability.Subject.ID == "preferred" {
++			location = "local"
++		}
++		return match.Profile{Location: location, Capacity: match.Resources{Cores: 1}}, match.Resources{Cores: 1}, nil
++	}))
++	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
++	raw := engineHTTPRoot(t, e, "a", "fallback", []capability.Grant{capability.NodesClaim})
++	engineHTTPRoot(t, e, "a", "preferred", []capability.Grant{capability.NodesClaim})
++	if err := e.Store.RecordAgentLabels(t.Context(), "preferred", nil); err != nil {
++		t.Fatal(err)
++	}
++	h := New(e.Store, nil).WithEngineController(e).WithLocalFirstPlacement([]string{"location=local"}, time.Hour, time.Hour).Handler()
++	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
++	var result controllerwire.ClaimResponse
++	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
++		t.Fatal(err)
++	}
++	if result.Claim != nil {
++		t.Fatalf("fallback claimed %s while a live eligible preferred runner had capacity", result.Claim.JobID)
++	}
++}
++
++func TestReviewDueScheduleCreatesSealedRun(t *testing.T) {
++	srv, tenant := reviewIntakeStore(t)
++	schedule := store.CronSchedule{
++		ID: "nightly", Team: tenant.Team(), Pipeline: "ci",
++		RepoPath: "https://github.com/acme/widgets.git", GitBranch: "main",
++		LockedRef: "0123456789abcdef0123456789abcdef01234567", ArmedBy: "account:editor",
++	}
++	id, err := (cronLauncher{server: srv}).Launch(t.Context(), schedule, time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC))
++	if err != nil {
++		t.Fatalf("due schedule intake: %v", err)
++	}
++	run, err := tenant.ReadRun(t.Context(), id)
++	if err != nil || run.Request.RunID != id || run.Request.Hash == "" || run.Owner == nil {
++		t.Fatalf("sealed scheduled run: %+v, %v", run, err)
++	}
++}
++
++func TestReviewVerifiedWebhookCreatesSealedRun(t *testing.T) {
++	srv, tenant := reviewIntakeStore(t)
++	req := httptest.NewRequest("POST", "/api/v1/github/app/webhook", nil)
++	req = req.WithContext(t.Context())
++	plan := githubAppPlannedRun{pipeline: "ci", intake: githubAppIntake{
++		user: "octocat", branch: "main", sha: "0123456789abcdef0123456789abcdef01234567",
++		env: map[string]string{EnvDefaultBranch: "main"},
++	}}
++	result, err := srv.startGitHubAppRun(req, tenant, plan, store.GitHubRepo{ID: 42, Owner: "acme", Name: "widgets"}, "delivery-1", []byte(`{"ref":"refs/heads/main"}`))
++	if err != nil {
++		t.Fatalf("verified webhook intake: %v", err)
++	}
++	run, err := tenant.ReadRun(t.Context(), result.RunID)
++	if err != nil || run.Request.RunID != result.RunID || run.Request.Hash == "" || run.Owner == nil {
++		t.Fatalf("sealed App run: %+v, %v", run, err)
++	}
++}

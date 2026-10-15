@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -33,6 +34,10 @@ func (f *queueReads) ListConcurrencyStates(context.Context) ([]*store.Concurrenc
 	return f.states, f.err
 }
 
+func (f *queueReads) ReadRunners(context.Context) (capability.RunnerSnapshot, error) {
+	return capability.RunnerSnapshot{Now: time.Unix(1800000000, 0)}, nil
+}
+
 func queueReadFixture() (*credentialBoundary, *queueReads) {
 	b := intakeBoundary()
 	b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsRead}
@@ -51,7 +56,7 @@ func queueReadServer(t *testing.T, b *credentialBoundary, f *queueReads) http.Ha
 				return nil, f.resolveErr
 			}
 			return f, f.resolveErr
-		}).Handler()
+		}).WithRunnerInventory(func(_ context.Context, team store.Team) (controller.RunnerInventoryReader, error) { return f, nil }).Handler()
 }
 
 func TestQueueReadAuthenticatesBeforePersistence(t *testing.T) {

@@ -20,8 +20,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
-const oauthOrigin = "https://controller.test"
-const oauthRedirect = oauthOrigin + "/auth/github/callback"
+const (
+	oauthOrigin   = "https://controller.test"
+	oauthRedirect = oauthOrigin + "/auth/github/callback"
+)
 
 type oauthProvider struct {
 	challenge, code string
@@ -29,10 +31,16 @@ type oauthProvider struct {
 	spent           bool
 	failure         string
 	diagnostic      string
+	transportError  error
+	userBody        string
+	emailsBody      string
 }
 
 func (p *oauthProvider) RoundTrip(r *http.Request) (*http.Response, error) {
 	p.calls++
+	if p.transportError != nil {
+		return nil, p.transportError
+	}
 	body, status := "", http.StatusOK
 	switch r.URL.Path {
 	case "/token":
@@ -57,10 +65,16 @@ func (p *oauthProvider) RoundTrip(r *http.Request) (*http.Response, error) {
 			return nil, errors.New("missing provider bearer")
 		}
 		body = `{"id":123,"login":"member","name":"Member"}`
+		if p.userBody != "" {
+			body = p.userBody
+		}
 	case "/emails":
 		body = `[{"email":"member@example.test","primary":true,"verified":true}]`
 		if p.failure == "unverified" {
 			body = `[{"email":"member@example.test","primary":true,"verified":false}]`
+		}
+		if p.emailsBody != "" {
+			body = p.emailsBody
 		}
 	default:
 		return nil, errors.New("unexpected provider request")
@@ -103,7 +117,7 @@ func newOAuthHTTP(t *testing.T) oauthHTTP {
 		t.Fatalf("start HTTP %d %s", w.Code, w.Body.String())
 	}
 	p.challenge = authorize.Query().Get("code_challenge")
-	if p.challenge == "" || authorize.Query().Get("code_challenge_method") != "S256" || authorize.Query().Get("redirect_uri") != oauthRedirect || p.calls != 0 || w.Header().Get("Cache-Control") != "no-store" {
+	if authorize.Query().Get("scope") != "read:user user:email" || p.challenge == "" || authorize.Query().Get("code_challenge_method") != "S256" || authorize.Query().Get("redirect_uri") != oauthRedirect || p.calls != 0 || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("authorize=%s calls=%d", authorize, p.calls)
 	}
 	if !flow.HttpOnly || !flow.Secure || flow.SameSite != http.SameSiteLaxMode || flow.Path != "/" || flow.Domain != "" {

@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
-func TestUnregisteredRouteAnswersJSONNamingTheRoute(t *testing.T) {
+func TestUnregisteredRouteAnswersCanonicalNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	controller.New(nil, nil).Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/does-not-exist", nil))
 	resp := w.Result()
@@ -21,18 +22,12 @@ func TestUnregisteredRouteAnswersJSONNamingTheRoute(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 		t.Errorf("content type = %q, want application/json", got)
 	}
-	var body struct {
-		Error string `json:"error"`
-		Route string `json:"route"`
-	}
+	var body apierr.Envelope
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body.Error != controller.UnsupportedRouteError {
-		t.Errorf("error = %q, want %q", body.Error, controller.UnsupportedRouteError)
-	}
-	if want := "GET /api/v1/does-not-exist"; body.Route != want {
-		t.Errorf("route = %q, want %q", body.Route, want)
+	if body.Error == nil || body.Error.Code != apierr.NotFound {
+		t.Fatalf("error = %+v, want not_found", body.Error)
 	}
 }
 

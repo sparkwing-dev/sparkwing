@@ -176,3 +176,61 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 		t.Fatalf("removed session = %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
+	engine, _ := engineRuntimeStore(t)
+	st := engine.Store
+	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('operator','operator@example.test',1,1)`)
+	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','operator','reader',1)`)
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(st, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t)).WithOperatorAccounts([]string{"operator"})
+	raw, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "operator"}, "a", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &consoleWritesFake{}
+	s.WithConsoleWriter(writer)
+	property := func(input []byte, phase uint8) bool {
+		s.WithOperatorAccounts([]string{"operator"})
+		writer.calls = 0
+		r := httptest.NewRequest("POST", "https://controller.test/api/v1/operator/teams/a/grants?actor="+hex.EncodeToString(input), strings.NewReader(`{"amount_cents":10,"reason":"test","key":"once"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", "https://controller.test")
+		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
+		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+		r.Header.Set(csrfHeaderName, csrf)
+		want := 201
+		switch phase % 5 {
+		case 1:
+			s.WithOperatorAccounts(nil)
+			want = 403
+		case 2:
+			r.Header.Set(csrfHeaderName, "foreign-"+hex.EncodeToString(input))
+			want = 403
+		case 3:
+			r.Header.Set("Authorization", "Bearer "+raw)
+			want = 401
+		case 4:
+			r.Header.Set("Origin", "https://foreign.test")
+			want = 403
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != want || (writer.calls == 1) != (phase%5 == 0) {
+			t.Logf("phase=%d response=%d %s calls=%d", phase%5, w.Code, w.Body, writer.calls)
+			return false
+		}
+		if phase%5 == 0 {
+			a := writer.seen
+			digest := sha256.Sum256([]byte(raw))
+			return a.Principal.Class == capability.CredentialConsole && a.Principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}) && a.Principal.Authority == (capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}) && a.Target.Team == "a"
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
+	}
+}

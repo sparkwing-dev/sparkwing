@@ -14,15 +14,12 @@ func TestClaimAttentionPreservesEnrollmentWhenARunnerIsOnline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered := []store.RegisteredAgent{{Name: "runner", CapabilityPrefix: "root", Profile: match.Profile{
+	now := time.Now()
+	registered := []store.RegisteredAgent{{LastSeen: now, Name: "runner", CapabilityPrefix: "root", Profile: match.Profile{
 		Name: "runner", Class: match.ClassAgent, Location: "local", ReservedPools: []string{"prod"},
-		Capacity: match.Resources{Cores: 4}, Accept: accept,
+		Capacity: match.Resources{Cores: 4}, Accept: accept, Labels: []string{"gpu"}, OS: "linux", Arch: "arm64",
 	}}}
-	online := map[string]runnerPresence{"root": {
-		Labels:  []string{"gpu", "pool=forged"},
-		profile: match.Profile{Name: "impostor", Class: match.ClassCloud, Location: "cloud", ReservedPools: []string{"forged"}, Capacity: match.Resources{Cores: 100}, OS: "linux", Arch: "arm64"},
-	}}
-	sighted := sightAgents(registered, online, time.Now())
+	sighted := sightAgents(registered, now)
 	if len(sighted) != 1 || !sighted[0].online {
 		t.Fatalf("online agent: %+v", sighted)
 	}

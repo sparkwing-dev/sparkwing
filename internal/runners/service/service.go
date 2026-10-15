@@ -16,75 +16,37 @@ import (
 )
 
 const (
-	// Marker appears verbatim in every file this package writes.
-	Marker = "Installed by sparkwing"
-
-	// ServiceName is the systemd user unit that runs the runner.
+	Marker      = "Installed by sparkwing"
 	ServiceName = "sparkwing-runner.service"
-
-	// Label is the launchd label of the runner.
-	Label = "com.sparkwing.runner"
-
-	// PlistName is the file launchd reads the runner from.
-	PlistName = Label + ".plist"
+	Label       = "com.sparkwing.runner"
+	PlistName   = Label + ".plist"
 )
 
 // ErrUnsupported is returned, wrapped, for a GOOS that has no runner service.
 var ErrUnsupported = errors.New("no sparkwing runner service on this operating system")
 
-// Host is everything the installer needs to know about the machine.
+// Host supplies native paths and a service-manager command executor.
 type Host struct {
-	// GOOS is "linux" or "darwin"; anything else yields [ErrUnsupported].
-	GOOS string
-
-	// Home is the user's home directory, where launchd reads LaunchAgents.
-	Home string
-
-	// ConfigHome is $XDG_CONFIG_HOME or ~/.config, where systemd reads user units.
+	GOOS       string
+	Home       string
 	ConfigHome string
-
-	// Binary is the absolute path of the sparkwing-runner binary.
-	Binary string
-
-	// ConfigPath is the config.yaml whose runner section the service reads its
-	// credential-file location from.
+	Binary     string
 	ConfigPath string
-
-	// LogPath receives the runner's stdout and stderr on macOS. systemd
-	// journals the unit instead.
-	LogPath string
-
-	// UID names the launchd domain gui/<uid>.
-	UID int
-
-	// Exec runs systemctl or launchctl and returns stdout and stderr combined.
-	Exec func(context.Context, string, ...string) (string, error)
+	LogPath    string
+	UID        int
+	Exec       func(context.Context, string, ...string) (string, error)
 }
 
 // State describes the service as it exists on the host.
 type State struct {
-	// Installed reports a managed unit or plist at the expected path.
-	Installed bool `json:"installed"`
-
-	// Foreign reports a file without Marker. It is never overwritten or removed.
-	Foreign bool `json:"foreign"`
-
-	// Mismatch reports a managed file that runs a different runner config than
-	// the one [Host] names. [Uninstall] leaves such a file in place.
-	Mismatch bool `json:"mismatch"`
-
-	// Running reports that the service manager accepted the start or stop.
-	Running bool `json:"running"`
-
-	// Path is the unit or plist path.
-	Path string `json:"path"`
-
-	// Binary and Arguments are read from the installed unit, without opening configuration.
+	Installed bool     `json:"installed"`
+	Foreign   bool     `json:"foreign"`
+	Mismatch  bool     `json:"mismatch"`
+	Running   bool     `json:"running"`
+	Path      string   `json:"path"`
 	Binary    string   `json:"binary,omitempty"`
 	Arguments []string `json:"arguments,omitempty"`
-
-	// Detail is one sentence for a human.
-	Detail string `json:"detail,omitempty"`
+	Detail    string   `json:"detail,omitempty"`
 }
 
 // Install writes and starts a managed registration after checking its loaded source.

@@ -190,6 +190,7 @@ const (
 // Authority records that authorizer; provisioned roots have no revocation parent.
 // Ordinary DelegateSpec cannot use this exception to detach from its parent.
 type ProvisionSpec struct {
+	Seed           string `json:"-"`
 	Kind           ProvisionKind
 	Authority      *AuthorityRef
 	RegistrationID string
@@ -320,4 +321,16 @@ func narrowData(parent, child *DataScope) bool {
 		(!parent.VerifiedDefaultOnly || child.VerifiedDefaultOnly) &&
 		(parent.RunID == "" || child.RunID == parent.RunID) && (parent.NodeID == "" || child.NodeID == parent.NodeID) &&
 		(parent.Attempt == 0 || child.Attempt == parent.Attempt) && (parent.Generation == 0 || child.Generation == parent.Generation)
+}
+
+// ValidateProvisionSeed confines supplied presentations to the bootstrap origin.
+func ValidateProvisionSeed(spec ProvisionSpec) error {
+	if spec.Seed == "" {
+		return nil
+	}
+	lookup, err := credentialLookup(Presentation{Class: CredentialBearer, Raw: spec.Seed})
+	if err != nil || lookup.Audience != Controller || spec.Kind != ProvisionBootstrap {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid bootstrap credential"}
+	}
+	return nil
 }

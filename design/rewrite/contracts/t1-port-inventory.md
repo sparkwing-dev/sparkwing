@@ -19,6 +19,259 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W2 runner-observation ports: the five tests in agents_test.go move to
+TestRunnerInventoryHTTPUsesCommittedSnapshot,
+TestRunnerInventoryHTTPNameProperty, TestRunnerInventoryHTTPTenantProperty,
+TestRunnerInventoryHTTPRequiresMemberCredential and
+TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts. They retain empty arrays,
+private storage-error refusal, distinct authority behind equal names, activity,
+liveness and separate headroom observation time through the actual authenticated
+HTTP handler. The inventory reader is a fake. Durable poll/renewal correlation,
+revocation, replacement and restarting the controller remain W1 integration
+obligations. The old newest-holder-wins display rule retires with holder parsing.
+
+TestBusyRunnerHeartbeatUpdatesObservedLivenessWithoutPolling is replaced at the
+HTTP projection boundary by the separate LastSeen/headroom snapshot assertions.
+The actual renewal already runs in TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences.
+W1 still needs to project that accepted renewal into ReadRunners and preserve
+liveness on refused renewal. A fake snapshot does not close that persistence
+obligation. The heartbeat-cache pruning test retires with that removed cache.
+
+TestClaimAttentionNamesWhyARunWaits and
+TestClaimAttentionPassWrapsDespiteNewNodes now run against the final SQLite
+capabilities, execution seals and node-attention projection. Their old token-table
+and HTTP-listener fixtures are deleted. Cloud matching remains covered by
+TestClaimAttentionCountsSparkwingCloud. The platform-change registry test retires
+with that cache. Current enrolled platform/pool/repository/capacity preservation
+runs in TestClaimAttentionPreservesEnrollmentWhenARunnerIsOnline.
+TestClaimAttentionCommittedLivenessProperty generates past/future observations
+and checks the existing two-minute boundary. TestEngineClaimHTTPCommitsRunnerObservations
+proves accepted claim polls persist C1's filtered labels and store time.
+
+The runner-presence credential-carrying test retires with that registry.
+TestQueueStateShowsOnlyTheCallersTeamsRunners now consumes the same final
+snapshot interface. QueueRead HTTP acceptance tests keep their existing policy,
+concurrency-group and error assertions with a runner-snapshot fake.
+
+The two auth_claim_test.go tests move to TestEngineClaimHTTPRefusalsDoNotAward,
+TestEngineClaimHTTPDeadCredentialProperty and the final claim-kind fuzz test.
+They check anonymous/unknown/legacy/revoked credentials, root-versus-claim grants,
+canonical 401/403 and zero persisted awards on refusal. The old TokenDeadError
+classification and admin-only readiness route retire with that legacy protocol.
+These ports complete no native credential-matrix cell.
+
+
+W2 signing/fixture cleanup ports: tokens_test.go's six scope validation tests move
+to TestCredentialIssuanceValidatesEveryGrant and RefusedGrantProperty. They exercise
+the final issuer with real SQLite, all declared grants, empty grants and generated
+unknown grants. Invalid/padded/duplicate grants refuse without creating a row.
+The source-scanning Scope* allowlist test retires with the old constants.
+
+The browser-session and page fixtures now use direct account sessions, row-bound
+CSRF protection and capability issuance. Session-header writes require CSRF, API
+refusals preserve cookies, and nonlocal pages require sign-in before bootstrap.
+OperatorPageServesOnlyTheOperatorsSession covers the configured gate and refuses
+a capability-parented session. The local-directory deletion port uses a fake
+committing TeamWriter. It proves post-commit directory handling and exact authority
+forwarding, not production deletion atomicity.
+
+The four chunked_body_test.go regressions move to EngineClaimHTTPChunkedBody and
+CapabilityRotationChunkedBodyPreservesGrace. Final claims keep decoded kinds and
+refuse removed pipeline/lease selectors. Empty claim bodies now refuse.
+
+The three execution_location_test.go tests retire with principal/holder-string
+inference. EngineClaimUsesEnrollmentAndChecksRunnerPolicy and
+EngineRunDetailReadsPersistedHistoryAndTaggedLogs retain granted runner identity
+and attempt generation/history through the final projections.
+
+Duplicate controller signer tests retire with their implementations. W7's shared
+backend tests and TestDataStorageSignedFilesystemRoutes retain transfer/signature
+proofs. CloudFrontDataBackendSignedObjectProperty checks generated exact-object
+policies, expiry and RSA signatures. DataReadHTTPChoosesCloudFrontOnlyForIngress
+checks the actual HTTP handoff and charge-before-sign order with fake data facts.
+RequestPrincipalMetricLabelsProperty bounds labels to seven constants, and
+RequestPrincipalMetricsCountsAuthenticatedPolicy checks counting through HTTP.
+The old token-cache/argon2 test retires with the removed cache. W1's retained
+legacy hashing collector is not asserted as final authentication behavior.
+These are component ports. No native credential-matrix cell is newly completed.
+
+
+W2 seeded-bootstrap and login ports: bootstrap_token_test.go no longer calls
+the removed token-table startup path. Its forwarding property checks the exact
+seed, fixed operational authority, issuer result and missing-adapter refusal.
+The old no-window, populated-table, malformed and empty-input cases split
+between those component tests and W1's pending once-only issuance transaction.
+No fake gate is counted as a durable race/restart proof.
+
+The three multi_team_auth_test.go functions and four auth_visibility_test.go
+functions move to TestEnableAuthFromStoreRefusesAnonymousBeforeBootstrapProperty.
+It runs without sockets against the actual final and legacy muxes with real
+SQLite. Single-team and both license-installation orders retain anonymous
+refusal, and health reports authentication enabled before seeding. The old
+single-team-open expectation retires with that removed startup mode. Late
+legacy-token acceptance retires with token-table startup provisioning.
+TestCheckRequireAuthUsesCapabilityRead ports the command's readiness check
+through the named read interface, including absence and backend errors.
+Production administrator-read integration remains W1 work.
+
+The two deleted files session_hash_test.go and session_lifetime_test.go held
+TestLogin_StoresOnlyTheSessionDigest and
+TestLoginSessionStartsWithSevenDaysOfValidity. Their assertions now run in
+TestLoginHTTPAccountCapabilitySession against actual account-capability login,
+real SQLite and the production handler. The final session is stored by digest,
+not raw presentation, the schema has no plaintext csrf_token column, and the
+fresh expiry is seven days. Operator bootstrap credentials cannot sign in.
+
+TestPaymentHTTPFinancialProviderHandoffProperty exercises actual signed HTTP
+refund, failed-payment and dispute handoffs in both modes, generated metadata
+and forged signatures. Existing HTTP refusals retain private ledger errors.
+TestPaymentProviderOutcomes covers card setup, paid-card and warning enrichment
+with a fake provider transport. These are verifier/HTTP component proofs.
+W1b's existing card/refund/warning/dispute tests still need their final
+SettlePayment ports and real ledger integration. No native matrix cell is
+newly unskipped.
+
+
+W2 execution credential retirement removes the seven tests in
+claim_route_internal_test.go with that router. Their principal-with-no-scopes
+expectation is replaced by the final credential/grant policy. The existing
+TestCredentialHTTPAuthenticationBoundary, TestCredentialHTTPTerminalGrace,
+TestCredentialHTTPCancelDrainsReporting and TestCredentialPolicyAlternatives
+retain wrong-kind, binding, ended-authority, replay and cancellation behavior
+against the final snapshot interface. Final engine and store properties retain
+generation and result fencing. These are interface/component proofs, not a
+new native claim or log-tail cell.
+
+TestEngineRetiredExecutionRoutesProperty reaches the actual API and browser
+handlers with generated run/job IDs, old and malformed bearers, session headers
+and cookies. Retired paths return canonical 404 and the raw event method returns
+canonical 405 before session lookup. No refusal changes cookies.
+TestNodeStoreErrorReportsTransientPostgresContention moves to
+TestEngineTransactionContentionProperty through the final transition route.
+It preserves 503 and one-second retry advice for all three PostgreSQL contention
+states, safe 500 for other database faults, and private error details through
+direct, wrapped and joined errors. It uses fake committing transactions.
+
+TestControllerEventsUseTenantAndReplica retires with raw event append. Events
+are emitted by committing state transitions. The retained store event accounting
+suite checks tenant/replica charges, rollback and reopening. Final engine-to-event
+accounting composition remains an integration requirement. The legacy node
+projection test retires with that unused projection. EngineJobsHTTP retains
+the public job shape and private-field exclusion. Black-box legacy runtime
+suites outside these deleted files still need their final caller/fixture ports.
+
+The four tests in local_execution_attempt_test.go and the local-mode budget
+and poll-advice tests retire with Server.WithLocalExecution. A local request
+cannot submit a caller-selected unfenced execution attempt. The final transition
+and claim-input constructors derive executor identity and generation from the
+award. TestEngineRetiredExecutionRoutesProperty refuses the old execution-start
+and execution-finish routes. The existing LocalControllerHTTP and EngineLifecycleHTTP
+components retain verified-peer selection and final transaction authority. Native
+local self-claim execution remains pending with W1/W3/W8/W9 composition.
+
+W2 browser-link ports: the deleted
+TestLinkRefusesAStateFromAnotherAccountSessionOrAReplay,
+TestLinkCompletionNeedsARecentSignIn, TestLinkAttemptsAreRateLimitedPerAccount
+and TestLinkStartRefusesAProviderAlreadyLinked move to the IdentityLinkHTTP
+tests in tests/acceptance/identity_link_http_test.go. They exercise the final
+start/callback/completion handlers with real SQLite sessions, the actual GitHub
+provider client and fake committing nonce/identity adapters. Generated checks
+cover account/session selection, ambiguous cookies, form CSRF, state and PKCE
+mutation, and arbitrary provider errors. Real durable nonce races and identity
+attachment remain C1 integrations. The surviving legacy link/unlink tests still
+carry their separate persistence obligations.
+
+TestLoginHTTPOpenController is replaced by
+TestLoginHTTPNonlocalRequiresSession. Nonlocal page access and the login page
+follow browser-session proof independently of the legacy token authenticator.
+The local-mode exception is selected through Dashboard.Local.
+
+TestLocalControllerHTTPUsesSharedPolicy exercises Server.HTTP through Wingd's
+HTTP serving/drain code over net.Pipe. Generated requests check that explicit
+credentials cannot fall back to verified peer identity. Retired paths reach no
+legacy handler. This uses fake committed peer facts and does not complete a
+native api.sock or placement cell.
+
+W2 account mutation ports: the deleted `TestActiveTeamSwitchNeedsMembership`
+and `TestIdentityRoutesRefuseABearerToken` use
+`TestAccountMutationHTTPIdentityProperty`,
+`TestAccountMutationHTTPAuthorityRefusals` and
+`TestAccountMutationHTTPTransactionRefusals`. They retain account-only policy,
+normalization and nonmember/missing-team refusal through the final HTTP boundary.
+The identity and CSRF properties use real SQLite session authentication and fake
+account transactions. Successful atomic team/session changes and the sticky
+selection on a later sign-in remain C1 integration obligations. Existing C1
+identity tests retain those persistence requirements. No native matrix cell
+is completed by these component ports.
+
+
+W2 browser-login ports: the ten tests in the deleted 271-line
+pkg/controller/browser_login_test.go move to TestLoginHTTPAccountCapabilitySession,
+TestLoginHTTPProofProperty, TestLoginHTTPPageAndMethods,
+TestLoginHTTPRefusesInvalidCredentialAndForm, TestLoginHTTPSafeReturnPath and
+TestLoginHTTPNonlocalRequiresSession in tests/acceptance/login_http_test.go. These cover
+cookies, form proof, invalid credentials, safe next, stale sessions, replacement,
+nonlocal page authentication, script escaping and audit attribution. The old admin-only
+form rule is replaced by C1's unbound account-capability contract. Machine,
+service, deployment and executable credentials still cannot open a session.
+The logout audit half retains the prior active browser-logout HTTP port.
+The local-mode caller in browser_pages_test.go no longer depends on the
+removed test helper. These are component proofs, not native matrix evidence.
+
+
+W2 route-cut ports: TestCredits_SetMeteredRouteMarksAnExistingToken moves to
+TestRunnerMeteringHTTPConsoleProperty and TestRunnerMeteringHTTPRefusals.
+The old admin-bearer expectation is reversed to console-only authority.
+The marker reaches a fake authority-bearing transaction. Real root metering
+and immutable-award provenance remain W1 integration obligations.
+TestGitHubRunnerBindingsAreOwnerOnlyAndUnbindingRevokes moves to
+TestGitHubRunnerAdminHTTPAuthorityProperty, TestGitHubRunnerAdminHTTPRefusals,
+TestGitHubRunnerAdminHTTPInputAndMethods and
+TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter. These prove final HTTP
+policy, tenant selection, public responses and missing-writer refusal.
+Atomic revocation of real Actions roots remains pending with W1.
+
+TestPaymentHTTPServiceRoutesRemoved replaces the old credits.grant route
+allowlist, anonymous-service-route and service-seeding assertions with removal
+of the entire credential path. TestPaymentHTTPAuthenticationBoundary and
+TestPaymentHTTPRefusals retain signed checkout and private-error checks.
+The deleted credit_reversals_test.go and six removed card_billing_test.go
+transport tests still require their final provider-event ports. Existing
+pkg/store tests retain partial reversal, dispute/payment identity, saved-card
+ordering, warned-card repayment, duplicate-payment refund and failed-refund
+retry requirements. None is counted as a completed provider-HTTP port here.
+The surviving owner-budget regression stays in card_billing_test.go. Source
+functions remain available in the parent revision. No native matrix cell is
+completed by these component tests.
+
+W2 OAuth ports: TestOAuthCallbackRefusesAFlowThisBrowserDidNotStart moves to
+TestOAuthHTTPProofProperty, TestOAuthHTTPPKCEProperty,
+TestOAuthHTTPSessionAndReplay and TestOAuthHTTPDeclineAndSafeNext in
+tests/acceptance/oauth_http_test.go. They retain missing flow, wrong state,
+wrong provider, replay and consent refusal and add ambiguous selectors,
+credential privacy and real session authentication. TestOAuthStartRefusesAnUnknownProvider
+moves to TestOAuthHTTPMethodsAndUnknownProvider. TestOAuthSignInAuditNamesTheAccount
+moves to TestOAuthHTTPSessionAndReplay. The 97-line old browser_oauth_test.go
+is deleted. The provider transport is fake. SQLite identity/session creation,
+PKCE client requests and the registered controller boundary are real. These
+three ports establish component behavior and complete no native matrix cell.
+
+W2 root provisioning ports: `TestMintingAMachineTokenRequiresValidRepositories`
+is replaced by `TestRootProvisioningHTTPInput` and the scope property. It
+retains host/path and shell-input refusals and adds server-derived origin,
+CSRF, dead-authority and transaction checks. The old test is deleted.
+`TestMintedMachineCommandCarriesTheRepositoryAllowlist`,
+`TestTheConnectCommandSplitsAfterItsTokenSetup`,
+`TestRunnerConnectArgsNamesTheControllerAndRepos`,
+`TestRunnerConnectArgsRunsTheLoopsTheScopesAllow`,
+`TestRunnerTokenSetupReplacesAnOpenTokenFileWithAPrivateOne` and
+`TestTheConnectCommandStopsWhenItCannotReplaceTheTokenFile` move to the
+`runnerConnectCommand` suite in web/src/lib/teams.test.ts, where the final
+command is produced. Shell tests execute that command with a fake runner and
+assert repository arguments, a private replacement file, no bearer in runner
+argv, and no launch after setup failure. All seven old regressions are deleted.
+This proves component behavior, not a native credential-matrix cell.
+
 The raw `RequeueUnstartedClaim` suite and its controller/orchestrator callers are
 retired. `TestOwnerUnstartedRecoveryFencesPriorAwardsProperty` varies initial
 generations, pending/running runs, runner/launcher owners and repeated recovery.
@@ -76,58 +329,6 @@ startup/body/dry-run assertions to procenv. The debug wait now reports an early
 host failure. It adds no acceptance cell. Store-backed legacy runtime ports and
 native placements remain open.
 
-W2 route-cut ports: TestCredits_SetMeteredRouteMarksAnExistingToken moves to
-TestRunnerMeteringHTTPConsoleProperty and TestRunnerMeteringHTTPRefusals.
-The old admin-bearer expectation is reversed to console-only authority.
-The marker reaches a fake authority-bearing transaction. Real root metering
-and immutable-award provenance remain W1 integration obligations.
-TestGitHubRunnerBindingsAreOwnerOnlyAndUnbindingRevokes moves to
-TestGitHubRunnerAdminHTTPAuthorityProperty, TestGitHubRunnerAdminHTTPRefusals,
-TestGitHubRunnerAdminHTTPInputAndMethods and
-TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter. These prove final HTTP
-policy, tenant selection, public responses and missing-writer refusal.
-Atomic revocation of real Actions roots remains pending with W1.
-
-TestPaymentHTTPServiceRoutesRemoved replaces the old credits.grant route
-allowlist, anonymous-service-route and service-seeding assertions with removal
-of the entire credential path. TestPaymentHTTPAuthenticationBoundary and
-TestPaymentHTTPRefusals retain signed checkout and private-error checks.
-The deleted credit_reversals_test.go and six removed card_billing_test.go
-transport tests still require their final provider-event ports. Existing
-pkg/store tests retain partial reversal, dispute/payment identity, saved-card
-ordering, warned-card repayment, duplicate-payment refund and failed-refund
-retry requirements. None is counted as a completed provider-HTTP port here.
-The surviving owner-budget regression stays in card_billing_test.go. Source
-functions remain available in the parent revision. No native matrix cell is
-completed by these component tests.
-
-W2 OAuth ports: TestOAuthCallbackRefusesAFlowThisBrowserDidNotStart moves to
-TestOAuthHTTPProofProperty, TestOAuthHTTPPKCEProperty,
-TestOAuthHTTPSessionAndReplay and TestOAuthHTTPDeclineAndSafeNext in
-tests/acceptance/oauth_http_test.go. They retain missing flow, wrong state,
-wrong provider, replay and consent refusal and add ambiguous selectors,
-credential privacy and real session authentication. TestOAuthStartRefusesAnUnknownProvider
-moves to TestOAuthHTTPMethodsAndUnknownProvider. TestOAuthSignInAuditNamesTheAccount
-moves to TestOAuthHTTPSessionAndReplay. The 97-line old browser_oauth_test.go
-is deleted. The provider transport is fake. SQLite identity/session creation,
-PKCE client requests and the registered controller boundary are real. These
-three ports establish component behavior and complete no native matrix cell.
-
-W2 root provisioning ports: `TestMintingAMachineTokenRequiresValidRepositories`
-is replaced by `TestRootProvisioningHTTPInput` and the scope property. It
-retains host/path and shell-input refusals and adds server-derived origin,
-CSRF, dead-authority and transaction checks. The old test is deleted.
-`TestMintedMachineCommandCarriesTheRepositoryAllowlist`,
-`TestTheConnectCommandSplitsAfterItsTokenSetup`,
-`TestRunnerConnectArgsNamesTheControllerAndRepos`,
-`TestRunnerConnectArgsRunsTheLoopsTheScopesAllow`,
-`TestRunnerTokenSetupReplacesAnOpenTokenFileWithAPrivateOne` and
-`TestTheConnectCommandStopsWhenItCannotReplaceTheTokenFile` move to the
-`runnerConnectCommand` suite in web/src/lib/teams.test.ts, where the final
-command is produced. Shell tests execute that command with a fake runner and
-assert repository arguments, a private replacement file, no bearer in runner
-argv, and no launch after setup failure. All seven old regressions are deleted.
-This proves component behavior, not a native credential-matrix cell.
 
 This repository-owned inventory records every parked source function and its required port. Acceptance destinations name existing skeletons; package destinations name required focused proofs to implement with their owning area. A scenario is complete only when every mapped case is implemented. Product skeletons remain skipped until their required areas exist; a wrong result must fail once activated.
 
@@ -136,6 +337,18 @@ Branch labels below retain the descriptive suffix of each source branch. Tracker
 The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-machine, 4 placement, 1 credential matrix, 23 run-input, 24 storage, and 10 state/security. Placement also contributes 10 existing functions. Six removed predecessors bring the total to 90 unique revision/file/function identities. Subcases do not increase that count. Source objects were inspected statically; this is not evidence that old or target product tests pass.
 
 ## Source snapshots
+
+`TestCapabilityManagementHTTPRotation` replaces the legacy controller tests
+`TestRotateToken_GraceCapRejected` and `TestRotateToken_GraceAtCapAccepted`.
+It checks the existing seven-day ceiling, default and zero grace, null and
+overflow refusal, and propagation of the authorized actor and absolute expiry
+through both member and deployment routes. `TestCapabilityManagementHTTPAuditProperty`
+replaces `TestAuditKeepsABearerInATargetOutOfTheLog`. Generated bearers pasted
+into token selectors or invalid roles never reach logs. Token targets retain
+only their public 16-character prefix. The three old tests and their obsolete
+rotation fixture are deleted. These are fake-backed HTTP proofs. They do not
+prove the committing rotation, grace, source-consent transfer or native route
+matrix and add no archived source-function identity to the inventory.
 
 `pkg/store/download_accounting_runtime_test.go` ports
 `TestChargeDownloadHoldsATeamToItsDailyCap` and
@@ -220,17 +433,6 @@ persisted generator reconstruction use existing process/replay components.
 No acceptance cell is added or activated by this continuation. The remaining
 legacy scheduler/store fixtures still fail against the removed schema.
 
-`TestCapabilityManagementHTTPRotation` replaces the legacy controller tests
-`TestRotateToken_GraceCapRejected` and `TestRotateToken_GraceAtCapAccepted`.
-It checks the existing seven-day ceiling, default and zero grace, null and
-overflow refusal, and propagation of the authorized actor and absolute expiry
-through both member and deployment routes. `TestCapabilityManagementHTTPAuditProperty`
-replaces `TestAuditKeepsABearerInATargetOutOfTheLog`. Generated bearers pasted
-into token selectors or invalid roles never reach logs. Token targets retain
-only their public 16-character prefix. The three old tests and their obsolete
-rotation fixture are deleted. These are fake-backed HTTP proofs. They do not
-prove the committing rotation, grace, source-consent transfer or native route
-matrix and add no archived source-function identity to the inventory.
 
 The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
 `pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
@@ -1113,3 +1315,395 @@ Windows execution remains unverified here.
 `GCWarmRoot`, its lister and its tmp/run-directory sweep tests are removed.
 There is no remaining warm-root producer or production caller. Final source
 workspace cleanup remains covered by cancellation/acquisition tests.
+
+W2 account discovery continuation: the GET /me branch of
+TestIdentityRoutesRefuseABearerToken is ported to
+TestAccountReadHTTPRefusesUnrelatedAuthority. It distinguishes a live unrelated
+bearer (403) from dead authority (401). The POST /teams branch remains with
+its unmigrated mutation. TestAccountReadHTTPDoesNotRenewOrSwitchSession uses
+real SQLite session persistence. TestAccountReadHTTPIdentityProperty generates
+forged selectors against all three account reads. TestCreditSettingsReadHTTP
+covers the final settings policy and authenticated feature availability.
+The two profile tests reintroduced by the integration conflict remain retired
+in favor of the existing sizing HTTP ports. No native cell is unskipped.
+
+## W2 OIDC mint retirement
+
+The twelve legacy controller OIDC tests and their token/trigger-row fixtures
+are replaced by TestOIDCMintHTTPIdentityAndExpiryProperty, Refusals,
+InputAndBudget, ClientAndKeyRotation and CommittedSubjects in
+`tests/acceptance/oidc_mint_http_test.go`, plus the existing issuer and public
+metadata tests. Real RS256/JWKS verification, the existing client, stable
+repository-specific subjects, all event/ref spellings, PR/tag subjects,
+audience validation, subject-injection refusal, 30-token isolation, distinct
+JTIs, disabled issuer, expiry and tampering are retained. Authority tests now
+refuse roots and accept only live bound oidc.mint awards/delegates.
+
+These are component tests against the actual registered HTTP handler and a
+committed-fact reader fake. C1 must prove original verified-event selection,
+schedule provenance, inheritance, registered runner identity, complete ancestry
+expiry and transactional cancellation/fencing in ReadOIDCFacts. The obsolete six-line dispatched-claim OIDC refusal assertion in
+TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames is reversed by
+the successful awarded-claim mint tests. The old
+Trigger/ClaimedRun readers are deleted from W2. No native credential matrix
+cell or production C1 identity projection is claimed complete by this port.
+
+## W2 concurrency transport cut
+
+TestObserveSlotMapsMissingHolder and TestHeartbeatSlotMapsLostOwnership move to
+`pkg/controller/client/concurrency_test.go:TestConcurrencyClientDomainErrors`.
+The tests now use in-process transport and canonical errors. They preserve
+errors.Is for the store sentinels and errors.As for apierr.Error. Untyped legacy
+error bodies cannot become lost-ownership results. TestConcurrencyClientDistinguishesAdmissionFromRateLimits
+pins the refusal of a canonical 429 as an admission result.
+
+TestConcurrencyHTTPTransactions exercises the eight actual group registrations
+with job, trigger and plan authority and fake committing adapters. The generated
+TestConcurrencyHTTPBindingProperty varies body/query run, job, holder and
+encoded group selectors against independent binding facts. Refused requests
+never enter the transaction adapter. TestConcurrencyHTTPRefusals covers current
+liveness, cancellation-sensitive acquire, cancellation-reporting release,
+stale generation, transaction refusal, safe errors, tenant selection, malformed
+inputs and unsupported methods. The client round trip uses final paths and job
+fields. The retired-route property reaches no adapter.
+
+The old claim_run_test.go concurrency properties and the cross-team leader
+resolution test remain unported native requirements. Fake adapters do not
+establish sealed group or memo policy, foreign leader resolution, lease ceilings,
+inheritance refusal or persistence races. W1 must implement C2's authority-bearing
+ConcurrencyStore and SlotKey/SlotHolderID checker before those cells can close.
+No native acceptance matrix cell is newly completed in this continuation.
+
+W2's typed step continuation updates the existing TestEngineStepHTTP and
+reporting-authority cases to StepReportRequest. TestEngineTypedStepHTTP uses
+the actual typed engine client. TestEngineTypedStepAttemptProperty generates
+captured and current ordinals and nanosecond timestamps for job and owner
+reports. Mismatched ordinals return lock_held without entering RecordStep.
+These are HTTP component proofs with fake transactions. The legacy
+StateStoreOld step callers and native placement/store composition remain open.
+
+
+## W2 reporting credential cut
+
+TestCapacityReadUsesRequestTenantProperty now calls the final authorized sizing
+handler and proves that a forged legacy Principal and request selectors cannot
+replace Authorized.Target.Team. Missing authority and an unregistered team have
+separate exact canonical refusals. The existing anonymous-bootstrap property
+uses /runners after the /agents cut. The retained agents liveness fixture passes
+the explicit target to its read handler.
+
+TestReportingRouteAuthorityProperty generates revoked, expired, wrong-audience,
+nonmember, deployment and wrong-grant presentations for all 22 reporting read
+registrations. It exercises the real verifier and policy selector against
+committed-fact fakes, with negative requests repeated through Server.Handler.
+TestReportingRetiredRoutes covers the removed read paths. The actual controller
+client's NodeLogs read, stream, completeness and whole-run requests retain exact
+escaped selectors in TestLogReaderUsesFinalRoutesAndAuthenticatedTransport. The retired NodeLogs client fixture is deleted with that API. The prior raw-event method
+refusal property still requires 405 with Allow after registration moves.
+
+The 258-line independent expected route table moved from
+internal/acceptance/credential_routes.go to
+pkg/controller/credential_route_expectations_test.go. Its independent comparison,
+mutation sensitivity and alternative-order tests moved beside it. The executable
+policy-alternative tests use the runtime rows, while the moved tests retain the
+hand-written permission oracle. No oracle is regenerated from implementation.
+No scenario, Harness method, registry or skipped native cell was added.
+
+These changes prove authorization transport and the real SQLite sizing projection.
+They do not establish final-schema run/reporting SQL or native composed log,
+receipt and runner-read implementations. Those retained tenant reads still need
+their owning store integration. The legacy verifier and remaining schedules,
+team mutations and other registrations are unfinished work.
+
+
+## W2 schedule and review credential continuation
+
+Thirteen legacy controller cron HTTP tests are ported to
+TestScheduleHTTPReadWriteAndReplay, TestScheduleHTTPOverrideAndWithdrawal,
+TestScheduleHTTPInvalidInputAndBackend and
+TestScheduleHTTPRetainedHistoryAndCounts, plus the expanded
+TestReportingRouteAuthorityProperty. The replaced test functions are deleted;
+the old shared fixture remains for unported legacy callers. The ports preserve
+stored metadata, withdrawal, invalid URL/cadence/branch refusal, pause/resume,
+override/reset, explicit empty arguments and zero catch-up, whole retained
+history, health before the first tick, deletion and capability refusal.
+
+TestRunControlHTTPAuthorityProperty and Refusals exercise verified team/run/actor
+forwarding and rejected approver, team, lifecycle and replay-body selectors.
+TestBusinessRetiredRoutesAndExactMethods checks the crons family and raw gate
+request are absent, with canonical methods on shared read/write paths.
+TestMetricsHTTPDeploymentPolicy exercises the deployment boundary.
+
+These are component proofs with fake authentication facts and committing
+writers. Schedule metadata/history use real SQLite. Native gate creation,
+run-now intake/provenance, per-team and admission limits, atomic replay and
+masking at the real committing edge remain W1/W3 integration obligations.
+The surviving legacy run-now, cron-team, compute-limit and approval fixtures
+must be ported to final intake and lifecycle before their old state APIs go.
+No native matrix cell is newly complete in this continuation.
+
+## W2 final business routes and verifier retirement
+
+The final seventeen legacy business registrations are migrated. The token-table
+Authenticator and its positive/negative caches, here/Actions fences, legacy
+tenant route table, requireScope and redundant cookie API middleware are deleted.
+Their cache implementation tests and open/admin-superset expectations retire.
+No argon2 or cached-verification behavior remains to port. The common capability
+authentication and policy suites retain missing/malformed/expired/revoked,
+ancestry/membership, grant and tenant refusals. TestControllerRefusesAnonymousBeforeBootstrapProperty
+retains the actual Server startup refusal, without a separate enable call.
+
+TestReportingRouteAuthorityProperty now exercises all seventeen route policies,
+including denied calls through actual Server registrations. The generated
+TestTeamWriteHTTPAuthorityProperty covers six team/run writes and App unbind,
+trigger deletion and automation withdrawal through committing fakes. It checks
+verified team/actor forwarding, wrong-team adapter refusal, changed-authority
+conflicts and private backend errors. TestBillingPageHTTPAuthorityAndReplayProperty
+covers all three hosted-page kinds, reservation-before-provider order, completion,
+replay without provider access, provider failure, committing conflict and budget
+forwarding. Malformed/forged bodies reach no successful mutation. Neither
+property proves real transaction races, financial reservation persistence,
+provider delivery or App consent after discovery.
+
+The four dashboard self-service account-deletion tests are removed with their
+retired helper and UI. Console deletion and last-owner handling remain covered
+by the earlier real console-route port. Teams and billing HTTP fixtures now use
+canonical failures and the required replay headers. Old broad team/billing/App
+fixtures still need migration off retired token/trigger APIs. No native matrix
+cell is newly enabled and no fake-backed result is native integration evidence.
+
+## Browser connection and console continuation
+
+W2 moves the seven GitHub App browser registrations to PolicyRouter and deletes
+the old browser Principal lookup, renewal wrapper and standalone form middleware.
+TestGitHubBrowserConnectionAuthorityProperty, StateProperty, ProviderAndReplay,
+CommitRefusal and RequiresTransaction cover the real HTTP/proof/provider adapter.
+The provider and committing writer are fake. They port the connection ownership,
+forged/foreign state, admin proof and single-use concerns from github_app_test.go.
+That broad socket fixture still needs its other App/trigger callers migrated.
+
+ConsoleWriteHTTPAuthorityProperty covers all nine business writes against the
+new ConsoleWriter. The executable TestOperatorHTTPForwardsActionsAndAudits and
+TestConsoleAccountDeletionRetainsLastOwnerConflict inject an explicit transaction
+fake over SQLite. These prove HTTP forwarding, output, audit and error mapping.
+They do not prove the real committing authority checks. W1 owns those checks.
+
+TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher is removed with its
+unused finalizer. TestMeteredUnitNodeLifecycleUsesImmutableAward,
+TestMeteredUnitSettlementFailureRollsBackResult and
+TestMeteredUnitStaleReportCannotSettleReplacementProperty pass against the final
+store and retain its award-billing, settlement rollback and stale-report fencing.
+An anonymous/unmetered HTTP request no longer finalizes another claim's window.
+No native credential-matrix cell is newly completed by this continuation.
+
+
+## W2 final credential helper and reporting cut
+
+The remaining legacy Principal API, Scope exports, tenant fallback, unused
+metering wrappers and live-log HTTP handlers are deleted. TestRequestTenantRefusesACallerWithNoRegisteredTeam
+and TestRunTeamRefusesAnotherTeamsRun retire with those helpers. Final route
+properties retain the authenticated-tenant boundary. Tenant cache expiry remains.
+TestMetricTimestamp is ported to the final HTTP path with a fake committing
+writer, preserving malformed, omitted and explicit timestamp coverage and adding
+nanosecond-range refusal. TestMetricsHTTPAuthorityProperty, ValidationAndLimit
+cover live authority, selected job/tenant, committing conflicts, canonical errors,
+missing/foreign adapters and invalid metric/usage bodies. The client transport
+fixture TestMetricAndUsageClientsUseFinalJobRoutes is retired with the removed Client API. TestMetricTimestamp and TestMetricsHTTPReadsPagedSamplesFromAuthorizedTenant retain the HTTP timestamp, accounting and read assertions. A final native metric/usage client contract is still required. These tests do not prove persistence.
+
+The old socket-based request-budget tests and claim-budget test are ported to
+real authenticated /runners/claim HTTP with SQLite. The ports cover empty-poll
+charges, free awards, independent runner names, name caps, an unlimited default,
+fleet cadence and the existing idle-advice/enforcement cases. The heartbeat
+property varies headers while retaining one authenticated holder. The obsolete
+trigger-schema fixture is removed. The advice-reset test calls the queue-activity
+edge directly. Production admission integration stays covered by its owner.
+
+The old audit identity fixtures and pending-offer test are removed. Final-policy
+HTTP ports cover credential/secret-path privacy with generated inputs, sensitive
+reads, authenticated denials, forged credentials, run/job path identifiers,
+request-ID replacement and successful empty-poll suppression. The existing span
+and budget-key tests use capability.Principal. The final log-concurrency test
+checks the canonical rate_limited envelope before the handler runs.
+
+The retired direct-download wrapper test is removed. TestDataReadHTTPDownload
+and DownloadFailures retain signed-data charge-before-sign behavior, and the
+store's download-charge tests retain tenant/replica accounting. No real download
+charging adapter or native placement matrix is newly proved by this cut.
+
+Five operator settings writes use a fake committing writer in their existing
+round-trip, invalid-body and private-failure tests. CommitAuthorityProperty adds
+current-authority/target forwarding and missing-writer refusal. The signup fake
+now commits one request once, rather than treating mode and limits as separate
+writes. TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate uses real
+SQLite session and CSRF persistence through the production console adapter and a
+fake committing writer. The roleless-session and durable transaction gates remain
+W1 work. No new scenario catalog or harness cell was added.
+
+
+## W2 member, claim and GitHub identity fixture ports
+
+The legacy tests in `pkg/controller/team_tokens_test.go` retire with the combined
+team-token route. `TestCredentialMemberHTTPRoleCeilingProperty` exercises every
+role ceiling and exact requested grants through real SQLite issuance.
+`TestCredentialMemberHTTPMembershipAndSessionLifecycle` verifies root independence
+from the minting session, membership removal and current-role narrowing through
+real HTTP delegation. Owner member roots may request team.admin under the final
+role contract. A reader retains read authority after demotion and cannot delegate
+runs.write. Narrow delegation is permitted. The old terminal/no-delegation rule,
+swt_ encoding, setup-command response and legacy token compatibility assertions
+are removed because they describe the retired API.
+
+Member metadata ownership, expiry and rotation are covered by
+`TestCapabilityManagementHTTPReads`, `ScopeProperty`, `ReplacementProperty` and
+`MissingAdaptersAndCSRF`. Machine enrollment, allowed grant subsets, trusted
+origin, expiry and refusal are covered by `TestRootProvisioningHTTPOrigin`,
+`Refusals`, `Input`, `ExpiryAndCSRF` and `ClaimGrantCeilings`. These management and
+enrollment tests use explicit transaction fakes. W1 still owns registry limits,
+origin invalidation, personal inventory and rotation persistence.
+
+The five legacy tests in `pkg/controller/runner_claim_test.go` are replaced by
+`TestCredentialClaimHTTPAncestryAndFenceProperty`, which obtains real node and
+trigger awards, reads their run, refuses root/claim grant confusion, and refuses
+revoked ancestry, replacement fences and terminal holders despite forged headers.
+`TestCredentialStartedClaimHTTPConsumesContractAttempt` proves the positive
+annotation, sibling refusal and committing revocation check using the declared
+current-attempt authentication snapshot and real SQLite writes. Its snapshot is
+an explicit fake because W1's real snapshot retains the awarded attempt zero
+after start advances the job to attempt one. Real post-start HTTP integration
+remains open. Secret selection and refusal are covered by `TestSecretReadHTTPUsesPolicyAndCommittedRow`,
+`AuthorityProperty`, `BindingProperty` and `RefusalsNeverOpenValues`. Their reader
+is fake. Release-audit persistence remains W1 work. The old operator secret
+bypass and 403-for-dead-claim assertions retire.
+
+The five tests in `pkg/controller/identity_github_test.go` move to the final OAuth
+start/callback and identity-link surfaces. `TestOAuthHTTPGitHubPrimaryEmailProperty`
+generates hostile profile, unverified-primary and verified-secondary addresses.
+None issues a session. `TestOAuthHTTPGitHubUsesNumericIdentityProperty` reads real
+committed identities with arbitrary display names and distinguishes two numeric
+subjects. OAuth start checks the exact read:user/user:email scope.
+`TestOAuthHTTPSessionAndReplay`, `ProviderAndStoreRefusals`, `ProofProperty` and
+`TestIdentityLinkHTTPCommitsVerifiedIdentityOnce` retain session/proof/provider
+and link transport behavior. The provider and link writer are fake.
+
+New-account creation, personal-space naming and same-email provider linking
+remain real W1 integrations. Targeted existing W1 tests
+`TestIdentitySignInCreatesOnePersonalSpace`,
+`TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount` and
+`TestSignInRefusesANewProviderOnAnExistingAccountsAddress` all fail at
+`ResolveSignIn` with an admission foreign-key constraint. No new-account or
+link-persistence success is claimed by the component ports.
+
+The remaining token/claim helper declarations support other unported fixtures.
+The cross-run, identity, team and log fixtures still need their final ports.
+No native cell, scenario catalog, Harness or boundary registry changed.
+
+## W2 identity and team HTTP fixture ports
+
+The 16 tests in `pkg/controller/identity_signin_test.go`, 14 tests in
+`identity_team_test.go` and five tests in `identity_link_test.go` are removed.
+The three files lose 1,019 lines. Their account-response and shared team fixture
+declarations move into `identity_fixture_test.go`, because other retained
+integration fixtures use them. The unused license splitter is removed there.
+
+| Retired HTTP assertions | Final evidence and remaining integration |
+| --- | --- |
+| Google sign-in, repeated sign-in, recycled email and provider subject selection | `TestGoogleOAuthHTTPSubjectAndProofProperty` verifies signed Google ID tokens through the real OAuth handler and real SQLite sessions. Two existing accounts share an email and have distinct provider subjects. Arbitrary names never choose the account. Fresh session presentations and identity are checked. New-account admission, personal-space creation and slug collisions remain in W1's `TestIdentitySignInCreatesOnePersonalSpace`, `TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount` and `TestIdentityConcurrentFirstSignInsShareALocalPart`. |
+| Unverified Google email, another flow's verifier, redirect allowlist | The Google property refuses unverified signed claims and unrelated PKCE verifiers without changing session state. `TestOAuthHTTPProviderAndStoreRefusals` and `TestOAuthHTTPProofProperty` retain redirect and browser-proof refusal. |
+| Public capabilities and unusable/tampered licenses | `TestOAuthHTTPLicenseControlsPublicProviders` checks both providers through real HTTP registration for absent, valid, expired, wrong-key, featureless, changed-signature and changed-payload licenses. Invalid licenses offer no provider and refuse OAuth start before provider I/O. |
+| Roleless services, unknown sessions, lost license and token-parented sessions | `TestAccountRolelessHTTPKeepsOnlyAccountAuthorityProperty` permits account reads and refuses services, members and runners despite caller team headers. Its snapshot is fake. `TestSessionPolicyHTTPRefusals`, `TestSessionRoutePreservesCapabilityScopeProperty` and `TestLoginHTTPAccountCapabilitySession` retain real session, scope, digest and license checks. W1 still supplies durable roleless sessions. |
+| Team creation, duplicate/reserved slugs and account team cap | `TestAccountMutationHTTPIdentityProperty`, `TestAccountMutationHTTPInputAndMissingWriter` and `TestAccountTeamHTTPTransactionGuards` retain authenticated identity, canonical slugs, exact transaction forwarding and safe refusals. Account writers are fakes. W1 retains slug collision, account-cap and atomic owner/session-selection requirements. |
+| Invitation creation, matching email, replay/expiry and team switching | `TestTeamWriteHTTPAuthorityProperty`, `TestAccountReadHTTPIdentityProperty`, `TestAccountMutationHTTPIdentityProperty` and `TestAccountTeamHTTPTransactionGuards` retain authority forwarding, invitation visibility and committing-writer error propagation. Closed invitations now use canonical 409. W1's invitation transaction must prove verified-email matching, one-use state and atomic membership/session selection. |
+| Reader/editor restrictions, role changes, last owner, tenant boundary and demotion | `TestAccountMembershipHTTPCurrentRoleProperty` uses real SQLite authentication and binding checks for owner/editor/reader grants, then a fake committing writer. `TestAuthorityMutationHTTPStoreGuards`, `TestAuthorityMemberDirectoryHTTP`, `TestTeamWriteHTTPAuthorityProperty` and `TestCredentialMemberHTTPMembershipAndSessionLifecycle` retain last-owner conflicts, current role, tenant and demotion checks. Last-owner refusal is canonical 409. |
+| Machine root scope, owner revocation, reader/name refusal and per-team cap | Existing `TestRootProvisioningHTTPAuthorityProperty`, `TestRootProvisioningHTTPInput`, `TestRootProvisioningHTTPOrigin`, `TestAuthorityMutationHTTP` and the member lifecycle property replace the retired combined `/team/tokens` fixture. Enrollment and inventory writers remain fakes. W1 still must prove registration caps/races, ownership, origin invalidation and rotation persistence. |
+| Removed member's personal-team fallback and last-team removal | The roleless property preserves account-only policy. W1's `TestIdentityLastOwnerCannotLeaveAndAMemberKeepsTheirTeams` and `TestIdentityUserWithNoTeamGetsAFreshSpace` retain fallback and durable session-selection requirements. The C2 snapshot does not prove their persistence. |
+| Linking a provider with another address, identity ownership conflicts and recent sign-in | `TestIdentityLinkHTTPAddressDoesNotSelectAccountProperty`, `TestIdentityLinkHTTPCommittedIdentityConflicts`, `TestIdentityLinkHTTPCommitsVerifiedIdentityOnce` and `TestIdentityLinkHTTPRefusals` retain exact account/provider/subject handoff, cross-account refusal, one-use transport and recent-sign-in checks. The link writer is fake. |
+| Unlinking the last method, reauthentication, future sign-in and retained App installation | `TestAccountUnlinkHTTPPreservesLastMethodAndReauthenticationRefusals` checks canonical reasons and unchanged real session state on writer refusal. `TestAccountMutationHTTPIdentityProperty` checks exact unlink authority. W1's `TestUnlinkIdentityKeepsTheLastSignInMethod` and `TestUnlinkedSignInNoLongerReachesTheAccount` retain durable method/session effects. App installation retention remains an integration obligation. |
+
+The three W1 signup tests selected in the preceding continuation still fail with
+an admission foreign-key error. Removing the explicit contract snapshot from
+`TestCredentialStartedClaimHTTPConsumesContractAttempt` still makes its first
+post-start annotation fail with 401. The fake-backed ports do not close either
+integration gap. Cross-run and log fixtures remain pending the contracts listed
+in `../W2-identity-ports-handoff.md`. No native matrix cell is newly completed.
+
+The duplicate controller S3 log presigner and its private client are deleted.
+`TestS3LogSegmentURLsSignTheSizeAndMD5` retires with that signer. W7's
+`TestS3LogSigningBindsCreateOnlyHeader` and `TestS3LogSigningRejectsBeforeSigning`
+check the final immutable-slot signer. Upload bytes are checked after transfer
+by `TestLogUploadReplayVerifiesExactObject` and `TestLogUploadReplayRefusals`.
+The legacy `TestDiskLogSegmentURLsAcceptOnlyTheSignedBytes` is replaced by
+`TestSignedLogKeyCannotBeReplaced` and `TestDataStorageSignedFilesystemRoutes`
+through actual controller transfer registration, plus the shared filesystem
+tagged-log round trip and retry tests. Batch signing no longer binds the future
+payload to MD5. Exact stored SHA-256 and size precede record commit.
+The controller's duplicate log-limit constants are removed, and the retained
+deletion delay and legacy fixture assertions use `internal/limits` values.
+Final log-signing/verification HTTP composition remains open. These signer
+ports do not prove a final controller log mutation or native log-tail cell.
+
+
+## W2 integration-merge recovery and fixture retirement
+
+`TestCredentialMachineHTTPCannotBecomeAMemberProperty` replaces the two
+remaining declared-repository credential tests. It uses real SQLite capability
+lookup and actual Server routes. Generated machine grants and caller hints
+cannot authorize intake, retry or cancellation as a team member. The test also
+checks that refusal creates no run and records no cancellation. The positive
+member retry path remains in `TestEngineLifecycleHTTP`. The obsolete
+runner_scopes_test.go helper file is deleted after its last callers are ported.
+
+`TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty` replaces the two
+legacy URL-path tenant tests. It issues real member capabilities in two teams,
+generates percent-encoded literal and identifier segments, checks positive own
+job reads, and refuses foreign reads without disclosing job data. It also checks
+nine noncanonical paths and unchanged persisted run state. A live foreign member
+now receives the final policy's canonical 403. The old 404 expectation is not
+copied. The raw invalid-HTTP-escape assertion retires because it tests Go's HTTP
+parser before Sparkwing receives a request.
+
+The seven token-table here-runner tests are deleted. Their final evidence is
+`TestAdmissionHereAwardRetainsRequestingAuthority`,
+`TestClaimUnitHereWindowAndReclaim`,
+`TestAuthenticationSnapshotHereClaimHistorySurvivesRequeue`,
+`TestLocalAndHereClaimsDoNotInventAnExecutionDeadline`,
+`TestAuthenticationHereWindowAndSessionParent`, `TestHereClaimStaysNamedAcrossReclaim`,
+`TestHereResumeClaimContract` and `TestHereClaimResponseLossIsNotRetried`.
+`TestSizingHTTPRefusals` retains the bound-pipeline boundary. The old fixed
+six-hour lifetime, machine-token scope table, token cache restart and
+no-reclaim expectations retire with their APIs. The final here selection has
+no reason field. These owner/component checks do not complete a native
+credential-matrix cell.
+
+The retired client fixtures `TestNodeLogReaderUsesJobRoutes`,
+`TestMetricAndUsageClientsUseFinalJobRoutes` and
+`TestConcurrencyHTTPClientUsesGroupRoutes` are removed. Final log transport
+coverage is `TestLogReaderUsesFinalRoutesAndAuthenticatedTransport`. Final queue
+client tests cover its retained read/priority contract. The existing
+`TestConcurrencyHTTPTransactions`, `TestConcurrencyHTTPRefusals`, `TestMetricTimestamp`,
+`TestMetricsHTTPAuthorityProperty`, `TestMetricsHTTPValidationAndLimit` and
+`TestMetricsHTTPReadsPagedSamplesFromAuthorizedTenant` retain the HTTP concerns.
+The final native metric/usage client contract and log mutation composition remain
+cross-area work. `TestOIDCMintHTTPKeyRotation` keeps the four-stage JWKS rotation
+proof through actual HTTP without the retired Client constructor.
+
+`TestUnregisteredRouteAnswersCanonicalNotFound` replaces the obsolete string
+error-envelope expectation. The unused `WriteUnsupportedRoute` and
+`UnsupportedRouteError` production API is deleted. Remaining legacy tenant
+fixtures check the canonical route-miss message until their persistence ports
+are supplied. No compatibility symbol is retained.
+
+The final independent route expectation table remains beside the route tests in
+pkg/controller/credential_route_expectations_test.go. The internal/acceptance
+copy remains absent. The catalog, port destinations and route declaration,
+ordering and drift checks pass. No scenario catalog, Harness or boundary registry
+entry is added.
+
+## W8 unused admission client retirement
+
+`TestStatsReset_ClearsTheEventWindow` now drives the admission wire through the
+local runtime's in-memory connection fixture. It checks a real grant, event
+window reset, holder preservation and the persisted empty window. It replaces
+the removed, unused `Client.ResetStats` call. The client-only unsupported-reply
+test retires with that API and its retry loop. The server wire remains covered.
+This component establishes no native socket or final local-controller binding
+evidence and adds no archived T1 port identity.

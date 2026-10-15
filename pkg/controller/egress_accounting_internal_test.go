@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
@@ -22,11 +25,11 @@ func TestControllerEgressUsesAuthenticatedTenantAndReplica(t *testing.T) {
 	second := New(engine.Store, nil)
 	for _, server := range []*Server{first, second} {
 		for _, class := range []egress.Class{egress.ClassArtifact, egress.ClassLog, egress.ClassLogStream} {
-			r := storeDataRequest(t, server, http.MethodGet, "/data?team=b&replica=forged", "", Principal{Name: "shared", Team: "a", Scopes: []string{ScopeAdmin}})
+			r := httptest.NewRequest(http.MethodGet, "/data?team=b&replica=forged", nil)
 			response := httptest.NewRecorder()
-			server.meterOn(class, egress.SlotNone, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server.meterResponse(response, r, class, egress.SlotNone, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte("bytes"))
-			})).ServeHTTP(response, r)
+			}), egress.TeamPrincipal("a", "shared"), "a")
 			if response.Code != http.StatusOK {
 				t.Fatalf("response=%d: %s", response.Code, response.Body)
 			}
@@ -74,14 +77,14 @@ func TestControllerEgressCountsDeliveredBytesAndResumesAlarm(t *testing.T) {
 		{http.MethodHead, http.StatusOK},
 		{http.MethodGet, http.StatusForbidden},
 	} {
-		r := storeDataRequest(t, s, tc.method, "/logs", "", Principal{Name: "account", Team: "a", Scopes: []string{ScopeAdmin}})
+		r := httptest.NewRequest(tc.method, "/logs", nil)
 		ctx, cancel := context.WithCancel(r.Context())
 		r = r.WithContext(ctx)
-		s.meteredStream(egress.ClassLogStream, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		s.meterResponse(shortEgressWriter{httptest.NewRecorder()}, r, egress.ClassLogStream, egress.SlotLogStream, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(tc.status)
 			_, _ = w.Write([]byte("long response"))
 			cancel()
-		})).ServeHTTP(shortEgressWriter{httptest.NewRecorder()}, r)
+		}), egress.TeamPrincipal("a", "account"), "a")
 		cancel()
 	}
 	restarted := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{GlobalDailyAlarmBytes: 2}))
@@ -103,10 +106,10 @@ func TestControllerEgressFailuresAreLoud(t *testing.T) {
 	if _, err := engine.Store.DB().Exec("CREATE TRIGGER refuse_egress BEFORE INSERT ON egress_usage BEGIN SELECT RAISE(ABORT,'storage unavailable'); END"); err != nil {
 		t.Fatal(err)
 	}
-	r := storeDataRequest(t, s, http.MethodGet, "/logs", "", Principal{Name: "account", Team: "a", Scopes: []string{ScopeAdmin}})
-	s.metered(egress.ClassLog, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	r := httptest.NewRequest(http.MethodGet, "/logs", nil)
+	s.meterResponse(httptest.NewRecorder(), r, egress.ClassLog, egress.SlotDownload, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("sent"))
-	})).ServeHTTP(httptest.NewRecorder(), r)
+	}), egress.TeamPrincipal("a", "account"), "a")
 	if !strings.Contains(logs.String(), "record delivered egress failed") {
 		t.Fatalf("missing accounting failure: %s", logs.String())
 	}
@@ -130,5 +133,22 @@ func TestControllerEgressRestoresTotalsBeyondMeterCardinality(t *testing.T) {
 	state := s.egress.State()
 	if state.GlobalDayBytes != int64(count) || state.GlobalMonthBytes != int64(count) || !state.Alarm {
 		t.Fatalf("restored day=%d month=%d alarm=%t, want %d and alarm", state.GlobalDayBytes, state.GlobalMonthBytes, state.Alarm, count)
+	}
+}
+
+func TestControllerEgressConcurrencyUsesCanonicalError(t *testing.T) {
+	s := New(nil, nil).WithEgressMeter(egress.New(egress.Config{MaxDownloadsPerPrincipal: 1}))
+	release, err := s.egress.Open("a/account", egress.SlotDownload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	r := httptest.NewRequest("GET", "/logs", nil)
+	w := httptest.NewRecorder()
+	called := false
+	s.meterResponse(w, r, egress.ClassLog, egress.SlotDownload, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "a/account", "a")
+	var body apierr.Envelope
+	if w.Code != 429 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != apierr.RateLimited || body.Error.Details["reason"] != "egress_download_limit" || w.Header().Get("Retry-After") == "" || called {
+		t.Fatalf("refusal=%d %s", w.Code, w.Body)
 	}
 }

@@ -50,13 +50,10 @@ func (s *Server) authorityEndpoints() []Endpoint {
 			Method: "GET", Pattern: "/api/v1/data/capabilities", Authentication: capability.AuthCapability,
 			Decode: authorityTarget, Handle: s.handleDirectCapabilities,
 		},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/oidc-token", Authentication: capability.AuthCapability, Decode: e.runTarget, Handle: s.handleOIDCToken},
 		{Method: "GET", Pattern: "/.well-known/openid-configuration", Authentication: capability.AuthPublic, Handle: s.handleOIDCDiscovery},
 		{Method: "GET", Pattern: "/.well-known/jwks.json", Authentication: capability.AuthPublic, Handle: s.handleOIDCKeys},
 	}
-}
-
-func (s *Server) registerAuthorityRoutes(mux *http.ServeMux) {
-	s.registerPolicyEndpoints(mux, s.authorityEndpoints())
 }
 
 func authorityTarget(r *http.Request) (capability.RequestEvidence, error) {

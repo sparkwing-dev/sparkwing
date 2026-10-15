@@ -2,10 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
-	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,9 +12,7 @@ import (
 // safety: GitHub's terms allow Actions only for the software project in the repository the
 // workflow runs in, so a job's credential reaches only runs of that one repository.
 
-// GitHubActionsLabel is the runner label a GitHub Actions job advertises. It
-// is not the local label, so the placement hold keeps a team's own machines
-// first and a job picks a node up only after the hold.
+// GitHubActionsLabel identifies a GitHub Actions runner observation.
 const GitHubActionsLabel = "github-actions"
 
 // safety: a job never outlives six hours and a node that outlives the
@@ -82,103 +76,6 @@ type githubExchangeResp struct {
 	Repository string   `json:"repository"`
 	ExpiresAt  int64    `json:"expires_at"`
 	Labels     []string `json:"labels"`
-}
-
-func githubRunnerScope(p *Principal) (scope store.GitHubRunnerScope, isGitHub, ok bool) {
-	if p == nil || !strings.HasPrefix(p.Name, store.GitHubRunnerPrincipalPrefix) {
-		return store.GitHubRunnerScope{}, false, false
-	}
-	rest := strings.TrimPrefix(p.Name, store.GitHubRunnerPrincipalPrefix)
-	id, slug, found := strings.Cut(rest, ":")
-	if _, err := strconv.ParseInt(id, 10, 64); !found || err != nil {
-		return store.GitHubRunnerScope{}, true, false
-	}
-	repo, parsed := store.ParseGitHubRepo(slug)
-	if !parsed || p.Team == "" {
-		return store.GitHubRunnerScope{}, true, false
-	}
-	return store.GitHubRunnerScope{Team: p.Team, Repo: repo}, true, true
-}
-
-// safety: routes are allowlisted, so a route added later answers 403 to a GitHub job's
-// credential until someone decides how it is confined.
-func (s *Server) githubRunnerFence(next http.Handler) http.Handler {
-	fence := s.githubFenceMux(next)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, _ := PrincipalFromContext(r.Context())
-		scope, isGitHub, ok := githubRunnerScope(p)
-		if !isGitHub {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if !ok {
-			writeGitHubFenceRefusal(w, p, "this credential does not name the repository it is bound to")
-			return
-		}
-		t, err := s.store.ForTeam(r.Context(), scope.Team)
-		if err == nil {
-			scope.Push, err = t.GitHubRunnerCredentialPush(r.Context(), p.TokenPrefix)
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeGitHubFenceRefusal(w, p, "this credential names no push it was minted for")
-			return
-		}
-		if err != nil {
-			s.writeInternalError(w, r, "github runner push", err)
-			return
-		}
-		fence.ServeHTTP(w, r.WithContext(store.WithGitHubRunnerScope(r.Context(), scope)))
-	})
-}
-
-func (s *Server) githubFenceMux(next http.Handler) *http.ServeMux {
-	pass := next
-	byRun := s.githubFenceRun(next)
-	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/nodes/claim", pass)
-	mux.Handle("POST /api/v1/triggers/claim", pass)
-	// safety: a non-admin run create is bound to the caller's live claim
-	// on the run's trigger, which the scoped trigger claim already confines.
-	mux.Handle("POST /api/v1/runs", pass)
-	mux.Handle("/api/v1/runs/{id}", byRun)
-	mux.Handle("/api/v1/runs/{id}/{rest...}", byRun)
-	mux.Handle("/api/v1/triggers/{id}", byRun)
-	mux.Handle("/api/v1/triggers/{id}/{rest...}", byRun)
-	// safety: each of these binds to a live claim on a named run or
-	// pipeline, and this credential holds claims only on its own
-	// repository's runs.
-	mux.Handle("/api/v1/concurrency/{key}/{rest...}", pass)
-	mux.Handle("/api/v1/pipelines/{name}/profile", pass)
-	mux.Handle("/api/v1/pipelines/{name}/profile/{rest...}", pass)
-	mux.Handle("GET /api/v1/secrets/{name}", pass)
-	mux.Handle("GET /api/v1/auth/whoami", pass)
-	mux.Handle("GET /api/v1/services", pass)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		p, _ := PrincipalFromContext(r.Context())
-		writeGitHubFenceRefusal(w, p, "a GitHub Actions runner credential cannot use "+r.Method+" "+r.URL.Path)
-	})
-	return mux
-}
-
-func (s *Server) githubFenceRun(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, _ := PrincipalFromContext(r.Context())
-		scope, _ := store.GitHubRunnerScopeFrom(r.Context())
-		ok, err := s.store.GitHubRunnerAdmits(r.Context(), scope, r.PathValue("id"))
-		if err != nil {
-			s.writeInternalError(w, r, "github runner fence", err)
-			return
-		}
-		if !ok {
-			writeGitHubFenceRefusal(w, p, "run "+r.PathValue("id")+" is not work of "+scope.Repo.Slug())
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func writeGitHubFenceRefusal(w http.ResponseWriter, p *Principal, msg string) {
-	writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "forbidden", Principal: p.label(), Message: msg})
 }
 
 type githubBindingReq struct {

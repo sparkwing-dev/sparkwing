@@ -114,8 +114,8 @@ export async function failure(
   try {
     const text = (await res.text()).trim();
     try {
-      const body = JSON.parse(text) as { message?: string; error?: string };
-      detail = body.message || body.error || text;
+      const body = JSON.parse(text) as { error?: { message?: string } };
+      detail = body.error?.message || text;
     } catch {
       detail = text;
     }
@@ -137,8 +137,12 @@ export async function send(
 ): Promise<Response> {
   const res = await authFetch(url, {
     method,
-    headers:
-      body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(method === "POST" && url === "/api/v1/team/invitations"
+        ? { "Idempotency-Key": crypto.randomUUID() }
+        : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) throw await failure(res, action);
@@ -466,39 +470,4 @@ export async function listTeamDeletions(): Promise<TeamDeletion[]> {
     "List team deletions",
   );
   return asList<TeamDeletion>(await res.json(), "deletions");
-}
-
-export type AccountDeletionResult =
-  | { kind: "deleted"; deletedTeams: string[] }
-  | { kind: "blocked"; teams: TeamRef[] }
-  | { kind: "reauth" };
-
-// A 409 is an answer, not a failure: it names the teams that would be left
-// without an owner, which the page lists so the person can deal with each.
-export async function deleteAccount(
-  confirmEmail: string,
-): Promise<AccountDeletionResult> {
-  const res = await authFetch("/api/v1/me", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirm_email: confirmEmail }),
-  });
-  if (res.status === 409) {
-    const body = (await res.json()) as { teams?: TeamRef[] };
-    return { kind: "blocked", teams: body.teams ?? [] };
-  }
-  // The controller deletes an account only for a sign-in from the last few
-  // minutes; the page asks for a fresh one rather than showing an error.
-  if (res.status === 403) {
-    const body = (await res
-      .clone()
-      .json()
-      .catch(() => ({}))) as {
-      error?: string;
-    };
-    if (body.error === "reauth_required") return { kind: "reauth" };
-  }
-  if (!res.ok) throw await failure(res, "Delete account");
-  const body = (await res.json()) as { deleted_teams?: string[] };
-  return { kind: "deleted", deletedTeams: body.deleted_teams ?? [] };
 }

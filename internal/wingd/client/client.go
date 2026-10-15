@@ -603,22 +603,7 @@ func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {
 	return *ack, nil
 }
 
-func (cl *Client) Draining() bool { return cl.ack.Draining }
-
 func (cl *Client) DaemonVersion() string { return cl.ack.BinaryVersion }
-
-// APIReady reports whether the connected daemon serves the controller HTTP
-// API on its api.sock. A daemon that predates the field advertises nothing,
-// which reads as false.
-func (cl *Client) APIReady() bool { return cl.ack.APIReady != nil && *cl.ack.APIReady }
-
-// APIError reports why the connected daemon's API socket is unbound, empty
-// when it is bound or when the daemon predates the field.
-func (cl *Client) APIError() string { return cl.ack.APIError }
-
-// APISocket reports where the connected daemon serves the controller HTTP
-// API, derived from the admission socket this client reached.
-func (cl *Client) APISocket() string { return wingd.APISocketBeside(cl.sock) }
 
 // safety: the daemon drops a peer that stops reading after its own
 // connWriteTimeout; a client without the mirror image of that bound blocks a

@@ -1,18 +1,16 @@
 package controller
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const teamBillingHistoryLimit = 50
-
-// safety: Stripe keeps a session open 31 minutes from its creation.
-const checkoutOpenHold = 35 * time.Minute
 
 type teamBillingUsageJSON struct {
 	RunID         string `json:"run_id"`
@@ -95,44 +93,41 @@ func teamLimitsBody(st store.SpendStanding) teamLimitsJSON {
 	}
 }
 
-func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if !s.Metering() {
+		return &apierr.Error{Code: apierr.NotFound, Message: "billing is not enabled"}
+	}
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	ctx := r.Context()
 	state, err := t.CreditState(ctx, creditsBurnWindow)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing state", err)
-		return
+		return engineLookupError(err)
 	}
 	usage, err := t.CreditUsageByRun(ctx, teamBillingHistoryLimit)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing usage", err)
-		return
+		return engineLookupError(err)
 	}
 	grants, err := t.ListCreditGrants(ctx, teamBillingHistoryLimit)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing grants", err)
-		return
+		return engineLookupError(err)
 	}
 	freeze, err := t.CreditFreeze(ctx)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing freeze", err)
-		return
+		return engineLookupError(err)
 	}
 	now := time.Now()
 	spend, err := t.SpendStanding(ctx, now)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing spend", err)
-		return
+		return engineLookupError(err)
 	}
 	standing, err := t.BillingStanding(ctx, now)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing standing", err)
-		return
+		return engineLookupError(err)
 	}
-	owner := store.Role(p.Role).AtLeast(store.RoleOwner)
+	owner := slices.Contains(a.Principal.Capability.Grants, capability.TeamAdmin)
 	out := teamBillingJSON{
 		Team:                      string(t.Team()),
 		BalanceMicro:              state.BalanceMicro,
@@ -183,14 +178,11 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 type teamCheckoutReq struct {
 	AmountCents int64 `json:"amount_cents"`
-}
-
-type teamCheckoutJSON struct {
-	URL string `json:"url"`
 }
 
 // Machine-readable codes on a refused credit purchase.
@@ -201,127 +193,10 @@ const (
 	PurchaseLimitCode       = "purchase_limit"
 )
 
-type purchaseLimitRefusalJSON struct {
-	Error          string `json:"error"`
-	Code           string `json:"code"`
-	Trusted        bool   `json:"trusted"`
-	LimitCents     int64  `json:"limit_cents"`
-	PurchasedCents int64  `json:"purchased_cents"`
-	AmountCents    int64  `json:"amount_cents"`
-}
-
-type balanceCapRefusalJSON struct {
-	Error        string `json:"error"`
-	Code         string `json:"code"`
-	BalanceMicro int64  `json:"balance_micro"`
-	OpenMicro    int64  `json:"open_micro"`
-	CapMicro     int64  `json:"cap_micro"`
-	AmountMicro  int64  `json:"amount_micro"`
-}
-
-type codedErrorJSON struct {
-	Error string `json:"error"`
-	Code  string `json:"code"`
-}
-
-func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
-	if s.checkout == nil {
-		writeJSON(w, http.StatusServiceUnavailable, codedErrorJSON{
-			Error: "this controller sells no credits", Code: CheckoutUnavailableCode,
-		})
-		return
-	}
+func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req teamCheckoutReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	ctx := r.Context()
-	now := time.Now()
-	spend, err := t.SpendStanding(ctx, now)
-	if err != nil {
-		s.writeInternalError(w, r, "team checkout standing", err)
-		return
-	}
-	// safety: a team whose usage is billed to its card spends any prepaid
-	// balance first and buys no more, so its card is its only way to pay; a
-	// revoked team keeps its card for what it owes and prepays again.
-	if spend.CardBilled() {
-		writeJSON(w, http.StatusConflict, codedErrorJSON{
-			Error: "this team's usage is billed to its card; it buys no prepaid credit", Code: CardOnFileCode,
-		})
-		return
-	}
-	standing := spend.Billing
-	if maxCents := standing.PurchaseMaxCents(); req.AmountCents < store.CreditPurchaseMinCents || req.AmountCents > maxCents {
-		writeJSON(w, http.StatusBadRequest, codedErrorJSON{
-			Error: fmt.Sprintf("the minimum purchase is $%d and the maximum $%d",
-				store.CreditPurchaseMinCents/100, maxCents/100),
-			Code: CheckoutAmountCode,
-		})
-		return
-	}
-	// safety: the limits are held here, before any money moves, counting every
-	// checkout of the team still open; the grant that follows a verified
-	// payment is never refused, so a later check would strand the payment.
-	checkoutID, err := t.OpenCreditCheckout(ctx, req.AmountCents*store.MicroCreditsPerCent, now, checkoutOpenHold)
-	if err != nil {
-		if s.writeBalanceCapRefusal(w, err) {
-			return
-		}
-		var limitErr *store.PurchaseLimitError
-		if errors.As(err, &limitErr) {
-			writeJSON(w, http.StatusConflict, purchaseLimitRefusalJSON{
-				Error: limitErr.Error(), Code: PurchaseLimitCode, Trusted: limitErr.Trusted,
-				LimitCents:     limitErr.LimitMicro / store.MicroCreditsPerCent,
-				PurchasedCents: limitErr.PurchasedMicro / store.MicroCreditsPerCent,
-				AmountCents:    limitErr.AmountMicro / store.MicroCreditsPerCent,
-			})
-			return
-		}
-		if errors.Is(err, store.ErrTeamBeingDeleted) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		s.writeInternalError(w, r, "team checkout balance", err)
-		return
-	}
-	session, err := s.checkout.open(ctx, string(t.Team()), req.AmountCents)
-	if err != nil {
-		if dropErr := t.DropCreditCheckout(ctx, checkoutID); dropErr != nil {
-			s.logger.Warn("dropping an unopened checkout failed", "team", string(t.Team()), "err", dropErr)
-		}
-		s.logger.Error("opening a checkout session failed", "team", string(t.Team()),
-			"cents", req.AmountCents, "err", err)
-		writeError(w, http.StatusBadGateway, errors.New("the payment page could not be opened; try again"))
-		return
-	}
-	expires := session.ExpiresAt
-	if expires.IsZero() || expires.After(now.Add(checkoutOpenHold)) {
-		expires = now.Add(checkoutOpenHold)
-	}
-	if err := t.AttachCreditCheckout(ctx, checkoutID, session.ID, expires); err != nil {
-		s.writeInternalError(w, r, "team checkout record", err)
-		return
-	}
-	s.logger.Info("checkout session opened", "team", string(t.Team()), "cents", req.AmountCents,
-		"session", session.ID)
-	writeJSON(w, http.StatusOK, teamCheckoutJSON{URL: session.URL})
-}
-
-func (s *Server) writeBalanceCapRefusal(w http.ResponseWriter, err error) bool {
-	var capErr *store.CreditBalanceCapError
-	if !errors.As(err, &capErr) {
-		return false
-	}
-	writeJSON(w, http.StatusConflict, balanceCapRefusalJSON{
-		Error: capErr.Error(), Code: BalanceCapCode,
-		BalanceMicro: capErr.BalanceMicro, OpenMicro: capErr.OpenMicro,
-		CapMicro: capErr.CapMicro, AmountMicro: capErr.AmountMicro,
-	})
-	return true
+	return s.openBillingPage(w, r, a, capability.BillingPageCredits, req.AmountCents)
 }

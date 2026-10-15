@@ -133,6 +133,14 @@ type Principal struct {
 	Authority  AuthorityRef
 }
 
+// DirectAccountSession identifies account authentication without capability ancestry.
+func (p Principal) DirectAccountSession() bool {
+	c := p.Capability
+	return p.Class == CredentialSession && p.Authority.Kind == AuthoritySession && p.Authority.ID != "" &&
+		c.Subject.Kind == SubjectAccount && c.Subject.ID != "" && c.Parent == nil &&
+		c.Unit == "" && c.Purpose == "" && c.Binding.Kind == BindingNone
+}
+
 // Issued returns the generated secret once; callers must keep Raw out of logs and process env.
 type Issued struct {
 	Raw        string     `json:"capability"`
