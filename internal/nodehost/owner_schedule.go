@@ -199,6 +199,9 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		if result.Source != nil {
 			request.Source, request.Policy = result.Source, result.Source.Kind
 		}
+		if kind == store.DecisionApproval && layer.Name == "approval" {
+			break
+		}
 	}
 	if request.Source != nil && (h.Local == nil || !h.Local(row)) {
 		return nil, errors.New("remote result reuse requires materialize-only reconciliation")

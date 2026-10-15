@@ -199,6 +199,48 @@ func TestNodeExecutorRetriesRetainGenerationAndAdvanceOrdinal(t *testing.T) {
 	}
 }
 
+func TestNodeExecutorRetryReceivesFreshProcessBinding(t *testing.T) {
+	input, st, deps, processes := executorFixture(t)
+	executorRetryBudget(t, &input, st, 1)
+	input.RouteBinding.Routes.Bearer = "parent"
+	issued := 0
+	deps.Bind = func(_ context.Context, in NodeInput) (nodeproto.ProcessBinding, error) {
+		issued++
+		binding := in.RouteBinding
+		binding.Routes.Bearer = fmt.Sprintf("child-%d", issued)
+		return binding, nil
+	}
+	start := deps.Start
+	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+		process, err := start(ctx, in, activity)
+		p := process.(*executorProcess)
+		want := fmt.Sprintf("child-%d", len(*processes))
+		if in.RouteBinding.Routes.Bearer != want {
+			t.Error("process adapter did not receive its delegated binding")
+		}
+		p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
+			if r.Op == nodeproto.OpHello && r.Binding.Routes.Bearer != want {
+				t.Error("retry reused a revoked bearer")
+			}
+			return nil, nil
+		}
+		if len(*processes) == 1 {
+			p.result.Outcome = "failed"
+		}
+		return p, err
+	}
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.Execute(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	if issued != 2 || len(*processes) != 2 {
+		t.Fatalf("bindings = %d, attempts = %d", issued, len(*processes))
+	}
+}
+
 func TestNodeExecutorDriftPreventsBody(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	start := deps.Start

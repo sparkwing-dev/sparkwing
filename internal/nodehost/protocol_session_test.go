@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -229,14 +230,15 @@ func TestProtocolSessionCancelledEvalReapsWithoutSendingCancel(t *testing.T) {
 	cause := errors.New("eval attempt deadline")
 	cancel(cause)
 	err := <-result
-	var failure *apierr.Error
-	if !errors.Is(err, cause) || !errors.As(err, &failure) || failure.Code != apierr.ProtocolError {
-		t.Fatalf("eval cancellation lost its cause or protocol explanation: %v", err)
+	if !errors.Is(err, cause) {
+		t.Fatalf("eval cancellation lost its cause: %v", err)
 	}
 	if session.cmd.ProcessState == nil {
 		t.Fatal("cancelled eval returned before process joined")
 	}
-	_ = session.Close()
+	if err := session.Close(); err != nil {
+		t.Fatalf("intentional eval stop became a close failure: %v", err)
+	}
 	if cancelSeen.Load() {
 		t.Fatal("sent job-only cancel for eval")
 	}
@@ -410,7 +412,7 @@ func TestProtocolSessionChild(t *testing.T) {
 				version++
 			}
 			sdkVersion := "test"
-			if mode == "owner_expand" {
+			if mode == "owner_expand" || mode == "owner_policy" {
 				sdkVersion = "v1.0.0"
 			}
 			reply(request, nodeproto.HelloResult{Protocol: version, SDK: nodeproto.SDKIdentity{Language: "go", Version: sdkVersion}, Features: []string{}})
@@ -426,6 +428,19 @@ func TestProtocolSessionChild(t *testing.T) {
 			continue
 		}
 		switch mode {
+		case "owner_policy":
+			switch request.Op {
+			case nodeproto.OpPlan:
+				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{ownerPolicyJob()}})
+			case nodeproto.OpEval:
+				if request.Closure == "slow" {
+					send(nodeproto.FrameLog{Level: "info", Message: "slow entered"})
+				} else {
+					reply(request, nodeproto.EvalResult{Value: json.RawMessage("true")})
+				}
+			default:
+				os.Exit(7)
+			}
 		case "owner_expand":
 			switch request.Op {
 			case nodeproto.OpPlan:
@@ -505,6 +520,72 @@ func TestProtocolSessionChild(t *testing.T) {
 	}
 }
 
+func ownerPolicyJob() nodeproto.JobSpec {
+	return nodeproto.JobSpec{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{SkipIf: []string{"slow", "skip"}}}
+}
+
+func TestOwnerPolicyNativeSkipTimeoutJoinsAndContinues(t *testing.T) {
+	for _, mode := range []string{"continue", "revocation", "cleanup"} {
+		t.Run(mode, func(t *testing.T) { ownerPolicyNativeSkip(t, mode) })
+	}
+}
+
+func ownerPolicyNativeSkip(t *testing.T, mode string) {
+	t.Helper()
+	in, _, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "owner_policy"}
+	deadlines := make(chan context.CancelCauseFunc, 2)
+	deps.ChildContext = func(ctx context.Context, _, _ time.Duration) (context.Context, context.CancelFunc, error) {
+		bounded, cancel := context.WithCancelCause(ctx)
+		deadlines <- cancel
+		return bounded, func() { cancel(context.Canceled) }, nil
+	}
+	var revoked, cleaned int
+	cfg := ProtocolSessionConfig{
+		Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec,
+		ValidateRequest: func(nodeproto.Request) error { return nil },
+		Log: func(_ context.Context, record nodeproto.FrameLog) error {
+			if record.Message == "slow entered" {
+				(<-deadlines)(context.DeadlineExceeded)
+			}
+			return nil
+		},
+		Revoke: func() error {
+			revoked++
+			if mode == "revocation" {
+				return errors.New("private revoke error")
+			}
+			return nil
+		},
+		RunCleanups: func(context.Context) error {
+			cleaned++
+			if mode == "cleanup" {
+				return errors.New("private cleanup error")
+			}
+			return nil
+		},
+	}
+	deps.Start = cfg.StartEvaluation
+	host, err := NewOwnerEvaluator(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := host.SkipIf(t.Context(), in)
+	if mode != "continue" {
+		if err == nil || result.Skip || len(result.TimedOut) != 0 || revoked != 1 || cleaned != 1 || strings.Contains(err.Error(), "private") {
+			t.Fatalf("skip = %+v, revocations = %d, cleanups = %d, error = %v", result, revoked, cleaned, err)
+		}
+		return
+	}
+	if err != nil || !result.Skip || !slices.Equal(result.TimedOut, []int{0}) || revoked != 2 || cleaned != 2 {
+		t.Fatalf("skip = %+v, revocations = %d, cleanups = %d, error = %v", result, revoked, cleaned, err)
+	}
+}
+
 func TestOwnerEvaluationNativeProcess(t *testing.T) {
 	in, _, deps, _ := evaluationFixture(t)
 	exe, err := os.Executable()
@@ -513,6 +594,11 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 	}
 	in.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "owner_expand"}
 	in.RouteBinding.Routes = nodeproto.ProcessRoutes{URL: "http://host", Bearer: "private-test-bearer"}
+	deps.Bind = func(_ context.Context, in EvaluationInput) (nodeproto.ProcessBinding, error) {
+		binding := in.RouteBinding
+		binding.Routes.Bearer = "private-test-bearer-child"
+		return binding, nil
+	}
 	revoked, cleaned := false, false
 	cfg := ProtocolSessionConfig{Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context) error {
 		if !revoked {

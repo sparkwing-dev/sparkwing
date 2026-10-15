@@ -67,6 +67,19 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		return h.failure(err), err
 	}
 	input.Engine = resolved
+	if h.deps.Bind != nil {
+		binding, bindErr := h.deps.Bind(ctx, input)
+		if bindErr != nil {
+			return h.failure(bindErr), bindErr
+		}
+		if err := checkProcessBinding(input.RouteBinding, binding); err != nil {
+			return h.failure(err), err
+		}
+		input.RouteBinding = binding
+	} else if input.RouteBinding.Routes.Bearer != "" {
+		err = errors.New("SDK execution requires a fresh process binding factory")
+		return h.failure(err), err
+	}
 	process, err = h.deps.Start(ctx, input, activity)
 	if err != nil {
 		return h.failure(err), err

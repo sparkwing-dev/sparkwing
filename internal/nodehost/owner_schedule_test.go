@@ -3,11 +3,47 @@ package nodehost
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
+	f, host, input := newOwnerFixture(t, true)
+	f.snapshot.Run.State = store.RunRunning
+	f.snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending}}
+	var layers []string
+	host.Layer = func(_ context.Context, layer LayerSpec, _ AcceptedRun, _ store.NodeRow) (OwnerLayerResult, error) {
+		layers = append(layers, layer.Name)
+		if layer.Name == "memo" || layer.Name == "admission" {
+			return OwnerLayerResult{}, errors.New("approval entered compute policy")
+		}
+		return OwnerLayerResult{}, nil
+	}
+	host.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
+		if s.Nodes[0].Status == string(store.StatusPending) {
+			return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "gate", Kind: store.DecisionApproval}}}
+		}
+		return store.ScheduleDecision{}
+	}
+	waiting := errors.New("waiting for human decision")
+	wait := host.Wait
+	host.Wait = func(ctx context.Context, s store.RunSnapshot) error {
+		if s.Nodes[0].Status == store.StatusApprovalPending {
+			return waiting
+		}
+		return wait(ctx, s)
+	}
+	_, err := host.Run(t.Context(), input)
+	if !errors.Is(err, waiting) {
+		t.Fatalf("approval did not reach human wait: %v", err)
+	}
+	if !reflect.DeepEqual(layers, []string{"debug", "skip_if", "approval"}) {
+		t.Fatalf("approval layers = %v", layers)
+	}
+}
 
 func TestOwnerHostAcquisitionUsesPersistedAcceptance(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -41,13 +42,18 @@ type EvaluationInput struct {
 // EvaluationDependencies connects the evaluator to the same engine, protocol and
 // validation boundaries as execution. ReadOutput must authorize the persisted
 // terminal generation and return its recorded JSON, including explicit null.
-// Start owns run-log attribution, masking, environment and delegated routes.
+// Bind delegates a fresh process bearer for each startup. Start takes ownership
+// of that binding, including revocation on failed startup and on Close, and owns
+// run-log attribution, masking and environment. Bound input requires Bind.
+// ChildContext applies the shared deadline policy to skip and memo evaluation.
 type EvaluationDependencies struct {
 	Store         EvaluationStore
+	Bind          func(context.Context, EvaluationInput) (nodeproto.ProcessBinding, error)
 	Start         func(context.Context, EvaluationInput) (ExecutorProcess, error)
 	EnsureEngine  func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
 	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
 	CanonicalHash func(any) (runspec.Hash, error)
+	ChildContext  func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	Validation    nodeproto.ValidationContext
 	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
 	Mask          func(string) string
@@ -70,6 +76,9 @@ func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
 	}
 	if deps.CanonicalHash == nil {
 		deps.CanonicalHash = runspec.CanonicalHash
+	}
+	if deps.ChildContext == nil {
+		deps.ChildContext = limits.ChildContext
 	}
 	return &OwnerEvaluator{deps: deps, sdkCode: sdkCode{Store: deps.Store, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
 }
@@ -154,53 +163,30 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 }
 
 func (h *OwnerEvaluator) expand(ctx context.Context, input EvaluationInput, spec runspec.Spec, job nodeproto.JobSpec, output json.RawMessage) (body json.RawMessage, err error) {
-	resolved, err := h.deps.EnsureEngine(ctx, spec.Resolved.Engine, input.Engine.Target)
+	err = h.withProcess(ctx, input, spec, func(session *executorSession, code NodeInput) error {
+		body, err = h.expansionBody(ctx, session, code, job, output)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	if !reflect.DeepEqual(resolved.Identity, spec.Resolved.Engine) {
-		return nil, executorError(apierr.SpecDrift, "engine resolution changed the sealed release")
-	}
-	input.Engine = resolved
-	process, err := h.deps.Start(ctx, input)
-	if process != nil {
-		defer func() {
-			closeErr := process.Close()
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.CleanupTimeout)
-			defer cancel()
-			err = errors.Join(err, closeErr, process.Cleanup(cleanupCtx))
-			if err != nil {
-				body = nil
-			}
-		}()
-	}
+	return body, nil
+}
+
+func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSession, code NodeInput, job nodeproto.JobSpec, output json.RawMessage) (json.RawMessage, error) {
+	snapshot, err := h.Store.ReadSnapshot(ctx, code.Accepted.RunID)
 	if err != nil {
 		return nil, err
 	}
-	if process == nil {
-		return nil, errors.New("SDK evaluator returned no process")
-	}
-	session := &executorSession{process: process}
-	code := NodeInput{Engine: input.Engine, Accepted: input.Accepted, NodeID: input.NodeID, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner, RouteBinding: input.RouteBinding, Replay: input.Replay}
-	if err = h.hello(ctx, session, code); err != nil {
-		return nil, err
-	}
-	if err = h.replan(ctx, session, code, spec); err != nil {
-		return nil, err
-	}
-	snapshot, err := h.Store.ReadSnapshot(ctx, input.Accepted.RunID)
-	if err != nil {
-		return nil, err
-	}
-	if snapshot.Run.ID != input.Accepted.RunID {
+	if snapshot.Run.ID != code.Accepted.RunID {
 		return nil, executorError(apierr.SpecDrift, "expansion snapshot belongs to another run")
 	}
 	validation := h.Validation
-	validation.Expansion, validation.SourceJob = true, input.NodeID
+	validation.Expansion, validation.SourceJob = true, code.NodeID
 	validation.ExistingJobs = make([]nodeproto.JobSpec, 0, len(snapshot.Nodes))
 	for _, row := range snapshot.Nodes {
 		var existing nodeproto.JobSpec
-		if err = json.Unmarshal(row.Spec, &existing); err != nil || row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != existing.ID {
+		if err := json.Unmarshal(row.Spec, &existing); err != nil || row.Ref.RunID != code.Accepted.RunID || row.Ref.NodeID != existing.ID {
 			return nil, executorError(apierr.PlanDrift, "expansion snapshot has invalid declarations")
 		}
 		validation.ExistingJobs = append(validation.ExistingJobs, existing)
@@ -216,21 +202,21 @@ func (h *OwnerEvaluator) expand(ctx context.Context, input EvaluationInput, spec
 			return nil, executorError(apierr.ProtocolError, "generator must return a jobs array")
 		}
 		var group []json.RawMessage
-		if err = json.Unmarshal(value, &group); err != nil {
+		if err := json.Unmarshal(value, &group); err != nil {
 			return nil, executorError(apierr.ProtocolError, "generator returned an invalid jobs array")
 		}
 		for _, raw := range group {
 			var member struct {
 				Groups []string `json:"groups"`
 			}
-			if err = json.Unmarshal(raw, &member); err != nil || !executorContains(member.Groups, id) {
+			if err := json.Unmarshal(raw, &member); err != nil || !executorContains(member.Groups, id) {
 				return nil, executorError(apierr.PlanInvalid, "generated job does not belong to its evaluated generator")
 			}
 		}
 		jobs = append(jobs, group...)
 	}
 	// safety: validate the raw combined body so unknown fields and cross-generator edges reach the shared validator.
-	body, err = json.Marshal(struct {
+	body, err := json.Marshal(struct {
 		Jobs []json.RawMessage `json:"jobs"`
 	}{Jobs: jobs})
 	if err != nil {

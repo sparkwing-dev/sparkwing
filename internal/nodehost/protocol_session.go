@@ -89,6 +89,11 @@ type ProtocolSession struct {
 
 var errProtocolSessionClosed = errors.New("SDK protocol session closed")
 
+type protocolEvalStopped struct{ cause error }
+
+func (e *protocolEvalStopped) Error() string { return "SDK evaluation stopped: " + e.cause.Error() }
+func (e *protocolEvalStopped) Unwrap() error { return e.cause }
+
 // StartProtocolSession starts the acquired command with private protocol pipes.
 // Callers must Close every returned session, including after a rejected hello.
 func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (*ProtocolSession, error) {
@@ -204,7 +209,7 @@ func (s *ProtocolSession) Request(ctx context.Context, request nodeproto.Request
 		}
 		err := context.Cause(ctx)
 		if request.Op == nodeproto.OpEval {
-			err = errors.Join(err, protocolSessionError(apierr.ProtocolError, "SDK eval cancellation requires process termination; the protocol defines only job/step cancellation"))
+			err = &protocolEvalStopped{cause: err}
 		}
 		s.failProtocol(err)
 		<-s.joined
@@ -468,7 +473,9 @@ func (s *ProtocolSession) Close() error {
 		}
 		s.stopLogs()
 		err := s.protocolFailure()
-		if errors.Is(err, errProtocolSessionClosed) {
+		_, evalStopped := err.(*protocolEvalStopped)
+		// safety: the request reports intentional eval cancellation; revocation and reaping failures remain errors.
+		if errors.Is(err, errProtocolSessionClosed) || evalStopped {
 			err = nil
 		}
 		s.closeErr = errors.Join(revokeErr, err, s.reapErr)

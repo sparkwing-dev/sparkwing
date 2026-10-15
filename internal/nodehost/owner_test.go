@@ -80,6 +80,8 @@ func (f *ownerFixture) TransitionNode(_ context.Context, change store.NodeTransi
 		if change.To == store.NodeReady {
 			now := time.Now()
 			row.ReadyAt = &now
+		} else if change.To == store.NodeApprovalPending {
+			row.Status = store.StatusApprovalPending
 		} else {
 			row.Status, row.Outcome = store.StatusDone, change.To
 		}

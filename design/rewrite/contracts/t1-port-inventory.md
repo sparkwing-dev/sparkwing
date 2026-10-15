@@ -119,6 +119,13 @@ The final three comparisons include all changes since the recorded merge base. E
 
 ## Required case details
 
+`internal/nodehost/lifecycle_test.go:TestLayerOwnership` ports
+`TestLifecycleLayersPerPlacement` to the final owner/executor table. The old
+retry-auto, bounce and workers rows are removed from that proof.
+`TestOwnerHostApprovalStopsBeforeComputeLayers` verifies the approval boundary
+through `OwnerHost.Run`. Native placement and the risk/cleanup acceptance cell
+remain separate requirements.
+
 ### Complete old credential dimension
 
 | Exact old label | Final fixture and decision |

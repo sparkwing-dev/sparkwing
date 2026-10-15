@@ -57,6 +57,7 @@ are part of this contract.
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
 | `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks. |
+| `nodehost.OwnerEvaluator.SkipIf`, `SkipEvaluation`, `OwnerEvaluator.MemoKey` | Evaluate pre-dispatch conditions and memo keys without starting job attempts or writing lifecycle state. |
 | `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |
 | `nodehost.ClaimAuthority` | Refers to authenticated executor authority without granting it from a request body. |
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
@@ -223,6 +224,9 @@ the job terminal. Acquisition and planning failures before acceptance finish the
 run and owner unit atomically. Setup failures on resumed runs leave accepted work
 to recovery. Loss of authority never writes a terminal verdict.
 
+Approval release stops after the approval layer. It never enters memo, compute
+admission or executor layers while waiting for a human decision.
+
 `ExecutorActivity.Await` brackets an authenticated child wait and returns an
 idempotent resume function. Nested waits suspend only the no-progress deadline.
 The native child-await route adapter must bracket the whole wait. The execution
@@ -242,6 +246,31 @@ The protocol defines cancellation by job and step, but eval carries only a
 closure ID. Until C3's protocol owner defines eval cancellation, the native
 session terminates and joins on an eval timeout. Host-registered cleanup still
 runs. Finally or after_run requiring that SDK process cannot run after this cut.
+
+The request retains its cancellation cause. Close treats this requested eval
+termination as an expected exit, but still reports revocation and reaping errors.
+
+`ExecutorDependencies.Bind` and `EvaluationDependencies.Bind` delegate a new
+nodehost route bearer before each process startup. The factory uses authenticated
+owner or claim authority. The returned binding must keep the input's run and job
+identity and must not reuse that input bearer. Start receives the delegated
+binding and owns its revocation even if startup fails. SDK hello receives only
+that process binding. Unbound transports may omit the factory.
+
+`OwnerEvaluator.SkipIf` evaluates predicates in declaration order and stops at
+the first true result. Each predicate reconstructs and checks the accepted code
+in its own process because protocol v2 cannot cancel one eval in place. The
+per-predicate budget is 30 seconds unless declared otherwise. Timeout means
+don't skip and records the predicate index in `SkipEvaluation.TimedOut` for host
+diagnostics. The next predicate starts after close and cleanup join. Null and
+non-boolean results, drift, SDK failures and cleanup errors prevent dispatch.
+
+`OwnerEvaluator.MemoKey` evaluates the declared closure with its existing
+30-second budget. A nonempty string supplies the key; null disables memoization
+for the job. NoMemo bypasses reads while preserving key evaluation for later
+writes. The store and storage adapters still own scope, result authorization and
+materialization. Neither evaluator creates an attempt. Cancellation retains its
+cause, and other policy error text passes through masking.
 
 `OwnerEvaluator.Expand` checks the persisted source generation and declaration
 hash, then reads its authorized recorded output. A successful or memoized source
@@ -284,6 +313,10 @@ Owner policy also needs a fenced store edge for a skip predicate that errors
 before dispatch. `NodeTransitions` permits owner dependency skips and cancels,
 but no pending-to-failed policy result. Debug pause status detail has no typed
 mutation in `TransitionExtra`. Neither path may fall back to legacy raw writers.
+Approval conditions need a pending-to-success edge when SkipIf returns true,
+because that bypass must release dependents. A skipped dependency would suppress
+them. Approval waiting also needs the persisted opening time and resolution ID
+in the read contract so a replacement owner retains the original deadline.
 Eval log identity must allow a materialized source at generation zero because
 `nodes.generation` starts at zero and unclaimed materialization needs no award.
 The `log_streams.source_generation > 0` constraint does not cover that source.

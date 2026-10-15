@@ -27,6 +27,16 @@ type executorSession struct {
 	failure  *nodeproto.JobFailure
 }
 
+func checkProcessBinding(parent, child nodeproto.ProcessBinding) error {
+	if child.RunID != parent.RunID || child.JobID != parent.JobID {
+		return executorError(apierr.SpecDrift, "process binding changed its accepted job")
+	}
+	if parent.Routes.Bearer != "" && (child.Routes.Bearer == "" || child.Routes.Bearer == parent.Routes.Bearer) {
+		return executorError(apierr.SpecDrift, "process requires a fresh delegated route bearer")
+	}
+	return nil
+}
+
 func (s *executorSession) call(ctx context.Context, request nodeproto.Request, result any) error {
 	if err := context.Cause(ctx); err != nil {
 		return err
