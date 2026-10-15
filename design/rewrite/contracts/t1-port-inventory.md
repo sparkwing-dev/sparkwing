@@ -19,6 +19,20 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+## W1b raw cancellation writer retirement
+
+`TestMeteredFailureReportSettlesAndReleasesClaimProperty` replaces
+`TestCancelNodeForExhaustedCreditsFailsAndReleasesTheNode`,
+`TestCancelNodeForComputeLimitFailsTheNodeAndReleasesTheClaim` and
+`TestStaleCancellationSettlesAtTheExecutionStart`. It exercises real capability
+issuance, terminal transitions and settlement for runner and Cloud claims,
+before and after execution starts. It checks persisted failure reasons, claim
+release, closed compute intervals, nonnegative settlement, exact replay and
+refusal of changed replay. Job and attempt finish times use the store clock
+and cannot precede execution. Unstarted Cloud claims refund their reservation.
+This ports result persistence and settlement. Renewal-time exhaustion and grace
+remain separate integration requirements.
+
 W2 runner-observation ports: the five tests in agents_test.go move to
 TestRunnerInventoryHTTPUsesCommittedSnapshot,
 TestRunnerInventoryHTTPNameProperty, TestRunnerInventoryHTTPTenantProperty,

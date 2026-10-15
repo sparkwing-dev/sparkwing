@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -57,7 +58,7 @@ func paidGrantForPaymentTx(ctx context.Context, tx *storeTx, paymentID string) (
 	return result, found, nil
 }
 
-func paymentWarningTeamTx(ctx context.Context, tx *storeTx, paymentID string) (Team, error) {
+func paymentWarningTeamTx(ctx context.Context, tx *storeTx, paymentID string, mode capability.PaymentMode) (Team, error) {
 	grant, found, err := paidGrantForPaymentTx(ctx, tx, paymentID)
 	if err != nil {
 		return "", err
@@ -80,5 +81,32 @@ func paymentWarningTeamTx(ctx context.Context, tx *storeTx, paymentID string) (T
 		}
 		team = owner
 	}
-	return team, errors.Join(rows.Err(), rows.Close())
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return "", err
+	}
+	if mode == "" {
+		return team, nil
+	}
+	rows, err = tx.QueryContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND payment_id=? UNION SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='collection'`, mode, paymentID, mode, paymentID)
+	if err != nil {
+		return "", err
+	}
+	var associated Team
+	for rows.Next() {
+		var owner Team
+		if err := rows.Scan(&owner); err != nil {
+			return "", errors.Join(err, rows.Close())
+		}
+		if associated != "" && associated != owner {
+			return "", errors.Join(ErrCreditGrantConflict, rows.Close())
+		}
+		associated = owner
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return "", err
+	}
+	if team != "" && team != associated {
+		return "", authorityError(apierr.Conflict, "payment has no matching mode-scoped payer association")
+	}
+	return associated, nil
 }

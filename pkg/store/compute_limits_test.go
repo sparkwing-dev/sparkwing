@@ -545,34 +545,6 @@ func TestWallClockGuardReportsAFailedRead(t *testing.T) {
 	}
 }
 
-func TestCancelNodeForComputeLimitFailsTheNodeAndReleasesTheClaim(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	readyNode(t, s, "run-cut", "build")
-	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-
-	if err := s.CancelNodeForComputeLimit(ctx, "run-cut", "build",
-		claimant.TokenPrefix, store.ComputeLimitRunSeconds, time.Now()); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	node, err := s.GetNode(ctx, "run-cut", "build")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.FailureReason != store.FailureComputeLimit {
-		t.Fatalf("failure reason = %q, want %q", node.FailureReason, store.FailureComputeLimit)
-	}
-	if node.Claimed {
-		t.Fatal("a cancelled node kept its claim")
-	}
-}
-
 func TestOldestWaitingReadyNodeForPrincipalStaysInsideThePrincipal(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

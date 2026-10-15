@@ -2720,7 +2720,6 @@ type Store struct {
 func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
-func (s *Store) AccountEmail(ctx context.Context, accountID string) (string, error)
 func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error)
 func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
@@ -2737,12 +2736,6 @@ func (s *Store) AuthGenerations(ctx context.Context, authority capability.Author
 func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
 func (s *Store) AuthorizeRunnerClaim(ctx context.Context, raw string, now time.Time) (RunnerClaim, error)
 func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error)
-func (s *Store) CancelNodeForComputeLimit(
-	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
-) error
-func (s *Store) CancelNodeForExhaustedCredits(
-	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
-) error
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error
 func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) error

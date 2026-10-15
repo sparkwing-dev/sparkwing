@@ -358,7 +358,7 @@ and `Operator.ReportCardRefund` are removed. Their private transaction owners
 retain the existing setup, refund, warning and dispute rules. Store tests supply
 trusted fixture facts through test-only entry points. Those tests do not prove
 provider verification. `SettlePayment` is the public verified-event boundary.
-Expanding its checkout-only event contract remains a C2 integration requirement.
+Its expanded event contract is implemented against the schema contract below.
 Console hold and release operations keep their authenticated tenant handles.
 
 `Store.SetTokenMetered` is removed. Legacy metering reads share one query until
@@ -412,8 +412,8 @@ and record commits. The retention proof materializes records through reconciliat
 finishes the destination to create its success pin, and keeps copied provenance
 after source deletion. GC uses a controlled store clock across grace and takeover.
 The ledger retention proof creates all financial-table rows through their mutation
-owners, then verifies them unchanged after run retention and reopening. Provider
-verification for card, warning and refund facts is still a C2 integration point.
+owners, then verifies them unchanged after run retention and reopening. The signed
+refund proof also joins C2 verification to settlement, using the schema fake below.
 The unused legacy storage-pass lease API is removed; maintenance uses the elected
 Operator pass.
 
@@ -426,7 +426,23 @@ contract. Tests use a schema fake for those missing tables. Production callbacks
 remain unavailable until that integration lands, and failed receipt writes
 cannot leave financial mutations behind.
 
+Global payer discovery uses the existing reviewed `paymentWarningTeamTx` owner.
+Verified events require its mode-scoped checkout or collection association to
+agree with any retained grant or attempt. Collection reads the exact attempt
+under the payer derived from its committed correlation. Generated tests replace
+the persisted correlation's team or mode and require financial state to stay
+unchanged across collection, refund, warning and dispute events.
+
 `Store.CommittedObject`, `Store.NodeOutputObject` and their legacy `Upload` model
 are removed because the controller now reads committed blob records. Source-key
 validation and the old local output writers remain until their W1/W3 callers
 are retired.
+
+`Store.CancelNodeForExhaustedCredits` and `Store.CancelNodeForComputeLimit`
+are removed. Terminal failures use `Tenant.TransitionNode` with the live holder,
+source attempt and structured result. The transition releases the claim and
+capacity, closes compute, settles its immutable award and emits its event in one
+transaction. Exact replay adds no charge or event. Transition timestamps come
+from the store clock, so a caller cannot supply a stale cancellation timestamp.
+This result path does not implement renewal-time exhaustion or grace policy.
+The unused raw `Store.AccountEmail` read is also removed.

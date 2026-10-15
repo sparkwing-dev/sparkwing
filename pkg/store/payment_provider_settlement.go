@@ -185,11 +185,10 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 		}
 		result.Team = c.team
 		var boundPayment, boundCharge string
-		var boundTeam Team
-		if err := tx.QueryRowContext(ctx, "SELECT team,charge_id,payment_intent FROM card_attempts WHERE id=?", c.attempt).Scan(&boundTeam, &boundCharge, &boundPayment); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT charge_id,payment_intent FROM card_attempts WHERE id=? AND team=?", c.attempt, c.team).Scan(&boundCharge, &boundPayment); err != nil {
 			return result, err
 		}
-		if c.team != boundTeam || c.charge != boundCharge || e.PaymentID != boundPayment {
+		if c.charge != boundCharge || e.PaymentID != boundPayment {
 			return PaymentSettlement{}, authorityError(apierr.Conflict, "payment does not match its committed collection attempt")
 		}
 		if e.Kind == capability.PaymentCardFailed {
@@ -204,7 +203,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 		result.GrantID, result.AmountMicro = g.ID, g.AmountMicro
 		return result, err
 	case capability.PaymentWarningEvent:
-		owner, err := providerPaymentOwnerTx(ctx, tx, e)
+		owner, err := paymentWarningTeamTx(ctx, tx, e.PaymentID, e.Mode)
 		if err != nil {
 			return result, err
 		}
@@ -217,7 +216,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 	case capability.PaymentRefund:
 		return settleProviderRefundTx(ctx, tx, e)
 	case capability.PaymentDisputeOpened, capability.PaymentDisputeClosed:
-		team, err := providerPaymentOwnerTx(ctx, tx, e)
+		team, err := paymentWarningTeamTx(ctx, tx, e.PaymentID, e.Mode)
 		if err != nil {
 			return result, err
 		}
@@ -252,7 +251,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 
 func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (PaymentSettlement, error) {
 	var result PaymentSettlement
-	team, err := providerPaymentOwnerTx(ctx, tx, e)
+	team, err := paymentWarningTeamTx(ctx, tx, e.PaymentID, e.Mode)
 	if err != nil {
 		return result, err
 	}
@@ -281,33 +280,4 @@ func settleProviderRefundTx(ctx context.Context, tx *storeTx, e capability.Payme
 		_, err = applyCardRefundTx(ctx, tx, team, e.PaymentID, e.ObjectID, e.Status, `refund_id = ? AND status = 'pending'`, []any{e.ObjectID}, tx.now())
 	}
 	return result, err
-}
-
-func providerPaymentOwnerTx(ctx context.Context, tx *storeTx, e capability.PaymentEvent) (Team, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND payment_id=? UNION SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='collection'`, e.Mode, e.PaymentID, e.Mode, e.PaymentID)
-	if err != nil {
-		return "", err
-	}
-	var owner Team
-	for rows.Next() {
-		var team Team
-		if err := rows.Scan(&team); err != nil {
-			return "", errors.Join(err, rows.Close())
-		}
-		if owner != "" && owner != team {
-			return "", errors.Join(ErrCreditGrantConflict, rows.Close())
-		}
-		owner = team
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return "", err
-	}
-	legacy, err := paymentWarningTeamTx(ctx, tx, e.PaymentID)
-	if err != nil {
-		return "", err
-	}
-	if legacy != "" && legacy != owner {
-		return "", authorityError(apierr.Conflict, "payment has no matching mode-scoped payer association")
-	}
-	return owner, nil
 }

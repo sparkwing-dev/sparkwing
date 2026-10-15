@@ -710,38 +710,6 @@ func TestChargeNodeCreditsCancelsAfterGrace(t *testing.T) {
 	}
 }
 
-func TestCancelNodeForExhaustedCreditsFailsAndReleasesTheNode(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	readyNode(t, s, "run-cancel", "build")
-	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if err := s.CancelNodeForExhaustedCredits(ctx, "run-cancel", "build", claimant.TokenPrefix, time.Now()); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	node, err := s.GetNode(ctx, "run-cancel", "build")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.Status != "done" || node.Outcome != "failed" {
-		t.Fatalf("node = %s/%s, want done/failed", node.Status, node.Outcome)
-	}
-	if node.FailureReason != store.FailureCreditsExhausted {
-		t.Fatalf("failure reason = %q, want %q", node.FailureReason, store.FailureCreditsExhausted)
-	}
-	if node.Claimed {
-		t.Fatal("the cancelled node is still claimed")
-	}
-	if anchor := chargeWindowAnchor(t, s, "run-cancel", "build"); anchor != 0 {
-		t.Fatalf("cancel left a charge window of %d", anchor)
-	}
-}
-
 // An unmetered token claims and runs without touching the ledger, which is
 // what keeps an install that marks nothing behaving as it did before.
 func TestUnmeteredClaimNeitherReservesNorCharges(t *testing.T) {

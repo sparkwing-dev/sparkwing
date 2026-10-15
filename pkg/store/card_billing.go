@@ -800,16 +800,6 @@ func (t *Tenant) TeamOwnerEmails(ctx context.Context) (_ []string, err error) {
 	return out, rows.Err()
 }
 
-// AccountEmail returns the email address of an account.
-func (s *Store) AccountEmail(ctx context.Context, accountID string) (string, error) {
-	var email string
-	err := s.queryRow(ctx, `SELECT email FROM accounts WHERE id = ?`, accountID).Scan(&email)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return email, err
-}
-
 func teamHasCardTx(ctx context.Context, tx *storeTx, team Team) (bool, error) {
 	return rowPresentTx(ctx, tx, `SELECT 1 FROM teams WHERE name = ? AND card_payment_method != ''`, string(team))
 }

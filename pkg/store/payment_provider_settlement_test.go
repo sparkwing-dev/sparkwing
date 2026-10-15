@@ -169,6 +169,52 @@ func TestProviderPaymentAssociationCannotChangeProperty(t *testing.T) {
 	}
 }
 
+func TestProviderPaymentRejectsConflictingPersistedPayerProperty(t *testing.T) {
+	s, _, now := providerPaymentFixture(t)
+	paid := providerCollectionEvent(t, s, now, capability.PaymentCardPaid)
+	if _, err := s.settlePaymentFacts(t.Context(), paid); err != nil {
+		t.Fatal(err)
+	}
+	before := paymentMutationSnapshot(t, s)
+	property := func(seed uint32, foreignTeam bool) bool {
+		team, mode := "a", "live"
+		if foreignTeam {
+			team, mode = "b", "test"
+		}
+		rewriteSchemaExec(t, s.db, "UPDATE payment_correlations SET team=?,payment_mode=? WHERE provider_id='payment'", team, mode)
+		defer rewriteSchemaExec(t, s.db, "UPDATE payment_correlations SET team='a',payment_mode='test' WHERE provider_id='payment'")
+		kinds := []capability.PaymentEventKind{capability.PaymentCardPaid, capability.PaymentCardFailed, capability.PaymentRefund, capability.PaymentWarningEvent, capability.PaymentDisputeOpened, capability.PaymentDisputeClosed}
+		e := providerPaymentEvent(now, kinds[seed%uint32(len(kinds))])
+		e.EventID, e.ObjectID, e.Status = fmt.Sprintf("conflicting-payer-%d", seed), fmt.Sprintf("conflicting-object-%d", seed), "succeeded"
+		if e.Kind == capability.PaymentCardPaid || e.Kind == capability.PaymentCardFailed {
+			e.ObjectID, e.AmountMinor = e.PaymentID, paid.AmountMinor
+		}
+		if e.Kind == capability.PaymentWarningEvent {
+			e.AmountMinor, e.Currency, e.Actionable = 0, "", true
+		}
+		switch e.Kind {
+		case capability.PaymentCardFailed:
+			e.Status = "requires_payment_method"
+		case capability.PaymentDisputeOpened:
+			e.Status = "needs_response"
+		case capability.PaymentDisputeClosed:
+			e.Status = "won"
+		}
+		got, err := s.settlePaymentFacts(t.Context(), e)
+		return err != nil && got == (PaymentSettlement{}) && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
+	}
+	for seed := range uint32(6) {
+		for _, foreign := range []bool{false, true} {
+			if !property(seed, foreign) {
+				t.Fatalf("conflicting payer committed: kind=%d foreign_team=%t", seed, foreign)
+			}
+		}
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(745))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProviderRefundIdentityAndConservationProperty(t *testing.T) {
 	s, tenant, now := providerPaymentFixture(t)
 	providerCheckoutPaid(t, s)
@@ -344,7 +390,7 @@ func TestProviderRefundUsesOpaqueVerifiedEvent(t *testing.T) {
 	dir := t.TempDir()
 	key, secret := filepath.Join(dir, "key"), filepath.Join(dir, "secret")
 	for path, value := range map[string]string{key: "sk_test_synthetic", secret: "whsec_synthetic"} {
-		if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

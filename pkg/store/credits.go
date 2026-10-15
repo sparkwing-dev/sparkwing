@@ -1604,14 +1604,6 @@ func (t *Tenant) eventKindPresent(ctx context.Context, runID, nodeID, kind strin
 	return err == nil, err
 }
 
-// CancelNodeForExhaustedCredits fails a running node whose controller ran out of credit, releases its claim, and records the reason on the run.
-func (s *Store) CancelNodeForExhaustedCredits(
-	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
-) error {
-	return s.cancelMeteredNode(ctx, runID, nodeID, tokenPrefix,
-		FailureCreditsExhausted, "credit balance exhausted", now)
-}
-
 // FailNodeForUnpricedClass fails a node whose cpu request is above the largest class the credit rate table prices, and records an event naming both sizes.
 func (t *Tenant) FailNodeForUnpricedClass(
 	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
@@ -1628,14 +1620,6 @@ func (t *Tenant) FailNodeForUnpricedClass(
 	}
 	return t.s.cancelMeteredNode(ctx, refusal.RunID, refusal.NodeID, "",
 		FailureUnpricedCPUClass, refusal.Error(), now)
-}
-
-// CancelNodeForComputeLimit fails a running node a compute guard stopped, releases its claim, and records the reason on the run.
-func (s *Store) CancelNodeForComputeLimit(
-	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
-) error {
-	return s.cancelMeteredNode(ctx, runID, nodeID, tokenPrefix,
-		FailureComputeLimit, "compute limit "+limit+" reached", now)
 }
 
 func (s *Store) cancelMeteredNode(
