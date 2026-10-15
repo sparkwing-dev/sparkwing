@@ -8,6 +8,8 @@ func TypeScriptTests(scenario string) []string {
 		return []string{"example.test.ts", "transport.test.ts"}
 	case "protocol-version-and-hard-cut", "protocol-envelope-transcripts":
 		return []string{"protocol-v2.test.ts"}
+	case "protocol-additive-fields-and-child-handles":
+		return []string{"protocol-v2.test.ts", "transport.test.ts", "native-package.test.ts"}
 	case "protocol-strict-plan-parity":
 		return []string{"plan.test.ts", "describe.test.ts"}
 	case "protocol-errors-and-frame-identity":

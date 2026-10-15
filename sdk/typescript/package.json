@@ -15,6 +15,7 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
+    "test:native": "go test -p 4 ./test/nativehost -run TestNativeProtocol",
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
     "prepack": "npm run build && node native/check-package.mjs"

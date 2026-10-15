@@ -36,4 +36,19 @@ func typeScriptBoundary(t *testing.T, scenario string) {
 			t.Fatalf("TypeScript SDK boundary: %v\n%s", err, output)
 		}
 	})
+	if scenario == "protocol-additive-fields-and-child-handles" {
+		t.Run("typescript_native_pipes", func(t *testing.T) {
+			root, err := filepath.Abs("../..")
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := exec.CommandContext(t.Context(), "go", "test", "-p", "4", "./sdk/typescript/test/nativehost", "-run", "^TestNativeProtocol$")
+			command.Dir = root
+			command.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false", "TMPDIR="+t.TempDir())
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("TypeScript native protocol: %v\n%s", err, output)
+			}
+		})
+	}
 }

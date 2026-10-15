@@ -58,15 +58,28 @@ node native/build.mjs --headers <node-headers/include/node> --node-lib <node.lib
 ```
 
 The release package must contain `native/win32-x64/protocol.node` and
-`native/win32-arm64/protocol.node`. `npm pack` refuses a package missing either bridge. The bridge source is in
-[native/protocol.c](native/protocol.c). End users need no compiler.
+`native/win32-arm64/protocol.node`. `npm pack` checks both files and their
+architecture and DLL headers. Native tests must also pass on each architecture
+because header checks cannot prove that Node can load and use the bridge.
+The bridge source is in [native/protocol.c](native/protocol.c). End users need
+no compiler.
 
 For development, run `npm ci`, `npm run typecheck`, `npm test` and `npm run build`.
 The build emits ESM into `dist/`; package exports expose only the public root.
 The release process stamps `package.json` and its lockfile with the engine
 release version. Hello reads that package version.
 
+Run `npm run test:native` from this directory with the repository's Go toolchain
+installed and `GOWORK=off` when a parent workspace points at another checkout.
+The test builds the SDK and launches a public-package fixture with inherited
+Unix descriptors or Windows argv handles. It exchanges requests and replies
+using the Go contract types and checks that a child tool cannot access the
+protocol pipes. Use Node and Go for the same CPU architecture. On Windows,
+build the matching native bridge first. Missing Node, TypeScript dependencies
+or bridge binaries fail the test.
+
 The Go acceptance suite also runs SDK boundary tests for the protocol scenarios.
-These tests use native Unix pipes and fake bound services. Controller authorization,
-store transitions, artifact/memo persistence, native Windows handles, real DinD,
-and the six placement paths require their corresponding integration hosts.
+These tests use native pipes and fake bound services. Run the native pipe test
+on Windows to verify raw handles there. Controller authorization, store
+transitions, artifact/memo persistence, real DinD and the six placement paths
+require their corresponding integration hosts.

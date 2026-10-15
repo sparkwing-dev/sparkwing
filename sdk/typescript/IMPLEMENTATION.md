@@ -136,3 +136,86 @@ bridge. The bridge is required because raw Windows handles are not Node file
 descriptors. No new environment knob, runtime dependency or compatibility shim
 was added. Local multi-platform Docker builds request --load so an unsupported
 image store fails rather than reporting an image that exists only in build cache.
+
+## Continuation: native transport and package evidence
+
+This continues commit `a00605433`. The implementation above remains in place.
+
+Added a native host fixture in `test/nativehost`. It imports the compiled public
+package and exchanges the actual Go `nodeproto` contract types over OS pipes.
+It covers hello, describe, explicit zero/false plan fields, box concurrency,
+body environment, all six eval kinds, generated declarations, paired cancellation
+replies, debug forwarding and separation of author stdout from protocol frames.
+A child tool checks that it cannot access either protocol pipe or the old bearer
+environment value. The host compares Node's architecture with its own so an
+emulated x64 Node cannot establish an arm64 bridge pass.
+
+Unix uses inherited descriptors 3/4. Windows uses `AdditionalInheritedHandles`
+and decimal argv handles. `npm run test:native` builds the SDK and runs this
+fixture. Missing dependencies or the native bridge fail. There are no skipped
+platform branches in this host fixture.
+
+`protocol-additive-fields-and-child-handles` now executes both the TypeScript
+boundary tests and a `typescript_native_pipes` child. Its placement targets
+remain pending. The fake host uses concrete request/reply/plan structs because
+W4's parser and validator functions still panic in this branch. This establishes
+wire-shape agreement, not shared validation or Go SDK behavioral parity.
+
+The package preflight now rejects an architecture mismatch, an executable in
+place of a DLL, and truncated or invalid image headers. The regression test
+first reproduced acceptance of an x64 DLL header under the arm64 filename.
+Its image fixtures exercise header checks only. Real addon loading remains the
+native fixture's responsibility. Header offsets and machine values follow the
+[Microsoft PE specification](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format).
+
+No additional prototype code was removed. The previous hard cut removed 2,896
+source/test lines. This continuation replaces three lines of the existence-only
+package check. No further T1 inventory rows belong to W5, and no previously
+ported tests were removed.
+
+Shared files changed in this continuation:
+
+- `internal/acceptance/typescript.go`: add the SDK tests for the child-handle cell.
+- `tests/acceptance/typescript_test.go`: run the native host fixture in that cell.
+
+No shared contract changed. The three contract agreements above remain open:
+W3 bound-service route definitions, W4 job-only cancellation and C4 concurrency
+omission. Native Windows x64/arm64 addon builds and execution, real W3/W4
+host/validator integration, W1/W2/W7 authorization and persistence, and the
+placement/DinD lanes still require their owners' implementations or machines.
+The package gate continues to refuse this checkout because both Windows bridge
+binaries are absent. No release artifact was produced.
+
+The added test host is needed because a JavaScript stream fake cannot establish
+OS handle inheritance or agreement with Go's contract structs. It adds no runtime
+dependency, environment setting or public SDK API. Removing `test/nativehost`,
+its npm script and its acceptance invocation reverses that test-only mechanism.
+
+Verification for this continuation:
+
+- All 96 TypeScript tests passed with
+  `node --test --experimental-test-isolation=none 'test/**/*.test.ts'`.
+- `node node_modules/typescript/bin/tsc -p tsconfig.json` passed.
+- The native fixture passed on Linux against compiled ESM, including its child
+  pipe-access probe. Its compilation runs `tsc -p tsconfig.build.json`.
+- `go build -p 4 ./...` passed for the whole repository.
+- `go test -p 4 ./internal/acceptance ./tests/acceptance` passed. After the final
+  native fixture change, the focused
+  `go test -p 4 ./tests/acceptance -run 'TestProtocol/protocol-additive-fields-and-child-handles' -v`
+  passed both SDK children. All 34 placement targets in that scenario remain
+  skipped by the existing acceptance skeleton.
+- `go vet -p 4 ./sdk/typescript/test/nativehost ./internal/acceptance ./tests/acceptance`
+  passed after the final code change.
+- Both `GOOS=windows GOARCH=amd64 go test -p 4 -c -o <temporary-path> ./sdk/typescript/test/nativehost`
+  and its `GOARCH=arm64` counterpart passed. These compile Go test hosts only.
+  They neither compile nor execute the native C bridge.
+- `node native/check-package.mjs` refused the missing x64 bridge as expected.
+  Native build/run tooling is absent here. This remains a release blocker.
+- `git diff --check` passed. Shared Git config has no `core.worktree` override.
+
+Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
+`GOCACHE=/tmp/sw-astra-W5/gocache`, `GOTMPDIR=/tmp/sw-astra-W5/gotmp` and
+`TMPDIR=/tmp/sw-astra-W5`. Node tests used that same `TMPDIR`. The temporary
+directory, cross-compiled test executables and check output were removed after
+verification. No Sparkwing binary ran and no Git write occurred. The lead still
+owns independent review, pipelines and the native release lanes.
