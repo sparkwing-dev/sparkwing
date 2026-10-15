@@ -76,6 +76,14 @@ unlock.
   Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 ### Fixed
 
+- **repos update:** Honor checkout selection, explicit previews and fleet confirmation
+  Updates apply to the current checkout by default. `--dry-run` previews it;
+  `--all-repos --yes` applies across the fleet. A sibling directory whose name
+  starts with a registered checkout's name cannot select that checkout.
+- **cli:** Accept the documented example and spark selectors
+  `examples --example` and sparks add/remove `--spark` reach their handlers.
+  Plain output prints names or the selected example's source. Scaffold tips
+  and generated project instructions use the current commands and flags.
 - **controller authorization:** Preserve capability-derived browser-session ancestry and lifetime during credential issuance, and require direct sign-in for account-consent routes.
 - **dashboard API:** Send final run, job and pause routes with JSON cancellation and retry requests. Reporting read failures propagate to callers.
 

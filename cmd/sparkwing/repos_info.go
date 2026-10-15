@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -118,11 +119,14 @@ func selectRepo(fleet []repos.Repo, sel string) (repos.Repo, error) {
 		}
 	}
 	for _, r := range fleet {
-		if r.Primary != "" && strings.HasPrefix(cwd, r.Primary) {
-			return r, nil
+		if r.Primary != "" {
+			relative, err := filepath.Rel(r.Primary, cwd)
+			if err == nil && filepath.IsLocal(relative) {
+				return r, nil
+			}
 		}
 	}
-	return repos.Repo{}, fmt.Errorf("repos info: %q is not a registered sparkwing repo; pass --repo NAME", cwd)
+	return repos.Repo{}, fmt.Errorf("repos info: %q is not a registered sparkwing repo; select a registered checkout with -C PATH", cwd)
 }
 
 func buildRepoInfo(ctx context.Context, repo repos.Repo, latest string, reader controllerwire.RunReader) (repoInfo, error) {
@@ -215,7 +219,7 @@ func pipelineStates(ctx context.Context, repo repos.Repo, reader controllerwire.
 
 func repoSuggestion(info repoInfo) string {
 	if info.GuidesBehind > 0 && info.Replace == "" && info.Latest != "" {
-		return fmt.Sprintf("pin is %d guide(s) behind: sparkwing repos update --version %s --apply", info.GuidesBehind, info.Latest)
+		return fmt.Sprintf("pin is %d guide(s) behind: sparkwing repos update --version %s --in-place", info.GuidesBehind, info.Latest)
 	}
 	if info.Dirty {
 		return "working tree has uncommitted changes; commit or stash before bumping the SDK pin"

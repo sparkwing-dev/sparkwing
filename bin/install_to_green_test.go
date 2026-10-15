@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
 // safety: the installer verifies this stub like any signed asset, so its
@@ -21,6 +23,7 @@ if [[ -d "${GOMODCACHE:-}" ]]; then
   entries="$(find "$GOMODCACHE" -mindepth 1 -maxdepth 1 | wc -l | tr -d '[:space:]')"
 fi
 if [[ "${1:-}" == -C ]]; then shift 2; fi
+{ printf '%s\0' "$@"; printf '\0'; } >>"$INSTALL_TO_GREEN_TRACE.argv"
 printf '%s\t%s\t%s\t%s\t%s\n' "$1" "${HOME:-}" "${GOMODCACHE:-}" "${SPARKWING_HOME:-}" "$entries" >>"$INSTALL_TO_GREEN_TRACE"
 case "$1 ${2:-}" in
   "version -o")
@@ -84,6 +87,7 @@ type installToGreenResult struct {
 	err      error
 	exitCode int
 	trace    string
+	commands [][]string
 	tmpDir   string
 }
 
@@ -132,6 +136,9 @@ func runInstallToGreen(t *testing.T, options installToGreenOptions) installToGre
 	if err := os.WriteFile(trace, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(trace+".argv", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	scratch := filepath.Join(fixture, "scratch")
 	if err := os.Mkdir(scratch, 0o755); err != nil {
 		t.Fatal(err)
@@ -165,13 +172,41 @@ func runInstallToGreen(t *testing.T, options installToGreenOptions) installToGre
 	if err != nil {
 		t.Fatal(err)
 	}
+	argvTrace, err := os.ReadFile(trace + ".argv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commands [][]string
+	for _, record := range strings.Split(strings.TrimSuffix(string(argvTrace), "\x00\x00"), "\x00\x00") {
+		if record != "" {
+			commands = append(commands, strings.Split(record, "\x00"))
+		}
+	}
 	return installToGreenResult{
 		stdout:   out.String(),
 		stderr:   errOut.String(),
 		err:      runErr,
 		exitCode: exitCode,
 		trace:    string(recorded),
+		commands: commands,
 		tmpDir:   scratch,
+	}
+}
+
+func TestInstallToGreenUsesAcceptedCommands(t *testing.T) {
+	result, _ := measureGreen(t)
+	paths := map[string]bool{}
+	for _, args := range result.commands {
+		inv, err := clisurface.Parse("sparkwing", args)
+		if err != nil {
+			t.Errorf("demo invocation %q: %v", args, err)
+		}
+		paths[inv.Command.Path] = true
+	}
+	for _, path := range []string{"sparkwing pipeline new", "sparkwing pipeline plan", "sparkwing run"} {
+		if !paths[path] {
+			t.Errorf("demo never reached %s", path)
+		}
 	}
 }
 

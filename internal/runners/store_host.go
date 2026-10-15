@@ -18,6 +18,7 @@ import (
 type StoreBinding struct {
 	Tenant    *store.Tenant
 	Principal capability.Principal
+	Refresh   func(context.Context) (capability.Principal, error)
 }
 
 // NativeServices supplies the per-award host services and their joined cleanup.
@@ -58,7 +59,11 @@ type storeInputs struct {
 }
 
 func (h StoreHosting) inputs(ctx context.Context, unit controllerwire.ClaimedUnit, input nodehost.RunInput) (storeInputs, error) {
-	principal, err := h.authenticate(ctx, unit)
+	frozen, err := captureUnit(unit)
+	if err != nil {
+		return storeInputs{}, err
+	}
+	principal, err := h.authenticate(ctx, frozen)
 	if err != nil {
 		return storeInputs{}, err
 	}
@@ -66,8 +71,10 @@ func (h StoreHosting) inputs(ctx context.Context, unit controllerwire.ClaimedUni
 	if err != nil {
 		return storeInputs{}, err
 	}
-	inputs, err := nativeInputs(ctx, tenant, unit, principal, input)
-	inputs.binding = StoreBinding{Tenant: tenant, Principal: principal}
+	inputs, err := nativeInputs(ctx, tenant, frozen, principal, input)
+	inputs.binding = StoreBinding{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
+		return h.authenticate(ctx, frozen)
+	}}
 	return inputs, err
 }
 

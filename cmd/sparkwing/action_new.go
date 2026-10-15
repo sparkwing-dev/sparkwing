@@ -54,7 +54,7 @@ func runPipelineNew(args []string) error {
 	sparkwingDir, ok := walkUpForSparkwing(cwd)
 	bootstrapped := !ok
 	if !ok {
-		if err := bootstrapDotSparkwingOpts(cwd, filepath.Join(cwd, ".sparkwing"), true); err != nil {
+		if err := bootstrapDotSparkwing(cwd, filepath.Join(cwd, ".sparkwing")); err != nil {
 			return err
 		}
 		sparkwingDir = filepath.Join(cwd, ".sparkwing")
@@ -205,9 +205,9 @@ func builtinShapeByName(name string) (builtinShape, bool) {
 }
 
 func (s builtinShape) Summary() string {
-	unit := "nodes"
+	unit := "jobs"
 	if s.Nodes == 1 {
-		unit = "node"
+		unit = "job"
 	}
 	out := fmt.Sprintf("%d %s, %s", s.Nodes, unit, s.Structure)
 	if s.DefaultOn != "" {
@@ -237,7 +237,7 @@ var triggerBlocks = map[string]string{
 `,
 	"schedule": `      # Cron cadence, read in UTC. 09:00 daily. ` + "`where`" + ` is required
       # and has no default: ` + "`local`" + ` fires from a host you arm with
-      # ` + "`sparkwing crons install`" + `, ` + "`controller`" + ` from a controller. Add
+      # ` + "`sparkwing schedules install`" + `, ` + "`controller`" + ` from a controller. Add
       # tz, overlap, catch_up, args or a second named entry to the list.
       schedule:
         - cron: "0 9 * * *"
@@ -374,7 +374,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 			color.Green("+"), color.Bold(strings.Join(events, " + ")+" trigger"))
 
 		if slices.Contains(events, "schedule") {
-			fmt.Printf("    %s\n", color.Dim("schedule: arm it on this host with `sparkwing crons install`"))
+			fmt.Printf("    %s\n", color.Dim("schedule: arm it on this host with `sparkwing schedules install`"))
 		}
 		if slices.Contains(events, "push") || slices.Contains(events, "pull_request") {
 			fmt.Printf("    %s\n", color.Dim("not yet live: point the repo's GitHub webhook at this pipeline to deliver the event"))
@@ -410,7 +410,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 	}
 	tips = append(tips,
 		InfoNextStep{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
-		InfoNextStep{Command: "sparkwing serve start", Purpose: "see runs in local dashboard"},
+		InfoNextStep{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
 	)
 	printAlignedSteps(tips)
 	return nil
@@ -753,17 +753,6 @@ import (
 //
 // A fan-out report: collect seeds three independent gatherers that run
 // in parallel, and publish-report converges them into one summary.
-// Designed to run on a schedule -- add an "on:" trigger to this
-// pipeline's .sparkwing/sparkwing.yaml entry:
-//
-//   on:
-//     schedule:
-//       cron: "0 8 * * *"   # daily at 08:00 UTC
-//       where: local        # required; local fires from the host you arm
-//
-// Then arm it on the host that should run it with
-// "sparkwing crons install".
-//
 // See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
 type {{STRUCT}} struct{ sw.Base }
 

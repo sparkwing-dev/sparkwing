@@ -9,10 +9,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // ReadPin resolves the repository SDK requirement without executing repository code.
@@ -52,11 +53,13 @@ func VersionForPin(pin Pin) (string, error) {
 	}
 	return version, nil
 }
+
 func releaseVersion(version string) bool {
 	return semver.IsValid(version) && semver.Canonical(version) == version && semver.Build(version) == "" && !module.IsPseudoVersion(version)
 }
+
 func readGoPin(dir string) (Pin, error) {
-	body, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	body, err := readPinFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
 		return Pin{}, err
 	}
@@ -83,13 +86,14 @@ func readGoPin(dir string) (Pin, error) {
 			return Pin{}, fmt.Errorf("SDK pin is excluded")
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "go.sum")); err == nil {
+	if _, err := os.Lstat(filepath.Join(dir, "go.sum")); err == nil {
 		pin.Lockfile = "go.sum"
 	} else if !os.IsNotExist(err) {
 		return Pin{}, err
 	}
 	return pin, nil
 }
+
 func sdkRequirement(body []byte) (string, error) {
 	var manifest struct{ Dependencies, DevDependencies, PeerDependencies map[string]string }
 	if err := decodeUniqueJSON(body, &manifest); err != nil {
@@ -109,8 +113,9 @@ func sdkRequirement(body []byte) (string, error) {
 	}
 	return spec, nil
 }
+
 func readNpmPin(dir string) (Pin, error) {
-	body, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	body, err := readPinFile(filepath.Join(dir, "package.json"))
 	if err != nil {
 		return Pin{}, err
 	}
@@ -121,7 +126,7 @@ func readNpmPin(dir string) (Pin, error) {
 	pin := Pin{SDK: TypeScriptSDK, Manifest: "package.json"}
 	var lockBody []byte
 	for _, name := range []string{"npm-shrinkwrap.json", "package-lock.json"} {
-		body, err := os.ReadFile(filepath.Join(dir, name))
+		body, err := readPinFile(filepath.Join(dir, name))
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -179,13 +184,14 @@ func readNpmPin(dir string) (Pin, error) {
 	}
 	return pin, nil
 }
+
 func pinInputsDigest(dir string, pin Pin) (string, error) {
 	var buf bytes.Buffer
 	for _, path := range []string{pin.Manifest, pin.Lockfile} {
 		if path == "" {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(dir, path))
+		body, err := readPinFile(filepath.Join(dir, path))
 		if err != nil {
 			return "", err
 		}

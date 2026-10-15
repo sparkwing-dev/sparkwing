@@ -35,6 +35,40 @@ binding fails. It closes those services before the store. Missing runner service
 or signed policy fail startup through the same cleanup path. Replacing the
 controller's store also fails startup.
 
+The CLI factory now binds `NewState`, the shared `Server.HTTP()` handlers,
+signed engine and runner policies, and the native service constructor.
+`NewState` reads activity in one tenant-scoped snapshot and reports changed
+counts. Published history and terminal nodes do not hold the controller open.
+It opens the optional Jev secret through the same store-bound cipher used by
+the HTTP server. The production factory test reconciles a fresh home, checks
+both HTTP handlers and verifies closure without a socket.
+
+`NewClaimant` captures the process's kernel account. Its bearer provider uses
+shared peer authentication and credential delegation. Its enrollment resolver
+accepts only that authenticated local account in `DefaultTeam`, and supplies
+the machine's CPU count, OS and architecture. Ambient runner names and tokens
+cannot select the account. Cleanup revokes the delegated queue credential.
+Store peer authentication remains unimplemented, so production queue startup
+cannot yet sustain a running controller. The constructor test does not claim
+that evidence.
+
+`NativeServices` binds the owned tenant to W3's host configuration, source,
+captured environments, lease keeper, state following and process router. It
+checks current authority before allocating resources. Process listeners and
+authority registries share joined cleanup. Logs are masked before private
+JSONL writes. `StoreBinding.Refresh` reauthenticates the captured award through
+the shared C2 policy, including unit liveness, before each authority refresh.
+Owner policies, node-award adoption, authorized byte/record
+clients, controller log projection and ephemeral-process binding validation
+remain integration points. Foreground CLI hosting also needs the shared host's
+remote state adapter. These gaps prevent a completed native local run.
+
+The local schedule factory constructs the same home-bound lifecycle and native
+timer operations without opening the store. Registration, pinning and ticks
+remain unbound because the current controller contracts have no local-checkout
+registration with a captured environment, pin operation or tick operation.
+The factory tests verify home preservation and native timer cancellation.
+
 Before readiness, this composition acquires the store's `controller.reaper`
 lease, runs unit recovery and concurrency maintenance, then asks the state
 projection to reconcile local activity. It renews the same fence after that

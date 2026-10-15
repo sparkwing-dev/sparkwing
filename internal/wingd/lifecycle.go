@@ -19,6 +19,15 @@ type LocalPeerIdentity struct {
 	SID  string
 }
 
+// CurrentLocalSubject identifies the controller process from its OS account.
+func CurrentLocalSubject() (string, error) {
+	owner, err := controllerPeerIdentity()
+	if err != nil {
+		return "", err
+	}
+	return LocalSubject(owner, owner)
+}
+
 // LocalSubject checks the peer against the controller's OS account before minting local authority.
 func LocalSubject(peer, owner LocalPeerIdentity) (string, error) {
 	if peer.GOOS != owner.GOOS {

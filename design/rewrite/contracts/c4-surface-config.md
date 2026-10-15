@@ -112,6 +112,14 @@ lifecycle and the common Cloud Job builder. The store owns sealing and authority
 C4 returns values to its transactions. The SDK owns declarations and applies body
 env after planning; C4 decides which env belongs at process startup.
 
+Examples use `--example`, with `--body` requiring that selector. Plain lists
+emit names, and a selected plain body emits source only. Sparks add requires
+`--source`; remove requires `--spark`. Their JSON receipts retain action,
+spark, source, version and project-file path. Plain receipts emit the spark name.
+Repository updates select the current checkout unless `--all-repos` is set.
+Apply is the default; `--dry-run` previews, including read-only SDK pin inspection
+with `--in-place`. Fleet application requires `--yes` before reading the fleet.
+
 | Concern | Authoritative source |
 | --- | --- |
 | Env classes, names and process policies | `internal/procenv` |
