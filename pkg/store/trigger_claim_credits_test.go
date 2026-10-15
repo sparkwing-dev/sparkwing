@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func pendingTrigger(t *testing.T, st *store.Store, id string) {
@@ -344,7 +345,7 @@ func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-reap-tail", pastTriggerMinimum(8*time.Second), time.Now().Add(-100*time.Millisecond))
-	if _, err := store.Maintenance.ReapExpiredTriggers(st, ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, st); err != nil {
 		t.Fatal(err)
 	}
 	if got := balance(t, st); got != 2*floor-7*rate {
@@ -661,7 +662,7 @@ func TestTriggerReapAndRequeueSettleTheReservation(t *testing.T) {
 	}
 	now := time.Now()
 	backdateTriggerClaim(t, st, "run-lapsed", now.Add(-10*time.Minute), now.Add(-10*time.Minute+90*time.Second))
-	ids, err := store.Maintenance.ReapExpiredTriggers(st, ctx)
+	ids, err := teststore.ReapUnits(ctx, st)
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("reap = %v, %v; want run-lapsed", ids, err)
 	}

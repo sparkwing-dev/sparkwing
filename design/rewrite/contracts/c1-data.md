@@ -66,6 +66,16 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
+`Store.ReapUnits` is the sole unit-expiry entry point. Every pass requires the
+current `controller.reaper` lease and rechecks it in each unit transaction.
+`Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
+`Maintenance.ReapExpiredTriggers` and `AgentLossRecovery` are removed. Recovery
+returns tagged `ReapedUnit` results and never creates a retry run. A local owner
+that has started fails in place after lease loss. An unstarted local owner
+requeues without consuming a disruption. Terminal owner timestamps stay recorded.
+The old dispatcher-expiry path and its application-retry accounting are removed.
+Metered recovery still needs W1b's final transactional settlement integration.
+
 Cancellation intent persists in `runs.cancel_reason` and `nodes.cancel_reason`,
 separately from terminal result fields. The first request owns that intent.
 `RunRow.CancelReason` and `NodeRow.CancelReason` retain it after draining and

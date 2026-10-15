@@ -53,10 +53,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"lockCommittedTx":                "the storage pass reconciles every team's count of one store from one bucket listing",
 	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
 		"retention, not one team's data",
-	"expiredClaimRunsTx": "the expired-claim reaper finds every team's runs holding a lapsed claim, " +
-		"to lock them before their nodes",
-	"(*Store).expiredDispatchRuns": "the expired-claim reaper finds every team's controller-dispatched runs " +
-		"holding a lapsed claim; each is then settled under that team's own run row",
+
 	"runOwnerTx":             "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Store).NodeOutputKey": "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
@@ -130,13 +127,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"launches each one through its own team's handle",
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
-	"(*Store).reapExpiredTriggers": "the trigger-lease reaper returns every team's lapsed claims to the queue, because a " +
-		"sweep that only reaped one team would leave the rest held",
-
-	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails every team's nodes whose runner lease " +
-		"lapsed; each write names a node its own locked scan selected",
-	"(*Store).ReapExpiredNodeClaims": "clears every team's lapsed node claims in one locked pass; each write names a node " +
-		"its own scan selected",
 
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +

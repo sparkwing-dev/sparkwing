@@ -40,6 +40,14 @@ cancellation reason before W1 can project it through `ReadAuthentication`. W1 ha
 not changed that foreign contract. OAuth/browser middleware and roleless-session
 representation remain integration points.
 
+W1's unit-reaper cut is complete. The unfenced node, agent-loss and trigger
+reapers and dispatcher-expiry helpers are removed. Remaining callers use the
+leased `ReapUnits` contract. The elected controller pass preserves remote runs,
+and the SQLite local-orphan cell proves unstarted requeue and started failure
+through reopening. See `../w1-session13-progress.md` for migrated callers, ports
+and verification. W1b still owns settlement wiring. Its unused `expiredClaim`
+and `settleExpiredClaimTx` helper can retire after this cut is merged.
+
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
 
 **Contract change needed, W1/W9/W3: attempt identity on job transitions.**
@@ -54,3 +62,5 @@ attempt through the request and adapter, check it in the committing transaction,
 and include it in replay identity. Start, unstarted refusal and reaper semantics
 must remain explicit. W1 has not changed the foreign wire shape. The reproducer
 and command are in `../w1-session12-progress.md`.
+
+**DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.

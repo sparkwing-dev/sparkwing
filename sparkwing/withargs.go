@@ -11,8 +11,8 @@ import (
 // only with a `flag:"name"` tag, and `desc`, `default`, `required`,
 // `enum` and `short` behave as they do on Inputs. The framework
 // resolves T from the run's flags before any step runs; a missing
-// required arg or a value outside `enum` fails the run. `secret` and
-// `flag:",extra"` are pipeline-only and panic at registration.
+// required arg or a value outside `enum` fails the run. `secret` masks
+// argument values; `flag:",extra"` is pipeline-only.
 //
 //	type DeployArgs struct {
 //	    Replicas int    `flag:"replicas" default:"3" desc:"target replica count"`

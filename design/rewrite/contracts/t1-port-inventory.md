@@ -8,6 +8,25 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
+`pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
+replaces its private ticker-based reaper with the real elected controller pass.
+It reverses the old assertion that a remote owner loss fails the run.
+`pkg/store/reaper_fence_property_test.go:TestReaperFenceProperty` generates forged
+holders and generations, exact expiry and takeover. Refusals change no snapshot.
+`recovery_test.go:TestRecovery/recovery-local-orphans/store-sqlite` ports local
+orphan persistence through repeat passes and reopening. Existing same-run owner,
+attempt, cancellation and bounded-reaper tests retain the other recovery assertions.
+Native heartbeat and process-termination proofs remain required.
+The two legacy `TestLease_Reaper*` tests are replaced by that controller pass and
+the final owner/reclaim tests. `TestExpiry_ALapsedClaimRetriesThroughSettle` is
+deleted because disruptions no longer consume application retries. Its ordinal,
+stale-report and exhaustion checks live in the unstarted/started-lapse SQLite
+cells and final unit-reaper tests. The private-pass error-suppression test
+`TestExpiry_ADispatchFailureDoesNotBlockTheOrchestratorPass` is deleted with those
+passes. `TestOwnerRequeueRollsBackWhenEventCannotCommit` instead requires a loud
+error and transactional rollback through the sole reaper.
+
 The SQLite store proofs
 `recovery_test.go:TestRecovery/recovery-cancel-beats-loss/store-sqlite` and
 `recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims/store-sqlite` port

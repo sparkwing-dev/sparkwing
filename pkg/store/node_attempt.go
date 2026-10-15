@@ -38,9 +38,6 @@ type AttemptReport struct {
 	Failure          json.RawMessage `json:"failure,omitempty"`
 	ArtifactManifest string          `json:"artifact_manifest,omitempty"`
 
-	// safety: set only by the expired-claim reaper, never decoded from a
-	// request, so a claimant cannot pass its own failure off as a lost claim.
-	leaseLost bool
 	// safety: set only from the store's own resolution of OutputFrom.
 	copyRun, copyNode string
 }
@@ -170,7 +167,7 @@ func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok Clai
 	// planned again.
 	retry := report.Outcome == outcomeFailed && ordinal <= n.retryBudget && !cancelled &&
 		report.FailureReason != FailureSourceUnavailable &&
-		(n.kind != nodeKindPlan || report.leaseLost || report.FailureReason == FailureSourceFetch)
+		(n.kind != nodeKindPlan || report.FailureReason == FailureSourceFetch)
 	if retry {
 		readyAt := now.Add(retryBackoff(time.Duration(n.backoffMS)*time.Millisecond, int(ordinal))).UnixNano()
 		_, err = tx.ExecContext(ctx, `UPDATE nodes

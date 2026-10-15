@@ -4,6 +4,12 @@
 
 ## Amendment 1 integration evidence
 
+`TestRecovery/recovery-local-orphans/store-sqlite` proves the local store boundary.
+It runs the elected reaper, repeats the pass and reopens the database. Unstarted
+owners requeue without a disruption. Started owners fail in place. Each case has
+one lifecycle event and retains its original run and owner rows. Native local
+controller/process cells remain required.
+
 [Amendments 1](amendments-1.md) assigns each cross-area dependency. Shared decoder
 and text-bounding tests are component evidence. Native placement cells require the
 real host, controller/auth, store and storage adapters. Keep cells blocked until the
