@@ -407,20 +407,12 @@ lines. Adding grep, line ranges, or event-only selection still scans the input
 before selecting the tail, so matches earlier in the log remain discoverable.
 Tree merging and follow behavior are unchanged.
 
-### Bouncing a wedged job
+### Stopping jobs
 
-Every job in a local run is its own process, which means one job can be
-restarted without touching the run around it. `sparkwing runs bounce
---run <id> --node <job>` stops that job's process -- SIGTERM, then
-SIGKILL after the grace period -- and runs the job again in place. The
-job never reaches a terminal state, so nothing downstream sees a
-failure and no other job is disturbed; the run finishes normally on the
-attempt that survives. Stopping the job stops the commands its steps
-started too: each runs in its own session, and the job kills those
-sessions before the signal ends it, and again if its dispatcher dies
-under it. The same holds when a run's CLI is interrupted or the run is
-cancelled, so an interrupted `go build` or `go test` does not keep
-compiling on its own.
+Cancelling a run stops its jobs and the commands their steps started. Each
+step command runs in its own session. The job ends those sessions before it
+exits, so an interrupted `go build` or `go test` does not keep compiling on
+its own.
 
 A node that dies without running any code -- SIGKILL, the OOM killer, a
 crash -- cannot clean up after itself, so the node also leaves a record
@@ -442,9 +434,8 @@ An interrupted job is stopped, not unwound. The commands its steps started do
 end, because the job kills their sessions as described above, but nothing
 inside the step's own Go code runs: the signal does not arrive there as a
 cancelled context, so a `defer` does not fire and neither does a `select` on
-`ctx.Done()`. That is what `runs bounce` rests on -- the supervisor records the
-outcome, and the killed job writes no terminal row of its own. Teardown
-therefore belongs in the ledger rather than in a `defer`: start a resource as a
+`ctx.Done()`. Teardown therefore belongs in the ledger rather than in a
+`defer`: start a resource as a
 step command so its session is reaped, or register a cleanup command for
 anything that lives outside that tree.
 
@@ -1280,8 +1271,8 @@ A verb that writes prints the same notes when the id it was given is in
 no store it could read, so a run in a skipped store is not reported
 simply missing.
 
-`sparkwing runs bounce`, `runs annotations add`, `runs approvals approve`,
-`runs approvals deny`, and `debug rerun` write to the
+`sparkwing runs annotations add`, `runs approvals approve`, and
+`runs approvals deny` write to the
 store that holds the run, so they act on a standalone run in its own
 store.
 

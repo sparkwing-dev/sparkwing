@@ -7,7 +7,7 @@ fetched engines, the controller, api.sock, local status and remote status.
 `capability.Routes` owns authentication, bindings, liveness and retry policy.
 `pkg/controller.EngineController` adapts these types to C1 transactions.
 `client.NewEngineClient` supplies the same interface to every fetched engine.
-These are declarations with stub bodies.
+The client executes this contract over HTTP. The server adapter retains stub bodies.
 
 From launch freeze, the controller preserves the API emitted by every engine
 for twelve calendar months after that engine's release. Matching engines own
@@ -34,7 +34,7 @@ one envelope and use `apierr.DecodeInner`.
 | `controller.ExpansionForStore` | Combines the wire body with C2-derived authority into C1 `ExpansionSubmission`. |
 | `controller.IntakeForStore` | Carries tagged session/capability authority into C1 `IntakeRequest`. |
 | `controller.EngineController` | Shared server adapter for lifecycle, claims, renewals and reads. |
-| `client.EngineOptions`, `NewEngineClient` | Authenticated HTTP transport, including api.sock dialing. |
+| `client.EngineOptions`, `NewEngineClient` | Authenticated HTTP transport, including api.sock dialing. `Launcher` explicitly selects the deployment launcher claim route. |
 | `nodehost.RemoteOwnerStore` | Consumes the shared wire through C1 reconciler and expansion interfaces. |
 
 The expansion adapter derives the source and actor from the authenticated
@@ -75,5 +75,13 @@ Runtime conformance must drive the same lifecycle through HTTP and api.sock,
 exercise exact result replay, stale-fence refusal and expansion failure, and
 check old-engine request fixtures across the guaranteed window. Stub bodies do
 not establish these behaviors.
+
+`EngineOptions.Launcher` selects `/api/v1/launcher/claim` for every launcher
+selection, including node-only and named jobs. Unit kinds cannot distinguish
+a runner's `nodes.claim` credential from a launcher's `claims.launch`
+credential. This transport option grants no authority. C2 authenticates the
+selected route. Other clients use the named run/job routes or the separate
+runner run/job queues. A mixed trigger/job queue request needs a shared C2 route
+before that combination can be transported in one claim.
 
 <!-- design:end -->

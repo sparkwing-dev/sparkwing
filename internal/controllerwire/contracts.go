@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -35,7 +36,11 @@ const APIMajor = 1
 // using limits.ControllerCompatibilityMonths calendar months. It does not reject an
 // older release or decide revocation; internal/engine owns that separate policy.
 func CompatibilityFor(release engine.VersionInfo) Compatibility {
-	panic("unimplemented: controller-wire")
+	return Compatibility{
+		APIMajor: APIMajor, EngineRelease: release.Version,
+		ReleasedAt:      release.PublishedAt,
+		GuaranteedUntil: release.PublishedAt.AddDate(0, limits.ControllerCompatibilityMonths, 0),
+	}
 }
 
 // CreateRunRequest carries user input; authenticated authority and App facts are server-derived.
