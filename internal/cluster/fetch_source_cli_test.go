@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -70,7 +69,7 @@ func TestFetchSource_ChecksOutAndDownloadsWithTheIssuedToken(t *testing.T) {
 		!slices.Contains(got.env, "GOTOOLCHAIN=local") {
 		t.Fatalf("download dirs %v env %v", got.dirs, got.env)
 	}
-	goEnv, err := os.ReadFile(filepath.Join(filepath.Dir(dest), orchestrator.GoEnvFile))
+	goEnv, err := os.ReadFile(filepath.Join(filepath.Dir(dest), goEnvFile))
 	if err != nil || string(goEnv) != "GOPRIVATE=github.com/acme/plans\n" {
 		t.Fatalf("the pipeline's module settings = %q, %v", goEnv, err)
 	}

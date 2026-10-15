@@ -172,12 +172,17 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 			return Result{Outcome: sparkwing.Success}
 		}
 		asking := askingState{StateStoreOld: state, asked: make(chan string, 1)}
+		resolved := make(chan error, 1)
+		resolverDone := make(chan struct{})
+		defer func() { cancel(); <-resolverDone }()
 		go func() {
-			if recv(t, ctx, asking.asked) == "" {
-				return
-			}
-			if _, err := st.ResolveApproval(ctx, testRunID, "gate", store.ApprovalResolutionApproved, "korey", ""); err != nil {
-				t.Errorf("resolve: %v", err)
+			defer close(resolverDone)
+			select {
+			case <-asking.asked:
+				_, err := st.ResolveApproval(ctx, testRunID, "gate", store.ApprovalResolutionApproved, "korey", "")
+				resolved <- err
+			case <-ctx.Done():
+				resolved <- context.Cause(ctx)
 			}
 		}()
 		cfg := Config{
@@ -185,6 +190,9 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 			Attempts: &Attempts{OpenLog: logs.open, Masker: secrets.NewMasker()},
 		}
 		res := hostEvents(t, ctx, asking, cfg, doc)
+		if err := <-resolved; err != nil {
+			t.Fatal("resolve approval:", err)
+		}
 		if res.Nodes["gate"].Outcome != sparkwing.Success || res.Nodes["consume"].Outcome != sparkwing.Success {
 			t.Fatalf("gate %+v consume %+v, want both to succeed", res.Nodes["gate"], res.Nodes["consume"])
 		}
@@ -223,12 +231,11 @@ func TestHostedRunEmitsConcurrencyEvents(t *testing.T) {
 		defer cancel()
 		holdSlotOutside(t, st, "global:db")
 		slots := storeSlots{st: st, queued: make(chan string, 1)}
-		go func() {
-			recv(t, ctx, slots.queued)
-			if _, _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
-				t.Errorf("release outside hold: %v", err)
-			}
-		}()
+		tenant := teststore.ForTeam(t, st, store.DefaultTeam)
+		afterAdmissionEvent(t, ctx, slots.queued, func(ctx context.Context) error {
+			_, _, _, err := tenant.ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease)
+			return err
+		})
 		res := hostEvents(t, ctx, state, Config{
 			Execute:   func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} },
 			Admission: &Admission{Slots: slots},

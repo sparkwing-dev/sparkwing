@@ -27,17 +27,17 @@ const testBox = "box-1"
 func runAdmitted(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, adm *Admission, exec Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	if adm.BoxID == nil {
 		adm.BoxID = func() string { return testBox }
 	}
 	cfg := Config{Execute: exec, Admission: adm}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), leaseToken: "tok", validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
+	run := &Run{ID: testRunID, Pipeline: "p", Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), leaseToken: "tok", validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
 	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
-		t.Fatalf("add: %v", err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	s.loop(ctx)
 	res.Status, res.Err = s.verdict(ctx)
@@ -314,19 +314,40 @@ func (g *gauge) exec(ctx context.Context, n *NodeRun) Result {
 	}
 }
 
-func recv(t *testing.T, ctx context.Context, c <-chan string) string {
+func afterAdmissionEvent(t *testing.T, parent context.Context, event <-chan string, action func(context.Context) error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan error, 1)
+	go func() {
+		select {
+		case <-event:
+			done <- action(ctx)
+		case <-ctx.Done():
+			done <- nil
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+}
+
+func awaitHostedEvent(t *testing.T, ctx context.Context, event <-chan string, done <-chan RunResult) string {
 	t.Helper()
 	select {
-	case v := <-c:
-		return v
+	case value := <-event:
+		return value
+	case result := <-done:
+		t.Fatalf("host returned before its event: %v", result.Err)
 	case <-ctx.Done():
-		t.Error("timed out waiting")
-		return ""
+		t.Fatal("host event did not arrive:", context.Cause(ctx))
 	}
+	return ""
 }
 
 func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
-	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	d := newFakeDaemon()
@@ -343,11 +364,16 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 		}
 		return Result{Outcome: sparkwing.Success}
 	}
-	res := runAdmitted(t, ctx, st, doc, &Admission{Daemon: d, Class: "batch"}, exec)
-	if got := res.Nodes["ok"]; got.Outcome != sparkwing.Success {
+	run := &Run{ID: testRunID, Pipeline: "p", Doc: doc, Logger: slog.New(slog.DiscardHandler), leaseToken: "tok"}
+	adm := &Admission{Daemon: d, Class: "batch"}
+	results := map[string]Result{}
+	for _, job := range doc.Jobs {
+		results[job.ID] = adm.withHost(ctx, &NodeRun{Run: run, Plan: job}, exec)
+	}
+	if got := results["ok"]; got.Outcome != sparkwing.Success {
 		t.Fatalf("ok: %+v", got)
 	}
-	if got := res.Nodes["bad"]; got.Outcome != sparkwing.Failed || !strings.Contains(errText(got.Err), "boom") {
+	if got := results["bad"]; got.Outcome != sparkwing.Failed || !strings.Contains(errText(got.Err), "boom") {
 		t.Fatalf("bad: %+v", got)
 	}
 	if live, granted, released := d.counts(); live != 0 || granted != 2 || released != 2 {
@@ -365,13 +391,16 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 }
 
 func TestAdmissionPriorityAndClassPrecedence(t *testing.T) {
-	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	d := newFakeDaemon()
 	front := 9
 	doc := nodeproto.PlanDoc{Priority: new(int(5)), AdmissionClass: new("critical"), Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-	runAdmitted(t, ctx, st, doc, &Admission{Daemon: d, Priority: &front, Class: "batch"}, nil)
+	run := &Run{ID: testRunID, Pipeline: "p", Doc: doc, Logger: slog.New(slog.DiscardHandler), leaseToken: "tok"}
+	adm := &Admission{Daemon: d, Priority: &front, Class: "batch"}
+	adm.withHost(ctx, &NodeRun{Run: run, Plan: doc.Jobs[0]}, func(context.Context, *NodeRun) Result {
+		return Result{Outcome: sparkwing.Success}
+	})
 	reqs := d.requests()
 	if len(reqs) != 1 || reqs[0].Priority != 9 || reqs[0].Class != "critical" {
 		t.Fatalf("requests %+v, want priority 9 from the run and class critical from the plan", reqs)
@@ -383,14 +412,19 @@ func TestAdmissionPriorityAndClassPrecedence(t *testing.T) {
 }
 
 func TestAdmissionRunHoldingTheHostTakesOnlySemaphores(t *testing.T) {
-	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	d := newFakeDaemon()
 	doc := nodeproto.PlanDoc{Resources: &nodeproto.ResourceSpec{Cores: new(float64(4))}, Jobs: append(grouped("run", "", 1, 0, "g"), nodeproto.JobSpec{ID: "plain", Steps: []nodeproto.StepSpec{{ID: "body"}}})}
-	res := runAdmitted(t, ctx, st, doc, &Admission{Daemon: d}, nil)
-	if res.Status != "failed" || res.Nodes["plain"].Outcome != sparkwing.Failed {
-		t.Fatalf("result %+v", res)
+	run := &Run{ID: testRunID, Pipeline: "p", Doc: doc, Logger: slog.New(slog.DiscardHandler), leaseToken: "tok"}
+	adm := &Admission{Daemon: d}
+	exec := func(context.Context, *NodeRun) Result {
+		return Result{Outcome: sparkwing.Failed, Err: errors.New("no attempt executor")}
+	}
+	groups := []group{{key: scopedConcurrencyKey("db", "run", testRunID, ""), capacity: 1, cost: 1, policy: "queue"}}
+	adm.underDaemon(ctx, &NodeRun{Run: run, Plan: doc.Jobs[0]}, groups, exec)
+	if got := adm.withHost(ctx, &NodeRun{Run: run, Plan: doc.Jobs[1]}, exec); got.Outcome != sparkwing.Failed {
+		t.Fatalf("result %+v", got)
 	}
 	reqs := d.requests()
 	if len(reqs) != 1 || !reqs[0].SemaphoresOnly || !strings.HasPrefix(reqs[0].RunID, testRunID+"/node-semaphore/") ||
@@ -407,12 +441,17 @@ func TestAdmissionDaemonGroupBoundsParallelNodes(t *testing.T) {
 	doc := nodeproto.PlanDoc{Jobs: grouped("box", "queue", 2, 0, "a", "b", "c", "d")}
 	done := make(chan RunResult, 1)
 	go func() { done <- runAdmitted(t, ctx, st, doc, &Admission{Daemon: d}, g.exec) }()
-	recv(t, ctx, g.entered)
-	recv(t, ctx, g.entered)
-	recv(t, ctx, d.queued)
-	recv(t, ctx, d.queued)
+	awaitHostedEvent(t, ctx, g.entered, done)
+	awaitHostedEvent(t, ctx, g.entered, done)
+	awaitHostedEvent(t, ctx, d.queued, done)
+	awaitHostedEvent(t, ctx, d.queued, done)
 	close(g.gate)
-	res := <-done
+	var res RunResult
+	select {
+	case res = <-done:
+	case <-ctx.Done():
+		t.Fatal("admitted host did not finish:", context.Cause(ctx))
+	}
 	if res.Status != "success" || g.peak != 2 {
 		t.Fatalf("status %s, peak %d: want success with at most 2 at once", res.Status, g.peak)
 	}
@@ -435,12 +474,17 @@ func TestAdmissionStoreGroupBoundsParallelNodes(t *testing.T) {
 	doc := nodeproto.PlanDoc{Jobs: grouped("", "queue", 2, 0, "a", "b", "c", "d")}
 	done := make(chan RunResult, 1)
 	go func() { done <- runAdmitted(t, ctx, st, doc, &Admission{Slots: slots}, g.exec) }()
-	recv(t, ctx, g.entered)
-	recv(t, ctx, g.entered)
-	recv(t, ctx, slots.queued)
-	recv(t, ctx, slots.queued)
+	awaitHostedEvent(t, ctx, g.entered, done)
+	awaitHostedEvent(t, ctx, g.entered, done)
+	awaitHostedEvent(t, ctx, slots.queued, done)
+	awaitHostedEvent(t, ctx, slots.queued, done)
 	close(g.gate)
-	res := <-done
+	var res RunResult
+	select {
+	case res = <-done:
+	case <-ctx.Done():
+		t.Fatal("admitted host did not finish:", context.Cause(ctx))
+	}
 	if res.Status != "success" || g.peak != 2 {
 		t.Fatalf("status %s, peak %d: want success with at most 2 at once", res.Status, g.peak)
 	}
@@ -473,7 +517,8 @@ func TestAdmissionCancelWhileQueuedInStore(t *testing.T) {
 	holdSlotOutside(t, st, "global:db")
 	slots := storeSlots{st: st, queued: make(chan string, 1)}
 	runCtx, cancelRun := context.WithCancel(ctx)
-	go func() { recv(t, ctx, slots.queued); cancelRun() }()
+	defer cancelRun()
+	afterAdmissionEvent(t, ctx, slots.queued, func(context.Context) error { cancelRun(); return nil })
 	ran := false
 	res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Jobs: grouped("global", "queue", 1, 0, "b")}, &Admission{Slots: slots},
 		func(context.Context, *NodeRun) Result { ran = true; return Result{Outcome: sparkwing.Success} })
@@ -539,7 +584,7 @@ func TestAdmissionDaemonQueueCancelTimeoutAndPolicies(t *testing.T) {
 			runCtx, cancelRun := context.WithCancel(ctx)
 			defer cancelRun()
 			if c.cancel {
-				go func() { recv(t, ctx, d.queued); cancelRun() }()
+				afterAdmissionEvent(t, ctx, d.queued, func(context.Context) error { cancelRun(); return nil })
 			}
 			res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Jobs: grouped("box", c.onLimit, 1, c.timeoutMS, "b")}, &Admission{Daemon: d},
 				func(context.Context, *NodeRun) Result {
@@ -562,7 +607,8 @@ func TestAdmissionCancelWhileWaitingForHost(t *testing.T) {
 	d := newFakeDaemon()
 	d.hostGate = make(chan struct{})
 	runCtx, cancelRun := context.WithCancel(ctx)
-	go func() { recv(t, ctx, d.queued); cancelRun() }()
+	defer cancelRun()
+	afterAdmissionEvent(t, ctx, d.queued, func(context.Context) error { cancelRun(); return nil })
 	res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, &Admission{Daemon: d},
 		func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
 	if got := res.Nodes["a"]; got.Outcome != sparkwing.Cancelled {
@@ -626,12 +672,12 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			d, g := newFakeDaemon(), newGauge()
-			go func() {
-				recv(t, ctx, g.entered)
+			afterAdmissionEvent(t, ctx, g.entered, func(context.Context) error {
 				if l := d.only(t); l != nil {
 					c.send(l)
 				}
-			}()
+				return nil
+			})
 			nodes := []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 			if c.grouped {
 				nodes = grouped("box", "cancel_others", 1, 0, "a")
@@ -696,12 +742,11 @@ func TestAdmissionStoreOutageToleranceMatchesTheDispatcher(t *testing.T) {
 			t.Cleanup(func() { outageClock = time.Now })
 			holdSlotOutside(t, st, "global:db")
 			slots := resolveFlaky{storeSlots: storeSlots{st: st, queued: make(chan string, 1)}, clock: clock, outage: c.outage}
-			go func() {
-				recv(t, ctx, slots.queued)
-				if _, _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
-					t.Error(err)
-				}
-			}()
+			tenant := teststore.ForTeam(t, st, store.DefaultTeam)
+			afterAdmissionEvent(t, ctx, slots.queued, func(ctx context.Context) error {
+				_, _, _, err := tenant.ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease)
+				return err
+			})
 			res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Jobs: grouped("", "queue", 1, 0, "b")}, &Admission{Slots: slots},
 				func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
 			if got := res.Nodes["b"]; got.Outcome != c.want {

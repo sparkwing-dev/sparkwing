@@ -1,6 +1,4 @@
-// Package nodehost is the engine side of the node protocol: it runs the SDK
-// process for a node and serves the node-facing /node/v1 routes that process
-// calls. docs/node-protocol.md is the contract.
+// Package nodehost executes SDK processes and serves their bound host services.
 package nodehost
 
 import (
@@ -14,7 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 // Server serves the /node/v1 routes on a loopback port. Each node reaches it
@@ -45,17 +45,14 @@ func Start(logger *slog.Logger) (*Server, error) {
 	}
 	s := &Server{listener: listener, logger: logger, grants: map[[bearerHashSize]byte]*grant{}}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	mux := http.NewServeMux()
-	s.handle(mux, "GET /node/v1/secrets/{name}", s.serveSecret)
-	s.handle(mux, "GET /node/v1/nodes/{node}/output", s.serveNodeOutput)
-	s.handle(mux, "GET /node/v1/pipelines/{name}/latest", s.servePipelineLatest)
-	s.handle(mux, "POST /node/v1/oidc-token", s.serveOIDCToken)
-	s.handle(mux, "POST /node/v1/children", s.serveStartChild)
-	s.handle(mux, "GET /node/v1/children/{run}/await", s.serveAwaitChild)
-	s.handle(mux, "POST /node/v1/cleanups", s.registerCleanup)
-	s.handle(mux, "DELETE /node/v1/cleanups/{id}", s.releaseCleanup)
+	handler, err := s.routes()
+	if err != nil {
+		_ = listener.Close()
+		s.cancel()
+		return nil, err
+	}
 	s.http = &http.Server{
-		Handler:           s.requireProtocol(mux),
+		Handler:           handler,
 		BaseContext:       func(net.Listener) context.Context { return s.ctx },
 		MaxHeaderBytes:    8 << 10,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -82,40 +79,86 @@ func (s *Server) Close() error {
 	return s.http.Shutdown(ctx)
 }
 
-type nodeHandler func(w http.ResponseWriter, r *http.Request, g *grant)
-
-func (s *Server) handle(mux *http.ServeMux, pattern string, h nodeHandler) {
-	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		g := s.authenticate(r)
+func (s *Server) routes() (http.Handler, error) {
+	mux := http.NewServeMux()
+	if err := RegisterProcessServices(serverRegistrar{s, mux}, func(ctx context.Context, _ capability.Authorized) (*ProcessServices, error) {
+		g, _ := ctx.Value(serverGrantKey{}).(*grant)
 		if g == nil {
-			s.writeError(w, http.StatusUnauthorized, "unauthorized", "a node bearer is required")
-			return
+			return nil, serviceUnavailable()
 		}
-		h(w, r, g)
+		return g.services, nil
+	}); err != nil {
+		return nil, err
+	}
+	mux.HandleFunc("/", func(w http.ResponseWriter, request *http.Request) {
+		code := apierr.UnsupportedRoute
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			probe := request.Clone(request.Context())
+			probe.Method = method
+			if _, pattern := mux.Handler(probe); pattern != "/" && pattern != "" {
+				code = apierr.MethodNotAllowed
+				break
+			}
+		}
+		s.writeFailure(w, executorError(code, "unsupported process service request"))
 	})
+	return mux, nil
 }
 
-// safety: a pipeline built against another protocol would misread every
-// reply, so a request naming no version or another one gets 426.
-func (s *Server) requireProtocol(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := r.Header.Get(authwire.NodeProtocolHeader)
-		if got != authwire.NodeProtocolVersion {
-			// safety: the header is attacker-sized and unauthenticated, so it is never echoed.
-			s.writeJSON(w, http.StatusUpgradeRequired, map[string]any{
-				"error":     "node protocol unsupported",
-				"code":      "protocol_mismatch",
-				"supported": []string{authwire.NodeProtocolVersion},
-			})
+type (
+	serverGrantKey  struct{}
+	serverRegistrar struct {
+		server *Server
+		mux    *http.ServeMux
+	}
+)
+
+func (router serverRegistrar) Register(endpoint controller.Endpoint) error {
+	router.mux.HandleFunc(endpoint.Method+" "+endpoint.Pattern, func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		g := router.server.authenticate(request)
+		if g == nil {
+			router.server.writeFailure(w, executorError(apierr.Unauthenticated, "a process bearer is required"))
 			return
 		}
-		next.ServeHTTP(w, r)
+		if g.Claim != nil {
+			switch endpoint.Pattern {
+			case "/node/v1/jobs/{job}/output", "/node/v1/pipelines/{name}/latest", "/node/v1/oidc-token", "/node/v1/children":
+				done, err := claimSlot(request.Context(), g.Claim.slots)
+				if err != nil {
+					router.server.writeFailure(w, err)
+					return
+				}
+				defer done()
+			}
+		}
+		evidence, err := endpoint.Decode(request)
+		if err == nil {
+			auth := capability.Authorized{Binding: capability.Binding{Kind: capability.BindingNode, RunID: g.RunID, NodeID: g.NodeID}, Target: evidence.Target}
+			request = request.WithContext(context.WithValue(request.Context(), serverGrantKey{}, g))
+			err = endpoint.Handle(w, request, auth)
+		}
+		if err != nil {
+			router.server.writeFailure(w, maskHostError(err, g.services.Masks.mask))
+		}
 	})
+	return nil
 }
 
-func (s *Server) writeError(w http.ResponseWriter, status int, code, message string) {
-	s.writeJSON(w, status, map[string]string{"error": message, "code": code})
+func (s *Server) writeFailure(w http.ResponseWriter, err error) {
+	var failure *apierr.Error
+	if !errors.As(err, &failure) {
+		failure = &apierr.Error{Code: apierr.Unavailable, Message: "process service is unavailable"}
+	}
+	s.writeJSON(w, apierr.Status(failure.Code), apierr.Envelope{Error: failure})
+}
+
+func routeFailure(code apierr.Code, reason apierr.Reason, message string) error {
+	failure := &apierr.Error{Code: code, Message: message}
+	if reason != "" {
+		failure.Details = map[string]any{"reason": reason}
+	}
+	return failure
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, body any) {

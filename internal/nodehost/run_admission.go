@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -62,7 +64,7 @@ func (a *Admission) hostRun(ctx context.Context, run *Run, cancel context.Cancel
 	case sparkwing.Skipped:
 		return runEnd{status: "success", skipped: true}, release
 	case sparkwing.Superseded:
-		return stoppedRun(ctx, &CancelError{Reason: "plan concurrency group: admission evicted; run `sparkwing queue` to inspect the queue"}), release
+		return stoppedRun(ctx, &lease.CancelError{Reason: "plan concurrency group: admission evicted; run `sparkwing queue` to inspect the queue"}), release
 	}
 	return stoppedRun(ctx, res.Err), release
 }
@@ -142,20 +144,20 @@ func (a *Admission) runLease(ctx context.Context, run *Run, claims []wingwire.Se
 			fmt.Errorf("plan concurrency group %q: queued %s without a slot under OnLimit:Queue; run `sparkwing queue` to see who holds it", key, timeout))
 		defer stop()
 	}
-	lease, err := a.Daemon.Acquire(acquireCtx, req, func(q wingwire.Queued) {
+	held, err := a.Daemon.Acquire(acquireCtx, req, func(q wingwire.Queued) {
 		run.Logger.Info("nodehost: run queued for local admission", "run", run.ID, "key", q.Key, "position", q.Position)
 	})
 	if err != nil {
 		return release, refusedRun(ctx, acquireCtx, run, claims, err), false
 	}
-	run.leaseToken = lease.Token()
+	run.leaseToken = held.Token()
 	watching := make(chan struct{})
 	go func() {
 		defer close(watching)
-		err := lease.Watch(func(ev wingwire.Evicted) {
-			cancel(&CancelError{Reason: fmt.Sprintf("admission on %q lost under %s: superseded by run %s; run `sparkwing queue` to inspect the queue", ev.Key, ev.Policy, ev.SupersededBy)})
+		err := held.Watch(func(ev wingwire.Evicted) {
+			cancel(&lease.CancelError{Reason: fmt.Sprintf("admission on %q lost under %s: superseded by run %s; run `sparkwing queue` to inspect the queue", ev.Key, ev.Policy, ev.SupersededBy)})
 		}, func(c wingwire.Cancel) {
-			cancel(&CancelError{Reason: cmp.Or(c.Reason, "cancelled via the admission daemon")})
+			cancel(&lease.CancelError{Reason: cmp.Or(c.Reason, "cancelled via the admission daemon")})
 		})
 		if err != nil {
 			// safety: as in the dispatcher, a lost watch leaves the run running
@@ -164,7 +166,7 @@ func (a *Admission) runLease(ctx context.Context, run *Run, claims []wingwire.Se
 		}
 	}()
 	return func() {
-		if err := lease.Release(); err != nil {
+		if err := held.Release(); err != nil {
 			run.Logger.Warn("nodehost: release run lease", "run", run.ID, "err", err)
 		}
 		<-watching
@@ -180,7 +182,7 @@ func refusedRun(ctx, acquireCtx context.Context, run *Run, claims []wingwire.Sem
 	case context.Cause(acquireCtx) != nil:
 		return runEnd{status: "failed", err: context.Cause(acquireCtx)}
 	case errors.As(err, &cancelled):
-		return runEnd{status: "cancelled", err: &CancelError{Reason: cmp.Or(cancelled.Reason, "cancelled via the admission daemon")}}
+		return runEnd{status: "cancelled", err: &lease.CancelError{Reason: cmp.Or(cancelled.Reason, "cancelled via the admission daemon")}}
 	case errors.As(err, &admErr) && admErr.Policy == wingwire.PolicySkip:
 		hostEvent(ctx, run, "", "plan_skipped_concurrent", nil)
 		return runEnd{status: "success", skipped: true}

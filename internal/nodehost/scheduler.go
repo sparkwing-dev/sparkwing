@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -22,8 +22,9 @@ import (
 // Config says how to host one run.
 type Config struct {
 	// Session starts the short-lived plan process.
-	Session  SessionConfig
-	Pipeline string
+	Session    SessionConfig
+	Pipeline   string
+	Entrypoint string
 	// Args are the invocation's flag values; describe's defaults fill in
 	// the flags it leaves out.
 	Args map[string]string
@@ -47,7 +48,7 @@ type Config struct {
 	Logger   *slog.Logger
 	// Admission admits each node before it runs; nil admits every node at once.
 	Admission *Admission
-	// Debug selects the run's operator pauses.
+	// Debug holds the run's debug pauses.
 	Debug Debug
 	// Invocation is the run row's invocation record, which the read paths
 	// redact secret arguments by.
@@ -79,9 +80,6 @@ type Config struct {
 	// Only, as --sw-only, runs only the plan's nodes whose ID matches the
 	// glob and the nodes they depend on, skipping the rest.
 	Only string
-	// Workers caps how many non-inline nodes run an attempt at once; zero
-	// leaves them uncapped.
-	Workers int
 	// Rehydrate, when set, copies the results of a retried run's nodes
 	// instead of running them; nil runs every node.
 	Rehydrate *Rehydration
@@ -146,10 +144,6 @@ type NodeRun struct {
 	// called, which restarts what was left of it. A child run of the node
 	// waiting in plan admission holds it.
 	Hold func() (resume func())
-	// BeforeRunEachAttempt runs before_run in every attempt rather than only
-	// the first, for an attempt that cannot learn whether an earlier one's
-	// before_run refused.
-	BeforeRunEachAttempt bool
 	// safety: set only for a memoized node that did not run, whose generators read it through the output route.
 	memoOutput json.RawMessage
 }
@@ -164,13 +158,14 @@ type Run struct {
 	Requires []string
 	// Pipeline, Args and Context are the accepted plan's request; every
 	// later process of the run plans with the same.
-	Pipeline string
-	Args     map[string]string
-	Context  nodeproto.RunContext
-	StartAt  string
-	StopAt   string
-	State    storage.StateStoreOld
-	Logger   *slog.Logger
+	Pipeline   string
+	Entrypoint string
+	Args       map[string]string
+	Context    nodeproto.RunContext
+	StartAt    string
+	StopAt     string
+	State      storage.StateStoreOld
+	Logger     *slog.Logger
 	// Masker is the run's; a node's result is masked with it where it is recorded.
 	Masker    *secrets.Masker
 	adds      chan addRequest
@@ -211,7 +206,7 @@ type Layer func(cfg *Config, next Executor) Executor
 // safety: the order is the envelope's nesting, outermost first: debug pauses, then skip_if, which the
 // dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, memo, which
 // copies a hit before any admission lease or group slot is taken, admission, artifacts, caches,
-// retries, the worker cap and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
+// retries and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
 var layers = []Layer{
 	debugLayer,
 	skipIfLayer,
@@ -221,7 +216,6 @@ var layers = []Layer{
 	artifactsLayer,
 	cachesLayer,
 	retryLayer,
-	workersLayer,
 	timeoutLayer,
 }
 
@@ -229,6 +223,9 @@ var layers = []Layer{
 // its nodes, and runs the nodes in dependency order. An error means no run
 // row was written; once one exists, every failure is in the result.
 func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
+	if cfg.Entrypoint == "" {
+		cfg.Entrypoint = cfg.Pipeline
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -252,7 +249,10 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		masker = cfg.Attempts.Masker
 	}
 	cfg.State, cfg.Logger = maskState(cfg.State, masker), maskLogger(cfg.Logger, masker)
-	scfg := planSession(cfg)
+	scfg, err := planSession(cfg)
+	if err != nil {
+		return RunResult{}, maskErr(masker, err)
+	}
 	scfg.HoldOutput, scfg.Masker = true, masker
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
@@ -263,7 +263,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 			cfg.Logger.Warn("nodehost: plan process", "err", err)
 		}
 	}
-	args, known, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
+	args, known, err := describeArgs(ctx, sess, cfg.Entrypoint, cfg.Args, masker)
 	if err == nil && cfg.CheckArgs != nil {
 		err = cfg.CheckArgs(args)
 	}
@@ -291,13 +291,15 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	defer func() {
 		// safety: plan code's error can quote a secret flag, and the run row and
 		// every caller that prints the error outlive the masker.
-		res.Err = maskErr(masker, res.Err)
+		if res.Err != nil && masker != nil {
+			res.Err = maskedRunError{err: res.Err, text: masker.Mask(res.Err.Error())}
+		}
 		if ferr := cfg.State.FinishRun(finishCtx, res.RunID, res.Status, errText(res.Err)); ferr != nil {
 			res.Status, res.Err = "failed", errors.Join(res.Err, fmt.Errorf("persist run state: %w", ferr))
 		}
 	}()
 
-	doc, raw, err := planRun(ctx, sess, cfg.Pipeline, args, cfg.Run)
+	doc, raw, err := planRun(ctx, sess, cfg.Entrypoint, args, cfg.Run)
 	closeSession()
 	if err == nil {
 		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)
@@ -364,8 +366,11 @@ func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (rel
 }
 
 func newRun(cfg *Config, doc nodeproto.PlanDoc, args, skips map[string]string) *Run {
+	if cfg.Entrypoint == "" {
+		cfg.Entrypoint = cfg.Pipeline
+	}
 	run := &Run{
-		ID: cfg.Run.RunID, Doc: doc, validation: cfg.Session.Validation, Requires: slices.Clone(cfg.Requires), Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
+		ID: cfg.Run.RunID, Doc: doc, validation: cfg.Session.Validation, Requires: slices.Clone(cfg.Requires), Pipeline: cfg.Pipeline, Entrypoint: cfg.Entrypoint, Args: args, Context: cfg.Run,
 		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
 		onlySkips: skips,
 	}
@@ -407,7 +412,6 @@ func chain(cfg *Config) Executor {
 		if err := n.Run.State.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
 			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("start node %s: %w", n.Plan.ID, err)}
 		}
-		// safety: application retries share one node start event.
 		if n.Attempt <= 1 {
 			hostEvent(ctx, n.Run, n.Plan.ID, "node_started", nil)
 		}
@@ -502,7 +506,7 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 			continue
 		}
 		progressed = true
-		if res, ok := s.rehydrated(ctx, n, byID); ok {
+		if res, ok := s.rehydrated(ctx, n); ok {
 			s.started[n.ID] = true
 			s.finish(ctx, n.ID, res)
 			continue
@@ -589,6 +593,10 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.JobSpec
 	if err := validateNodes(append(slices.Clone(s.nodes), nodes...), s.run.validation); err != nil {
 		return err
 	}
+	return s.recordNodes(ctx, writeCtx, nodes, from)
+}
+
+func (s *scheduler) recordNodes(ctx, writeCtx context.Context, nodes []nodeproto.JobSpec, from *expansionFrom) error {
 	existing, err := s.resumedRows(writeCtx, nodes)
 	if err != nil {
 		return err
@@ -713,15 +721,8 @@ func appendNew(to, from []string) []string {
 	return to
 }
 
-// CancelError is the cause to cancel a run's context with when the run is
-// cancelled rather than failed: an interrupt, an eviction, a supersession or
-// a daemon's cancel. Any other cause, a deadline included, fails the run.
-type CancelError struct{ Reason string }
-
-func (e *CancelError) Error() string { return e.Reason }
-
 func runStatus(err error) string {
-	var cancel *CancelError
+	var cancel *lease.CancelError
 	switch {
 	case err == nil:
 		return "success"
@@ -777,23 +778,6 @@ func (s *scheduler) nodeVerdict() (string, error) {
 	return "success", nil
 }
 
-// safety: a failed command's error embeds its whole output, which the node's
-// log already holds, and the controller refuses a finish body over 1 MiB, so
-// the row and end event carry a bounded error.
-const (
-	nodeErrTextMaxBytes  = 8 << 10
-	nodeErrTextHeadBytes = 512
-)
-
-// safety: only the text is masked, so errors.Is and As still reach the cause.
-type maskedRunError struct {
-	err  error
-	text string
-}
-
-func (e maskedRunError) Error() string { return e.text }
-func (e maskedRunError) Unwrap() error { return e.err }
-
 // safety: the one writer of a node's result, for the scheduler and a pod host. A refused output fails the node in
 // its row too, so the row never stays running, and a result the store never took never reads as a success. Layers
 // outside the attempt, and the store itself, fail with text no attempt masked, so the result is masked after its
@@ -802,11 +786,11 @@ func recordResult(ctx context.Context, run *Run, id string, res Result) Result {
 	writeCtx := context.WithoutCancel(ctx)
 	var err error
 	if !res.recorded {
-		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(run.Masker, res.Err), res.Output, res.Reason, nil)
+		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(maskErr(run.Masker, res.Err)), res.Output, res.Reason, nil)
 	}
 	if errors.Is(err, store.ErrOutputNotStored) {
 		res = Result{Outcome: sparkwing.Failed, Err: err}
-		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(run.Masker, err), nil, store.FailureUnknown, nil)
+		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(maskErr(run.Masker, err)), nil, store.FailureUnknown, nil)
 	}
 	if err != nil {
 		run.Logger.Error("nodehost: record node result", "node", id, "err", err)
@@ -823,44 +807,7 @@ func maskErr(m *secrets.Masker, err error) error {
 	if err == nil || m == nil {
 		return err
 	}
-	return maskedRunError{err: err, text: m.Mask(err.Error())}
-}
-
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-// safety: only the node's row and end event are shortened; a cut taken before
-// masking could split a secret the masker no longer recognizes, so hook and
-// recovery inputs keep the whole error.
-func recordedErrText(m *secrets.Masker, err error) string {
-	return boundedNodeErrText(m.Mask(errText(err)))
-}
-
-// RecordedErrText is err as a node's row records it, bounded as every node
-// finish bounds it.
-func RecordedErrText(err error) string { return recordedErrText(nil, err) }
-
-// safety: the first line names what failed and the tail is where a command's
-// output reports why, so both survive and the elision is stated.
-func boundedNodeErrText(text string) string {
-	if len(text) <= nodeErrTextMaxBytes {
-		return text
-	}
-	head, _, _ := strings.Cut(text, "\n")
-	if len(head) > nodeErrTextHeadBytes {
-		head = strings.ToValidUTF8(head[:nodeErrTextHeadBytes], "")
-	}
-	tail := text[len(text)-(nodeErrTextMaxBytes-nodeErrTextHeadBytes-128):]
-	if i := strings.IndexByte(tail, '\n'); i >= 0 && i < len(tail)-1 {
-		tail = tail[i+1:]
-	}
-	tail = strings.ToValidUTF8(tail, "")
-	elided := len(text) - len(head) - len(tail)
-	return fmt.Sprintf("%s\n… (%d bytes of this error elided)\n%s", head, elided, tail)
+	return maskHostError(err, m.Mask)
 }
 
 type discardSink struct{}

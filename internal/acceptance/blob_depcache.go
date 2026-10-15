@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -119,11 +120,38 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	}
 	data.Records = tenant.BlobRecords(storage.BlobManifests{Objects: objects})
 	output := blob.OutputData{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
+	attempt := identity.Attempt.Value
+	accepted := runspec.Spec{Hash: "spec", PlanHash: "plan", Request: runspec.SealedRequest{Request: runspec.Request{Team: identity.Team, Pipeline: "fixture", Git: runspec.Git{Repository: runspec.Repository{Key: authority.Repo}}}}}
+	raw, err := json.Marshal(accepted)
+	if err != nil {
+		return err
+	}
+	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: identity.RunID, Spec: raw, SpecHash: string(accepted.Hash), PlanHash: string(accepted.PlanHash)}, NodeID: attempt.NodeID, Attempt: attempt.Attempt, Generation: attempt.Generation, Authority: nodehost.ClaimAuthority{Holder: "logger", CapabilityPrefix: identity.CapabilityRef}, Storage: nodehost.StorageBinding{Bytes: data.Bytes, Records: data.Records, Authority: authority}}
 	body := seed[:]
 	if seed[0]%2 == 0 {
 		body = nil
 	}
-	result, err := output.Put(ctx, body)
+	var result blob.Record
+	if body == nil {
+		result, err = output.Put(ctx, body)
+	} else {
+		body, err = json.Marshal(seed)
+		if err != nil {
+			return err
+		}
+		writer := nodehost.OutputRecords{Bind: func(context.Context, nodehost.NodeInput) (nodehost.JobUpload, error) {
+			return nodehost.JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt, authority.Repo, authority.Ref.Scope, "fixture", blob.KindOutput)}, nil
+		}}
+		key, writeErr := writer.PublishOutput(ctx, input, body)
+		if writeErr != nil {
+			return fmt.Errorf("store host output: %w", writeErr)
+		}
+		hit, readErr := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: authority, Key: *key, Budget: data.Budget})
+		if readErr != nil || !hit.Found {
+			return fmt.Errorf("read host output record: %v", readErr)
+		}
+		result = hit.Record
+	}
 	if err != nil {
 		return fmt.Errorf("store physical output: %w", err)
 	}
@@ -148,14 +176,18 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 		return err
 	}
 	artifactData := artifacts.Data{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
-	manifest, err := artifacts.Capture(ctx, artifactData, source, []string{"module"}, func(string) {})
+	publisher := nodehost.ArtifactRecords{Bind: func(context.Context, nodehost.NodeInput) (nodehost.JobUpload, error) {
+		return nodehost.JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt, authority.Repo, authority.Ref.Scope, "fixture", blob.KindManifest)}, nil
+	}}
+	manifestKey, err := publisher.Publish(ctx, input, source, []string{"module"}, func(string) {})
 	if err != nil {
-		return fmt.Errorf("store physical artifacts: %w", err)
+		return fmt.Errorf("store host artifacts: %w", err)
 	}
-	manifestHit, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: authority, Key: manifest.Key, Budget: data.Budget})
+	manifestHit, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: authority, Key: *manifestKey, Budget: data.Budget})
 	if err != nil || !manifestHit.Found {
 		return fmt.Errorf("read physical artifact manifest: %v", err)
 	}
+	manifest := manifestHit.Record
 	if _, err := data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Authority: authority, Source: identity, Key: memoKey, Digest: result.Digest, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest.Digest}, Members: manifestHit.Members}); err != nil {
 		return fmt.Errorf("store physical memo: %w", err)
 	}

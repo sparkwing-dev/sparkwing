@@ -13,10 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -548,7 +549,7 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 			if err == nil {
 				if status != nil && status.CancelRequested {
 					logger.Warn("trigger loop: cancellation requested; stopping the run", "trigger_id", triggerID)
-					killChild(&nodehost.CancelError{Reason: errTriggerCancelled.Error()})
+					killChild(&lease.CancelError{Reason: errTriggerCancelled.Error()})
 					return triggerClaimCancelled
 				}
 				lastOK = time.Now()

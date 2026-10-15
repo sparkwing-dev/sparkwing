@@ -26,7 +26,9 @@ the record transaction.
 bytes under the lookup budget. It returns bytes only after EOF verification and
 successful close. Missing records and missing objects both fail. Memo reads use
 the same bounded output reader. Hosts must attach the resulting record key in
-their result transition. Controller and host output bindings remain pending.
+their result transition. Authenticated controller and host binding construction remains pending.
+The common host output publisher calls `OutputData.Put` after checking SDK JSON
+and its exact-attempt result key.
 
 `AuthorizeUpload` and `AuthorizeEdge` operate on server-resolved facts. They do
 not authenticate a bearer or query the store. Call them inside the transaction
@@ -63,11 +65,14 @@ refreshes it after successful execution before saving. A refused binding runs
 cold or skips the save. A download is verified before archive extraction publishes
 files. Without an injected backend, dependency caches use local files.
 The SDK and host share `internal/depcachekey` for workspace-contained lockfile
-reads and full SHA-256 keys. Candidate inputs outside the workspace, including
+reads and full SHA-256 keys. The common executor hashes captured lockfile bytes
+through that same key function. Candidate inputs outside the workspace, including
 escaping symlinks, disable caching. The protocol's Go resolver is `go-modules`.
 `ExtractArchiveStaged(ctx, reader, dir)` consumes the gzip trailer before
 publishing, so checksum errors and truncated trailers preserve the destination.
-Cancellation during extraction also preserves it. A failed restore runs cold
+Cancellation during extraction also preserves it. The common executor restores
+through `depcacheblob.RestoreArchive`, sharing verification and staged extraction
+with local and remote archive backends. A failed restore runs cold
 and can replace the failed archive after successful work.
 
 The archive acceptance checks join signed filesystem and S3 transfers to SQLite
@@ -95,7 +100,10 @@ record boundaries reject forged metadata and borrowed same-run upload receipts,
 then admit independently verified member uploads and read them after reopening.
 Record fixtures, writers and store checks share `ResultRecordKey`.
 
-Artifact capture and staging live in `internal/artifacts`. Its `Data` value binds
+Artifact capture and staging live in `internal/artifacts`.
+The common host artifact publisher calls `Capture` with its current storage
+binding and the final result key. It writes the shared `Manifest` format, which
+the real store verifies before publishing member edges. Its `Data` value binds
 the byte store, record store and authority to the same job. Capture uploads each
 file even if another principal stored identical bytes, because an existence
 answer does not establish an upload receipt. It commits the manifest only after
@@ -332,8 +340,10 @@ transactions and controller authorization are fakes. Separate generated capture
 and staging properties check symlink and path containment on Unix. Native
 Windows filesystem evidence remains required.
 
-The filesystem and S3 archive proofs also write outputs, capture artifacts and
-commit memo through real tenant record transactions. They reopen SQLite, verify
+The filesystem and S3 archive proofs drive the common host output and artifact
+publishers through real tenant upload and record transactions. Empty output is
+also covered directly through `OutputData.Put`. They commit memo through those
+same records. They reopen SQLite, verify
 required output bytes, materialize the memo and stage its artifacts. Their data
 signer is a contract fixture around real reservations, receipts and physical
 verification because authenticated controller binding remains separate.

@@ -13,10 +13,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -51,20 +52,7 @@ type TriggerHost struct {
 	Logger   *slog.Logger
 }
 
-var errTriggerClaimEnded = errors.New("the trigger claim ended, so the run stopped")
-
-// HostTriggerRun plans h's run in a short-lived process of its pipeline,
-// runs the scheduler, dispatches each node, and finishes the trigger once
-// the run row is terminal. An error means no run row was recorded. The caller
-// renews the trigger claim, as [HeartbeatTrigger] does, and cancels ctx with a
-// [nodehost.CancelError] for an operator's cancel; a ctx cancelled with no
-// cause, as a runner shutting down is, leaves the run and trigger to the
-// claim's lease.
-//
-// safety: plan code and every closure run in processes with the minimal
-// environment and only their node's route bearer; the runner's token stays in
-// this process, and a node's code reaches the controller only under the
-// claim of the host that runs it.
+// HostTriggerRun plans and schedules a claimed run under the caller's owner lease.
 func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	logger := cmp.Or(h.Logger, slog.Default())
 	trig := h.Trigger
@@ -74,7 +62,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	if err != nil {
 		return err
 	}
-	args, guards, err := checkoutRunArgs(h.Dir, trig.Pipeline, triggerHostArgs(ctx, c, trig, logger))
+	args, guards, selection, err := checkoutRunArgs(h.Dir, trig.Pipeline, triggerHostArgs(ctx, c, trig, logger))
 	if err != nil {
 		return err
 	}
@@ -114,7 +102,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	rehydrate := hostedRehydration(Options{RetryOf: trig.RetryOf, Full: trig.Full})
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env, Engine: h.Engine, Runner: h.Identity, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementRunnerHosted, Secrets: masker}},
-		Pipeline: trig.Pipeline, Args: args, CheckArgs: checkArgs,
+		Pipeline: trig.Pipeline, Entrypoint: selection.Entrypoint, Args: args, CheckArgs: checkArgs,
 		Run: rc, Requires: requires, Invocation: flags.Invocation(),
 		StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
@@ -157,13 +145,14 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 // safety: the checkout's sparkwing.yaml fills the arguments a run left out, its pipeline entry's over the project
 // defaults, as a local run's do. Layering them again under a run row's arguments, which already hold them, changes
 // nothing, so every planner of a run calls this and their plans agree.
-func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]string, pipelines.Guards, error) {
+func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]string, pipelines.Guards, nodehost.PipelineIdentity, error) {
 	_, cfg, err := projectconfig.Discover(dir)
+	selection := nodehost.ResolvePipeline(cfg, pipeline)
 	if err != nil {
-		return nil, pipelines.Guards{}, &projectConfigError{err: err}
+		return nil, pipelines.Guards{}, selection, &projectConfigError{err: err}
 	}
 	if cfg == nil {
-		return args, pipelines.Guards{}, nil
+		return args, pipelines.Guards{}, selection, nil
 	}
 	opts := Options{Pipeline: pipeline, Args: args}
 	if cfg.Defaults != nil {
@@ -176,7 +165,7 @@ func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]s
 	} else if cfg.Defaults != nil && cfg.Defaults.Guards != nil {
 		rules = pipelines.Guards{Require: cfg.Defaults.Guards.When, Reject: cfg.Defaults.Guards.Unless}
 	}
-	return mergeInvokeArgs(opts), rules, nil
+	return mergeInvokeArgs(opts), rules, selection, nil
 }
 
 // safety: the host checks a run's guards once describe has filled in the SDK's defaults, against the arguments the
@@ -295,29 +284,6 @@ const (
 	runReadBackoff  = 250 * time.Millisecond
 )
 
-// HeartbeatTrigger renews triggerID's claim every interval until stop is
-// called, and cancels the returned context when the claim ends: with a
-// [nodehost.CancelError] for an operator's cancel, which the run records as
-// cancelled, and with an error that fails the run when the claim ended any
-// other way.
-func HeartbeatTrigger(ctx context.Context, c *client.Client, triggerID string, interval time.Duration, logger *slog.Logger) (context.Context, func()) {
-	ctx, cancel := context.WithCancelCause(ctx)
-	var cancelled atomic.Bool
-	beatCtx, stopBeat := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runHeartbeat(beatCtx, c, triggerID, interval, func() {
-			if cancelled.Load() {
-				cancel(&nodehost.CancelError{Reason: "cancelled by operator"})
-				return
-			}
-			cancel(errTriggerClaimEnded)
-		}, &cancelled, logger)
-	}()
-	return ctx, func() { stopBeat(); <-done; cancel(nil) }
-}
-
 func dispatchThrough(r runner.Runner, pipeline string) nodehost.Executor {
 	return func(ctx context.Context, n *nodehost.NodeRun) nodehost.Result {
 		req := runner.Request{
@@ -364,30 +330,38 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	}
 	ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
-	ctx, abandon := context.WithCancelCause(ctx)
-	defer abandon(nil)
-	beatCtx, stopBeat := context.WithCancel(ctx)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		heartbeatDispatchedClaim(beatCtx, client.NewWithToken(h.controllerURL, nil, n.ClaimToken),
-			req.RunID, req.NodeID, fence, store.MaxLeaseDuration, abandon, h.logger)
-	}()
-	defer func() { stopBeat(); wg.Wait() }()
+	ctx, stop := nodeClaimKeeper(client.NewWithToken(h.controllerURL, nil, n.ClaimToken),
+		req.RunID, req.NodeID, fence, store.MaxLeaseDuration).Run(ctx)
+	defer stop()
 	res, err := hostDispatchedNode(ctx, podNode{
 		entry: h.entry, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
 		runID: req.RunID, nodeID: req.NodeID, logger: h.logger,
 	})
 	if err == nil {
+		res.Err = errors.Join(res.Err, context.Cause(ctx))
 		return res
 	}
+	err = errors.Join(err, context.Cause(ctx))
 	// safety: only this claim may write the node now, so a host that never started finishes the row under it.
 	if ferr := client.NewWithToken(h.controllerURL, nil, n.ClaimToken).FinishNodeWithReason(context.WithoutCancel(ctx),
 		req.RunID, req.NodeID, string(sparkwing.Failed), nodehost.RecordedErrText(err), nil, store.FailureUnknown, nil); ferr != nil {
 		h.logger.Warn("trigger host: finish a node whose host never started", "run_id", req.RunID, "node_id", req.NodeID, "err", ferr)
 	}
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}
+}
+
+func nodeClaimKeeper(ctrl *client.Client, runID, nodeID string, fence store.NodeClaimFence, duration time.Duration) lease.Keeper {
+	return lease.Keeper{Interval: store.DispatchedHeartbeatInterval, Lease: duration, Renew: func(ctx context.Context) (lease.Beat, error) {
+		err := ctrl.HeartbeatNodeClaim(store.WithNodeClaimFence(ctx, fence), runID, nodeID, fence.HolderID, duration, nil)
+		switch {
+		case errors.Is(err, store.ErrClaimCancelRequested):
+			return lease.Beat{CancelRequested: true}, nil
+		case errors.Is(err, store.ErrLockHeld) || client.IsTokenDead(err):
+			return lease.Beat{}, &apierr.Error{Code: apierr.LockHeld, Message: "job claim ended"}
+		default:
+			return lease.Beat{}, err
+		}
+	}}
 }
 
 // safety: a run host's eval and approval lines go to this runner's own log,

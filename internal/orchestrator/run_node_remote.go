@@ -138,7 +138,6 @@ func (s stoppingHostState) FinishNodeWithReason(ctx context.Context, runID, node
 // checked against it and the node's terminal row is the result the
 // dispatcher reads.
 func hostDispatchedNode(ctx context.Context, p podNode) (runner.Result, error) {
-	p.dispatched = true
 	p.state = stoppingHostState{
 		Client:       client.NewWithToken(p.controllerURL, nil, p.token),
 		shuttingDown: shuttingDownOn(ctx),

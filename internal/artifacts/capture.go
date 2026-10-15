@@ -38,7 +38,7 @@ type Data struct {
 // and returns the committed record. A wildcard match outside the workspace is
 // skipped with a warning; a literal outside match fails.
 func Capture(ctx context.Context, data Data, workspace string, globs []string, warn func(msg string)) (blob.Record, error) {
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return blob.Record{}, err
 	}
 	if data.Bytes == nil || data.Records == nil || warn == nil {
@@ -70,7 +70,7 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 		if err != nil {
 			return err
 		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := context.Cause(ctx); ctxErr != nil {
 			return ctxErr
 		}
 		if p == workspace {
@@ -85,7 +85,7 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 		if d.IsDir() && !isSymlink {
 			return nil
 		}
-		if !anyGlobMatches(globs, rel) {
+		if !Matches(globs, rel) {
 			return nil
 		}
 		name, nerr := workspaceRelPath(wsRoot, p)
@@ -119,7 +119,7 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 	if walkErr != nil {
 		return blob.Record{}, walkErr
 	}
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return blob.Record{}, err
 	}
 
@@ -131,7 +131,7 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 	sum := sha256.Sum256(manifestBytes)
 	digest := blob.Digest(hex.EncodeToString(sum[:]))
 	receipt, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: int64(len(manifestBytes)), Body: bytes.NewReader(manifestBytes)})
-	if err = errors.Join(err, ctx.Err()); err != nil {
+	if err = errors.Join(err, context.Cause(ctx)); err != nil {
 		return blob.Record{}, fmt.Errorf("store manifest: %w", err)
 	}
 	if receipt.Digest != digest || receipt.Identity != data.Identity {
@@ -142,7 +142,7 @@ func Capture(ctx context.Context, data Data, workspace string, globs []string, w
 		members = append(members, blob.Member{Team: key.Team, ManifestDigest: digest, Digest: entry.Digest, Path: entry.Path, Size: entry.Size, Mode: entry.Mode})
 	}
 	record, err := data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Source: data.Identity, Authority: data.Authority, Key: key, Digest: digest, Members: members})
-	if err = errors.Join(err, ctx.Err()); err != nil {
+	if err = errors.Join(err, context.Cause(ctx)); err != nil {
 		return blob.Record{}, fmt.Errorf("commit artifact manifest: %w", err)
 	}
 	if record.Key != key || record.Digest != digest || record.Source != data.Identity {
@@ -198,11 +198,11 @@ func storeArtifactFile(ctx context.Context, data Data, root *os.Root, name strin
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", 0, err
 	}
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return "", 0, err
 	}
 	receipt, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: n, Body: f})
-	if err = errors.Join(err, ctx.Err()); err != nil {
+	if err = errors.Join(err, context.Cause(ctx)); err != nil {
 		return "", 0, err
 	}
 	if receipt.Digest != digest || receipt.Identity != data.Identity {
@@ -211,7 +211,9 @@ func storeArtifactFile(ctx context.Context, data Data, root *os.Root, name strin
 	return digest, n, nil
 }
 
-func anyGlobMatches(globs []string, rel string) bool {
+// Matches reports whether a slash-separated path or one of its parent directories
+// matches an artifact glob. A ** segment matches zero or more path segments.
+func Matches(globs []string, rel string) bool {
 	segs := strings.Split(rel, "/")
 	for i := len(segs); i >= 1; i-- {
 		prefix := strings.Join(segs[:i], "/")

@@ -17,8 +17,12 @@ func TestHostedProjectDefaultsWithoutPipelineEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := Options{Pipeline: "build"}
-	if err := applyHostedProjectConfig(&opts, root); err != nil {
+	selection, err := applyHostedProjectConfig(&opts, root)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if selection.Invoked != "build" || selection.Entrypoint != "build" {
+		t.Fatal("default guards changed pipeline selection:", selection)
 	}
 	if mergeInvokeArgs(opts)["mode"] != "default" {
 		t.Fatal("default arguments lost without pipeline entry")

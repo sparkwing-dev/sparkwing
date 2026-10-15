@@ -288,9 +288,9 @@ func TestLogSinkBoundsAnOversizedSummary(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(body) > 1<<20 || !strings.Contains(op, "summary truncated") || strings.Contains(op, logSecret[:8]) {
+		if len(body) > 1<<20 || !strings.Contains(op, "[elided]") || strings.Contains(op, logSecret[:8]) {
 			t.Errorf("summary body is %d bytes, notes the cut %v, leaks the secret %v",
-				len(body), strings.Contains(op, "summary truncated"), strings.Contains(op, logSecret[:8]))
+				len(body), strings.Contains(op, "[elided]"), strings.Contains(op, logSecret[:8]))
 		}
 	}
 	if state.ops[2] != "node-summary run-1/build ## small" {
@@ -314,9 +314,9 @@ func TestLogSinkBoundsAnOversizedAnnotation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(body) > 1<<20 || !strings.Contains(op, "annotation truncated") || strings.Contains(op, logSecret[:8]) {
+		if len(body) > 1<<20 || !strings.Contains(op, "[elided]") || strings.Contains(op, logSecret[:8]) {
 			t.Errorf("annotation body is %d bytes, notes the cut %v, leaks the secret %v",
-				len(body), strings.Contains(op, "annotation truncated"), strings.Contains(op, logSecret[:8]))
+				len(body), strings.Contains(op, "[elided]"), strings.Contains(op, logSecret[:8]))
 		}
 	}
 	if state.ops[2] != "node-annotation run-1/build built" {

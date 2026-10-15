@@ -30,15 +30,20 @@ func Files(workdir, name, scope string, files []string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read cache key input: %w", err)
 		}
-		raw, err := json.Marshal([]string{name, scope, runtime.GOOS, runtime.GOARCH})
-		if err != nil {
-			return "", err
-		}
-		digest := sha256.New()
-		digest.Write(raw)
-		digest.Write([]byte{0})
-		digest.Write(data)
-		return fmt.Sprintf("dep-%x", digest.Sum(nil)), nil
+		return Bytes(name, scope, data)
 	}
 	return "", fmt.Errorf("cache key input: %w", os.ErrNotExist)
+}
+
+// Bytes derives a platform-specific key from captured dependency input.
+func Bytes(name, scope string, data []byte) (string, error) {
+	raw, err := json.Marshal([]string{name, scope, runtime.GOOS, runtime.GOARCH})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.New()
+	digest.Write(raw)
+	digest.Write([]byte{0})
+	digest.Write(data)
+	return fmt.Sprintf("dep-%x", digest.Sum(nil)), nil
 }

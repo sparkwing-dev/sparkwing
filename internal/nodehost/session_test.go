@@ -369,9 +369,9 @@ func TestSessionEndsWithHostCode(t *testing.T) {
 		msg  string
 	}{
 		{"exit", apierr.SDKExited, "exit status 3"},
-		{"garbage", apierr.ProtocolError, "not a JSON object"},
+		{"garbage", apierr.ProtocolError, "JSON object"},
 		{"unknown-reply", apierr.ProtocolError, "unknown request"},
-		{"close-frames", apierr.ProtocolError, "frame pipe"},
+		{"close-frames", apierr.FramesClosed, "frame pipe"},
 	} {
 		t.Run(tc.node, func(t *testing.T) {
 			s := startFake(t, context.Background(), &recorder{})

@@ -1,9 +1,13 @@
 package orchestrator
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 const envDryRun = "SPARKWING_DRY_RUN"
 
 func dryRunFromEnv() bool {
-	return os.Getenv(envDryRun) == "1"
+	enabled, _ := strconv.ParseBool(os.Getenv(envDryRun))
+	return enabled
 }
