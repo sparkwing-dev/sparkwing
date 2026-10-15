@@ -132,7 +132,7 @@ func TestAHoldWaitsForTheLedgerLock(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := tenant.HoldForDispute(ctx, "dp_lock", "", "opened", time.Now())
+		_, err := tenant.TestOnlyHoldForDispute(ctx, "dp_lock", "", "opened", time.Now())
 		done <- err
 	}()
 	waited := false

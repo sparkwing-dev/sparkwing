@@ -83,18 +83,6 @@ func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now tim
 	return created, warned, err
 }
 
-// RecordPaymentWarning records provider fraud evidence and holds its persisted payer.
-func (o *Operator) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (team Team, err error) {
-	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		team, err = recordPaymentWarningTx(ctx, tx, w, now)
-		return err
-	})
-	if err != nil {
-		return "", err
-	}
-	return team, nil
-}
-
 // DueCardRefunds lists due refunds across the deployment.
 func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error) {
 	rows, err := o.s.query(ctx, `SELECT team, payment_intent, reason, attempts FROM card_refunds
@@ -129,18 +117,6 @@ func (o *Operator) MarkCardRefundMade(
 			`attempts = ? AND status = 'due'`, []any{attempt}, now)
 		return err
 	})
-}
-
-// ReportCardRefund applies a provider refund outcome to its current queued attempt.
-func (o *Operator) ReportCardRefund(ctx context.Context, key, refundID, status string, now time.Time) (changed bool, err error) {
-	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		changed, err = reportCardRefundTx(ctx, tx, key, refundID, status, now)
-		return err
-	})
-	if err != nil {
-		return false, err
-	}
-	return changed, err
 }
 
 // FailCardAttempt records a failed collection attempt and its payer hold.

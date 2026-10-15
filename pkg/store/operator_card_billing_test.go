@@ -19,7 +19,7 @@ func cardCollectionFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	if _, _, err := tenant.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.SaveCard(t.Context(), Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1", Brand: "visa", Last4: "4242"}, "billing", now); err != nil {
 		t.Fatal(err)
 	}
 	return s, tenant, now
@@ -216,7 +216,7 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if due, err := s.AsOperator().DueCardRefunds(ctx, now); err != nil || len(due) != 0 {
 		t.Fatalf("a pending refund = %+v, %v; want not due", due, err)
 	}
-	if queued, err := s.AsOperator().ReportCardRefund(ctx, "pi_short-0", "re_1", "failed", now); err != nil || !queued {
+	if queued, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_short-0", "re_1", "failed", now); err != nil || !queued {
 		t.Fatalf("report failed = %v, %v", queued, err)
 	}
 	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(30*time.Minute)); err != nil || len(due) != 0 {
@@ -229,7 +229,7 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "pi_short-1", "re_2", "succeeded", now); err != nil {
 		t.Fatal(err)
 	}
-	if queued, err := s.AsOperator().ReportCardRefund(ctx, "pi_short-0", "re_1", "failed", now); err != nil || queued {
+	if queued, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_short-0", "re_1", "failed", now); err != nil || queued {
 		t.Fatalf("a stale report of the first refund = %v, %v; want ignored", queued, err)
 	}
 	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
@@ -253,10 +253,10 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 			}, now); err != nil {
 				t.Fatal(err)
 			}
-			if queued, err := s.AsOperator().ReportCardRefund(ctx, "pi_short-0", "re_1", tc.status, now); err != nil || !queued {
+			if queued, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_short-0", "re_1", tc.status, now); err != nil || !queued {
 				t.Fatalf("early %s report = %v, %v; want applied", tc.status, queued, err)
 			}
-			if _, err := s.AsOperator().ReportCardRefund(ctx, "pi_short-0", "re_1", tc.status, now); err != nil {
+			if _, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_short-0", "re_1", tc.status, now); err != nil {
 				t.Fatal(err)
 			}
 			if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "pi_short-0", "re_1", "pending", now); err != nil {

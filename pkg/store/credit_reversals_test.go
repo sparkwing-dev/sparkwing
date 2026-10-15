@@ -19,7 +19,7 @@ func TestATeamStaysFrozenWhileAnyDisputeHoldsIt(t *testing.T) {
 	acme := teamHandle(t, s, "acme")
 	now := time.Now()
 	for _, dispute := range []string{"dp_1", "dp_2", "dp_1"} {
-		if _, err := acme.HoldForDispute(ctx, dispute, "", "dispute opened", now); err != nil {
+		if _, err := acme.TestOnlyHoldForDispute(ctx, dispute, "", "dispute opened", now); err != nil {
 			t.Fatalf("hold %s: %v", dispute, err)
 		}
 	}
@@ -40,7 +40,7 @@ func TestATeamStaysFrozenWhileAnyDisputeHoldsIt(t *testing.T) {
 	if f := frozen(); !f.Frozen || len(f.Disputes) != 1 || f.Disputes[0] != "dp_2" {
 		t.Fatalf("freeze after releasing one dispute = %+v, want dp_2 still holding it", f)
 	}
-	if created, err := acme.HoldForDispute(ctx, "dp_1", "", "replayed", now); err != nil || created {
+	if created, err := acme.TestOnlyHoldForDispute(ctx, "dp_1", "", "replayed", now); err != nil || created {
 		t.Fatalf("a replayed hold of a released dispute = %v, %v; want nothing written", created, err)
 	}
 	if f := frozen(); len(f.Disputes) != 1 {
@@ -61,7 +61,7 @@ func TestReleaseCreditFreezesRefusesABlankHold(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, s, "acme")
 	now := time.Now()
-	if _, err := acme.HoldForDispute(ctx, "dp_1", "", "dispute opened", now); err != nil {
+	if _, err := acme.TestOnlyHoldForDispute(ctx, "dp_1", "", "dispute opened", now); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"", "   "} {

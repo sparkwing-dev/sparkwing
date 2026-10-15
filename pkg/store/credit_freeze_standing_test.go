@@ -34,7 +34,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 		t.Fatalf("a member of a paid team = %v", err)
 	}
 
-	if _, err := teststore.ForTeam(t, st, team).HoldForDispute(ctx, "dp_frozen", "", "dispute opened", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, st, team).TestOnlyHoldForDispute(ctx, "dp_frozen", "", "dispute opened", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, team); got.Tier == store.TeamTierFunded {
@@ -67,7 +67,7 @@ func TestAFrozenTeamsEventsAreHeldToTheFreeShare(t *testing.T) {
 	if err := appendBytes(acme, "r1", 500); err != nil {
 		t.Fatalf("a funded team's write past the share: %v", err)
 	}
-	if _, err := teststore.ForTeam(t, st, "acme").HoldForDispute(ctx, "dp_ev", "", "dispute opened", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, st, "acme").TestOnlyHoldForDispute(ctx, "dp_ev", "", "dispute opened", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, "acme"); got.Tier == store.TeamTierFunded {

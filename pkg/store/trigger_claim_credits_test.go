@@ -247,7 +247,7 @@ func TestMeteredTriggerHeartbeatKeepsChargingAnAdmittedFrozenTeam(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).HoldForDispute(ctx, "dispute-trigger", "", "operator hold", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlyHoldForDispute(ctx, "dispute-trigger", "", "operator hold", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, claimed.ID, pastTriggerMinimum(5*time.Second), time.Time{})

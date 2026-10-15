@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func operatorFixture(t *testing.T) (f *identityFixture, operator, owner signedIn) {
@@ -193,7 +192,7 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 		t.Errorf("a limit after trust is restored = %d want 200", code)
 	}
 
-	if _, err := teststore.ForTeam(t, f.store, store.Team(owner.team)).HoldForDispute(context.Background(), "dp_1", "", "chargeback", time.Now()); err != nil {
+	if _, err := f.store.DB().ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES (?,?,?,?,?)", "dp_1", owner.team, "", "chargeback", time.Now().UnixNano()); err != nil {
 		t.Fatalf("dispute hold: %v", err)
 	}
 	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse"}, nil); code != http.StatusOK {

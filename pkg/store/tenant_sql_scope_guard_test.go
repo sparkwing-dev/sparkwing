@@ -34,14 +34,13 @@ var reviewedUnscopedSQL = map[string]string{
 		"under the ledger lock",
 	"startDueAttemptsTx": "the payment worker starts the due attempts of every team's open charges; " +
 		"each row it touches is named by its global id",
-	"(*Operator).SettleCardPayment": "a payment names its charge by global id, and the charge row it reads " +
+	"settleCardPaymentTx": "a payment names its charge by global id, and the charge row it reads " +
 		"is checked against the team the payment names",
-	"(*Operator).FailCardAttempt":     "a decline names its attempt by global id; the team is read from that row",
-	"(*Operator).DropCardAttempt":     "an attempt that never reached Stripe is closed by its global id",
-	"(*Operator).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
-	"(*Operator).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
-	"(*Operator).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
-		"the queued row says",
+	"failCardAttemptTx":                 "a decline names its attempt by global id; the team is read from that row",
+	"(*Operator).DropCardAttempt":       "an attempt that never reached Stripe is closed by its global id",
+	"(*Operator).RecordAttemptIntent":   "the worker binds a payment to the attempt it names by global id",
+	"reportCardRefundTx":                "a provider refund names its payment identity before its persisted team is known",
+	"(*Operator).DueCardRefunds":        "the payment worker lists every team's queued refunds in one pass",
 	"globalRunnerRefusal":               "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":          "the global hourly cap counts runs from every team",
 	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
@@ -164,10 +163,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"admin scope is the deployment operator's and no team membership grants it",
 	"(*Store).ListTokens": "the operator's credential listing spans every team and returns each token's team; the admin " +
 		"scope is the deployment operator's and no team membership grants it",
-	"(*Store).SetTokenMetered": "the operator marks one credential as metered by its prefix, which is unique across teams; " +
-		"the admin scope is the deployment operator's",
-	"(*Store).TokenMetered": "reads whether one credential pays credits by its prefix, which is unique across teams, so " +
-		"the answer is that credential's own",
 	"tokenMeteredTx": "reads whether the claiming credential pays credits by its prefix, which is unique across teams, so " +
 		"the answer is that credential's own",
 	"(*Store).SeedToken": "a provisioned credential is seeded once by its prefix, which is unique across " +

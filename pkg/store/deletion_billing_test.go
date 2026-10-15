@@ -46,7 +46,7 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	}
 
 	held := tenant(t, st, "held")
-	if _, err := teststore.ForTeam(t, st, "held").HoldForDispute(ctx, "dp_held", "", "dispute opened", now); err != nil {
+	if _, err := teststore.ForTeam(t, st, "held").TestOnlyHoldForDispute(ctx, "dp_held", "", "dispute opened", now); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = held.RequestDeletion(ctx, owner.Account.ID, now)

@@ -21,7 +21,7 @@ func trustWithCard(t *testing.T, tenant *store.Tenant, now time.Time) {
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.SaveCard(ctx, store.Card{
+	if err := tenant.TestOnlySaveCard(ctx, store.Card{
 		Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1", Brand: "visa", Last4: "4242",
 	}, "billing", now); err != nil {
 		t.Fatal(err)
@@ -169,11 +169,11 @@ func TestAPartialReversalTakesOnlyItsAmount(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, s, "acme")
 	payTeam(t, acme, "pi_1", 25)
-	first, err := s.AsOperator().ReversePayment(ctx, "pi_1", "re_1", "billing", dollarsMicro(10))
+	first, err := s.AsOperator().TestOnlyReversePayment(ctx, "pi_1", "re_1", "billing", dollarsMicro(10))
 	if err != nil || first.Grant.AmountMicro != -dollarsMicro(10) {
 		t.Fatalf("partial = %+v, %v", first, err)
 	}
-	rest, err := s.AsOperator().ReversePayment(ctx, "pi_1", "re_2", "billing", dollarsMicro(100))
+	rest, err := s.AsOperator().TestOnlyReversePayment(ctx, "pi_1", "re_2", "billing", dollarsMicro(100))
 	if err != nil || rest.Grant.AmountMicro != -dollarsMicro(15) || rest.ReversedMicro != dollarsMicro(25) {
 		t.Fatalf("the rest = %+v, %v; want $15, capped at what is left", rest, err)
 	}
@@ -222,7 +222,7 @@ func TestAWarningBeforeItsPaymentStopsTheGrant(t *testing.T) {
 	trustWithCard(t, acme, now)
 	spend(t, s, "acme", "ch_1", 15_000)
 	w := dueCharge(t, s, now)
-	team, err := s.AsOperator().RecordPaymentWarning(ctx, store.PaymentWarning{
+	team, err := s.AsOperator().TestOnlyRecordPaymentWarning(ctx, store.PaymentWarning{
 		WarningID: "issfr_1", PaymentIntent: "pi_warned", Fingerprint: "fp_other", Actionable: true,
 	}, now)
 	if err != nil || team != "" {
@@ -263,7 +263,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 		if _, _, err := s.AsOperator().FailCardAttempt(ctx, w.AttemptID, "pi_declined", "card_declined", now); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.AsOperator().RecordPaymentWarning(ctx, store.PaymentWarning{
+		if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(ctx, store.PaymentWarning{
 			WarningID: "issfr_elsewhere", PaymentIntent: warnedIntent, Fingerprint: "fp_flagged", Actionable: true,
 		}, now); err != nil {
 			t.Fatal(err)
@@ -378,7 +378,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 				t.Fatalf("pay-now after settlement = %v, want ErrNoPayableCharge", err)
 			}
 			for range 2 {
-				if _, err := s.AsOperator().ReversePayment(ctx, "pi_recovery", "re_unapplied", "billing",
+				if _, err := s.AsOperator().TestOnlyReversePayment(ctx, "pi_recovery", "re_unapplied", "billing",
 					tc.unapplied*store.MicroCreditsPerCent); err != nil {
 					t.Fatalf("reverse the unapplied rest: %v", err)
 				}
@@ -386,7 +386,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 					t.Fatalf("balance = %d, %v; want returning the unapplied rest to leave the repayment", bal, err)
 				}
 			}
-			if _, err := s.AsOperator().ReversePayment(ctx, "pi_recovery", "re_rest", "billing",
+			if _, err := s.AsOperator().TestOnlyReversePayment(ctx, "pi_recovery", "re_rest", "billing",
 				tc.repaid*store.MicroCreditsPerCent+1); err != nil {
 				t.Fatalf("reverse the rest: %v", err)
 			}
@@ -542,7 +542,7 @@ func TestBillingWritersShareOneLockOrder(t *testing.T) {
 			note(err)
 		},
 		func(i int) {
-			note(acme.SaveCard(ctx, store.Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1"}, "billing", now))
+			note(acme.TestOnlySaveCard(ctx, store.Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1"}, "billing", now))
 		},
 		func(i int) {
 			_, _, err := acme.SetBillingTrust(ctx, store.BillingTrustChange{
@@ -599,7 +599,7 @@ func TestANonActionableWarningStopsNoGrant(t *testing.T) {
 	if err := s.AsOperator().RecordAttemptIntent(ctx, w.AttemptID, "pi_quiet", now); err != nil {
 		t.Fatal(err)
 	}
-	if team, err := s.AsOperator().RecordPaymentWarning(ctx, store.PaymentWarning{
+	if team, err := s.AsOperator().TestOnlyRecordPaymentWarning(ctx, store.PaymentWarning{
 		WarningID: "issfr_quiet", PaymentIntent: "pi_quiet", Fingerprint: "fp_1",
 	}, now); err != nil || team != "" {
 		t.Fatalf("non-actionable warning = %q, %v; want recorded with no hold", team, err)
@@ -627,7 +627,7 @@ func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 	if _, _, err := s.AsOperator().FailCardAttempt(ctx, w.AttemptID, "pi_dead", "card_declined", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AsOperator().RecordPaymentWarning(ctx, store.PaymentWarning{
+	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(ctx, store.PaymentWarning{
 		WarningID: "issfr_saved", PaymentIntent: "pi_old", Fingerprint: "fp_1", Actionable: true,
 	}, now); err != nil {
 		t.Fatal(err)
@@ -710,7 +710,7 @@ func TestARefundDebitsTheCardThatPaid(t *testing.T) {
 		store.NamedClaimOptions{SizesToClass: true}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if err := acme.SaveCard(ctx, store.Card{Customer: "cus_1", PaymentMethod: "pm_2", Fingerprint: "fp_2"}, "billing", now); err != nil {
+	if err := acme.TestOnlySaveCard(ctx, store.Card{Customer: "cus_1", PaymentMethod: "pm_2", Fingerprint: "fp_2"}, "billing", now); err != nil {
 		t.Fatal(err)
 	}
 	res, err := s.FinalizeNodeCredits(ctx, "run-card", "build", claimant.TokenPrefix, time.Now().Add(15*time.Minute))
@@ -747,10 +747,10 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	paid := int64(1_000) * store.MicroCreditsPerCent
-	if _, err := s.AsOperator().ReversePayment(ctx, "pi_dup", "re_operator", "card", paid*4/10); err != nil {
+	if _, err := s.AsOperator().TestOnlyReversePayment(ctx, "pi_dup", "re_operator", "card", paid*4/10); err != nil {
 		t.Fatal(err)
 	}
-	if moved, err := s.AsOperator().ReportCardRefund(ctx, "", "re_operator", "succeeded", now); err != nil || moved {
+	if moved, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "", "re_operator", "succeeded", now); err != nil || moved {
 		t.Fatalf("an operator's refund without our key = %v, %v; want the queue untouched", moved, err)
 	}
 	due, err := s.AsOperator().DueCardRefunds(ctx, now)
@@ -760,10 +760,10 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	if err := s.AsOperator().MarkCardRefundMade(ctx, "acme", "pi_dup-0", "re_ours", "pending", now); err != nil {
 		t.Fatal(err)
 	}
-	if moved, err := s.AsOperator().ReportCardRefund(ctx, "pi_dup-0", "re_ours", "succeeded", now); err != nil || !moved {
+	if moved, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_dup-0", "re_ours", "succeeded", now); err != nil || !moved {
 		t.Fatalf("our refund's success = %v, %v", moved, err)
 	}
-	rev, err := s.AsOperator().ReversePayment(ctx, "pi_dup", "re_ours", "card", paid)
+	rev, err := s.AsOperator().TestOnlyReversePayment(ctx, "pi_dup", "re_ours", "card", paid)
 	if err != nil || rev.ReversedMicro != paid {
 		t.Fatalf("reversal of ours = %+v, %v; want the two reversals to total exactly the payment", rev, err)
 	}
@@ -778,11 +778,11 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	if err := s.AsOperator().MarkCardRefundMade(ctx, "acme", "pi_dup2-0", "re_a", "pending", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AsOperator().ReportCardRefund(ctx, "pi_dup2-0", "re_a", "failed", now); err != nil {
+	if _, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_dup2-0", "re_a", "failed", now); err != nil {
 		t.Fatal(err)
 	}
 	for _, foreign := range []string{"", "pi_dup2-0", "pi_dup2-7"} {
-		if moved, err := s.AsOperator().ReportCardRefund(ctx, foreign, "re_foreign", "failed", now); err != nil || moved {
+		if moved, err := s.AsOperator().TestOnlyReportCardRefund(ctx, foreign, "re_foreign", "failed", now); err != nil || moved {
 			t.Fatalf("a failure under key %q = %v, %v; want the retry state unchanged", foreign, moved, err)
 		}
 	}

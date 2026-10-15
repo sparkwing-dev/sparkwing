@@ -1153,11 +1153,13 @@ is removed. Verified failure and expiry events own those outcomes.
 settlement writes the checkout's paid timestamp and grant association.
 
 `Operator` owns deployment card collection and refund workers: `DueCardCharges`,
-`RecordAttemptIntent`, `SettleCardPayment`, `RecordPaymentWarning`,
-`DueCardRefunds`, `MarkCardRefundMade`, `ReportCardRefund`, `FailCardAttempt`
+`RecordAttemptIntent`, `SettleCardPayment`,
+`DueCardRefunds`, `MarkCardRefundMade`, `FailCardAttempt`
 and `DropCardAttempt`. Their raw Store methods are removed. Provider workers
 select Operator before operating on persisted attempt and payment identities.
-Tenant card setup, spend policy and recovery checkout keep their tenant handles.
+Tenant spend policy and recovery checkout keep their tenant handles.
+Raw card setup, warning and provider refund callback APIs are removed. Their
+transaction-local owners remain for verified payment-event settlement.
 The collection worker and webhook settlement retain their ledger lock,
 persisted payer attribution, replay rules and refund queue. This handle cut
 adds no provider verification contract. C2 still owns verified event delivery.
@@ -1171,14 +1173,13 @@ Holds use the tenant-scoped warning identity. The legacy provider-only hold
 identity is removed. Replaying an exact warning after release cannot restore
 its hold. A failed audit rolls back both warning persistence and the hold.
 
-`Operator.ReversePayment` and `Operator.PaymentTeam` resolve provider payment
-identity across teams. Their raw Store methods are removed. The unused public
-PaidGrantTeam lookup is removed. The operator lookup and reversal share the
-existing transaction-local grant resolver and configured test/live mode.
-`Tenant.HoldForDispute` and `Tenant.ReleaseCreditFreezes` own dispute holds and
-named releases. Their private mutation owners derive the team from the tenant
-handle. There is no caller-selected team argument. A dispute stays bound to its
-first team and payment after release, and replay cannot restore its hold.
+`Operator.ReversePayment`, `Operator.PaymentTeam`, `Tenant.SaveCard`,
+`Tenant.HoldForDispute`, `Operator.RecordPaymentWarning` and
+`Operator.ReportCardRefund` are removed. Verified event settlement owns provider
+mutations. Private transaction owners retain payment/grant resolution, refund
+conservation, setup ordering and immutable dispute attribution. A dispute stays
+bound to its first team and payment after release. Replay cannot restore a hold.
+`Tenant.ReleaseCreditFreezes` still requires a named hold, actor and reason.
 `Tenant.HoldByOperator` and `Tenant.ReleaseOperatorHolds` use those same owners.
 Console HTTP and break-glass callers retain their authenticated tenant selection.
 
@@ -2084,5 +2085,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.AdmitRun` | AdmitRun is the only intake for local, remote, retry, child and published runs. It derives authority and allowed pools in the transaction; published runs receive no executable owner unit. Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them. |
 | `Tenant.AcceptPlan` | AcceptPlan validates the C3 plan, ceilings and declared secrets, then seals spec and inserts nodes atomically. Neither a request field nor an existing seal may change; a differing sealed hash returns spec_drift. Published plans require live publisher authority and create importable jobs without awarding an executable claim. |
 | `Tenant.AcceptExpansion` | Atomically accepts exactly one success body or structured failure, rechecking authority and persisting its canonical hash. |
+
+`Store.SetTokenMetered` is removed. Root capability metering uses C2's operator
+route. Legacy claim selection shares one private metering query until those
+claim APIs are retired.
 
 <!-- design:end -->

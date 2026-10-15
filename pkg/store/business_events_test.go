@@ -38,13 +38,13 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().ReversePayment(ctx, "pi_1", "re_1", "operator", 0); err != nil {
+	if _, err := st.AsOperator().TestOnlyReversePayment(ctx, "pi_1", "re_1", "operator", 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tn.GrantCredits(ctx, store.CreditGrantFree, store.MicroCreditsPerCredit, "promo", "operator"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.ForTeam(t, st, team).HoldForDispute(ctx, "dp_1", "pi_1", "card holder says fraud", now); err != nil {
+	if _, err := teststore.ForTeam(t, st, team).TestOnlyHoldForDispute(ctx, "dp_1", "pi_1", "card holder says fraud", now); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_1", "", "", now); err != nil || n != 1 {

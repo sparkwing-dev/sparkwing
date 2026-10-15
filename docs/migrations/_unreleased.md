@@ -54,12 +54,17 @@ an authority contract before this path can reproduce it.
 
 Replace `st.DueCardCharges(ctx, now)` with
 `st.AsOperator().DueCardCharges(ctx, now)`. The same handle change applies to
-`RecordAttemptIntent`, `SettleCardPayment`, `RecordPaymentWarning`,
-`DueCardRefunds`, `MarkCardRefundMade`, `ReportCardRefund`, `FailCardAttempt`
+`RecordAttemptIntent`, `SettleCardPayment`,
+`DueCardRefunds`, `MarkCardRefundMade`, `FailCardAttempt`
 and `DropCardAttempt`. The raw Store methods are removed.
 
-Tenant card setup, spend policy and recovery checkout keep their existing
-handles. Provider request and response payloads keep their existing shape.
+Tenant spend policy and recovery checkout keep their existing handles.
+`Tenant.SaveCard`, `Tenant.HoldForDispute`, `Operator.PaymentTeam`,
+`Operator.ReversePayment`, `Operator.RecordPaymentWarning` and
+`Operator.ReportCardRefund` are removed. Provider mutations require verified
+payment-event settlement. Card setup, refund, warning and dispute events still
+need the expanded C2 verified-event contract. No raw callback API replaces them.
+`Store.SetTokenMetered` is removed. Use the operator runner-metering route.
 
 ## Legacy binary lookups
 
@@ -1050,10 +1055,10 @@ that keep the logs service running.
   boolean `metered`. The runner selector is the enrolled root's public
   capability prefix. The response contains `runner` and `metered`.
 - **Go:** select the registered team with `Store.ForTeam`. Use
-  `Tenant.HoldForDispute` and `Tenant.ReleaseCreditFreezes` for its dispute holds.
-  A release requires the actor, reason and one hold ID. An empty ID is refused.
-  Use `Operator.PaymentTeam` and `Operator.ReversePayment` for payment lookup and
-  refunds. Their raw Store methods and `Store.PaidGrantTeam` are removed.
+  `Tenant.ReleaseCreditFreezes` to release a named hold. A release requires the
+  actor, reason and one hold ID. An empty ID is refused. Provider disputes and
+  refunds use verified payment-event settlement. Raw callback APIs and
+  `Store.PaidGrantTeam` are removed.
   A caller of the removed `Store.DisputeTeam` reads the team from its hold
   or from `Tenant.CreditFreeze`.
 

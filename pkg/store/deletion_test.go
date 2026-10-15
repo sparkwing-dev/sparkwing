@@ -76,7 +76,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := teststore.ForTeam(t, st, "acme").HoldForDispute(ctx, "dp_acme", "", "dispute opened", now); err != nil {
+	if _, err := teststore.ForTeam(t, st, "acme").TestOnlyHoldForDispute(ctx, "dp_acme", "", "dispute opened", now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.ForTeam(t, st, "acme").ReleaseCreditFreezes(ctx, "dp_acme", "", "", now); err != nil {

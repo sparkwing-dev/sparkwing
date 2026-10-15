@@ -22,7 +22,7 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 				demand.CapabilityPrefix = root.Prefix
 			}
 			tenant := &Tenant{s: s, team: "a"}
-			if _, err := tenant.HoldForDispute(t.Context(), "dispute", "payment", "opened", *now); err != nil {
+			if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "dispute", "payment", "opened", *now); err != nil {
 				t.Fatal(err)
 			}
 			claim, err := s.ClaimUnit(t.Context(), demand)
@@ -67,14 +67,14 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 		}
 		dispute := fmt.Sprintf("dispute-%d-%x", index, seed)
 		now := s.now()
-		created, err := owner.HoldForDispute(t.Context(), dispute, payment, "opened", now)
+		created, err := owner.TestOnlyHoldForDispute(t.Context(), dispute, payment, "opened", now)
 		if err != nil || !created {
 			t.Fatalf("hold=%t: %v", created, err)
 		}
-		if _, err := stranger.HoldForDispute(t.Context(), dispute, foreignPayment, "forged", now); !errors.Is(err, ErrDisputeConflict) {
+		if _, err := stranger.TestOnlyHoldForDispute(t.Context(), dispute, foreignPayment, "forged", now); !errors.Is(err, ErrDisputeConflict) {
 			return false
 		}
-		if _, err := s.AsOperator().ReversePayment(t.Context(), foreignPayment, dispute, "console", 0); !errors.Is(err, ErrDisputeConflict) {
+		if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), foreignPayment, dispute, "console", 0); !errors.Is(err, ErrDisputeConflict) {
 			return false
 		}
 		if count, err := stranger.ReleaseCreditFreezes(t.Context(), dispute, "console", "forged", now); err != nil || count != 0 {
@@ -90,10 +90,10 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 		if count, err := owner.ReleaseCreditFreezes(t.Context(), dispute, "console", "resolved", now); err != nil || count != 1 {
 			return false
 		}
-		if replay, err := owner.HoldForDispute(t.Context(), dispute, payment, "replayed", now); err != nil || replay {
+		if replay, err := owner.TestOnlyHoldForDispute(t.Context(), dispute, payment, "replayed", now); err != nil || replay {
 			return false
 		}
-		if _, err := stranger.HoldForDispute(t.Context(), dispute, foreignPayment, "replayed", now); !errors.Is(err, ErrDisputeConflict) {
+		if _, err := stranger.TestOnlyHoldForDispute(t.Context(), dispute, foreignPayment, "replayed", now); !errors.Is(err, ErrDisputeConflict) {
 			return false
 		}
 		for _, tenant := range []*Tenant{owner, stranger} {
@@ -115,14 +115,14 @@ func TestAReversalMayNotUseTheUnappliedPrefix(t *testing.T) {
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AsOperator().ReversePayment(t.Context(), event.PaymentID, "unapplied:refund", "console", 300000); !errors.Is(err, ErrInvalidInput) {
+	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "unapplied:refund", "console", 300000); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("reserved reference=%v", err)
 	}
 	tenant := &Tenant{s: s, team: "a"}
 	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantReversal, AmountMicro: -300000, Reference: "unapplied:refund", Reverses: "payment:test:checkout", CreatedBy: "console"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("reserved grant reference=%v", err)
 	}
-	if _, err := s.AsOperator().ReversePayment(t.Context(), event.PaymentID, "refund", "console", 200000); err != nil {
+	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "refund", "console", 200000); err != nil {
 		t.Fatal(err)
 	}
 	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != 800000 {

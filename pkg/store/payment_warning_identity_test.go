@@ -31,7 +31,7 @@ func TestPaymentWarningCannotChangePaymentOrCardProperty(t *testing.T) {
 			warning.PaymentIntent, owner, stranger = other.PaymentID, stranger, owner
 		}
 		now := time.Unix(1000, int64(index)).UTC()
-		if team, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, now); err != nil || team != owner {
+		if team, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, now); err != nil || team != owner {
 			t.Logf("first warning: %q, %v", team, err)
 			return false
 		}
@@ -46,7 +46,7 @@ func TestPaymentWarningCannotChangePaymentOrCardProperty(t *testing.T) {
 		} {
 			changed := warning
 			mutate(&changed)
-			if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), changed, now); !errors.Is(err, ErrCreditGrantConflict) {
+			if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), changed, now); !errors.Is(err, ErrCreditGrantConflict) {
 				t.Logf("changed warning accepted: %+v, %v", changed, err)
 				return false
 			}
@@ -56,7 +56,7 @@ func TestPaymentWarningCannotChangePaymentOrCardProperty(t *testing.T) {
 			t.Logf("foreign freezes: %d, %v", foreign, err)
 			return false
 		}
-		if team, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, now); err != nil || team != owner {
+		if team, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, now); err != nil || team != owner {
 			t.Logf("exact replay: %q, %v", team, err)
 			return false
 		}
@@ -87,7 +87,7 @@ func TestPaymentWarningRefusesAmbiguousPayerProperty(t *testing.T) {
 				}
 				rewriteSchemaExec(t, s.db, `INSERT INTO card_attempts(id,team,charge_id,kind,status,payment_intent,created_at,updated_at) VALUES (?,'b',?,'off_session','live',?,1,1)`, fmt.Sprintf("attempt-%d", index), fmt.Sprintf("charge-%d", index), payment)
 				warning := PaymentWarning{WarningID: fmt.Sprintf("warning-%d", index), PaymentIntent: payment, Actionable: true}
-				if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, s.now()); !errors.Is(err, ErrCreditGrantConflict) {
+				if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); !errors.Is(err, ErrCreditGrantConflict) {
 					t.Logf("ambiguous payer accepted: %v", err)
 					return false
 				}
@@ -110,13 +110,13 @@ func TestPaymentWarningHoldAndAuditRollbackAndReplayAfterRestart(t *testing.T) {
 	path := blobAccountingDiskStore(t, s)
 	warning := PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Fingerprint: "card", Actionable: true}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_warning_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
-	if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, s.now()); err == nil {
+	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err == nil {
 		t.Fatal("warning committed without its audit")
 	}
 	rewriteSchemaCount(t, s.db, "payment_warnings", 0)
 	rewriteSchemaCount(t, s.db, "credit_freezes", 0)
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_warning_audit`)
-	if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, s.now()); err != nil {
+	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err != nil {
 		t.Fatal(err)
 	}
 	var hold string
@@ -131,7 +131,7 @@ func TestPaymentWarningHoldAndAuditRollbackAndReplayAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.db = blobAccountingDB(t, path)
-	if team, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, s.now()); err != nil || team != "a" {
+	if team, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err != nil || team != "a" {
 		t.Fatalf("replay after restart: %q, %v", team, err)
 	}
 	freeze, err := tenant.CreditFreeze(t.Context())
@@ -139,7 +139,7 @@ func TestPaymentWarningHoldAndAuditRollbackAndReplayAfterRestart(t *testing.T) {
 		t.Fatalf("replay restored a released hold: %+v, %v", freeze, err)
 	}
 	warning.PaymentIntent = "another-payment"
-	if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, s.now()); !errors.Is(err, ErrCreditGrantConflict) {
+	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); !errors.Is(err, ErrCreditGrantConflict) {
 		t.Fatalf("restart lost warning identity: %v", err)
 	}
 	rewriteSchemaCount(t, s.db, "payment_warnings", 1)
@@ -153,10 +153,10 @@ func TestPaymentWarningHoldDoesNotReplaceUnrelatedDispute(t *testing.T) {
 	}
 	tenant := &Tenant{s: s, team: "a"}
 	warning := PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: true}
-	if _, err := tenant.HoldForDispute(t.Context(), warning.WarningID, event.PaymentID, "disputed", s.now()); err != nil {
+	if _, err := tenant.TestOnlyHoldForDispute(t.Context(), warning.WarningID, event.PaymentID, "disputed", s.now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, s.now()); err != nil {
+	if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now()); err != nil {
 		t.Fatal(err)
 	}
 	freeze, err := tenant.CreditFreeze(t.Context())
@@ -185,7 +185,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 			if _, _, err := second.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "customer"}, now); err != nil {
 				t.Fatal(err)
 			}
-			if err := second.SaveCard(t.Context(), Card{Customer: "customer-b", PaymentMethod: "method-b", Fingerprint: "fp_1"}, "billing", now); err != nil {
+			if err := second.TestOnlySaveCard(t.Context(), Card{Customer: "customer-b", PaymentMethod: "method-b", Fingerprint: "fp_1"}, "billing", now); err != nil {
 				t.Fatal(err)
 			}
 			for _, tenant := range []*Tenant{first, second} {
@@ -205,7 +205,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				}
 			}
 			warning := PaymentWarning{WarningID: "shared-warning", PaymentIntent: payments[first.team].PaymentIntent, Fingerprint: "fp_1", Actionable: true}
-			if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, now); err != nil {
+			if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, now); err != nil {
 				t.Fatal(err)
 			}
 			settle := func(team Team) error {
@@ -261,7 +261,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 			}
 			if order == "payment-first" {
 				for range 2 {
-					if _, err := s.AsOperator().ReversePayment(t.Context(), payments[first.team].PaymentIntent, "refund", "console", 10000*MicroCreditsPerCent); err != nil {
+					if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), payments[first.team].PaymentIntent, "refund", "console", 10000*MicroCreditsPerCent); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -272,7 +272,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 			if count, err := first.ReleaseCreditFreezes(t.Context(), ids[first.team], "console", "reviewed", now); err != nil || count != 1 {
 				t.Fatalf("first release: %d, %v", count, err)
 			}
-			if _, err := s.AsOperator().RecordPaymentWarning(t.Context(), warning, now); err != nil {
+			if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, now); err != nil {
 				t.Fatal(err)
 			}
 			if err := settle(first.team); err != nil {

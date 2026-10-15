@@ -31,7 +31,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 			work := cardCollectionDue(t, s, now)
 			payment := CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "collected", AmountCents: work.AmountCents}
 			if kind == "dispute_close" {
-				if _, err := tenant.HoldForDispute(t.Context(), "dispute", event.PaymentID, "disputed", now); err != nil {
+				if _, err := tenant.TestOnlyHoldForDispute(t.Context(), "dispute", event.PaymentID, "disputed", now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -210,12 +210,12 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 		older := Card{Customer: "customer", PaymentMethod: "older", Fingerprint: "older-card", AddedAt: first}
 		newer := Card{Customer: "customer", PaymentMethod: "newer", Fingerprint: "newer-card", AddedAt: second}
 		for _, card := range []Card{older, newer, newer} {
-			if err := tenant.SaveCard(t.Context(), card, "provider", second.Add(time.Hour)); err != nil {
+			if err := tenant.TestOnlySaveCard(t.Context(), card, "provider", second.Add(time.Hour)); err != nil {
 				t.Log(err)
 				return false
 			}
 		}
-		if err := tenant.SaveCard(t.Context(), older, "provider", second.Add(2*time.Hour)); !errors.Is(err, ErrStaleCardSetup) {
+		if err := tenant.TestOnlySaveCard(t.Context(), older, "provider", second.Add(2*time.Hour)); !errors.Is(err, ErrStaleCardSetup) {
 			t.Logf("older completion accepted: %v", err)
 			return false
 		}
@@ -226,11 +226,11 @@ func TestPaymentMutationCardSetupOrderingProperty(t *testing.T) {
 		}
 		unordered := newer
 		unordered.AddedAt = time.Time{}
-		if err := tenant.SaveCard(t.Context(), unordered, "provider", first); !errors.Is(err, ErrStaleCardSetup) {
+		if err := tenant.TestOnlySaveCard(t.Context(), unordered, "provider", first); !errors.Is(err, ErrStaleCardSetup) {
 			t.Logf("old receipt bypassed setup order: %v", err)
 			return false
 		}
-		if err := tenant.SaveCard(t.Context(), unordered, "provider", second.Add(time.Second)); err != nil {
+		if err := tenant.TestOnlySaveCard(t.Context(), unordered, "provider", second.Add(time.Second)); err != nil {
 			t.Log(err)
 			return false
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type credFixture struct {
@@ -77,7 +78,7 @@ func (f *credFixture) put(who signedIn, body map[string]any) (controller.GitCred
 func (f *credFixture) cloudRun(owner signedIn, runID, repoURL string) string {
 	f.t.Helper()
 	auth, prefix := f.nodeClaim(owner, runID, repoURL, 0)
-	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
+	if err := seedLegacyMeteredCredential(f.store, prefix); err != nil {
 		f.t.Fatal(err)
 	}
 	return auth
@@ -165,7 +166,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 	}
 
 	idle, prefix := f.teamRunner(f.olga, "idle")
-	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
+	if err := seedLegacyMeteredCredential(f.store, prefix); err != nil {
 		t.Fatal(err)
 	}
 	if got, code := f.sourceCredential(idle, "run-olga"); code != http.StatusForbidden || got.Secret != "" || got.Error != "claim_token_required" {
@@ -289,7 +290,7 @@ func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 		t.Fatalf("put = %d", code)
 	}
 	covered, prefix := f.nodeClaim(f.olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
-	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
+	if err := seedLegacyMeteredCredential(f.store, prefix); err != nil {
 		t.Fatal(err)
 	}
 	got, code := f.sourceCredential(covered, "run-widgets")
@@ -359,4 +360,9 @@ func jsonText(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func seedLegacyMeteredCredential(st *store.Store, prefix string) error {
+	_, err := st.DB().ExecContext(context.Background(), "UPDATE tokens SET metered=1 WHERE prefix=?", prefix)
+	return err
 }

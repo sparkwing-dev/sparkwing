@@ -317,15 +317,8 @@ func headroomTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (int
 	return room, nil
 }
 
-// ErrStaleCardSetup is SaveCard's refusal of a setup completed before the card already on file, such as a delayed delivery of an older setup.
+// ErrStaleCardSetup refuses a card setup older than the card already on file.
 var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
-
-// SaveCard records the card an owner added through Stripe.
-func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error {
-		return saveCardTx(ctx, tx, t.team, c, actor, now)
-	})
-}
 
 // SetSpendBudget sets the owner's budget, which stops Cloud usage when the team's 30-day spend reaches it.
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error {

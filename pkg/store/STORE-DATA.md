@@ -349,3 +349,16 @@ authenticated bindings report an error while pod stdout remains available.
 Production signing, verification and recording adapters remain with the controller,
 and the host must supply the persisted subject binding. Output readers still use
 the legacy output-reference model until persisted result selectors reach callers.
+
+The raw provider callback methods `Tenant.SaveCard`, `Tenant.HoldForDispute`,
+`Operator.PaymentTeam`, `Operator.ReversePayment`, `Operator.RecordPaymentWarning`
+and `Operator.ReportCardRefund` are removed. Their private transaction owners
+retain the existing setup, refund, warning and dispute rules. Store tests supply
+trusted fixture facts through test-only entry points. Those tests do not prove
+provider verification. `SettlePayment` is the public verified-event boundary.
+Expanding its checkout-only event contract remains a C2 integration requirement.
+Console hold and release operations keep their authenticated tenant handles.
+
+`Store.SetTokenMetered` is removed. Legacy metering reads share one query until
+the legacy claim APIs are retired. The final runner-metering route belongs to
+C2 and operates on enrolled root capabilities.

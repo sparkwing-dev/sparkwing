@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // Another replica may still accept a revoked token from its cache, so the
@@ -84,7 +83,7 @@ func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
 	}
 
 	f.createTeam(&owner, "held")
-	if _, err := teststore.ForTeam(t, f.store, "held").HoldForDispute(context.Background(), "dp_held", "", "dispute opened", time.Now()); err != nil {
+	if _, err := f.store.DB().ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES (?,?,?,?,?)", "dp_held", "held", "", "dispute opened", time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "held"}, &refused); code != http.StatusConflict ||

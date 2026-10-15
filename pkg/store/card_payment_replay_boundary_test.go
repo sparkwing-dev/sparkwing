@@ -77,7 +77,7 @@ func TestPaymentRefundCanTakeSpentBalanceBelowZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,seconds,kind,amount_micro,charged_at) VALUES ('spent','a','','','',1,'usage',700000,1)`)
-	got, err := s.AsOperator().ReversePayment(t.Context(), event.PaymentID, "refund", "console", 0)
+	got, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "refund", "console", 0)
 	if err != nil || got.Grant == nil || got.Grant.AmountMicro != -1000000 || got.BalanceMicro != -700000 {
 		t.Fatalf("spent payment refund=%+v: %v", got, err)
 	}

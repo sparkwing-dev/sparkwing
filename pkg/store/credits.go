@@ -1645,22 +1645,10 @@ func clearCreditExhaustionAnchorTx(ctx context.Context, tx *storeTx, e creditExh
 
 // TokenMetered reports whether the operator marked this token's holder as a runner credits pay for.
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error) {
-	if prefix == "" {
-		return false, nil
-	}
-	var metered int64
-	var scopes string
-	err := s.queryRow(ctx, `SELECT metered, scopes FROM tokens WHERE prefix = ?`, prefix).Scan(&metered, &scopes)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return tokenPaysCredits(metered, scopes), nil
+	return tokenMeteredTx(ctx, storeRowQuerier{s}, prefix)
 }
 
-func tokenMeteredTx(ctx context.Context, tx *storeTx, prefix string) (bool, error) {
+func tokenMeteredTx(ctx context.Context, tx rowQuerier, prefix string) (bool, error) {
 	if prefix == "" {
 		return false, nil
 	}
@@ -1681,26 +1669,6 @@ func tokenMeteredTx(ctx context.Context, tx *storeTx, prefix string) (bool, erro
 // at mint must never hand out free compute.
 func tokenPaysCredits(metered int64, scopes string) bool {
 	return metered != 0 || slices.Contains(strings.Split(scopes, ","), LaunchScope)
-}
-
-// SetTokenMetered marks or unmarks a minted token as one credits pay for, which is how a warm pool already running gets its marker.
-func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error {
-	value := 0
-	if metered {
-		value = 1
-	}
-	res, err := s.exec(ctx, `UPDATE tokens SET metered = ? WHERE prefix = ?`, value, prefix)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return notFound("token", prefix)
-	}
-	return nil
 }
 
 // AppendEventOnce writes a tenant run event unless that run or job already has its kind.

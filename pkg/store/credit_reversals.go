@@ -24,18 +24,6 @@ type CreditReversal struct {
 	Created       bool
 }
 
-// ReversePayment reverses a provider payment through its committed grant with idempotent refund attribution.
-func (o *Operator) ReversePayment(ctx context.Context, paymentID, reference, createdBy string, amountMicro int64) (out CreditReversal, err error) {
-	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		out, err = reversePaymentTx(ctx, tx, paymentID, reference, createdBy, amountMicro)
-		return err
-	})
-	if err != nil {
-		return CreditReversal{}, err
-	}
-	return out, err
-}
-
 // safety: a refund returns a payment's unapplied rest first, released here up
 // to amountMicro, so its reversal takes back only what it returns beyond it.
 func releaseUnappliedTx(
@@ -64,23 +52,6 @@ func releaseUnappliedTx(
 	return release, nil
 }
 
-// PaymentTeam returns the team a payment funded.
-func (o *Operator) PaymentTeam(ctx context.Context, paymentID string) (Team, error) {
-	var team Team
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		grant, found, err := paidGrantForPaymentTx(ctx, tx, strings.TrimSpace(paymentID))
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("%w: %q", ErrUnknownPayment, paymentID)
-		}
-		team = grant.Team
-		return nil
-	})
-	return team, err
-}
-
 // TeamCreditFreeze is whether a team's cloud usage is held, and by which
 // disputes.
 type TeamCreditFreeze struct {
@@ -91,13 +62,6 @@ type TeamCreditFreeze struct {
 // ErrDisputeConflict is returned when a hold or a reversal names a dispute
 // already held for another payment or team: a dispute disputes one payment.
 var ErrDisputeConflict = errors.New("credits: the dispute is already held for another payment")
-
-// HoldForDispute holds this tenant against an immutable dispute and payment identity.
-func (t *Tenant) HoldForDispute(
-	ctx context.Context, disputeID, paymentID, reason string, now time.Time,
-) (bool, error) {
-	return t.hold(ctx, disputeID, paymentID, reason, "", now)
-}
 
 // OperatorHoldPrefix begins the id of every hold an operator places by hand,
 // which keeps those holds apart from a payment dispute's.

@@ -289,7 +289,7 @@ func TestMeteredTokenClaimsOnlyItsOwnTeam(t *testing.T) {
 	// safety: flipping the flag afterwards is the admin endpoint's move, and
 	// it must not widen what an existing team credential reaches either.
 	laptop := mintTeamClaimant(t, acme, "agent:acme-laptop")
-	if err := st.SetTokenMetered(ctx, laptop.TokenPrefix, true); err != nil {
+	if err := seedRetiredMeteredToken(ctx, st, laptop.TokenPrefix); err != nil {
 		t.Fatalf("SetTokenMetered: %v", err)
 	}
 	if err := st.CreateRun(ctx, store.Run{
@@ -392,4 +392,9 @@ func TestConcurrentClaimsNeverCrossTeams(t *testing.T) {
 	if len(seen) != len(owner) {
 		t.Errorf("claimed %d of %d triggers and nodes", len(seen), len(owner))
 	}
+}
+
+func seedRetiredMeteredToken(ctx context.Context, st *store.Store, prefix string) error {
+	_, err := st.DB().ExecContext(ctx, "UPDATE tokens SET metered=1 WHERE prefix=?", prefix)
+	return err
 }

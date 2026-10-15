@@ -63,7 +63,7 @@ func TestTriggersAreNeverRefusedForBilling(t *testing.T) {
 	}
 	held := teamHandle(t, st, "held")
 	fund(t, held)
-	if _, err := teststore.ForTeam(t, st, "held").HoldForDispute(ctx, "dp_1", "pay-held", "dispute", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, st, "held").TestOnlyHoldForDispute(ctx, "dp_1", "pay-held", "dispute", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := startRun(held, "t-held"); err != nil {
