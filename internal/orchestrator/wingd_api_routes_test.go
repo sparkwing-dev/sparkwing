@@ -30,6 +30,8 @@ var apiWriteRoutes = []string{
 	"GET /api/v1/data/capabilities",
 	"POST /api/v1/data/upload",
 	"POST /api/v1/data/commit",
+	"POST /api/v1/data/records",
+	"GET /api/v1/data/records",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/output-commit",
 	"PUT /api/v1/outputs/uploads/{id}",

@@ -962,8 +962,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.
 	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
-	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
-	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
 	// safety: these carry a URL signature this process minted, not a bearer.
 	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", s.handleOutputBlobPut)
 	router.HandleFunc("GET /api/v1/outputs/objects/{key...}", s.handleOutputBlobGet)

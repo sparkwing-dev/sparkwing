@@ -85,68 +85,6 @@ func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	return srv, grant, head
 }
 
-func TestStaleGrantCannotReserveOrCommitAfterSameTokenReclaimsRun(t *testing.T) {
-	s, grant, _ := downloadFixture(t)
-	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
-	s.WithDirectUploads(client, "bucket", "cache")
-	request := func(digest string) *http.Request {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/data/upload", strings.NewReader(`{"kind":"binary","key":"bin/01234567-89abcdef/`+digest+`","size":4,"sha256":"`+digest+`","run_id":"run-1"}`))
-		req.Header.Set("Authorization", "Bearer "+grant)
-		req.Header.Set("Content-Type", "application/json")
-		return req
-	}
-	first := httptest.NewRecorder()
-	s.Handler().ServeHTTP(first, request(strings.Repeat("a", 64)))
-	if first.Code != http.StatusOK {
-		t.Fatalf("first reserve = %d: %s", first.Code, first.Body.String())
-	}
-	var upload DirectUploadResponse
-	if err := json.Unmarshal(first.Body.Bytes(), &upload); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE triggers SET claim_seq = 2 WHERE id = ?`, "run-1"); err != nil {
-		t.Fatal(err)
-	}
-	stale := httptest.NewRecorder()
-	s.Handler().ServeHTTP(stale, request(strings.Repeat("b", 64)))
-	if stale.Code != http.StatusForbidden {
-		t.Fatalf("stale reserve = %d, want 403", stale.Code)
-	}
-	commit := httptest.NewRequest(http.MethodPost, "/api/v1/data/commit", strings.NewReader(`{"upload_id":"`+upload.UploadID+`","run_id":"run-1"}`))
-	commit.Header.Set("Authorization", "Bearer "+grant)
-	commit.Header.Set("Content-Type", "application/json")
-	stale = httptest.NewRecorder()
-	s.Handler().ServeHTTP(stale, commit)
-	if stale.Code != http.StatusForbidden {
-		t.Fatalf("stale commit = %d, want 403", stale.Code)
-	}
-}
-
-func TestPendingTriggerCanReserveBinaryUpload(t *testing.T) {
-	s, grant, _ := downloadFixture(t)
-	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE runs SET status = 'pending' WHERE id = ?`, "run-1"); err != nil {
-		t.Fatal(err)
-	}
-	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
-	s.WithDirectUploads(client, "bucket", "cache")
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/data/upload", strings.NewReader(`{"kind":"binary","key":"bin/01234567-89abcdef/`+strings.Repeat("a", 64)+`","size":4,"sha256":"`+strings.Repeat("a", 64)+`","run_id":"run-1"}`))
-	request.Header.Set("Authorization", "Bearer "+grant)
-	request.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, request)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("pending trigger binary PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	artifact := httptest.NewRequest(http.MethodPost, "/api/v1/data/upload", strings.NewReader(`{"kind":"artifact","key":"artifacts/blobs/`+strings.Repeat("a", 64)+`","size":4,"sha256":"`+strings.Repeat("a", 64)+`","run_id":"run-1"}`))
-	artifact.Header.Set("Authorization", "Bearer "+grant)
-	artifact.Header.Set("Content-Type", "application/json")
-	rec = httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, artifact)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("pending trigger artifact PUT = %d, want 403", rec.Code)
-	}
-}
-
 func TestCacheGrantSigningBindsLiveTriggerGeneration(t *testing.T) {
 	s, boundGrant, _ := downloadFixture(t)
 	issued, err := authwire.VerifyCacheGrant("grant-key", boundGrant, time.Now())

@@ -28,6 +28,24 @@
   },
   "routes": [
     {
+      "route": "/api/v1/data/records",
+      "kind": "api",
+      "exempt": "Requires live data authority and transactionally authorized record/member edges, absent from the dashboard corpus. Read and write probes without these fixtures measure rejection. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/data/commit",
+      "kind": "api",
+      "exempt": "Verifies external physical bytes and settles an authority-bound reservation. The dashboard corpus has no committed upload fixture. A rejection does not measure verification or settlement. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/data/upload",
+      "kind": "api",
+      "exempt": "Reserves quota and signs through an external object backend under live uploader authority. The dashboard corpus has neither upload authority nor a backend fixture. A rejection does not measure an authorized write. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/data/download",
       "kind": "api",
       "exempt": "Requires live data authority, readable persisted bytes, daily byte charging and a configured object signer, absent from the dashboard corpus. Authorized latency, cold start and response bytes remain unmeasured.",

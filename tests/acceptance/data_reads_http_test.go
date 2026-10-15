@@ -426,5 +426,11 @@ func TestDataReadHTTPDiscovery(t *testing.T) {
 	}
 	f.data.ChargeDownload = nil
 	w := discoveryRequest(f.handler(), f.boundary, "GET", "/api/v1/services")
+	var got controller.ServicesResponse
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.DataDownloadURL != "" || !got.DirectData {
+		t.Fatalf("upload-only discovery HTTP %d %s", w.Code, w.Body.String())
+	}
+	f.data.Objects = nil
+	w = discoveryRequest(f.handler(), f.boundary, "GET", "/api/v1/services")
 	assertEngineError(t, w, 404, apierr.NotFound)
 }

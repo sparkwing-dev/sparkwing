@@ -33,19 +33,19 @@ type ServicesResponse struct {
 	// cache's refresh and seed routes take the cache's operator token, which
 	// no team member holds there, so a CLI skips them.
 	MultiTeam bool `json:"multi_team,omitempty"`
-	// DirectData advertises S3-backed signed data routes for claimed runs.
+	// DirectData advertises capability-authorized upload and commit routes.
 	DirectData bool `json:"direct_data,omitempty"`
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	multiTeam := s.MultiTeam()
 	downloadURL := s.dataDownloadURL()
-	if s.cachePodURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
+	if s.cachePodURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && !s.dataUploadsAvailable() {
 		return &apierr.Error{Code: apierr.NotFound, Message: "no services announced"}
 	}
 	writeJSON(w, http.StatusOK, ServicesResponse{
 		DataDownloadURL: downloadURL,
-		DirectData:      s.directUploads != nil,
+		DirectData:      s.dataUploadsAvailable(),
 		CachePod:        s.cachePodURL,
 		Dashboard:       s.dashboardURL,
 		MultiTeam:       multiTeam,
@@ -54,10 +54,15 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request, _ capabi
 }
 
 func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
-	if s.directUploads == nil {
+	if !s.dataUploadsAvailable() {
 		return &apierr.Error{Code: apierr.NotFound, Message: "data uploads are unavailable"}
 	}
 	download := s.dataDownloadURL() != ""
 	writeJSON(w, http.StatusOK, map[string]bool{"upload": true, "source": download, "download": download})
 	return nil
+}
+
+func (s *Server) dataUploadsAvailable() bool {
+	d := s.dataController
+	return d != nil && d.ResolveAuthority != nil && d.Access != nil && d.Objects != nil && (d.Store != nil || d.ResolveTenant != nil)
 }

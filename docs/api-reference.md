@@ -51,10 +51,12 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/crons/{id}/resume` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
 | `GET` | `/api/v1/data/capabilities` | `authenticated` |
-| `POST` | `/api/v1/data/commit` | `public` |
+| `POST` | `/api/v1/data/commit` | `data.write` or `data.write` |
 | `POST` | `/api/v1/data/download` | `data.read` or `data.read` or `data.read` |
 | `POST` | `/api/v1/data/has-many` | `data.read` or `data.read` or `data.read` |
-| `POST` | `/api/v1/data/upload` | `public` |
+| `GET` | `/api/v1/data/records` | `data.read` or `data.read` or `data.read` |
+| `POST` | `/api/v1/data/records` | `data.write` or `data.write` |
+| `POST` | `/api/v1/data/upload` | `data.write` or `data.write` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |

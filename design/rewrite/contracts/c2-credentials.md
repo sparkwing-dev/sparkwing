@@ -71,7 +71,22 @@ membership and liveness before deriving sealed facts, ReadBlob supplies live
 existence and size, and Access uses C1's DataAccessChecker. ResolveTenant exposes
 only C1's existing upload and record method signatures. Missing dependencies fail
 closed. These are local C2 contract additions, not implementations of W1's reads.
-Download and presence HTTP routes use these bindings. Upload, commit and record HTTP routes still need their cutover.
+Download, presence, upload, commit and record HTTP routes use these bindings.
+Upload takes `digest` and an explicit nonnegative `size`. Its response carries
+`upload_id`, `url`, `headers`, `expires_at`, `sha256` and `size`. Commit takes
+`upload_id` and returns only `digest` and `created_at`. These local C2 wire
+declarations replace the cache-grant body and object-key selectors.
+
+Record writes take `kind`, `pipeline`, `job`, `key`, `name`, `digest`, optional
+`manifest_digest`, `members` and optional `expires_at`. Members carry `digest`,
+`path`, `size` and `mode`. C2 derives team, repository, ref, uploader and each
+member's manifest identity. Record reads select `kind`, `ref`, `pipeline`,
+`job`, `key`, `name`, optional RFC3339 `deadline` and optional
+`verified_default_only`. A remote-cache credential forces the latter true.
+Responses expose public record/member metadata, excluding authority, uploader,
+source and read-set snapshots. These routes cover generic RecordStore lookup
+and commit. Specialized memo/depcache fallback and memo-copy wire transport
+still need C2/W9 coordination. The in-process methods remain implemented.
 
 
 

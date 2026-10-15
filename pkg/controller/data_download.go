@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -72,56 +70,6 @@ func downloadViaIngress(r *http.Request) bool {
 	_, forwardedFor := r.Header["X-Forwarded-For"]
 	_, forwardedHost := r.Header["X-Forwarded-Host"]
 	return forwardedFor || forwardedHost
-}
-
-func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant, allowPendingTrigger bool) (bool, error) {
-	if c := grant.Claim; c.Kind == authwire.CacheClaimToken {
-		tok, err := s.store.CheckClaimSensitive(ctx, store.ClaimToken{
-			Team: store.Team(grant.Team), RunID: grant.Run,
-			NodeID: c.NodeID, Generation: c.Generation,
-		}, time.Now())
-		if err != nil || tok.Prefix != c.TokenPrefix {
-			return false, errors.New("cache grant claim is not live")
-		}
-		// safety: a plan claim uploads only the binary it compiled, as a
-		// trigger holder does before dispatch.
-		return tok.Kind == store.ClaimTokenPlan, nil
-	}
-	team, err := s.store.ForTeam(ctx, store.Team(grant.Team))
-	if err != nil {
-		return false, err
-	}
-	run, err := team.GetRun(ctx, grant.Run)
-	// safety: a live trigger fetches source and compiles binary cache before dispatch.
-	pendingTrigger := allowPendingTrigger && grant.Claim.Kind == "trigger" && run != nil && run.Status == "pending"
-	if err != nil || run == nil || (run.Status != "running" && !pendingTrigger) || run.FinishedAt != nil {
-		return false, errors.New("cache grant run or claim is not live")
-	}
-	claim := grant.Claim
-	// safety: the signed grant can outlive the token that held its claim.
-	claimantToken, err := s.store.LookupTokenByPrefix(claim.TokenPrefix)
-	if err != nil || claimantToken == nil || claimantToken.Team != store.Team(grant.Team) ||
-		claimantToken.Principal != claim.Principal || !claimantToken.IsValid(time.Now()) {
-		return false, errors.New("cache grant claimant token is not active")
-	}
-	identity := store.ClaimIdentity{Principal: claim.Principal, TokenPrefix: claim.TokenPrefix}
-	var live bool
-	switch claim.Kind {
-	case "trigger":
-		live, err = s.store.TriggerClaimFenceIsLive(ctx, grant.Run, identity, claim.Generation, time.Now())
-	case "node":
-		fence := store.NodeClaimFence{Claimant: identity, HolderID: claim.HolderID, MembershipID: claim.MembershipID, ReservationID: claim.ReservationID, ClaimGeneration: claim.Generation}
-		live, err = s.store.NodeClaimFenceIsLive(ctx, grant.Run, claim.NodeID, fence, time.Now())
-	default:
-		return false, errors.New("cache grant claim kind is invalid")
-	}
-	if err != nil {
-		return false, err
-	}
-	if !live {
-		return false, errors.New("cache grant claim is not live")
-	}
-	return pendingTrigger, nil
 }
 
 var errSigningUnavailable = errors.New("download signing unavailable")

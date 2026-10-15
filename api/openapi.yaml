@@ -5498,67 +5498,140 @@ paths:
 
   /api/v1/data/upload:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: data.write or data.write
       tags: [artifacts]
-      summary: Reserve storage and sign a checksum-bound S3 PUT.
-      description: A binary or artifact requires a cache grant minted for an exact live claim. A source bundle requires a user bearer authorized to start runs before a run exists, and an empty run_id. A raw runner token cannot sign.
+      summary: Reserve quota and sign one checksum-bound PUT.
+      description: Live data authority supplies the team, uploader, run and attempt. The request cannot select an object key or provenance. A signing failure releases the reservation.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.directUploadRequest
+              x-sparkwing-go-type: pkg/controller.dataUploadRequest
               type: object
-              required: [kind, key, size, sha256, run_id]
+              required: [digest, size]
               properties:
-                kind: {type: string, enum: [binary, artifact, source]}
-                key: {type: string}
-                size: {type: integer, format: int64, minimum: 1}
-                sha256: {type: string}
-                run_id: {type: string}
+                digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                size: {type: integer, format: int64, minimum: 0}
       responses:
         "200":
-          description: Pending-object PUT and required signed headers.
+          description: One pending-object PUT and its required signed headers.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.DirectUploadResponse
+                x-sparkwing-go-type: pkg/controller.dataUploadResponse
                 type: object
-                required: [upload_id, url, headers, expires_at]
+                required: [upload_id, url, headers, expires_at, sha256, size]
                 properties:
                   upload_id: {type: string}
                   url: {type: string, format: uri}
-                  headers: {type: object, additionalProperties: {type: string}}
+                  headers: {type: object, nullable: true, additionalProperties: {type: string}}
                   expires_at: {type: string, format: date-time}
+                  sha256: {type: string}
+                  size: {type: integer, format: int64, minimum: 0}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: The immutable object already exists.}
-        "413": {description: The upload exceeds its size or storage allowance.}
-        "429": {description: The team already holds 100 uncommitted uploads.}
+        "429": {description: The atomic storage quota reservation was refused.}
 
   /api/v1/data/commit:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: data.write or data.write
       tags: [artifacts]
-      summary: Verify the pending S3 object and publish it under an immutable key.
-      description: Requires the same live claim-bound cache grant, or for a pretrigger source bundle the same user bearer, used to reserve the upload.
+      summary: Verify physical bytes and commit an uploader receipt.
+      description: Rechecks the authenticated uploader and the immutable reservation before verifying bytes. Existence and receipt settlement recheck authority in one store transaction.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.directCommitRequest
+              x-sparkwing-go-type: pkg/controller.dataCommitRequest
               type: object
-              required: [upload_id, run_id]
+              required: [upload_id]
               properties:
                 upload_id: {type: string}
-                run_id: {type: string}
       responses:
-        "204": {description: The committed object is visible to authorized readers.}
+        "200":
+          description: The settled digest and receipt timestamp.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.dataReceiptResponse
+                type: object
+                required: [digest, created_at]
+                properties:
+                  digest: {type: string}
+                  created_at: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: The pending object is absent or its final key holds other content.}
-        "422": {description: The pending object's size or checksum differs from the reservation.}
+        "409": {description: The upload lost its holder or generation fence.}
+        "422": {description: The object's size or checksum differs from the reservation.}
+
+  /api/v1/data/records:
+    get:
+      x-sparkwing-scope: data.read or data.read or data.read
+      tags: [artifacts]
+      summary: Read an authorized logical record and its members.
+      parameters:
+        - {in: query, name: kind, required: true, schema: {type: string, enum: [output, manifest, memo, depcache, binary, source_bundle]}}
+        - {in: query, name: name, required: true, schema: {type: string}}
+        - {in: query, name: ref, schema: {type: string}}
+        - {in: query, name: pipeline, schema: {type: string}}
+        - {in: query, name: job, schema: {type: string}}
+        - {in: query, name: key, schema: {type: string}}
+        - {in: query, name: deadline, schema: {type: string, format: date-time}}
+        - {in: query, name: verified_default_only, schema: {type: boolean}}
+      responses:
+        "200":
+          description: A miss or public metadata with independently authorized members.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.dataRecordLookupResponse
+                type: object
+                required: [found, members]
+                properties:
+                  found: {type: boolean}
+                  record: {$ref: "#/components/schemas/DataRecord"}
+                  members: {type: array, items: {$ref: "#/components/schemas/DataMember"}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: data.write or data.write
+      tags: [artifacts]
+      summary: Commit a logical reference after checking every digest edge.
+      description: The controller derives the team, repository, write ref, uploader and member manifest identity. Same-run receipts never grant unrelated jobs authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.dataRecordRequest
+              type: object
+              required: [kind, name, digest]
+              properties:
+                kind: {type: string, enum: [output, manifest, memo, depcache, binary, source_bundle]}
+                pipeline: {type: string}
+                job: {type: string}
+                key: {type: string}
+                name: {type: string}
+                digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                manifest_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                members: {type: array, items: {$ref: "#/components/schemas/DataMember"}}
+                expires_at: {type: string, format: date-time}
+      responses:
+        "200":
+          description: Committed public record metadata.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataRecord"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The record conflicts with an immutable prior value or lost its fence.}
 
   /api/v1/team/build-trust:
     get:
@@ -7303,6 +7376,32 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    DataRecord:
+      x-sparkwing-go-type: pkg/controller.dataRecordJSON
+      type: object
+      required: [kind, repo, ref, pipeline, job, key, name, digest, provenance, created_at]
+      properties:
+        kind: {type: string}
+        repo: {type: string}
+        ref: {type: string}
+        pipeline: {type: string}
+        job: {type: string}
+        key: {type: string}
+        name: {type: string}
+        digest: {type: string}
+        manifest_digest: {type: string}
+        provenance: {type: string, enum: [cloud, local]}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    DataMember:
+      x-sparkwing-go-type: pkg/controller.dataMemberJSON
+      type: object
+      required: [digest, path, size, mode]
+      properties:
+        digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        path: {type: string}
+        size: {type: integer, format: int64, minimum: 0}
+        mode: {type: integer, format: int64, minimum: 0}
     LaunchJob:
       x-sparkwing-go-type: pkg/store.LaunchJob
       type: object

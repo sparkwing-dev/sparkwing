@@ -32,6 +32,23 @@ record and result commits. Legacy remote state clients cannot publish a manifest
 separately. Local state writers retain their existing direct persistence while
 the host moves to result transactions.
 
+## Data writes and records
+
+Upload and commit use live controller capabilities through the shared policy
+router. Replace `{kind,key,size,sha256,run_id}` with `{digest,size}` on
+`POST /api/v1/data/upload`. PUT the bytes with the returned signed headers,
+then commit with `{upload_id}`. Commit returns `{digest,created_at}` with
+HTTP 200. Cache grants and the pretrigger user-token upload path are removed.
+
+Create references with `POST /api/v1/data/records` and look them up with
+`GET /api/v1/data/records`. The controller derives the team, repository, write
+ref and uploader. Record responses omit private authority and receipt facts.
+See [Direct data uploads](../data-uploads.md) for the request fields.
+
+Embedded controllers must configure `WithDataController`. Upload discovery
+uses those adapters. The older direct S3 output/log configuration does not
+advertise authenticated data writes.
+
 ## Data reads
 
 `POST /api/v1/data/download` accepts `{"digest":"<sha256>"}` through the shared
@@ -42,7 +59,7 @@ alongside `url`, `sha256`, `size` and `expires`. Send those headers to storage.
 `POST /api/v1/data/has-many` returns only readable live digests from its
 `digests` array. Missing and unreadable objects are indistinguishable. This
 query does not consume the team's download allowance. Both routes return
-the common error envelope. Upload and commit use their separate contracts.
+the common error envelope.
 
 ## Run detail
 

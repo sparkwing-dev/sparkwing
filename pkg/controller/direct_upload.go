@@ -20,8 +20,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -33,8 +31,7 @@ type directUploadS3 struct {
 	prefix  string
 }
 
-// WithDirectUploads enables the data upload and commit routes for an S3
-// bucket. Prefix is the existing cache namespace inside that bucket.
+// WithDirectUploads configures S3 output and log transfers.
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server {
 	if client != nil && bucket != "" && prefix != "" {
 		s.directUploads = &directUploadS3{
@@ -48,64 +45,9 @@ func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Se
 	return s
 }
 
-// DirectUploadResponse tells the client where and how to put exactly the
-// declared bytes before it calls /api/v1/data/commit.
-type DirectUploadResponse struct {
-	UploadID  string            `json:"upload_id"`
-	URL       string            `json:"url"`
-	Headers   map[string]string `json:"headers"`
-	ExpiresAt time.Time         `json:"expires_at"`
-}
-
-type directUploadRequest struct {
-	Kind   string `json:"kind"`
-	Key    string `json:"key"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-	RunID  string `json:"run_id"`
-}
-
-type directCommitRequest struct {
-	UploadID string `json:"upload_id"`
-	RunID    string `json:"run_id"`
-}
-
-type directCaller struct {
-	team           store.Team
-	runID          string
-	principal      string
-	claimPrefix    string
-	provenance     string
-	claim          bool
-	repo, ref      string
-	pendingTrigger bool
-}
-
 // EnvDefaultBranch carries, on a GitHub App trigger, the repository's default
 // branch, which a claim's cache reads fall back to.
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
-
-// safety: a claim's cache scope is its run's repository and ref, both read
-// here and never from the caller; as GitHub Actions scopes caches, it writes
-// under its own ref and reads its own, its pull request's base, then the
-// default branch, and other callers use only the unscoped objects.
-func (s *Server) cacheScope(ctx context.Context, grant authwire.CacheGrant) (repo, write string, read []string, err error) {
-	if grant.Claim.Kind != authwire.CacheClaimToken {
-		return "", "", []string{""}, nil
-	}
-	tenant, err := s.tenantForTeam(ctx, store.Team(grant.Team))
-	if err != nil {
-		return "", "", nil, err
-	}
-	trigger, err := tenant.GetTrigger(ctx, grant.Run)
-	if err != nil {
-		return "", "", nil, err
-	}
-	if trigger.Team != store.Team(grant.Team) {
-		return "", "", nil, errors.New("the cache grant's run belongs to another team")
-	}
-	return s.triggerCacheScope(ctx, trigger)
-}
 
 func (s *Server) triggerCacheScope(ctx context.Context, trigger *store.Trigger) (repo, write string, read []string, err error) {
 	repoID, err := s.store.TriggerRepoID(ctx, trigger.Team, trigger.ID)
@@ -140,205 +82,9 @@ func branchRef(branch string) string {
 	return "refs/heads/" + branch
 }
 
-// safety: A signing grant must name an exact live claim so pooled token reuse cannot revive an old claimant.
-func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID string, allowPendingTrigger bool) (directCaller, bool) {
-	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-	if !strings.EqualFold(scheme, "Bearer") || token == "" {
-		writeError(w, http.StatusUnauthorized, errors.New("a bearer is required"))
-		return directCaller{}, false
-	}
-	if !strings.HasPrefix(token, authwire.CacheGrantPrefix) {
-		writeError(w, http.StatusForbidden, errors.New("direct uploads require a claim-bound cache grant"))
-		return directCaller{}, false
-	}
-	grant, err := authwire.VerifyCacheGrant(s.cacheGrantKey, token, time.Now())
-	if err != nil {
-		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
-		return directCaller{}, false
-	}
-	noteAuditPrincipal(r.Context(), &Principal{
-		Name: grant.Claim.Principal, Kind: "cache_grant", Team: store.Team(grant.Team), TokenPrefix: grant.Claim.TokenPrefix,
-	})
-	if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
-		return directCaller{}, false
-	}
-	if runID != "" && grant.Run != runID {
-		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
-		return directCaller{}, false
-	}
-	pendingTrigger, err := s.verifyLiveDataGrant(r.Context(), grant, allowPendingTrigger)
-	if err != nil {
-		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
-		return directCaller{}, false
-	}
-	metered, err := s.store.TokenMetered(r.Context(), grant.Claim.TokenPrefix)
-	if err != nil {
-		s.writeInternalError(w, r, "direct upload provenance", err)
-		return directCaller{}, false
-	}
-	provenance := "local"
-	// safety: only the launcher mints claim tokens, and it runs on Cloud compute.
-	if metered || grant.Claim.Kind == authwire.CacheClaimToken {
-		provenance = "cloud"
-	}
-	repo, ref, _, err := s.cacheScope(r.Context(), grant)
-	if err != nil {
-		writeError(w, http.StatusForbidden, errors.New("the cache grant's run names no cache scope"))
-		return directCaller{}, false
-	}
-	return directCaller{
-		team: store.Team(grant.Team), runID: grant.Run, principal: grant.Claim.Principal,
-		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance, pendingTrigger: pendingTrigger,
-		claim: grant.Claim.Kind == authwire.CacheClaimToken, repo: repo, ref: ref,
-	}, true
-}
-
-func (s *Server) directSourceCaller(w http.ResponseWriter, r *http.Request) (directCaller, bool) {
-	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-	if !strings.EqualFold(scheme, "Bearer") || token == "" {
-		writeError(w, http.StatusUnauthorized, errors.New("source upload needs a bearer"))
-		return directCaller{}, false
-	}
-	principal, err := s.authMiddleware().Authenticate(token)
-	if err != nil || principal == nil {
-		writeError(w, http.StatusUnauthorized, errors.New("invalid source upload bearer"))
-		return directCaller{}, false
-	}
-	noteAuditPrincipal(r.Context(), principal)
-	if principal.Kind != store.TokenKindUser || (!principal.HasScope(ScopeRunsWrite) && !principal.HasScope(ScopeAdmin)) {
-		writeError(w, http.StatusForbidden, errors.New("source upload needs a user token with runs.write"))
-		return directCaller{}, false
-	}
-	team := store.NormalizeTeam(principal.Team)
-	if !teamblob.ValidTeam(string(team)) {
-		writeError(w, http.StatusForbidden, errors.New("source upload bearer names no team"))
-		return directCaller{}, false
-	}
-	if !s.allowDataRequest(w, r, team, principal.TokenPrefix) {
-		return directCaller{}, false
-	}
-	return directCaller{team: team, principal: principal.Name, claimPrefix: principal.TokenPrefix, provenance: "local"}, true
-}
-
 func (d *directUploadS3) pendingKey(id string) string { return "pending/" + id }
 func (d *directUploadS3) finalKey(u store.Upload) string {
 	return d.prefix + "/teams/" + string(u.Team) + "/" + u.Provenance + "/" + u.Key
-}
-
-func validDirectKey(kind, key, sha string) bool {
-	switch kind {
-	case "binary":
-		input, _, ok := strings.Cut(strings.TrimPrefix(key, "bin/"), "/")
-		return ok && validBinaryInput(input) && key == "bin/"+input+"/"+sha
-	case "artifact":
-		return key == "artifacts/blobs/"+sha || key == "artifacts/manifests/"+sha
-	case "source":
-		digest, ok := store.SourceKeyDigest(key)
-		return ok && digest == sha
-	default:
-		return false
-	}
-}
-
-func validBinaryInput(raw string) bool {
-	if len(raw) != 17 || raw[8] != '-' {
-		return false
-	}
-	for i, c := range raw {
-		if i == 8 {
-			continue
-		}
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
-	d := s.directUploads
-	if d == nil {
-		writeError(w, http.StatusNotFound, errors.New("direct uploads are unavailable"))
-		return
-	}
-	var req directUploadRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Kind == "source" && req.RunID != "" {
-		writeError(w, http.StatusBadRequest, errors.New("source uploads precede a run"))
-		return
-	}
-	var caller directCaller
-	var ok bool
-	if req.Kind == "source" {
-		caller, ok = s.directSourceCaller(w, r)
-	} else {
-		caller, ok = s.directCaller(w, r, req.RunID, req.Kind == "binary")
-	}
-	if !ok {
-		return
-	}
-	if req.Size > store.DirectUploadMaxSize {
-		writeError(w, http.StatusRequestEntityTooLarge, errors.New("direct uploads are limited to 500 MiB"))
-		return
-	}
-	if req.Size <= 0 {
-		writeError(w, http.StatusBadRequest, errors.New("direct uploads carry at least one byte; an empty object needs no upload"))
-		return
-	}
-	// safety: an artifact key names its own content, so a claim writes one
-	// with no scope; a binary is found by its input hash, so a claim writes one
-	// only inside its run's repository and ref.
-	if caller.claim && req.Kind == "binary" && (caller.repo == "" || caller.ref == "") {
-		writeError(w, http.StatusForbidden, errors.New("a claim's run names no repository and git ref to write a binary under"))
-		return
-	}
-	if !validDirectKey(req.Kind, req.Key, req.SHA256) {
-		writeError(w, http.StatusBadRequest, errors.New("the upload needs a content-addressed key"))
-		return
-	}
-	raw, err := hex.DecodeString(req.SHA256)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, errors.New("sha256 must be lowercase hex"))
-		return
-	}
-	u, err := s.store.ReserveUpload(r.Context(), store.UploadRequest{
-		Team: caller.team, RunID: caller.runID, Kind: store.StorageCache, Key: req.Key, Size: req.Size,
-		SHA256: req.SHA256, Principal: caller.principal, ClaimPrefix: caller.claimPrefix, Provenance: caller.provenance,
-		Repo: caller.repo, Ref: caller.ref,
-	})
-	if err != nil {
-		if s.writeComputeLimitRefusal(w, r, "", "", err) {
-			return
-		}
-		switch {
-		case errors.Is(err, store.ErrStorageQuota):
-			writeError(w, http.StatusRequestEntityTooLarge, err)
-		case errors.Is(err, store.ErrObjectExists):
-			writeError(w, http.StatusConflict, err)
-		case errors.Is(err, store.ErrTooManyPendingUploads):
-			writeError(w, http.StatusTooManyRequests, err)
-		case errors.Is(err, store.ErrInvalidInput):
-			writeError(w, http.StatusBadRequest, err)
-		default:
-			s.writeInternalError(w, r, "reserve direct upload", err)
-		}
-		return
-	}
-	putURL, headers, err := d.presignPut(r.Context(), u, raw)
-	if err != nil {
-		if releaseErr := s.store.ReleaseStorage(r.Context(), u.Team, u.ID, time.Now()); releaseErr != nil {
-			err = errors.Join(err, releaseErr)
-		}
-		s.writeInternalError(w, r, "presign direct upload", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, DirectUploadResponse{
-		UploadID: u.ID, URL: putURL,
-		Headers: headers, ExpiresAt: time.Now().Add(directUploadPutTTL).UTC(),
-	})
 }
 
 const directUploadPutTTL = 15 * time.Minute
@@ -359,53 +105,6 @@ func (d *directUploadS3) presignPut(ctx context.Context, u store.Upload, sha []b
 		}
 	}
 	return put.URL, headers, nil
-}
-
-func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
-	d := s.directUploads
-	if d == nil {
-		writeError(w, http.StatusNotFound, errors.New("direct uploads are unavailable"))
-		return
-	}
-	var req directCommitRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-	var caller directCaller
-	var ok bool
-	if strings.EqualFold(scheme, "Bearer") && !strings.HasPrefix(token, authwire.CacheGrantPrefix) {
-		caller, ok = s.directSourceCaller(w, r)
-	} else {
-		caller, ok = s.directCaller(w, r, req.RunID, true)
-	}
-	if !ok {
-		return
-	}
-	u, err := s.store.UploadForTeam(r.Context(), caller.team, req.UploadID)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "read direct upload", err)
-		return
-	}
-	if strings.HasPrefix(u.Key, "sources/") != (caller.runID == "") ||
-		u.RunID != caller.runID || u.Principal != caller.principal || u.ClaimPrefix != caller.claimPrefix || !time.Now().Before(u.ExpiresAt) {
-		writeError(w, http.StatusForbidden, errors.New("this claimant cannot commit the upload"))
-		return
-	}
-	if caller.pendingTrigger && !validDirectKey("binary", u.Key, u.SHA256) {
-		writeError(w, http.StatusForbidden, errors.New("a pending trigger can commit only binary cache uploads"))
-		return
-	}
-	if !u.CommittedAt.IsZero() {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	s.writeCommitResult(w, r, d.commit(r.Context(), s.store, u, s.logger))
 }
 
 // safety: a client fixes these by uploading again; any other commit failure

@@ -130,12 +130,6 @@ const DefaultRunnersPerToken = 64
 const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 const DefaultTeamDailyDownloadFreeBytes int64 = 5 << 30
 const DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
-type DirectUploadResponse struct {
-	UploadID  string
-	URL       string
-	Headers   map[string]string
-	ExpiresAt time.Time
-}
 const DisputeConflictCode = "dispute_conflict"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"

@@ -22,8 +22,8 @@ import (
 func discoveryServer(b *credentialBoundary, configured bool) http.Handler {
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
 	if configured {
-		client := s3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("synthetic", "synthetic", "")})
-		s.WithDashboardURL("https://dashboard.example").WithDirectUploads(client, "objects", "data")
+		data, _, _, _, _ := dataControllerFixture(dataAuthorized())
+		s.WithDashboardURL("https://dashboard.example").WithDataController(data)
 	}
 	return s.Handler()
 }
@@ -179,8 +179,8 @@ func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
 				s.WithCachePodURL("https://cache.example")
 				want.CachePod = "https://cache.example"
 			case "uploads":
-				client := s3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("synthetic", "synthetic", "")})
-				s.WithDirectUploads(client, "objects", "data")
+				data, _, _, _, _ := dataControllerFixture(dataAuthorized())
+				s.WithDataController(data)
 				want.DirectData = true
 			}
 			w := discoveryRequest(s.Handler(), b, "GET", "/api/v1/services")
@@ -195,5 +195,14 @@ func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
 				t.Fatalf("services = %+v, want %+v", got, want)
 			}
 		})
+	}
+}
+
+func TestDiscoveryHTTPRequiresAuthenticatedDataAdapters(t *testing.T) {
+	b := authorityMember()
+	client := s3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("synthetic", "synthetic", "")})
+	h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithDirectUploads(client, "objects", "data").Handler()
+	for _, path := range []string{"/api/v1/services", "/api/v1/data/capabilities"} {
+		assertEngineError(t, discoveryRequest(h, b, "GET", path), 404, apierr.NotFound)
 	}
 }
