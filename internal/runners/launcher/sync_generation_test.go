@@ -135,3 +135,53 @@ func FuzzControllerSyncSeparatesClaimGenerations(f *testing.F) {
 		}
 	})
 }
+
+func FuzzControllerSyncRequiresExactlyObservedDecisions(f *testing.F) {
+	for kind := range uint8(3) {
+		for mode := range uint8(4) {
+			f.Add(kind, mode, uint16(1), false)
+		}
+	}
+	f.Fuzz(func(t *testing.T, kind, mode uint8, generation uint16, reverse bool) {
+		unit := wireAward([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kind%3])
+		unit.Capability = ""
+		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation := CloudJobObservation{Binding: binding, JobNamespace: "cloud", JobName: jobName(binding), JobUID: "job-uid", NodeUID: "node-uid"}
+		control, err := NewControllerControl(launcherWireFake{sync: func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+			response := controllerwire.LauncherSyncResponse{}
+			if mode%2 == 0 {
+				response.Awards = append(response.Awards, unit)
+			} else {
+				response.Remove = []controllerwire.LauncherJobRef{{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID}}
+			}
+			if mode%4 < 2 {
+				foreign := wireAward(unit.Unit)
+				foreign.Capability = ""
+				if foreign.Unit == capability.UnitEval {
+					foreign.Binding.Expansion.Generation += int64(generation) + 1
+				} else {
+					foreign.Binding.Generation += int64(generation) + 1
+				}
+				response.Awards = append(response.Awards, foreign)
+			}
+			if reverse {
+				slices.Reverse(response.Awards)
+			}
+			return response, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{unit.Unit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		states, err := control.Sync(t.Context(), []CloudJobObservation{observation})
+		if mode%4 < 2 {
+			if err == nil || len(states) != 0 {
+				t.Fatalf("unobserved award accepted: states=%+v error=%v", states, err)
+			}
+		} else if err != nil || len(states) != 1 || !sameBinding(states[0].Binding, binding) || states[0].Delete != (mode%2 == 1) {
+			t.Fatalf("observed decision refused: states=%+v error=%v", states, err)
+		}
+	})
+}

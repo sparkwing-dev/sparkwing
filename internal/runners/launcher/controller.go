@@ -187,7 +187,10 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	if err != nil {
 		return nil, err
 	}
-	states, seen := make([]CloudJobState, len(observations)), make(map[int]bool)
+	if len(response.Awards)+len(response.Remove) != len(observations) {
+		return nil, errors.New("controller sync omitted or added Cloud Job decisions")
+	}
+	states := make([]CloudJobState, len(observations))
 	for _, unit := range response.Awards {
 		if unit.Capability != "" {
 			return nil, errors.New("controller sync unexpectedly returned credential material")
@@ -198,23 +201,17 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		}
 		fence := capability.LeaseRef{Kind: unit.Unit, ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
 		i, ok := byAward[fence]
-		if !ok {
-			continue
-		}
-		if seen[i] || !sameBinding(binding, observations[i].Binding) {
+		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
 			return nil, errors.New("controller sync returned duplicate or changed Cloud bindings")
 		}
-		seen[i], states[i].Binding = true, observations[i].Binding
+		states[i].Binding = observations[i].Binding
 	}
 	for _, job := range response.Remove {
 		i, ok := byJob[job.Name]
-		if !ok || seen[i] || job != jobs[i] {
+		if !ok || states[i].Binding.UnitID != "" || job != jobs[i] {
 			return nil, errors.New("controller sync returned unknown or contradictory Cloud cleanup")
 		}
-		seen[i], states[i] = true, CloudJobState{Binding: observations[i].Binding, Delete: true}
-	}
-	if len(seen) != len(observations) {
-		return nil, errors.New("controller sync omitted a Cloud Job decision")
+		states[i] = CloudJobState{Binding: observations[i].Binding, Delete: true}
 	}
 	return states, nil
 }
