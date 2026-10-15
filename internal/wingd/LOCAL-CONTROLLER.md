@@ -61,6 +61,11 @@ decision.
 `LocalSubject` accepts matching kernel UIDs on Linux and macOS, or matching
 client SIDs on Windows. Missing identity refuses access. The socket transport
 also refuses peers when its platform implementation cannot supply credentials.
+`APIConn.PeerIdentity` exposes that verified identity to the shared controller.
+The connection owns its identity snapshot. Changing an input UID or a returned
+UID cannot change the account attached to the connection. The API listener
+checks `LocalSubject` before yielding a connection. Its Unix reader supplies
+kernel UIDs. A Windows client-SID transport remains required.
 Admission state and election files use `fssecure`. Admission state accepts only
 the current schema.
 

@@ -1,7 +1,7 @@
 # W8 implementation handoff
 
-Latest continuation: the Cloud controller adapter and persisted reconciliation
-identity are recorded at the end of this file. W8 remains incomplete.
+Latest continuation: the local API's verified UID/SID projection is recorded
+at the end of this file. W8 remains incomplete.
 
 W8 remains incomplete. The runner, engine, launcher and local process runtime
 are exercised with component fixtures. Installed process composition, the shared
@@ -226,9 +226,8 @@ Detached startup and dashboard commands still need CLI composition.
    W9 must reconcile those paths before W8 renders installed commands.
    Native runner replacement needs actual service registration hooks. Windows
    needs a native SID-authenticated transport; missing identity still refuses.
-   `APIConn` exposes only `PeerUID() int`. Its controller-facing identity needs
-   a platform-neutral UID/SID projection before a Windows transport can supply
-   authenticated local subjects.
+   `APIConn.PeerIdentity` now supplies the controller-facing UID/SID projection.
+   The native Windows transport must still supply a kernel-authenticated SID.
 8. **Cloud deployment.** Supply real network probes and reservation-scoped node
    cleanup, then prove native sidecars, aggregate scratch accounting, Docker
    execution, network isolation and teardown. These remain deployment proofs.
@@ -1337,3 +1336,83 @@ metadata. Local Git config has no user identity or core.worktree override.
 No candidate runtime, external service or deployment was exercised. Initial
 bootstrap discovery queried installed sparkwing info only. Scratch is removed
 after all checks and the independent review finish.
+
+## Continuation: local API peer identity
+
+`APIConn.PeerIdentity` replaces `PeerUID`. The shared controller can consume
+the existing `LocalPeerIdentity` UID/SID projection. The connection copies its
+input identity and returns a separate UID copy on every read. Neither the
+transport input nor a controller consumer can mutate the retained identity.
+The API listener checks `LocalSubject` before yielding a connection. A missing
+kernel identity closes the connection and reports the refusal.
+
+The security invariant is that only transport-verified identities matching the
+controller account reach the API. The property test generates platform,
+UID/SID, presence and equality combinations, then attempts to mutate accepted
+identity snapshots. A separate in-memory listener test checks actual refusal,
+connection closure and diagnostics without opening a socket.
+
+The declared local-controller platforms remain Linux, macOS and Windows.
+`LocalSubject` refuses other OS names. The low-level FreeBSD UID reader does
+not add FreeBSD to that supported-platform contract. Native Windows still has
+no client-SID reader and refuses access. The SID fixture checks the projection
+and policy, not Windows authentication or transport.
+
+This is a W8-local contract amendment. It closes the controller-facing UID/SID
+projection request. No other area's Go caller uses the removed method. The
+existing `internal/wingd/apisock_test.go` recorder is migrated. The three
+changed existing Go files replace **15 old lines**. No whole file or additional
+legacy subsystem is deleted. No further T1 inventory test is claimed as ported.
+
+### Evidence
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8, with package parallelism at
+most four. The new tests first failed because the typed connection API was
+absent, then passed after implementation.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- Vet passed for wingd and subpackages, cluster, runners and subpackages,
+  engine and sdkinstall, tests/acceptance and internal/acceptance.
+- Full runners, launcher, runner-service, unitfile, engine, sdkinstall and
+  tests/acceptance suites passed. internal/acceptance has no runtime tests.
+- Cluster passed with TestStartMetricsListener_ServesMetrics excluded because
+  the earlier continuation established that its native TCP listener cannot bind
+  in this sandbox. No socket proof is claimed.
+- Focused local-controller, peer-policy and new identity tests passed under
+  `-race`. The new property fuzz test passed 41,578 generated cases in ten seconds.
+- Wingd tests cross-compiled for windows/amd64. This is no native Windows proof.
+- Scoped commentcheck, sleepcheck and `git diff --check` passed.
+- Independent review used immutable copies and found no concrete correctness
+  or authorization defect. Its Simplify review accepted the small identity
+  validation/copy helpers. Overwing's staleness notice did not prevent standards
+  discovery or loading.
+
+`TestLocalControllerW8Components` and the existing W8 component acceptance
+suite remain green. No native catalog cell was unskipped.
+
+### Remaining integration, shared files and assumptions
+
+The real-integration points are unchanged except for the completed peer projection:
+W9's engine HTTP client; W3's source, keeper, host constructors, delegated node
+routes and replay; W1/W2's local controller/store/consumer and capability
+composition; runner/launcher/Cloud bootstrap factories and source handoff;
+native managed-service lifecycle; Windows client-SID transport, schedules and
+SDK bridge; and deployed Cloud probes/node cleanup. This checkout still has
+panic stubs in NewEngineClient, source.Acquire/ForRequest/ForExecution,
+lease.Keeper.Run, final controller operations and final store claims. Their
+declared interfaces remain covered with fakes at W8's existing boundaries.
+
+Other-area contract requests remain shared native npm invocation, workspace-off
+binary-cache hashing, host construction/delegation/replay, shared local service
+construction/activity and final bootstrap grammar/handoff. No new request or
+human product question is added by this continuation.
+
+Shared edits are design/rewrite/contracts/c4-surface-config.md and the W8
+audit/handoff. All production/test edits stay in internal/wingd. The source
+LOCAL-CONTROLLER.md records the accessor and native limitation. No public CLI,
+environment variable, setting, dependency, service or compatibility alias is
+added. Undoing the local contract amendment restores the UID accessor and its
+sole test caller. No Git metadata write or Sparkwing binary invocation ran.
+Git configuration has no local identity or core.worktree override. Scratch is
+removed after verification and review.

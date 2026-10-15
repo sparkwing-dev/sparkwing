@@ -4,27 +4,29 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 )
 
 var readPeerUID = peerUID
 
 func checkPeerCredentials(nc net.Conn) error {
-	_, err := acceptedPeerUID(nc)
+	_, err := acceptedPeerIdentity(nc)
 	return err
 }
 
-func acceptedPeerUID(nc net.Conn) (int, error) {
+func acceptedPeerIdentity(nc net.Conn) (LocalPeerIdentity, error) {
 	uid, known, err := readPeerUID(nc)
 	if err != nil {
-		return 0, fmt.Errorf("wingd: read peer credentials: %w", err)
+		return LocalPeerIdentity{}, fmt.Errorf("wingd: read peer credentials: %w", err)
 	}
 	if !known {
-		return 0, fmt.Errorf("wingd: peer identity unavailable; local API access refused")
+		return LocalPeerIdentity{}, fmt.Errorf("wingd: peer identity unavailable; local API access refused")
 	}
 	if !peerAllowed(uid, known) {
-		return 0, fmt.Errorf("wingd: refused a connection from uid %d; this daemon serves uid %d only", uid, os.Getuid())
+		return LocalPeerIdentity{}, fmt.Errorf("wingd: refused a connection from uid %d; this daemon serves uid %d only", uid, os.Getuid())
 	}
-	return uid, nil
+	value := uint32(uid)
+	return LocalPeerIdentity{GOOS: runtime.GOOS, UID: &value}, nil
 }
 
 func peerAllowed(uid int, known bool) bool {

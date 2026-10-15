@@ -3,6 +3,8 @@ package wingd
 import (
 	"context"
 	"net"
+	"os"
+	"runtime"
 	"time"
 )
 
@@ -12,12 +14,12 @@ import (
 // returns outlives both drains.
 const APIDrainWindow = 5 * time.Second
 
-// APIConn is a connection accepted on api.sock. The daemon checks the peer's
-// uid before it yields the connection, so PeerUID names the account the
-// kernel reported. Missing kernel identity refuses access.
+// APIConn carries a verified transport identity for the shared controller's
+// local authorization. PeerIdentity returns a snapshot owned by the caller.
+// Missing kernel UID or client SID evidence refuses access before Accept returns.
 type APIConn interface {
 	net.Conn
-	PeerUID() int
+	PeerIdentity() LocalPeerIdentity
 }
 
 func (d *Daemon) startAPI(ctx context.Context) error {
@@ -96,19 +98,39 @@ func (l apiListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		uid, perr := acceptedPeerUID(nc)
+		peer, perr := acceptedPeerIdentity(nc)
+		var connection *apiConn
+		if perr == nil {
+			uid := uint32(os.Getuid())
+			connection, perr = newAPIConn(nc, peer, LocalPeerIdentity{GOOS: runtime.GOOS, UID: &uid})
+		}
 		if perr != nil {
 			l.d.cfg.logf("%v", perr)
 			_ = nc.Close()
 			continue
 		}
-		return &apiConn{Conn: nc, uid: uid}, nil
+		return connection, nil
 	}
 }
 
 type apiConn struct {
 	net.Conn
-	uid int
+	identity LocalPeerIdentity
 }
 
-func (c *apiConn) PeerUID() int { return c.uid }
+func newAPIConn(nc net.Conn, peer, owner LocalPeerIdentity) (*apiConn, error) {
+	if _, err := LocalSubject(peer, owner); err != nil {
+		return nil, err
+	}
+	return &apiConn{Conn: nc, identity: copyPeerIdentity(peer)}, nil
+}
+
+func (c *apiConn) PeerIdentity() LocalPeerIdentity { return copyPeerIdentity(c.identity) }
+
+func copyPeerIdentity(identity LocalPeerIdentity) LocalPeerIdentity {
+	if identity.UID != nil {
+		uid := *identity.UID
+		identity.UID = &uid
+	}
+	return identity
+}

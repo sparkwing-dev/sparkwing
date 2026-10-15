@@ -21,7 +21,7 @@ cell or establish an HTTP, Cloud or OS deployment proof.
 | A1-36 | Hosting retains the complete award for preparation. Bound byte/record clients must still be supplied to RunInput/NodeInput by the concrete host composition. |
 | A1-38 | NewControllerControl maps immutable awards and sync decisions. Jobs persist UnitID and report Job name/node UID after restart. Eval retains its source fence and separate Expansion lease. Server identity replaces the removed caller holder. Component claim/sync/restart tests pass with fakes. Real HTTP/source/exchange composition remains open. |
 | A1-39 | The old cluster claim/source/heartbeat loops and old daemon remain deleted. Unified loop and Hosting components pass. source.Acquire, lease.Keeper.Run and the engine HTTP client still panic. Host factories, delegated node routes and generated-code replay construction remain undeclared. |
-| A1-40 | The implemented local runtime keeps readiness/status/stay/drain and dynamic dashboard attachment. The merge retains the amended contract comments. Shared local controller/store/consumer services remain unwired. |
+| A1-40 | The implemented local runtime keeps readiness/status/stay/drain and dynamic dashboard attachment. APIConn now exposes a verified UID/SID identity snapshot to the shared controller, replacing the UID-only accessor. Shared local controller/store/consumer services and native Windows SID transport remain unwired. |
 | A1-41 | Implemented the native home-bound ManagedUnitManager and final foreground/timer arguments. Refresh preserves captured settings and restarts installed controllers. W9 dashboard/schedule/update/doctor composition and native login/crash/drain proofs remain open. |
 | A1-42 | Existing builder/boundary tests retain exclusive nodes, enforced network evidence, DinD and aggregate 20 GiB scratch. Deployed probes, reservation cleanup and native teardown proofs remain open with T1/lead. |
 | A1-43 | Historical closed release matrices and signed-index fallback remain intact. W9 still owns presentation notices and the upgrade verifier integration. |
@@ -75,6 +75,12 @@ The existing W3 host-construction/delegated-route/replay and local-services
 contracts remain required. Managed-unit CLI composition, the final runner
 transport/host factory, capability issuance, Cloud probes and node cleanup remain open.
 No new human product decision is requested.
+
+The controller-facing peer projection is now W8's `APIConn.PeerIdentity`.
+W2 can consume the existing `LocalPeerIdentity` through that interface. This
+closes the missing UID/SID projection request. The Windows socket reader still
+has no SID evidence and continues to refuse access. Native transport and
+same-account/foreign-account proofs remain open.
 
 ## Runner credential and enrollment continuation
 

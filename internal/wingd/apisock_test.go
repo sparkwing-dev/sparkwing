@@ -35,8 +35,11 @@ func (a *apiRecorder) accept(ctx context.Context, ln net.Listener) {
 			return
 		}
 		if peer, ok := nc.(APIConn); ok {
+			identity := peer.PeerIdentity()
 			a.mu.Lock()
-			a.uids = append(a.uids, peer.PeerUID())
+			if identity.UID != nil {
+				a.uids = append(a.uids, int(*identity.UID))
+			}
 			a.mu.Unlock()
 		}
 		a.held <- nc

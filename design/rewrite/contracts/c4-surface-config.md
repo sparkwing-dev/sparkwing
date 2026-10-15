@@ -315,6 +315,13 @@ removed timer verbs. Windows supports stay and daemon schedules; install is
 refused. Kernel UID or client SID establishes local identity; absent evidence
 refuses access. Private files use fssecure on every supported OS.
 
+`wingd.APIConn.PeerIdentity()` carries `LocalPeerIdentity` from the verified
+transport to the shared controller. The connection retains its own snapshot
+and returns a caller-owned UID copy. `LocalSubject` checks the peer against
+the controller account before the API listener yields the connection.
+This replaces the UID-only accessor. Windows still requires a client-SID
+transport and refuses access without it.
+
 Every plan/eval/work Cloud Job runs root with privileged DinD, including jobs
 from run-host dispatch. Before a runnable object exists, CloudBoundary must
 reserve exactly one Job on a team-dedicated node and establish enforced default-
