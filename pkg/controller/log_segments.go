@@ -5,7 +5,7 @@ import (
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 )
 
-func (s *Server) logObjects() logseg.Objects {
+func (s *Server) logObjects() logseg.SegmentObjects {
 	if s.directUploads == nil {
 		return nil
 	}

@@ -42,6 +42,10 @@ func TestLogPersistenceMaintenanceRespectsFinalTailGrace(t *testing.T) {
 	if n, err := op.SealAbandonedLogStreams(t.Context(), lease, 10); err != nil || n != 1 {
 		t.Fatalf("abandoned stream not sealed: %d, %v", n, err)
 	}
+	commit.Final = true
+	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
+		t.Fatal("late writer replaced the maintenance seal")
+	}
 	blobAccountingDiskStore(t, s)
 	got, err := tenant.ReadLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: commit.Subject})
 	if err != nil || got.Complete || got.IncompleteReason != "writer_lost" || len(got.Segments) != 1 || got.Segments[0] != commit.Segments[0] {

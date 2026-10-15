@@ -310,7 +310,10 @@ func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID stri
 	if err != nil {
 		return logseg.Completeness{}, true, err
 	}
-	verdict := logseg.Assess(nil, node, now)
+	verdict := logseg.Completeness{State: logseg.StateStreaming}
+	if node.Terminal && now.Sub(node.FinishedAt) >= logseg.SealGrace {
+		verdict = logseg.Completeness{State: logseg.StateIncomplete, Message: "logs incomplete: the runner never sealed this log"}
+	}
 	if result.Complete {
 		verdict = logseg.Completeness{State: logseg.StateComplete}
 	} else if result.IncompleteReason != "" {

@@ -316,3 +316,26 @@ func TestCommittedDashboardLiveTailRechecksAuthority(t *testing.T) {
 		}
 	}
 }
+
+func TestCommittedDashboardUnsealedLogGrace(t *testing.T) {
+	now := time.Now()
+	for _, test := range []struct {
+		name  string
+		node  logseg.NodeProgress
+		state string
+	}{
+		{"running", logseg.NodeProgress{Started: true}, logseg.StateStreaming},
+		{"tail grace", logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: now.Add(-logseg.SealGrace + time.Nanosecond)}, logseg.StateStreaming},
+		{"exact grace", logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: now.Add(-logseg.SealGrace)}, logseg.StateIncomplete},
+		{"abandoned", logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: now.Add(-2 * logseg.SealGrace)}, logseg.StateIncomplete},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			records := newScriptedSegmentLogs()
+			records.add(t, jobLogSubject(1, 1), "tail\n", false)
+			verdict, found, err := records.reader().NodeLogCompleteness(t.Context(), "run", "job", test.node, now)
+			if err != nil || !found || verdict.State != test.state || records.gets != 1 {
+				t.Fatalf("verdict=%+v,found=%v,gets=%d,err=%v", verdict, found, records.gets, err)
+			}
+		})
+	}
+}

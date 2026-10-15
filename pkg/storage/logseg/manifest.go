@@ -23,7 +23,6 @@ const (
 
 // Reasons a manifest gives for any status but complete.
 const (
-	ReasonRunnerLost   = "runner lost"
 	ReasonUploadFailed = "upload failed"
 	ReasonByteCap      = "byte cap"
 	ReasonSequenceGap  = "sequence gap"
@@ -32,11 +31,8 @@ const (
 	ReasonStopped      = "node stopped before its log was finished"
 )
 
-// Who sealed a log.
-const (
-	SealedByNode       = "node"
-	SealedByController = "controller"
-)
+// SealedByNode identifies the writer of a physical manifest.
+const SealedByNode = "node"
 
 // Manifest seals one subject's log: which segments it holds, what
 // each one covers and its digest, and whether the log is whole.
@@ -166,42 +162,6 @@ type NodeProgress struct {
 	FinishedAt time.Time
 }
 
-// Assess turns a manifest, or its absence, into a verdict. A nil
-// manifest reads as streaming until the node has been finished for
-// [SealGrace]; past it, the attempt is abandoned and reads incomplete.
-func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness {
-	if m == nil {
-		if !node.Terminal || now.Sub(node.FinishedAt) < SealGrace {
-			return Completeness{State: StateStreaming}
-		}
-		return Completeness{
-			State:   StateIncomplete,
-			Message: "logs incomplete: the runner never sealed this log",
-		}
-	}
-	c := Completeness{Lines: m.Lines}
-	missing := m.DroppedLines
-	for _, g := range m.Gaps {
-		missing += g.To - g.From + 1
-	}
-	switch m.Status {
-	case StatusComplete:
-		c.State = StateComplete
-	case StatusCutOff:
-		c.State = StateCutOff
-		c.Message = fmt.Sprintf("logs cut off after line %d: %s", m.Lines, m.Reason)
-	default:
-		c.State = StateIncomplete
-		c.MissingLines = missing
-		if missing > 0 {
-			c.Message = fmt.Sprintf("logs incomplete: %d %s missing (%s)", missing, plural(missing, "line", "lines"), m.Reason)
-		} else {
-			c.Message = "logs incomplete: " + m.Reason
-		}
-	}
-	return c
-}
-
 // SyntheticLine renders c's message as the line a reader shows after the
 // log, or "" when there is nothing to show. It is never stored.
 func (c Completeness) SyntheticLine() string {
@@ -209,11 +169,4 @@ func (c Completeness) SyntheticLine() string {
 		return ""
 	}
 	return "[" + c.Message + "]"
-}
-
-func plural(n int64, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }

@@ -164,7 +164,6 @@ func TestCommittedReadsPreserveIncompleteAndEmptyTails(t *testing.T) {
 }
 
 type failedLogObjects struct {
-	logseg.Objects
 	body io.ReadCloser
 	err  error
 }
@@ -198,4 +197,38 @@ func TestCommittedReadsPreserveCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || result.Bytes != 0 || f.calls != 0 {
 		t.Fatalf("read = %+v, %v; authorizations = %d", result, err, f.calls)
 	}
+}
+
+func FuzzCommittedReadsUseOnlyAuthorizedRecords(f *testing.F) {
+	f.Add([]byte("committed\n"), []byte("foreign\n"), false)
+	f.Add([]byte("committed\n"), []byte("foreign\n"), true)
+	f.Fuzz(func(t *testing.T, committed, foreign []byte, denied bool) {
+		if len(committed) == 0 || len(committed) > 1<<16 || len(foreign) > 1<<16 {
+			return
+		}
+		subject := jobSubject()
+		prefix, err := blob.LogSubjectPrefix("r90", subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		segment, body := subjectSegment(t, 1, string(committed))
+		objects := newMemObjects()
+		key := blob.LogSegmentKey(prefix, 1)
+		objects.put(key, body)
+		objects.put(blob.LogSegmentKey(prefix, 2), foreign)
+		objects.put(blob.LogManifestKey(prefix), foreign)
+		records := &committedRecords{view: store.LogSegments{Subject: subject, Complete: true, Segments: []store.Segment{{Index: 1, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}}}}
+		if denied {
+			records.err = blob.ErrDigestNotReadable
+		}
+		var out bytes.Buffer
+		result, err := (logseg.CommittedReader{Records: records, Objects: objects}).Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject}, &out)
+		if denied {
+			if !errors.Is(err, blob.ErrDigestNotReadable) || objects.getCount() != 0 || out.Len() != 0 || result.Bytes != 0 {
+				t.Fatalf("denied read=%+v, %v, %q", result, err, out.Bytes())
+			}
+		} else if err != nil || !bytes.Equal(out.Bytes(), committed) || !result.Complete || objects.getCount() != 1 {
+			t.Fatalf("authorized read=%+v, %v, %q", result, err, out.Bytes())
+		}
+	})
 }

@@ -17,6 +17,11 @@ seals. This preserves the successful job outcome when its log tail is lost.
 with `logseg.Data` and use `SubjectUploader` for immutable uploads and segment
 commits. The unused `orchestrator.EngineNodeLog` wrapper is removed.
 
+`logseg.Open`, `Log`, `Objects`, `SealAbandoned` and `Assess` are removed.
+Use `CommittedReader` with `SegmentObjects` and the selected tenant's
+`ReadLogSegments`. Physical manifests and listings cannot select readable
+segments. Abandoned seals belong to `Operator.SealAbandonedLogStreams`.
+
 Controller reads select committed tagged subjects. Authenticated signing,
 physical verification and recording adapters still need their production
 bindings. The host must supply the persisted subject and its authenticated
