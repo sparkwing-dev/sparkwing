@@ -25,10 +25,12 @@ func (f nodeHostFunc) Execute(ctx context.Context, in nodehost.NodeInput) error 
 
 func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	binding := capability.Binding{RunID: "run", Holder: "holder", Generation: 2, Kind: capability.BindingTrigger}
+	purpose := capability.PurposeTrigger
 	if kind == capability.UnitNode {
 		binding.Kind, binding.NodeID, binding.Attempt = capability.BindingNode, "job", 3
+		purpose = capability.PurposeWork
 	}
-	return controllerwire.ClaimedUnit{Unit: kind, UnitID: "unit", RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: "award-secret", LeaseExpiresAt: time.Now().Add(time.Minute)}
+	return controllerwire.ClaimedUnit{Unit: kind, Purpose: purpose, Delivery: capability.DeliveryDirect, UnitID: "unit", RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: "award-secret", LeaseExpiresAt: time.Now().Add(time.Minute)}
 }
 
 func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
@@ -91,7 +93,8 @@ func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
 func TestHostingPreparationFailureStopsKeeperAndClosesPartialSource(t *testing.T) {
 	failure, cleanupFailure := errors.New("acquisition failed"), errors.New("cleanup failed")
 	var stopped, closed bool
-	host := Hosting{Lease: time.Minute, Interval: 10 * time.Second,
+	host := Hosting{
+		Lease: time.Minute, Interval: 10 * time.Second,
 		Renew: func(context.Context, controllerwire.ClaimedUnit) (lease.Beat, error) { return lease.Beat{}, nil },
 		StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
 			return ctx, func() { stopped = true }
@@ -114,7 +117,8 @@ func TestHostingPreparationFailureStopsKeeperAndClosesPartialSource(t *testing.T
 
 func TestHostingLostLeaseDuringPreparationCannotExecute(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
-	host := Hosting{Lease: time.Minute, Interval: 10 * time.Second,
+	host := Hosting{
+		Lease: time.Minute, Interval: 10 * time.Second,
 		Renew:       func(context.Context, controllerwire.ClaimedUnit) (lease.Beat, error) { return lease.Beat{}, nil },
 		StartKeeper: func(context.Context, lease.Keeper) (context.Context, func()) { return ctx, func() {} },
 		PrepareNode: func(context.Context, controllerwire.ClaimedUnit) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {

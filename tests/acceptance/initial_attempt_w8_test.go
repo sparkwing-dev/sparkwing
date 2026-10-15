@@ -31,6 +31,7 @@ func TestInitialAttemptW8Components(t *testing.T) {
 		}
 		unit := controllerwire.ClaimedUnit{
 			Unit: capability.UnitNode, UnitID: "job", RunID: "run", JobID: "job", Capability: "private-award",
+			Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect,
 			Binding:        capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 1},
 			LeaseExpiresAt: time.Now().Add(time.Minute),
 		}

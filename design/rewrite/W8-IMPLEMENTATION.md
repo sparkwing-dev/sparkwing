@@ -1,7 +1,7 @@
 # W8 implementation handoff
 
-Latest continuation: the local API's verified UID/SID projection is recorded
-at the end of this file. W8 remains incomplete.
+Latest continuation: runner award purpose, delivery and authority deadlines
+are recorded at the end of this file. W8 remains incomplete.
 
 W8 remains incomplete. The runner, engine, launcher and local process runtime
 are exercised with component fixtures. Installed process composition, the shared
@@ -1416,3 +1416,82 @@ added. Undoing the local contract amendment restores the UID accessor and its
 sole test caller. No Git metadata write or Sparkwing binary invocation ran.
 Git configuration has no local identity or core.worktree override. Scratch is
 removed after verification and review.
+
+## Continuation: runner execution authority
+
+The hosting invariant is that only directly usable trigger, here and work awards
+with matching unit purpose and claim fences reach preparation, and execution
+cannot outlive its binding, owner or parent credential deadline. Hosting checks
+delivery and purpose before renewing or preparing source. It selects the earliest
+of those three declared deadlines before confirmation, keeper startup and host
+preparation. Go context propagation retains an earlier caller deadline. An absent
+deadline stays unbounded. Lease expiry remains renewable, and per-attempt deadlines
+remain the host's responsibility. Here reclaim ignores the initial claim window.
+
+The acceptance regressions first demonstrated five invalid purpose/delivery
+awards reaching preparation, expired owner/parent authority reaching renewal,
+and the wrong execution deadline when an owner or parent deadline was earlier.
+They pass after the small in-place changes. FuzzRunnerAuthorityW8 generates
+unit/purpose/delivery combinations, generations, attempt ordinals, and absent,
+zero, expired or future authority bounds through Hosting.Host. The controlled
+clock tests exercise execution cancellation and keeper-before-source cleanup.
+Shared host and keeper implementations remain fakes of their declared ports.
+
+The production change replaces three old lines. Migrating the existing host
+fixture replaces one more. This continuation removes **4 old lines / 0 whole
+files**, with no additional legacy subsystem remaining behind a shim. No parked
+T1 inventory test is newly claimed as ported. The initial-attempt acceptance
+fixture now includes its declared direct-work purpose and delivery.
+
+### Verification and review
+
+Commands use GOWORK=off, GOFLAGS=-buildvcs=false and GOMAXPROCS=4, with GOCACHE,
+GOTMPDIR and TMPDIR under /tmp/sw-astra-W8 and package parallelism at most four.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- Vet passed for cluster, runners and subpackages, wingd and subpackages, engine
+  and sdkinstall, tests/acceptance and internal/acceptance.
+- Full runners, launcher, runner-service, unitfile, engine, sdkinstall and
+  tests/acceptance suites passed. internal/acceptance has no runtime tests.
+- Focused hosting/authority/deadline/initial-attempt tests passed under `-race`.
+  The property fuzz test passed 10,866 generated cases in ten seconds.
+- Cluster passed with the previously established socket-only metrics test
+  excluded. Focused local runtime, managed-unit and local-lifecycle tests passed
+  in wingd and its client. No socket or native platform proof is claimed.
+- Commentcheck and sleepcheck scoped to this continuation passed. The required
+  `commentcheck -base main .` still fails only on the existing HereBearer comment
+  in internal/controllerwire/contracts.go:47. Sleepcheck against main still fails
+  only on the existing wall-clock checks in internal/limits/deadline_test.go:58
+  and :66. Neither owning area was edited to suppress those findings.
+- Independent immutable-snapshot review found no blocking correctness issue and
+  accepted the small validation/deadline changes. It inspected the new untracked
+  test separately from the tracked diff. It did not execute tests.
+
+TestRunnerAuthorityW8Components and TestRunnerDeadlineW8Components provide new
+component acceptance evidence. No native catalog cell is unskipped. No Sparkwing
+binary, external service or Git write ran. The source RUNNER-SERVICE.md records
+the authority bounds. No generated reference consumes this internal document.
+
+### Contracts, shared files and remaining integration
+
+No contract or product-policy change is needed for this continuation. These
+checks consume existing C2/C3 award fields. No interface, setting, environment
+variable, timeout value, trust root or compatibility path is added.
+
+The only shared Go edit is tests/acceptance/initial_attempt_w8_test.go. The new
+tests/acceptance/runner_authority_w8_test.go and the W8 amendment audit/handoff
+are also shared review artifacts. Production and existing package-test edits
+remain in internal/runners. No other-area production caller required migration.
+
+Real integration still needs W9's engine HTTP client, W3's source/keeper/host
+construction, delegated node routes and generated-code replay, W1/W2's local
+controller/store/consumer composition, and the runner/launcher/bootstrap factories.
+Native service lifecycle, Windows SID transport/schedules/SDK bridge and deployed
+Cloud probe/node-cleanup proofs remain open. Existing shared npm invocation,
+workspace-off cache hashing, local activity/store errors and bootstrap grammar/
+source-handoff requests remain unchanged. No new human product question is added.
+
+Overwing's installed binary remains ten commits behind source but returned the
+applicable standards. Git config has no local author or core.worktree override.
+Scratch is removed after all checks finish. The lead retains staging and committing,
+including the new acceptance test that is absent from plain tracked diffs.

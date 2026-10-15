@@ -21,6 +21,13 @@ files keep working. A failed enrollment revokes its new authority, removes its
 new private files and service file, and restores the previous runner
 section. Existing service files and unrelated settings survive cleanup.
 
+Hosting accepts direct trigger, here and work awards with matching unit purposes
+and claim fences. Bootstrap credentials require the Cloud exchange path. Renewal,
+source preparation and execution share the earliest binding, owner or parent
+credential deadline, capped by the caller's deadline. Absent deadlines remain
+unbounded. The keeper owns renewable lease expiry. The host owns per-attempt
+deadlines, so application retries can continue under the same unit claim.
+
 `Inspect` reads the executable and arguments from the actual registration.
 It uses the runner's shared parser to identify the effective config, including
 repeated flags and values that resemble flags.

@@ -41,7 +41,13 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if h.Renew == nil || (unit.Unit == capability.UnitTrigger && h.PrepareRun == nil) || (unit.Unit == capability.UnitNode && h.PrepareNode == nil) {
 		return errors.New("runner host requires award-bound renewal and host preparation")
 	}
-	if deadline := unit.Binding.Deadline; deadline != nil {
+	deadline := unit.Binding.Deadline
+	for _, bound := range []*time.Time{unit.OwnerDeadline, unit.ParentCapabilityExpiry} {
+		if bound != nil && (deadline == nil || bound.Before(*deadline)) {
+			deadline = bound
+		}
+	}
+	if deadline != nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, *deadline)
 		defer cancel()
@@ -123,15 +129,18 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 	if err := validateUnit(unit); err != nil {
 		return err
 	}
+	if unit.Delivery != capability.DeliveryDirect {
+		return errors.New("runner hosting requires a directly usable award")
+	}
 	binding := unit.Binding
 	if binding.RunID != unit.RunID || binding.Holder == "" || binding.Generation <= 0 {
 		return errors.New("runner award has an invalid run or claim fence")
 	}
 	if unit.Unit == capability.UnitNode {
-		if binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
+		if unit.Purpose != capability.PurposeWork || binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
 			return errors.New("runner award has an invalid job or attempt binding")
 		}
-	} else if binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {
+	} else if (unit.Purpose != capability.PurposeTrigger && unit.Purpose != capability.PurposeHere) || binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {
 		return errors.New("runner award has an invalid trigger binding")
 	}
 	if unit.LeaseExpiresAt.IsZero() {
