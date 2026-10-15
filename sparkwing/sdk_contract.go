@@ -291,8 +291,7 @@ func (a *Approval) ContinueOnError() *Approval {
 
 // safety: OnFailure declares an executable recovery job separate from the gate.
 func (a *Approval) OnFailure(id string, body any) *JobNode {
-	a.node.OnFailure(id, body)
-	return a.node.onFailure
+	return a.node.OnFailure(id, body)
 }
 
 // safety: FailurePolicy chooses fail_fast or collect_all without changing dependency requirements.
