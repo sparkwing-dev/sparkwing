@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -219,7 +220,7 @@ func runCachePrune(args []string) error {
 	}
 	maxBytes := limits.MaxBytes
 	if maxBytesRaw != "" {
-		parsed, err := bincache.ParseBytes(maxBytesRaw)
+		parsed, err := userconfig.ParseByteSize(maxBytesRaw)
 		if err != nil {
 			return fmt.Errorf("cache prune: --max-bytes: %w", err)
 		}

@@ -329,3 +329,16 @@ To skip the binary cache entirely for one invocation, pass
 `--sw-no-bincache`; sparkwing builds a temporary binary with debug
 symbols, then runs it with your original environment. The Go toolchain floor
 adjustment applies only while building.
+
+## Rewrite integration
+
+The final storage contract has no cache service, cache grant or package proxy.
+Some runtime consumers in this source revision still read legacy cache plumbing,
+including `SPARKWING_GITCACHE_URL`, `SPARKWING_CACHE_URL` and
+`SPARKWING_CACHE_GRANT`. The environment inventory retains those names until
+their owning runtime consumers are retired. They do not select a supported
+cache-service deployment in the final design.
+
+Pipeline binaries stay local. Final remote-cache reads use an explicit profile
+and only authorized verified-default-branch records over signed `/data`. Native
+host/storage composition still needs integration evidence.

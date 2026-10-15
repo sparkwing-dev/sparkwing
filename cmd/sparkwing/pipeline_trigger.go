@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -117,7 +116,7 @@ func runPipelineTrigger(args []string) error {
 	return remoteFollowExit(ctx, prof, resp.RunID, followErr)
 }
 
-func remoteFollowExit(ctx context.Context, prof *profile.Profile, runID string, followErr error) error {
+func remoteFollowExit(ctx context.Context, prof *namedProfile, runID string, followErr error) error {
 	if followErr != nil {
 		fmt.Fprintf(os.Stderr, "note: follow of %s ended early (%v); reading the run's status\n", runID, followErr)
 	}

@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -86,10 +85,6 @@ func TestLogReaderRetainsStructuredFailure(t *testing.T) {
 	c := testEngine(t, func(*http.Request) (*http.Response, error) {
 		return engineResponse(403, `{"error":{"code":"forbidden","message":"logs revoked","hint":"select a permitted profile"}}`), nil
 	})
-	c.decodeError = func(raw []byte) (*apierr.Error, error) {
-		var failure apierr.Error
-		return &failure, json.Unmarshal(raw, &failure)
-	}
 	_, err := c.ReadLogs(t.Context(), "r1", controllerwire.LogQuery{})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Message != "logs revoked" || failure.Hint != "select a permitted profile" {

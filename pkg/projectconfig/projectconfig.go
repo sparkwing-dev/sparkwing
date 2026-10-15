@@ -1,122 +1,36 @@
-// Package projectconfig reads the combined .sparkwing/sparkwing.yaml
-// project file:
-//
-//	defaults: {args: { ... }}
-//	profiles: { ... }
-//	pipelines: [ ... ]
-//	sparks: [ ... ]
-//
-// Each section reuses its existing types, and LoadOld normalizes and
-// validates them. A missing file returns (nil, nil).
+// Package projectconfig owns checkout-local pipeline declarations.
 package projectconfig
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-// Filename is the combined project-config file name inside .sparkwing/.
+// Filename is the project configuration file inside .sparkwing.
 const Filename = "sparkwing.yaml"
 
-const migrationGuideURL = "https://sparkwing.dev/docs/migration-guide/v0.5.0"
-
-var legacyFiles = []string{
-	"pipelines.yaml",
-	"backends.yaml",
-	"runners.yaml",
-	"sources.yaml",
-	"sparks.yaml",
-}
-
-// CheckLegacy walks up from startDir for the first .sparkwing/ directory
-// and errors if it holds any pre-v0.5.0 standalone config file
-// (pipelines/backends/runners/sources/sparks.yaml). The error names every
-// offending file and points at the migration guide. It returns nil when
-// no .sparkwing/ is found or the directory holds only sparkwing.yaml, so
-// a fully-migrated repo is silent and a half-migrated one is loud.
-func CheckLegacy(startDir string) error {
-	dir := startDir
-	for {
-		sw := filepath.Join(dir, ".sparkwing")
-		if info, statErr := os.Stat(sw); statErr == nil && info.IsDir() {
-			var present []string
-			for _, f := range legacyFiles {
-				if _, ferr := os.Stat(filepath.Join(sw, f)); ferr == nil {
-					present = append(present, ".sparkwing/"+f)
-				}
-			}
-			if len(present) == 0 {
-				return nil
-			}
-			verb := "is"
-			if len(present) > 1 {
-				verb = "are"
-			}
-			return fmt.Errorf("%s %s no longer read in v0.5.0; combine this project's YAML into .sparkwing/%s -- see %s for the layout",
-				strings.Join(present, ", "), verb, Filename, migrationGuideURL)
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return nil
-		}
-		dir = parent
+func parse(raw []byte) (*Config, error) {
+	var cfg Config
+	doc, err := userconfig.DecodeYAML(Filename, raw, &cfg)
+	if err != nil {
+		return nil, err
 	}
+	if err := Validate(cfg); err != nil {
+		return nil, userconfig.LocateError(Filename, doc, err)
+	}
+	return &cfg, nil
 }
 
-// ConfigOld is the parsed .sparkwing/sparkwing.yaml.
-type ConfigOld struct {
-	// Defaults carries the per-pipeline fields each pipeline
-	// inherits unless it declares its own. See Defaults for the
-	// per-field merge semantics.
-	Defaults DefaultsOld `yaml:"defaults,omitempty"`
-
-	// Profiles maps profile name to its surface bundle. The same
-	// shape as the profiles section of ~/.config/sparkwing/config.yaml;
-	// project profiles are selected by pipeline.profile or by the
-	// CLI's --profile, user profiles by --profile alone.
-	Profiles map[string]*profile.Profile `yaml:"profiles,omitempty"`
-
-	Pipelines []pipelines.Pipeline `yaml:"pipelines,omitempty"`
-	Sparks    []sparks.Library     `yaml:"sparks,omitempty"`
-}
-
-// Defaults is the project-level block of per-pipeline defaults.
-// Resolution rules per field are documented inline; the general
-// principle is "replace, unless the field is independently keyed."
-type DefaultsOld struct {
-	// Args supplies per-arg default values for every pipeline. Each
-	// key is layered under pipeline.args (pipeline wins per-key),
-	// and the merged map overrides a field's `default` tag while an
-	// explicit operator CLI flag overrides it.
-	Args map[string]string `yaml:"args,omitempty"`
-
-	// Guards apply to every pipeline. Wholesale-replaced by a
-	// pipeline that declares its own non-empty guards block.
-	Guards pipelines.Guards `yaml:"guards,omitempty"`
-
-	// Requires are runner labels every pipeline's jobs must
-	// satisfy in addition to their own Job.Requires(). Wholesale-
-	// replaced by pipeline.requires when set.
-	Requires []string `yaml:"requires,omitempty"`
-}
-
-// LoadOld reads and parses .sparkwing/sparkwing.yaml at path. A missing
-// file returns (nil, nil) so the caller can fall back to the legacy
-// per-file loaders. Unknown fields at any level fail the parse with the
-// file path in the message. Each section is normalized and validated to
-// match its per-file loader.
-func LoadOld(path string) (*ConfigOld, error) {
+func load(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -124,49 +38,23 @@ func LoadOld(path string) (*ConfigOld, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	cfg, err := ParseOld(raw)
+	cfg, err := Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
 }
 
-// ParseOld validates a project config read from a source other than a checkout.
-func ParseOld(raw []byte) (*ConfigOld, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	var cfg ConfigOld
-	if err := dec.Decode(&cfg); err != nil {
-		if errors.Is(err, io.EOF) {
-			return &ConfigOld{}, nil
-		}
-		return nil, fmt.Errorf("parse sparkwing.yaml: %w", err)
+func discover(startDir string) (string, *Config, error) {
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", nil, err
 	}
-	var extra any
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		return nil, errors.New("parse sparkwing.yaml: expected one YAML document")
-	}
-	if err := cfg.normalize(); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
-// DiscoverOld walks up from startDir looking for
-// <dir>/.sparkwing/sparkwing.yaml, stopping at the filesystem root. It
-// returns the absolute path and loaded ConfigOld of the first match, or
-// ("", nil, nil) when nothing is found anywhere on the walk-up -- the
-// caller falls back to the legacy per-file discovery.
-func DiscoverOld(startDir string) (path string, cfg *ConfigOld, err error) {
-	dir := startDir
 	for {
-		candidate := filepath.Join(dir, ".sparkwing", Filename)
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			loaded, lerr := LoadOld(candidate)
-			if lerr != nil {
-				return candidate, nil, lerr
-			}
-			return candidate, loaded, nil
+		path := filepath.Join(dir, ".sparkwing", Filename)
+		cfg, err := Load(path)
+		if err != nil || cfg != nil {
+			return path, cfg, err
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -176,39 +64,25 @@ func DiscoverOld(startDir string) (path string, cfg *ConfigOld, err error) {
 	}
 }
 
-// DiscoverPipelines walks up from startDir for .sparkwing/sparkwing.yaml
-// and returns the pipelines section as a *pipelines.Config. It is a
-// drop-in for the retired pipelines.Discover: it returns a non-nil error
-// when no sparkwing.yaml is found anywhere on the walk-up, and the path
-// it returns is the sparkwing.yaml path (so filepath.Dir yields the
-// .sparkwing/ directory, same as before).
-func DiscoverPipelines(startDir string) (path string, cfg *pipelines.Config, err error) {
-	p, pc, err := DiscoverOld(startDir)
-	if err != nil {
-		return "", nil, err
-	}
-	if p == "" || pc == nil {
-		return "", nil, fmt.Errorf("no .sparkwing/%s found from %s up", Filename, startDir)
-	}
-	return p, &pipelines.Config{Pipelines: pc.Pipelines}, nil
-}
-
 // LoadSparksManifest reads the sparks section of
 // <sparkwingDir>/sparkwing.yaml as a *sparks.Manifest. Returns (nil, nil)
-// when the file is absent or declares no sparks, mirroring the contract
-// the retired sparks.LoadManifest had.
+// when the file is absent or declares no sparks.
 func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error) {
 	if sparkwingDir == "" {
 		return nil, errors.New("sparks: sparkwingDir must not be empty")
 	}
-	cfg, err := LoadOld(filepath.Join(sparkwingDir, Filename))
+	cfg, err := Load(filepath.Join(sparkwingDir, Filename))
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil || len(cfg.Sparks) == 0 {
 		return nil, nil
 	}
-	return &sparks.Manifest{Libraries: cfg.Sparks}, nil
+	libs := make([]sparks.Library, len(cfg.Sparks))
+	for i, s := range cfg.Sparks {
+		libs[i] = sparks.Library{Name: s.Name, Source: s.Source, Version: s.Version}
+	}
+	return &sparks.Manifest{Libraries: libs}, nil
 }
 
 // WriteSparksSection rewrites the top-level sparks: section of the
@@ -247,6 +121,9 @@ func loadDocument(path string) (*yaml.Node, *yaml.Node, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	if _, err := Parse(raw); err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
+	}
 	var doc yaml.Node
 	if len(bytes.TrimSpace(raw)) > 0 {
 		if uerr := yaml.Unmarshal(raw, &doc); uerr != nil {
@@ -271,13 +148,6 @@ func mappingIndex(node *yaml.Node, key string) int {
 	return -1
 }
 
-func mappingValue(node *yaml.Node, key string) *yaml.Node {
-	if idx := mappingIndex(node, key); idx >= 0 {
-		return node.Content[idx+1]
-	}
-	return nil
-}
-
 func writeDocument(path string, doc *yaml.Node) error {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -289,40 +159,11 @@ func writeDocument(path string, doc *yaml.Node) error {
 	if err := enc.Close(); err != nil {
 		return err
 	}
+	if _, err := Parse(buf.Bytes()); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(path, buf.Bytes(), 0o644)
-}
-
-func (c *ConfigOld) normalize() error {
-	pcfg := pipelines.Config{Pipelines: c.Pipelines}
-	if err := pcfg.Validate(); err != nil {
-		return err
-	}
-
-	for name, p := range c.Profiles {
-		if p == nil {
-			return fmt.Errorf("profile %q: empty body", name)
-		}
-		p.Name = name
-		p.InheritControllerDefaults()
-		if err := p.Surfaces().Validate(name); err != nil {
-			return err
-		}
-	}
-
-	if err := c.Defaults.Guards.Validate("defaults"); err != nil {
-		return err
-	}
-
-	for i, lib := range c.Sparks {
-		if lib.Source == "" {
-			return fmt.Errorf("sparks: entry %d missing 'source'", i)
-		}
-		if lib.Version == "" {
-			return fmt.Errorf("sparks: entry %d (%s) missing 'version'", i, lib.Source)
-		}
-	}
-	return nil
 }

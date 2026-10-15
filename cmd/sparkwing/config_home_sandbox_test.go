@@ -22,6 +22,9 @@ func scratchUserConfigDir(t *testing.T) string {
 		userconfig.PathEnv, localsecrets.KeyFileEnv,
 	} {
 		t.Setenv(env, "")
+		if err := os.Unsetenv(env); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return filepath.Join(xdg, "sparkwing")
 }
@@ -83,7 +86,7 @@ func TestProfilesAddWritesInsideTheHomeItIsPointedAt(t *testing.T) {
 		t.Fatalf("profiles add with %s=%s: %v", userconfig.PathEnv, inHome, err)
 	}
 
-	if p := loadSavedProfile(t, inHome, "drill"); p.Controller == nil || p.Controller.URL != "http://127.0.0.1:4344" {
+	if p := loadSavedProfile(t, inHome, "drill"); p.ControllerURL() == "" || p.Controller.URL != "http://127.0.0.1:4344" {
 		t.Errorf("profile written to %s = %+v, want the controller it was given", inHome, p.Controller)
 	}
 	userProfiles := filepath.Join(userConfig, userconfig.Filename)

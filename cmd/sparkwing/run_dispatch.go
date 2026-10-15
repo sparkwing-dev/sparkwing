@@ -23,7 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -319,7 +318,7 @@ func triggerSource(prefix string) string {
 	return prefix
 }
 
-func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source string, flags runFlags, passthrough []string, workingTree bool) (*client.TriggerResponse, error) {
+func createRemoteTrigger(runProfile *namedProfile, pipelineName, source string, flags runFlags, passthrough []string, workingTree bool) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
 	branch, sha, repositorySlug, repoURL := detectRemoteGit()
 	if repoURL == "" && !workingTree {
@@ -432,7 +431,7 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 	return response, nil
 }
 
-func uploadSourceBundle(runProfile *profile.Profile, snapshot *worktreeSnapshot) (string, error) {
+func uploadSourceBundle(runProfile *namedProfile, snapshot *worktreeSnapshot) (string, error) {
 	f, err := os.Open(snapshot.BundlePath)
 	if err != nil {
 		return "", err
@@ -467,7 +466,7 @@ func uploadSourceBundle(runProfile *profile.Profile, snapshot *worktreeSnapshot)
 
 // safety: a durable remote fetch cannot depend on a cache seed from this shell;
 // working-tree submissions upload a separately bound source bundle.
-func offerTriggerSource(_ *profile.Profile, repoDir, _, sha string) error {
+func offerTriggerSource(_ *namedProfile, repoDir, _, sha string) error {
 	if !commitOnOrigin(repoDir, sha) {
 		return fmt.Errorf("commit %s is not on origin: push your commit or trigger with --working-tree", shortSHA(sha))
 	}

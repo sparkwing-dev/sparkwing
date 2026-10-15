@@ -1,3 +1,504 @@
+# W9 protocol schema and guide continuation
+
+W9 remains incomplete. HEAD remains df4f991b6. The six merge-conflict contents
+were already resolved at this continuation's start. They still contain no
+conflict markers, and secret_local_test.go remains absent. The index still
+lists the six paths as unmerged. SWARM-BRIEF prohibits worker Git writes, so
+the lead must stage the resolutions and finish the merge. No Git metadata,
+candidate runtime, daemon, service or release was changed. Bootstrap read the
+installed sparkwing info output before the brief was loaded.
+
+## Delivered
+
+Advanced A1-51 by replacing the three published v1 schemas with generated v2
+schemas. The generator lives in internal/doccheck and reads the final
+nodeproto types. It preserves required fields, explicit zero/false, non-null
+optional values, additive transport/describe fields and strict plan objects.
+It also applies operation-specific selectors, exclusive reply payloads,
+canonical inner errors, concurrency counts and shared retry/memo bounds.
+It does not replace session ordering, duplicate-key, graph, secret, placement,
+source-policy or transaction validation.
+
+GOWORK=off go generate ./internal/doccheck regenerates the schemas.
+bin/regen-all.sh includes that step. Doccheck and its tests reject changed or
+missing schema files. The existing conformance schema helper gained the five
+JSON Schema keywords needed for these shapes, with twelve independent
+keyword cases. No node protocol or other area's contract signature changed.
+
+Replaced the protocol guide with the amended hello, exact-engine, job/step,
+flat-plan, structured-error, generated-code replay, node-host service and
+Windows argv-handle contract. Its implementation note keeps native execution
+unclaimed. Updated the environment inventory to identify remaining v1 consumers
+and the final hello/argv transport. Generated docs/changelog mirrors agree with
+the sources.
+
+## Tests and deletions
+
+Added TestProtocolSchemaContract in tests/acceptance with 29 cases. It covers
+hello identity, named and request-target cancellation, contradictory selectors,
+removed run_node, additive fields, inner/body errors, flat plans, missing versus
+zero concurrency, explicit false versus null, retry and memo boundaries,
+annotation ranges, removed wrappers and host-owned plan fields. These are
+passing acceptance contract cases. No native T1 scenario was unskipped.
+
+Ported TestDescribeSchemaDeclaresEveryEmittedField and
+TestLogRecordSchemaDeclaresEveryEmittedField to the final nodeproto types.
+TestLogRecordsMatchTheSchema now checks final SDK frames and annotation/summary
+service messages, retaining refusal of line zero. The old guide transcript
+check moved to doccheck as TestProtocolGuideExamplesMatchSchemas and validates
+every JSON line in the new guide, including hello/body results. The old
+notYetEmitted exceptions for tools and host-hashed memo inputs are removed.
+No parked inventory source function is assigned directly to W9.
+
+Removed 1,093 gross lines across the protocol guide, three old schemas and the
+old schema tests, measured against HEAD. This is not net reduction. No whole
+production file was deleted. Generated mirrors and earlier continuations are
+excluded from this count.
+
+## Verification
+
+Go checks used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
+GOCACHE=/tmp/sw-astra-W9/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W9/tmp.
+
+Passed:
+
+- Whole-repository go build -p 4 ./... on the final source.
+- Full internal/doccheck, tests/acceptance, internal/clisurface and
+  internal/controllerwire suites. Native acceptance skips remain.
+- internal/nodeproto/conformance -run '^TestSchemaV2Keywords$'.
+- The three ported internal/orchestrator schema tests named above.
+- Focused go vet over cmd/sparkwing, clisurface, controllerwire,
+  controller/client, doccheck, nodeproto/conformance, orchestrator and
+  tests/acceptance.
+- Pkg/docs mirror/changelog, privacy, read/list/search, guide, section,
+  migration and symbol checks selected by Test(PkgDocsContent|EmbeddedChangelog|
+  EmbeddedDocsCarry|EveryRecordedScrub|ScrubPatterns|Read_|ReadGuide|Migrations|
+  List|Search|Sections|SectionBody|Guide|Catalog|DocsName).
+- Python jsonschema independently validates all three as Draft 2020-12 schemas
+  and reproduces all 29 acceptance case verdicts.
+- commentcheck -base HEAD (224 files), sync-docs --check, gofmt and
+  git diff --check.
+
+The initial acceptance run failed on the v1 shapes before implementation.
+The full pkg/docs suite could not run its WebClient tests because httptest
+cannot listen in this sandbox. The focused embedded-doc checks passed.
+Root sleepcheck still fails only the previously reported W6 wall-clock
+findings at internal/limits/deadline_test.go:58 and :66. No W9 sleep was added.
+One build overlapped an import edit and failed to load the newly added archive;
+the subsequent builds on stable source passed.
+
+## Remaining integration and scope
+
+No new contract change is requested in another area. Earlier contract questions
+and the amendment action ledger below remain, except that the W9 v2 schema and
+protocol-guide portion of A1-51 is now implemented. W3/W4/W5/W8 must finish real
+v2 host/SDK fixture execution, the shared native transcript/hash corpus and
+platform evidence. The existing runtime fixtures still use Old protocol types;
+this continuation does not make them pass through a v1 schema or adapter.
+Native Windows bridge and release packaging evidence remains open under A1-52.
+
+Other W9 work remains: local/here/detached hosting against sealed requests,
+publication and read-only cache composition, final trigger/retry intake,
+controller-owned scheduling/tick, runtime/unit construction and matching-engine
+Go preparation. The prior handoffs name their contract interfaces and gaps.
+This continuation adds no flag, environment variable, timeout or product limit.
+No new human decision is requested.
+
+Shared files touched in this continuation: bin/regen-all.sh,
+internal/doccheck/main.go, new protocolschema.go/protocolschema_test.go,
+internal/nodeproto/conformance/schema.go and its new schema_v2_test.go,
+internal/orchestrator/node_protocol_schema_test.go,
+tests/acceptance/protocol_schema_contract_test.go, CHANGELOG.md,
+pkg/docs/changelog.md and generated pkg/docs/mirror files. The orchestrator
+change only migrates schema-dependent tests. No other area's production
+implementation or exported contract changed. W9-owned source docs and this
+handoff also changed.
+
+Friction: Xwing context inspection cannot create its session lock in this
+sandbox. The user-selected worktree was reused. The lead owns review, merge,
+pipelines and native checks. Git identity remains Korey Gambill and core.worktree
+is unset. Scratch is removed before the final report.
+
+---
+
+# W9 foreground runtime, installer masking and guide continuation
+
+W9 remains incomplete. HEAD is still df4f991b6 with the integration merge index
+left open. All six conflict contents remain resolved, with secret_local_test.go
+absent. The lead must stage those paths and complete the merge because workers
+may not write Git metadata. No Sparkwing binary, service or release was run.
+
+## Delivered in this continuation
+
+- Replaced the hidden foreground wingd handler's pflag/orchestrator daemon path
+  with clisurface parsing and wingd.LocalRuntime.Run. It forwards absolute Home,
+  executable, version, stay and standalone mode and waits for Run to return.
+  Help, invalid input and cancellation are checked before runtime construction.
+  Context cancellation after construction prevents startup. dashboardServices
+  now carries that runtime beside lifecycle, managed units and logs. Native
+  resolveLocalServices remains unbound. This completes the CLI adapter portion
+  of A1-40/A1-41, not native runtime or managed-timer acceptance.
+- Explicit budget, headroom and alternate state-db flags fail as unavailable
+  because LocalStartOptions cannot carry them. Standalone reason selects its
+  declared boolean mode. No new runtime option or fallback was invented.
+- Cache warming now supplies the shared Install environment with a registered
+  masker and streams TypeScript installer stdout/stderr through the existing
+  diagnostic writer. Errors retain their cause and are masked before display.
+  Diagnostic flush/writer failures prevent success receipts. A real child with
+  fake npm proves filtering, masking and non-execution of pipeline code.
+- Removed warming's legacy Go compiler path. That compiler resets the captured
+  install environment and writes directly to os.Stderr. Go warming now calls
+  the same preparation seam as the SDK installer and reports unavailable until
+  the shared compiler binding exists. Component fakes still exercise successful
+  Go receipts. This is an explicit unfinished binding, not a permanent limit.
+- Fixed SDK installer errors whose Error() text was masked while errors.As still
+  exposed raw apierr hints/details to CLI formatting. The wrapper now exposes
+  a masked structured copy, keeps exact JSON numbers, preserves errors.Is and
+  does not mutate the source error. The regression failed with raw credentials
+  in JSON before the fix. Cache warming shares the corrected wrapper.
+- Confirmed the merged W6 section reader already validates the complete machine
+  file without migrations. New fleet-survey tests prove refusal of invalid
+  unrelated sections, no credential echo, unchanged bytes and no created files.
+  No repos reader production change was needed.
+- Removed all undispatched command references reported by the docs honesty
+  check, including the README. Retired the cache-service page and its sidebar
+  entry, obsolete cache provisioning, inline agent-token instructions, public
+  consumer controls and unredacted trigger-row claims. Architecture and native
+  dashboard docs distinguish final contracts from missing native bindings.
+  Versioned migration history was left intact. Other guide claims still need
+  final runtime review; the command-name pass proves dispatch names only.
+- Updated four schedule-command source comments and regenerated the config
+  reference through bin/gen-config-docs.sh. Updated the docs link fixture after
+  removing gitcache.md. Generated mirrors and changelog are synchronized.
+  The environment inventory retains legacy names while real consumers remain;
+  caching.md identifies that unfinished retirement instead of documenting a
+  supported cache-service deployment.
+
+These changes advance A1-10/A1-40/A1-41/A1-50/A1-51. All other W9 amendment rows
+retain the decisions and open integrations in the ledger below. No cross-area
+contract signature changed. No permanent capability restriction, environment
+variable, flag, service or timeout was added.
+
+## Evidence and remaining integration
+
+Added 15 test functions: eight foreground-runtime tests, two survey tests, two
+cache diagnostic tests, two native-tool warming tests and one structured-error
+formatting regression. Existing cache warm and TypeScript non-execution tests
+now accept an explicit diagnostic writer. No parked source function is assigned
+directly to W9. No native T1 cell was unskipped. SurfaceGrammarContract now also
+parses the amended foreground/home and stable tick invocations.
+
+Passing checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9:
+
+- Whole-repository go build -p 4 ./... .
+- Focused vet over cmd/sparkwing, clisurface, controllerwire, controller/client,
+  pkg/docs and tests/acceptance.
+- Full clisurface, controllerwire and tests/acceptance suites. Native skips stay.
+- Focused CLI foreground, warming, installer, dashboard, doctor, local-binary,
+  survey, command-reference and documentation-honesty suites.
+- Pkg/docs mirror/changelog, read/list/search/migration/catalog and privacy checks.
+- Full internal/doccheck tests and config-reference regeneration.
+- commentcheck, sync-docs --check, gofmt and git diff --check.
+
+Not passing: internal/engineenv TestEveryEngineEnvNameIsClassified reports
+SPARKWING_API_TOKEN and SPARKWING_JOB_ID in W6's procenv registry plus the
+SPARKWING_CUSTOM acceptance fixture. This is the old classification scanner's
+integration with the new policy/fixture, not permission to mark those credentials
+as pass-through. Root sleepcheck retains the two W6 wall-clock findings in
+internal/limits/deadline_test.go at 58 and 66. W9 adds no wall-clock waits.
+
+Native W3/W8 source/host/lease/runtime/managed-unit construction, here resume,
+controller-owned tick and detached execution, publication/cache composition,
+matching-engine Go preparation and native Windows QA remain. W2 WriteJSON is
+still a declaration; structured-error tests inject a JSON encoder and do not
+claim native shared-encoder integration. LocalStartOptions still needs the
+unrepresented flags if those controls survive. ManagedUnitManager still lacks a
+schedule-install operation. The prior compiler/output/lease and successful
+ReadFailure-with-no-failure contract questions remain. No human decision is
+requested by this continuation.
+
+Deleted docs/gitcache.md completely: 571 lines. Replaced another 746 gross lines
+across the five architecture/lifecycle/storage sections counted below, plus
+54 gross Go lines in wingd.go and cache_warm.go. These are gross removals against
+HEAD, not net reduction or additional whole-file deletions. The five source doc
+counts are architecture 342, local-execution 58, native-mode 73, security 114 and
+self-hosting 159. Smaller guide edits and generated mirrors are excluded.
+
+Shared files touched: pkg/pipelines/pipelines.go (four command-name comments),
+pkg/docs/links_test.go (retired page fixture), tests/acceptance/surface_contract_test.go,
+README.md, CHANGELOG.md, generated doc/changelog mirrors and this handoff.
+No other area's production behavior changed. The foreground resolver and installer
+callbacks are private composition seams against existing contracts.
+
+Scratch is removed before the final report. Git identity remains Korey Gambill,
+with core.worktree unset. The earlier handoffs below are historical progress;
+their claims that procenv.Build is a panic stub and that the foreground CLI
+handler is missing are superseded by this continuation.
+
+---
+
+# W9 machine-profile continuation
+
+W9 remains incomplete. This continuation started with the prior session's
+uncommitted work and the same merge index at `df4f991b6`. All six conflict
+contents were already resolved and remain free of conflict markers. The index
+still lists them as unmerged. The lead must stage the resolutions and complete
+the merge because SWARM-BRIEF forbids worker Git writes. No Sparkwing executable,
+service, release operation or external message ran.
+
+## Delivered in this continuation
+
+- Removed every cmd/sparkwing dependency on internal/profile. Connection
+  selection, listing, edits, completion and profile consumers now use W6's
+  userconfig.Profile and complete machine parser. namedProfile adds the map
+  entry's name to that final type. It carries no backend fields or old-schema
+  parser. Removed the unused profile-chain adapter.
+- Replaced profile load/modify/save with userconfig.Update. Add checks collisions
+  before probing and again under the file lock. Set changes only its selected
+  fields against the latest file. Remove revokes the selected member credential,
+  then compares the exact URL and optional token before deleting that connection.
+  Concurrent profiles and other machine sections survive. A changed selected
+  connection remains in the file and produces a failure.
+- Auth probes now call the shared authenticated RunReader with the existing
+  ten-second HTTP budget. Redirects, malformed successful pages and denied
+  credentials fail. The public health probe also refuses redirects. Deleted the
+  CLI-only bearer HTTP helper. No new timeout, environment variable or flag.
+- Deleted the unreachable configure init handler and its three test files.
+  Deleted runWorker, its trigger-only polling/reload loop and its unused sleep
+  helper. The here host's existing checkout helpers remain until hosting changes.
+  Removed the two dead help bindings. No removed command alias was restored.
+- Rewrote the machine settings and controller-connection pages around the final
+  schema. Removed backend/profile migration claims, inline runner credentials,
+  removed sections and the automatic import story. Updated the migration guide,
+  changelog and embedded copies.
+- Migrated the profile documentation checker to userconfig.Decode. It now checks
+  inline profile maps and rejects invalid settings in other sections, null,
+  trailing documents, removed backend fields and credential-bearing URLs. All
+  five published profile examples pass the same parser as the CLI.
+
+These changes complete the machine-profile portion of A1-50 and the matching
+profile documentation/checker portion of A1-51. The earlier amendment ledger
+still applies to the remaining portions. The older remaining-work item about
+W9's profile.Load/Save callers is superseded by this section.
+
+## Tests, deletion and evidence
+
+Added ten test functions. They cover concurrent addition/replacement during a
+probe, replacement during revocation, preservation of explicit empty/zero/false
+machine settings, complete-file refusal and credential-safe errors, typed probe
+failures, sorted/private completion and writer failures, and the documentation
+schema boundary. The new concurrency tests failed against the previous code
+before the implementation changed. The new documentation boundary test also
+failed against the legacy checker first.
+
+Ported existing profile selection, project isolation/name-collision, token stdin,
+revocation-kind and result-redaction tests to the final machine connection type.
+The parked inventory assigns no old source function directly to W9. No new
+native T1 cell was unskipped or claimed. Existing acceptance contract additions
+and the complete tests/acceptance suite pass with native skips retained.
+
+Deleted four complete configure files, 579 lines in the incoming worktree
+(587 lines against HEAD). Removed another 111 old worker-loop/helper/import
+lines against HEAD. These counts exclude other replaced loader/probe lines and
+are gross removal counts, not net reduction claims.
+
+All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false and GOCACHE, GOTMPDIR and
+TMPDIR beneath /tmp/sw-astra-W9. Tests use -p 4 at most.
+
+Passing evidence:
+
+- Whole-repository go build -p 4 ./... .
+- go vet -p 4 on cmd/sparkwing, clisurface, controllerwire, controller/client
+  and tests/acceptance. The documentation-checker package's full tests pass.
+- Full clisurface, controllerwire, userconfig and tests/acceptance suites.
+- Focused CLI suites for profiles, completion, probes, secrets, runner enrollment
+  and observation, queue, doctor, cache warming, installer, upgrade, help and
+  generated command-reference drift, with -short.
+- Focused client engine/data/queue/log/review/secret/schedule-projection tests.
+- Pkg/docs mirror/changelog/catalog/read/list/search/migration/scrub checks.
+- All five published profile examples validate through the final machine parser.
+- commentcheck, gofmt, git diff --check and sync-docs --check.
+
+The full doccheck executable was not run over all SDK examples. Its unit suite
+and the complete published profile-example scan ran. No native sockets,
+services, full legacy CLI suite, Windows/Darwin or launch QA ran.
+
+## Remaining integration and contract questions
+
+No new cross-area contract shape changed. W3/W8 native source/host/runtime/engine
+construction is still absent. Local/here/detached hosting, sealed here resume,
+publication, remote-cache composition and target selection remain unfinished.
+LocalStartOptions still cannot carry the registry's legacy hidden budget,
+headroom or state-db controls. ManagedUnitManager still has no schedule-install
+operation, and a controller-owned scheduler-pass operation is absent for __tick.
+These need owner contracts rather than a second CLI-owned store or scheduler.
+The shared Go compiler preparation contract and ReadFailure's successful no-failure
+shape remain the earlier open questions. V2 schema/corpus regeneration and native
+Windows packaging/evidence also remain. Do not claim native integration from fakes.
+
+## Shared files and friction
+
+Minimal shared consumer migration: internal/doccheck/profilecheck.go and its new
+tests, because the old checker accepted a profile schema the CLI now refuses.
+Other shared changes are CHANGELOG.md, pkg/docs/changelog.md, generated doc
+mirrors and this handoff. No other-area production caller was changed. No public
+client API snapshot changed in this continuation.
+
+An exploratory internal/profile test run fails on legacy backend round-trips,
+old error wording, empty SPARKWING_CONFIG and invalid placeholder controller URLs.
+W9 no longer imports that package. Its remaining callers and tests belong to
+other areas, so they were left intact. Root sleepcheck still reports the two
+inherited W6 wall-clock checks in internal/limits/deadline_test.go, lines 58 and
+66. W9 adds no sleeps. Standards matching/showing works despite the installed
+Overwing staleness notice. Git identity remains Korey Gambill and core.worktree
+is unset. Scratch is deleted before the final report.
+
+---
+
+# W9 amendment continuation
+
+W9 remains incomplete. This session continued the merge of `bw-3095-rewrite`
+onto `df4f991b6`. All six conflict contents are resolved. The index still lists
+unmerged paths because SWARM-BRIEF forbids Git writes. The lead must stage the
+resolutions and finish the merge. No Sparkwing executable or service ran.
+
+## Delivered
+
+- Kept W9 typed CLI/client behavior and amended contracts. The conflict in
+  profile_flag.go was whitespace. Kept the removed sparks warmup implementation
+  and obsolete secret_local_test.go deleted. Runner conflicts now use the final
+  runner schema and private credential directory. Engine comments retain the
+  amended named/here/launcher routing rules.
+- Implemented mixed `/runners/claim`, named trigger/job selection and explicit
+  launcher routing. Added CancelJob, ReadFailure, SyncLauncher and Exchange.
+  Claims, reconcile and exchange use non-replay policies. Here CreateRun and
+  Retry suppress transparent replay because replay cannot recover a lost bearer.
+  Retry has no source runner selector, so it conservatively avoids replay for
+  every source. Explicit caller replay still uses the supplied idempotency key.
+- Removed the test-only error-decoder field and overrides. Every shared client
+  error now uses real apierr.DecodeInner, including persisted JobFailure errors.
+  Tests preserve unknown error codes, execution state, source generation,
+  accepted engine, granted runner identity, deadlines and empty expansions.
+  Sync rejects responses containing private bearer material.
+- Implemented NewDataClient's nine signing/record operations. Added 28 shared
+  snake_case data message types in controllerwire/data.go. Existing C2 routes
+  are unchanged. Upload retries retain their one generated key, record/commit
+  retries retain exact bytes, and explicit lookup budgets bound transport.
+  VerifiedDefaultOnly, members and authorized read edges survive the adapter.
+  Requests omit read sets and sealed ref evidence. Signed transfers refuse
+  reusable controller bearer, cookie and proxy-authorization headers.
+- Runner enrollment uses private credential files under runner.credentials_dir.
+  Config/service failures revoke newly minted authority and remove only newly
+  created files. Forced replacement restores the previous section/credential.
+  Rollback compares the current section before replacing it, preserves concurrent
+  changes and retains referenced files if restoration fails. A revocation failure
+  returns the joined error and a manual revoke command. Manual argv uses start.
+  Output-writer failure after successful service installation keeps enrollment.
+- Added hidden __sdk-install dispatch and the stdin/result adapter. It validates
+  the requested directory against the exact pin's manifest and engine version,
+  filters the inherited Install environment, masks split-chunk diagnostics,
+  rechecks the pin after preparation, and emits one SDKCommand JSON object.
+  Native TypeScript preparation installs with npm ci and returns Node/main argv
+  without preload or execution. Go is tested through the preparation seam.
+  Native Go preparation remains unavailable pending the shared compiler contract.
+
+## Contract changes needed and real integration
+
+W3's shared pipeline compiler needs an explicit Install environment and output
+writer, while retaining sparks overlays and checking their effective SDK pin.
+Native Go preparation must populate missing checksums before cache hashing and
+include the effective build configuration in the cache identity. W3/W8 must
+retain or reacquire the executable lease through execution. The current
+SDKCommand only returns argv. A duplicate CLI compiler was removed after review
+because it bypassed overlays and reused artifacts across CGO settings. No shared
+compiler API or other area's contract was changed here.
+
+W8 must implement ReadPin, VersionForPin and Resolved.InstallSDK and connect the
+verified engine. Assumption: Go Pin.InputsDigest covers the pin-establishing
+manifest/effective replacement, rather than newly populated go.sum. TypeScript's
+native lockfile remains part of the pin. Strict pre/post pin equality stays.
+
+W2 must bind the existing /data routes to DataController/DataBinding using the
+new shared messages, documented in c3-controller-wire.md. GET records selects
+record/memo/depcache with lookup plus URL-escaped selector JSON. POST records
+uses commit/copy_memo with exactly its matching payload. W1/W7 still own live
+read/write authority, quota, receipts and physical-byte verification.
+
+Successful ReadFailure currently expects the declared direct JobFailure object.
+C1/C2 still need to specify the successful response for a terminal job with no
+recorded failure. The client never synthesizes a failure from a status string.
+
+## Amendment action ledger
+
+Every row naming W9 was checked. Transport completion does not imply its native
+host/controller/store integration is complete.
+
+| Amendment | W9 action / remaining owner integration |
+| --- | --- |
+| A1-03 | Removed all decoder bypasses; real shared error decoding tested. |
+| A1-08, A1-09, A1-55 | Mixed/named/launcher routes and one-time replay behavior implemented and tested. Reclaim timing remains W1/W2 authority. |
+| A1-10 | Hidden installer dispatch/validation/masking and TS preparation implemented. W3 compiler binding and W8 caller/pin implementation remain. |
+| A1-11 | Amended Source.Location survives private wire tests. CLI acquisition/sealing remains in the hosting cutover. |
+| A1-13 | MaterializeOnly crosses reconcile unchanged with persisted execution result. W1/W3 implement awards and dispatch. |
+| A1-14, A1-15 | Recovery failure read and scoped job cancel adapters implemented/tested. W1/W2 server/store behavior remains. |
+| A1-16, A1-17, A1-18, A1-19 | Restricted state, current expansion jobs, source fences, attempt ordinal, engine and granted identity survive typed transport tests. W3/W8 host composition remains. |
+| A1-20, A1-22 | Kept amended server authority/evidence contracts. W9 bodies do not supply actor/grants. Native provisioning and audit remain W1/W2. |
+| A1-29, A1-30, A1-34 | Data signer/record transport implemented with explicit verified-default lookup and member metadata. RemoteCache composition and server binding remain. |
+| A1-37 | Merged lint consumer no longer uses cache HTTP. SDK cache/key migration remains W4/W7. |
+| A1-38 | Cloud payload types retained; sync/exchange adapters and immutable state tests added. W2 bootstrap and W8 pod integration remain. |
+| A1-39, A1-40, A1-41 | Retained amended runner/runtime/readiness/home/stay contracts. Native constructors, foreground handler, stable tick and final runner startup remain W8/W9 composition. |
+| A1-43 | Existing shared notice rendering and upgrade verifier retained. Historical assets/index/resolution are W8 and remain stubs. |
+| A1-45, A1-47 | Retained merged settings/guard fixes and CLI project-reader cutover. Final host/schedule composition remains. |
+| A1-49 | Final credential-file writer and failure rollback/revocation implemented/tested. W8 service dispatcher/templates still use agent rather than start. |
+| A1-50 | Safe observation, typed wire and installer adapters advanced. Local/here/detached hosting, sealed resume, publication and cache opt-in remain unfinished. |
+| A1-51 | W9 client API snapshot/docs/mirrors synchronized. Public command-reference drift test passes. v2 schemas/corpus and old runtime consumers still need W4/W3/W8 coordination. |
+| A1-52 | No release packaging changes. Native Windows bridges and stamping remain W5/W8/W9 integration. |
+| A1-53 | Added fake-transport acceptance contract tests. All native T1 cells and real-repository launch QA remain unclaimed. |
+
+## Evidence and accounting
+
+Added 36 test functions across the installer, data client, engine amendments,
+acceptance transport and runner rollback tests. Ported runner schema/loading,
+service-failure and forced-replacement checks to cleanup/revocation behavior.
+The parked inventory assigns no original source function directly to W9.
+
+Passing acceptance additions:
+TestEngineAmendmentsPreservePrivateWireContract and
+TestEngineAmendmentsNeverReplayOneTimeAuthority. Both use public clients with
+HTTP/api.sock fake RoundTrippers. No native T1 cell was unskipped. The entire
+existing tests/acceptance suite passes, including its honest native skips.
+
+Whole-repository build, focused W9 vet, full clisurface/controllerwire and
+acceptance suites pass. Focused CLI tests cover installer, runners/enrollment,
+queue, doctor, warming, upgrade, help and generated references. Focused client
+suites cover data, engine, logs, reviews, secrets, schedules and queue.
+Documentation mirror/changelog/catalog checks and commentcheck pass.
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false and isolated
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Tests use -p 4 at most.
+
+W9-edited tracked Go files show 172 gross removed lines versus starting HEAD,
+including incoming merge adaptations. This is not a net reduction claim.
+The incoming obsolete secret_local_test.go has 160 lines and stays deleted as
+on W9's HEAD. Removed decoder overrides/split claim routing and the unused
+eight-line firstNonBlank helper. No other whole tracked file was deleted here.
+
+Friction: root sleepcheck reports two inherited W6 wall-clock checks in
+internal/limits/deadline_test.go (58 and 66). W9's new tests add no sleeps.
+Seven non-W9 public API snapshots still drift: controller, projectconfig, match,
+store, storage/storeurl, storage and sparkwing. Only the W9 client snapshot was
+updated. Pipelines, sockets, native Windows/Darwin, full legacy suites and release
+QA were not run. Git identity remains Korey Gambill and core.worktree is unset.
+
+Shared files touched: CHANGELOG.md, .apidiff/pkg_controller_client.txt,
+pkg/docs/changelog.md and generated mirrors, tests/acceptance/engine_amendments_test.go,
+design/rewrite/contracts/c3-controller-wire.md, c3-engine-version.md and this
+handoff. No other-area production caller migration was necessary. No Git writes,
+release operations or external messages occurred. Scratch is deleted before the
+final report. The remaining W9 work in the earlier handoff below still applies.
+
+---
+
 # W9 continuation handoff
 
 W9 remains incomplete. This continuation started at `d9e4ba202` with a clean

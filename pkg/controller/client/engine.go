@@ -13,14 +13,16 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type engineClient struct {
-	base        string
-	http        *http.Client
-	bearer      func(context.Context) (string, error)
-	launcher    bool
-	decodeError func([]byte) (*apierr.Error, error)
+	base     string
+	http     *http.Client
+	bearer   func(context.Context) (string, error)
+	launcher bool
 }
 
 func (c *engineClient) request(ctx context.Context, method, pattern, path, key string, input, output any) error {
@@ -57,6 +59,14 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		}
 	}
 	mayRetry := policy.Retry == capability.RetrySafe || policy.Retry == capability.RetryExactBody || policy.Retry == capability.RetryIdempotencyKey && key != ""
+	// safety: intake replay cannot recover a lost one-time here bearer.
+	switch input := input.(type) {
+	case controllerwire.CreateRunRequest:
+		mayRetry = mayRetry && input.Request.Options.Runner.Value.Kind != runspec.RunnerHere
+	case controllerwire.RetryRequest:
+		// safety: the source run's sealed runner selection is unavailable at this boundary.
+		mayRetry = false
+	}
 	for attempt := 0; ; attempt++ {
 		resp, requestErr := c.http.Do(req)
 		if requestErr != nil {
@@ -108,7 +118,7 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 		if !ok {
 			return false, fmt.Errorf("controller response is missing its error envelope")
 		}
-		failure, err := c.decodeError(inner)
+		failure, err := apierr.DecodeInner(inner)
 		if err != nil {
 			return false, fmt.Errorf("decode controller error: %w", err)
 		}
@@ -118,7 +128,8 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 		retry := resp.StatusCode == http.StatusServiceUnavailable && failure.Code == apierr.Unavailable || resp.StatusCode == http.StatusTooManyRequests && failure.Code == apierr.RateLimited
 		return retry, failure
 	}
-	if _, exists := fields["error"]; exists {
+	// safety: recovery carries a persisted inner error as part of its successful result.
+	if _, exists := fields["error"]; exists && reflect.TypeOf(output).Elem() != reflect.TypeFor[nodeproto.JobFailure]() {
 		return false, fmt.Errorf("successful controller response contains an error")
 	}
 	if err := requiredResponseFields(fields, reflect.TypeOf(output).Elem()); err != nil {
@@ -210,6 +221,10 @@ func responseValue(raw json.RawMessage, typ reflect.Type) error {
 		default:
 			return fmt.Errorf("null is not a %s", typ.Kind())
 		}
+	}
+	if typ == reflect.TypeFor[apierr.Error]() {
+		_, err := apierr.DecodeInner(raw)
+		return err
 	}
 	if reflect.PointerTo(typ).Implements(reflect.TypeFor[json.Unmarshaler]()) {
 		return nil

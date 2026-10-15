@@ -56,7 +56,7 @@ func runPipelineLint(args []string) error {
 	if err != nil {
 		return err
 	}
-	path, cfg, err := projectconfig.DiscoverPipelines(cwd)
+	path, cfg, err := projectconfig.Discover(cwd)
 	if err != nil {
 		return err
 	}
@@ -65,13 +65,13 @@ func runPipelineLint(args []string) error {
 		return err
 	}
 
-	findings, err := pipelinelint.Analyze(sourceDir, cfg)
+	findings, err := pipelinelint.Analyze(sourceDir, cfg.Registry())
 	if err != nil {
 		return fmt.Errorf("lint: %w", err)
 	}
 
 	if parsed.pipeline != "" {
-		entrypoint := cfg.EntrypointsByName()[parsed.pipeline]
+		entrypoint := cfg.Registry().EntrypointsByName()[parsed.pipeline]
 		if entrypoint == "" {
 			return fmt.Errorf("lint: no pipeline named %q in %s", parsed.pipeline, filepath.Base(path))
 		}

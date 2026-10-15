@@ -49,7 +49,7 @@ func TestEngineClientRoutes(t *testing.T) {
 		{"plan", "POST", "/api/v1/runs/r1/plan", controllerwire.PlanAccepted{Replayed: true}, func(c controllerwire.Controller) (any, error) {
 			return c.AcceptPlan(ctx, "r1", controllerwire.PlanSubmission{})
 		}},
-		{"claim", "POST", "/api/v1/runners/jobs/claim", controllerwire.ClaimResponse{}, func(c controllerwire.Controller) (any, error) {
+		{"claim", "POST", "/api/v1/runners/claim", controllerwire.ClaimResponse{}, func(c controllerwire.Controller) (any, error) {
 			return c.Claim(ctx, controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitNode}})
 		}},
 		{"renew", "POST", "/api/v1/claims/c1/heartbeat", controllerwire.RenewalResponse{CancelRequested: true, CancelReason: "cancel", WatchedJobs: []string{"j1"}}, func(c controllerwire.Controller) (any, error) {
@@ -58,7 +58,7 @@ func TestEngineClientRoutes(t *testing.T) {
 		{"transition", "POST", "/api/v1/runs/r1/jobs/j1/transition", controllerwire.Applied{StateSeq: 5, Attempt: 2, Generation: 3, Replayed: true}, func(c controllerwire.Controller) (any, error) {
 			return c.TransitionJob(ctx, "r1", "j1", controllerwire.JobTransitionRequest{To: "finished"})
 		}},
-		{"reconcile", "POST", "/api/v1/runs/r1/jobs/j1/reconcile", controllerwire.ReconcileResponse{Kind: "execute", Job: controllerwire.JobDetail{ID: "j1"}}, func(c controllerwire.Controller) (any, error) {
+		{"reconcile", "POST", "/api/v1/runs/r1/jobs/j1/reconcile", controllerwire.ReconcileResponse{Kind: "execute", Job: controllerwire.ExecutionJob{JobDetail: controllerwire.JobDetail{ID: "j1"}}}, func(c controllerwire.Controller) (any, error) {
 			return c.ReconcileJob(ctx, "r1", "j1", controllerwire.ReconcileRequest{})
 		}},
 		{"expand", "POST", "/api/v1/runs/r1/jobs/j1/expansion", controllerwire.ExpansionAccepted{SourceGeneration: 3, State: "succeeded", Jobs: []controllerwire.ExpandedJob{}}, func(c controllerwire.Controller) (any, error) {
@@ -105,21 +105,13 @@ func TestEngineClientErrorsAndRetry(t *testing.T) {
 	for _, code := range []apierr.Code{apierr.LockHeld, apierr.IllegalTransition, apierr.Forbidden, apierr.Unauthenticated, "future_code", apierr.Unavailable} {
 		t.Run(string(code), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				calls, decodes := 0, 0
+				calls := 0
 				c := testEngine(t, func(r *http.Request) (*http.Response, error) {
 					calls++
 					resp := engineResponse(apierr.Status(code), `{"error":{"code":"`+string(code)+`","message":"safe","hint":"next","details":{"reason":"binding"}},"future":true}`)
 					resp.Header.Set("Retry-After", "1")
 					return resp, nil
 				})
-				c.decodeError = func(raw []byte) (*apierr.Error, error) {
-					decodes++
-					var e apierr.Error
-					if strings.Contains(string(raw), `"error"`) {
-						t.Fatal("decoder received an outer envelope")
-					}
-					return &e, json.Unmarshal(raw, &e)
-				}
 				_, err := c.Renew(t.Context(), "c1", controllerwire.RenewalRequest{})
 				var failure *apierr.Error
 				if !errors.As(err, &failure) || failure.Code != code || failure.Hint != "next" {
@@ -129,8 +121,8 @@ func TestEngineClientErrorsAndRetry(t *testing.T) {
 				if code == apierr.Unavailable {
 					want = UnavailableRetries + 1
 				}
-				if calls != want || decodes != calls {
-					t.Fatalf("calls=%d decodes=%d want=%d", calls, decodes, want)
+				if calls != want {
+					t.Fatalf("calls=%d want=%d", calls, want)
 				}
 			})
 		})
@@ -236,12 +228,12 @@ func TestEngineClientNamedClaimsAndSelectorEscaping(t *testing.T) {
 		request controllerwire.ClaimRequest
 		path    string
 	}{
-		{controllerwire.ClaimRequest{RunID: "here-1"}, "/api/v1/runs/here-1/claim"},
-		{controllerwire.ClaimRequest{RunID: "r1", JobID: "group/build"}, "/api/v1/runs/r1/jobs/group%2Fbuild/claim"},
-		{controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitTrigger}}, "/api/v1/runners/runs/claim"},
+		{controllerwire.ClaimRequest{RunID: "here-1", Kinds: []capability.UnitKind{capability.UnitTrigger}}, "/api/v1/runs/here-1/claim"},
+		{controllerwire.ClaimRequest{RunID: "r1", JobID: "group/build", Kinds: []capability.UnitKind{capability.UnitNode}}, "/api/v1/runs/r1/jobs/group%2Fbuild/claim"},
+		{controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitTrigger}}, "/api/v1/runners/claim"},
 	} {
 		c := testEngine(t, func(r *http.Request) (*http.Response, error) {
-			if r.URL.EscapedPath() != tt.path || r.Header.Get("Idempotency-Key") == "" {
+			if r.URL.EscapedPath() != tt.path || r.Header.Get("Idempotency-Key") != "" {
 				t.Fatalf("wrong claim: %s", r.URL)
 			}
 			return engineResponse(200, `{}`), nil

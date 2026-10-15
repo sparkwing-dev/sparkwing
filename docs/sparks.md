@@ -216,7 +216,7 @@ in their `go.mod`.
 
 ### Flow
 
-On every `sparkwing run <pipeline>` run (and on explicit `sparkwing pipeline sparks resolve`):
+When a pipeline build resolves its sparks:
 
 1. If the `sparks:` block is absent, no-op. Compile with plain `go build`
    against the user's `go.mod`.
@@ -359,7 +359,7 @@ pinning is suspended for the duration. The `pre-release` gate refuses to
 push a committed `go.work` or `go.work.sum`, so this stays a local-only
 convenience -- shipped builds always go through the overlay.
 
-`sparkwing pipeline sparks resolve` still runs while a workspace is in
+Spark resolution still runs while a workspace is in
 scope: it writes `.resolved.mod` as usual but skips materializing
 `.resolved.sum` (the toolchain refuses `go mod download -modfile=X` under
 `go.work`), printing a one-line notice. Remove the workspace file or set
@@ -420,10 +420,15 @@ For the exact flags each subcommand takes, see
 
 ### Warmup
 
-`sparkwing cache warm` resolves the checkout's sparks versions and compiles its
-Go pipeline into the same local cache used by `sparkwing run`. TypeScript
-checkouts install their declared dependencies with `npm ci`. Warming never
-executes the pipeline or transfers compiled binaries to another machine.
+`sparkwing cache warm` prepares TypeScript dependencies with `npm ci` without
+executing the pipeline. It filters the install environment and masks stdout,
+stderr and preparation errors, including proxy usernames and passwords. A failed
+install or diagnostic write produces an error without a success receipt.
+
+Go preparation requires the shared compiler's explicit environment and diagnostic
+bindings. This build reports `unavailable` for Go warming until that binding is
+present. It does not invoke the legacy compiler, whose environment and output
+bypass those bindings.
 
 Pass `--clear-cache` to prune the local binary cache first. Entries held by a
 running process remain protected. JSON returns one `cache_warm` receipt with
@@ -437,11 +442,12 @@ sparkwing cache warm --checkout /path/to/repo --clear-cache -o plain
 ```
 
 <!-- design:begin -->
-The command uses the shared `procenv.Install` policy before pruning or building.
-Its implementation is still a dependency of this rewrite build. Command tests
-supply that policy through a fake. Native warming needs the process-environment
-implementation. Local compilation and TypeScript dependency preparation are
-separately tested with fake compiler and package-manager executables.
+The command uses the shared `procenv.Install` implementation before pruning or
+preparing dependencies. Native TypeScript tests use a fake package-manager child
+process to check invocation, filtering and masking. They do not prove a real npm
+dependency installation. Go component tests supply preparation through a fake.
+The native Go compiler still needs its shared binding, matching engine selection,
+complete cache identity and executable-lease ownership.
 <!-- design:end -->
 
 ### Inflating a spark library

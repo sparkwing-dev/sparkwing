@@ -174,12 +174,11 @@ K=V`, which the SDK's docker and services helpers use, puts the value on the
 docker CLI's command line, which every account on a
 shared self-hosted host can read in the process table.
 
-**The laptop dashboard admits the account that started it.** `sparkwing
-serve start` mounts the controller API and the dashboard on one listener
+**The laptop dashboard admits the account that started it.** `sparkwing dashboard start` mounts the controller API and the dashboard on one listener
 and requires the token in `serve-token` under the Sparkwing home, a `0600`
 file, so another account on the machine that reaches the loopback port is
 refused. The CLI sends the token as a bearer; a browser signs in once
-through the link `sparkwing serve status` prints, whose single-use code the
+through the link `sparkwing dashboard status` prints, whose single-use code the
 page trades for a session it keeps in `localStorage` and sends as a bearer.
 A session has no expiry and survives restarts; deleting `serve-token` and
 restarting the dashboard ends every browser session.
@@ -269,7 +268,7 @@ bearer is, under the budget below.
 
 Bearer verification carries the same protection, keyed on the client
 address and the 12-character token prefix, which is public
-(`sparkwing cluster tokens list` prints it). Ten failed verifications for one
+(`sparkwing tokens list` prints it). Ten failed verifications for one
 prefix from one client in a minute and further attempts answer `429`
 without hashing. Keying on the pair matters: a prefix-only budget would let a stranger who reads a prefix
 deny that runner its own token on any cold cache. Only a genuine hash
@@ -572,7 +571,7 @@ A profile fills a guard only where the command line and the environment
 named none, and a guard the operator named wins whatever its value,
 including an explicit zero that turns it off. Raising one guard on a
 hosted controller is one flag beside the profile rather than a fork of
-it. `sparkwing cluster limits show` prints the budgets in force beside
+it. `sparkwing operator limits show` prints the budgets in force beside
 the stored compute guards.
 
 ## GitHub webhooks
@@ -724,112 +723,16 @@ and the run fails; completing it takes `force_retag: true`, which moves the
 version tag onto bytes nobody pinned. Prefer `publish_images: false` unless
 the published images are known bad.
 
-## Cache service
+## Signed data access
 
-`sparkwing-cache` requires a cache grant, signed with the grant key in the file
-`cache-grant-key` in its `--credentials-dir`, on every route that touches
-repository content: git clone and registration, the binary and
-dependency-archive blob routes, and the admin routes. A run's grant is
-confined to its team and repository; the operator grant the controller signs
-for its own proxy, team purge and store-ceiling calls lasts five minutes and
-reaches every route. The cache accepts no static token, so no person holds a
-credential for it: an operator reaches it through the controller's
-`admin`-scoped `/api/v1/gitcache/...` and `/api/v1/cache/store-ceiling/...`
-routes. The cache serves no source archives, single
-files, uploads or seeds: it fills a mirror only from origin. It
-refuses to start without a grant key unless the operator passes
-`--allow-unauthenticated`, which
-logs a startup warning. The guard has no network-location exemption: an
-in-cluster caller, a port-forward, and an ingress request are all rejected
-without the bearer, because a caller-controlled header cannot prove where a
-request came from. `/health`, `/metrics`, `/stats`, and the pull-through
-package proxy under `/proxy/` stay open, because package managers fetch
-through the proxy without a credential and it serves upstream registry bytes
-rather than repository content. A cache published outside the cluster starts
-with `--disable-proxy`, which drops `/proxy/` and `/stats`, and
-`--metrics-addr`, which moves `/metrics` to a listener the ingress does not
-route to.
+The separate cache service, cache grants and its package proxy are removed from
+the final storage design. Do not provision a cache-service credential. Controller
+`/data` operations use capability data grants, current unit authority and
+short-lived signed transfers. Byte existence alone grants no read or publication
+right. See [data uploads](data-uploads.md) and [authentication](auth.md).
 
-In the other direction the cache counts each team's storage and downloads on
-the controller's `/internal/storage/...`, `/internal/downloads/charge` and
-`/internal/egress/totals` routes with a `service` token holding only the
-`storage.count` scope, the file `controller-token` in its `--credentials-dir`.
-It is an ordinary hashed row in the tokens table: `sparkwing cluster tokens
-list --type service` shows it, and rotating it is minting a new one and
-revoking the old.
-
-Registering a repository name validates it against
-`^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a
-different repository requires the token even on an unauthenticated cache.
-Every response carries `X-Content-Type-Options: nosniff`, and blob downloads
-are served as `application/octet-stream` or `application/gzip`.
-
-Off-cluster runners read Git through
-`/api/v1/runs/<run>/gitcache/git/...`. That route requires `nodes.claim`, a
-live claim on the named run, and the repository recorded on its trigger. The
-unscoped `/api/v1/gitcache/git/...` route remains admin-only. The controller
-drops the caller's bearer and presents its own cache credential upstream, and
-permits only registration and upload-pack reads. A
-direct cache receives the run's cache grant instead, which opens only that
-team's blob trees. Every grant names the live claim that asked for it and the
-run's repository and refs; the cache refuses one that names neither, so no
-grant opens a team's whole tree. A claim token's grant lasts five minutes and
-its pod renews it. A runner token's grant, minted through its live node or
-trigger claim fence, lasts six hours or until the token expires, and the cache
-honors it on its signature alone for that window even after the member who
-held the token is removed.
-
-Within a team, a grant carries the repository and refs the controller read
-from the run's trigger, and the cache writes `/cache` and `/bin` entries only
-under the run's own ref. It reads that ref, the pull request's
-base branch, the default branch, and then entries written before grants
-carried a scope, in that order. A branch's run therefore cannot replace or
-delete an entry its base branch's runs restore, and another repository's run
-does not read it. A run's ref counts only when the server holds it: a signed
-GitHub webhook, a schedule that follows the branch tip, or a retry or child of
-one of those that keeps its ref and commit and uploads no source. A run whose
-ref and commit its submitter chose, including a member with `runs.write`
-naming `main` from the CLI, API or dashboard, writes under a ref of its own and
-never over what `main`'s pushes restore. Entries a
-run writes under its own ref are still restored by that ref's later runs, so
-whoever can push a branch can poison that branch's cache.
-
-Content-addressed artifact keys (`artifacts/blobs/<sha256>` and
-`artifacts/manifests/<sha256>`) are the exception: they are shared by the
-whole team, as the controller's direct uploads already store them, so a
-memoized or retried node on another ref can stage what a feature ref
-produced. The cache refuses an upload whose bytes do not hash to the key,
-refuses a grant's delete of one, and every reader checks the digest again, so
-a branch can add artifacts but cannot change the bytes another run stages.
-Which manifest a node stages is decided by the controller's run and memo
-records, not by the cache.
-
-The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
-cache pod (`networkPolicy.enabled`, on by default). It admits the release's
-runner and controller pods plus the Job pods the Kubernetes runner
-backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
-render a non-`ClusterIP` cache Service unless a token Secret is configured. A
-controller or runner pool outside the cluster reaches the cache through
-`networkPolicy.extraIngress`, which is appended to the rule verbatim and takes
-an `ipBlock` for the caller's source range.
-
-`pipeline trigger --working-tree` refuses to upload a snapshot whose manifest
-holds a secret-shaped file: by name, by a key or certificate block in any text
-file, or by the first 64 KiB of a settings or manifest file, using the
-credential vocabulary the detached-run environment filter uses. An operator sends such a file only by naming its path
-with `--allow-secret-file`, so the audit of what left the laptop is the command
-itself.
-
-`pipeline trigger --working-tree` uploads one immutable source object per
-submission. The controller binds it to one run and signs reads only for that
-run's live claim. An unused upload expires 24 hours after commit; a bound
-upload stays through a queued or running run and expires 24 hours after that
-run finishes. A retry uploads a new bundle. Source bytes count against the
-team's cache storage share. The hourly storage pass deletes the S3 object
-before releasing its database row and quota.
-
-The cache's unauthenticated `/metrics` carries no per-repository label, so
-scraping it does not enumerate or confirm the mirror set.
+Native authorization, record, quota and physical-byte verification still require
+the final controller/store/storage bindings in this rewrite build.
 
 ## Local daemon socket
 
@@ -991,9 +894,7 @@ scanner failure on `main` is what holds a release back, before the tag exists.
 
 - **Set the auth tokens.** With an empty tokens table the controller
   serves every endpoint unauthenticated. It logs a warning at startup,
-  reports `"auth": "disabled"` on `GET /api/v1/health`, and `sparkwing
-  cloud status --cluster` flags the controller probe as a warning -- fine for a
-  laptop, not for a shared deployment. Pass `--require-auth` so the pod refuses to start with an empty tokens
+  reports `"auth": "disabled"` on `GET /api/v1/health`, and an authenticated run query must succeed before a deployment is considered ready. Pass `--require-auth` so the pod refuses to start with an empty tokens
   table. A controller with a multi-team license never serves
   unauthenticated, whatever the tokens table holds. See [auth.md](auth.md).
 - **Provision the first admin token.** Hand the controller the first

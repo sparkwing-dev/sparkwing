@@ -3,14 +3,14 @@ package cluster
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func parseReserve(s string) (reserve, error) {
-	b, err := wingd.ParseBudget(s)
+	b, err := userconfig.ParseBudget(s)
 	if err != nil {
 		return reserve{}, err
 	}

@@ -101,8 +101,8 @@ Your laptop:
 
 Your laptop runs the pipeline directly. No sparkwing controller is
 involved. Each invocation's outcome lands in the SQLite store under
-`~/.sparkwing/`, which is what `sparkwing serve start` reads.
-Run `sparkwing serve start` once and leave it up to watch
+`~/.sparkwing/`, which is what `sparkwing dashboard start` reads.
+Run `sparkwing dashboard start` once and leave it up to watch
 concurrent runs in a browser without needing any remote service.
 
 The run does not open that store. `sparkwing run` hosts the run: it
@@ -345,59 +345,12 @@ lineage. Otherwise it attaches under the lease root and the daemon logs the
 requested and resolved parents. Clients that send only the inherited lease
 token also attach under the root.
 
-#### The consumer process
+#### The local controller queue
 
-One consumer per sparkwing home claims queued runs and executes them.
-`sparkwing run --sw-detached` starts one when none is resident and confirms it
-owns the queue *before* acknowledging your run, so the acknowledgment
-means the machine has taken ownership -- not merely that a child was
-forked. The consumer exits on its own after five idle minutes.
-
-Exactly one serves a home at a time, enforced by a file lock rather than
-a PID check: a consumer killed with `kill -9` releases the lock
-immediately and leaves nothing stale to clean up. A running dashboard
-consumes the same queue; whichever holds the lock does the work and the
-other stands down, so a run is never dispatched twice.
-
-```bash
-sparkwing runs consumer status   # exits 1 when none is resident
-sparkwing runs consumer start    # keep one up deliberately
-sparkwing runs consumer stop     # queued runs stay queued
-```
-
-Consumer lifecycle commands emit one compact JSON status record when piped:
-`service`, `state`, `home`, `log`, and `pid` when known. `--output plain`
-prints only `running` or `stopped`. `--output pretty` requests the terminal
-layout. A stopped status exits 1; stopping an absent consumer exits 0.
-
-
-Recovery is automatic in both directions. Work queued while no consumer
-is resident runs as soon as one comes back. A run whose consumer was
-killed mid-dispatch stops having its claim renewed, and the next
-consumer sweeps the lapsed claim back onto the queue -- unless the run
-already reached a terminal status, in which case the claim is closed out
-rather than re-executed. Every acknowledged run ends up recoverable or
-terminal; none is lost, and none runs twice. A re-executed run is the
-same run, not a new one: it keeps the run id you were given along with
-its arguments, trigger, and submission time, and only its start time
-reflects the attempt that actually ran.
-
-Stopping a consumer never cancels queued runs. Use `runs cancel` for
-that.
-
-A run that is *executing* when you stop the consumer is interrupted and
-returned to the queue, not failed: it never reached a verdict, so the
-next consumer re-executes it from the start. If you want it to stop for
-good, cancel it rather than stopping the consumer.
-
-The consumer is also replaced when it is out of date. It records the
-sparkwing version it was built from, and a detached launch from a different
-build stops the old consumer and starts one from the new binary --
-otherwise a home with a steady queue would keep serving every run from
-the build that happened to start first, and an upgrade would never take
-effect. Replacing a consumer interrupts whatever it was executing, on
-the same terms as stopping one: that run returns to the queue and the
-new consumer re-executes it from the start.
+Detached execution belongs to the local controller's queue. There is no separate
+public consumer process. Its runtime owns queue consumption, admission and state
+for one home. Controller startup and detached host composition still need native
+integration in this rewrite build. See [Local dashboard](native-mode.md).
 
 ### Reading recent local logs
 
@@ -711,7 +664,7 @@ credentials. It refuses `--working-tree` snapshots unless the section
 also sets `accept_working_tree: true`, which you want when you send your own
 `sparkwing pipeline trigger --working-tree` runs to this machine. The list follows the rules in
 [What a laptop runner trusts](#what-a-laptop-runner-trusts).
-`sparkwing cluster runners add --allow-repo 'github.com/acme/*'` writes it.
+`sparkwing runners add --repos 'github.com/acme/*'` writes it.
 An agent section without `allow_repos` keeps the proxy, as before.
 
 ### Remote machine capacity
@@ -722,7 +675,7 @@ sets either key fails to load and says enrolled mode has been removed.
 
 The configuration uses the outbound FIFO `/api/v1/nodes/claim` loop. Its
 `labels` are self-asserted placement terms, not administrator-trusted
-capabilities. `sparkwing cluster runners add` and the bundled service installer
+capabilities. `sparkwing runners add` and the bundled service installer
 both write this format. Existing sections keep their `local_admission` setting,
 including an explicit `false`; when enabled, local admission happens after a
 claim.
@@ -904,13 +857,13 @@ for WAL mode. Keep the local database on one host rather than a network share.
 
 Laptop mode trusts the user account on the machine, and nothing narrower.
 
-`sparkwing serve start` serves the controller API and the dashboard from
+`sparkwing dashboard start` serves the controller API and the dashboard from
 one process. Loopback is not a user boundary, because every account on the
 machine can connect to `127.0.0.1`, so the listener requires the token in
 `serve-token` under the Sparkwing home. The file is created `0600` on first
 start and stays the same across restarts. The CLI reads it and sends it as a
 bearer. A browser signs in once through the dashboard link that
-`sparkwing serve start` and `sparkwing serve status` print: its `#code=`
+`sparkwing dashboard start` and `sparkwing dashboard status` print: its `#code=`
 fragment is a single-use code, valid for five minutes, which never reaches a
 server or its logs. The page trades it for a session credential derived from
 the token and keeps that in its origin's `localStorage`, which is scoped to

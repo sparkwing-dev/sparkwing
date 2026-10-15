@@ -81,12 +81,6 @@ func TestScheduleManagerReturnsStructuredNotFound(t *testing.T) {
 		}
 		return engineResponse(404, `{"error":{"code":"not_found","message":"schedule not found"}}`), nil
 	})
-	c.decodeError = func(inner []byte) (*apierr.Error, error) {
-		if string(inner) != `{"code":"not_found","message":"schedule not found"}` {
-			t.Fatalf("decoder received more than the inner error: %s", inner)
-		}
-		return &apierr.Error{Code: apierr.NotFound, Message: "schedule not found"}, nil
-	}
 	_, err := c.ReadSchedule(t.Context(), "missing", controllerwire.ScheduleReadQuery{})
 	var structured *apierr.Error
 	if !errors.As(err, &structured) || structured.Code != apierr.NotFound || calls != 1 {

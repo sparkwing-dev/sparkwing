@@ -4,23 +4,6 @@
 
 Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated from the Go structs the config parser enforces. `Required` reflects whether the field may be omitted. See [storage backends](backends.md) for profiles and [spark libraries](sparks.md) for library configuration.
 
-## Top level
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `defaults` | `Defaults` | no | Defaults carries the per-pipeline fields each pipeline inherits unless it declares its own. See Defaults for the per-field merge semantics. |
-| `profiles` | `map[string]*profile.Profile` | no | Profiles maps profile name to its surface bundle. The same shape as the profiles section of ~/.config/sparkwing/config.yaml; project profiles are selected by pipeline.profile or by the CLI's --profile, user profiles by --profile alone. |
-| `pipelines` | `[]pipelines.Pipeline` | no |  |
-| `sparks` | `[]sparks.Library` | no |  |
-
-## `defaults`
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `args` | `map[string]string` | no | Args supplies per-arg default values for every pipeline. Each key is layered under pipeline.args (pipeline wins per-key), and the merged map overrides a field's `default` tag while an explicit operator CLI flag overrides it. |
-| `guards` | `pipelines.Guards` | no | Guards apply to every pipeline. Wholesale-replaced by a pipeline that declares its own non-empty guards block. |
-| `requires` | `[]string` | no | Requires are runner labels every pipeline's jobs must satisfy in addition to their own Job.Requires(). Wholesale- replaced by pipeline.requires when set. |
-
 ## Pipeline entry (a `pipelines:` list item)
 
 | Field | Type | Required | Description |
@@ -73,9 +56,9 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | no | Name distinguishes several cadences on one pipeline and appears in `sparkwing crons list` as <repo>/<pipeline>/<name>. Required once a pipeline declares more than one entry; a lone entry is named "default". It matches `^[a-z0-9][a-z0-9-]*$` and is at most 40 characters. |
+| `name` | `string` | no | Name distinguishes several cadences on one pipeline and appears in `sparkwing schedules list` as <repo>/<pipeline>/<name>. Required once a pipeline declares more than one entry; a lone entry is named "default". It matches `^[a-z0-9][a-z0-9-]*$` and is at most 40 characters. |
 | `cron` | `string` | **yes** | Cron is a five-field cron expression (minute hour day-of-month month day-of-week) with the usual lists, ranges, steps, month and day names, and the @hourly/@daily/@weekly/@monthly/@yearly aliases. |
-| `where` | `string` | **yes** | Where says which side fires this entry: "local" fires from a host that armed it with `sparkwing crons install`, "controller" from a controller it was installed on. One side per entry, and there is no default, so nothing fires somewhere you did not say it should. Declare one entry per side to fire from both. |
+| `where` | `string` | **yes** | Where says which side fires this entry: "local" fires from a host that armed it with `sparkwing schedules install`, "controller" from a controller it was installed on. One side per entry, and there is no default, so nothing fires somewhere you did not say it should. Declare one entry per side to fire from both. |
 | `tz` | `string` | no | TZ is the IANA zone the expression is read in, such as America/Denver. Default UTC. The word "local" means the zone of the host that runs the schedule. |
 | `overlap` | `string` | no | Overlap decides what happens when the cadence comes due while the previous scheduled run is still running: "skip" (default) records the fire as skipped, "queue" launches it anyway and lets admission order it. |
 | `catch_up` | `string` | no | CatchUp is how long after its due minute a fire may still happen when the host was asleep or the timer was late, as a Go duration such as 1h or 30m. Default 1h; values under 2m are rejected, and a value over 24h is lowered to 24h when the schedule is evaluated. A due minute older than the window is recorded as missed. |

@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 type errReader struct{ prefix string }
@@ -106,9 +104,36 @@ func TestProbeAuthChecksFinalRunsRoute(t *testing.T) {
 				}
 				return tc.status, `{"runs":[],"next_cursor":"","truncated":false}`
 			})
-			result := probeAuth(t.Context(), &profile.Profile{Controller: &profile.ControllerSpec{URL: "https://controller.example", Token: "private-credential"}})
+			result := probeAuth(t.Context(), connectionFixture("", "https://controller.example", "private-credential"))
 			if result.Status != tc.want || calls != 1 {
 				t.Fatalf("probe: %+v calls=%d", result, calls)
+			}
+		})
+	}
+}
+
+func TestProbeAuthRefusesRedirectsAndMalformedSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"redirect", ``, http.StatusTemporaryRedirect},
+		{"malformed", `{"runs":"broken"}`, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := http.DefaultTransport
+			calls := 0
+			http.DefaultTransport = profileTransport(func(req *http.Request) (*http.Response, error) {
+				calls++
+				if req.URL.Path != "/api/v1/runs" {
+					t.Fatal("probe forwarded a reusable credential through a redirect")
+				}
+				return &http.Response{StatusCode: tc.status, Header: http.Header{"Location": []string{"https://controller.example/redirect"}}, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			t.Cleanup(func() { http.DefaultTransport = original })
+			result := probeAuth(t.Context(), connectionFixture("prod", "https://controller.example", "private-credential"))
+			if result.Status != "fail" || calls != 1 {
+				t.Fatalf("invalid probe response: %s, calls=%d", result.Status, calls)
 			}
 		})
 	}

@@ -23,7 +23,7 @@ Kinds:
 - **undecided**: an operator knob without a page yet; each one waits on a
   decision to document it or remove it.
 
-The services (`sparkwing-controller`, `sparkwing-cache`,
+The services (`sparkwing-controller` and
 `sparkwing-runner`) read their settings from flags and their secrets from
 the files in `--credentials-dir`, so no service configuration appears here.
 
@@ -38,19 +38,19 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 |---|---|
 | `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
 | `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
+| `SPARKWING_GITCACHE_URL` | [remaining cache readers](caching.md#rewrite-integration) |
 | `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
-| `SPARKWING_GITCACHE_URL` | [caching](caching.md), [gitcache](gitcache.md), [self-hosting](self-hosting.md) |
 
 ## Configuration: the `sparkwing` CLI and local runs
 
 | Variable | Described in |
 |---|---|
 | `SPARKWING_ADMISSION_CLASS` | [admission](admission.md) |
-| `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [cli-configure](cli-configure.md) |
+| `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [profiles](cli-profiles.md) |
 | `SPARKWING_CONFIG_ENV` | [machine-config](machine-config.md) |
 | `SPARKWING_DEBUG` | [sdk](sdk.md) |
 | `SPARKWING_FLEET_CONFIG` | [machine-config](machine-config.md) |
-| `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [schedules](schedules.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [cli-configure](cli-configure.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
+| `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [schedules](schedules.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [profiles](cli-profiles.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
 | `SPARKWING_PROFILES` | [machine-config](machine-config.md) |
 | `SPARKWING_REPOS` | [machine-config](machine-config.md) |
@@ -73,13 +73,13 @@ Set by Sparkwing for pipeline code and node processes.
 
 | Variable | Described in |
 |---|---|
+| `SPARKWING_CACHE_GRANT` | [remaining cache readers](caching.md#rewrite-integration) |
 | `SPARKWING_RUN_ID` | [architecture](architecture.md) |
 | `SPARKWING_NODE_ID` | [architecture](architecture.md) |
 | `SPARKWING_RUNNER_NAME` | [architecture](architecture.md) |
 | `SPARKWING_RUNNER_TYPE` | [architecture](architecture.md) |
 | `SPARKWING_RUNNER_LABELS` | [architecture](architecture.md) |
 | `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
-| `SPARKWING_CACHE_GRANT` | [gitcache](gitcache.md) |
 | `SPARKWING_SOURCE_DIR` | [git-credentials](git-credentials.md) |
 | `SPARKWING_STANDALONE_REASON` | [local-execution](local-execution.md) |
 | `SPARKWING_STATE_DB` | [local-execution](local-execution.md) |
@@ -93,15 +93,17 @@ Set by Sparkwing for pipeline code and node processes.
 
 ## Plumbing
 
+These names still have consumers in hosts being replaced by the rewrite. Protocol v2 passes its delegated route bearer in hello and Windows pipe handles in argv. Its final transport is described in [node-protocol](node-protocol.md). This inventory does not make the old environment transport part of v2.
+
 | Variable | Why it stays |
 |---|---|
 | `SPARKWING_DEBUG_PAUSE_BEFORE` | `sparkwing debug` sets it for the run it starts: pause before the named node. |
 | `SPARKWING_DEBUG_PAUSE_AFTER` | `sparkwing debug` sets it for the run it starts: pause after the named node. |
 | `SPARKWING_DEBUG_PAUSE_ON_FAILURE` | `sparkwing debug` sets it for the run it starts: pause when a node fails. |
-| `SPARKWING_PROTOCOL_HANDLES` | Windows only: the host sets it for a process it starts with `--sw-node-protocol`, naming the inherited request and frame pipe handles as `<request>,<frame>`. The SDK removes it at startup. Never set it by hand. See [node-protocol](node-protocol.md). |
-| `SPARKWING_NODE_URL` | The host sets it for a process it starts with `--sw-node-protocol`: the loopback base URL of the node's `/node/v1` routes. The SDK refuses any URL other than `http://127.0.0.1`, `http://[::1]` or `http://localhost` with a port. Never set it by hand. See [node-protocol](node-protocol.md). |
-| `SPARKWING_NODE_TOKEN` | The host sets it for a process it starts with `--sw-node-protocol`: the bearer for the node's `/node/v1` routes, valid until the process exits. The SDK removes it at startup, before any package's `init` can start a command, so no command inherits it. Never set it by hand. See [node-protocol](node-protocol.md). |
-| `SPARKWING_WORKERS` | Caps how many nodes a run executes at once, as `--sw-workers` does; `sparkwing run` reads it from its own environment when the flag is absent. |
+| `SPARKWING_PROTOCOL_HANDLES` | Legacy Windows pipe transport. V2 uses `--sw-protocol-handles <request>,<frame>` in argv. |
+| `SPARKWING_NODE_URL` | Legacy node-route location. V2 passes `binding.routes.url` in hello. |
+| `SPARKWING_NODE_TOKEN` | Legacy credential transport in unported hosts. V2 passes a delegated node-host bearer in `binding.routes.bearer` during hello, in memory. |
+| `SPARKWING_WORKERS` | Legacy dispatcher concurrency input. Final run worker selection uses shared settings and `--sw-workers`. |
 
 ## Test
 

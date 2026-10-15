@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -16,13 +17,14 @@ import (
 func TestCacheWarmPreparesLocalEntryAndReportsClearing(t *testing.T) {
 	for _, language := range []string{"go", "typescript"} {
 		var calls []string
-		deps := cacheWarmDependencies{buildEnv: cacheWarmTestEnvironment,
-			locate: func() (string, error) { calls = append(calls, "locate"); return "/checkout/.sparkwing", nil },
+		deps := cacheWarmDependencies{
+			buildEnv: cacheWarmTestEnvironment,
+			locate:   func() (string, error) { calls = append(calls, "locate"); return "/checkout/.sparkwing", nil },
 			clear: func(context.Context) (bincache.PruneResult, error) {
 				calls = append(calls, "clear")
 				return bincache.PruneResult{ReclaimedEntries: 2, LogicalRemovedBytes: 42}, nil
 			},
-			prepare: func(_ context.Context, dir string, env []string) (cacheWarmResult, error) {
+			prepare: func(_ context.Context, dir string, env []string, _ io.Writer) (cacheWarmResult, error) {
 				calls = append(calls, "prepare")
 				if !reflect.DeepEqual(env, []string{"PATH=/tools"}) {
 					t.Fatalf("preparation received the wrong environment: %v", env)
@@ -72,10 +74,11 @@ func TestCacheWarmFailureEmitsNoSuccess(t *testing.T) {
 			}
 			return nil
 		}
-		deps := cacheWarmDependencies{buildEnv: cacheWarmTestEnvironment,
-			locate: func() (string, error) { return "/checkout/.sparkwing", check("locate") },
-			clear:  func(context.Context) (bincache.PruneResult, error) { return bincache.PruneResult{}, check("clear") },
-			prepare: func(context.Context, string, []string) (cacheWarmResult, error) {
+		deps := cacheWarmDependencies{
+			buildEnv: cacheWarmTestEnvironment,
+			locate:   func() (string, error) { return "/checkout/.sparkwing", check("locate") },
+			clear:    func(context.Context) (bincache.PruneResult, error) { return bincache.PruneResult{}, check("clear") },
+			prepare: func(context.Context, string, []string, io.Writer) (cacheWarmResult, error) {
 				return cacheWarmResult{}, check("prepare")
 			},
 		}
@@ -88,9 +91,10 @@ func TestCacheWarmFailureEmitsNoSuccess(t *testing.T) {
 }
 
 func TestCacheWarmWithoutClearingReturnsThePath(t *testing.T) {
-	deps := cacheWarmDependencies{buildEnv: cacheWarmTestEnvironment,
-		locate: func() (string, error) { return "/checkout/.sparkwing", nil },
-		prepare: func(context.Context, string, []string) (cacheWarmResult, error) {
+	deps := cacheWarmDependencies{
+		buildEnv: cacheWarmTestEnvironment,
+		locate:   func() (string, error) { return "/checkout/.sparkwing", nil },
+		prepare: func(context.Context, string, []string, io.Writer) (cacheWarmResult, error) {
 			return cacheWarmResult{Path: "/cache/pipeline", Status: "cached"}, nil
 		},
 	}
@@ -132,5 +136,47 @@ func TestCacheWarmUsesInstallEnvironmentBeforeClearing(t *testing.T) {
 	var out bytes.Buffer
 	if err := runCacheWarmCommand(t.Context(), []string{"--clear-cache", "-o", "json"}, &out, deps); !errors.Is(err, failure) || out.Len() != 0 {
 		t.Fatalf("environment failure: %v %s", err, &out)
+	}
+}
+
+func TestCacheWarmMasksInstallerOutputAndErrors(t *testing.T) {
+	failure := errors.New("installer failed for p@ss")
+	var out, diagnostics bytes.Buffer
+	deps := cacheWarmDependencies{
+		locate:      func() (string, error) { return "/checkout/.sparkwing", nil },
+		environment: []string{"PATH=/tools", "HTTPS_PROXY=http://alice:p%40ss@proxy.test", "AWS_SECRET_ACCESS_KEY=private-credential"},
+		buildEnv:    procenv.Build, diagnostics: &diagnostics,
+		prepare: func(_ context.Context, _ string, env []string, output io.Writer) (cacheWarmResult, error) {
+			joined := strings.Join(env, "\n")
+			if !strings.Contains(joined, "HTTPS_PROXY=") || strings.Contains(joined, "AWS_SECRET_ACCESS_KEY") {
+				t.Fatalf("installer received the wrong filtered environment: %q", env)
+			}
+			for _, chunk := range []string{"using ali", "ce:p", "@ss\n"} {
+				if _, err := io.WriteString(output, chunk); err != nil {
+					return cacheWarmResult{}, err
+				}
+			}
+			return cacheWarmResult{}, failure
+		},
+	}
+	err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, &out, deps)
+	if !errors.Is(err, failure) || out.Len() != 0 || strings.Contains(err.Error(), "p@ss") || strings.Contains(diagnostics.String(), "alice") || strings.Contains(diagnostics.String(), "p@ss") {
+		t.Fatalf("installer leaked diagnostics: err=%v stdout=%s stderr=%s", err, &out, &diagnostics)
+	}
+}
+
+func TestCacheWarmFlushesDiagnosticsBeforeSuccess(t *testing.T) {
+	deps := cacheWarmDependencies{
+		locate:   func() (string, error) { return "/checkout/.sparkwing", nil },
+		buildEnv: procenv.Build, diagnostics: doctorFailedWriter{},
+		prepare: func(_ context.Context, _ string, _ []string, output io.Writer) (cacheWarmResult, error) {
+			_, err := io.WriteString(output, "done")
+			return cacheWarmResult{Path: "/cache/pipeline"}, err
+		},
+	}
+	var out bytes.Buffer
+	err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, &out, deps)
+	if !errors.Is(err, io.ErrClosedPipe) || out.Len() != 0 {
+		t.Fatalf("diagnostics failure reported success: err=%v out=%s", err, &out)
 	}
 }

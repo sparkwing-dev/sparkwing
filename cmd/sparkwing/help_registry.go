@@ -291,7 +291,6 @@ var (
 	cmdDaemonStatus                   = surfaceCommand("sparkwing daemon status")
 	cmdDaemonRestart                  = surfaceCommand("sparkwing daemon restart")
 	cmdInfo                           = surfaceCommand("sparkwing info")
-	cmdConfigureInit                  = Command{Path: "sparkwing configure init", Hidden: true}
 	cmdVersion                        = surfaceCommand("sparkwing version")
 	cmdVersionHold                    = surfaceCommand("sparkwing version hold")
 	cmdUpdate                         = surfaceCommand("sparkwing update")
@@ -325,7 +324,6 @@ var (
 	cmdDashboardStop                  = surfaceCommand("sparkwing dashboard stop")
 	cmdDashboardLogs                  = surfaceCommand("sparkwing dashboard logs")
 	cmdDashboardStatus                = surfaceCommand("sparkwing dashboard status")
-	cmdWorker                         = Command{Path: "sparkwing cluster worker", Hidden: true}
 	cmdDoctor                         = surfaceCommand("sparkwing doctor")
 	cmdCompletion                     = surfaceCommand("sparkwing completion")
 	cmdProfiles                       = surfaceCommand("sparkwing profiles")

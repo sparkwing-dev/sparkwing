@@ -11,8 +11,8 @@ func TestRead_RewritesCrossDocLinks(t *testing.T) {
 	}{
 		{
 			name: "labeled link to known topic",
-			in:   "See [Cache](gitcache.md) for endpoints.",
-			want: "See Cache (`sparkwing docs read --topic gitcache`) for endpoints.",
+			in:   "See [Cache](caching.md) for endpoints.",
+			want: "See Cache (`sparkwing docs read --topic caching`) for endpoints.",
 		},
 		{
 			name: "filename-as-text collapses to bare command",

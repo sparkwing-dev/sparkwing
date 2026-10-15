@@ -1,5 +1,36 @@
 # Migrating to the next release
 
+## Machine connection profiles
+
+Profiles contain only `controller.url` and an optional `controller.token`.
+Remove profile `state`, `secrets`, `rerun_image`, cache and log settings, and
+remove project-level profile definitions. Use `sparkwing profiles add`,
+`show`, `list`, `set` and `remove` to manage machine connections.
+
+Every profile command validates the whole machine file. An invalid setting
+in another section blocks reads and writes without exposing credential values.
+An explicitly empty `SPARKWING_CONFIG` fails. Unset it to use the default path.
+No reader imports old per-file settings.
+
+Adding and removing profiles preserves concurrent edits. If a connection
+changes during credential revocation, removal fails and retains that changed
+connection. Reload it before retrying. The removed `configure init` handler
+and its permission-repair behavior are gone.
+
+## Runner enrollment files
+
+Runner settings use the `runner:` section, `repos` and `credentials_dir`.
+The reusable credential is stored in a private file inside that directory.
+Remove inline runner tokens and the old `agent:` and `allow_repos` keys.
+Re-enroll with `sparkwing runners add --runner NAME --profile PROFILE --force`.
+Its JSON receipt contains credential metadata rather than the bearer.
+
+If writing the configuration or installing its service fails, enrollment
+revokes the new credential and removes the new credential files. A failed
+replacement restores the previous runner section. Concurrent configuration
+changes are preserved. A controller revocation failure prints the exact
+manual revocation command and returns nonzero.
+
 ## Queue and concurrency views
 
 Replace bare `sparkwing queue` listings with `sparkwing queue list`.

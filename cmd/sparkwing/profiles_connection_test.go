@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 type profileTransport func(*http.Request) (*http.Response, error)
@@ -40,7 +40,7 @@ func TestProfilesAddStoresExistingCredentialAfterProbe(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/v1/runs":
-			return 200, `{"runs":[]}`
+			return 200, `{"runs":[],"next_cursor":"","truncated":false}`
 		default:
 			t.Fatalf("unexpected request: %s", r.URL)
 			return 500, ""
@@ -141,8 +141,7 @@ func TestProfilesRemoveRevokesOnlyMemberCredential(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cfg := &profile.Config{Profiles: map[string]*profile.Profile{"prod": {Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example", Token: token}}}}
-			if err := profile.Save(path, cfg); err != nil {
+			if err := writeConnectionFixture(path, "prod", "https://api.example", token); err != nil {
 				t.Fatal(err)
 			}
 			deletes := 0
@@ -174,7 +173,7 @@ func TestProfilesRemoveRevokesOnlyMemberCredential(t *testing.T) {
 			if strings.Contains(out, token) {
 				t.Fatal("raw credential in result")
 			}
-			after, err := profile.Load(path)
+			after, err := userconfig.ReadConfig(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -202,7 +201,7 @@ func TestProfilesRemoveKeepTokenMakesNoRequest(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	cfg, err := profile.Load(path)
+	cfg, err := userconfig.ReadConfig(path)
 	if err != nil || len(cfg.Profiles) != 0 {
 		t.Fatalf("remove result: %#v %v", cfg, err)
 	}

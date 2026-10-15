@@ -1,46 +1,38 @@
 # Machine settings: config.yaml
 
-Every sparkwing setting that belongs to one machine rather than one project
-lives in one file, `config.yaml`, in the sparkwing config directory:
-`$XDG_CONFIG_HOME/sparkwing/config.yaml`, else
-`~/.config/sparkwing/config.yaml`. `SPARKWING_CONFIG` names a different file.
-`SPARKWING_HOME` does not move it: the home is the state, cache and logs root,
-and a profile or a registered checkout outlives any one home.
+Machine settings live in `$XDG_CONFIG_HOME/sparkwing/config.yaml`, or
+`~/.config/sparkwing/config.yaml` when `XDG_CONFIG_HOME` is absent.
+`SPARKWING_CONFIG` selects another file. A present empty value is invalid.
+`SPARKWING_HOME` selects runtime state and does not move machine settings.
 
-Project settings live in `.sparkwing/sparkwing.yaml` instead; see
-[Config reference](config-reference.md).
+Project declarations live in `.sparkwing/sparkwing.yaml` instead.
+See [Config reference](config-reference.md).
 
 ## Sections
 
-Each top-level key is a section with one owner:
+| Section | Holds |
+| --- | --- |
+| `profiles` | Named controller connections containing `controller.url` and an optional `controller.token`. |
+| `repos` | Registered checkout paths, `fallback_paths`, `auto_register` and `include_worktrees`. |
+| `admission` | Machine admission `mode`, `budget`, `custom` and `jev` policy. |
+| `runner` | Controller URL, `credentials_dir`, permitted `repos`, labels and local capacity preferences. |
+| `cache` | Local binary-cache `max_bytes` and `max_entries`. Explicit zero disables a bound. |
+| `machine` | An optional `box_id` for box-scoped concurrency. |
+| `debug` | `pause_timeout`. |
+| `run` | `submit_env_allow` and the opt-in `cache_from` controller profile. |
 
-| Section | Holds | Written by |
-|---|---|---|
-| `profiles` | named connections to controllers and storage backends, keyed by profile name | `sparkwing cloud connect`, `sparkwing configure profiles` |
-| `repos` | the repo registry: `repos` (registered checkouts) and `fallback_paths`; `auto_register` (default `true`) and `include_worktrees` (default `false`) govern automatic registration | `sparkwing run` (auto-registration), `sparkwing repos add` |
-| `admission` | the admission policy (`mode`, `custom`, `jev`) and the machine `budget` | you |
-| `agent` | what `sparkwing-runner agent` runs: controller, token, capacity | `sparkwing cluster runners add` |
-| `cache` | the pipeline binary cache ceilings `max_bytes` (default `2GiB`) and `max_entries` (default `20`); `0` disables one | you |
-| `machine` | `box_id`, the host identity a box-scoped concurrency group keys on (default: the hostname) | you |
-| `logs` | `drop_policy`: `warn` keeps a run green when log lines are lost; anything else fails the node | you |
-| `debug` | `pause_timeout`, how long a `sparkwing debug` pause holds (default `30m`) | you |
-| `run` | `submit_env_allow`, the extra names and `NAME_*` prefixes a detached run's environment snapshot carries; `dispatch_wait`, how long a run waits for a dispatch before it is classed as wedged (a duration, or `off` to wait forever; default: the plan's own bound) | you |
-
-Any other top-level key, and any key a section does not define, fails the read
-with the file, line and key named. That includes a `fleet` section left from
-the removed foreground fleet coordinator, which fails with
-`unknown section "fleet"`; delete the section.
-
-A profile in this file is used only by a command that names it with
-`--profile`; no setting here or in the environment makes one the default.
+The shared decoder validates the complete file before a section is used.
+Unknown keys, duplicate keys, explicit null and additional YAML documents fail
+with file, key and line information. A reader never accepts another section's
+invalid settings. Omission remains distinct from an explicit empty, false or
+zero value where the setting permits it.
 
 ```yaml
-# ~/.config/sparkwing/config.yaml
 profiles:
   prod:
     controller:
       url: https://api.sparkwing.example
-      token: swu_...
+      token: swk_...
 repos:
   repos:
     - path: /srv/code/app
@@ -49,144 +41,54 @@ repos:
   include_worktrees: true
 admission:
   mode: auto
-  # host sensor over-reads external load on this box
   budget: 50%,ignore-external
-agent:
+runner:
   controller: https://api.sparkwing.example
-  token: swr_...
+  credentials_dir: /srv/sparkwing/credentials
+  repos: [github.com/acme/app]
   max_concurrent: 2
   holder_prefix: desk
-  contribution: 50%,50%
   local_admission: true
 cache:
   max_bytes: 4GiB
 machine:
   box_id: rack-3-host-7
 run:
-  submit_env_allow: [AWS_PROFILE, AWS_REGION, DOCKER_*]
+  submit_env_allow: [BUILD_REGION, BUILD_*]
 ```
 
-The sections are documented where their behavior is:
-[Backends](backends.md) for profiles, [Hooks](hooks.md) for the registry,
-[Local admission policy](admission.md) and
-[Local execution](local-execution.md#where-to-set-it) for admission and the
-budget, [Self-hosting](self-hosting.md) for the agent,
-[Local execution](local-execution.md) for `run`,
-[Caching](caching.md) for `cache`, [SDK](sdk.md) for `machine`,
-[Observability](observability.md) for `logs`, and
-[`sparkwing debug`](cli-debug.md) for `debug`.
+Connections come only from this machine file. A project can name a profile but
+cannot define one. A controller observation uses a profile only when selected
+with `--profile`. See [Controller connections](backends.md).
 
 ## Permissions and writes
 
-The file carries credentials, so sparkwing reads it only as an owner-only
-regular file (mode `0600` on Unix) and refuses a symlink. A command that writes
-settings rewrites only its own section: it takes a lock beside the file
-(`config.yaml.lock`), reads the file, replaces that section, and renames a
-complete owner-only copy over the original. Other sections and their comments
-survive, and two commands writing different sections at once both land. Within
-the rewritten section, a key that survives keeps its comments; a removed key
-takes its comments with it. A write that would remove an anchor an alias in
-another section uses is refused, naming the anchor.
+The file carries credentials, so reads require an owner-only regular file.
+Unix uses mode `0600`. Windows checks the owning SID and DACL. Symlinks and
+reparse points are refused.
 
-A command running under a `SPARKWING_HOME` of its own refuses to write the
-machine's `config.yaml`; point `SPARKWING_CONFIG` at a file inside that home to
-keep the write there.
+Settings writers lock `config.yaml.lock`, reread the file, change their section
+and atomically replace the file with an owner-only copy. Other sections and
+their comments survive. A write that would leave a dangling YAML alias fails.
+Profile mutations also preserve changes to other profiles made during a
+controller probe or credential revocation.
 
-## Files that stay separate
-
-- `secrets.key` is the key local secrets are sealed under. The secrets
-  themselves live in `state.db` in `SPARKWING_HOME`; see
-  [Secrets](cli-secrets.md) and [Local secrets](#local-secrets).
-- `version-hold` records a held CLI version; see [Version](cli-version.md).
+A command running under a separate `SPARKWING_HOME` refuses to write the
+machine's settings. Set `SPARKWING_CONFIG` to a file inside that home when
+testing an isolated runtime.
 
 ## Local secrets
 
-`sparkwing secrets` without `--profile`, local runs, and the dashboard (`sparkwing serve`) share
-one secret store: the `secrets` table of `state.db`, which the sparkwing daemon
-serves on its API socket. Every value is sealed with the controller's cipher
-(XChaCha20-Poly1305, bound to the row's name, scope and flags) under a 32-byte
-key:
-
-- `SPARKWING_SECRETS_KEY`, base64 of the 32 bytes, when set, as
-  `sparkwing-controller` takes it;
-- otherwise the key file, `secrets.key` in the config directory, or the path
-  `SPARKWING_SECRETS_KEY_FILE` names. It holds the 32 raw bytes, owner-only.
-
-The daemon creates the key file on the first stored secret; no other process
-creates it, so a daemon started with `SPARKWING_SECRETS_KEY` and a
-the dashboard (`sparkwing serve`) started without it cannot end up with two keys. The dashboard
-and a run refuse to seal until the key exists; store the first secret with
-`sparkwing secrets set`. Sparkwing reads the key file only as an
-owner-only regular file that is not a symlink. It refuses to create one
-while `state.db` already holds sealed values, because a second key would leave
-rows only the first one opens; restore the old file or set
-`SPARKWING_SECRETS_KEY` to it. Set these variables in the environment the
-daemon starts in, then run `sparkwing daemon restart`; like any variable,
-they reach every process started from that environment, pipeline steps
-included. `SPARKWING_SECRETS_PREVIOUS_KEY` keeps a
-retired key readable until `sparkwing secrets rotate` reseals every value under
-the current one. Back up `secrets.key` with `state.db`: neither opens the other
-alone. A command running under a `SPARKWING_HOME` of its own refuses to create
-the machine's key file; point `SPARKWING_SECRETS_KEY_FILE` at a file inside
-that home.
-
-The key keeps a copied or backed-up `state.db` sealed. It does not keep
-secrets from code running as your account: a pipeline step can read the key
-file, and the daemon answers every process of your account.
-
-A run the daemon hosts reads its secrets through the daemon. A run with no
-daemon reads `state.db` directly and opens values with the same key.
-
-A local run reads every local secret, including an unscoped one that is not
-shared, because the daemon answers this machine's own account as its
-administrator. `sparkwing secrets set` stores a local secret without
-`--pipeline` as shared, so this gap changes nothing for secrets set that way.
-
-### Moving from secrets.env and config.env
-
-The local secret store used to be two dotenv files: `secrets.env` for masked
-values and `config.env` for `--plain` ones, in the config directory or where
-`SPARKWING_SECRETS` and `SPARKWING_CONFIG_ENV` pointed. The daemon imports the
-files its own environment names, once, when it first opens `state.db`. Each
-name becomes an unscoped, shared row; a name in both files imports once,
-masked, with the `config.env` value that runs used. A name `state.db` already
-holds keeps the store's value. The import parses both files before it writes
-anything, then commits the rows and a record of the import in one
-transaction. Once recorded it never runs again, so a secret deleted afterwards
-stays deleted and later edits to the files are ignored. The daemon log names
-each imported name and each name that kept the store's value. The files are
-left in place for an older sparkwing still on the machine; delete them once
-none needs them.
-
-An import that fails, on a malformed line for example, imports nothing. Until
-it succeeds, `sparkwing secrets` and every secret a local run reads fail with
-its error; fix the file and run `sparkwing daemon restart`. A command running
-under a `SPARKWING_HOME` of its own does not import the machine's files. This
-automatic import will be removed in a later release.
+Secret values are separate from the machine settings file.
+Use [Secrets](cli-secrets.md) for credential storage and rotation.
 
 ## Moving from the per-file settings
 
-Before `config.yaml`, each section was its own file in the config directory.
-Sparkwing copies any it finds into `config.yaml` automatically, the first time a
-command reads or writes settings, and leaves each original in place so older
-sparkwing binaries on the machine keep reading it. Once `config.yaml` has the
-section, the original is ignored; delete it when no older binary needs it. This
-automatic copy will be removed in a later release; the migration guide
-(`sparkwing docs search --query config.yaml`) shows the manual move.
+There is no automatic import or compatibility reader. Move settings into the
+final sections above. Remove old `agent`, `logs`, `fleet`, `allow_repos`,
+`dispatch_wait` and profile backend keys. Runner enrollment uses
+`sparkwing runners add` and stores its credential in a private file under
+`runner.credentials_dir`.
 
-| Old file | Section of config.yaml |
-|---|---|
-| `admission.yaml` | `admission` (same keys) |
-| `budget` | `admission.budget` (the file's one setting line) |
-| `agent.yaml` | `agent` |
-| `profiles.yaml` | `profiles` (the file's `profiles:` map) |
-| `repos.yaml` | `repos` (same keys) |
-
-The copy checks each file with its section's own validation first. A file that
-fails is not copied, and only reads of that section fail, naming the file and
-the key to remove. The copy goes only into the machine's own `config.yaml`,
-never into a file `SPARKWING_CONFIG` names, and is skipped with a warning
-under a sandboxed `SPARKWING_HOME`. `SPARKWING_PROFILES`, `SPARKWING_REPOS`
-and `SPARKWING_FLEET_CONFIG` no longer move anything; a command refuses to
-start while one is set. `sparkwing doctor` does not migrate settings or
-remove old files.
+See [the migration guide](migrations/_unreleased.md#machine-connection-profiles)
+for controller-profile changes.

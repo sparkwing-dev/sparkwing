@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func withStdin(t *testing.T, body string) {
@@ -36,9 +36,17 @@ func profilesFixturePath(t *testing.T) string {
 	return path
 }
 
-func loadSavedProfile(t *testing.T, path, name string) *profile.Profile {
+func connectionFixture(name, endpoint, token string) *namedProfile {
+	return &namedProfile{Name: name, Profile: userconfig.Profile{Controller: userconfig.Connection{URL: endpoint, Token: &token}}}
+}
+
+func writeConnectionFixture(path, name, endpoint, token string) error {
+	return userconfig.Write(path, userconfig.Profiles, "profiles", map[string]userconfig.Profile{name: connectionFixture(name, endpoint, token).Profile})
+}
+
+func loadSavedProfile(t *testing.T, path, name string) *namedProfile {
 	t.Helper()
-	cfg, err := profile.Load(path)
+	cfg, err := userconfig.ReadConfig(path)
 	if err != nil {
 		t.Fatalf("load %s: %v", path, err)
 	}
@@ -46,7 +54,7 @@ func loadSavedProfile(t *testing.T, path, name string) *profile.Profile {
 	if !ok {
 		t.Fatalf("profile %q missing from %s", name, path)
 	}
-	return p
+	return &namedProfile{Name: name, Profile: p}
 }
 
 func TestReadTokenStdinTrimsPipedInput(t *testing.T) {

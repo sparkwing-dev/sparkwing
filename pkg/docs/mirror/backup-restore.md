@@ -223,32 +223,32 @@ restores only under a controller at the old schema.
 Run these after a restore and after an upgrade, against the controller
 you are judging. They are ordered so the first failure is the most
 informative. `--profile` names the profile pointing at that controller;
-register one with `sparkwing cloud connect` when verifying a
+register one with `sparkwing profiles add` when verifying a
 scratch controller on a spare port.
 
 ```bash
 # The controller answers, and the token still authenticates.
-sparkwing cloud status --profile prod
+sparkwing runs list --profile prod --limit 1
 
 # Run history is present, and reaches the most recent run you remember.
 sparkwing runs list --profile prod
 
 # One run still carries its nodes.
-sparkwing runs status <id> -o json --exit-zero --profile prod
+sparkwing runs status --run RUN -o json --exit-zero --profile prod
 
 # Secret rows are present.
 sparkwing secrets list --profile prod
 
 # The secrets key matches the database. This is the check that catches a
 # database restored without its key, and nothing else catches it.
-sparkwing secrets get --profile prod --name <name>
+sparkwing secrets get --profile prod --secret NAME
 
 # Runner and user credentials survived, so runners reconnect without
 # being added again.
-sparkwing cluster tokens list --profile prod
+sparkwing tokens list --profile prod
 
 # Runners have reconnected.
-sparkwing cluster agents list --profile prod
+sparkwing runners list --profile prod
 ```
 
 Sparkwing Cloud operators also verify the restored credit balance and ledger

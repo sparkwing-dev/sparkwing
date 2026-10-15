@@ -66,7 +66,7 @@ func Rules() []RuleDoc {
 		{
 			Name:    RuleGuardMisuse,
 			Forbids: "pipeline guards that can never be satisfied together",
-			Why:     "A token in both require and reject, require listing both profile:local and profile:controller, or a duplicate token, all describe a pipeline that can never dispatch. Guards are validated for syntax at load; this catches unsatisfiable combinations.",
+			Why:     "A token in both require and reject, require listing both where:local and where:controller, or a duplicate token, all describe a pipeline that can never dispatch. Guards are validated for syntax at load; this catches unsatisfiable combinations.",
 		},
 	}
 }
@@ -124,8 +124,8 @@ func guardFindings(p *pipelines.Pipeline) []Finding {
 		}
 	}
 
-	if containsToken(require, "profile:local") && containsToken(require, "profile:controller") {
-		add("require lists both profile:local and profile:controller, which are mutually exclusive; the pipeline can never dispatch")
+	if containsToken(require, "where:local") && containsToken(require, "where:controller") {
+		add("require lists both where:local and where:controller, which are mutually exclusive; the pipeline can never dispatch")
 	}
 	return out
 }

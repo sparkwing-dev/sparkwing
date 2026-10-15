@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -26,22 +26,23 @@ func addProfile(inv clisurface.Invocation, format string) error {
 	if name == "" {
 		name = profileNameForController(base)
 	}
-	cfg, path, err := loadCfg()
+	profiles, path, err := loadProfiles()
 	if err != nil {
 		return err
 	}
-	if _, exists := cfg.Profiles[name]; exists && !inv.Bool("force") {
+	if _, exists := profiles[name]; exists && !inv.Bool("force") {
 		return fmt.Errorf("profiles add: profile %q already exists in %s; use --force to replace it", name, displayConfigPath(path))
 	}
-	p := &profile.Profile{Name: name, Controller: &profile.ControllerSpec{URL: base}}
+	p := &namedProfile{Name: name, Profile: userconfig.Profile{Controller: userconfig.Connection{URL: base}}}
 	if inv.Bool("token-stdin") {
-		p.Controller.Token, err = readTokenStdin(os.Stdin, os.Stderr, fmt.Sprintf("bearer token for %q", name))
+		token, err := readTokenStdin(os.Stdin, os.Stderr, fmt.Sprintf("bearer token for %q", name))
 		if err != nil {
 			return err
 		}
-		if p.Controller.Token == "" {
+		if token == "" {
 			return errors.New("profiles add: stdin carried no token")
 		}
+		p.Controller.Token = &token
 	}
 	if !inv.Bool("no-probe") {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -50,14 +51,24 @@ func addProfile(inv clisurface.Invocation, format string) error {
 			return err
 		}
 	}
-	cfg.Profiles[name] = p
-	if err := profile.Save(path, cfg); err != nil {
+	profiles = nil
+	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
+		if _, exists := profiles[name]; exists && !inv.Bool("force") {
+			return fmt.Errorf("profiles add: profile %q already exists in %s; use --force to replace it", name, displayConfigPath(path))
+		}
+		if profiles == nil {
+			profiles = make(map[string]userconfig.Profile)
+		}
+		profiles[name] = p.Profile
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	return writeProfile(p, format)
 }
 
-func checkProfileConnection(ctx context.Context, p *profile.Profile) error {
+func checkProfileConnection(ctx context.Context, p *namedProfile) error {
 	if reach := probeController(ctx, p); reach.Status == "fail" {
 		return fmt.Errorf("profiles add: controller probe failed: %s", reach.Detail)
 	}
@@ -72,27 +83,43 @@ func checkProfileConnection(ctx context.Context, p *profile.Profile) error {
 
 func removeProfile(inv clisurface.Invocation, format string) error {
 	name := inv.Value("profile")
-	cfg, path, err := loadCfg()
+	profiles, path, err := loadProfiles()
 	if err != nil {
 		return err
 	}
-	p, ok := cfg.Profiles[name]
-	if !ok || p == nil {
+	connection, ok := profiles[name]
+	if !ok {
 		return fmt.Errorf("profiles remove: %q not found", name)
 	}
+	p := &namedProfile{Name: name, Profile: connection}
 	if !inv.Bool("keep-token") {
 		if err := revokeProfileToken(p); err != nil {
 			return err
 		}
 	}
-	delete(cfg.Profiles, name)
-	if err := profile.Save(path, cfg); err != nil {
+	profiles = nil
+	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
+		current, found := profiles[name]
+		if !found || current.Controller.URL != connection.Controller.URL || !sameProfileToken(current.Controller.Token, connection.Controller.Token) {
+			return fmt.Errorf("profiles remove: profile %q changed; reload it before removing it", name)
+		}
+		delete(profiles, name)
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	return writeProfile(p, format)
 }
 
-func revokeProfileToken(p *profile.Profile) error {
+func sameProfileToken(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func revokeProfileToken(p *namedProfile) error {
 	raw := p.ControllerToken()
 	if raw == "" {
 		return nil

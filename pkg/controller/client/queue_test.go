@@ -9,7 +9,6 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
@@ -120,11 +119,6 @@ func TestQueueManagerConstructionAndStructuredErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.(*engineClient).decodeError = func(data []byte) (*apierr.Error, error) {
-		var result apierr.Error
-		err := json.Unmarshal(data, &result)
-		return &result, err
-	}
 	if _, err := manager.ReadQueue(t.Context()); err == nil || !strings.Contains(err.Error(), "queue access refused") {
 		t.Fatalf("failure lost: %v", err)
 	}
@@ -149,11 +143,6 @@ func TestQueueManagerReplaysOnePriorityMutation(t *testing.T) {
 			}
 			return engineResponse(200, `{"group":"prod","run_id":"r1","found":true,"previous":0,"priority":1,"position":1}`), nil
 		})
-		c.decodeError = func(data []byte) (*apierr.Error, error) {
-			var failure apierr.Error
-			err := json.Unmarshal(data, &failure)
-			return &failure, err
-		}
 		_, err := c.SetGroupPriority(t.Context(), "prod", controllerwire.QueuePriorityWrite{RunID: "r1", Mode: "front", IdempotencyKey: "stable"})
 		if err != nil || len(bodies) != 2 || bodies[0] != bodies[1] || bodies[0] != `{"run_id":"r1","mode":"front"}` {
 			t.Fatalf("retry: %v %v", bodies, err)

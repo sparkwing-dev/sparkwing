@@ -131,9 +131,9 @@ sparkwing run build-deploy                                  # local execution
 sparkwing pipeline trigger build-deploy --profile prod      # remote dispatch
 ```
 
-`sparkwing cluster triggers list --profile prod` surfaces pending / claimed /
-done triggers on the controller; `sparkwing cluster triggers get --id ...`
-inspects one. To fire a fresh trigger (the sparkwing equivalent of
+`sparkwing runs list --profile prod` lists controller runs.
+`sparkwing runs status --run RUN --profile prod` reads one run's safe display
+projection, including its jobs and attempts. To fire a fresh trigger (the sparkwing equivalent of
 `gh workflow run`), use `sparkwing pipeline trigger <pipeline> --profile PROF`.
 
 ## Git hooks

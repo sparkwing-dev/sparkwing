@@ -2,13 +2,14 @@ package client
 
 import (
 	"context"
-	"crypto/rand"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 var _ controllerwire.Controller = (*engineClient)(nil)
@@ -109,6 +110,47 @@ func (c *engineClient) Cancel(ctx context.Context, run string, input controllerw
 	return result, err
 }
 
+func (c *engineClient) CancelJob(ctx context.Context, run, job string, input controllerwire.CancelRequest) (controllerwire.Applied, error) {
+	var result controllerwire.Applied
+	if !validSelector(run) || !validSelector(job) {
+		return result, &apierr.Error{Code: apierr.BadRequest, Message: "invalid run or job selector"}
+	}
+	err := c.request(ctx, "POST", "/api/v1/runs/{run}/jobs/{job}/cancel", "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/cancel", "", input, &result)
+	return result, err
+}
+
+func (c *engineClient) ReadFailure(ctx context.Context, run, job string, generation int64) (*nodeproto.JobFailure, error) {
+	if !validSelector(run) || !validSelector(job) || generation < 0 {
+		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "failure read requires valid run, job and source generation"}
+	}
+	var result nodeproto.JobFailure
+	err := c.request(ctx, "GET", "/api/v1/runs/{run}/jobs/{job}/failure", "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/failure?source_generation="+strconv.FormatInt(generation, 10), "", nil, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+	var result controllerwire.LauncherSyncResponse
+	err := c.request(ctx, "POST", "/api/v1/launcher/sync", "/api/v1/launcher/sync", "", input, &result)
+	if err != nil {
+		return result, err
+	}
+	for _, award := range result.Awards {
+		if award.Capability != "" {
+			return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.ProtocolError, Message: "launcher sync returned private bearer material"}
+		}
+	}
+	return result, nil
+}
+
+func (c *engineClient) Exchange(ctx context.Context) (controllerwire.ExchangeResponse, error) {
+	var result controllerwire.ExchangeResponse
+	err := c.request(ctx, "POST", "/api/v1/claims/exchange", "/api/v1/claims/exchange", "", nil, &result)
+	return result, err
+}
+
 func (c *engineClient) Retry(ctx context.Context, run string, input controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
 	var result controllerwire.CreateRunResponse
 	if !validSelector(run) {
@@ -134,11 +176,30 @@ func (c *engineClient) Claim(ctx context.Context, input controllerwire.ClaimRequ
 	if err != nil {
 		return result, err
 	}
-	err = c.request(ctx, "POST", pattern, path, rand.Text(), input, &result)
+	err = c.request(ctx, "POST", pattern, path, "", input, &result)
 	return result, err
 }
 
 func claimPath(input controllerwire.ClaimRequest, launcher bool) (string, string, error) {
+	if len(input.Kinds) == 0 {
+		return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "claim requires at least one unit kind"}
+	}
+	seen := make(map[capability.UnitKind]bool, len(input.Kinds))
+	for _, kind := range input.Kinds {
+		if seen[kind] {
+			return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "duplicate claim unit kind"}
+		}
+		seen[kind] = true
+		switch kind {
+		case capability.UnitTrigger, capability.UnitNode:
+		case capability.UnitPlan, capability.UnitEval:
+			if !launcher {
+				return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "plan and eval claims require a launcher client"}
+			}
+		default:
+			return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "unknown claim unit kind"}
+		}
+	}
 	if launcher {
 		for _, kind := range input.Kinds {
 			if kind != capability.UnitNode && kind != capability.UnitPlan && kind != capability.UnitEval {
@@ -151,7 +212,7 @@ func claimPath(input controllerwire.ClaimRequest, launcher bool) (string, string
 		return "/api/v1/launcher/claim", "/api/v1/launcher/claim", nil
 	}
 	if input.JobID != "" {
-		if !validSelector(input.RunID) || !validSelector(input.JobID) {
+		if !validSelector(input.RunID) || !validSelector(input.JobID) || len(input.Kinds) != 1 || input.Kinds[0] != capability.UnitNode {
 			return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "named job claim requires valid run and job selectors"}
 		}
 		return "/api/v1/runs/{run}/jobs/{job}/claim", "/api/v1/runs/" + url.PathEscape(input.RunID) + "/jobs/" + url.PathEscape(input.JobID) + "/claim", nil
@@ -160,29 +221,9 @@ func claimPath(input controllerwire.ClaimRequest, launcher bool) (string, string
 		if !validSelector(input.RunID) {
 			return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "invalid run selector"}
 		}
-		return "/api/v1/runs/{run}/claim", "/api/v1/runs/" + url.PathEscape(input.RunID) + "/claim", nil
-	}
-	var trigger, node bool
-	for _, kind := range input.Kinds {
-		switch kind {
-		case capability.UnitTrigger:
-			trigger = true
-		case capability.UnitNode:
-			node = true
-		case capability.UnitPlan, capability.UnitEval:
-			return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "plan and eval claims require a launcher client"}
-		default:
-			return "", "", &apierr.Error{Code: apierr.BadRequest, Message: "unknown claim unit kind"}
+		if len(input.Kinds) == 1 && input.Kinds[0] == capability.UnitTrigger {
+			return "/api/v1/runs/{run}/claim", "/api/v1/runs/" + url.PathEscape(input.RunID) + "/claim", nil
 		}
 	}
-	path := ""
-	switch {
-	case trigger && !node:
-		path = "/api/v1/runners/runs/claim"
-	case !trigger && node:
-		path = "/api/v1/runners/jobs/claim"
-	default:
-		return "", "", &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "no registered queue route accepts this combination of unit kinds"}
-	}
-	return path, path, nil
+	return "/api/v1/runners/claim", "/api/v1/runners/claim", nil
 }

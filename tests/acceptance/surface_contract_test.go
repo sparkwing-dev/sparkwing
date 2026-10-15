@@ -20,7 +20,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 		"pipeline list", "runs list", "schedules list", "runners list", "pools list",
 		"tokens list", "secrets list", "profiles list", "queue list", "daemon status",
 		"dashboard status", "cache info", "repos list", "debug env --run r1 --job j1",
-		"cache warm", "operator limits show", "doctor", "info", "version", "update", "docs list", "examples", "commands", "completion",
+		"cache warm", "wingd run --stay --home private-home", "__tick --home private-home", "operator limits show", "doctor", "info", "version", "update", "docs list", "examples", "commands", "completion",
 	} {
 		for _, format := range []string{"pretty", "json", "plain"} {
 			args := append(strings.Fields(command), "-o", format)

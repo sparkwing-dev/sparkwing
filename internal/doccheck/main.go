@@ -24,6 +24,13 @@ var (
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--write-protocol-schemas" {
+		if err := writeProtocolSchemas(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) != 3 {
 		fmt.Fprintln(os.Stderr, "usage: doccheck <docs-content-dir> <repo-root>")
 		os.Exit(2)
@@ -35,6 +42,8 @@ func main() {
 	ok = checkYAMLConfigs(contentDir) && ok
 	fmt.Println()
 	ok = checkProfileConfigs(contentDir) && ok
+	fmt.Println()
+	ok = checkProtocolSchemas(contentDir) && ok
 	fmt.Println()
 	ok = checkBannedTokens(contentDir, repoRoot) && ok
 	fmt.Println()

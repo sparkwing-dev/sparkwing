@@ -197,7 +197,7 @@ func renderInitPipelinesYAML() string {
 # release | scheduled-report. An entry with no ` + "`on:`" + ` block runs only
 # when invoked; see ` + "`sparkwing docs read --topic pipelines`" + ` for the
 # trigger schema.
-pipelines:
+pipelines: []
 `
 }
 

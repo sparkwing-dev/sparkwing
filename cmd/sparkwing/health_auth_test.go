@@ -4,15 +4,10 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-func healthProfile(url string) *profile.Profile {
-	return &profile.Profile{
-		Name:       "test",
-		Controller: &profile.ControllerSpec{URL: url},
-	}
+func healthProfile(url string) *namedProfile {
+	return connectionFixture("health", url, "")
 }
 
 func mockControllerHealth(t *testing.T, authField string) {

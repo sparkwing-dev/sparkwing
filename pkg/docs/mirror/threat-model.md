@@ -128,7 +128,7 @@ claim, so the branch's code reaches a run's worth of secrets, wider than one
 node's
 (`HostTriggerRun` in `internal/orchestrator/trigger_host.go`). Each node runs
 under its own claim, in this runner or in a Kubernetes Job carrying its
-node's claim token. `sparkwing cluster runners add` never sets
+node's claim token. `sparkwing runners add` never sets
 that flag, so a desktop added by the installer does not take that path.
 
 **The contribution cap.** A runner's `--contribution` value caps the headroom it
@@ -157,7 +157,7 @@ pool runner never sees that work.
 because it is the one that moves the OS user boundary. Create an account for the
 runner, install the service under it, and keep your keys, cloud credentials, and
 source checkouts out of its reach. Add the runner from that account with
-`sparkwing cluster runners add`.
+`sparkwing runners add`.
 
 **Add runners only to a controller whose repositories you accept.** Every
 repository that controller schedules may run on your box. A repository you would
@@ -179,6 +179,6 @@ and use its `enforce` term on Linux when you want the ceiling to hold at the OS
 level. See
 [capping sparkwing's share of the machine](local-execution.md#capping-sparkwings-share-of-the-machine).
 
-**Revoke when a device leaves.** `sparkwing cluster runners remove` stops the
+**Revoke when a device leaves.** `sparkwing runners remove` stops the
 service and revokes that machine's token; the machine keeps a dead credential
 rather than a live one.

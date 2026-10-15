@@ -83,10 +83,6 @@ func TestRunReviewPreservesForbiddenAndRejectsUnresolvedSuccess(t *testing.T) {
 	failure := testEngine(t, func(*http.Request) (*http.Response, error) {
 		return engineResponse(403, `{"error":{"code":"forbidden","message":"reporting credential required","hint":"use an authorized credential"}}`), nil
 	})
-	failure.decodeError = func(raw []byte) (*apierr.Error, error) {
-		var failure apierr.Error
-		return &failure, json.Unmarshal(raw, &failure)
-	}
 	_, err := failure.AppendAnnotation(t.Context(), "r", "j", controllerwire.AnnotationWrite{Annotation: controllerwire.Annotation{Level: "info", Message: "x"}})
 	var api *apierr.Error
 	if !errors.As(err, &api) || api.Code != apierr.Forbidden || api.Hint != "use an authorized credential" {
@@ -119,10 +115,6 @@ func TestRunReviewDecisionRetryKeepsExactBodyAndKey(t *testing.T) {
 			}
 			return engineResponse(200, `{"approval":{"run_id":"r","job_id":"j","requested_at":"2026-10-14T10:00:00Z","resolved_at":"2026-10-14T10:01:00Z","message":"gate","timeout_ms":0,"on_timeout":"fail","resolution":"denied","approver":"user"},"replayed":true}`), nil
 		})
-		c.decodeError = func(raw []byte) (*apierr.Error, error) {
-			var failure apierr.Error
-			return &failure, json.Unmarshal(raw, &failure)
-		}
 		result, err := c.ResolveApproval(t.Context(), "r", "j", controllerwire.ApprovalDecision{Resolution: "denied", Comment: "reviewed", IdempotencyKey: "decision-key"})
 		if err != nil || calls != 2 || !result.Replayed {
 			t.Fatalf("calls=%d result=%+v err=%v", calls, result, err)

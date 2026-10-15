@@ -13,7 +13,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -78,16 +77,14 @@ func runInternalComplete(args []string) error {
 }
 
 func runInternalCompleteProfiles(w io.Writer, _ []string) error {
-	path, err := profile.DefaultPath()
+	profiles, _, err := loadProfiles()
 	if err != nil {
 		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
-	cfg, err := profile.Load(path)
-	if err != nil {
-		return nil //nolint:nilerr // silent failure is correct for completion context
-	}
-	for _, n := range cfg.Names() {
-		fmt.Fprintln(w, n)
+	for _, n := range profileNames(profiles) {
+		if _, err := fmt.Fprintln(w, n); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -118,8 +115,8 @@ func runInternalCompletePipelines(w io.Writer, _ []string) error {
 	}
 	var rows []completionRow
 	pipelineNames := map[string]struct{}{}
-	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
-		for _, p := range cfg.Pipelines {
+	if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
+		for _, p := range cfg.Registry().Pipelines {
 			pipelineNames[p.Name] = struct{}{}
 			rows = append(rows, completionRow{
 				name: p.Name,

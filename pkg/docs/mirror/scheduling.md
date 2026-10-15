@@ -202,18 +202,10 @@ no warm runner advertises these labels; start a runner with
 --label matching or remove .Requires()
 ```
 
-`sparkwing cluster worker` is a laptop-side loop that claims triggers
-from a profile's controller and hosts each run itself: it builds the
-pipeline from the checkout it runs in, plans the run, and runs each node in
-a process of its own under a claim it takes for that node. It works at the
-trigger layer, unlike the cluster runner (`sparkwing-runner runner`),
-which claims nodes.
-
-While runners work on its nodes, the warm runner reads their
-statuses with one `GET /api/v1/runs/{id}/nodes` per run. An unchanged run
-backs off from 500 ms to 12 seconds with jitter; a status change resets the
-interval. A `429` response with `Retry-After` or
-`X-Sparkwing-Poll-After` sets a minimum wait before the next read.
+The unified runner claims trigger and job units through the same controller
+queue. Run hosting uses the shared host library. The separate laptop worker and
+warm-pool trigger loop are removed from the final process model. Native runner,
+launcher and host composition remains part of the rewrite integration.
 
 ## Local-first placement in claim mode
 

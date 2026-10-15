@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // Schema is one JSON Schema file from docs/schemas.
@@ -74,6 +75,28 @@ func (s *Schema) Validate(schema map[string]any, value any, at string) []string 
 		case "const":
 			if !reflect.DeepEqual(want, value) {
 				errs = append(errs, fmt.Sprintf("%s: %v is not %v", at, value, want))
+			}
+		case "minLength":
+			if str, ok := value.(string); ok && utf8.RuneCountInString(str) < int(want.(float64)) {
+				errs = append(errs, fmt.Sprintf("%s: string is shorter than %v", at, want))
+			}
+		case "maximum":
+			if n, ok := value.(float64); ok && n > want.(float64) {
+				errs = append(errs, fmt.Sprintf("%s: number exceeds %v", at, want))
+			}
+		case "not":
+			if len(s.Validate(want.(map[string]any), value, at)) == 0 {
+				errs = append(errs, fmt.Sprintf("%s: matches a forbidden shape", at))
+			}
+		case "oneOf", "anyOf":
+			matches := 0
+			for _, sub := range want.([]any) {
+				if len(s.Validate(sub.(map[string]any), value, at)) == 0 {
+					matches++
+				}
+			}
+			if matches == 0 || (key == "oneOf" && matches != 1) {
+				errs = append(errs, fmt.Sprintf("%s: %s matched %d alternatives", at, key, matches))
 			}
 		case "minimum":
 			if n, ok := value.(float64); ok && n < want.(float64) {

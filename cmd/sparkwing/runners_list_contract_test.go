@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 type runnerReaderFake func() (controllerwire.Runners, error)
@@ -84,7 +83,7 @@ func TestRunnerListingEmptyAndFailureAreUnambiguous(t *testing.T) {
 
 func TestRunnerListingCommandUsesSelectedProfile(t *testing.T) {
 	path := profilesFixturePath(t)
-	if err := profile.Save(path, &profile.Config{Profiles: map[string]*profile.Profile{"prod": {Name: "prod", Controller: &profile.ControllerSpec{URL: "https://controller.example", Token: "private-credential"}}}}); err != nil {
+	if err := writeConnectionFixture(path, "prod", "https://controller.example", "private-credential"); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0

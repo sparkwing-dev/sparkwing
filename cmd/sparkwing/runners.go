@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -10,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -24,15 +24,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: the agent loop lives in this binary, not in `sparkwing`, so the service runs a second executable.
+// safety: the runner loop lives in this binary, so the service runs a second executable.
 const runnerBinaryName = "sparkwing-runner"
 
 // safety: the machine is reached only through these two, so a suite can substitute a host that touches nothing.
@@ -84,11 +84,11 @@ func runRunnersAdd(args []string) error {
 	return enrollRunner(context.Background(), manager, enrollment)
 }
 
-func runnerTokenManager(prof *profile.Profile) (controllerwire.TokenManager, error) {
+func runnerTokenManager(prof *namedProfile) (controllerwire.TokenManager, error) {
 	return client.NewTokenManager(client.EngineOptions{URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil }}, false)
 }
 
-func prepareRunnerEnrollment(args []string) (runnerEnrollment, *profile.Profile, error) {
+func prepareRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, error) {
 	enrollment, prof, err := parseRunnerEnrollment(args)
 	if err != nil {
 		return enrollment, prof, err
@@ -103,7 +103,7 @@ func prepareRunnerEnrollment(args []string) (runnerEnrollment, *profile.Profile,
 	return enrollment, prof, err
 }
 
-func parseRunnerEnrollment(args []string) (runnerEnrollment, *profile.Profile, error) {
+func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, error) {
 	var enrollment runnerEnrollment
 	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "add"}, args...))
 	if err != nil {
@@ -160,7 +160,11 @@ func enrollRunner(ctx context.Context, manager controllerwire.TokenManager, enro
 	enrollment.config.Token = minted.Token
 	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, enrollment.force, enrollment.service)
 	if err != nil {
-		printRunnerRevokeHint(enrollment.profileName, minted.Metadata.Prefix)
+		_, revokeErr := manager.RevokeToken(context.WithoutCancel(ctx), minted.Metadata.Prefix)
+		if revokeErr != nil {
+			printRunnerRevokeHint(enrollment.profileName, minted.Metadata.Prefix)
+			return errors.Join(err, fmt.Errorf("revoke failed enrollment token %s: %w", minted.Metadata.Prefix, revokeErr))
+		}
 		return err
 	}
 	return renderRunnerEnrollment(enrollment, minted.Metadata, service)
@@ -191,7 +195,7 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 		return err
 	}
 	fmt.Printf("minted runner token %s for %s on profile %s\n", token.Prefix, token.Principal, enrollment.profileName)
-	fmt.Printf("wrote the agent section of %s (mode 0600)\n", enrollment.path)
+	fmt.Printf("wrote the runner section of %s (mode 0600)\n", enrollment.path)
 	fmt.Printf("service: %s\n", service.Status)
 	if service.Detail != "" {
 		fmt.Println(service.Detail)
@@ -208,14 +212,20 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 	return nil
 }
 
-func finishRunnerEnrollment(path string, cfg agentFileConfig, force bool, service runnerServicePlan) (runnerServiceResult, error) {
-	if err := writeAgentConfig(path, cfg, force); err != nil {
-		return runnerServiceResult{}, err
+func finishRunnerEnrollment(path string, cfg agentFileConfig, force bool, service runnerServicePlan) (result runnerServiceResult, err error) {
+	written, err := writeAgentConfig(path, cfg, force)
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, written.rollback())
+		}
+	}()
+	if err != nil {
+		return result, err
 	}
 	return service.start(path)
 }
 
-// safety: the credential outlives every failure after the mint, so the operator is always told how to kill it.
+// safety: a failed revocation leaves authority live even after its local file is removed.
 func printRunnerRevokeHint(profileName, prefix string) {
 	fmt.Fprintf(os.Stderr, "the token %s is live; revoke it with:\n  sparkwing tokens revoke --profile %s --token %s\n", prefix, profileName, prefix)
 }
@@ -240,7 +250,7 @@ func runRunnersRemove(args []string) error {
 	return removeRunner(context.Background(), manager, removal)
 }
 
-func prepareRunnerRemoval(args []string) (runnerRemoval, *profile.Profile, error) {
+func prepareRunnerRemoval(args []string) (runnerRemoval, *namedProfile, error) {
 	var removal runnerRemoval
 	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "remove"}, args...))
 	if err != nil {
@@ -310,7 +320,7 @@ func removeRunner(ctx context.Context, manager controllerwire.TokenManager, remo
 		return err
 	}
 	fmt.Printf("revoked %s on profile %s\n", removal.tokenPrefix, removal.profileName)
-	fmt.Printf("the agent section of %s retains the revoked token; sparkwing runners add --force replaces it\n", removal.path)
+	fmt.Printf("the runner section of %s retains the revoked credential file; sparkwing runners add --force replaces it\n", removal.path)
 	return nil
 }
 
@@ -334,30 +344,23 @@ func requireRunnerToken(ctx context.Context, manager controllerwire.TokenManager
 }
 
 func validateAgentFileConfig(cfg agentFileConfig) error {
-	body, err := yaml.Marshal(cfg)
+	body, err := yaml.Marshal(map[string]agentFileConfig{userconfig.Runner: cfg})
 	if err != nil {
 		return err
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-	var parsed agentconfig.Config
-	if err := decoder.Decode(&parsed); err != nil {
-		return fmt.Errorf("the assembled agent config does not parse: %w", err)
-	}
-	if _, err := agentconfig.Validate(parsed); err != nil {
-		return err
-	}
-	return nil
+	_, err = userconfig.Decode("runner configuration", body)
+	return err
 }
 
 // safety: the claim-mode subset install/service-install.sh writes.
 type agentFileConfig struct {
 	Controller     string   `yaml:"controller"`
-	Token          string   `yaml:"token"`
+	CredentialsDir string   `yaml:"credentials_dir,omitempty"`
+	Token          string   `yaml:"-"`
 	MaxConcurrent  int      `yaml:"max_concurrent"`
 	HolderPrefix   string   `yaml:"holder_prefix"`
 	Labels         []string `yaml:"labels,omitempty"`
-	AllowRepos     []string `yaml:"allow_repos,omitempty"`
+	AllowRepos     []string `yaml:"repos,omitempty"`
 	Contribution   string   `yaml:"contribution,omitempty"`
 	LocalAdmission bool     `yaml:"local_admission"`
 }
@@ -370,7 +373,7 @@ func agentConfigPath(override string) (string, error) {
 }
 
 func checkAgentConfigAbsent(path string, force bool) error {
-	section, err := userconfig.Node(path, userconfig.Agent)
+	section, err := userconfig.Node(path, userconfig.Runner)
 	if err != nil || section == nil || force {
 		return err
 	}
@@ -378,29 +381,102 @@ func checkAgentConfigAbsent(path string, force bool) error {
 }
 
 func errAgentSectionExists(path string) error {
-	return fmt.Errorf("%s already has an agent section; pass --force to replace it (its token stays live until you revoke it)", path)
+	return fmt.Errorf("%s already has a runner section; pass --force to replace it (its token stays live until you revoke it)", path)
 }
 
 // safety: the absence check repeats under the settings lock, so a second
 // enrollment racing this one cannot overwrite the section it wrote.
-func writeAgentConfig(path string, cfg agentFileConfig, force bool) error {
+func writeAgentConfig(path string, cfg agentFileConfig, force bool) (runnerConfigWrite, error) {
+	written := runnerConfigWrite{path: path}
+	if err := validateAgentFileConfig(cfg); err != nil {
+		return written, err
+	}
+	if strings.TrimSpace(cfg.Token) == "" {
+		return written, errors.New("runner credential is empty")
+	}
 	var section yaml.Node
-	return userconfig.Update(path, userconfig.Agent, "the agent config", &section, func(found bool) error {
+	err := userconfig.Update(path, userconfig.Runner, "the runner config", &section, func(found bool) error {
 		if found && !force {
 			return errAgentSectionExists(path)
 		}
+		if found {
+			written.previous = new(userconfig.RunnerConfig)
+			if err := section.Decode(written.previous); err != nil {
+				return err
+			}
+		}
+		// safety: a failed config replacement must leave the previous credential intact.
+		credentialDir, err := fssecure.MkdirPrivateTemp(filepath.Dir(path), "runner-credentials-")
+		if err != nil {
+			return err
+		}
+		written.credentialsDir = credentialDir
+		if err := fssecure.WriteFile(filepath.Join(credentialDir, "agent-token"), []byte(cfg.Token)); err != nil {
+			return err
+		}
+		cfg.CredentialsDir = credentialDir
 		section = yaml.Node{}
-		return section.Encode(cfg)
+		if err := section.Encode(cfg); err != nil {
+			return err
+		}
+		return section.Decode(&written.current)
 	})
+	return written, err
 }
 
-func firstNonBlank(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
+type runnerConfigWrite struct {
+	path, credentialsDir string
+	previous             *userconfig.RunnerConfig
+	current              userconfig.RunnerConfig
+}
+
+func (w runnerConfigWrite) rollback() error {
+	if w.credentialsDir == "" {
+		return nil
+	}
+	var section yaml.Node
+	unchanged := errors.New("runner configuration changed")
+	retained := false
+	err := userconfig.Update(w.path, userconfig.Runner, "the runner config", &section, func(found bool) error {
+		if !found {
+			return unchanged
+		}
+		var current userconfig.RunnerConfig
+		if err := section.Decode(&current); err != nil {
+			return err
+		}
+		// safety: another enrollment may have replaced ours while its service was starting.
+		if current.CredentialsDir == nil || *current.CredentialsDir != w.credentialsDir {
+			return unchanged
+		}
+		if !reflect.DeepEqual(current, w.current) {
+			retained = true
+			return unchanged
+		}
+		section = yaml.Node{}
+		if w.previous != nil {
+			return section.Encode(w.previous)
+		}
+		return nil
+	})
+	if errors.Is(err, unchanged) {
+		err = nil
+	}
+	if err != nil {
+		return fmt.Errorf("restore runner configuration before credential cleanup: %w", err)
+	}
+	if retained {
+		return fmt.Errorf("runner configuration changed; retained its credential file in %s", w.credentialsDir)
+	}
+	for _, path := range []string{filepath.Join(w.credentialsDir, "agent-token"), w.credentialsDir} {
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
 		}
 	}
-	return ""
+	if err != nil {
+		return fmt.Errorf("clean failed runner enrollment: %w", err)
+	}
+	return nil
 }
 
 // safety: the decision about this machine's service manager, taken before anything irreversible happens.
@@ -441,7 +517,7 @@ func (p runnerServicePlan) start(configPath string) (runnerServiceResult, error)
 		if p.manual {
 			status = "manual"
 		}
-		return runnerServiceResult{Status: status, Command: []string{runnerBinaryName, "agent", "--config", configPath}}, nil
+		return runnerServiceResult{Status: status, Command: []string{runnerBinaryName, "start", "--config", configPath}}, nil
 	}
 	state, err := agentservice.Install(p.host)
 	if err != nil {

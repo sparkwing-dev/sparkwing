@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
@@ -18,14 +17,16 @@ type EngineOptions struct {
 	URL    string
 	HTTP   *http.Client
 	Bearer func(context.Context) (string, error)
-	// Launcher selects the deployment launcher claim route, including node-only
-	// and named selections. The server still authenticates the credential's grants.
+	// Launcher selects /launcher/claim; the credential must independently hold claims.launch.
 	Launcher bool
 }
 
 // NewEngineClient supplies the same controller API to every fetched engine.
-// It decodes errors once with apierr.DecodeInner, accepts additive fields and
-// unknown codes, and branches on codes rather than treating every 409 as lease loss.
+// It decodes errors once with apierr.DecodeInner, preserves unknown additive
+// fields/codes, and branches on codes rather than treating every 409 as lease loss.
+// Claim with one trigger kind and RunID uses /runs/{run}/claim, including here.
+// Otherwise Launcher selects /launcher/claim and ordinary claims use /runners/claim.
+// Here intake is never transparently retried: replay cannot reproduce HereBearer.
 func NewEngineClient(options EngineOptions) (controllerwire.Controller, error) {
 	c, err := newEngineClient(options)
 	if err != nil {
@@ -54,5 +55,5 @@ func newEngineClient(options EngineOptions) (*engineClient, error) {
 	}
 	// safety: credentials and private execution inputs must stay at the selected controller.
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &engineClient{base: strings.TrimRight(base.String(), "/"), http: &hc, bearer: options.Bearer, launcher: options.Launcher, decodeError: apierr.DecodeInner}, nil
+	return &engineClient{base: strings.TrimRight(base.String(), "/"), http: &hc, bearer: options.Bearer, launcher: options.Launcher}, nil
 }

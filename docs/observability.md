@@ -211,9 +211,10 @@ where `<class>` is the retention class (see
 A controller with neither a cache bucket nor an output directory keeps no
 node logs: its runners keep each log on their own disk, and a laptop run
 against it fails at start naming the controller.
-`sparkwing cloud status` reports whether a profile's controller keeps
-node logs. A laptop run whose state stays local writes its node logs
-under `$SPARKWING_HOME/runs/`, where `sparkwing serve` reads them.
+`sparkwing profiles show --profile NAME` inspects the saved connection.
+It does not probe log retention. Use a controller run/log observation to verify
+that its persisted segments remain readable. A laptop run whose state stays local writes its node logs
+under `$SPARKWING_HOME/runs/`, where `sparkwing dashboard` reads them.
 
 A runner pushes a node's lines to the controller's live ring only while
 a viewer watches the node: the dashboard's log stream or `sparkwing runs
@@ -711,7 +712,7 @@ processes on the same bucket can spend N budgets. Size the numbers for
 what one process should ever need, and read the AWS-side budget action
 and CloudWatch alarm as the layer that sees the whole account.
 
-The same split decides the remedies. `sparkwing cluster object-store
+The same split decides the remedies. `sparkwing operator object-store
 reset-breaker` reaches the controller process and nothing else, so a
 refusal inside a local `sparkwing run` clears when its window rolls or
 the process restarts. The refusal message names the controller's remedies.
@@ -725,8 +726,8 @@ token.
 Read a controller's budget, and clear a tripped one, with:
 
 ```bash
-sparkwing cluster object-store status --profile prod
-sparkwing cluster object-store reset-breaker --profile prod
+sparkwing operator object-store status --profile prod
+sparkwing operator object-store reset-breaker --profile prod
 ```
 
 A reset clears every tripped class and both window counters, and thaws a
@@ -826,8 +827,7 @@ in place of the listing.
 whenever a ceiling is set or a bucket is measured, because that route
 answers without a token; the totals
 and the ceilings sit behind the admin-scoped
-`GET /api/v1/object-store/breaker` and on `sparkwing cluster
-object-store status`, which also reports `counted_at` (when the running
+`GET /api/v1/object-store/breaker` and on `sparkwing operator object-store status`, which also reports `counted_at` (when the running
 count last moved) and `reconciled_at` (when the bucket was last
 measured). Alarm on
 `sparkwing_object_store_bucket_ceiling_frozen` for the freeze and on
@@ -839,7 +839,7 @@ same signal from the account side.
 Clearing a freeze is an operator decision:
 
 ```bash
-sparkwing cluster object-store reset-breaker --profile prod
+sparkwing operator object-store reset-breaker --profile prod
 ```
 
 A thaw is refused while no measurement is scheduled

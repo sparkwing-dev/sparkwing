@@ -18,7 +18,7 @@ Run a pipeline on the machine where you invoke Sparkwing:
 
 ```bash
 sparkwing run build
-sparkwing serve start
+sparkwing dashboard start
 ```
 
 This path needs no controller or Kubernetes cluster. Runs, logs, and cache
@@ -72,8 +72,9 @@ directory and expires nothing; deleting a run or a team deletes its logs.
 A controller with neither a cache bucket nor an output directory keeps no
 node logs: its runners keep each log on
 their own disk, and a laptop run whose profile keeps its state there fails
-at start naming the controller. `sparkwing cloud status` reports whether a
-profile's controller keeps node logs.
+at start naming the controller. `sparkwing profiles show --profile NAME`
+inspects only the saved connection. Verify log retention by reading a completed
+run's logs through the controller.
 On a multi-team controller a segment's stored bytes count against the
 team's log storage, and the hourly storage pass lists the segments to
 correct the count and, for a team without credits past its log share,
@@ -229,113 +230,38 @@ instead.
 
 ## Add workstation capacity
 
-After a controller is running, a Linux or macOS workstation can run
-`sparkwing-runner` as a user service. With `sparkwing-runner` on PATH and a
-profile naming the controller, one command does the whole setup:
+Enrollment uses a named controller connection and a runner identity:
 
 ```bash
-go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
-sparkwing cluster runners add --profile prod --name dev-laptop
+sparkwing runners add --profile prod --runner dev-laptop
 ```
 
-It mints a runner token scoped to `nodes.claim`, `triggers.claim` and
-`runs.state`, writes
-the `agent` section of `~/.config/sparkwing/config.yaml` at mode `0600`,
-keeping the file's other sections, installs the user service, and
-prints the token prefix with the command that revokes it. The runner uploads
-its nodes' logs to the controller as segments. The config and the machine are checked
-before the mint, so a host with no `sparkwing-runner` or no
-user service session fails before a credential exists; a failure after the mint
-prints the live token and its revoke command. `--max-concurrent`,
-`--contribution` and `--labels` set the same fields the interactive installer
-asks for, `--no-service` writes the config for a machine you supervise
-yourself, and an existing config is replaced only with `--force`. Retire the
-machine with `sparkwing cluster runners remove --profile prod`, which stops the
-service and then revokes the token.
+The CLI checks local prerequisites before minting a runner credential. It writes
+that credential to a private file under `runner.credentials_dir`, then updates
+the `runner` section of the complete machine file. Labels, repository patterns
+and capacity observations grant no authority beyond the controller's enrollment.
 
-From a source checkout, `bash bin/install.sh` installs both `sparkwing` and
-`sparkwing-runner` into `~/.local/bin` (or `SPARKWING_INSTALL_BIN`). Each run
-updates both binaries from the same checkout. Keep that directory on the
-service's PATH when using the source installer.
+`--label` and `--repos` accept repeated values. `--no-service` writes the
+configuration for a machine supervised separately. `--force` permits replacing
+an enrollment. A configuration or service-install failure revokes the newly
+minted credential and removes only newly created files. Failed replacement
+restores the previous section without overwriting concurrent changes. Output
+contains metadata, never the bearer.
 
-The command needs an admin credential on the profile, because minting a token
-is an admin route. A machine whose operator holds no admin token uses the
-interactive installer with a token an administrator minted for them:
+Retire an enrollment with:
 
 ```bash
-bash install/service-install.sh
+sparkwing runners remove --profile prod --runner dev-laptop
 ```
 
-GitHub Releases also contain `sparkwing-runner` binaries for amd64 and arm64
-on macOS, Linux, and Windows (Windows asset names end in `.exe`). Before
-registering or restarting a downloaded runner, inspect its embedded identity
-without contacting the network:
+Removal validates its controller and credential kind before stopping the service
+and revoking authority. A failed or unconfirmed revocation is an error.
 
-```bash
-sparkwing-runner version -o json --offline
-```
-
-The record names the runner binary, release version, target platform, and any
-VCS provenance embedded by the Go build. The runner does not yet download or
-replace its own executable; update the service binary through the same installer
-or service manager you used to install it.
-
-The installer asks for the controller URL, API token, runner name,
-and maximum concurrent jobs. It writes the agent format `sparkwing cluster
-runners add` writes, which uses FIFO claims with local admission enabled. Its default CPU
-and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
-`~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
-`~/.config/systemd/user/`.
-
-The agent defaults `gitcache` to the controller's claim-scoped proxy. Set
-`SPARKWING_GITCACHE_URL` only for a direct cache on a trusted LAN, VPN, or
-tailnet; the value is stored in the mode-0600 agent configuration. The agent
-holds no cache token: for each claimed run it asks the controller for a cache
-grant, and runs without the binary cache when the controller mints none.
-
-For unattended installation, supply the same values as environment variables:
-
-```bash
-SPARKWING_CONTROLLER=https://api-sparkwing.example.com \
-SPARKWING_API_TOKEN="$MY_TOKEN" \
-RUNNER_NAME=dev-laptop \
-MAX_CONCURRENT=2 \
-SPARKWING_CONTRIBUTION='4,8gb' \
-SPARKWING_LOCAL_RESERVE='1,2gb' \
-bash install/service-install.sh --yes
-```
-
-`SPARKWING_CONTRIBUTION` and `SPARKWING_LOCAL_RESERVE` use the same machine
-budget grammar as local admission. The contribution defaults to `50%,50%`;
-the reserve defaults to empty because the contribution already retains half
-the machine for other work.
-
-A runner warms its Go module cache at startup from `--warm-modules`, a comma-separated list of module paths with an
-optional `@version`; it defaults to the SDK at the runner's own version, and
-`off` disables it. The warm runs in the background and a failed download only
-logs, so a cold cache never blocks a claim.
-
-The installer writes the token to the `agent` section of a new
-`~/.config/sparkwing/config.yaml` with mode `0600`, and refuses when that file
-already exists, because a shell script cannot merge YAML without risking the
-other sections; `sparkwing cluster runners add` merges it instead. The service
-uses that file rather than embedding the token in its
-launchd plist or systemd unit. The contribution caps reported capacity; the
-reserve constrains local admission.
-
-The section carries claim-mode keys only. It has no `name` and no
-`coordinators`; a section that still sets either key fails to load and says
-enrolled mode has been removed. `allow_repos`, which `runners add --allow-repo`
-writes, makes the agent fetch source directly rather than through the
-controller's gitcache proxy; see
-[local-execution.md](local-execution.md#an-agent-that-fetches-source-itself).
-
-The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
---config <path>` command, but neither installer creates a Windows service. On
-Windows `sparkwing cluster runners add` mints the token, writes the config, and
-prints those manual steps. Supervise the agent with the service manager you
-already use, or run the Linux installer inside WSL when systemd user services
-are enabled.
+The native runner dispatcher and service templates still need final startup
+integration. Legacy agent-format installers are not a substitute for that
+binding. Windows enrollment prints manual supervision steps rather than
+installing a login service. See [runner reference](cli-runners.md) and
+[machine settings](machine-config.md).
 
 ### Operate the service
 
@@ -377,68 +303,15 @@ reach the repository with its configured Git credentials.
 service requirement. Install and start Docker only on machines assigned jobs
 that invoke it.
 
-## Object storage for the cache
+## Object storage
 
-`sparkwing-cache` keeps its data on a volume by default. Pointed at an S3
-bucket with `--blob-store s3://bucket/cache`, it keeps its durable data there
-instead, one namespace per team, and the volume shrinks to working space. It
-never writes at the bucket root or lists outside its prefix, so an IAM policy
-scoped to the prefix is enough. Region and credentials come from the AWS
-default chain (IRSA on EKS, with `AWS_REGION` set); no static keys are read.
-The AWS SDK's own `AWS_ENDPOINT_URL_S3` points it at an S3-compatible store.
+The final storage path uses controller-authorized signed `/data` transfers and
+logical records. It has no cache pod, Git mirror proxy or cache-service token.
+The storage owner selects filesystem or object storage and verifies bytes before
+publication. Local pipeline binaries stay in the machine's binary cache.
 
-| Service | Flag | Keys |
-|---|---|---|
-| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator grant's own under `cache/{bins,cache,artifacts}/...` |
-| `sparkwing-controller` | `--cache-blob-store s3://bucket/cache` | node log segments under `cache/logs/<class>/teams/<team>/runs/...`; see [Node log retention](#node-log-retention) |
-
-**The cache** moves its binary, dependency-archive and artifact stores to the
-bucket. Git mirrors, workspace uploads and the registry proxy stay on
-`--data-dir`, because git needs a real filesystem and the others are
-short-lived working state, so the volume and its `--max-store-bytes` ceiling
-remain, sized for the mirrors. A binary is staged under `--data-dir/tmp` to
-learn its digest before it is written. Uploads above 64 MiB go up in 16 MiB
-parts, and an upload that fails or runs past its size cap is aborted, so no
-partial object is ever readable. Every read is served through the pod, never
-redirected to the bucket, so the egress meter and the request budget see every
-byte.
-
-The cache does not count what each team holds in its bucket: the controller
-does, in its database, and the cache asks it for room before a team's
-write and charges each team's download to its day there
-([Tenant limits](limits.md)). The cache's store ceiling covers its
-volume alone; the controller's `--bucket-store` measurement covers the
-bucket. On a multi-team deployment give the cache `--controller` and a
-`service` token holding only the `storage.count` scope, minted with
-`sparkwing cluster tokens create --type service --principal cache --scope storage.count`
-and mounted as the file `controller-token` in its `--credentials-dir`; a cache
-with a `cache-grant-key` and `--blob-store` refuses to start without
-`--controller`, and one with `--controller` refuses to start without the
-token. Give the controller `--cache-blob-store`, the same URL the cache uses,
-and its hourly storage pass lists it to reconcile the counts, cache objects
-and log segments alike, and expires a team's cache objects 30 days after
-their last write. The controller's role then needs `s3:ListBucket`,
-`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` and
-`s3:GetLifecycleConfiguration` on the cache's prefix.
-`GET /api/v1/storage` shows a team what it holds.
-
-Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
-cache, and the controller deletes the team's log segments, both idempotent. A
-team's credential never reaches another team's namespace: the cache takes the
-team from the controller-signed grant.
-
-The cache does not retry on its own. The SDK sends at most four attempts per
-request, and every attempt spends the process's object-store request budget.
-A `403` on a write or a listing, which is what a bucket-level deny returns,
-pauses it for a minute, doubling to five while the deny lasts, and one
-request probes when each pause ends; three other failures in a row pause it
-for five seconds, doubling to two minutes. Reads and deletes keep working
-through a pause. The cache answers a paused write with `503` and
-`Retry-After`.
-
-Moving an existing deployment: a volume's blobs are not read once
-`--blob-store` is set, so copy them first or accept the misses (dependency
-archives and binaries are caches and repopulate).
+Native backend and deployment wiring remains an integration requirement. See
+[data uploads](data-uploads.md) and [caching](caching.md).
 
 ## Bound storage growth
 

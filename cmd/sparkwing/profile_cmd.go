@@ -7,7 +7,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 type profileIndex struct {
@@ -16,11 +15,11 @@ type profileIndex struct {
 	Token      string `json:"token"`
 }
 
-func profileRecord(p *profile.Profile) profileIndex {
+func profileRecord(p *namedProfile) profileIndex {
 	return profileIndex{Name: p.Name, Controller: p.ControllerURL(), Token: redactToken(p.ControllerToken())}
 }
 
-func writeProfile(p *profile.Profile, format string) error {
+func writeProfile(p *namedProfile, format string) error {
 	record := profileRecord(p)
 	switch format {
 	case "json":
@@ -34,13 +33,13 @@ func writeProfile(p *profile.Profile, format string) error {
 }
 
 func listProfiles(format string) error {
-	cfg, _, err := loadCfg()
+	profiles, _, err := loadProfiles()
 	if err != nil {
 		return err
 	}
-	index := make([]profileIndex, 0, len(cfg.Profiles))
-	for _, name := range cfg.Names() {
-		index = append(index, profileRecord(cfg.Profiles[name]))
+	index := make([]profileIndex, 0, len(profiles))
+	for _, name := range profileNames(profiles) {
+		index = append(index, profileRecord(&namedProfile{Name: name, Profile: profiles[name]}))
 	}
 	switch format {
 	case "json":

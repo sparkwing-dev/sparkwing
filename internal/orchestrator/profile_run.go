@@ -24,12 +24,12 @@ func RefusePinnedLocalRun(p *pipelines.Pipeline) error {
 // cannot be read refuses the run.
 func refusePinnedIn(sparkwingDir, pipeline string) error {
 	path := filepath.Join(sparkwingDir, projectconfig.Filename)
-	cfg, err := projectconfig.LoadOld(path)
+	cfg, err := projectconfig.Load(path)
 	if err != nil {
 		return fmt.Errorf("read %s to check pipeline %s's profile pin: %w", path, pipeline, err)
 	}
 	if cfg == nil {
 		return nil
 	}
-	return RefusePinnedLocalRun((&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline))
+	return RefusePinnedLocalRun(cfg.Registry().Find(pipeline))
 }

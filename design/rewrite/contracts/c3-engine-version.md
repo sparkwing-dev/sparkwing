@@ -2,8 +2,45 @@
 
 <!-- design:begin -->
 
-These are target contracts. All new functions remain panic stubs. The existing
-CLI, runner and launcher do not yet call them.
+## Amendment 1: selected-engine installation
+
+`install_contract.go` declares `Resolved.InstallSDK(SDKInstallRequest) SDKCommand`.
+Source acquisition resolves the exact pin before calling it. The verified selected
+Sparkwing executable implements hidden `__sdk-install`, reads request JSON on stdin,
+inherits only procenv.Install's environment, and writes one SDKCommand JSON value.
+Diagnostics go to masked stderr. The command contains locally built Go argv or
+Node/main argv without protocol flags or a preload. Installation rechecks the pin
+against Resolved and cannot substitute the host's engine or a remote pipeline binary.
+Eval/work use the accepted identity and the same selected engine's host operations.
+
+W8 retains historical signed asset matrices even after current cache-binary removal.
+W9 renders shared version notices and wires upgrade verification. W5/W9 package and
+stamp the TypeScript Windows bridge for supported architectures with its matching
+engine release. Decision 104 requires native Windows handle-inheritance evidence.
+These are integration obligations under decisions 102-104, not a new distribution
+origin, trust root, fallback-age cutoff or support-window expiry refusal.
+
+
+
+The CLI dispatches `__sdk-install` through the declared stdin/result contract.
+It checks the checkout pin before preparation and again before emitting argv.
+The selected directory must contain that pin's manifest. TypeScript installs from its lockfile and returns Node/main without
+executing pipeline code or requiring a preload. Diagnostics use the shared
+stream masker, including proxy credential components registered by procenv.
+
+The engine resolver, pin reader and InstallSDK caller are still declarations.
+Their W8 implementations and W3 source/host composition are required for native
+matched-engine execution. Go preparation also needs a shared compiler binding
+that accepts the filtered install environment and masked diagnostics, preserves
+sparks overlays and verifies the effective SDK pin. It must populate missing
+checksums before cache hashing, include the effective build environment in its
+key, and hold or reacquire the executable lease through execution. The CLI refuses
+native Go preparation until that binding exists. It does not substitute a second
+compiler or change process-global environment/output to call the existing one.
+
+Fake pin readers and preparation callbacks establish the Go CLI adapter. Native
+fake npm/Node tools establish TypeScript invocation and argv without running the
+pipeline. Neither proves release verification or a real dependency installation.
 
 ## Ownership
 

@@ -19,6 +19,7 @@ import (
 )
 
 type dashboardServices struct {
+	runtime   wingd.LocalRuntime
 	lifecycle wingd.LocalLifecycle
 	units     wingd.ManagedUnitManager
 	options   wingd.LocalStartOptions

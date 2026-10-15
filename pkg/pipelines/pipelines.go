@@ -349,7 +349,7 @@ func (p *PullRequestTrigger) UnmarshalYAML(node *yaml.Node) error {
 
 // ScheduleTriggers is one pipeline's declared cadences, one entry per cadence, nil when the
 // pipeline declares none. Sparkwing evaluates a `local` entry on every host where
-// `sparkwing crons install` armed the pipeline.
+// `sparkwing schedules install` armed the pipeline.
 //
 // The YAML accepts one mapping or a list of mappings. A bare cron string is
 // refused, because `where` is required and a scalar cannot carry it:
@@ -373,7 +373,7 @@ type ScheduleTriggers []ScheduleTrigger
 // ScheduleTrigger is one cadence: when it fires, which side fires it, and the policy that
 // resolves a fire the host was not awake for.
 type ScheduleTrigger struct {
-	// Name distinguishes several cadences on one pipeline and appears in `sparkwing crons list`
+	// Name distinguishes several cadences on one pipeline and appears in `sparkwing schedules list`
 	// as <repo>/<pipeline>/<name>. Required once a pipeline declares more than one entry; a lone
 	// entry is named "default". It matches `^[a-z0-9][a-z0-9-]*$` and is at most 40 characters.
 	Name string `yaml:"name,omitempty"`
@@ -381,7 +381,7 @@ type ScheduleTrigger struct {
 	// lists, ranges, steps, month and day names, and the @hourly/@daily/@weekly/@monthly/@yearly aliases.
 	Cron string `yaml:"cron"`
 	// Where says which side fires this entry: "local" fires from a host that armed it with
-	// `sparkwing crons install`, "controller" from a controller it was installed on. One side per
+	// `sparkwing schedules install`, "controller" from a controller it was installed on. One side per
 	// entry, and there is no default, so nothing fires somewhere you did not say it should.
 	// Declare one entry per side to fire from both.
 	Where string `yaml:"where"`
@@ -410,7 +410,7 @@ const (
 	DefaultScheduleTZ = "UTC"
 	// ScheduleTZLocal is the tz value meaning the zone of the host that runs the schedule.
 	ScheduleTZLocal = "local"
-	// ScheduleWhereLocal fires the entry from a host that armed it with `sparkwing crons install`.
+	// ScheduleWhereLocal fires the entry from a host that armed it with `sparkwing schedules install`.
 	ScheduleWhereLocal = "local"
 	// ScheduleWhereController fires the entry from a controller the schedule was installed on.
 	ScheduleWhereController = "controller"

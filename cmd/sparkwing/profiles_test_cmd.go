@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type profileProbeResult struct {
@@ -46,7 +47,7 @@ func interpretHealthBody(r *profileProbeResult, resp *http.Response) (health.Res
 	return body, false
 }
 
-func probeController(ctx context.Context, prof *profile.Profile) profileProbeResult {
+func probeController(ctx context.Context, prof *namedProfile) profileProbeResult {
 	r := profileProbeResult{Name: "controller", Target: prof.ControllerURL()}
 	if prof.ControllerURL() == "" {
 		r.Status = "fail"
@@ -75,7 +76,7 @@ func probeController(ctx context.Context, prof *profile.Profile) profileProbeRes
 	return r
 }
 
-func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
+func probeAuth(ctx context.Context, prof *namedProfile) profileProbeResult {
 	r := profileProbeResult{Name: "auth"}
 	if prof.ControllerURL() == "" {
 		r.Status = "skip"
@@ -88,26 +89,19 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 		return r
 	}
 	start := time.Now()
-	resp, err := httpGetWithToken(ctx, strings.TrimRight(prof.ControllerURL(), "/")+"/api/v1/runs?limit=1", prof.ControllerToken())
+	reader, err := client.NewRunReader(client.EngineOptions{
+		URL: prof.ControllerURL(), HTTP: &http.Client{Timeout: 10 * time.Second},
+		Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil },
+	})
+	if err == nil {
+		_, err = reader.ListRuns(ctx, controllerwire.RunQuery{Limit: 1})
+	}
 	r.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
 		r.Status = "fail"
 		r.Detail = err.Error()
 		return r
 	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusUnauthorized, http.StatusForbidden:
-		r.Status = "fail"
-		r.Detail = fmt.Sprintf("token rejected (%s)", resp.Status)
-		return r
-	default:
-		r.Status = "fail"
-		r.Detail = fmt.Sprintf("runs endpoint returned %s", resp.Status)
-		return r
-	}
-
 	r.Status = "ok"
 	r.Detail = "credential can read runs"
 	return r
@@ -118,18 +112,6 @@ func httpGetNoAuth(ctx context.Context, url string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	return client.Do(req)
-}
-
-func httpGetWithToken(ctx context.Context, url, token string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return client.Do(req)
 }

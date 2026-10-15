@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"golang.org/x/term"
 )
 
@@ -42,37 +42,21 @@ func runProfiles(args []string) error {
 	return errors.New("profiles: subcommand required")
 }
 
-func loadCfg() (*profile.Config, string, error) {
-	path, err := profile.DefaultPath()
-	if err != nil {
-		return nil, "", err
-	}
-	cfg, err := profile.Load(path)
-	if err != nil {
-		return nil, path, err
-	}
-	return cfg, path, nil
-}
-
 func setProfile(inv clisurface.Invocation, format string) error {
 	name := inv.Value("profile")
-	cfg, path, err := loadCfg()
+	profiles, path, err := loadProfiles()
 	if err != nil {
 		return err
 	}
-	p, ok := cfg.Profiles[name]
-	if !ok || p == nil {
+	if _, ok := profiles[name]; !ok {
 		return fmt.Errorf("profiles set: %q not found", name)
 	}
+	var base string
 	if inv.Has("controller") {
-		base, err := normalizeControllerURL(inv.Value("controller"))
+		base, err = normalizeControllerURL(inv.Value("controller"))
 		if err != nil {
 			return err
 		}
-		if p.Controller == nil {
-			p.Controller = &profile.ControllerSpec{}
-		}
-		p.Controller.URL = base
 	}
 	token := inv.Value("token")
 	if inv.Bool("token-stdin") {
@@ -84,16 +68,26 @@ func setProfile(inv clisurface.Invocation, format string) error {
 			return errors.New("profiles set: stdin carried no token")
 		}
 	}
-	if inv.Has("token") || inv.Bool("token-stdin") {
-		if p.Controller == nil {
-			p.Controller = &profile.ControllerSpec{}
+	var updated userconfig.Profile
+	profiles = nil
+	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
+		p, ok := profiles[name]
+		if !ok {
+			return fmt.Errorf("profiles set: %q not found", name)
 		}
-		p.Controller.Token = token
-	}
-	if err := profile.Save(path, cfg); err != nil {
+		if inv.Has("controller") {
+			p.Controller.URL = base
+		}
+		if inv.Has("token") || inv.Bool("token-stdin") {
+			p.Controller.Token = &token
+		}
+		profiles[name], updated = p, p
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-	return writeProfile(p, format)
+	return writeProfile(&namedProfile{Name: name, Profile: updated}, format)
 }
 
 func readTokenStdin(in *os.File, prompt io.Writer, label string) (string, error) {

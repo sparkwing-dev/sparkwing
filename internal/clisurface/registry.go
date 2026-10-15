@@ -4,6 +4,7 @@ package clisurface
 func Registry() []Command {
 	return []Command{
 		{Path: "sparkwing", Flags: []Flag{}},
+		{Path: "sparkwing __sdk-install", Hidden: true, Rules: []string{"Read engine.SDKInstallRequest from stdin, inherit the filtered install environment, write one engine.SDKCommand to stdout."}},
 		{Path: "sparkwing __complete", Hidden: true, Flags: []Flag{
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
 			{Name: "word", Argument: "VALUE", Meaning: "Command words to complete; empty selects the root."},
@@ -15,6 +16,7 @@ func Registry() []Command {
 			{Name: "env-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing __tick", Hidden: true, Rules: []string{"Stable managed-timer entrypoint; start the local controller on demand. No crons tick alias."}, Flags: []Flag{
+			{Name: "home", Argument: "PATH", Meaning: "Explicit state home captured by the managed timer."},
 			{Name: "dry-run"},
 		}},
 		{Path: "sparkwing cache", Flags: []Flag{}},
@@ -667,6 +669,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing wingd", Hidden: true, Flags: []Flag{}},
 		{Path: "sparkwing wingd run", Hidden: true, Flags: []Flag{
+			{Name: "home", Argument: "PATH", Meaning: "Explicit state home for foreground controller ownership."},
 			{Name: "version", Argument: "VERSION"},
 			{Name: "headroom", Argument: "FRACTION"},
 			{Name: "budget", Argument: "BUDGET"},

@@ -87,14 +87,14 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 ```
 
 This installs the `sparkwing` binary, which is the single CLI for
-both admin / inspection (`sparkwing serve start`,
+both admin / inspection (`sparkwing dashboard start`,
 `sparkwing pipeline list`) and pipeline invocation
 (`sparkwing run <pipeline>`).
 
 > **Note:** `go install` does not include the Next.js dashboard
 > bundle, which is a generated artifact and not checked into the
 > repository. A source-built binary will refuse to start
-> `sparkwing serve` with a clear message pointing back to the
+> `sparkwing dashboard` with a clear message pointing back to the
 > release binary. CLI-only commands (`run`, `pipeline`, `runs`, etc.)
 > work fine. If you want the dashboard from a source checkout, run
 > `bash bin/build-web.sh` first to generate the bundle, then
@@ -104,7 +104,7 @@ both admin / inspection (`sparkwing serve start`,
 
 Prebuilt Windows binaries are published to GitHub Releases:
 `sparkwing-windows-amd64.exe` and `sparkwing-windows-arm64.exe`. They
-embed the dashboard bundle, so `sparkwing serve start` runs locally
+embed the dashboard bundle, so `sparkwing dashboard start` runs locally
 just as it does on macOS/Linux. Download the one for your architecture,
 rename it to `sparkwing.exe`, and put it on PATH. Install
 [Git for Windows](https://git-scm.com/download/win) as well -- pipelines
@@ -119,7 +119,7 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 
 A source build does not include the Next.js dashboard bundle (it is a
 generated artifact, not checked into the repository), so
-`sparkwing serve start` on a source-built CLI refuses to start unless
+`sparkwing dashboard start` on a source-built CLI refuses to start unless
 you run `bash bin/build-web.sh` from a repo checkout first. The prebuilt
 release binary has no such limitation.
 
@@ -138,7 +138,7 @@ sparkwing pipeline new --name release   # single-node minimal template by defaul
 sparkwing run release
 
 # 3. (Optional) Watch runs in the browser
-sparkwing serve start    # detached local dashboard + API on :4343
+sparkwing dashboard start    # detached local dashboard + API on :4343
 ```
 
 The scaffold adds `sparkwing-pipeline` to `.sparkwing/.gitignore` so Git
@@ -175,12 +175,10 @@ copies its source into your repo. See
 
 Each `sparkwing` invocation compiles `.sparkwing/` and runs the pipeline as a host
 subprocess. Run state lives under `~/.sparkwing/` (SQLite + log files).
-`sparkwing serve start` spawns a detached local web server (`pkg/localws`,
-embedded in the CLI) against the same SQLite store, exposing the dashboard
-plus the JSON / logs APIs on one port - useful when several runs are going
-in parallel and the terminal gets crowded. `sparkwing serve status` /
-`kill` manage its lifecycle. These commands print a compact status record when
-piped, including `service`, `state`, `pid` when known, `home`, and `log`.
+The dashboard commands use the local controller lifecycle. This rewrite build
+still needs its native runtime, managed-service and log bindings. Commands report
+`unavailable` when those bindings are absent. See [Local dashboard](native-mode.md)
+for the current integration boundary.
 Dashboard records include `url` when known. Use `--output plain` for a single
 `running` or `stopped` value, or `--output pretty` for the terminal layout.
 A stopped `status` still exits 1; stopping an absent server exits 0.
@@ -375,18 +373,16 @@ Commands reach the connection only when they name it with `--profile`;
 without the flag they act on this machine's store.
 
 ```bash
-sparkwing cloud status --profile prod        # principal, scopes, and probes
-sparkwing cloud disconnect --name prod --admin-token-stdin   # revoke and remove
+sparkwing profiles show --profile prod        # saved connection, with token redacted
+sparkwing profiles remove --profile prod      # revoke and remove
 ```
 
-Disconnect revokes the profile's token. The profile's own token revokes only
-when it carries `admin`, so `--admin-token-stdin` supplies one that does; a
-revoke the credential is not allowed to make leaves the token live and names
-the prefix and the command that finishes the job. `--keep-token` removes the
-profile and touches no credential.
+Removal first verifies that the saved credential is a member credential and
+confirms its revocation. A failed revocation leaves the connection saved.
+`--keep-token` removes only the connection and leaves its credential live.
 
 To run work on this machine for that controller, add it as a runner with
-`sparkwing cluster runners add --profile prod --name this-laptop`.
+`sparkwing runners add --profile prod --runner this-laptop`.
 
 ### Start a run
 

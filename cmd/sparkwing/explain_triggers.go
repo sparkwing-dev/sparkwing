@@ -98,11 +98,11 @@ func pipelineTriggers(name string) (pipelines.Triggers, bool) {
 	if err != nil {
 		return pipelines.Triggers{}, false
 	}
-	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
+	_, cfg, err := projectconfig.Discover(cwd)
 	if err != nil || cfg == nil {
 		return pipelines.Triggers{}, false
 	}
-	for _, p := range cfg.Pipelines {
+	for _, p := range cfg.Registry().Pipelines {
 		if p.Name == name {
 			return p.On, true
 		}

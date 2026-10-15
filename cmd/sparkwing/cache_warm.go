@@ -13,9 +13,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -32,8 +33,9 @@ type cacheWarmDependencies struct {
 	locate      func() (string, error)
 	environment []string
 	buildEnv    func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
+	diagnostics io.Writer
 	clear       func(context.Context) (bincache.PruneResult, error)
-	prepare     func(context.Context, string, []string) (cacheWarmResult, error)
+	prepare     func(context.Context, string, []string, io.Writer) (cacheWarmResult, error)
 }
 
 func runCacheWarm(args []string) error {
@@ -41,6 +43,7 @@ func runCacheWarm(args []string) error {
 	defer stop()
 	return runCacheWarmCommand(ctx, args, os.Stdout, cacheWarmDependencies{
 		locate: defaultSparkwingDir, environment: os.Environ(), buildEnv: procenv.Build,
+		diagnostics: os.Stderr,
 		clear: func(ctx context.Context) (bincache.PruneResult, error) {
 			return bincache.PruneToLimits(ctx, 0, 0, true)
 		},
@@ -64,7 +67,8 @@ func runCacheWarmCommand(ctx context.Context, args []string, out io.Writer, deps
 	if err != nil {
 		return err
 	}
-	env, err := deps.buildEnv(procenv.Install, procenv.Base{Local: true, Captured: deps.environment}, procenv.Runtime{})
+	masker := secrets.NewMasker()
+	env, err := deps.buildEnv(procenv.Install, procenv.Base{Local: true, Captured: deps.environment, Masker: masker}, procenv.Runtime{})
 	if err != nil {
 		return err
 	}
@@ -82,12 +86,14 @@ func runCacheWarmCommand(ctx context.Context, args []string, out io.Writer, deps
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	result, err := deps.prepare(ctx, dir, env)
-	if err != nil {
-		return err
+	diagnostics := deps.diagnostics
+	if diagnostics == nil {
+		diagnostics = io.Discard
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	masked := &installDiagnostics{out: diagnostics, stream: masker.Stream()}
+	result, prepareErr := deps.prepare(ctx, dir, env, masked)
+	if err := errors.Join(prepareErr, masked.close(), ctx.Err()); err != nil {
+		return &sdkInstallError{err: err, masker: masker}
 	}
 	result.Cleared = cleared
 	switch format {
@@ -101,32 +107,26 @@ func runCacheWarmCommand(ctx context.Context, args []string, out io.Writer, deps
 	return err
 }
 
-func warmLocalPipeline(ctx context.Context, dir string, env []string) (result cacheWarmResult, retErr error) {
+func warmLocalPipeline(ctx context.Context, dir string, env []string, diagnostics io.Writer) (result cacheWarmResult, err error) {
 	result.Kind = "cache_warm"
 	ts, err := pipelineentry.IsTypeScript(dir)
 	if err != nil {
 		return result, err
 	}
 	if ts {
-		if err := pipelineentry.InstallTypeScript(ctx, dir, env, os.Stderr); err != nil {
+		if err := pipelineentry.InstallTypeScript(ctx, dir, env, diagnostics); err != nil {
 			return result, err
 		}
 		result.Language, result.Status, result.Path = "typescript", "prepared", filepath.Join(dir, "node_modules")
 		return result, nil
 	}
-	ctx = gotoolchain.WithSession(ctx, env, nil)
-	if err := resolveSparks(ctx, dir, compileOptions{}); err != nil {
-		return result, err
-	}
-	key, parts, err := bincache.ExplainCacheKey(dir)
+	prepared, err := prepareInstalledSDK(ctx, dir, engine.GoSDK, env, diagnostics)
 	if err != nil {
 		return result, err
 	}
-	lease, source, err := pipelineBinary(ctx, dir, key, parts, env)
-	if err != nil {
-		return result, err
+	if len(prepared.Command) == 0 || !filepath.IsAbs(prepared.Command[0]) {
+		return result, errors.New("Go preparation returned an invalid command")
 	}
-	defer func() { retErr = errors.Join(retErr, lease.Release()) }()
-	result.Language, result.Status, result.Path, result.Key = "go", source, lease.Path(), key
+	result.Language, result.Status, result.Path = "go", "prepared", prepared.Command[0]
 	return result, nil
 }

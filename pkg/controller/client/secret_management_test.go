@@ -155,14 +155,9 @@ func TestSecretManagementPreservesStructuredRefusal(t *testing.T) {
 		return engineResponse(403, `{"error":{"code":"forbidden","message":"restricted pool required","hint":"request pool=prod","details":{"pool":"prod"}}}`), nil
 	})
 	want := &apierr.Error{Code: apierr.Forbidden, Message: "restricted pool required", Hint: "request pool=prod", Details: map[string]any{"pool": "prod"}}
-	c.decodeError = func(raw []byte) (*apierr.Error, error) {
-		if !strings.Contains(string(raw), `"code":"forbidden"`) {
-			t.Fatal("not the inner error")
-		}
-		return want, nil
-	}
 	_, err := c.ReadSecret(context.Background(), controllerwire.SecretSelector{Name: "TOKEN"})
-	if !errors.Is(err, want) {
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || !reflect.DeepEqual(failure, want) {
 		t.Fatalf("refusal changed: %v", err)
 	}
 }

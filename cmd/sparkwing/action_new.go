@@ -60,7 +60,7 @@ func runPipelineNew(args []string) error {
 		sparkwingDir = filepath.Join(cwd, ".sparkwing")
 	}
 
-	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
+	if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Pipelines {
 			if p.Name == name {
 				return fmt.Errorf("pipeline %q already exists in sparkwing.yaml (entrypoint %q)", name, p.Entrypoint)
@@ -240,8 +240,8 @@ var triggerBlocks = map[string]string{
       # ` + "`sparkwing crons install`" + `, ` + "`controller`" + ` from a controller. Add
       # tz, overlap, catch_up, args or a second named entry to the list.
       schedule:
-        cron: "0 9 * * *"
-        where: local
+        - cron: "0 9 * * *"
+          where: local
 `,
 	"pre_commit": `      # Fires from this checkout's git pre-commit hook and can refuse
       # the commit. Scoped to fast local checks. Arm it with
@@ -865,6 +865,9 @@ func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool, tri
 	if err != nil {
 		return err
 	}
+	if _, err := projectconfig.Parse(existing); err != nil {
+		return err
+	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(existing, &doc); err != nil {
 		return err
@@ -907,6 +910,9 @@ func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool, tri
 		return err
 	}
 	if err := enc.Close(); err != nil {
+		return err
+	}
+	if _, err := projectconfig.Parse(b.Bytes()); err != nil {
 		return err
 	}
 	return os.WriteFile(path, b.Bytes(), 0o644)

@@ -75,7 +75,7 @@ func TestSecretArgs_ExecutionFetchCarriesPlaintextAndSeedsTheMasker(t *testing.T
 	}
 
 	payload := []byte(`{"args":{"token":"` + execSecretValue + `"}}`)
-	if got := string(maskEventPayload(masker, payload)); strings.Contains(got, execSecretValue) {
+	if got := string(masker.MaskJSON(payload)); strings.Contains(got, execSecretValue) {
 		t.Errorf("child_run_start payload not masked: %s", got)
 	}
 }

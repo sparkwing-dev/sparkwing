@@ -872,14 +872,10 @@ Limits worth knowing:
   otherwise. The row records the arguments the caller passed, and the
   yaml layers are re-read from the checkout each run, so a retry picks
   up the project's current value instead of a copy of the old one.
-- Trigger rows are not redacted. `sparkwing cluster triggers get`,
-  `sparkwing cluster triggers list`, and `GET /api/v1/triggers` show
-  argument values, because the same endpoint hands them to the runner
-  claiming the work.
-- A run pre-allocated by a fresh trigger shows its arguments while it
-  sits in `pending`, until the worker that starts it stamps the
-  classification on. Retries and replays inherit their source run's
-  classification and are covered for that window.
+- Public run observations use a safe display projection. Raw requested values
+  stay private before classification, and both seals retain secret
+  classifications. Restricted execution and claim responses are separate from
+  those observations. Final controller and host integration remains required.
 - Redaction of the `rerun` reproducer is anchored on the argument name,
   not the value. Pass the same value to a non-secret argument as well
   and it is masked in logs -- where masking is value-anchored -- but
