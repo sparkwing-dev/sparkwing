@@ -123,7 +123,7 @@ func prepareLocalHostRequest(ctx context.Context, directory string, pipeline nod
 		}
 	}
 	return controllerwire.CreateRunRequest{Request: runspec.Request{
-		Version: 1, Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost,
+		Version: 1, Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost, ExecutionLocation: "local",
 		Pipeline: pipeline.Invoked, RequestedArgs: run.args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: secretArgs},
 		Git:     runspec.Git{Repository: repository, SHA: git.SHA, Ref: git.Branch},
 		Source:  runspec.Source{Ref: git.SHA, Entrypoint: pipeline.Entrypoint, Location: runspec.SourceLocation{LocalCheckout: directory, PipelineDir: ".sparkwing"}},

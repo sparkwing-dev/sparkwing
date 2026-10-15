@@ -692,7 +692,7 @@ func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (
 					participant = payload.RequestID
 				}
 			}
-			if participant == "" || participant == runID || participant == runID+localPlanSemsID {
+			if participant == "" || participant == runID {
 				participant = rootParticipant
 			}
 			switch event.Kind {

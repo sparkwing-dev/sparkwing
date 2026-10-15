@@ -25,10 +25,15 @@ import (
 type initialTriggerController struct {
 	controllerwire.Controller
 	create func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
+	read   func(context.Context, string) (controllerwire.RunDetail, error)
 }
 
 func (c initialTriggerController) CreateRun(ctx context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
 	return c.create(ctx, request)
+}
+
+func (c initialTriggerController) ReadRun(ctx context.Context, run string) (controllerwire.RunDetail, error) {
+	return c.read(ctx, run)
 }
 
 func initialTriggerRequest(here bool) controllerwire.CreateRunRequest {

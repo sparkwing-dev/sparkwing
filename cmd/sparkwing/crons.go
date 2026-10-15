@@ -13,10 +13,12 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -120,29 +122,26 @@ type cronLauncher struct {
 	paths orchestrator.Paths
 }
 
-func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.Time) (string, error) {
-	// safety: the effective arguments are passed as a submission's own, exactly
-	// as `sparkwing run <pipeline> --key value` would, so the repository's
-	// defaults and the pipeline's own args still merge underneath them.
-	result, err := persistSubmission(ctx, l.store, l.paths, submission{
-		Pipeline: s.Pipeline,
-		RepoDir:  s.RepoPath,
-		Gate: riskGate{
-			Surface:  "schedule " + s.ID,
-			Pipeline: s.Pipeline,
-		}.check,
-		Source:       scheduleTriggerSource,
-		ScheduleID:   s.ID,
-		Args:         s.Effective().Args,
-		PinnedBinary: s.LockedBinary,
-		PinnedDigest: s.LockedDigest,
-	})
+func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error) {
+	options, closeTransport, err := controllerOptions(ctx, "")
 	if err != nil {
 		return "", err
 	}
-	if cerr := cronsEnsureConsumer(l.paths.Root); cerr != nil {
-		return "", fmt.Errorf("run %s stays queued and will start when a consumer does, but none could be started now: %w",
-			result.RunID, cerr)
+	defer closeTransport()
+	manager, err := client.NewScheduleManager(options)
+	if err != nil {
+		return "", err
+	}
+	return launchScheduledRun(ctx, manager, s.ID, due)
+}
+
+func launchScheduledRun(ctx context.Context, manager controllerwire.ScheduleManager, schedule string, due time.Time) (string, error) {
+	result, err := manager.RunSchedule(ctx, schedule, "tick:"+schedule+":"+due.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return "", err
+	}
+	if result.Schedule.ID != schedule || result.RunID == "" {
+		return "", errors.New("scheduled intake returned a different schedule or no run")
 	}
 	return result.RunID, nil
 }
@@ -177,10 +176,6 @@ func runQueuedAt(run *store.Run) time.Time {
 	}
 	return run.StartedAt
 }
-
-// safety: tests replace this to exercise a launch with no consumer, without
-// spawning one.
-var cronsEnsureConsumer = func(home string) error { return ensureTriggerConsumer(home, 0, 0) }
 
 // safety: tests replace this with a fake service manager and unit directory.
 var cronsTimerHost = defaultCronsTimerHost

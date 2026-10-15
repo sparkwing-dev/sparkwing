@@ -47,7 +47,15 @@ func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 
 func TestPipelineAliasRiskGateUsesEntrypointDeclaration(t *testing.T) {
 	dir, schema := aliasProject(t)
-	err := (riskGate{Pipeline: "deploy-prod", Surface: "detached", SubmitDir: filepath.Dir(dir), Declared: []nodeproto.PipelineDescription{schema}}).check(filepath.Dir(dir), "")
+	identity, err := pipelineIdentityAt(dir, "deploy-prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := boundPipelineSchema([]nodeproto.PipelineDescription{schema}, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = enforceRiskGate(identity.Name, risksIn(selected), runFlags{})
 	var blocked *riskBlockedError
 	if !errors.As(err, &blocked) || blocked.Pipeline != "deploy-prod" || !reflect.DeepEqual(blocked.MissingLabels, []string{"prod"}) {
 		t.Fatalf("alias bypassed entrypoint risks: %v", err)
@@ -158,9 +166,12 @@ func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 	if _, err := pipelineFlagsFromCache(t.Context(), dir, "deploy-prod"); err == nil {
 		t.Fatal("completion used an unrelated registration")
 	}
-	gate := riskGate{Pipeline: "deploy-prod", Surface: "detached", SubmitDir: filepath.Dir(dir), Declared: []nodeproto.PipelineDescription{registered}}
-	if err := gate.check(filepath.Dir(dir), ""); err == nil {
-		t.Fatal("detached risk gate used an unrelated registration")
+	identity, err := pipelineIdentityAt(dir, "deploy-prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := boundPipelineSchema([]nodeproto.PipelineDescription{registered}, identity); err == nil {
+		t.Fatal("detached intake used an unrelated registration")
 	}
 }
 

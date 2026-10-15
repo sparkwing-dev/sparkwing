@@ -56,7 +56,7 @@ func TestLocalHostRequestCapturesEnvironmentAndPipelineIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := request.Request
-	if input.Origin != runspec.OriginLocal || input.Dispatch != runspec.DispatchHost || input.Pipeline != "deploy-prod" || input.Source.Entrypoint != "Deploy" || input.Source.Location.LocalCheckout != directory || input.Options.Runner.Value.Kind != runspec.RunnerAny || input.Options.Workers.Value != 2 || input.Options.Priority.Value != 3 || !input.Options.DryRun.Value || !input.Options.NoMemo.Value {
+	if input.Origin != runspec.OriginLocal || input.ExecutionLocation != "local" || input.Dispatch != runspec.DispatchHost || input.Pipeline != "deploy-prod" || input.Source.Entrypoint != "Deploy" || input.Source.Location.LocalCheckout != directory || input.Options.Runner.Value.Kind != runspec.RunnerAny || input.Options.Workers.Value != 2 || input.Options.Priority.Value != 3 || !input.Options.DryRun.Value || !input.Options.NoMemo.Value {
 		t.Fatalf("local request lost its inputs: %+v", input)
 	}
 	if !reflect.DeepEqual(input.SecretArgs.Value, []string{"password"}) {

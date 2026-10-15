@@ -1067,3 +1067,14 @@ admission daemon. They check run/box lease retention for fresh, ready and held
 jobs, absence of local compute reservations, cancellation intent and holder
 drain before release. A generated-input property refuses foreign or regressed
 remote job snapshots. No acceptance cell is added or activated.
+
+## W3 consumer and intake cut
+
+[The consumer cut](../w3-consumer-cut-progress.md) removes the raw consumer and
+orphan hosting adapters. Detached receipt, replay and retained-environment
+assertions now use the typed intake in run_detached_native_test.go. Alias risk
+checks use the resolved declaration. The schedule launcher delegates source and
+environment selection to ScheduleManager with a stable due-instant key.
+The native nodehost suite remains green. Native workers, source overrides,
+sealed step selections and usage/profile bindings remain open. No additional
+archived inventory row or full native acceptance cell is claimed complete.

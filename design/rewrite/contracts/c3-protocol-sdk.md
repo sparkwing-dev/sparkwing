@@ -1,5 +1,11 @@
 # C3 protocol and SDK contract
 
+[The consumer and intake cut](../w3-consumer-cut-progress.md) removes the raw
+local trigger consumer, run-ID environment snapshots and orphan hosting adapters.
+Detached intake uses sealed controller requests and retained environment identities.
+Scheduled launches use the typed schedule API. Native process composition and
+source/step selection bindings remain open.
+
 [The local hosting cut](../w3-local-hosting-cut-progress.md) removes the local
 scheduler, Server, attempt chain, source compiler and trigger shepherd. Local
 foreground and claimed-trigger callers use typed intake/awards and the shared
@@ -176,8 +182,8 @@ The capability and layer tables contain the complete target data.
 | Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
 | Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host.go` |
 | Pure graph decisions and consistent snapshot projection | `pkg/store/scheduling_contract.go` |
-| Every unit's renewal loop | `internal/lease/keeper_contract.go` |
-| Checkout and entry acquisition | `internal/source/acquire_contract.go` |
+| Every unit's renewal loop | `internal/lease/keeper.go` |
+| Checkout and entry acquisition | `internal/source/source.go` |
 | Plan cache identity, eligibility and validated hits | `internal/nodehost/plan_cache.go` |
 | Exact engines, verified releases and signed version policy | `internal/engine` |
 | Go declarations and services | `sparkwing/sdk_contract.go`, `sparkwing/inputs/memo_contract.go`, retained API inventory below |

@@ -19,10 +19,7 @@ type Beat struct {
 	WatchedNodes    []string `json:"watched_jobs,omitempty"`
 }
 
-// Keeper is shared by trigger, node, eval, controller-owner and maintenance leases.
-// Interval must pass limits.CheckRenewal and normally comes from limits.Renew.
-// Renew also renews the unit's bound concurrency holders and, for a run host,
-// its self-claimed nodes in one store statement.
+// Keeper renews every unit and its bound concurrency under the shared cadence.
 type Keeper struct {
 	Renew    func(context.Context) (Beat, error)
 	Interval time.Duration
@@ -50,11 +47,7 @@ var ErrLeaseLost = errors.New("lease authority lost")
 // ErrSilent ends execution after a full lease interval without a successful renewal.
 var ErrSilent = errors.New("lease renewal silent")
 
-// Run returns the unit context and a stop function that cancels and joins its loop.
-// The first terminal cause wins: *CancelError, ErrLeaseLost or ErrSilent, or the
-// parent's cancellation. A 429/503 honors Retry-After without renewing local
-// liveness. Other transient errors also cannot extend the last successful beat.
-// Every caller must defer stop, including failed startup and rejected reattach.
+// Run returns the unit context and a stop function that cancels and joins renewal.
 func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 	unit, cancel := context.WithCancelCause(ctx)
 	done := make(chan struct{})

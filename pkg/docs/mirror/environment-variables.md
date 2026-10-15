@@ -43,7 +43,6 @@ rewrite. Final credentials travel through private files or protocol hello. See
 
 | Variable | Described in |
 |---|---|
-| `SPARKWING_ADMISSION_CLASS` | [admission](admission.md) |
 | `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [profiles](cli-profiles.md) |
 | `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [schedules](schedules.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [runners](cli-runners.md), [profiles](cli-profiles.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [dashboard](cli-dashboard.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
@@ -72,8 +71,6 @@ identity. Entries for unported hosts remain here while their consumers exist.
 | `SPARKWING_NODE_ID` | [architecture](architecture.md) |
 | `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
 | `SPARKWING_SOURCE_DIR` | [git-credentials](git-credentials.md) |
-| `SPARKWING_STANDALONE_REASON` | [local-execution](local-execution.md) |
-| `SPARKWING_STATE_DB` | [local-execution](local-execution.md) |
 | `SPARKWING_NODE_CLAIM_GENERATION` | [local-execution](local-execution.md) |
 | `SPARKWING_NODE_CLAIM_HOLDER` | [local-execution](local-execution.md) |
 | `SPARKWING_NODE_CLAIM_LEASE_SECONDS` | [local-execution](local-execution.md) |

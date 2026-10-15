@@ -140,9 +140,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 				Features: localFeatures(),
 			},
 		})
-	if err := orchestrator.RunLocalTriggerConsumer(ctx, paths.Root, st, nil, opts.Version); err != nil {
-		return err
-	}
 
 	baseURL := "http://" + opts.Addr
 	if err := writeDevEnv(paths.Root, baseURL); err != nil {

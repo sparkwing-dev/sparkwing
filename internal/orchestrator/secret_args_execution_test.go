@@ -101,44 +101,6 @@ func TestSecretArgs_DisplayFetchWouldBreakExecutionAndMasking(t *testing.T) {
 	}
 }
 
-func TestSecretArgs_RetryArgRehydrationUsesTheExecutionView(t *testing.T) {
-	_, c := execControllerWithSecretRun(t, "orig-1")
-
-	args := resolveTriggerArgs(context.Background(), c,
-		&store.Trigger{Pipeline: "deploy", RetryOf: "orig-1"}, nil)
-
-	if args["token"] != execSecretValue {
-		t.Errorf("retry rehydrated args[token] = %q, want plaintext -- the retry would run with that literal",
-			args["token"])
-	}
-	if args["env"] != execVisibleValue {
-		t.Errorf("retry lost a non-secret arg: %q", args["env"])
-	}
-}
-
-func TestRunForExecution_FallsBackForLocalBackends(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "local.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	err = st.CreateRun(context.Background(), store.Run{
-		ID: "run-1", Pipeline: "deploy", Status: "running",
-		Args:      map[string]string{"token": execSecretValue},
-		StartedAt: time.Now(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := runForExecution(context.Background(), localState{st: st}, "run-1")
-	if err != nil {
-		t.Fatalf("runForExecution: %v", err)
-	}
-	if run.Args["token"] != execSecretValue {
-		t.Errorf("local backend args[token] = %q, want plaintext", run.Args["token"])
-	}
-}
-
 func TestSecretArgs_ExecutionFetchOnAnUnauthenticatedController(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {

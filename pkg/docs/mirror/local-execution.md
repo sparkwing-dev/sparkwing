@@ -97,7 +97,7 @@ part of the model. A successful submission receipt identifies the allocated run.
 It does not prove that execution has started.
 
 `--sw-idempotency-key` gives repeated detached submissions one durable identity.
-`--sw-request-id` is a tracing field and does not deduplicate work. JSON receipts
+`--sw-request-id` is echoed in the submission receipt and does not deduplicate work. JSON receipts
 exclude raw arguments, captured environment values, private bearers and seal
 hashes. A log path is reported only when it exists.
 
@@ -204,7 +204,8 @@ membership or repository permission. See [scheduling](scheduling.md),
 A local run captures its environment once. Children inherit that snapshot, and
 schedules capture theirs at installation. The daemon's ambient environment never
 replaces accepted values. The sealed spec records names and a digest. Values
-remain in private host storage.
+remain in private host storage, retained by digest for replacement owners and
+retries. Reading a snapshot preserves it for later attempts.
 
 Shared process policy filters every spawn. Remote submission passes only the
 minimal base, network/CA settings and explicitly allowed names. Credential-shaped

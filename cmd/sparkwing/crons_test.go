@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -308,39 +307,8 @@ func cronsBuildableRepo(t *testing.T) string {
 	return repo
 }
 
-func TestCronLaunchReportsAConsumerThatWillNotStart(t *testing.T) {
-	launcher, st := cronsRealLauncher(t)
-	prior := cronsEnsureConsumer
-	cronsEnsureConsumer = func(string) error { return errors.New("consumer did not take the queue lock") }
-	t.Cleanup(func() { cronsEnsureConsumer = prior })
-
-	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsBuildableRepo(t), Pipeline: "every-minute"}
-	runID, err := launcher.Launch(context.Background(), sched, time.Now())
-	if err == nil {
-		t.Fatal("a launch with no consumer to run it reported success")
-	}
-	if runID != "" {
-		t.Errorf("run id = %q, want none so the tick records a failure", runID)
-	}
-	for _, want := range []string{"stays queued", "consumer did not take the queue lock"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q is missing %q", err, want)
-		}
-	}
-	runs, lerr := st.ListRuns(context.Background(), store.RunFilter{})
-	if lerr != nil {
-		t.Fatalf("ListRuns: %v", lerr)
-	}
-	if len(runs) != 1 {
-		t.Fatalf("the queued run did not survive the failure: %+v", runs)
-	}
-}
-
 func TestCronLauncherStopsCountingAPendingRunOnceItIsStale(t *testing.T) {
 	launcher, _ := cronsRealLauncher(t)
-	prior := cronsEnsureConsumer
-	cronsEnsureConsumer = func(string) error { return nil }
-	t.Cleanup(func() { cronsEnsureConsumer = prior })
 
 	ctx := context.Background()
 	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsBuildableRepo(t), Pipeline: "every-minute"}

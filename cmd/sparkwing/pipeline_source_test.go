@@ -7,9 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
 func declaredSourceFixture(t *testing.T) *submitTestEnv {
@@ -99,27 +96,6 @@ func TestDeclaredPipelineSourceForeground(t *testing.T) {
 				t.Fatalf("missing source revision: %v", run.Invocation)
 			}
 		})
-	}
-}
-
-func TestDeclaredPipelineSourceDetached(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds the CLI and starts a consumer")
-	}
-	e := declaredSourceFixture(t)
-	ack := e.submit()
-	if ack.RunID == "" {
-		t.Fatal("submission succeeded without a handle")
-	}
-	waitUntil(t, "source execution", 30*time.Second, func() bool { _, err := os.Stat(e.marker); return err == nil })
-	body, err := os.ReadFile(e.marker)
-	cwd, _ := filepath.EvalSymlinks(e.repoDir)
-	if err != nil || !strings.HasPrefix(string(body), "selected\n"+cwd+"\n") {
-		t.Fatalf("execution = %q, %v", body, err)
-	}
-	trig, err := e.store().GetTrigger(t.Context(), ack.RunID)
-	if err != nil || trig.TriggerEnv[orchestrator.PipelineRevKey] == "" {
-		t.Fatalf("source not pinned: %v, %v", trig, err)
 	}
 }
 

@@ -343,10 +343,6 @@ var (
 	cmdJobsLogs           = surfaceCommand("sparkwing runs logs")
 	cmdJobsStats          = surfaceCommand("sparkwing runs stats")
 	cmdJobsRetry          = surfaceCommand("sparkwing runs retry")
-	cmdJobsConsumer       = Command{Path: "sparkwing runs consumer", Hidden: true}
-	cmdJobsConsumerStart  = Command{Path: "sparkwing runs consumer start", Hidden: true}
-	cmdJobsConsumerStatus = Command{Path: "sparkwing runs consumer status", Hidden: true}
-	cmdJobsConsumerStop   = Command{Path: "sparkwing runs consumer stop", Hidden: true}
 	cmdJobsCancel         = surfaceCommand("sparkwing runs cancel")
 	cmdJobsPrune          = surfaceCommand("sparkwing runs prune")
 	cmdHooks              = surfaceCommand("sparkwing pipeline hooks")

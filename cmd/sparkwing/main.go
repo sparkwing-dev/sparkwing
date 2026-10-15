@@ -144,7 +144,6 @@ func dispatchRunWithEngine(args []string, selectEngine func(string) error) error
 			return err
 		}
 	}
-	// safety: the consumer owns execution setup for detached runs.
 	if flags.detached {
 		return runDetached(context.Background(), pipelineName, flags, passthrough)
 	}
@@ -486,8 +485,6 @@ func runJobs(args []string) error {
 	case "logs", "grep":
 		return runRunsLogs(contextValue, args[0], args[1:])
 
-	case "consumer":
-		return runRunsConsumer(args[1:])
 	case "cancel":
 		return runRunsCancel(contextValue, args[1:])
 	case "retry":

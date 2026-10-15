@@ -14,19 +14,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func runTriggerHost(args []string) error {
-	fs := flag.NewFlagSet(orchestrator.TriggerHostVerb, flag.ContinueOnError)
+	fs := flag.NewFlagSet("__host-trigger", flag.ContinueOnError)
 	runID := fs.String("run", "", "the admitted run to claim and host")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *runID == "" || fs.NArg() != 0 {
-		return errors.New("usage: sparkwing " + orchestrator.TriggerHostVerb + " --run <run-id>")
+		return errors.New("usage: sparkwing " + "__host-trigger" + " --run <run-id>")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals()...)
 	defer stop()
