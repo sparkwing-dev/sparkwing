@@ -185,9 +185,6 @@ func TestTenantRunControlStaysInTheRunsTeam(t *testing.T) {
 	if cancelled, err := globex.CancelPendingTrigger(ctx, "run-a"); err != nil || cancelled {
 		t.Fatalf("globex.CancelPendingTrigger = %v, %v, want nothing cancelled", cancelled, err)
 	}
-	if err := globex.SetRetriedAs(ctx, "run-a", "run-b"); err != nil {
-		t.Fatalf("globex.SetRetriedAs: %v", err)
-	}
 	run, err := acme.GetRun(ctx, "run-a")
 	if err != nil {
 		t.Fatalf("another team's delete removed the run: %v", err)

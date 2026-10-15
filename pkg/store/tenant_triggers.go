@@ -72,39 +72,6 @@ func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, 
 	return tx.Commit()
 }
 
-// CreateRetryWithRun writes a retry's trigger and pending run into the team
-// that owns sourceRunID, in one transaction with the read that finds it. A
-// retry is asked for by run id, so the source run's team is the only one
-// that can own it; filing it anywhere else hands the rerun, its repository
-// and its secrets to another team's runners. ErrNotFound when the source
-// run does not exist.
-func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig Trigger, r Run) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	team, found, err := runOwnerTx(ctx, tx, sourceRunID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return notFound("run", sourceRunID)
-	}
-	trig.GithubRepoID = 0
-	if err := tx.QueryRowContext(ctx, `SELECT github_repo_id FROM triggers WHERE team = ? AND id = ?`,
-		string(team), sourceRunID).Scan(&trig.GithubRepoID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if err := createTriggerTx(ctx, tx, team, trig); err != nil {
-		return err
-	}
-	if err := s.createRunTx(ctx, tx, team, r); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // FindTriggerByIdempotencyKey returns the trigger in t's team that
 // already claimed key for pipeline, or ErrNotFound. The unique index the
 // key races on spans every team, so a key another team holds loses the

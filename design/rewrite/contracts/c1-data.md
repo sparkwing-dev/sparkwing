@@ -95,8 +95,9 @@ unused backend output-read forwarding methods are removed too.
 `RecordStore.CopyMemo` is implemented, but the state machine's private
 `CopyMaterializedRecords` seam remains assigned only by tests. Removing that
 fixture assignment makes manual-retry, memo and coalesced reconciliation fail
-with `transactional materialization records are not configured`. W1 must bind
-the copier inside its state transaction. Calling the public copy method before
+with `transactional materialization records are not configured`. W1b must
+implement the existing transaction-local copier so W1 can bind it inside its
+state transaction. Calling the public copy method before
 reconciliation would commit the records separately from the terminal state.
 
 `Tenant.StorageStanding` reports the selected team's policy, retained event,
@@ -1014,6 +1015,15 @@ and manifest records in the terminal transition transaction. It must authorize
 the exact persisted attempt or publication binding. A refused attachment rolls
 back state, attempt closure and events. An exact result replay does not reattach
 records.
+
+`NodeRow.OutputRecord` and `NodeRow.ManifestRecord` expose the selectors
+committed with the terminal result. `nodes.result_records` stores that pair in
+the same transaction as state, attempts and events. Reported, published and
+materialized results share this projection. Jobs materialized without execution
+retain attempt zero. Readers never infer result keys from an execution attempt
+or depend on retained event payloads. Selectors grant no data access. W7 readers
+still authorize the selected record and verify its bytes. W3/W9 must carry these
+fields through their execution projections.
 
 `Store.SetResultBlobRecords` configures the blob implementation of
 `nodeResultRecords` before the store is shared. Attachment verifies exact

@@ -1,17 +1,18 @@
-package acceptance
+package store_test
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"path/filepath"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 type storeActionsProof struct{}
@@ -23,10 +24,10 @@ func (storeActionsProof) AuthorizeProvision(_ context.Context, _ capability.Auth
 	return nil
 }
 
-// CheckStoreActionsEnrollment verifies durable enrollment and revocation below OIDC transport and execution.
-func CheckStoreActionsEnrollment(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "actions.db")
-	s, err := store.Open(path)
+func checkStoreActionsEnrollment(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -37,21 +38,18 @@ func CheckStoreActionsEnrollment(ctx context.Context, root string) (err error) {
 	}
 	s.SetSessionKeyCipher(cipher)
 	s.SetProvisionPolicy(storeActionsProof{})
-	for _, query := range []string{
-		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('owner','owner@example.test',1,1)`,
-		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','owner','owner',1)`,
-	} {
-		if _, err := s.DB().ExecContext(ctx, query); err != nil {
-			return err
-		}
+	member, err := s.ResolveSignIn(ctx, googleProfile("actions-owner", "actions-owner@example.test"), store.SignUpConditions{}, time.Now())
+	if err != nil {
+		return err
 	}
-	raw, _, _, err := s.CreateAccountSession(ctx, store.Account{ID: "owner"}, store.DefaultTeam, time.Hour)
+	team := member.PersonalTeam
+	raw, _, _, err := s.CreateAccountSession(ctx, member.Account, team, time.Hour)
 	if err != nil {
 		return err
 	}
 	digest := sha256.Sum256([]byte(raw))
-	a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}}, Target: capability.Target{Team: "default"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	a := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}}, Target: capability.Target{Team: string(team)}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	tenant, err := s.ForTeam(ctx, team)
 	if err != nil {
 		return err
 	}
@@ -59,7 +57,7 @@ func CheckStoreActionsEnrollment(ctx context.Context, root string) (err error) {
 	if err != nil {
 		return err
 	}
-	spec := capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: "default", RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: "1000"}}, Repositories: []string{"gh:42"}, ExpiresAt: new(time.Now().Add(30 * time.Minute))}
+	spec := capability.ProvisionSpec{Kind: capability.ProvisionActions, Team: string(team), RegistrationID: "github:42:7", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "github:42:7:1000"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "gh:42", Ref: "refs/heads/main", SHA: "commit", WorkflowRunID: "1000"}}, Repositories: []string{"gh:42"}, ExpiresAt: new(time.Now().Add(30 * time.Minute))}
 	issued, err := s.ProvisionCapability(ctx, spec)
 	if err != nil {
 		return err
@@ -71,14 +69,14 @@ func CheckStoreActionsEnrollment(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	s = reopened
 	s.SetSessionKeyCipher(cipher)
 	s.SetProvisionPolicy(storeActionsProof{})
-	tenant, err = s.ForTeam(ctx, store.DefaultTeam)
+	tenant, err = s.ForTeam(ctx, team)
 	if err != nil {
 		return err
 	}
@@ -97,7 +95,7 @@ func CheckStoreActionsEnrollment(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err = store.Open(path)
+	reopened, err = target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -114,4 +112,10 @@ func CheckStoreActionsEnrollment(ctx context.Context, root string) (err error) {
 		return errors.New("removed enrollment issued after reopening")
 	}
 	return nil
+}
+
+func TestStoreActionsEnrollment(t *testing.T) {
+	if err := checkStoreActionsEnrollment(t); err != nil {
+		t.Fatal(err)
+	}
 }

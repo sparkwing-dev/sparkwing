@@ -1624,3 +1624,16 @@ The unused `Store.SeedToken`, `ErrSeededTokenRevoked`,
 `Tenant.GitCredentialMachines` APIs are removed too. Use the capability issuer,
 current binding checks and `Tenant.ReleaseSourceCredential` for their retained
 responsibilities.
+
+## Manual retries use sealed intake
+
+Use `Tenant.AdmitRun` with `Request.Lineage.RetryOf` and current retry authority.
+The transaction retains the original sealed request and records the retrier in
+lineage. The raw `Store.CreateRetryWithRun`, `Tenant.SetRetriedAs` and
+`InheritSecretArgs` APIs are removed. Hosts use the retained source and secret
+classification from the seal.
+
+`Tenant.ReadNode`, `ReadSnapshot` and reconciliation expose `NodeRow.OutputRecord`
+and `NodeRow.ManifestRecord` from the committed terminal result. Use these
+selectors for materialized jobs, which may have no execution attempt. Authorize
+record reads through the data contract before reading bytes.

@@ -998,13 +998,6 @@ ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
 	return tx.Commit()
 }
 
-// SetRetriedAs stores the reverse retry pointer within the tenant.
-func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error {
-	_, err := t.s.exec(ctx,
-		`UPDATE runs SET retried_as = ? WHERE team = ? AND id = ?`, newID, string(t.team), runID)
-	return err
-}
-
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
 const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, admission, ` + runAttentionColumn

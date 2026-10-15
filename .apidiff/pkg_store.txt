@@ -1309,7 +1309,6 @@ type Identity struct {
 }
 type IllegalTransitionReason string
 const IncludeSecretValues = "secret_values"
-func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
 type InsufficientCreditsError struct {
 	BalanceMicro  int64
 	RequiredMicro int64
@@ -1708,6 +1707,8 @@ type NodeRow struct {
 	Execution             runspec.JobExecutionSettings
 	Spec                  json.RawMessage
 	SpecHash              string
+	OutputRecord          *blob.RecordKey
+	ManifestRecord        *blob.RecordKey
 }
 const NodeRunning NodeState = "running"
 type NodeSettlement struct {
@@ -2811,7 +2812,6 @@ func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, 
 func (s *Store) CreateNode(ctx context.Context, n Node) error
 func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now time.Time) (err error)
-func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig Trigger, r Run) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
@@ -3311,7 +3311,6 @@ func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, r
 func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (t *Tenant) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
-func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capability.AuthorityRef, machine string, enabled bool) error
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error
 func (t *Tenant) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error

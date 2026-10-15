@@ -285,34 +285,6 @@ func RedactedRun(run *Run) *Run {
 	return &redacted
 }
 
-// InheritSecretArgs copies src's secret-arg classification onto inv,
-// returning inv (allocating it when nil) so a run minted from another
-// run redacts the same args as the run it came from.
-//
-// Retry and replay build their row straight from a source run rather
-// than through the orchestrator's invocation snapshot, so without this
-// the new row carries the same plaintext args with no classification
-// and renders them in the clear -- the original defect, reintroduced
-// one hop downstream. The classification is the only thing copied; the
-// orchestrator overwrites the whole invocation with the real snapshot
-// when the run actually starts.
-//
-// Returns inv untouched when src carries no classification.
-func InheritSecretArgs(inv map[string]any, src *Run) map[string]any {
-	if src == nil {
-		return inv
-	}
-	names := src.SecretArgNames()
-	if len(names) == 0 {
-		return inv
-	}
-	if inv == nil {
-		inv = make(map[string]any, 1)
-	}
-	inv[InvocationSecretArgsKey] = names
-	return inv
-}
-
 // RedactedRuns applies [RedactedRun] across a slice -- the shape every
 // list endpoint and `runs list` renderer works in. Preserves nil vs
 // empty so JSON encoders keep emitting `[]` where they did before.

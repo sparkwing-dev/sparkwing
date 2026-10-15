@@ -7,16 +7,6 @@ import (
 )
 
 func TestPlacement(t *testing.T) {
-	t.Run("placement-run-host-to-launcher/store-sqlite", func(t *testing.T) {
-		if err := acceptance.CheckStoreLauncherSync(t.Context(), t.TempDir()); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("placement-github-actions-exchange/store-sqlite", func(t *testing.T) {
-		if err := acceptance.CheckStoreActionsEnrollment(t.Context(), t.TempDir()); err != nil {
-			t.Fatal(err)
-		}
-	})
 	t.Run("placement-ordered-matching/store-sqlite", func(t *testing.T) {
 		if err := acceptance.CheckStoreQueueOrder(t.Context(), t.TempDir()); err != nil {
 			t.Fatal(err)
@@ -24,9 +14,6 @@ func TestPlacement(t *testing.T) {
 	})
 	t.Run("placement-granted-identity-and-capacity/store-sqlite", func(t *testing.T) {
 		if err := acceptance.CheckStoreClaimMatching(t.Context(), t.TempDir()); err != nil {
-			t.Fatal(err)
-		}
-		if err := acceptance.CheckStoreEnrolledClaims(t.Context(), t.TempDir()); err != nil {
 			t.Fatal(err)
 		}
 	})

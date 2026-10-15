@@ -21,6 +21,9 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **store (Breaking):** Manual retries use the sealed intake transaction
+  Removed the legacy retry writer, reverse-link writer and invocation-classification copier. `Tenant.AdmitRun` retains the source request, team and classification under current retry authority. See [migration guide](docs/migrations/_unreleased.md#manual-retries-use-sealed-intake).
+- **store:** Terminal job reads expose their committed output and manifest record selectors, including materialized jobs with no execution attempt. Selector persistence commits with the result and its event.
 - **store (Breaking):** Launcher awards use the shared unit queue
   Removed `Store.ClaimLaunch`, its launcher-only scan and cursor, `Client.ClaimLaunch` and unused token/source authority helpers. Direct consumers use `ClaimUnit`. HTTP consumers use `client.NewEngineClient` with launcher options. See [migration guide](docs/migrations/_unreleased.md#launcher-claims-use-the-shared-unit-queue).
 - **store (Breaking):** GitHub runner enrollment commits with current administration authority

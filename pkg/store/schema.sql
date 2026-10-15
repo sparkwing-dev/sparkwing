@@ -134,6 +134,7 @@ CREATE TABLE nodes (
     retry_budget BIGINT NOT NULL DEFAULT 0,
     retry_backoff_ms BIGINT NOT NULL DEFAULT 0,
     failure_json BLOB,
+    result_records BLOB,
     kind TEXT NOT NULL DEFAULT '',
     spec_hash TEXT NOT NULL DEFAULT '',
     on_failure_of TEXT NOT NULL DEFAULT '',
@@ -159,6 +160,7 @@ CREATE TABLE nodes (
     CHECK(owner_capability_prefix = '' OR (claimed_by IS NOT NULL AND capability_prefix <> '')),
     CHECK((status = 'done') = (outcome <> '')),
     CHECK((status = 'done') = (finished_at IS NOT NULL)),
+    CHECK(result_records IS NULL OR status = 'done'),
     CHECK(status <> 'done' OR (claimed_by IS NULL AND lease_expires_at IS NULL AND capability_prefix = '')),
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );

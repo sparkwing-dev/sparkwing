@@ -1,3 +1,37 @@
+
+Store continuation moves three more harness files into `pkg/store` tests.
+`store_actions_enrollment.go` becomes
+`acceptance_actions_enrollment_test.go:TestStoreActionsEnrollment`.
+`store_enrollment.go` becomes
+`acceptance_enrollment_test.go:TestStoreEnrolledClaims`.
+`store_launcher_sync.go` becomes
+`acceptance_launcher_sync_test.go:TestStoreLauncherSync`.
+They open through storetest and use sign-in, issuance, admission, acceptance and
+release transactions to seed their rows. They retain reopening, enrollment
+revocation, granted identity, award exchange and replacement-generation cleanup.
+The placement wrappers are removed. Native placement scenarios remain pending.
+
+The retired `internal/runretry.Create`, `Store.CreateRetryWithRun`,
+`Tenant.SetRetriedAs` and `InheritSecretArgs` have no production callers.
+`TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty` ports tenant ownership,
+source selection and secret classification through real admission. It generates
+twelve pinned sources, rejects foreign tenants and forged team selectors, and
+checks the complete retained request seal. `TestManualRetryRefusesMissingSource`
+retains missing-source refusal. `TestManualRetryRetainsVerifiedRepositoryFacts`
+retains verified App repository identity and proves the retry does not repeat a
+webhook delivery. The prior reverse-link and invocation-copy tests are removed
+because the sealed lineage and classification replace those representations.
+`TestPipelineRefDispatchRecreatesSourceAfterCleanup` keeps the dispatch-side
+source reacquisition check with its recorded inputs supplied directly. That
+runtime check remains unverified in the socket-restricted sandbox.
+
+`TestTerminalRecordSelectorsProperty` generates optional output and manifest keys
+across reports, memo hits, manual retries and coalesced results. It checks the
+committed selectors in reconciliation, replay, ReadNode and ReadSnapshot even
+after event removal. Foreign tenants cannot read them. Attachment/copy failure
+and event-write failure leave no selectors. Record authorization and byte
+verification remain the record implementation's separate tests.
+
 The final unit-billing suite in `pkg/store/unit_billing_test.go` ports the
 unfunded-claim, last-reservation race, unstarted-refund and consumed-minimum
 assertions from the retained `pkg/store/credits_test.go` tests. It uses final

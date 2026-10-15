@@ -67,13 +67,13 @@ func runClaimWait(run RunRow) runspec.Setting[time.Duration] {
 	return run.Request.Request.Options.ClaimWait
 }
 
-const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash`
+const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,result_records`
 
 func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef) (NodeRow, error) {
 	v := NodeRow{Ref: ref}
 	var ready, queued, lease, start, finish, cancel sql.NullInt64
-	var actor, execution []byte
-	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash)
+	var actor, execution, records []byte
+	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &records)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, notFound("job", ref.NodeID)
 	}
@@ -87,6 +87,13 @@ func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef) (NodeR
 	}
 	if err = json.Unmarshal(execution, &v.Execution); err != nil {
 		return v, err
+	}
+	if len(records) > 0 {
+		var keys materializedRecords
+		if err = json.Unmarshal(records, &keys); err != nil {
+			return v, err
+		}
+		v.OutputRecord, v.ManifestRecord = keys.Output, keys.Manifest
 	}
 	// safety: application retry is node-wide; counting attempts within each generation excludes lease-loss attempts.
 	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(n-1),0) FROM (SELECT COUNT(*) AS n FROM node_attempts WHERE team=? AND run_id=? AND node_id=? GROUP BY generation) AS attempts`, team, ref.RunID, ref.NodeID).Scan(&v.ApplicationRetries)

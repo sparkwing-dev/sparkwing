@@ -16,11 +16,14 @@ func (f nodeResultRecordsFunc) AttachResultRecords(ctx context.Context, tx *stor
 }
 
 func TestResultRecordsCommitWithTerminalState(t *testing.T) {
-	for _, scenario := range []string{"success", "bad_record", "expired_holder"} {
+	for _, scenario := range []string{"success", "bad_record", "expired_holder", "event_failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			tenant, now, actor := liveHolderFixture(t)
 			record := blob.RecordKey{Team: "a", Kind: blob.KindOutput, Name: "result"}
 			recordErr := errors.New("result record is not readable")
+			if scenario == "event_failure" {
+				rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_result_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'refuse result event'); END`)
+			}
 			tenant.s.resultRecords = nodeResultRecordsFunc(func(ctx context.Context, tx *storeTx, team Team, got Actor, row NodeRow, result NodeResult) error {
 				if team != "a" || got != actor || row.Attempt != 3 || row.Generation != 2 || result.OutputRecord == nil || *result.OutputRecord != record {
 					t.Fatal("attachment lost the attempt fence")
@@ -46,6 +49,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 				t.Fatal(readErr)
 			}
 			if scenario != "success" {
+				assertResultSelectors(t, node, materializedRecords{})
 				if node.Status != StatusRunning || node.StateSeq != 0 {
 					t.Fatalf("failed attachment ended job: %+v", node)
 				}
@@ -56,6 +60,7 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 			if node.Status != StatusDone || node.Outcome != NodeSuccess {
 				t.Fatalf("successful attachment: %+v", node)
 			}
+			assertResultSelectors(t, node, materializedRecords{Output: &record})
 			replayed, err := tenant.TransitionNode(t.Context(), change)
 			if err != nil || !replayed.Replayed {
 				t.Fatalf("result replay: %+v, %v", replayed, err)
