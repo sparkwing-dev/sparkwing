@@ -169,11 +169,10 @@ func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input
 	if err := executorResultFailure(result); err != nil {
 		return nil, err
 	}
-	if int64(len(result.Output)) > limits.NodeOutputBytes {
-		return nil, executorError(apierr.PayloadTooLarge, "step output exceeds its limit")
-	}
-	if len(result.Output) > 0 && !json.Valid(result.Output) {
-		return nil, errors.New("SDK step output is not JSON")
+	if len(result.Output) > 0 {
+		if err := checkOutput(result.Output); err != nil {
+			return nil, err
+		}
 	}
 	return result.Output, nil
 }

@@ -1,9 +1,7 @@
 package orchestrator
 
 import (
-	"context"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,35 +35,19 @@ func TestAHostedRetryCopiesOnlyWhenItPlannedItsSourcesPlan(t *testing.T) {
 	}
 }
 
-// hack: the store records an automatic retry's causes only when it creates an agent-loss retry, so the run row
-// is the fake's.
-type retryCauses struct{ StateBackend }
-
-func (retryCauses) GetRun(context.Context, string) (*store.Run, error) {
-	return &store.Run{ID: "retry", RetryCauseNodeIDs: []string{"build"}}, nil
-}
-
-func TestAHostedAutomaticRetryRunsItsCauses(t *testing.T) {
-	ctx := t.Context()
+func TestHostedRehydrationUsesOnlyManualRetrySource(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		opts   Options
-		causes []string
-		none   bool
+		name string
+		opts Options
+		none bool
 	}{
-		{"not a retry", Options{}, nil, true},
-		{"full", Options{RetryOf: "source", Full: true}, nil, true},
-		{"manual", Options{RetryOf: "source", RetrySource: store.RetrySourceManual}, nil, false},
-		{"automatic", Options{RetryOf: "source", RetrySource: store.RetrySourceAuto}, []string{"build"}, false},
+		{"not a retry", Options{}, true},
+		{"full", Options{RetryOf: "source", Full: true}, true},
+		{"manual", Options{RetryOf: "source"}, false},
 	} {
-		r, err := hostedRehydration(ctx, retryCauses{}, tc.opts, "retry")
-		switch {
-		case err != nil:
-			t.Fatalf("%s: %v", tc.name, err)
-		case tc.none != (r == nil):
+		r := hostedRehydration(tc.opts)
+		if tc.none != (r == nil) || r != nil && r.SourceRunID != "source" {
 			t.Errorf("%s: rehydration %+v, want none=%v", tc.name, r, tc.none)
-		case r != nil && (r.SourceRunID != "source" || !slices.Equal(r.Causes, tc.causes)):
-			t.Errorf("%s: rehydration %+v, want source with causes %v", tc.name, r, tc.causes)
 		}
 	}
 }

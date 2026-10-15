@@ -20,10 +20,23 @@ import (
 )
 
 func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
-	for _, kind := range []procenv.Kind{procenv.Plan, procenv.Attempt, procenv.Eval} {
+	for _, placement := range []struct {
+		name  string
+		kind  procenv.Kind
+		retry bool
+	}{{"plan", procenv.Plan, false}, {"attempt", procenv.Attempt, false}, {"eval", procenv.Eval, false}, {"retry_attempt", procenv.Attempt, true}, {"retry_eval", procenv.Eval, true}} {
+		kind := placement.kind
 		for _, refuse := range []bool{false, true} {
-			t.Run(map[procenv.Kind]string{procenv.Plan: "plan", procenv.Attempt: "attempt", procenv.Eval: "eval"}[kind]+map[bool]string{false: "/success", true: "/refused"}[refuse], func(t *testing.T) {
+			t.Run(placement.name+map[bool]string{false: "/success", true: "/refused"}[refuse], func(t *testing.T) {
 				input, st, _, _ := executorFixture(t)
+				if placement.retry {
+					var spec runspec.Spec
+					if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+						t.Fatal(err)
+					}
+					spec.Request.RunID = "source-run"
+					input.Accepted.Spec, _ = json.Marshal(spec)
+				}
 				exe, err := os.Executable()
 				if err != nil {
 					t.Fatal(err)

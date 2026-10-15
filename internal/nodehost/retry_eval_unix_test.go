@@ -105,12 +105,10 @@ func (f *retryFixture) source() {
 	}
 }
 
-var retryCause = []string{"test-bad"}
-
 func TestARetryOfAGeneratedFailureRunsOnlyIt(t *testing.T) {
 	f := newRetryFixture(t)
 	f.source()
-	res := f.run(t.Context(), "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, f.st)
+	res := f.run(t.Context(), "retry", &Rehydration{SourceRunID: "retry-source"}, f.st)
 	if res.Status != "success" {
 		t.Fatalf("retry %s: %v", res.Status, res.Err)
 	}
@@ -122,7 +120,7 @@ func TestARetryOfAGeneratedFailureRunsOnlyIt(t *testing.T) {
 func TestARetryWhoseGeneratorOutputIsGoneRunsItAndItsNodes(t *testing.T) {
 	f := newRetryFixture(t)
 	f.source()
-	res := f.run(t.Context(), "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, sourceTargetsGone{f.st})
+	res := f.run(t.Context(), "retry", &Rehydration{SourceRunID: "retry-source"}, sourceTargetsGone{f.st})
 	if res.Status != "success" || f.bodies("targets") != 2 || f.bodies("good") != 2 {
 		t.Fatalf("retry %s targets=%d good=%d: a generator whose output is gone runs again with every node it adds",
 			res.Status, f.bodies("targets"), f.bodies("good"))
@@ -148,7 +146,7 @@ func TestACopiedGeneratorsEvalKeepsTheNodesTimeout(t *testing.T) {
 	f.mode("hang")
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := f.run(ctx, "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, sourceBatchUnrecorded{f.st})
+	res := f.run(ctx, "retry", &Rehydration{SourceRunID: "retry-source"}, sourceBatchUnrecorded{f.st})
 	if ctx.Err() != nil {
 		t.Fatal("the retry only ended with its context: a hung generator eval held the scheduler")
 	}
@@ -168,7 +166,7 @@ func TestARetryKeepsTheGeneratedNodesItsSourceRecorded(t *testing.T) {
 	f := newRetryFixture(t)
 	f.source()
 	f.mode("changed")
-	res := f.run(t.Context(), "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, f.st)
+	res := f.run(t.Context(), "retry", &Rehydration{SourceRunID: "retry-source"}, f.st)
 	if f.bodies("good") != 1 || f.evalWall["targets"] != 0 {
 		t.Fatalf("good=%d, targets eval %s: the copied generator's recorded nodes are added without generating them",
 			f.bodies("good"), f.evalWall["targets"])

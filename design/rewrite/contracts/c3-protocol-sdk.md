@@ -65,6 +65,7 @@ are part of this contract.
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
+| `nodehost.OutputRecords`, `OutputUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. |
 | `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
 | `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
@@ -339,6 +340,13 @@ exact environment. The environment acceptance cell uses store and procenv fakes
 and proves projection and startup refusal. W6 filtering, SDK body application,
 captured-snapshot loading and native placement assembly remain integration work.
 
+Retry intake preserves the source run's sealed request, spec and plan. SDK
+environment and replan requests use the destination row's run ID while git,
+arguments and execution settings keep their accepted values. Attempt and eval
+environment construction cannot require the envelope's embedded source run ID
+to equal the execution run ID. The environment acceptance cell and native SDK
+startup tests cover both identities with fake persistence and process policy.
+
 `ExecutorDependencies.Bind` and `EvaluationDependencies.Bind` delegate a new
 nodehost route bearer before each process startup. The factory uses authenticated
 owner or claim authority. The returned binding must keep the input's run and job
@@ -406,6 +414,29 @@ evaluation, blob storage, route delegation and a state follower that catches up
 from persistence before waiting. The store owns the scheduling projection and
 decider. No host adapter may substitute its own readiness policy.
 
+`OutputRecords.PublishOutput` supplies the executor's output publisher. Its
+binding adapter returns live server-derived upload authority and a record key.
+The host checks the destination job attempt, scope, byte limit and JSON before
+upload. It hashes the exact JSON bytes, checks the verified receipt, commits
+the output record and checks the returned key, digest and source identity.
+Only then may the executor propose a terminal result containing that key.
+The result transaction still rechecks its reference edge. A refused upload,
+record commit or result transaction cannot produce a successful result.
+
+`OutputRecords.ReadOutput` looks up an authorized output record, consumes its
+download to verified EOF and closes the reader on every path. Missing records,
+missing bytes, invalid JSON, oversized output, integrity failures and close
+errors fail the read. Explicit JSON null remains a valid recorded value.
+The adapter does not grant access from a digest or infer a missing value as null.
+
+The output acceptance cells use fake blob and record stores. Native wiring
+still needs C2 upload binding and W7 byte/record implementations. Persisted
+result reads also need C1/W9 to expose the output record key with its terminal
+generation and distinguish an absent declared result from a missing required
+record. `NodeRow` exposes no result reference, so the host cannot construct that
+lookup from a node read. Owner evaluation and generated-code replay must use
+the persisted reference through live read authority.
+
 Owner operations need cross-area contract completion. Remote result reuse
 needs a materialize-only reconciliation choice because a cache miss must remain
 available to the selected remote executor. The run-host actor also needs an
@@ -452,7 +483,9 @@ The recovery acceptance cell uses the follower with fake persistence and
 subscriptions. Native controller and local-controller subscriptions remain open.
 
 The legacy envelope's retry-auto dispatch branch, duplicate start-event condition
-and dedicated tests are removed. Application retries keep their existing budget
+and dedicated tests are removed. Automatic retry-cause traversal and the host's
+terminal-agent-loss reset hook are also removed. A terminal row stays terminal;
+only a committed requeue permits recovery. Application retries keep their existing budget
 and backoff. The common executor's fenced retry acceptance remains the target
 proof. The legacy scheduler, dispatched-pod executor and run-host entry points
 still need their lifecycle cut.

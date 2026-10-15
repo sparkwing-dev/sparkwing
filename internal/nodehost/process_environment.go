@@ -40,7 +40,7 @@ func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted Acc
 		return nil, errors.New("SDK job environment requires persisted job identity")
 	}
 	var spec runspec.Spec
-	if err := json.Unmarshal(accepted.Spec, &spec); err != nil || spec.Request.RunID != accepted.RunID || accepted.SpecHash == "" || accepted.PlanHash == "" || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
+	if err := json.Unmarshal(accepted.Spec, &spec); err != nil || accepted.SpecHash == "" || accepted.PlanHash == "" || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
 		return nil, executorError(apierr.SpecDrift, "SDK environment differs from the accepted run")
 	}
 	ref := store.NodeRef{RunID: accepted.RunID, NodeID: nodeID}
@@ -69,6 +69,8 @@ func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted Acc
 		return nil, err
 	}
 	runtime := sdkRuntime(executorRunContext(spec), runner)
+	// safety: retry seals retain the source run ID; runtime identity belongs to the destination row.
+	runtime.RunID = accepted.RunID
 	runtime.JobID, runtime.Startup = nodeID, jobEnv.Startup
 	if err := context.Cause(ctx); err != nil {
 		return nil, err

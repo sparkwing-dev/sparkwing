@@ -209,6 +209,34 @@ fixture processes and checks their environment. The store and procenv policy
 remain fakes. W6 filtering, actual SDK body environment and placement bootstrap
 are unverified by these cells.
 
+The same environment cell and native startup test include retry attempt/eval
+cases whose accepted envelope retains the source run ID. Environment policy
+receives the destination ID. Accepted git, arguments and settings remain sealed.
+
+`lifecycle-result-commit-atomicity/hermetic-output-records` checks the typed
+output publisher against fake blob and record stores. It covers explicit null,
+the exact 16 MiB boundary, oversized or malformed JSON, cancellation, incorrect
+attempt/generation/run/scope, receipt mismatches and failed or inconsistent
+record commits. `hermetic-executor-output` ports the host half of
+`TestLifecycleAFailedRecordEndsTheNodeOnce`: failed upload/commit reports a failed
+job without an output reference; a refused result transaction returns an error.
+Only the fake store handles lifecycle requests. Real transaction/event atomicity
+remains C1's proof.
+
+`storage-cas-integrity/hermetic-required-output` checks required output reads
+through authorized record lookup and verified EOF. Missing records/bytes,
+unauthorized bytes, corrupt or unverified streams, invalid JSON, oversize and
+reader-close errors return no output. Null and the exact byte boundary pass.
+Native byte signing, read-set enforcement and placement integration remain open.
+
+The host's automatic retry-cause traversal and terminal-agent-loss reset hook
+are deleted. `TestAnAutomaticRetryRunsOnlyItsCausesAndWhatTheyReach` is dropped
+because recovery requeues inside the same run. The remaining retry fixtures
+request successful-result reuse without cause lists. The generator-waiter case
+is retained as `TestARetryRunsTheWaiterOfAFailedGenerator`. The existing
+`CheckHostReconciliation/requeued` and `/terminal` cases cover the host's
+replacement recovery boundary; only store-committed state permits execution.
+
 `TestNativeSDKStartupChangeRefusesDriftBeforeBody` executes the common node host
 with real protocol pipes. A stable startup value permits the body. A value that
 changes the fixture's replan records plan_drift before execution and still joins

@@ -507,7 +507,7 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 			continue
 		}
 		progressed = true
-		if res, ok := s.rehydrated(ctx, n, byID); ok {
+		if res, ok := s.rehydrated(ctx, n); ok {
 			s.started[n.ID] = true
 			s.finish(ctx, n.ID, res)
 			continue
@@ -673,17 +673,11 @@ func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode)
 }
 
 // safety: a resumed run's finished node keeps the result its row records and
-// is never run or written again; an unfinished row, or one the reaper failed
-// because its holder was lost, is run again.
+// is never run or written again; recovery follows a persisted requeue.
 func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *store.Node) {
 	id := n.ID
 	if row.Status != "done" || row.Outcome == "" {
 		return
-	}
-	if row.FailureReason == store.FailureAgentLost {
-		if r, ok := s.run.State.(lostNodeResetter); ok && r.ResetNodeForAutoRetry(ctx, s.run.ID, id) == nil {
-			return
-		}
 	}
 	res := Result{Outcome: sparkwing.Outcome(row.Outcome), Reason: row.FailureReason, recorded: true}
 	if row.Error != "" {
@@ -716,12 +710,6 @@ func recordedOutput(ctx context.Context, st storage.StateStoreOld, runID, id str
 		return nil, nil
 	}
 	return out, err
-}
-
-// safety: the store reopens a node whose holder was lost only for the run's own trigger holder, and only while no
-// agent-loss retry run took the run over, so the node never runs in both.
-type lostNodeResetter interface {
-	ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 }
 
 func pendingRow(run *Run, n nodeproto.PlanNode) store.Node {

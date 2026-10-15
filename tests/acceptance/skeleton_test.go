@@ -17,6 +17,11 @@ func pendingScenarios(t *testing.T, group string) {
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
 			switch scenario.ID {
+			case "lifecycle-result-commit-atomicity":
+				t.Run("hermetic-output-records", acceptance.CheckOutputRecordCommit)
+				t.Run("hermetic-executor-output", acceptance.CheckExecutorOutputCommit)
+			case "storage-cas-integrity":
+				t.Run("hermetic-required-output", acceptance.CheckOutputRecordRead)
 			case "lifecycle-generator-reconstruct-code":
 				t.Run("hermetic-replay", acceptance.CheckGeneratorReplay)
 			case "environment-startup-versus-body":

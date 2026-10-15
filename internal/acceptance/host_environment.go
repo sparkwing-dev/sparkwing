@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -18,8 +19,9 @@ import (
 // boundary. Policy and store fakes leave native placement and SDK body-env proofs open.
 func CheckSDKEnvironmentProjection(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"plan", "attempt", "eval"} {
+	for _, name := range []string{"plan", "attempt", "eval", "retry_attempt", "retry_eval"} {
 		t.Run(name, func(t *testing.T) {
+			operation := strings.TrimPrefix(name, "retry_")
 			var trace []string
 			var processes []*executionSDK
 			input, s, _ := executionHostFixture(t, "success", &trace, &processes)
@@ -30,10 +32,14 @@ func CheckSDKEnvironmentProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec.Resolved.Settings.Options.DryRun.Value = true
+			if operation != name {
+				// safety: retry intake preserves the source envelope while rows and SDK execution name the destination.
+				spec.Request.RunID = "source-run"
+			}
 			input.Accepted.Spec, _ = json.Marshal(spec)
 			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{"BODY": {Value: "after plan"}, "STARTUP": {Value: "before exec", Startup: true}}}
 			s.snapshot.Nodes[0].Spec, _ = json.Marshal(job)
-			kind := map[string]procenv.Kind{"plan": procenv.Plan, "attempt": procenv.Attempt, "eval": procenv.Eval}[name]
+			kind := map[string]procenv.Kind{"plan": procenv.Plan, "attempt": procenv.Attempt, "eval": procenv.Eval}[operation]
 			boundary := errors.New("environment boundary refused startup")
 			revoked, built, split := 0, 0, 0
 			cfg := nodehost.ProtocolSessionConfig{Revoke: func() error { revoked++; return nil }, Environments: nodehost.SDKEnvironment{
@@ -49,7 +55,7 @@ func CheckSDKEnvironmentProjection(t *testing.T) {
 					if gotKind != kind || !base.Local || !reflect.DeepEqual(base.Captured, []string{"CAPTURED=sealed"}) || runtime.RunID != input.Accepted.RunID || runtime.Runner.Name != input.GrantedRunner.Name || !runtime.DryRun {
 						t.Fatalf("environment policy changed sealed values: kind=%v runtime=%+v", gotKind, runtime)
 					}
-					if name == "plan" {
+					if operation == "plan" {
 						if runtime.JobID != "" || len(runtime.Startup) != 0 || split != 0 {
 							t.Fatal("initial planning inherited job startup settings")
 						}
@@ -61,7 +67,7 @@ func CheckSDKEnvironmentProjection(t *testing.T) {
 			}}
 			var process nodehost.ExecutorProcess
 			var err error
-			switch name {
+			switch operation {
 			case "plan":
 				process, err = cfg.StartPlanning(t.Context(), nodehost.PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build", DryRun: true}}, func(context.Context, nodeproto.FrameLog) error { return nil })
 			case "attempt":

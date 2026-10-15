@@ -31,7 +31,7 @@ func TestAResumedRetryRegeneratesTheGeneratorItAdopts(t *testing.T) {
 	var regenerated json.RawMessage
 	s := &scheduler{
 		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
-		rehydrate: &Rehydration{SourceRunID: sourceRunID, Causes: []string{"test-a"}}, rerun: map[string]bool{},
+		rehydrate: &Rehydration{SourceRunID: sourceRunID}, rerun: map[string]bool{},
 		regenerate: func(_ context.Context, n *NodeRun, out json.RawMessage) []expansion {
 			regenerated = out
 			return []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{{ID: "test-a", Deps: deps(n.Plan.ID)}}}}

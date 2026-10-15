@@ -111,10 +111,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	if err != nil {
 		return err
 	}
-	rehydrate, err := hostedRehydration(ctx, c, Options{RetryOf: trig.RetryOf, RetrySource: trig.RetrySource, Full: trig.Full}, trig.ID)
-	if err != nil {
-		return err
-	}
+	rehydrate := hostedRehydration(Options{RetryOf: trig.RetryOf, Full: trig.Full})
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env},
 		Pipeline: trig.Pipeline, Args: args, CheckArgs: checkArgs,
