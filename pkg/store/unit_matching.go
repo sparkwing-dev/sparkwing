@@ -31,17 +31,7 @@ func resolveMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDeman
 			return profile, match.Demand{}, err
 		}
 	}
-	profile.Name = p.Capability.Subject.ID
-	profile.ReservedPools = slices.Clone(p.Capability.ReservedPools)
-	profile.Class = ""
-	switch {
-	case launcherClaimant(p.Capability):
-		profile.Class, profile.Location = match.ClassCloud, "cloud"
-	case here || p.Capability.Subject.Kind == capability.SubjectLocal:
-		profile.Class, profile.Location = match.ClassCoordinator, "local"
-	case p.Capability.Subject.Kind == capability.SubjectMachine:
-		profile.Class = match.ClassAgent
-	}
+	profile = authenticatedClaimProfile(p.Capability, profile, here)
 	profile.Labels, profile.OS, profile.Arch, profile.Capacity = slices.Clone(request.Labels), request.OS, request.Arch, request.Capacity
 	var team, repo, display string
 	var requestBody, specBody, pools []byte
@@ -113,6 +103,19 @@ func resolveMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDeman
 
 func matchingResources(v runspec.Resources) match.Resources {
 	return match.Resources{Cores: v.Cores.Value, MemoryBytes: v.MemoryBytes.Value}
+}
+
+func authenticatedClaimProfile(c capability.Capability, profile match.Profile, here bool) match.Profile {
+	profile.Name, profile.ReservedPools, profile.Class = c.Subject.ID, slices.Clone(c.ReservedPools), ""
+	switch {
+	case launcherClaimant(c):
+		profile.Class, profile.Location = match.ClassCloud, "cloud"
+	case here || c.Subject.Kind == capability.SubjectLocal:
+		profile.Class, profile.Location = match.ClassCoordinator, "local"
+	case c.Subject.Kind == capability.SubjectMachine:
+		profile.Class = match.ClassAgent
+	}
+	return profile
 }
 
 func validMatchingResources(v match.Resources) bool {

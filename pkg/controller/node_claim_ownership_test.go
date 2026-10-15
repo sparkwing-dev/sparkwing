@@ -395,10 +395,10 @@ func TestNodeReadResponsesHideClaimHolderAndReservations(t *testing.T) {
 	now := time.Now().UnixNano()
 	if _, err := f.store.DB().Exec(`UPDATE nodes SET reservation_id = ?, claim_reservation_id = ?,
 coordinator_id = ?, claim_membership_id = ?, executor_kind = 'agent', executor_id = ?,
-executor_location = 'local', required_coordinator_id = ?, claim_worker_id = ?,
+executor_location = 'local', claim_worker_id = ?,
 claim_executor_kind = 'agent', attempts_consumed = 1, execution_started_at = ?
 WHERE run_id = ? AND node_id = ?`, "execution-reservation", "offer-reservation",
-		"coordinator-secret", "membership-secret", "desktop", "coordinator-secret", "desktop",
+		"coordinator-secret", "membership-secret", "desktop", "desktop",
 		now, "run-1", "only"); err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ VALUES (?, ?, ?, 1, ?, ?, ?, 'agent', 'desktop', ?, 'local', ?, ?, ?)`,
 				t.Errorf("GET %s exposed %q", path, secret)
 			}
 		}
-		for _, internal := range []string{"claimed_by", "claim_worker_id", "claim_generation", "claim_membership_id", "coordinator_id", "executor_id", "required_coordinator_id", "reservation_id", "holder_id", "membership_id", "token_prefix"} {
+		for _, internal := range []string{"claimed_by", "claim_worker_id", "claim_generation", "claim_membership_id", "coordinator_id", "executor_id", "reservation_id", "holder_id", "membership_id", "token_prefix"} {
 			if strings.Contains(body, `"`+internal+`"`) {
 				t.Errorf("GET %s exposed internal field %q: %s", path, internal, body)
 			}

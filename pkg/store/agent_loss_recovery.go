@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const agentLossAvoidWindow = 15 * time.Second
-
 type AgentLossRecovery struct {
 	RunID       string
 	NodeID      string
@@ -18,16 +16,13 @@ type AgentLossRecovery struct {
 }
 
 type expiredAgentNode struct {
-	runID, nodeID                                         string
-	coordinatorID, executorKind, executorName, executorID string
-	executorLocation                                      string
-	membershipID, reservationID                           string
-	requiredCoordinatorID, requiredLocation               string
-	started                                               bool
-	chargeWindowOpen                                      bool
-	invocations                                           int
-	leaseNS                                               int64
-	tokenPrefix                                           string
+	runID, nodeID                                string
+	executorKind, executorName, executorLocation string
+	started                                      bool
+	chargeWindowOpen                             bool
+	invocations                                  int
+	leaseNS                                      int64
+	tokenPrefix                                  string
 }
 
 func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRecovery, err error) {
@@ -55,8 +50,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
 			return nil, err
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT run_id, node_id, coordinator_id, executor_kind, claim_worker_id, executor_id, executor_location,
-	       claim_membership_id, reservation_id, required_coordinator_id, required_executor_location,
+	rows, err := tx.QueryContext(ctx, `SELECT run_id, node_id, executor_kind, claim_worker_id, executor_location,
 	       execution_started_at, attempts_consumed, credit_charged_through, lease_expires_at, claim_token_prefix
  FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
@@ -71,9 +65,9 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
 		var item expiredAgentNode
 		var started sql.NullInt64
 		var chargeWindow int64
-		if err := rows.Scan(&item.runID, &item.nodeID, &item.coordinatorID, &item.executorKind,
-			&item.executorName, &item.executorID, &item.executorLocation, &item.membershipID, &item.reservationID,
-			&item.requiredCoordinatorID, &item.requiredLocation, &started, &item.invocations, &chargeWindow,
+		if err := rows.Scan(&item.runID, &item.nodeID, &item.executorKind,
+			&item.executorName, &item.executorLocation,
+			&started, &item.invocations, &chargeWindow,
 			&item.leaseNS, &item.tokenPrefix); err != nil {
 			_ = rows.Close()
 			return nil, err
@@ -114,21 +108,15 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRe
 					return nil, err
 				}
 			}
-			var avoidUntil any
-			if item.executorID != "" {
-				avoidUntil = now.Add(agentLossAvoidWindow).UnixNano()
-			}
 			if _, err := tx.ExecContext(ctx, `UPDATE nodes
    SET `+nodeFailSet+`, error = 'runner heartbeat expired', failure_reason = ?, finished_at = ?,
-       avoid_coordinator_id = ?, avoid_executor_kind = ?, avoid_executor_id = ?, avoid_until = ?,
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
        ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL, reservation_id = '',
        credit_charged_through = 0
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
-				FailureAgentLost, now.UnixNano(), item.coordinatorID, item.executorKind,
-				item.executorID, avoidUntil, runID, item.nodeID); err != nil {
+				FailureAgentLost, now.UnixNano(), runID, item.nodeID); err != nil {
 				return nil, err
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts

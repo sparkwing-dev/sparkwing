@@ -16,7 +16,6 @@ import (
 // Preferences rank eligible candidates and never change the admission verdict.
 func Evaluate(profile Profile, demand Demand) Verdict {
 	profile.Labels = SelfAsserted(profile.Labels)
-	profile.Labels = slices.DeleteFunc(profile.Labels, func(label string) bool { return strings.HasPrefix(label, "pool=") })
 	for _, pool := range profile.ReservedPools {
 		profile.Labels = append(profile.Labels, "pool="+pool)
 	}

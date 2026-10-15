@@ -1481,37 +1481,31 @@ type Node struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
 	// Warm-pool dispatch; zero on laptop / K8sRunner paths.
-	ReadyAt                  *time.Time         `json:"ready_at,omitempty"`
-	ClaimedBy                string             `json:"claimed_by,omitempty"`
-	Claimed                  bool               `json:"claimed,omitempty"`
-	LeaseExpiresAt           *time.Time         `json:"lease_expires_at,omitempty"`
-	OfferStartedAt           *time.Time         `json:"offer_started_at,omitempty"`
-	OfferPriorityTarget      int                `json:"offer_priority_target,omitempty"`
-	ClaimBasePriority        int                `json:"claim_base_priority,omitempty"`
-	ClaimPriority            int                `json:"claim_priority,omitempty"`
-	ClaimWorkerID            string             `json:"claim_worker_id,omitempty"`
-	ClaimExecutorKind        string             `json:"claim_executor_kind,omitempty"`
-	ClaimReservationID       string             `json:"claim_reservation_id,omitempty"`
-	CoordinatorID            string             `json:"coordinator_id,omitempty"`
-	ClaimGeneration          int64              `json:"claim_generation,omitempty"`
-	ClaimMembershipID        string             `json:"claim_membership_id,omitempty"`
-	ExecutorKind             string             `json:"executor_kind,omitempty"`
-	ExecutorName             string             `json:"executor_name,omitempty"`
-	ExecutorID               string             `json:"executor_id,omitempty"`
-	ExecutorLocation         string             `json:"executor_location,omitempty"`
-	ExecutionSite            string             `json:"execution_site,omitempty"`
-	ExecutionSiteName        string             `json:"execution_site_name,omitempty"`
-	RequiredCoordinatorID    string             `json:"required_coordinator_id,omitempty"`
-	RequiredExecutorLocation string             `json:"required_executor_location,omitempty"`
-	ExecutionStartedAt       *time.Time         `json:"execution_started_at,omitempty"`
-	ReservationID            string             `json:"reservation_id,omitempty"`
-	AttemptsConsumed         int                `json:"attempts_consumed,omitempty"`
-	RetryRootRunID           string             `json:"retry_root_run_id,omitempty"`
-	ExecutionAttempts        []ExecutionAttempt `json:"execution_attempts,omitempty"`
-	AvoidCoordinatorID       string             `json:"-"`
-	AvoidExecutorKind        string             `json:"-"`
-	AvoidExecutorID          string             `json:"-"`
-	AvoidUntil               *time.Time         `json:"-"`
+	ReadyAt             *time.Time         `json:"ready_at,omitempty"`
+	ClaimedBy           string             `json:"claimed_by,omitempty"`
+	Claimed             bool               `json:"claimed,omitempty"`
+	LeaseExpiresAt      *time.Time         `json:"lease_expires_at,omitempty"`
+	OfferStartedAt      *time.Time         `json:"offer_started_at,omitempty"`
+	OfferPriorityTarget int                `json:"offer_priority_target,omitempty"`
+	ClaimBasePriority   int                `json:"claim_base_priority,omitempty"`
+	ClaimPriority       int                `json:"claim_priority,omitempty"`
+	ClaimWorkerID       string             `json:"claim_worker_id,omitempty"`
+	ClaimExecutorKind   string             `json:"claim_executor_kind,omitempty"`
+	ClaimReservationID  string             `json:"claim_reservation_id,omitempty"`
+	CoordinatorID       string             `json:"coordinator_id,omitempty"`
+	ClaimGeneration     int64              `json:"claim_generation,omitempty"`
+	ClaimMembershipID   string             `json:"claim_membership_id,omitempty"`
+	ExecutorKind        string             `json:"executor_kind,omitempty"`
+	ExecutorName        string             `json:"executor_name,omitempty"`
+	ExecutorID          string             `json:"executor_id,omitempty"`
+	ExecutorLocation    string             `json:"executor_location,omitempty"`
+	ExecutionSite       string             `json:"execution_site,omitempty"`
+	ExecutionSiteName   string             `json:"execution_site_name,omitempty"`
+	ExecutionStartedAt  *time.Time         `json:"execution_started_at,omitempty"`
+	ReservationID       string             `json:"reservation_id,omitempty"`
+	AttemptsConsumed    int                `json:"attempts_consumed,omitempty"`
+	RetryRootRunID      string             `json:"retry_root_run_id,omitempty"`
+	ExecutionAttempts   []ExecutionAttempt `json:"execution_attempts,omitempty"`
 
 	// PlacementReason names why the claiming runner got this node:
 	// "preference", "fallback" after the local-first hold window, or "none"
@@ -1660,30 +1654,14 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefers_labels,
                    requested_cores, requested_memory_bytes, requested_slots,
-			       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
-			       attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
+			       attempts_consumed, retry_root_run_id,
 			       spec_hash, generated_json, seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		?,
-		?,
-		?,
-		?,
-		?,
-		?,
-		?,
-		?,
-		?, ?,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE team = ? AND run_id = ?))`,
 		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
-		n.AvoidCoordinatorID,
-		n.AvoidExecutorKind,
-		n.AvoidExecutorID,
-		nullableTimeNS(n.AvoidUntil),
 		n.AttemptsConsumed,
 		n.RunID,
-		n.RequiredCoordinatorID,
-		n.RequiredExecutorLocation,
 		n.SpecHash, generatedJSON,
 		string(team), n.RunID)
 	if err != nil {
@@ -2067,8 +2045,7 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
 	   artifact_manifest, cpu_nanos, max_rss_bytes, process_wall_nanos,
 	   coordinator_id, claim_generation, claim_membership_id,
 	   executor_kind, executor_id, executor_location, execution_started_at, reservation_id,
-	   attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
-	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
+	   attempts_consumed, retry_root_run_id,
 	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash, generated_json`
 
 func scanNodeRow(rs rowScanner, n *Node) error {
@@ -2076,7 +2053,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	var outputKey, outputSHA sql.NullString
 	var outputSize sql.NullInt64
 	var generatedJSON []byte
-	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
+	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS sql.NullInt64
 	var holdFromNS sql.NullInt64
 	var claimedBy sql.NullString
 	var exitCode sql.NullInt64
@@ -2091,8 +2068,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
 		&n.CoordinatorID, &n.ClaimGeneration, &n.ClaimMembershipID,
 		&n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executionStartedNS, &n.ReservationID,
-		&n.AttemptsConsumed, &n.RetryRootRunID, &n.RequiredCoordinatorID, &n.RequiredExecutorLocation,
-		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
+		&n.AttemptsConsumed, &n.RetryRootRunID,
 		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &generatedJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
@@ -2148,10 +2124,6 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	if executionStartedNS.Valid {
 		t := time.Unix(0, executionStartedNS.Int64)
 		n.ExecutionStartedAt = &t
-	}
-	if avoidUntilNS.Valid {
-		t := time.Unix(0, avoidUntilNS.Int64)
-		n.AvoidUntil = &t
 	}
 	if heartbeatNS.Valid {
 		t := time.Unix(0, heartbeatNS.Int64)
@@ -2691,7 +2663,7 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, 
 	}
 
 	for range maxClaimAttempts {
-		target, err := s.scanClaimCandidates(ctx, coordinatorID, profile, runnerLabels, placement, warm, scope)
+		target, err := s.scanClaimCandidates(ctx, profile, runnerLabels, placement, warm, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -2809,7 +2781,7 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 
 // safety: walks the queue outside any transaction, so a poll that takes nothing
 // writes nothing and holds no lock.
-func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, profile match.Profile, runnerLabels []string,
+func (s *Store) scanClaimCandidates(ctx context.Context, profile match.Profile, runnerLabels []string,
 	placement ClaimPlacement, warm warmClassFilter, scope teamScope,
 ) (*claimCandidate, error) {
 	var cursor *claimCandidate
@@ -2818,7 +2790,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 	needRepo := profile.Accept != nil || placement.needsRunRepository()
 	repos := map[string]match.Repository{}
 	for range claimScanRounds {
-		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
+		batch, err := s.readClaimCandidates(ctx, cursor, warm, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -2878,14 +2850,13 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 }
 
 func (s *Store) readClaimCandidates(
-	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter, scope teamScope,
+	ctx context.Context, after *claimCandidate, warm warmClassFilter, scope teamScope,
 ) ([]claimCandidate, error) {
 	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
 	if err != nil {
 		return nil, err
 	}
-	args := []any{time.Now().UnixNano(), coordinatorID, "", ""}
-	args = append(args, teamArgs...)
+	args := teamArgs
 	// safety: the stamped class keeps a queue of large nodes out of the scan
 	// window, so a small node behind thousands of them is still reachable.
 	classClause := ""
@@ -2910,10 +2881,7 @@ func (s *Store) readClaimCandidates(
  FROM nodes
 	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
 	AND `+nodeRunActiveSQL("nodes.")+`
-	AND required_coordinator_id = '' AND required_executor_location = ''
-	AND `+nodeTriggerDispatched+`
-   AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+scopeClause+keyset+`
+	AND `+nodeTriggerDispatched+teamClause+classClause+scopeClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
 	 LIMIT ?`, args...)
 	if err != nil {
@@ -3048,8 +3016,7 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 		        credit_charged_through = 0,
 		        placement_reason = ?, claim_generation = claim_generation + 1
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
-		    AND `+nodeNotDone+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+`
-		    AND required_coordinator_id = '' AND required_executor_location = ''`+teamClause,
+		    AND `+nodeNotDone+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+teamClause,
 		awardArgs...,
 	)
 	if err != nil {

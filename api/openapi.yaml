@@ -7333,9 +7333,6 @@ components:
           enum: [machine, cloud, github-actions, cluster]
           description: Display site derived from the claim credential and holder; absent without enough evidence.
         execution_site_name: {type: string, description: Public runner or repository name for the execution site.}
-        required_executor_location:
-          type: string
-          enum: ["", local, cloud, unknown]
         execution_started_at: {type: string, format: date-time, nullable: true}
         attempts_consumed: {type: integer}
         retry_root_run_id: {type: string}

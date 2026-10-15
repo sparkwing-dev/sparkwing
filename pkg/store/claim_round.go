@@ -32,8 +32,6 @@ type claimRoundSummary struct {
 	Resources             ExecutorResource `json:"resources"`
 	Slots                 int              `json:"slots"`
 	RunPriority           int              `json:"run_priority"`
-	RequiredCoordinatorID string           `json:"-"`
-	RequiredLocation      string           `json:"-"`
 }
 
 type claimRoundEvent struct {
@@ -59,7 +57,6 @@ func claimRoundSummaryTx(ctx context.Context, tx *storeTx, runID, nodeID string)
 	return claimRoundSummary{
 		HardCapabilities: append([]string(nil), n.NeedsLabels...), PreferredCapabilities: snapshotNodePrefers(plan, nodeID),
 		Resources: charge, Slots: 1, RunPriority: snapshotRunPriority(plan),
-		RequiredCoordinatorID: n.RequiredCoordinatorID, RequiredLocation: n.RequiredExecutorLocation,
 	}, nil
 }
 
@@ -77,11 +74,10 @@ func (s *Store) finalizeClaimRoundAt(ctx context.Context, runID, nodeID string, 
 	defer rollbackOrLog(tx)
 	var readyAt, opened sql.NullInt64
 	var claimedBy sql.NullString
-	var status, requiredCoordinator, requiredLocation string
-	err = tx.QueryRowContext(ctx, `SELECT ready_at, claimed_by, status, offer_started_at,
-       required_coordinator_id, required_executor_location FROM nodes
+	var status string
+	err = tx.QueryRowContext(ctx, `SELECT ready_at, claimed_by, status, offer_started_at FROM nodes
 	 WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(
-		&readyAt, &claimedBy, &status, &opened, &requiredCoordinator, &requiredLocation)
+		&readyAt, &claimedBy, &status, &opened)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimRoundResult{}, ErrNotFound
 	}
@@ -92,9 +88,6 @@ func (s *Store) finalizeClaimRoundAt(ctx context.Context, runID, nodeID string, 
 		return ClaimRoundResult{}, tx.Commit()
 	}
 	if opened.Valid && now.Before(time.Unix(0, opened.Int64).Add(nodeClaimOfferWindow)) {
-		return ClaimRoundResult{Pending: true}, tx.Commit()
-	}
-	if requiredCoordinator != "" || requiredLocation != "" {
 		return ClaimRoundResult{Pending: true}, tx.Commit()
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
@@ -130,7 +123,7 @@ func (s *Store) offerRoundIdleTx(ctx context.Context, tx *storeTx, runID string,
 	class int64, now time.Time,
 ) (bool, error) {
 	live, known := ctx.Value(queueRunnersKey{}).([]RunnerPresence)
-	if !known || summary.RequiredCoordinatorID != "" || summary.RequiredLocation != "" {
+	if !known {
 		return false, nil
 	}
 	team, _, err := runOwnerTx(ctx, tx, runID)

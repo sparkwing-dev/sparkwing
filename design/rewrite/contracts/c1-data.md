@@ -139,6 +139,16 @@ require this resolver because `ReconcileRequest` carries no machine observations
 Named and queued claims still carry their observed labels and capacity in
 `UnitDemand`.
 
+Advisory runner discovery reads live unbound machine capabilities and rechecks
+their ancestry and current claim grants. `RecordAgentLabels` persists only
+self-asserted labels and a nanosecond last-use time. `RegisteredAgent.CapabilityPrefix`
+identifies that capability. Its profile combines enrollment with the same granted
+identity and pools used for claims. Online presence replaces observed labels and
+platform only. `ListWaitingNodes` pages ready host-owned jobs from their sealed
+execution demand and request runner selection. `WaitingNode.AllowedPools` carries
+the intake-authorized pools into the advisory matcher. Advisory results grant no
+authority to claim or mutate a job.
+
 `ReconciledNode.Bearer` carries the new self-claim credential after commit and
 is excluded from JSON. `nodes.owner_capability_prefix` and the matching
 `NodeRow.OwnerCapabilityPrefix` identify which live trigger award may renew

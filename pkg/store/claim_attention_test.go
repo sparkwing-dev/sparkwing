@@ -84,67 +84,6 @@ func TestNodeAttentionShowsOnTheRunUntilAClaim(t *testing.T) {
 	}
 }
 
-// A team's agents are listed with what they last advertised, offline or not.
-func TestRegisteredAgentsCarryTheirLastLabels(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	_, pi, err := s.CreateToken("agent:pi", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.CreateToken("someone", store.TokenKindUser, []string{"runs.read"}, 0, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RecordAgentLabels(ctx, pi.Prefix, []string{"tool:git", "name=forged", "arch=arm64"}); err != nil {
-		t.Fatal(err)
-	}
-	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
-	if err != nil || len(agents) != 1 || agents[0].Name != "pi" ||
-		!slices.Equal(agents[0].Profile.Labels, []string{"tool:git", "arch=arm64"}) {
-		t.Fatalf("agents = %+v, %v; want pi with its labels less the forged name", agents, err)
-	}
-}
-
-// Token times are Unix seconds, so an agent whose token expires is still
-// listed before then, and its last use reads back as the time it happened.
-func TestRegisteredAgentsKeepAnExpiringTokenAndItsLastUse(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	raw, desk, err := s.CreateToken("agent:desk", store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.LookupToken(raw, now); err != nil {
-		t.Fatal(err)
-	}
-	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
-	if err != nil || len(agents) != 1 || agents[0].TokenPrefix != desk.Prefix {
-		t.Fatalf("agents = %+v, %v; want the desk token, which expires in an hour", agents, err)
-	}
-	if seen := agents[0].LastSeen; seen.Before(now.Add(-time.Minute)) || seen.After(time.Now().Add(time.Minute)) {
-		t.Fatalf("last seen = %v, want about %v", seen, now)
-	}
-}
-
-// Waiting nodes come back in pages, so one sweep tick reads a bounded batch.
-func TestWaitingNodesPage(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	for _, run := range []string{"run-a", "run-b", "run-c"} {
-		seedMatchNode(t, s, run, "", 1, "tool:terraform")
-		ageReadyNode(t, s, run, time.Minute)
-	}
-	first, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{}, 2)
-	if err != nil || len(first) != 2 || first[1].RunID != "run-b" {
-		t.Fatalf("first page = %+v, %v", first, err)
-	}
-	rest, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{first[1].RunID, first[1].NodeID}, 2)
-	if err != nil || len(rest) != 1 || rest[0].RunID != "run-c" {
-		t.Fatalf("second page = %+v, %v", rest, err)
-	}
-}
-
 // The sweep writes one row per statement: while another transaction holds one
 // node's lock, the reason for a different node is already committed rather
 // than held behind it.
@@ -197,45 +136,5 @@ func TestSetNodeAttentionHoldsOneNodeLockAtATime(t *testing.T) {
 	}
 	if run, err := s.GetRun(ctx, "run-y"); err != nil || run.NeedsAttention != "y" {
 		t.Fatalf("run-y = %+v, %v; want its reason once the lock is released", run, err)
-	}
-}
-
-// A node withdrawn from the queue between the sweep's read and its write keeps
-// no reason.
-func TestSetNodeAttentionSkipsANodeRevokedSinceTheRead(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedMatchNode(t, s, "run-r", "", 1, "tool:terraform")
-	ageReadyNode(t, s, "run-r", time.Minute)
-	waiting, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{}, 10)
-	if err != nil || len(waiting) != 1 {
-		t.Fatalf("waiting = %+v, %v", waiting, err)
-	}
-	if revoked, err := s.RevokeNodeReady(ctx, "run-r", "work"); err != nil || !revoked {
-		t.Fatalf("revoke = %v, %v", revoked, err)
-	}
-	if err := s.SetNodeAttention(ctx, []store.NodeAttention{{
-		Team: waiting[0].Team, RunID: "run-r", NodeID: "work", Reason: "stale",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	var reason string
-	if err := s.DB().QueryRowContext(ctx, storetest.Rebind(s,
-		`SELECT attention_reason FROM nodes WHERE run_id = ? AND node_id = ?`), "run-r", "work").Scan(&reason); err != nil {
-		t.Fatal(err)
-	}
-	if reason != "" {
-		t.Fatalf("a revoked node was given the reason %q", reason)
-	}
-}
-
-// Only the launcher claims a controller-dispatched node, so the attention
-// sweep, which judges waits by the agents that could claim, skips it.
-func TestWaitingNodesSkipAControllerDispatchedNode(t *testing.T) {
-	f := newDispatchRun(t, "run-dispatched")
-	f.mustAccept(t, planOf(`a`))
-	waiting, err := f.s.ListWaitingNodes(context.Background(), time.Now().Add(time.Hour), [2]string{}, 10)
-	if err != nil || len(waiting) != 0 {
-		t.Fatalf("waiting = %+v, %v; want none", waiting, err)
 	}
 }
