@@ -30,8 +30,7 @@ func main() {
 		"scope each requires, generated from the routing code. All paths are under " +
 		"the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and " +
 		"the token model are in [auth.md](auth.md); `admin` satisfies any scope " +
-		"check except `credits.grant`, which only the checkout service's own token " +
-		"passes. `public` routes run with no bearer check (the " +
+		"check on legacy routes. `public` routes run with no bearer check (the " +
 		"GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes require live " +
 		"identity under their credential policy and no named grant. `claim` routes answer the claim " +
 		"token of one node claim, and only for that claim's own run and node. " +

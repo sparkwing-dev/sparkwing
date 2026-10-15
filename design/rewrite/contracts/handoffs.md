@@ -2,6 +2,45 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+**W2 runner administration and billing hard cut.** The three legacy GitHub
+runner permission routes, token-table metering route and eight credits.grant
+service routes are removed. The dashboard uses /api/v1/runners/github.
+Final GitHub administration and console runner metering use PolicyRouter and
+C2's local transaction contracts. Signed checkout transport remains. See
+[W2-route-cut-handoff.md](../W2-route-cut-handoff.md).
+
+**W1: GitHub enrollment transactions for W2.** C2 declares
+controller.GitHubRunnerRegistry with Team() Team,
+GitHubRunnerBindings(ctx) ([]GitHubRunnerBinding, error),
+RegisterGitHubRunner(ctx, Authorized, GitHubRunnerBinding)
+(GitHubRunnerBinding, error), and RevokeGitHubRunner(ctx, Authorized, int64)
+error. Recheck current team.admin, ancestry, tenant, actor, enrollment limits
+and canonical repository facts in the committing transaction. Repeated
+registration must not duplicate authority. Revocation removes the enrollment
+and revokes its Actions roots/descendants atomically against concurrent
+ProvisionActions. Preserve numeric repository/owner identity, repo_key,
+registration ID and nanosecond timestamps. A real SQLite call to the legacy
+Tenant.AddGitHubRunnerBinding failed with
+`NOT NULL constraint failed: github_runner_bindings.repo_key (1299)`.
+It is not a production adapter. W2's default mutation path refuses missing
+transactions and its component proofs use fakes.
+
+**W1: console runner metering for W2.** C2 declares
+controller.RunnerMeteringWriter.SetRunnerMetered(ctx, Authorized, string,
+bool) error. Recheck the committed console session, resolve the enrolled
+machine root by its public capability prefix in the runner selector, update only its future-award metering
+and preserve immutable billing on existing awards. W2 supplies the declared
+console-only route and explicit boolean transport with a fake writer.
+Store.SetTokenMetered on the retired token table is not a fallback.
+
+**W1/W2: verified card and dispute events.** The legacy financial service
+callbacks and startup service-token seeding are deleted. C2 PaymentEvent
+and C1 SettlePayment still cover only committed checkout payment, failure
+and expiry. Card setup, off-session card outcomes, refunds, warning and
+dispute events need the verified-event contract before their HTTP ports can
+be completed. Existing C1 card/refund/dispute tests retain the business
+requirements. No caller-selected team/credit path replaces the deleted routes.
+
 **W2 OAuth continuation.** OAuth start and callback now use PolicyRouter and
 their named browser proof. Eight active HTTP tests cover real SQLite account
 sessions through a fake provider transport. Generated proof and PKCE refusals

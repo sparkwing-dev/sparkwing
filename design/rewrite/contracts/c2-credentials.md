@@ -4,6 +4,61 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Runner administration and financial service hard cuts
+
+GET and POST `/api/v1/runners/github` and DELETE
+`/api/v1/runners/github/{repository}` register through PolicyRouter. Reads
+require member runs.read. Mutations require member team.admin and the selected
+session's CSRF proof. The authorized active team supplies tenancy and the
+principal's subject supplies CreatedBy. Body/query/header selectors supply
+neither. The existing GitHub App coverage check supplies numeric identities
+when configured. Without it, positive repository and owner IDs are required.
+Removal accepts a canonical positive numeric repository selector. Responses
+retain bindings and workflow, with the existing public metadata fields.
+
+C2 declares controller.GitHubRunnerRegistry: Team() Team,
+GitHubRunnerBindings(ctx) ([]GitHubRunnerBinding, error),
+RegisterGitHubRunner(ctx, Authorized, GitHubRunnerBinding)
+(GitHubRunnerBinding, error), and RevokeGitHubRunner(ctx, Authorized, int64)
+error. The registry must recheck live administration, tenant and actor inside
+its store-clock transaction, preserve existing enrollment limits and canonical
+repository identity, and make repeated enrollment safe. Revocation removes the
+enrollment and ends its capability roots and descendants atomically with
+concurrent root issuance. The controller has no legacy token-table fallback.
+Default inventory uses C1's existing tenant reader. Missing mutation adapters
+return policy_missing. WithGitHubRunnerRegistry supplies the same contract to
+embedded controllers and tests.
+
+POST `/api/v1/operator/runners/{runner}/metered` requires console proof and
+session-bound CSRF. It accepts one explicit boolean metered and returns runner
+and metered after commit. The runner selector is the enrolled root's public
+capability prefix because machine names can repeat across teams. Unlicensed controllers return not_found after
+authorization. C2's controller.RunnerMeteringWriter requires
+SetRunnerMetered(ctx, Authorized, string, bool) error. The transaction must
+recheck console authority, resolve only an enrolled machine root and update
+future-award metering without changing existing award billing provenance.
+WithRunnerMeteringWriter supplies this contract. Missing adapters return
+policy_missing. No token-table metering or response adapter remains.
+
+The three `/api/v1/team/github-runners` registrations and
+`/api/v1/tokens/{prefix}/metered` are deleted. The dashboard uses the final
+GitHub paths. HTTP properties cover tenant-selector independence, live
+authority, console-only metering, explicit bodies, missing transactions and
+private failures. Enrollment mutation and metering tests use fakes. Real
+SQLite proves the empty default inventory and missing-writer refusal.
+Tenant.AddGitHubRunnerBinding fails against the final schema because it omits
+required repo_key. No W2 schema repair or SQL adapter is added.
+
+The eight credits.grant service routes for reversals, freezes, cards, card
+payments, warnings, card refunds, units and payment lookup are deleted, along
+with their handlers and wire types. EnsureCheckoutToken, ScopeCreditsGrant,
+requireServiceScope and credits-token startup loading/seeding are removed.
+The signed checkout callback remains the only automated HTTP settlement
+boundary. Card, refund, warning and dispute provider events still require a
+joint verified-event contract with C1. No legacy bearer callback survives as
+an interim implementation. Existing store regressions retain their financial
+invariants. Their final provider-HTTP ports remain open.
+
 ### OAuth browser proof
 
 GET `/auth/{provider}/start` and GET `/auth/{provider}/callback` register

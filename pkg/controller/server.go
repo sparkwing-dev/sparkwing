@@ -43,6 +43,7 @@ type Server struct {
 
 	auth                       *Authenticator
 	credentialIssuer           CredentialIssuer
+	runnerMeteringWriter       RunnerMeteringWriter
 	resolveCapabilityManager   func(context.Context, store.Team) (CapabilityManager, error)
 	authorization              RouteAuthorization
 	dataController             *DataController
@@ -745,8 +746,7 @@ func (s *Server) handler() http.Handler {
 			// safety: migrated ledger reads authenticate before checking billing availability.
 			legacyCredits := strings.HasPrefix(path, "/api/v1/credits") && path != "/api/v1/credits" && path != "/api/v1/credits/history"
 			if legacyCredits ||
-				strings.HasPrefix(path, "/api/v1/team/billing") ||
-				(strings.HasPrefix(path, "/api/v1/tokens/") && strings.HasSuffix(path, "/metered")) {
+				strings.HasPrefix(path, "/api/v1/team/billing") {
 				http.NotFound(w, r)
 				return
 			}
@@ -911,9 +911,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
 	mux.Handle("GET /api/v1/team/build-trust", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetBuildTrust)))
 	mux.Handle("PUT /api/v1/team/build-trust", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutBuildTrust)))
-	mux.Handle("GET /api/v1/team/github-runners", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubRunnerBindings)))
-	mux.Handle("POST /api/v1/team/github-runners", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleAddGitHubRunnerBinding)))
-	mux.Handle("DELETE /api/v1/team/github-runners/{repository_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRemoveGitHubRunnerBinding)))
 	mux.Handle("GET /api/v1/team/github-app", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppShow)))
 	mux.Handle("DELETE /api/v1/team/github-app/installations/{installation_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppUnbind)))
 	mux.Handle("GET /api/v1/team/github-app/installations/{installation_id}/repositories", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppRepositories)))
@@ -926,8 +923,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/team/github-app/extra-repos", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppExtraRepos)))
 	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
 
-	mux.Handle("POST /api/v1/tokens/{prefix}/metered", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetTokenMetered)))
-
 	mux.Handle("GET /api/v1/storage", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleStorageShow)))
 
 	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
@@ -935,14 +930,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/team/billing/card", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCard)))
 	mux.Handle("POST /api/v1/team/billing/pay", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingPay)))
 	mux.Handle("PUT /api/v1/team/billing/budget", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingBudget)))
-	mux.Handle("POST /api/v1/credits/reversals", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
-	mux.Handle("POST /api/v1/credits/freezes", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
-	mux.Handle("POST /api/v1/credits/cards", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleSavedCard)))
-	mux.Handle("POST /api/v1/credits/card-payments", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardPayment)))
-	mux.Handle("POST /api/v1/credits/warnings", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaymentWarning)))
-	mux.Handle("POST /api/v1/credits/card-refunds", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardRefund)))
-	mux.Handle("GET /api/v1/credits/units", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
-	mux.Handle("GET /api/v1/credits/payments/{reference}", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaidGrantLookup)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
 
 	router := http.NewServeMux()
@@ -958,6 +945,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerPolicyEndpoints(router, s.dataEndpoints())
 	s.registerPolicyEndpoints(router, s.sourceEndpoints())
 	s.registerPolicyEndpoints(router, s.actionsEndpoints())
+	s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())
 	s.registerPolicyEndpoints(router, s.sessionEndpoints())
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,

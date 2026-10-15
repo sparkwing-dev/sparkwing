@@ -193,10 +193,41 @@ func TestPaymentHTTPRefusals(t *testing.T) {
 	}
 }
 
-func TestPaymentHTTPGrantRouteRemoved(t *testing.T) {
-	server := paymentServer(paymentVerifier(t, capability.PaymentTest), &paymentLedger{})
-	if server.RegisteredRoute(httptest.NewRequest(http.MethodPost, "/api/v1/credits/grants", nil)) {
-		t.Fatal("caller-selected paid grants remain registered")
+func TestPaymentHTTPServiceRoutesRemoved(t *testing.T) {
+	ledger := &paymentLedger{}
+	server := paymentServer(paymentVerifier(t, capability.PaymentTest), ledger)
+	handler := server.Handler()
+	routes := []struct{ method, path string }{
+		{"POST", "/api/v1/credits/grants"},
+		{"POST", "/api/v1/credits/reversals"},
+		{"POST", "/api/v1/credits/freezes"},
+		{"POST", "/api/v1/credits/cards"},
+		{"POST", "/api/v1/credits/card-payments"},
+		{"POST", "/api/v1/credits/warnings"},
+		{"POST", "/api/v1/credits/card-refunds"},
+		{"GET", "/api/v1/credits/units"},
+		{"GET", "/api/v1/credits/payments/pi_forged"},
+	}
+	for _, route := range routes {
+		t.Run(route.path, func(t *testing.T) {
+			for i := range 32 {
+				body := fmt.Sprintf(`{"team":"forged-%d","amount_micro":%d}`, i, i+1)
+				r := httptest.NewRequest(route.method, route.path, strings.NewReader(body))
+				r.Header.Set("Authorization", fmt.Sprintf("Bearer sws_forged_%d", i))
+				r.Header.Set("Stripe-Signature", paymentSignature(body, time.Now()))
+				if server.RegisteredRoute(r) {
+					t.Fatal("retired billing route remains registered")
+				}
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				if w.Code != http.StatusNotFound {
+					t.Fatalf("retired route: %d %s", w.Code, w.Body.String())
+				}
+			}
+		})
+	}
+	if len(ledger.events) != 0 {
+		t.Fatal("retired routes reached payment settlement")
 	}
 	if !server.RegisteredRoute(httptest.NewRequest(http.MethodPost, "/webhooks/stripe", nil)) {
 		t.Fatal("payment callback is missing from the server")

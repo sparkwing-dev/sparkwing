@@ -3210,319 +3210,6 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CreditState"}
 
-  /api/v1/credits/reversals:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Take back what a payment still has on the ledger, or part of it.
-      description: |
-        Writes one `reversal` of what the paid grant carrying `payment_id`
-        still has, less what earlier reversals of it took back, in the team
-        the payment funded. A positive `amount_micro` smaller than that takes
-        back only that much, as a partial refund does. The balance may go below zero, which stops the
-        team's new metered claims. `reference` names the reversal, such as
-        the refund id for a refund or the dispute id for a lost chargeback;
-        a repeat under it answers 200 with the reversal already written, and
-        a payment already taken back whole answers 200 with no `grant`. The
-        controller never moves money: an operator issues a refund in the
-        Stripe dashboard, and the checkout service reverses it here.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.reversePaymentReq
-              type: object
-              required: [payment_id, reference]
-              properties:
-                payment_id: {type: string, description: The payment id the paid grant carries as its reference.}
-                reference: {type: string, description: This reversal's own reference.}
-                amount_micro: {type: integer, format: int64, minimum: 0, description: "How much to take back; zero or absent takes back all that remains."}
-      responses:
-        "200":
-          description: The reversal this reference already wrote, or nothing left to take back.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/PaymentReversal"}
-        "201":
-          description: The reversal written.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/PaymentReversal"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: No paid grant carries the payment id.}
-        "409": {description: "The reference already names a reversal of another payment, or a dispute held for another payment (`dispute_conflict`)."}
-
-  /api/v1/credits/freezes:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Hold the team a disputed payment funded.
-      description: |
-        A hold is one per dispute, and a team is held while any of its holds
-        stands: its metered claims are refused with 402 and
-        `"code": "credits_frozen"`, so no new cloud work starts, while work
-        already running finishes. A hold names the team by `payment_id`, a
-        payment it made, and names the `dispute_id`. A dispute is bound to
-        the payment and team its first hold named: holding it again for
-        them, released or not, writes nothing, and holding it for another
-        payment is refused with 409. The checkout service holds and never
-        releases; the operator releases a dispute's hold through
-        `POST /api/v1/operator/teams/{team}/unfreeze`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.creditFreezeReq
-              type: object
-              required: [payment_id, dispute_id]
-              properties:
-                payment_id: {type: string}
-                dispute_id: {type: string, description: The dispute the hold is for.}
-                reason: {type: string}
-      responses:
-        "200":
-          description: The team's holds as they now stand.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.creditFreezeJSON
-                type: object
-                required: [team, frozen, disputes]
-                properties:
-                  team: {type: string}
-                  frozen: {type: boolean}
-                  disputes: {type: array, items: {type: string}, description: The disputes still holding the team.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: "No paid grant carries the payment id, or the team is not registered."}
-        "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
-
-  /api/v1/credits/units:
-    get:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Read the units the ledger prices in.
-      description: >-
-        The checkout service reads these before its first grant and refuses to grant when a cent is not the micro-credits it computes with. It saves no card, reports no card payment, records no fraud warning and reverses no refund unless `capabilities` names `card-billing-v1`.
-      responses:
-        "200":
-          description: The ledger's units.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.creditUnitsJSON
-                type: object
-                required: [micro_per_credit, credits_per_dollar, micro_per_cent, capabilities]
-                properties:
-                  micro_per_credit: {type: integer, format: int64}
-                  credits_per_dollar: {type: integer, format: int64}
-                  micro_per_cent: {type: integer, format: int64}
-                  capabilities: {type: array, items: {type: string}, description: "The contracts this controller serves; `card-billing-v1` covers partial reversals, saved cards, card payments and payment warnings, `paid-grant-lookup-v1` the payment lookup, and `card-setup-order-v1` the saved card's `completed_at`."}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/credits/payments/{reference}:
-    parameters:
-      - in: path
-        name: reference
-        required: true
-        schema: {type: string}
-        description: The payment id a paid grant carries as its reference.
-    get:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Read the team a payment was granted to.
-      description: >-
-        The checkout service asks this before it refunds a payment from a refused card, so a payment the ledger already settled keeps its grant when the grant's reply or the service's own receipt was lost. It writes nothing. Controllers that serve it name `paid-grant-lookup-v1` in the units' `capabilities`. A 404 carrying `unknown_payment` means no paid grant carries the reference; any other 404 means the controller does not serve this route, and the checkout service then refunds nothing and asks Stripe to retry.
-      responses:
-        "200":
-          description: The team holding the paid grant.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.paidGrantJSON
-                type: object
-                required: [team]
-                properties:
-                  team: {type: string}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: "No paid grant carries the reference (`unknown_payment`)."}
-
-  /api/v1/credits/cards:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Record the card an owner put on file through Stripe.
-      description: |
-        The checkout service reports the card saved on the setup page the
-        controller opened for `team`. It replaces any card on file, records a
-        `card.added` business event, and makes a charge that failed on the old
-        card due again at once. While the team is trusted, its usage is billed
-        to this card. With `completed_at`, a setup that completed before a
-        card on file that was also saved with `completed_at` is refused with
-        409 `stale_card_setup` and changes nothing; a repeat of the same
-        completion time is saved again. A card saved without it never makes a
-        later save stale.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.savedCardReq
-              type: object
-              required: [team, customer, payment_method, fingerprint]
-              properties:
-                team: {type: string, description: The team the setup page was opened for.}
-                customer: {type: string, description: The Stripe customer id.}
-                payment_method: {type: string, description: The Stripe payment method id.}
-                fingerprint: {type: string, description: "The card's fingerprint, which the spend limits and fraud warnings follow across teams."}
-                brand: {type: string}
-                last4: {type: string}
-                completed_at: {type: integer, format: int64, description: "Unix seconds the owner completed the setup, from Stripe's signed event; orders saves. Sent only to a controller naming `card-setup-order-v1`, since an older one refuses the field."}
-      responses:
-        "204": {description: Card saved.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: The team is not registered.}
-        "409": {description: "The setup completed before the card on file (`stale_card_setup`)."}
-
-  /api/v1/credits/card-payments:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Report the outcome of an attempt to pay a card charge.
-      description: |
-        The checkout service's webhook and the pay-now Checkout report here,
-        and the controller's payment worker settles its own calls the same
-        way. `succeeded` settles the payment: the live attempt of the open
-        charge paying exactly the charge's amount pays it off, grants the
-        amount and lifts the hold a decline placed. Any other payment, a
-        second one or the wrong amount, is granted and queued for a refund. A
-        payment that drew an actionable early fraud warning, or was made by a
-        card that did, grants nothing and holds the team, except that a
-        pay-now payment of exactly the open charge by a card warned only on
-        another payment repays what the team owes at settlement, since any
-        card may repay usage already consumed, closes the charge even when
-        nothing is left to repay, and keeps the rest unapplied rather than as
-        credit, so a refund of that rest reverses nothing; it also holds the
-        team, and the controller logs
-        `alert=card_payment_warned` for either outcome. A repeat of a
-        settled payment changes nothing. A payment reference already credited
-        to another team is refused, including one recorded as a prepaid grant.
-        `failed` records a declined attempt: the charge stays open and is
-        retried after 1, 3 and 7 days, the team is held until it is paid, and
-        its owners are mailed on the first failure. `processing` and
-        `created` change nothing.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.cardPaymentReq
-              type: object
-              required: [status]
-              properties:
-                team: {type: string, description: "The charge's team; checked against the attempt when given."}
-                charge_id: {type: string, description: "Required with `succeeded`."}
-                attempt_id: {type: string, description: "The attempt the payment was made under; required with `succeeded` and `failed`."}
-                payment_intent: {type: string, description: "The Stripe payment intent; required with `succeeded`."}
-                amount_cents: {type: integer, format: int64, description: "What was paid; required and positive with `succeeded`."}
-                status: {type: string, enum: [succeeded, failed, processing, created]}
-                decline_code: {type: string, description: "Why a `failed` attempt was declined."}
-                fingerprint: {type: string, description: "The card that paid, which a pay-now Checkout may take from another card than the one on file."}
-      responses:
-        "204": {description: Recorded.}
-        "400": {description: "The status is unknown, a required field is missing, or the attempt is not for this charge and team."}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: No attempt carries the attempt id.}
-        "409": {description: The payment reference was already credited to another team.}
-
-  /api/v1/credits/warnings:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Record an early fraud warning on a payment.
-      description: |
-        The warning is stored whether or not the ledger has seen its payment
-        yet, and a repeat of `warning_id` writes nothing new. An `actionable`
-        warning holds the team the payment funded, when the ledger knows it,
-        and the warned payment, or a later payment by the same card, is never
-        granted: its refund returns the money. A pay-now payment by that card
-        still repays the open debt it was opened for. A warning that is not
-        actionable is stored and stops nothing.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.paymentWarningReq
-              type: object
-              required: [warning_id, payment_intent]
-              properties:
-                warning_id: {type: string, description: The Stripe early fraud warning id.}
-                payment_intent: {type: string, description: The payment the warning is on.}
-                fingerprint: {type: string, description: The card that made the payment.}
-                actionable: {type: boolean, description: "Stripe's word that the payment can still be refunded to head off a dispute."}
-                reason: {type: string, description: Accepted and not recorded.}
-      responses:
-        "200":
-          description: The team the warning holds.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.paymentWarningJSON
-                type: object
-                required: [team, held]
-                properties:
-                  team: {type: string, description: "Empty when the ledger does not know the payment yet or the warning is not actionable."}
-                  held: {type: boolean}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/credits/card-refunds:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Report the status of a refund the controller queued.
-      description: |
-        The controller refunds a card payment that paid no open charge,
-        under a queue key of the payment intent and the attempt number,
-        `<payment intent>-<attempt>`. The checkout service reports each
-        refund's status here as Stripe announces it. Only the queue's current
-        key moves it, even when the report arrives before the controller
-        recorded the refund: `succeeded` finishes the refund, and `failed` or
-        `canceled` makes it due again after 1, 6 and then every 24 hours under
-        the next key. Any other status, or a key the queue does not hold,
-        answers `queued: false`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.cardRefundReq
-              type: object
-              required: [payment_intent, refund_id, queue, status]
-              properties:
-                payment_intent: {type: string}
-                refund_id: {type: string, description: The Stripe refund id.}
-                queue: {type: string, description: "The queue key the refund was made under."}
-                status: {type: string, description: "Stripe's refund status, such as `succeeded`, `failed`, `canceled` or `pending`."}
-      responses:
-        "200":
-          description: Whether the report moved the queue.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.cardRefundJSON
-                type: object
-                required: [queued]
-                properties:
-                  queued: {type: boolean}
-        "400": {description: "The payment intent, refund id, queue key or status is missing."}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
   /api/v1/credits/history:
     get:
       x-sparkwing-scope: runs.read
@@ -3567,40 +3254,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditSettings"}
-
-  /api/v1/tokens/{prefix}/metered:
-    parameters:
-      - in: path
-        name: prefix
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: admin
-      tags: [tokens]
-      summary: Mark an existing token as one whose node claims cost credits.
-      description: |
-        Metering is an operator decision recorded against the token, which
-        is how a warm pool already running starts costing credits without a
-        new credential. A runner's self-asserted labels never make its work
-        billable.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.setTokenMeteredReq
-              type: object
-              required: [metered]
-              properties:
-                metered: {type: boolean}
-      responses:
-        "200":
-          description: The token after the change.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Token"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/storage:
     get:
@@ -4545,32 +4198,92 @@ paths:
       responses:
         default: {description: Undescribed.}
 
-  /api/v1/team/github-runners:
+  /api/v1/runners/github:
     get:
       x-sparkwing-scope: runs.read
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      summary: List the authenticated team's GitHub runner permissions.
       responses:
-        default: {description: Undescribed.}
+        "200":
+          description: Repository permissions and the team's workflow.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubRunnerBindings"}
     post:
       x-sparkwing-scope: team.admin
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      summary: Enroll a repository for the authenticated team.
+      description: Resolves repository IDs through the configured GitHub App. Without an App, both numeric IDs are required. Session requests require session-bound CSRF. The committing registry rechecks authority and enrollment limits.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubBindingReq
+              type: object
+              required: [repository]
+              additionalProperties: false
+              properties:
+                repository: {type: string}
+                repository_id: {type: integer, format: int64}
+                repository_owner_id: {type: integer, format: int64}
       responses:
-        default: {description: Undescribed.}
+        "201":
+          description: The committed permission and workflow.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubRunnerBindings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The repository is already enrolled.}
 
-  /api/v1/team/github-runners/{repository_id}:
+  /api/v1/runners/github/{repository}:
     parameters:
       - in: path
-        name: repository_id
+        name: repository
         required: true
-        schema: {type: string}
+        schema: {type: string, pattern: '^[1-9][0-9]*$'}
     delete:
       x-sparkwing-scope: team.admin
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      summary: Revoke the repository's enrollment and derived roots atomically.
       responses:
-        default: {description: Undescribed.}
+        "204": {description: Enrollment revoked.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/operator/runners/{runner}/metered:
+    parameters:
+      - in: path
+        name: runner
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: operator
+      summary: Change an enrolled runner's metering for future awards.
+      description: Requires a licensed controller and an operator-console session with CSRF. The runner selector is the enrolled root's public capability prefix. The transaction preserves billing provenance on existing awards.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleSetRunnerMetered.request
+              type: object
+              required: [metered]
+              additionalProperties: false
+              properties:
+                metered: {type: boolean}
+      responses:
+        "200":
+          description: Committed metering selection.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                properties:
+                  runner: {type: string}
+                  metered: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/team/github-app:
     get:
@@ -7444,6 +7157,23 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    GitHubRunnerBindings:
+      x-sparkwing-go-type: pkg/controller.githubBindingsResp
+      type: object
+      properties:
+        bindings:
+          type: array
+          items: {$ref: "#/components/schemas/GitHubRunnerBinding"}
+        workflow: {type: string}
+    GitHubRunnerBinding:
+      x-sparkwing-go-type: pkg/controller.githubBindingJSON
+      type: object
+      properties:
+        repository: {type: string}
+        repository_id: {type: integer, format: int64}
+        repository_owner_id: {type: integer, format: int64}
+        created_by: {type: string}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
     DataRecord:
       x-sparkwing-go-type: pkg/controller.dataRecordJSON
       type: object
@@ -8022,25 +7752,6 @@ components:
         released_at: {type: string, format: date-time, nullable: true}
         released_by: {type: string}
         release_kind: {type: string}
-    Token:
-      x-sparkwing-go-type: pkg/controller.tokenRecordJSON
-      type: object
-      description: One bearer-token row (raw value redacted; only `prefix` is shown after mint).
-      properties:
-        prefix: {type: string}
-        principal: {type: string}
-        kind: {type: string}
-        scopes:
-          type: array
-          items: {type: string}
-        created_at: {type: integer, format: int64, description: Unix seconds.}
-        expires_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-        last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-        revoked_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-        replaced_by: {type: string}
-        metered:
-          type: boolean
-          description: The operator marked this token as one whose node claims cost credits.
     StorageSettings:
       x-sparkwing-go-type: pkg/controller.storageSettingsJSON
       type: object
@@ -8335,18 +8046,6 @@ components:
         charges:
           type: array
           items: {$ref: "#/components/schemas/CreditCharge"}
-    PaymentReversal:
-      x-sparkwing-go-type: pkg/controller.reversePaymentJSON
-      type: object
-      required: [team, payment_id, paid_micro, reversed_micro, balance_micro, created]
-      properties:
-        team: {type: string, description: The team the payment funded.}
-        payment_id: {type: string}
-        paid_micro: {type: integer, format: int64, description: What the payment granted.}
-        reversed_micro: {type: integer, format: int64, description: What the payment's reversals have taken back in total.}
-        balance_micro: {type: integer, format: int64, description: "The team's balance afterwards, which may be negative."}
-        created: {type: boolean, description: Whether this call wrote the reversal.}
-        grant: {$ref: "#/components/schemas/CreditGrant"}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
       type: object

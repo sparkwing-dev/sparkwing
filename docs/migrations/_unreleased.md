@@ -494,10 +494,10 @@ that keep the logs service running.
   console session (`--operator-accounts`). The four admin routes above are
   removed. Paid checkout events use the signed `/webhooks/stripe` callback.
   `POST /api/v1/credits/grants` is removed.
-  `POST /api/v1/credits/freezes` holds by `payment_id` and `dispute_id`
-  only; the `reverses`, `team` and `release` fields are gone and are
-  refused as unknown. Every `credits.grant` route answers `403` to an
-  admin token. The console's trust action sets the daily cap, card rung and
+  The card, refund, warning, dispute, unit and payment-lookup service routes
+  under `/api/v1/credits/` are also removed. No service token can submit
+  financial outcomes. Card and dispute provider-event integration remains
+  incomplete. The console's trust action sets the daily cap, card rung and
   Cloud node cap alongside the purchase limit, and its unfreeze releases a
   payment dispute's hold named by `hold`. The new
   `sparkwing-controller admin freeze|unfreeze` holds or releases a team
@@ -514,23 +514,25 @@ that keep the logs service running.
   | `GET /api/v1/signups/waitlist` | `GET /api/v1/operator/waitlist`, newest first, with `offset` |
   | `POST /api/v1/signups/waitlist/approve` | `POST /api/v1/operator/waitlist/approve`, same body |
   | `free` grant on `POST /api/v1/credits/grants` | `POST /api/v1/operator/teams/{team}/grants` with `amount_cents`, `reason` and `key` |
-  | `reversal` grant, or a refund on `POST /api/v1/credits/reversals` | refund in the Stripe dashboard; the checkout service reverses it |
+  | `reversal` grant, or a refund on `POST /api/v1/credits/reversals` | refund in the Stripe dashboard; callback settlement remains incomplete |
   | hold naming `team` on `POST /api/v1/credits/freezes` | `POST /api/v1/operator/teams/{team}/freeze` |
   | `release` on `POST /api/v1/credits/freezes` | `POST /api/v1/operator/teams/{team}/unfreeze`, with `hold` for one dispute's hold |
 
   A script that used the admin token for any row above now gets `404` or
   `403`.
-- **The checkout service's token:** `POST /api/v1/tokens` and
-  `POST /api/v1/tokens/{prefix}/rotate` refuse `credits.grant` with `403`,
-  and its routes answer only a service token, never an anonymous caller.
-  `POST /api/v1/tokens` trims each scope and refuses any that is not
-  exactly a known scope, so a padded spelling is checked as the plain one.
-  The token the checkout service already holds keeps working. Before the
-  next rotation, put its value in the controller's `credits-token`
-  credential so the controller adopts it; to rotate, write a new
-  `sws_` value there and in the checkout service, restart, and revoke the
-  old prefix. A value whose token was revoked is never seeded again; the
-  controller logs an error at start until the file holds a new value.
+- **The checkout service's token:** `credits-token` is removed from controller
+  credentials. Delete its configuration after switching checkout settlement
+  to the signed provider callback. The controller no longer seeds a service
+  token on startup.
+- **Runner permissions:** GitHub Actions enrollment moves from
+  `/api/v1/team/github-runners` to `/api/v1/runners/github`. Removal selects
+  the positive numeric repository ID in `/api/v1/runners/github/{repository}`.
+  Both mutations require live team administration and session-bound CSRF
+  when using a session. The dashboard uses these paths.
+- **Runner metering:** `/api/v1/tokens/{prefix}/metered` is removed. Use the
+  console-only `/api/v1/operator/runners/{runner}/metered` with an explicit
+  boolean `metered`. The runner selector is the enrolled root's public
+  capability prefix. The response contains `runner` and `metered`.
 - **Go:** pass the actor, the reason and the one hold's id to
   `Store.ReleaseCreditFreezes`, which refuses an empty id; a
   caller of the removed `Store.DisputeTeam` reads the team from the hold it

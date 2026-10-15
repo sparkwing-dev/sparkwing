@@ -39,8 +39,9 @@ is installed or a worker has run. Other team runners retain their placement poli
 The equivalent owner-session request is:
 
 ```bash
-curl -X POST "$CONTROLLER/api/v1/team/github-runners" \
+curl -X POST "$CONTROLLER/api/v1/runners/github" \
   -H "Authorization: Session $SESSION" -H 'Content-Type: application/json' \
+  -H "Origin: $CONTROLLER" -H "X-CSRF-Token: $CSRF" -b "__Host-sw_csrf=$CSRF" \
   -d '{"repository":"acme/widgets"}'
 ```
 
@@ -55,12 +56,13 @@ When the controller has no GitHub App configured, supply both numeric IDs:
 2. As a team owner, bind the repository:
 
    ```bash
-   curl -X POST "$CONTROLLER/api/v1/team/github-runners" \
+   curl -X POST "$CONTROLLER/api/v1/runners/github" \
      -H "Authorization: Session $SESSION" -H 'Content-Type: application/json' \
+     -H "Origin: $CONTROLLER" -H "X-CSRF-Token: $CSRF" -b "__Host-sw_csrf=$CSRF" \
      -d '{"repository":"acme/widgets","repository_id":123456,"repository_owner_id":7890}'
    ```
 
-   The answer and `GET /api/v1/team/github-runners` carry the workflow with the controller URL and team filled in.
+   The answer and `GET /api/v1/runners/github` carry the workflow with the controller URL and team filled in.
 
 3. Commit it as `.github/workflows/sparkwing.yaml`:
 
@@ -97,7 +99,7 @@ jobs:
             --idle-exit 2m
 ```
 
-`DELETE /api/v1/team/github-runners/{repository_id}` removes a binding and revokes every live credential minted under it. Credential exchange checks the binding again while minting, so an unbind racing with an exchange either stops the mint or revokes the credential.
+`DELETE /api/v1/runners/github/{repository}` removes a binding and revokes every live credential minted under it. Credential exchange checks the binding again while minting, so an unbind racing with an exchange either stops the mint or revokes the credential.
 
 ## What the credential can do
 

@@ -58,6 +58,28 @@ func TestParseCapabilityEndpointsUsesActualRegistrations(t *testing.T) {
 	}
 }
 
+func TestParseGitHubRunnerEndpointsUsesActualRegistrations(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())")
+	endpoints := `{Method: "GET", Pattern: "/api/v1/runners/github"},
+{Method: "POST", Pattern: "/api/v1/runners/github"},
+{Method: "DELETE", Pattern: "/api/v1/runners/github/{repository}"},`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "github_runner_admin.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{
+		{Method: "GET", Path: "/api/v1/runners/github", Scope: "runs.read"},
+		{Method: "POST", Path: "/api/v1/runners/github", Scope: "team.admin"},
+		{Method: "DELETE", Path: "/api/v1/runners/github/{repository}", Scope: "team.admin"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GitHub runner registrations=%+v want %+v", got, want)
+	}
+}
+
 func TestParseEngineEndpointsUsesActualRegistrations(t *testing.T) {
 	src := writeFile(t, "server.go", "s.registerEngineRoutes(router)")
 	endpoints := `{

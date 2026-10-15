@@ -121,7 +121,6 @@ these file names, mounted whole.
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
 | `stripe-api-key` | Stripe API credential matching `--payment-mode test` or `live` | a configured payment callback refuses to start |
 | `stripe-webhook-secret` | Signature key for `/webhooks/stripe` | a configured payment callback refuses to start |
-| `credits-token` | The checkout service's own token (`sws_`), seeded as a `credits.grant` service token; see [Buying credits](auth.md#buying-credits) | the checkout service has no token |
 | `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
 
 Keep the directory readable by the controller's user alone (`0700`, files

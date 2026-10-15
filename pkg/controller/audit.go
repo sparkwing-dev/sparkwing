@@ -65,7 +65,7 @@ var auditTargetIDs = map[string]map[string]auditTarget{
 	"/api/v1/operator/tokens/{token}":              {"token": tokenTarget},
 	"/api/v1/tokens/{token}/rotate":                {"token": tokenTarget},
 	"/api/v1/operator/tokens/{token}/rotate":       {"token": tokenTarget},
-	"/api/v1/tokens/{prefix}/metered":              {"prefix": tokenTarget},
+	"/api/v1/operator/runners/{runner}/metered":    {"runner": tokenTarget},
 	"/api/v1/team/tokens/{prefix}/git-credentials": {"prefix": tokenTarget},
 }
 

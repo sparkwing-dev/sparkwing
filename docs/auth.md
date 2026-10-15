@@ -395,34 +395,10 @@ controller's credentials directory. Both modes use the same verifier and
 settlement path. Missing or inconsistent credentials refuse startup.
 An unconfigured callback returns `503 unavailable`.
 
-The separate card and dispute service holds a service token carrying
-only `credits.grant`; it records card outcomes, holds by payment, and reads the
-ledger's units, and every other route refuses it. Those routes answer only a
-service token carrying `credits.grant`: an admin token, a session, a user or
-runner token and an anonymous caller are refused, the last even on a
-controller that serves without credentials.
-
-`credits.grant` is outside the capability grant vocabulary.
-`POST /api/v1/tokens` rejects it with `400`. The remaining legacy rotation
-route also refuses that service credential. The controller seeds the token from the `credits-token` file in its
-credentials directory, as it seeds the bootstrap admin token. Generate the
-value once and give the same string to the checkout service:
-
-```bash
-printf 'sws_%s' "$(openssl rand -hex 24)" > credits-token
-```
-
-The controller seeds each value once and records that it did, so a restart
-with the same file writes nothing. Once that token is revoked, the value is
-never seeded again, even after the revoked row is pruned: the controller logs
-an `ERROR` naming the `credits-token` credential at every start until the file
-holds a new value. To rotate it, put a new value in the file and in the
-checkout service, restart the controller, then revoke the old prefix with
-`sparkwing cluster tokens revoke`. A token stored under the file's prefix
-before it was provisioned, such as one minted by an earlier release, is
-adopted as it stands. A controller with no `--billing-url` sells no credits
-and answers the checkout route with `503` and
-`"code": "checkout_unavailable"`.
+Service credentials cannot submit payment, card or dispute outcomes. The
+`credits-token` credential and its service routes are removed. The signed
+callback accepts checkout payment, failure and expiry events. Other provider
+event types are acknowledged without settlement.
 
 A team's balance holds at most $5,000, and the cap is held when a checkout
 opens. The controller adds the balance, every checkout of the team still
@@ -453,71 +429,8 @@ raise the limit to $5,000, and a revocation holds the team to the new-team
 limits even when it would earn trust; `automatic` returns it to the rule. Team -> Billing shows the limit and what
 remains of it.
 
-Purchases are final, so a refund is the operator's decision, issued in the
-Stripe dashboard. The refund reaches the ledger: the checkout service answers
-`charge.refunded` by reversing exactly what each refund returned, under the
-refund's id, through `POST /api/v1/credits/reversals` with `amount_micro`. A
-reversal never takes back more than its payment has left, and replaying it
-reverses once. The balance can go below zero, and the team's metered claims
-then stop until it is funded again.
-
-Every team spends within limits, counted in daily buckets of gross usage at
-list price, promotional credit included. A new team may spend $50 over 30
-days and $25 in one UTC day; a trusted team $500 and $200. An owner may set a
-lower budget through `PUT /api/v1/team/billing/budget`, and owners are
-mailed at 50, 80 and 100% of it. A claim past any limit is refused with `402`
-and `"code": "spend_limit"`, and the run log's `credits_blocked` event names
-the limit. Limits stop new work; running jobs finish within about a minute.
-A refunded reservation counts against the day of its charge, so a refund
-never frees room today.
-
-A trusted team may add a card (`POST /api/v1/team/billing/card`, owners
-only), which opens a Stripe setup page that asks for 3-D Secure and shows the
-charge authorization. With a card on file the team buys no prepaid credit
-(`409`, `"code": "card_on_file"`), spends any prepaid balance first, and may
-then run up to twice its rung below zero. The controller's payment worker
-charges the card off-session when the debt reaches the rung ($100), on the
-first of the month for a smaller debt, and at once when trust is revoked.
-Each charge has one attempt in flight at a time, and the attempt id is both
-Stripe's idempotency key and the payment's `metadata.attempt_id`, so a retried
-attempt finds the payment already made. Stripe emails the receipt. A declined
-charge withdraws the card's credit, so new work waits, and is retried after
-1, 3 and 7 days; an owner can pay it at once through
-`POST /api/v1/team/billing/pay`, and a new card retries it at once. A team
-with debt or a charge open cannot be deleted.
-
-An early fraud warning gives each affected team its own hold, blocks the
-card's fingerprint for every team, and refunds the payment; the refund then
-reverses the credits as above. Debt is usage already consumed, so any card may
-repay it through `POST /api/v1/team/billing/pay`: a payment of the open charge
-by a card warned on another payment pays off that charge, repays what the
-team owes at that moment, grants nothing beyond it, holds the team, and logs
-`alert=card_payment_warned` with the repaid and unapplied amounts. Returning
-the unapplied rest, or the whole payment, is the operator's decision; a refund
-returns the unapplied rest first, which reverses nothing, and only what it
-returns beyond that reopens the debt. Use the returned hold id to release
-that hold. Existing warning holds keep their ids, and replaying
-a warning does not undo an operator's release. Business events retain the
-provider's warning id alongside the hold id.
-
-A chargeback holds the team. Holds are one per dispute, and a team is held
-while any of its holds stands: its metered claims are refused with `402` and
-`"code": "credits_frozen"` while work already running finishes, and
-Team -> Billing says so. When Stripe reports a dispute opened on a purchase,
-the checkout service logs an alert (`alert=chargeback_opened`) and holds the
-team the payment funded through `POST /api/v1/credits/freezes`. A dispute
-lost reverses the purchase the way a refund does and holds the team too, so a
-lost dispute holds it even when Stripe delivered the close before the open. A
-dispute won logs `alert=dispute_won` and changes nothing: the checkout service
-never releases a team, because one dispute's outcome says nothing about
-another's. The operator releases a settled dispute's hold from the
-[operator console](#operator-console). Replaying any
-dispute event changes nothing, and a replayed hold never undoes a release. A
-dispute is bound to the one payment and team its first hold named: a hold or
-a lost-dispute reversal that names the same dispute for another payment is
-refused with `409` and `"code": "dispute_conflict"` and logged as
-`alert=dispute_conflict`. A hold takes the ledger lock a metered claim takes,
-so no claim that read the team as not held commits after the hold.
+Purchases are final. The operator can issue refunds in the Stripe dashboard.
+The controller's callback does not settle refund or dispute events.
 
 ## Operator console
 
@@ -532,9 +445,8 @@ admits them. Each team action takes a reason and a confirmation step naming
 the team and the effect.
 
 Trust, overrides, free grants, holds and the waitlist are reachable only here.
-No bearer token reaches them, an admin token included, and the checkout
-service's `credits.grant` routes refuse every other credential, so a
-standing credential grants no credit, changes no trust and releases no hold.
+No bearer token reaches them. A standing credential grants no credit, changes
+no trust and releases no hold.
 
 Console API actions require an operator-console session and session-bound CSRF
 proof for writes. A live bearer, ordinary account session or local peer receives
@@ -772,14 +684,12 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `secrets.read` | Member or verified local reads of unmasked config through GET `/api/v1/secrets/{name}`. Masked values require a live, declaring `secrets.release` claim |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
-| `credits.grant`   | The card and dispute service's scope: POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, the card routes under `/api/v1/credits/`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route. Only the controller's `credits-token` credential provisions it; no API call mints or rotates it, and no team's token may carry it. These routes answer only a service token carrying it; `admin` does not stand in |
 | `storage.count`   | The cache service's scope: POST `/internal/storage/reserve`, `/internal/storage/commit` and `/internal/storage/release` for any team's cache or logs, POST `/internal/downloads/charge`. It reaches no other route, and only the operator mints it, with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`; no team's token may carry it. The cache reads it from the file `controller-token` in its `--credentials-dir` |
-| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin` -- except on the
-`credits.grant` routes and the [operator console](#operator-console)'s
-routes, which no admin token reaches.
+[operator console](#operator-console) routes, which require console proof.
 
 A runner needs `nodes.claim`, `triggers.claim` and
 `runs.state`. That set claims work, drives the run it claimed from plan to

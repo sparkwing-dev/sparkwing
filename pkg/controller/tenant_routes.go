@@ -65,15 +65,7 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/concurrency/{key}/resolve":        resConcurrencyKey,
 	"GET /api/v1/concurrency/{key}/state":          resConcurrencyKey,
 
-	"POST /api/v1/credits/card-payments":       resNone,
-	"POST /api/v1/credits/card-refunds":        resNone,
-	"POST /api/v1/credits/cards":               resNone,
-	"POST /api/v1/credits/freezes":             resNone,
-	"GET /api/v1/credits/payments/{reference}": resPayment,
-	"POST /api/v1/credits/reversals":           resNone,
-	"GET /api/v1/credits/settings":             resNone,
-	"GET /api/v1/credits/units":                resNone,
-	"POST /api/v1/credits/warnings":            resNone,
+	"GET /api/v1/credits/settings": resNone,
 
 	"GET /api/v1/crons":                  resNone,
 	"GET /api/v1/crons/{id}":             resCron,
@@ -188,18 +180,11 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/team/github-app/triggers":                                     resNone,
 	"PUT /api/v1/team/github-app/triggers":                                     resNone,
 
-	"GET /api/v1/team/github-runners":                    resNone,
-	"POST /api/v1/team/github-runners":                   resNone,
-	"DELETE /api/v1/team/github-runners/{repository_id}": resGitHubRunner,
-
 	"GET /api/v1/team/invitations":         resNone,
 	"POST /api/v1/team/invitations":        resNone,
 	"DELETE /api/v1/team/invitations/{id}": resInvitation,
 
 	"POST /api/v1/teams": resNone,
-
-
-	"POST /api/v1/tokens/{prefix}/metered": resToken,
 
 	"GET /api/v1/trends": resNone,
 

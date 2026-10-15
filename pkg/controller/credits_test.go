@@ -797,49 +797,6 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	}
 }
 
-func TestCredits_SetMeteredRouteMarksAnExistingToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t, false)
-	ctx := context.Background()
-
-	status, body := creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/"+f.prefix+"/metered", f.readonly, map[string]any{"metered": true})
-	if status != http.StatusForbidden {
-		t.Fatalf("set-metered without admin = %d: %s", status, body)
-	}
-
-	status, body = creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/"+f.prefix+"/metered", f.admin, map[string]any{"metered": true})
-	if status != http.StatusOK {
-		t.Fatalf("set-metered = %d: %s", status, body)
-	}
-	var record struct {
-		Prefix  string `json:"prefix"`
-		Metered bool   `json:"metered"`
-	}
-	if err := json.Unmarshal(body, &record); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if record.Prefix != f.prefix || !record.Metered {
-		t.Fatalf("set-metered returned %+v", record)
-	}
-	metered, err := f.store.TokenMetered(ctx, f.prefix)
-	if err != nil {
-		t.Fatalf("token metered: %v", err)
-	}
-	if !metered {
-		t.Fatal("the marker did not reach the database")
-	}
-
-	status, body = creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/swu_notatoken/metered", f.admin, map[string]any{"metered": true})
-	if status != http.StatusNotFound {
-		t.Fatalf("set-metered on an unknown prefix = %d: %s", status, body)
-	}
-}
-
 func creditSettings(t *testing.T, f creditsFixture, method string, body any) (int, creditSettingsView) {
 	t.Helper()
 	status, raw := creditsRequest(t, method, f.url+"/api/v1/credits/settings", f.admin, body)

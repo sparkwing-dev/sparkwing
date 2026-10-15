@@ -187,47 +187,6 @@ func TestGitHubRunnerCredentialReachesNothingOutsideItsRoutes(t *testing.T) {
 	}
 }
 
-func TestGitHubRunnerBindingsAreOwnerOnlyAndUnbindingRevokes(t *testing.T) {
-	f := newGHFixture(t)
-	owner, editor, reader := teamOf(f.identityFixture)
-	for _, who := range []signedIn{editor, reader} {
-		if code := f.call("POST", "/api/v1/team/github-runners", who.auth, map[string]any{
-			"repository": "acme/widgets", "repository_id": 42, "repository_owner_id": 7,
-		}, nil); code != http.StatusForbidden {
-			t.Fatalf("non-owner bind = %d, want 403", code)
-		}
-	}
-	f.bind(owner, widgetsJob)
-	var listed struct {
-		Bindings []struct {
-			Repository   string `json:"repository"`
-			RepositoryID int64  `json:"repository_id"`
-		} `json:"bindings"`
-		Workflow string `json:"workflow"`
-	}
-	if code := f.call("GET", "/api/v1/team/github-runners", reader.auth, nil, &listed); code != http.StatusOK ||
-		len(listed.Bindings) != 1 || listed.Bindings[0].RepositoryID != 42 {
-		t.Fatalf("list = %d %+v", code, listed)
-	}
-	if !strings.Contains(listed.Workflow, "--team "+owner.team) || !strings.Contains(listed.Workflow, "--controller "+ghAudience) ||
-		!strings.Contains(listed.Workflow, "id-token: write") {
-		t.Fatalf("workflow does not name the team, controller and token permission:\n%s", listed.Workflow)
-	}
-	runner := f.credential(widgetsJob, owner.team)
-	if code := f.call("DELETE", "/api/v1/team/github-runners/42", editor.auth, nil, nil); code != http.StatusForbidden {
-		t.Fatalf("editor unbind = %d, want 403", code)
-	}
-	if code := f.call("DELETE", "/api/v1/team/github-runners/42", owner.auth, nil, nil); code != http.StatusNoContent {
-		t.Fatalf("unbind = %d", code)
-	}
-	if code := f.call("GET", "/api/v1/auth/whoami", runner, nil, nil); code != http.StatusUnauthorized {
-		t.Fatalf("credential after unbind = %d, want 401", code)
-	}
-	if _, code := f.exchange(f.gh.Token(widgetsJob, ghAudience), owner.team); code != http.StatusForbidden {
-		t.Fatalf("exchange after unbind = %d, want 403", code)
-	}
-}
-
 func TestGitHubRunnerCredentialsPerTeamAreBounded(t *testing.T) {
 	f := newGHFixture(t)
 	owner := f.user("o", "olga@example.com")

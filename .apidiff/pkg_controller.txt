@@ -50,13 +50,10 @@ type CapabilityManager interface {
 	ReadCapability(context.Context, capability.Authorized) (capability.Metadata, error)
 	RotateCapability(context.Context, capability.Authorized, time.Duration, *time.Time) (capability.Rotation, error)
 }
-const CardBillingCapability = "card-billing-v1"
 const CardBillingInterval = 30 * time.Second
 const CardNotTrustedCode = "card_not_trusted"
 const CardOnFileCode = "card_on_file"
-const CardSetupOrderCapability = "card-setup-order-v1"
 const CheckoutAmountCode = "amount_out_of_range"
-const CheckoutServicePrincipal = "checkout-service"
 const CheckoutUnavailableCode = "checkout_unavailable"
 type Cipher interface {
 	Seal(plain string) (string, error)
@@ -157,7 +154,6 @@ const DefaultRunnersPerToken = 64
 const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 const DefaultTeamDailyDownloadFreeBytes int64 = 5 << 30
 const DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
-const DisputeConflictCode = "dispute_conflict"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
 type Endpoint struct {
@@ -205,7 +201,6 @@ func (s *EngineController) Snapshot(ctx context.Context, authorized capability.A
 func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (s *EngineController) TransitionJob(ctx context.Context, a capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
-func EnsureCheckoutToken(ctx context.Context, st *store.Store, raw string, now time.Time) (bool, error)
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error)
 type FilesystemDataSigner struct {
@@ -253,6 +248,12 @@ type GitCredentialReleaseJSON struct {
 	ReleasedAt       int64
 }
 const GitHubActionsLabel = "github-actions"
+type GitHubRunnerRegistry interface {
+	Team() store.Team
+	GitHubRunnerBindings(context.Context) ([]store.GitHubRunnerBinding, error)
+	RegisterGitHubRunner(context.Context, capability.Authorized, store.GitHubRunnerBinding) (store.GitHubRunnerBinding, error)
+	RevokeGitHubRunner(context.Context, capability.Authorized, int64) error
+}
 func GitHubRunnerWorkflow(controllerURL, team string) string
 const IdleClaimPollJitterFactor = 1.25
 func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error)
@@ -327,7 +328,6 @@ type ObjectStoreBreakerResponse struct {
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
 func OperatorReason(reason string) (string, error)
-const PaidGrantLookupCapability = "paid-grant-lookup-v1"
 type PaymentSettler interface {
 	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
 }
@@ -403,13 +403,15 @@ type RunTransactions interface {
 type RunnerAdmissionPolicy interface {
 	CheckRunner(context.Context, string) error
 }
+type RunnerMeteringWriter interface {
+	SetRunnerMetered(context.Context, capability.Authorized, string, bool) error
+}
 type S3DataSigner struct {
 }
 func (s *S3DataSigner) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
-const ScopeCreditsGrant = "credits.grant"
 const ScopeLogsRead = store.ScopeLogsRead
 const ScopeNodesClaim = store.ScopeNodesClaim
 const ScopeRunsControl = store.ScopeRunsControl
@@ -469,6 +471,7 @@ func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithFreeTier(src FreeTierSource) *Server
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server
 func (s *Server) WithGitHubRunnerBindingLookup(lookup func(context.Context, store.Team, int64) (store.GitHubRunnerBinding, error)) *Server
+func (s *Server) WithGitHubRunnerRegistry(resolve func(context.Context, store.Team) (GitHubRunnerRegistry, error)) *Server
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
 func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
 func (s *Server) WithGoogleSignIn(client *googleauth.Client, redirectURIs []string) *Server
@@ -490,6 +493,7 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
+func (s *Server) WithRunnerMeteringWriter(writer RunnerMeteringWriter) *Server
 func (s *Server) WithSecretReader(resolve func(context.Context, store.Team) (SecretReader, error)) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
@@ -554,7 +558,6 @@ type SourceTransactions interface {
 	SetSourceMachineConsent(context.Context, capability.AuthorityRef, string, bool) error
 }
 const SpendLimitCode = "spend_limit"
-const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
 const TeamDeletionInterval = time.Minute
@@ -579,7 +582,6 @@ type TrendPoint struct {
 type UnitRenewer interface {
 	RenewUnit(context.Context, string, bool) (store.LeaseBeat, error)
 }
-const UnknownPaymentCode = "unknown_payment"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)

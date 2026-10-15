@@ -1,5 +1,30 @@
 # Acceptance test port inventory
 
+W2 route-cut ports: TestCredits_SetMeteredRouteMarksAnExistingToken moves to
+TestRunnerMeteringHTTPConsoleProperty and TestRunnerMeteringHTTPRefusals.
+The old admin-bearer expectation is reversed to console-only authority.
+The marker reaches a fake authority-bearing transaction. Real root metering
+and immutable-award provenance remain W1 integration obligations.
+TestGitHubRunnerBindingsAreOwnerOnlyAndUnbindingRevokes moves to
+TestGitHubRunnerAdminHTTPAuthorityProperty, TestGitHubRunnerAdminHTTPRefusals,
+TestGitHubRunnerAdminHTTPInputAndMethods and
+TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter. These prove final HTTP
+policy, tenant selection, public responses and missing-writer refusal.
+Atomic revocation of real Actions roots remains pending with W1.
+
+TestPaymentHTTPServiceRoutesRemoved replaces the old credits.grant route
+allowlist, anonymous-service-route and service-seeding assertions with removal
+of the entire credential path. TestPaymentHTTPAuthenticationBoundary and
+TestPaymentHTTPRefusals retain signed checkout and private-error checks.
+The deleted credit_reversals_test.go and six removed card_billing_test.go
+transport tests still require their final provider-event ports. Existing
+pkg/store tests retain partial reversal, dispute/payment identity, saved-card
+ordering, warned-card repayment, duplicate-payment refund and failed-refund
+retry requirements. None is counted as a completed provider-HTTP port here.
+The surviving owner-budget regression stays in card_billing_test.go. Source
+functions remain available in the parent revision. No native matrix cell is
+completed by these component tests.
+
 W2 OAuth ports: TestOAuthCallbackRefusesAFlowThisBrowserDidNotStart moves to
 TestOAuthHTTPProofProperty, TestOAuthHTTPPKCEProperty,
 TestOAuthHTTPSessionAndReplay and TestOAuthHTTPDeclineAndSafeNext in

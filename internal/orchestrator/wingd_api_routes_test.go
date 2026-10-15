@@ -144,7 +144,6 @@ var apiWriteRoutes = []string{
 	"GET /api/v1/operator/tokens",
 	"GET /api/v1/operator/tokens/{token}",
 	"POST /api/v1/operator/tokens/{token}/rotate",
-	"POST /api/v1/tokens/{prefix}/metered",
 	"GET /api/v1/credits",
 	"GET /api/v1/credits/history",
 	"POST /api/v1/credits/reversals",

@@ -1,7 +1,7 @@
 <!-- GENERATED from the route registrations in pkg/controller/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
 # HTTP API reference
 
-Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` satisfies any scope check except `credits.grant`, which only the checkout service's own token passes. `public` routes run with no bearer check (the GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes require live identity under their credential policy and no named grant. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes require an operator-console session through the shared route policy and CSRF proof for writes; no bearer reaches them.
+Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` satisfies any scope check on legacy routes. `public` routes run with no bearer check (the GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes require live identity under their credential policy and no named grant. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes require an operator-console session through the shared route policy and CSRF proof for writes; no bearer reaches them.
 
 ## Controller
 
@@ -30,16 +30,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `claim` or `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `claim` or `runs.read` |
 | `GET` | `/api/v1/credits` | `runs.read` |
-| `POST` | `/api/v1/credits/card-payments` | `credits.grant` |
-| `POST` | `/api/v1/credits/card-refunds` | `credits.grant` |
-| `POST` | `/api/v1/credits/cards` | `credits.grant` |
-| `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
-| `GET` | `/api/v1/credits/payments/{reference}` | `credits.grant` |
-| `POST` | `/api/v1/credits/reversals` | `credits.grant` |
 | `GET` | `/api/v1/credits/settings` | `runs.read` |
-| `GET` | `/api/v1/credits/units` | `credits.grant` |
-| `POST` | `/api/v1/credits/warnings` | `credits.grant` |
 | `GET` | `/api/v1/crons` | `runs.read` |
 | `DELETE` | `/api/v1/crons/repos` | `runs.control` |
 | `PUT` | `/api/v1/crons/repos` | `runs.control` |
@@ -85,6 +77,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `PUT` | `/api/v1/operator/object-store/quotas/{team}/allowance` | `operator.object_store` or `operator` |
 | `POST` | `/api/v1/operator/object-store/reset-breaker` | `operator.object_store` or `operator` |
 | `PUT` | `/api/v1/operator/object-store/settings` | `operator.object_store` or `operator` |
+| `POST` | `/api/v1/operator/runners/{runner}/metered` | `operator` |
 | `GET` | `/api/v1/operator/signups` | `operator.limits` or `operator` |
 | `PUT` | `/api/v1/operator/signups` | `operator.limits` or `operator` |
 | `GET` | `/api/v1/operator/teams` | `operator` |
@@ -113,7 +106,10 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/queue` | `runs.read` |
 | `POST` | `/api/v1/runners` | `team.admin` |
 | `POST` | `/api/v1/runners/claim` | `nodes.claim` or `triggers.claim` |
+| `GET` | `/api/v1/runners/github` | `runs.read` |
+| `POST` | `/api/v1/runners/github` | `team.admin` |
 | `POST` | `/api/v1/runners/github/exchange` | `github_actions_oidc` |
+| `DELETE` | `/api/v1/runners/github/{repository}` | `team.admin` |
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.write` or `children.start` |
 | `GET` | `/api/v1/runs/grep` | `logs.read` |
@@ -230,9 +226,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `DELETE` | `/api/v1/team/github-app/triggers` | `team.admin` |
 | `GET` | `/api/v1/team/github-app/triggers` | `runs.read` |
 | `PUT` | `/api/v1/team/github-app/triggers` | `team.admin` |
-| `GET` | `/api/v1/team/github-runners` | `runs.read` |
-| `POST` | `/api/v1/team/github-runners` | `team.admin` |
-| `DELETE` | `/api/v1/team/github-runners/{repository_id}` | `team.admin` |
 | `GET` | `/api/v1/team/invitations` | `team.admin` |
 | `POST` | `/api/v1/team/invitations` | `team.admin` |
 | `DELETE` | `/api/v1/team/invitations/{id}` | `team.admin` |
@@ -242,7 +235,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `GET` | `/api/v1/tokens` | `runs.read` |
 | `POST` | `/api/v1/tokens` | `runs.read` |
-| `POST` | `/api/v1/tokens/{prefix}/metered` | `admin` |
 | `DELETE` | `/api/v1/tokens/{token}` | `runs.read` |
 | `GET` | `/api/v1/tokens/{token}` | `runs.read` |
 | `PUT` | `/api/v1/tokens/{token}/git-credentials` | `authenticated` |
