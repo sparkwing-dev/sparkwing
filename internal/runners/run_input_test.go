@@ -13,6 +13,69 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+func FuzzHostingNodeInputKeepsAwardSeals(f *testing.F) {
+	f.Add("other-run", "other-hash", int64(999))
+	f.Add("run", "spec-hash", int64(0))
+	f.Fuzz(func(t *testing.T, preparedRun, preparedHash string, retry int64) {
+		unit := hostingAward(capability.UnitNode)
+		unit.Accepted.Spec.Hash, unit.Accepted.PlanHash = "spec-hash", "plan-hash"
+		unit.Accepted.Spec.Request.Request.RequestedArgs = map[string]string{"key": "sealed"}
+		unit.Accepted.Plan = json.RawMessage(`{"jobs":[{"id":"job"}]}`)
+		wait := int64(100)
+		unit.Execution = &runspec.JobExecutionSettings{
+			Retry:       runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 2}},
+			Requires:    runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sealed"}}},
+			Concurrency: []runspec.Concurrency{{Group: "sealed", Capacity: 3, Cost: 1, QueueTimeoutMS: &wait}},
+		}
+		wantSpec, err := json.Marshal(unit.Accepted.Spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantExecution, err := json.Marshal(unit.Execution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared := hostingInput(unit)
+		prepared.Accepted = nodehost.AcceptedRun{RunID: preparedRun, SpecHash: preparedHash}
+		prepared.Execution.Retry = runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: int(retry)}}
+		executed := false
+		host := Hosting{
+			ControllerURL: "http://controller", Lease: time.Minute, Interval: time.Second,
+			NewController: hostingClient(func(context.Context) (lease.Beat, error) {
+				unit.Accepted.Spec.Request.Request.RequestedArgs["key"] = "changed"
+				unit.Accepted.Plan[0] = '!'
+				unit.Execution.Requires.Value[0] = "changed"
+				unit.Execution.Concurrency[0].Cost = 9
+				wait = 900
+				return lease.Beat{}, nil
+			}),
+			StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
+			PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+				return nodeHostFunc(func(_ context.Context, input nodehost.NodeInput) error {
+					executed = true
+					accepted := input.Accepted
+					if accepted.RunID != "run" || accepted.SpecHash != "spec-hash" || accepted.PlanHash != "plan-hash" || string(accepted.Spec) != string(wantSpec) || len(accepted.Plan.Jobs) != 1 || accepted.Plan.Jobs[0].ID != "job" {
+						t.Fatal("node execution replaced the awarded seals")
+					}
+					gotExecution, err := json.Marshal(input.Execution)
+					if err != nil || string(gotExecution) != string(wantExecution) {
+						t.Fatal("node execution replaced the awarded settings")
+					}
+					input.Execution.Requires.Value[0] = "executor"
+					*input.Execution.Concurrency[0].QueueTimeoutMS = 7
+					return nil
+				}), prepared, nil, nil
+			},
+		}
+		if err := host.Host(t.Context(), unit); err != nil || !executed {
+			t.Fatalf("node seals: executed=%v error=%v", executed, err)
+		}
+		if unit.Execution.Requires.Value[0] != "changed" || wait != 900 {
+			t.Fatal("executor mutated the award's settings")
+		}
+	})
+}
+
 func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
 	f.Add("other-run", "other-hash", false, false)
 	f.Add("run", "request-hash", true, true)

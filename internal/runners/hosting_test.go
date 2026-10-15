@@ -42,7 +42,8 @@ func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	if kind == capability.UnitNode {
 		unit.Engine = &engine.Identity{Version: "v0.20.0"}
 		unit.Runner = nodeproto.RunnerIdentity{Name: "granted-runner", Type: "runner"}
-		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: *unit.Engine}}}
+		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", Resolved: runspec.Resolved{Engine: *unit.Engine}}, Plan: []byte(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
+		unit.Execution = &runspec.JobExecutionSettings{}
 	}
 	return unit
 }

@@ -26,6 +26,28 @@ type engineTransportW8 struct {
 	calls           int
 }
 
+func runnerVersionPolicyW8(t *testing.T, version string) *engine.Resolver {
+	t.Helper()
+	public, key, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := releaseauth.TrustedPublicKeys
+	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
+	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
+	now := time.Now().UTC()
+	body, err := json.Marshal(engine.VersionIndex{Format: 1, PublishedAt: now, Latest: version, Versions: []engine.VersionInfo{{Version: version, PublishedAt: now, SupportUntil: now.AddDate(0, 12, 0)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &engineTransportW8{body: body, signature: ed25519.Sign(key, body)}
+	resolver, err := engine.NewResolver(engine.Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolver
+}
+
 func TestEngineW8IndexFailureComponents(t *testing.T) {
 	public, key, err := ed25519.GenerateKey(nil)
 	if err != nil {

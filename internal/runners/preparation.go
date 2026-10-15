@@ -37,18 +37,16 @@ func (p NodePreparation) Prepare(ctx context.Context, unit controllerwire.Claime
 	if err := validateHostedAward(unit); err != nil {
 		return nil, input, closeResources, err
 	}
-	if unit.Unit != capability.UnitNode || unit.Execution == nil || p.Host == nil || input.SpecHash == "" {
+	if unit.Unit != capability.UnitNode || p.Host == nil || input.SpecHash == "" {
 		return nil, input, closeResources, errors.New("node preparation requires an execution award, host and job hash")
 	}
-	execution := executionFor(unit)
+	execution, err := executionFor(unit)
+	if err != nil {
+		return nil, input, closeResources, err
+	}
 	routes := input.RouteBinding
 	if routes.RunID != unit.RunID || routes.JobID != unit.JobID || routes.Routes.URL == "" || routes.Routes.Bearer == "" || routes.Routes.Bearer == unit.Capability {
 		return nil, input, closeResources, errors.New("node preparation requires delegated routes for the awarded job")
-	}
-	var err error
-	input.Accepted, err = acceptedInput(unit.RunID, *unit.Accepted)
-	if err != nil {
-		return nil, input, closeResources, err
 	}
 	if err := context.Cause(ctx); err != nil {
 		return nil, input, closeResources, err
@@ -61,7 +59,6 @@ func (p NodePreparation) Prepare(ctx context.Context, unit controllerwire.Claime
 	if err != nil {
 		return nil, input, closeResources, err
 	}
-	input.Execution = *unit.Execution
 	input, err = execution.input(input)
 	return p.Host, input, closeResources, err
 }

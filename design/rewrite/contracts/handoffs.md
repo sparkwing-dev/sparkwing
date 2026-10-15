@@ -29,6 +29,15 @@ not the frozen LocalRuntime operations. The sole implemented backend was the
 W8 fixture; all its callers are migrated. Store/queue/maintenance construction
 and shared policy handlers remain W1/W2 integration.
 
+W8's node-input constructor now captures the accepted spec/plan seals and job
+settings alongside engine, runner and claim identity before renewal or preparation.
+Every preparation path uses that projection. Nested settings are copied, and
+missing or inconsistent seals fail before renewal. NodePreparation's duplicate
+accepted-input projection is removed. The SQLite lifecycle component constructs
+NewManagedRunner with a verified signed version policy before real claim/start/
+finish persistence. Source/keeper/host and controller-client bodies remain fake
+boundaries. See [the node composition report](../W8-NODE-INPUT-COMPOSITION.md).
+
 W8's runtime now owns dashboard HTTP connection holds through close, including
 keep-alive and hijacked connections. Controller activity reports cover holds
 outside those connections. Status sums both owners, and closing the last

@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -170,6 +173,7 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 				}
 			}
 			joined, closed, executed := false, false, false
+			transport, clients := &http.Client{}, 0
 			var held controllerwire.ClaimedUnit
 			host := runners.Hosting{
 				ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
@@ -178,9 +182,10 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 					if err != nil {
 						return nil, err
 					}
-					if bearer == root.Raw {
-						t.Error("hosting reused machine root authority")
+					if options.HTTP != transport || options.Launcher || options.URL != "https://controller.example" || ((clients == 0) != (bearer == root.Raw)) {
+						t.Error("runner composition changed transport or mixed claimant and award authority")
 					}
+					clients++
 					return storedRunnerClientW8(t.Context(), server, bearer)
 				},
 				StartKeeper: func(ctx context.Context, keeper lease.Keeper) (context.Context, func()) {
@@ -219,7 +224,7 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 				held = unit
 				executor := identityNodeW8(func(input nodehost.NodeInput) {
 					executed = true
-					if input.Engine.Identity != *unit.Engine || input.GrantedRunner.Name != unit.Runner.Name || input.Generation != unit.Binding.Generation || input.Attempt != unit.Binding.Attempt {
+					if input.Engine.Identity != *unit.Engine || input.GrantedRunner.Name != unit.Runner.Name || input.Generation != unit.Binding.Generation || input.Attempt != unit.Binding.Attempt || input.Accepted.SpecHash != string(unit.Accepted.Spec.Hash) || input.Accepted.PlanHash != string(unit.Accepted.PlanHash) || !reflect.DeepEqual(input.Execution, *unit.Execution) {
 						t.Error("host input lost its granted execution identity")
 						return
 					}
@@ -243,11 +248,19 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 				}}
 				return preparation.Prepare(ctx, unit, bound)
 			}
-			loop := runners.Loop{Config: runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1, MaxClaims: 1}, Controller: claimant, Host: host, CheckVersion: runnerStorePolicyW8{}.CheckRunner, RequestCapacity: func() (float64, int64) { return 2, 1 << 30 }}
-			if err := loop.Run(t.Context()); err != nil {
+			runner, err := runners.NewManagedRunner(t.Context(), runners.RuntimeConfig{
+				Controller: client.EngineOptions{URL: host.ControllerURL, HTTP: transport, Bearer: func(context.Context) (string, error) { return root.Raw, nil }},
+				Loop:       runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1, MaxClaims: 1}, Hosting: host,
+				Versions: runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
+				RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
-			if !executed || !joined || !closed || held.Unit != kind || held.Runner.Name != "runner" {
+			if err := runner.Run(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if !executed || !joined || !closed || clients != 2 || held.Unit != kind || held.Runner.Name != "runner" {
 				t.Fatalf("lifecycle: executed=%v joined=%v closed=%v kind=%s runner=%s", executed, joined, closed, held.Unit, held.Runner.Name)
 			}
 			tenant, err := server.Store.ForTeam(t.Context(), store.DefaultTeam)

@@ -126,11 +126,16 @@ bootstrap or changed execution inputs fail before the unit host runs. Cancellati
 before or after exchange also prevents dispatch. The unit host receives the complete
 exchanged claim and owns renewal, source acquisition and execution.
 
-For work, `runners.Hosting` captures the awarded runner, engine identity and
-claim fence before preparation. Its node-input constructor uses the acquired
+For work, `runners.Hosting` captures the awarded runner, engine identity,
+claim fence, accepted seals and job settings before renewal or preparation.
+The node-input constructor owns those values for every preparation path and
+copies nested settings. Later award mutations cannot change executor inputs,
+and executor edits cannot change the award through those inputs.
+Missing or inconsistent seals and missing job settings fail before renewal.
+The constructor uses the acquired
 entry's engine only when it matches the award and accepted spec. It supplies
 the awarded runner, job, generation and attempt, including ordinal zero.
-Preparation supplies the accepted plan, source entry, storage, delegated routes
+Preparation supplies the source entry, storage, delegated routes
 and generator replay. `NodeHost` owns policy checks at each process start.
 
 <!-- design:begin -->

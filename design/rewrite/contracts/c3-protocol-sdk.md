@@ -24,8 +24,10 @@ W8's `runners.NodePreparation` constructs accepted executor input and acquires
 source under `Hosting`'s keeper. Its default acquisition calls `source.ForExecution`
 and `source.Acquire`. It preserves the cleanup returned with partial acquisition.
 Bound host services supply the job hash, delegated routes, storage and replay.
-The preparation overwrites source, accepted run, execution settings, engine,
-runner and claim identity from the award. `NewManagedRunner` composes one claim
+The node-input constructor captures accepted seals, job settings, engine,
+runner and claim identity before renewal or preparation. It owns their projection
+for every preparation path and copies nested mutable settings. The preparer
+acquires the accepted source and uses that constructor. `NewManagedRunner` composes one claim
 client and award clients over the same HTTP transport with separate bearers.
 Concrete shared host constructors and run/plan/eval execution identities remain
 with W3.

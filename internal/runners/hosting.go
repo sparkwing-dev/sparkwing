@@ -40,14 +40,14 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	}
 	var execution nodeExecution
 	var sealedRun nodehost.RunInput
+	var err error
 	if unit.Unit == capability.UnitNode {
-		execution = executionFor(unit)
+		execution, err = executionFor(unit)
 	} else {
-		var err error
 		sealedRun, err = runInputFor(unit)
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
 	}
 	if err := limits.CheckRenewal(h.Interval, h.Lease); err != nil {
 		return err

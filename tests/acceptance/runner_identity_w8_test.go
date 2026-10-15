@@ -30,8 +30,9 @@ func runnerIdentityFixtureW8() (controllerwire.ClaimedUnit, nodehost.NodeInput) 
 func bindRunnerIdentityW8(unit *controllerwire.ClaimedUnit) {
 	identity := engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v0.20.0", Manifest: "go.mod", InputsDigest: strings.Repeat("a", 64)}, Version: "v0.20.0", ManifestDigest: strings.Repeat("b", 64)}
 	unit.Engine = &identity
-	unit.Request = runspec.SealedRequest{RunID: unit.RunID, Request: runspec.Request{Team: "team"}}
-	unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: identity}}}
+	unit.Request = runspec.SealedRequest{RunID: unit.RunID, Hash: "request-hash", Request: runspec.Request{Team: "team"}}
+	unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", Resolved: runspec.Resolved{Engine: identity}}, Plan: []byte(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
+	unit.Execution = &runspec.JobExecutionSettings{}
 	unit.Runner = nodeproto.RunnerIdentity{Name: "granted-runner", Type: "runner", Labels: []string{"pool=granted", "linux"}}
 }
 
@@ -82,6 +83,8 @@ func TestRunnerExecutionIdentityW8Components(t *testing.T) {
 	input.Engine = engine.Resolved{Identity: engine.Identity{Version: "v9.9.9"}, Executable: "/ambient/engine"}
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "ambient-runner", Type: "cloud", Labels: []string{"pool=forged"}}
 	input.NodeID, input.Generation, input.Attempt = "other-job", 999, 999
+	input.Accepted = nodehost.AcceptedRun{RunID: "other-run", SpecHash: "other-spec"}
+	input.Execution.Retry.Value = 999
 	input.RouteBinding = nodeproto.ProcessBinding{RunID: unit.RunID, JobID: unit.JobID, Routes: nodeproto.ProcessRoutes{URL: "http://private-host", Bearer: "delegated-route"}}
 	input.SpecHash = "persisted-job-hash"
 	called := false
@@ -92,6 +95,9 @@ func TestRunnerExecutionIdentityW8Components(t *testing.T) {
 		}
 		if got.SpecHash != input.SpecHash || got.Entry != input.Entry || got.RouteBinding != input.RouteBinding {
 			t.Error("identity binding changed host-owned preparation")
+		}
+		if got.Accepted.RunID != unit.RunID || got.Accepted.SpecHash != string(unit.Accepted.Spec.Hash) || got.Accepted.PlanHash != string(unit.Accepted.PlanHash) || !reflect.DeepEqual(got.Execution, *unit.Execution) {
+			t.Error("preparation replaced the awarded seals or job settings")
 		}
 		got.GrantedRunner.Labels[0] = "mutated-by-host"
 	}); err != nil || !called {
@@ -188,6 +194,8 @@ func FuzzRunnerExecutionIdentityW8(f *testing.F) {
 	f.Fuzz(func(t *testing.T, runner, replacement string, field uint8) {
 		unit, input := runnerIdentityFixtureW8()
 		input.GrantedRunner.Name, input.Engine.Identity.Version = runner, replacement
+		input.Accepted = nodehost.AcceptedRun{RunID: runner, SpecHash: replacement}
+		input.Execution.Retry.Value = int(field)
 		valid := field%4 == 0
 		switch field % 4 {
 		case 1:
@@ -203,7 +211,7 @@ func FuzzRunnerExecutionIdentityW8(f *testing.F) {
 		called := false
 		err := runIdentityW8(t, unit, input, func(got nodehost.NodeInput) {
 			called = true
-			if !reflect.DeepEqual(got.GrantedRunner, unit.Runner) || got.Engine.Identity != *unit.Engine {
+			if !reflect.DeepEqual(got.GrantedRunner, unit.Runner) || got.Engine.Identity != *unit.Engine || got.Accepted.RunID != unit.RunID || got.Accepted.SpecHash != string(unit.Accepted.Spec.Hash) || got.Accepted.PlanHash != string(unit.Accepted.PlanHash) || !reflect.DeepEqual(got.Execution, *unit.Execution) {
 				t.Error("prepared identity replaced the server grant or verified selection")
 			}
 		})
