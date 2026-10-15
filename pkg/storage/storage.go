@@ -15,12 +15,7 @@ var ErrNotFound = errors.New("storage: not found")
 // without a native enumeration primitive.
 var ErrListNotSupported = errors.New("storage: list not supported")
 
-// ErrNotSupported is returned by any operation a partial
-// implementation deliberately doesn't perform (e.g. Read on a
-// write-only LogStore). Conformance suites under
-// pkg/storage/conformance use errors.Is on this sentinel to skip
-// subtests for operations the implementation has opted out of,
-// rather than failing them.
+// ErrNotSupported reports an operation unavailable on the selected backend.
 var ErrNotSupported = errors.New("storage: operation not supported")
 
 // ErrBadCursor is returned by a log stream whose resume cursor is not one
@@ -91,11 +86,8 @@ type ReadOpts struct {
 	Grep  string // substring filter (case-sensitive)
 }
 
-// LogStore exposes run and job log access for controller and dashboard readers.
+// LogStore reads and streams run and job logs through the controller.
 type LogStore interface {
-	// Append writes data verbatim to the (runID, nodeID) log.
-	Append(ctx context.Context, runID, nodeID string, data []byte) error
-
 	// Read returns the (filtered) contents of one node's log.
 	// Returns nil bytes (no error) if the node has no log yet.
 	Read(ctx context.Context, runID, nodeID string, opts ReadOpts) ([]byte, error)
@@ -109,7 +101,4 @@ type LogStore interface {
 	// that don't support streaming return (nil, nil); the caller falls
 	// back to polling Read.
 	Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
-
-	// DeleteRun removes every log file for the run. Idempotent.
-	DeleteRun(ctx context.Context, runID string) error
 }

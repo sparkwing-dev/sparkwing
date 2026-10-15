@@ -336,8 +336,6 @@ func NewPacer(floor time.Duration) *Pacer
 func NewShedLog(every time.Duration) *ShedLog
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 type NodeLogs struct{}
-func (NodeLogs) Append(context.Context, string, string, []byte) error
-func (NodeLogs) DeleteRun(context.Context, string) error
 func (l NodeLogs) Grep(ctx context.Context, runID, nodeID, pattern string, maxMatches int) ([]GrepLine, error)
 func (l NodeLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, _ logseg.NodeProgress, _ time.Time) (logseg.Completeness, bool, error)
 func (l NodeLogs) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)

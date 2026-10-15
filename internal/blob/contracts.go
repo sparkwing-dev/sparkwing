@@ -420,6 +420,7 @@ type RemoteCacheOptions struct {
 
 // safety: RemoteCache exposes reads only, with no binary fetch or shared-cache write method.
 // Every returned record must originate in a verified default-branch run.
+// Memo and Depcache ignore the local key's Ref; the server selects the verified default ref.
 type RemoteCache interface {
 	Memo(context.Context, MemoKey, Budget) (MemoHit, error)
 	Depcache(context.Context, DepcacheKey, Budget) (Record, error)

@@ -1,5 +1,26 @@
 # Migrating to the next release
 
+## Log readers expose only reads
+
+`storage.LogStore` provides `Read`, `ReadRun` and `Stream`. Its unused
+`Append` and `DeleteRun` methods and the corresponding `client.NodeLogs`
+methods are removed. Writers publish tagged segments with `logseg.Sink`.
+Delete a run through the controller's run API to remove its logs.
+
+```go
+// Before
+logs.Append(ctx, runID, jobID, data)
+logs.DeleteRun(ctx, runID)
+
+// After
+sink.Append(data, "", 0, 0)
+controllerClient.DeleteRun(ctx, runID)
+```
+
+`storage.SafeLogIDs` is removed with the unused append-log surface. Use
+`blob.LogObjectKey` for tagged log slots. Custom path users can validate a run
+segment with `storage.SafeSegment` and a job path with `storage.SafeRelPath`.
+
 ## Filesystem logs use tagged segments
 
 `fs.LogStore` and `fs.NewLogStore` are removed. Log writers use a tagged

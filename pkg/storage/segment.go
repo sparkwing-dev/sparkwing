@@ -67,12 +67,3 @@ func SafeArtifactKey(key string) error {
 	}
 	return nil
 }
-
-// SafeLogIDs validates a (runID, nodeID) pair at a log-store boundary:
-// the run ID is a single segment, the node ID may be hierarchical.
-func SafeLogIDs(runID, nodeID string) error {
-	if err := SafeSegment(runID); err != nil {
-		return err
-	}
-	return SafeRelPath(nodeID)
-}

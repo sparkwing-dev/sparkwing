@@ -169,6 +169,8 @@ are removed. Distributed presence queries use the authorized blob read set.
 
 Tagged log sinks and committed readers are tested in `pkg/storage/logseg`.
 The append/delete `TestLogStore` suite and its test-only facade are removed.
+`LogStore` exposes reads and streams. Writers publish tagged segments, and
+the controller's run-deletion API owns log cleanup.
 
 The conformance contract counts as part of the public API: changes
 to what an implementation must support to pass are breaking, and

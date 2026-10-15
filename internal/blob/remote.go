@@ -90,7 +90,10 @@ func (c *remoteCache) Memo(ctx context.Context, key MemoKey, budget Budget) (Mem
 	if key.Repo != c.options.Repo {
 		return MemoHit{}, ErrDigestNotReadable
 	}
-	if _, err := MemoNamespace(key); err != nil {
+	if !validDigest(Digest(key.Hash)) {
+		return MemoHit{}, fmt.Errorf("invalid memo hash")
+	}
+	if _, err := namespace(string(key.Repo), key.Pipeline, key.Job, string(key.Hash)); err != nil {
 		return MemoHit{}, err
 	}
 	result, err := c.lookup(ctx, RecordKey{Kind: KindMemo, Name: MemoRecordName, Scope: Scope{Repo: key.Repo, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}}, budget)
@@ -104,7 +107,7 @@ func (c *remoteCache) Depcache(ctx context.Context, key DepcacheKey, budget Budg
 	if key.Repo != c.options.Repo {
 		return Record{}, ErrDigestNotReadable
 	}
-	if _, err := DepcacheNamespace(key); err != nil {
+	if _, err := namespace(string(key.Repo), key.Name, key.Key); err != nil {
 		return Record{}, err
 	}
 	result, err := c.lookup(ctx, RecordKey{Kind: KindDepcache, Scope: Scope{Repo: key.Repo, Key: key.Key}, Name: key.Name}, budget)

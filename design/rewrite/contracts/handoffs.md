@@ -2,6 +2,40 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 remote archive integration and log-reader cut
+
+**Completed W7 fix.** The signed filesystem and S3 remote archive proofs first
+failed with `empty or invalid record namespace component`. `NewRemoteReader`
+leaves ref selection to the server, but `RemoteCache.Depcache` applied the
+write-namespace validator to that empty ref. Remote memo and depcache lookups
+now validate logical key fields and leave ref resolution to the existing
+verified-default-only record query. Their public signatures are unchanged.
+
+Invariant: a local ref cannot select remote bytes, failed verification preserves
+the destination, and a local save cannot publish into the shared cache.
+The ref-selection fuzz test passes 1,000 cases. New `TestStorage` cells
+`storage-local-remote-cache-opt-in/filesystem-archives` and `s3-archives` each
+pass 128 generated cases through signed upload, immutable publication, trusted
+record lookup, verified download, archive extraction and local save/restore.
+Forged record scopes, equal-length corruption and missing objects fail. Local
+saves restore with the remote object still absent. Both cells pass with race
+detection. Record/authentication callbacks are fakes, so these are component
+proofs. W2/W3/W9 still own authenticated transport and host/profile construction.
+
+**Completed W7 cut.** Removed the unused log-reader `Append` and `DeleteRun`
+methods, their controller/client adapters and `storage.SafeLogIDs`. Runtime
+files delete 41 lines and add two replacement GoDoc lines. The internal
+run-deletion path remains the owner of physical log cleanup. Shared runtime
+files touched are `pkg/controller/log_reads.go` and
+`pkg/controller/client/logs.go`. The storage snapshot is regenerated. The client
+snapshot removes only those two methods. Its unrelated stale
+`ResetNodeForAutoRetry` entry remains for W3/W9/lead.
+
+Whole-repository build, storage tests, focused vet, both document drift guards,
+commentcheck and sleepcheck pass. `TestStorage` reports 74 passing test events
+and 425 skips. The existing W1 result/memo/log layout and W2 data-adapter gaps
+remain open. No cross-area contract change or new runtime mechanism is needed.
+
 ## From W7 merge resolution and log conformance cut
 
 **Completed W7 cuts.** The acceptance dispatcher keeps both storage checks and

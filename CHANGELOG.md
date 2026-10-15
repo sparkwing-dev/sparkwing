@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+- **storage:** Opted-in remote memo and dependency-cache lookups let the server
+  select the verified default ref. Local archive readers can restore without a
+  caller-selected ref. Local saves stay local after remote misses.
+
+- **storage (Breaking):** Log readers expose only reads and streams. Removed
+  `LogStore.Append`, `LogStore.DeleteRun`, `NodeLogs.Append`,
+  `NodeLogs.DeleteRun` and the unused `storage.SafeLogIDs` helper. See
+  [migration steps](docs/migrations/_unreleased.md#log-readers-expose-only-reads).
+
 - **storage (Breaking):** Removed the unused filesystem append-log backend
   and append/delete `conformance.TestLogStore` suite, plus the cache-specific
   `artifact_store_error` daemon status field.

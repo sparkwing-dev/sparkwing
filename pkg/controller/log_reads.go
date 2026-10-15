@@ -26,10 +26,6 @@ type segmentLogs struct {
 
 var _ storage.LogStore = segmentLogs{}
 
-func (l segmentLogs) Append(context.Context, string, string, []byte) error {
-	return fmt.Errorf("%w: node logs reach the controller as segments", storage.ErrNotSupported)
-}
-
 func (l segmentLogs) record(ctx context.Context, runID, nodeID string) (store.NodeLog, bool, error) {
 	rec, err := l.s.store.LatestNodeLog(ctx, l.team, runID, nodeID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -295,11 +291,6 @@ func writeSSELines(out io.Writer, data []byte, base int64, id func(off int64) st
 		}
 	}
 	return nil
-}
-
-func (l segmentLogs) DeleteRun(ctx context.Context, runID string) error {
-	_, err := l.s.deleteRunSegments(ctx, l.objs, l.team, runID)
-	return err
 }
 
 // NodeLogCompleteness reports the segment verdict for a node with a

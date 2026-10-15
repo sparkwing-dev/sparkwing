@@ -46,6 +46,9 @@ store and a record store. Its lookups set `VerifiedDefaultOnly`, which requires
 the record owner to resolve the verified default branch from sealed evidence.
 The client also checks returned evidence and verifies the bytes. A memo lookup
 failure becomes a miss. A depcache failure returns `ErrNotFound` for a cold start.
+The local key's ref is not a remote selector. Remote lookups validate their
+logical key fields and leave the verified default ref to the server, including
+when the local reader has no ref.
 Caller cancellation remains an error. Memo lookups use `MemoRecordName`, shared
 with the writer. A hit must pass output-size and manifest/member agreement
 checks before it grants artifact access.
@@ -127,6 +130,12 @@ after a local miss. Saves remain on local disk because the remote reader has no
 write method. W3/W9 still need to install this binding from the selected cache
 profile. Cloud and hosted-job writes continue through the separate signed-data
 backend.
+
+The remote archive acceptance checks drive signed filesystem and S3 uploads,
+default-ref lookup, verified downloads and local restore/save. Generated cases
+refuse forged record scopes, preserve destinations after missing or corrupt
+bytes, and restore local saves while the remote object remains missing. Logical
+records and authentication use contract fakes until controller binding is ready.
 
 `NewFilesystem` and `NewS3` implement `capability.DataSigner` and `ObjectBackend`.
 The controller passes an authorized `ObjectToSign` after reserving quota.
