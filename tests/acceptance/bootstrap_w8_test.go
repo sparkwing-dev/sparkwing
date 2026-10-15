@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 	for _, kind := range []launcher.CloudUnitKind{launcher.CloudPlan, launcher.CloudEval, launcher.CloudWork} {
 		t.Run(string(kind), func(t *testing.T) {
 			now, cfg, award := cloudFixture(kind)
-			award.Source = source.Spec{RepoKey: "github.com/team/repo", RemoteURL: "https://github.com/team/repo.git", SHA: "sealed-commit", PipelineDir: ".sparkwing", Engine: award.Engine}
+			award.Source = source.Spec{RepoKey: "gh:1", RemoteURL: "https://github.com/team/repo.git", SHA: strings.Repeat("a", 40), PipelineDir: ".sparkwing", Engine: award.Engine}
 			resources, err := launcher.BuildJob(t.Context(), now, cfg, award, &cloudBoundaryFake{})
 			if err != nil {
 				t.Fatal(err)
@@ -70,6 +71,8 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 					MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: award.Memory}},
 				}}}},
 			}
+			unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey(award.Source.RepoKey)}, SHA: award.Source.SHA}
+			unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: award.Source.RemoteURL, PipelineDir: award.Source.PipelineDir}
 			switch kind {
 			case launcher.CloudPlan:
 				unit.Unit, unit.Purpose, unit.Binding.Kind = capability.UnitPlan, capability.PurposePlan, capability.BindingRun

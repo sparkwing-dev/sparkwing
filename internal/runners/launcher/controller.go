@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -22,10 +21,8 @@ type LauncherController interface {
 
 // ControllerControl projects controller awards without running source or pipeline code.
 type ControllerControl struct {
-	client       LauncherController
-	demand       controllerwire.ClaimRequest
-	forRequest   func(runspec.SealedRequest) (source.Spec, error)
-	forExecution func(runspec.Spec) (source.Spec, error)
+	client LauncherController
+	demand controllerwire.ClaimRequest
 }
 
 // NewControllerControl captures only observations; the controller supplies each award's identity.
@@ -41,7 +38,7 @@ func NewControllerControl(client LauncherController, demand controllerwire.Claim
 		seen[kind] = true
 	}
 	demand.Kinds, demand.Labels = slices.Clone(demand.Kinds), slices.Clone(demand.Labels)
-	return &ControllerControl{client: client, demand: demand, forRequest: source.ForRequest, forExecution: source.ForExecution}, nil
+	return &ControllerControl{client: client, demand: demand}, nil
 }
 
 // Claim delivers a bootstrap once; uncertain transport delivery recovers through lease expiry.
@@ -71,18 +68,25 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 	if err := validateAward(*award); err != nil {
 		return nil, err
 	}
-	if binding.Kind == CloudPlan {
-		award.Source, err = c.forRequest(unit.Request)
-	} else {
-		if unit.Accepted == nil || unit.Accepted.Spec.Request.RunID != unit.RunID || unit.Accepted.Spec.Request.Request.Team != binding.Team || *unit.Engine != unit.Accepted.Spec.Resolved.Engine {
-			return nil, errors.New("Cloud execution award does not match its accepted engine and run")
-		}
-		award.Source, err = c.forExecution(unit.Accepted.Spec)
-	}
+	award.Source, err = cloudSource(unit)
 	if err != nil {
 		return nil, err
 	}
-	return award, nil
+	captured, err := captureAward(*award)
+	if err != nil {
+		return nil, err
+	}
+	return &captured, nil
+}
+
+func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {
+	if unit.Unit == capability.UnitPlan {
+		return source.ForRequest(unit.Request)
+	}
+	if unit.Accepted == nil || unit.Engine == nil || unit.Accepted.Spec.Request.RunID != unit.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || *unit.Engine != unit.Accepted.Spec.Resolved.Engine {
+		return source.Spec{}, errors.New("Cloud execution award does not match its accepted engine and run")
+	}
+	return source.ForExecution(unit.Accepted.Spec)
 }
 
 func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryPurpose) (CloudJobBinding, error) {
@@ -140,6 +144,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		return nil, err
 	}
 	request := controllerwire.LauncherSyncRequest{}
+	jobs := make([]controllerwire.LauncherJobRef, len(observations))
 	byJob, byAward := make(map[string]int), make(map[capability.LeaseRef]int)
 	for i, observation := range observations {
 		if observation.Binding.UnitID == "" || observation.JobName != jobName(observation.Binding) || observation.NodeUID == "" {
@@ -168,6 +173,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 			return nil, errors.New("duplicate Cloud award observation")
 		}
 		byJob[observation.JobName], byAward[observed.Award] = i, i
+		jobs[i] = observed.Job
 		request.Observed = append(request.Observed, observed)
 	}
 	if len(observations) == 0 {
@@ -198,7 +204,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	}
 	for _, job := range response.Remove {
 		i, ok := byJob[job.Name]
-		if !ok || seen[i] || job != request.Observed[i].Job {
+		if !ok || seen[i] || job != jobs[i] {
 			return nil, errors.New("controller sync returned unknown or contradictory Cloud cleanup")
 		}
 		seen[i], states[i] = true, CloudJobState{Binding: observations[i].Binding, Delete: true}

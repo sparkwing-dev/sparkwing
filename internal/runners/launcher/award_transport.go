@@ -15,6 +15,19 @@ import (
 
 const awardFileName = "award.json"
 
+func captureAward(award CloudJobAward) (CloudJobAward, error) {
+	body, err := json.Marshal(award)
+	if err != nil {
+		return CloudJobAward{}, errors.New("invalid Cloud award metadata")
+	}
+	var captured CloudJobAward
+	if err := json.Unmarshal(body, &captured); err != nil {
+		return CloudJobAward{}, errors.New("invalid Cloud award metadata")
+	}
+	captured.Bootstrap = slices.Clone(award.Bootstrap)
+	return captured, nil
+}
+
 // ReadBootstrapAward reads the award and token from their immutable projected Secret.
 func ReadBootstrapAward(bootstrapFile string) (CloudJobAward, error) {
 	if !filepath.IsAbs(bootstrapFile) || filepath.Base(bootstrapFile) == awardFileName {

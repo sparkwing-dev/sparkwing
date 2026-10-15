@@ -355,9 +355,8 @@ ingress:
 #    API token; the account exists to carry IRSA / Workload Identity
 #    annotations for S3 and similar cloud access.
 #
-#    The runner-side SA + RBAC is managed by the sparkwing-runner-bundle
-#    sub-chart -- see `sparkwing-runner-bundle.serviceAccount` /
-#    `sparkwing-runner-bundle.rbac` below.
+#    The runner account comes from sparkwing-runner-bundle.serviceAccount.
+#    Its optional launcher account has separate Kubernetes permissions.
 # -----------------------------------------------------------------------
 serviceAccount:
   # Create a SA for the controller pod (recommended). Set false if

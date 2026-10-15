@@ -11,6 +11,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -37,6 +39,14 @@ func bootstrapAward(t testing.TB, kind capability.UnitKind) (CloudJobAward, cont
 		t.Fatal(err)
 	}
 	award := CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: 1.5, Memory: 2 << 30}
+	if kind == capability.UnitPlan {
+		award.Source, err = source.ForRequest(unit.Request)
+	} else {
+		award.Source, err = source.ForExecution(unit.Accepted.Spec)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
 	unit.Delivery, unit.Capability = capability.DeliveryDirect, "private-work-award"
 	unit.LeaseExpiresAt = time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	return award, unit
@@ -217,6 +227,71 @@ func FuzzBootstrapBinding(f *testing.F) {
 		valid := field%7 == 5 && foreign != "" && foreign != string(award.Bootstrap)
 		if called != valid || (err == nil) != valid {
 			t.Fatal("exchange crossed its original binding or dispatched unusable authority")
+		}
+	})
+}
+
+func FuzzBootstrapSourceIsImmutable(f *testing.F) {
+	for field := range uint8(9) {
+		f.Add(field, uint8(0), "changed")
+		f.Add(field, uint8(1), "")
+		f.Add(field, uint8(2), "changed")
+	}
+	f.Fuzz(func(t *testing.T, field, kind uint8, value string) {
+		award, unit := bootstrapAward(t, []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kind%3])
+		expected := award.Source
+		change := &unit.Request.Request
+		if unit.Accepted != nil {
+			change = &unit.Accepted.Spec.Request.Request
+		}
+		switch field % 9 {
+		case 0:
+			change.Git.SHA = value
+		case 1:
+			change.Git.Repository.Key = runspec.RepoKey(value)
+		case 2:
+			change.Source.Location.RemoteURL = value
+		case 3:
+			change.Source.Location.PipelineDir = value
+		case 4:
+			change.Source.Location.LocalCheckout = value
+		case 5:
+			change.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: value}
+		case 6:
+			change.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: value}
+		case 7:
+			depth := len(value) + 1
+			policy := runspec.CheckoutPolicy{}
+			policy.Policy.Depth = &depth
+			if unit.Accepted == nil {
+				change.Options.Checkout = runspec.Setting[runspec.CheckoutPolicy]{Optional: runspec.Optional[runspec.CheckoutPolicy]{Set: true, Value: policy}}
+			} else {
+				unit.Accepted.Spec.Resolved.Settings.Options.Checkout = runspec.Setting[runspec.CheckoutPolicy]{Optional: runspec.Optional[runspec.CheckoutPolicy]{Set: true, Value: policy}}
+			}
+		case 8:
+			if unit.Accepted == nil {
+				change.Source.Location.PipelineDir = value
+			} else {
+				unit.Accepted.Spec.Resolved.DefaultBranch = runspec.Optional[string]{Set: true, Value: value}
+			}
+		}
+		var projected source.Spec
+		var projectionErr error
+		if unit.Accepted == nil {
+			projected, projectionErr = source.ForRequest(unit.Request)
+		} else {
+			projected, projectionErr = source.ForExecution(unit.Accepted.Spec)
+		}
+		called := false
+		host := BootstrapHost{ControllerURL: "https://controller.example", NewController: func(client.EngineOptions) (controllerwire.Controller, error) {
+			return bootstrapController{exchange: func(context.Context) (controllerwire.ExchangeResponse, error) {
+				return controllerwire.ExchangeResponse{Claim: unit}, nil
+			}}, nil
+		}, Host: bootstrapUnitHost(func(context.Context, controllerwire.ClaimedUnit) error { called = true; return nil })}
+		err := host.Run(t.Context(), award)
+		valid := projectionErr == nil && reflect.DeepEqual(projected, expected)
+		if called != valid || (err == nil) != valid {
+			t.Fatalf("exchange changed its private source: field=%d kind=%s called=%t error=%v", field%9, unit.Unit, called, err)
 		}
 	})
 }

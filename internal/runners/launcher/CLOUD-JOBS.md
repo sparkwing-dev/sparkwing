@@ -135,6 +135,9 @@ runtime's configured interval, which defaults to five seconds.
 
 The adapter projects plan source through `source.ForRequest`, and eval/work
 through `source.ForExecution` using the accepted spec and matching engine.
+Claim publication, source initialization and bootstrap exchange capture private
+award values before calling service bindings. The claim adapter uses the shared
+source projections directly.
 Each award must include resolved CPU and memory in `ClaimedUnit.Execution`.
 For eval, `Binding.Generation` fences the terminal source and
 `Binding.Expansion` identifies the eval's own live lease. Both survive dispatch.
@@ -149,6 +152,9 @@ duplicate or missing decisions and returned credentials fail before activation
 or teardown. No in-memory award map or replacement bootstrap is needed after
 restart.
 
+The adapter retains observed Job identities separately from the request passed
+to the transport, so request mutation cannot select a different cleanup target.
+
 `BootstrapHost` creates a separate controller client whose bearer callback holds
 only the Job's bootstrap. It calls exchange once. Before dispatch, it checks the
 direct award against the original unit, team, run, job, live lease, attempt,
@@ -156,6 +162,10 @@ source generation, deadlines, engine and resources. Missing authority, a repeate
 bootstrap or changed execution inputs fail before the unit host runs. Cancellation
 before or after exchange also prevents dispatch. The unit host receives the complete
 exchanged claim and owns renewal, source acquisition and execution.
+The exchanged source must match the private projection used by fetch-source,
+including repository, remote, commit, pipeline directory, default branch, bundle,
+checkout policy and accepted engine. A matching run and generation alone cannot
+authorize another source.
 
 For work, `runners.Hosting` captures the awarded runner, engine identity,
 claim fence, accepted seals and job settings before renewal or preparation.

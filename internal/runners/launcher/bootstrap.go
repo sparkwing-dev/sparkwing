@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -32,12 +32,11 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
 	if strings.TrimSpace(h.ControllerURL) == "" || h.Host == nil {
 		return errors.New("Cloud bootstrap requires a controller URL and unit host")
 	}
-	binding, bootstrap := award.Binding, string(award.Bootstrap)
-	var identity *engine.Identity
-	if award.Engine != nil {
-		value := *award.Engine
-		identity = &value
+	award, err := captureAward(award)
+	if err != nil {
+		return err
 	}
+	binding, bootstrap := award.Binding, string(award.Bootstrap)
 	open := h.NewController
 	if open == nil {
 		open = client.NewEngineClient
@@ -72,11 +71,15 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
 	if !sameBinding(binding, exchanged) || unit.Capability == "" || unit.Capability == bootstrap || unit.LeaseExpiresAt.IsZero() {
 		return errors.New("Cloud exchange returned different binding or unusable authority")
 	}
-	if identity != nil && (unit.Engine == nil || *unit.Engine != *identity) {
+	if !reflect.DeepEqual(unit.Engine, award.Engine) {
 		return errors.New("Cloud exchange changed the accepted engine")
 	}
-	if binding.Kind != CloudPlan && (unit.Accepted == nil || unit.Engine == nil || unit.Accepted.Spec.Request.RunID != binding.RunID || unit.Accepted.Spec.Request.Request.Team != binding.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine) {
-		return errors.New("Cloud exchange is missing its matching accepted run")
+	projected, err := cloudSource(unit)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(projected, award.Source) {
+		return errors.New("Cloud exchange changed the awarded source")
 	}
 	if unit.Execution == nil || !unit.Execution.Resources.Set || !unit.Execution.Resources.Value.Cores.Set || !unit.Execution.Resources.Value.MemoryBytes.Set || unit.Execution.Resources.Value.Cores.Value != award.CPUCores || unit.Execution.Resources.Value.MemoryBytes.Value != award.Memory {
 		return errors.New("Cloud exchange changed awarded execution resources")

@@ -2,7 +2,6 @@ package launcher
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -36,12 +35,8 @@ func (s SourceInit) Run(ctx context.Context, award CloudJobAward, destination st
 	if award.Binding.Kind != CloudPlan && (award.Source.Engine == nil || *award.Source.Engine != *award.Engine) {
 		return errors.New("Cloud source differs from the accepted engine")
 	}
-	body, err := json.Marshal(award)
+	captured, err := captureAward(award)
 	if err != nil {
-		return errors.New("invalid Cloud source award")
-	}
-	var captured CloudJobAward
-	if err := json.Unmarshal(body, &captured); err != nil {
 		return err
 	}
 	deadline, err := limits.JobDeadline(time.Now(), captured.Binding.OwnerDeadline, captured.Binding.AttemptDeadline)

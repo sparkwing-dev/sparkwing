@@ -162,6 +162,14 @@ func TestCloudWorkUsesRunnerExecutionIdentityW8(t *testing.T) {
 		Cores:       runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: award.CPUCores}},
 		MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: award.Memory}},
 	}}}}
+	unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40)}
+	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo.git", PipelineDir: ".sparkwing"}
+	unit.Accepted.Spec.Request = unit.Request
+	var err error
+	award.Source, err = source.ForExecution(unit.Accepted.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "runner-image-identity"}
 	input.Engine = engine.Resolved{Executable: "/runner-image/engine"}
 	exchanges, executions := 0, 0

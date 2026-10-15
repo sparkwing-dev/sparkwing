@@ -79,7 +79,11 @@ func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.Cl
 	if unit.AttemptDeadline != nil {
 		binding.AttemptDeadline = *unit.AttemptDeadline
 	}
-	return server, launcher.CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: 1, Memory: 1 << 29, Source: source.Spec{RepoKey: "gh:1", RemoteURL: "https://github.com/team/repo.git", SHA: "sealed-commit", PipelineDir: ".sparkwing", Engine: unit.Engine}}
+	projection, err := source.ForExecution(unit.Accepted.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return server, launcher.CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: 1, Memory: 1 << 29, Source: projection}
 }
 
 func cloudStoreClientW8(t *testing.T, server *controller.EngineController) func(client.EngineOptions) (controllerwire.Controller, error) {

@@ -9,14 +9,15 @@ import (
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktesting "k8s.io/client-go/testing"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	batchv1 "k8s.io/api/batch/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	ktesting "k8s.io/client-go/testing"
 )
 
 type launcherWireFake struct {
@@ -46,6 +47,8 @@ func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 		}}}},
 		OwnerDeadline: &deadline, AttemptDeadline: &deadline, ParentCapabilityExpiry: &deadline, Engine: &identity,
 	}
+	unit.Request.Request.Git = runspec.Git{Repository: runspec.Repository{Key: "git:github.com/team/repo"}, SHA: strings.Repeat("a", 40)}
+	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}
 	unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: identity}}}
 	switch kind {
 	case capability.UnitPlan:
@@ -76,18 +79,14 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			projected := source.Spec{RepoKey: "gh:42", SHA: "sealed-sha", RemoteURL: "https://github.com/acme/repo", PipelineDir: ".sparkwing"}
-			control.forRequest = func(request runspec.SealedRequest) (source.Spec, error) {
-				if kind != capability.UnitPlan || !reflect.DeepEqual(request, unit.Request) {
-					t.Fatal("planning lost the sealed request")
-				}
-				return projected, nil
+			var projected source.Spec
+			if kind == capability.UnitPlan {
+				projected, err = source.ForRequest(unit.Request)
+			} else {
+				projected, err = source.ForExecution(unit.Accepted.Spec)
 			}
-			control.forExecution = func(spec runspec.Spec) (source.Spec, error) {
-				if kind == capability.UnitPlan || !reflect.DeepEqual(spec, unit.Accepted.Spec) {
-					t.Fatal("execution lost the accepted spec")
-				}
-				return projected, nil
+			if err != nil {
+				t.Fatal(err)
 			}
 			award, err := control.Claim(t.Context())
 			if err != nil || award == nil || calls != 1 {
@@ -207,10 +206,6 @@ func TestControllerClaimRejectsIncompleteOrConflictingAwards(t *testing.T) {
 			}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
 			if err != nil {
 				t.Fatal(err)
-			}
-			control.forExecution = func(runspec.Spec) (source.Spec, error) {
-				t.Fatal("invalid award reached source projection")
-				return source.Spec{}, nil
 			}
 			if award, err := control.Claim(t.Context()); award != nil || err == nil || strings.Contains(err.Error(), "one-time-bootstrap") {
 				t.Fatalf("invalid award accepted or exposed: %v", err)
@@ -380,4 +375,41 @@ func TestCloudJobNamesSeparateAwardedUnits(t *testing.T) {
 	if jobName(first) == jobName(second) {
 		t.Fatal("different terminal source generations alias the same Kubernetes Job")
 	}
+}
+
+func FuzzControllerSyncRetainsObservedIdentity(f *testing.F) {
+	for field := range uint8(3) {
+		f.Add(field, "replacement")
+		f.Add(field, "")
+	}
+	f.Fuzz(func(t *testing.T, field uint8, replacement string) {
+		unit := wireAward(capability.UnitNode)
+		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation := CloudJobObservation{Binding: binding, JobNamespace: "cloud", JobName: jobName(binding), JobUID: "job-uid", NodeUID: "node-uid"}
+		original := controllerwire.LauncherJobRef{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID}
+		var removed controllerwire.LauncherJobRef
+		control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+			switch field % 3 {
+			case 0:
+				request.Observed[0].Job.Namespace = replacement
+			case 1:
+				request.Observed[0].Job.Name = replacement
+			case 2:
+				request.Observed[0].Job.UID = replacement
+			}
+			removed = request.Observed[0].Job
+			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{removed}}, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		states, err := control.Sync(t.Context(), []CloudJobObservation{observation})
+		valid := removed == original
+		if (err == nil) != valid || (len(states) == 1) != valid {
+			t.Fatal("transport changed the persisted Job identity used for cleanup")
+		}
+	})
 }
