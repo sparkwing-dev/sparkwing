@@ -89,15 +89,3 @@ func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upl
 	u.Team, u.Kind, u.Key, u.CommittedAt = NormalizeTeam(team), StorageKind(kind), key, time.Unix(0, committed)
 	return u, nil
 }
-
-// TriggerRepoID returns the GitHub repository ID team's trigger id recorded,
-// or 0 when it recorded none.
-func (s *Store) TriggerRepoID(ctx context.Context, team Team, id string) (int64, error) {
-	var repoID int64
-	err := s.queryRow(ctx, `SELECT COALESCE(github_repo_id, 0) FROM triggers WHERE team = ? AND id = ?`,
-		string(NormalizeTeam(team)), id).Scan(&repoID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrNotFound
-	}
-	return repoID, err
-}

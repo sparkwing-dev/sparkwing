@@ -51,6 +51,9 @@ foreign actors and authority ending between inventory selection and segment read
 Authenticated `LogTransport` signing/verification and host subject construction
 remain separate integrations.
 
+Remote log follow opens the stream without probing legacy segment capabilities.
+Stream refusals remain errors. The old segment-unavailable classification is removed.
+
 ## Log byte accounting
 
 `Segment.Offset` and `Segment.Size` describe decoded log bytes. `StoredBytes`

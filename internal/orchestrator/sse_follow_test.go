@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -108,19 +109,24 @@ func TestFollowedNode_ResumesFromItsCursorWithoutReplay(t *testing.T) {
 	}
 }
 
-// A stream the controller refuses, as it does a token without logs.read,
-// ends the follow with that refusal rather than retrying it forever, even
-// when the run reads as terminal only after the refusal was queued.
 func TestFollowLogsRemote_EndsOnARefusedStream(t *testing.T) {
+	synctest.Test(t, testFollowRefusedStream)
+}
+
+func testFollowRefusedStream(t *testing.T) {
 	const runID = "run-refused"
 	streamRefused := make(chan struct{})
 	var refuseOnce sync.Once
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	transport := heartbeatTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
 		switch {
-		case strings.HasSuffix(r.URL.Path, "/nodes"):
-			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []store.Node{{RunID: runID, NodeID: "a", Status: "done"}}})
+		case strings.HasSuffix(r.URL.Path, "/jobs"):
+			if err := json.NewEncoder(w).Encode([]store.Node{{RunID: runID, NodeID: "a", Status: "done"}}); err != nil {
+				t.Fatal(err)
+			}
 		case r.URL.Path == "/api/v1/capabilities":
-			_, _ = io.WriteString(w, `{"logs":{"segments":true}}`)
+			t.Error("log follow probed retired segment capabilities")
+			w.WriteHeader(http.StatusNotFound)
 		case strings.HasSuffix(r.URL.Path, "/stream"):
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 			refuseOnce.Do(func() { close(streamRefused) })
@@ -130,10 +136,9 @@ func TestFollowLogsRemote_EndsOnARefusedStream(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	t.Cleanup(srv.Close)
-	shortFollowTiming(t, time.Second, 10*time.Millisecond)
-	ctrl := client.NewWithToken(srv.URL, nil, "")
+		return w.Result(), nil
+	})
+	ctrl := client.NewWithToken("https://controller.test", &http.Client{Transport: transport}, "")
 	if err := followLogsRemote(context.Background(), ctrl, ctrl.NodeLogs(), runID, "", io.Discard); !errors.Is(err, client.ErrLogStreamRefused) {
 		t.Fatalf("follow = %v, want the refusal", err)
 	}

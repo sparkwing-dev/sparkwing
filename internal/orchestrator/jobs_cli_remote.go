@@ -252,7 +252,6 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	var multi atomic.Bool
 	streams := map[string]*followedNode{}
 	refused := make(chan error, 1)
-	segmentsChecked := false
 	var terminalAt time.Time
 
 	wait := remoteFollowPollInterval
@@ -276,17 +275,6 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 		for _, n := range nodes {
 			if (nodeFilter != "" && n.NodeID != nodeFilter) || streams[n.NodeID] != nil {
 				continue
-			}
-			if !segmentsChecked {
-				keeps, err := ctrl.KeepsLogSegments(runCtx)
-				if err != nil {
-					return fmt.Errorf("run %s: %w", runID, err)
-				}
-				if !keeps {
-					return fmt.Errorf("run %s: the controller keeps no node log segments, so it has no node log stream "+
-						"to follow; it predates them or has no store to keep them in", runID)
-				}
-				segmentsChecked = true
 			}
 			f := &followedNode{done: make(chan struct{})}
 			streams[n.NodeID] = f

@@ -27,30 +27,21 @@ type nodeLogSink struct {
 	closeOnce sync.Once
 }
 
-// safety: nil keeps the node's log on local disk as before, for a controller that keeps no segments or cannot be
-// asked; ctx carries the claim fence every upload request repeats.
 func openNodeLogSink(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) *nodeLogSink {
-	n, _ := openNodeLogSinkLive(ctx, ctrl, runID, nodeID, true, logger)
-	return n
+	return openNodeLogSinkLive(ctx, ctrl, runID, nodeID, true, logger)
 }
 
-// safety: unavailable reports a controller that keeps no segments at all, which no retry changes, as against a
-// request that failed; a pseudo node with no node row takes no live view, which the controller would refuse.
-func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID string, live bool, logger *slog.Logger) (n *nodeLogSink, unavailable bool) {
+func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID string, live bool, logger *slog.Logger) *nodeLogSink {
 	up := ctrl.NewLogSegmentUploader(ctx, runID, nodeID)
 	openCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := up.Open(openCtx); err != nil {
-		level := slog.LevelWarn
-		if errors.Is(err, client.ErrLogSegmentsUnavailable) {
-			level = slog.LevelDebug
-		}
-		logger.Log(ctx, level, "node log stays on this runner's disk: the controller issued no segment URLs",
+		logger.WarnContext(ctx, "node log stays on this runner's disk: the controller issued no segment URLs",
 			"run_id", runID, "node_id", nodeID, "err", err)
-		return nil, errors.Is(err, client.ErrLogSegmentsUnavailable)
+		return nil
 	}
 	nodeCtx := context.WithoutCancel(ctx)
-	n = &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger}
+	n := &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger}
 	opts := logseg.Options{Subject: up.Subject(), Logger: logger}
 	if live {
 		n.live = startLivePusher(nodeCtx, ctrl, runID, nodeID, up.LiveAttempt(), logger)
@@ -61,14 +52,14 @@ func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID
 		logger.Warn("node log stays on this runner's disk: the log spool could not be opened",
 			"run_id", runID, "node_id", nodeID, "err", err)
 		n.live.close()
-		return nil, false
+		return nil
 	}
 	n.sink = sink
 	if live {
 		up.OnWatched(sink.SetWatched)
 		watchedSinks.Store(watchKey(runID, nodeID), n)
 	}
-	return n, false
+	return n
 }
 
 func (n *nodeLogSink) close(ctx context.Context, stopped bool) {
@@ -227,7 +218,7 @@ func (l *EngineNodeLog) Append(ctx context.Context, data []byte) error {
 	if !l.opened {
 		l.opened = true
 		if l.controllerURL != "" {
-			l.sink, _ = openNodeLogSinkLive(context.WithoutCancel(ctx), client.NewWithToken(l.controllerURL, nil, l.token),
+			l.sink = openNodeLogSinkLive(context.WithoutCancel(ctx), client.NewWithToken(l.controllerURL, nil, l.token),
 				l.runID, l.nodeID, false, l.logger)
 		}
 	}

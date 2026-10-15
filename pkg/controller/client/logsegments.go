@@ -6,7 +6,6 @@ import (
 	"crypto/md5" // #nosec G501 -- S3's Content-MD5 integrity check, not a security digest
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -19,10 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// ErrLogSegmentsUnavailable reports a controller that keeps no log
-// segments: it predates the route, or it has no store to keep them in.
-var ErrLogSegmentsUnavailable = errors.New("controller/client: the controller keeps no log segments")
 
 // WatchReport is what a heartbeat reply says about viewers. A node
 // report names NodeID and whether a viewer watches it; a run report sets
@@ -56,39 +51,7 @@ func (c *Client) reportWatch(r WatchReport) {
 	}
 }
 
-// KeepsLogSegments reports whether the controller advertises that it
-// keeps node logs as segments. A controller that predates segments
-// answers false.
-func (c *Client) KeepsLogSegments(ctx context.Context) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, capabilitiesReadTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/capabilities", nil)
-	if err != nil {
-		return false, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return false, readHTTPError(resp)
-	}
-	var caps struct {
-		Logs struct {
-			Segments bool `json:"segments"`
-		} `json:"logs"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
-		return false, fmt.Errorf("decode capabilities: %w", err)
-	}
-	return caps.Logs.Segments, nil
-}
-
-// LogSegment asks the controller to sign the upload of one log segment
-// of a node attempt, or with req.N zero names the attempt the writer
-// writes. A controller that keeps no segments answers
-// [ErrLogSegmentsUnavailable].
+// LogSegment requests an upload slot or selects the current attempt with N zero.
 func (c *Client) LogSegment(ctx context.Context, runID, nodeID string, req store.LogSegmentRequest) (store.LogSegmentGrant, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -99,15 +62,7 @@ func (c *Client) LogSegment(ctx context.Context, runID, nodeID string, req store
 		return store.LogSegmentGrant{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		if err := classifyNotFound(resp); errors.Is(err, ErrControllerLacksRoute) || errors.Is(err, ErrForeignNotFound) {
-			return store.LogSegmentGrant{}, fmt.Errorf("%w: %w", ErrLogSegmentsUnavailable, err)
-		}
-		return store.LogSegmentGrant{}, fmt.Errorf("log segments: run %s node %s not found", runID, nodeID)
-	case resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "":
-		return store.LogSegmentGrant{}, fmt.Errorf("%w: %w", ErrLogSegmentsUnavailable, readHTTPError(resp))
-	case resp.StatusCode != http.StatusOK:
+	if resp.StatusCode != http.StatusOK {
 		return store.LogSegmentGrant{}, fmt.Errorf("log segments: %w", readHTTPError(resp))
 	}
 	var grant store.LogSegmentGrant
@@ -207,9 +162,7 @@ func (u *LogSegmentUploader) OnWatched(fn func(bool)) {
 	u.onWatched = fn
 }
 
-// Open asks the controller which attempt the writer writes, which records
-// where its log lives. It answers [ErrLogSegmentsUnavailable] when the
-// controller keeps no segments, so the caller can keep the log another way.
+// Open resolves the current attempt and its log subject through the controller.
 func (u *LogSegmentUploader) Open(ctx context.Context) error {
 	_, err := u.request(ctx, store.LogSegmentRequest{})
 	return err
