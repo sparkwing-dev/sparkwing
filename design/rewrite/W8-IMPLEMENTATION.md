@@ -901,3 +901,76 @@ No Sparkwing binary, pipeline or Git write ran. The shared Git config has no
 local `user.name` or `core.worktree` override. Standards discovery succeeded with
 its installed-binary staleness notice. Worker scratch is deleted after the final
 checks. The lead retains committing and landing.
+
+## Continuation: bootstrap admission and cleanup
+
+`LaunchOne` checks the admitted bootstrap Secret before activation. Altered
+bytes, extra data, mutability, type, Job ownership or deletion state refuse
+execution without exposing credentials or reading Secrets. Added server
+metadata remains allowed. The source documentation describes this behavior.
+
+A refused renamed Secret uses the existing teardown and `Sync`. One private
+Job annotation records its name, UID and owning Job UID. Deletion uses the
+Secret UID as a precondition. A failed deletion retains the Job finalizer and
+reservation, so a restarted launcher retries the same target. A replacement
+Secret is preserved. The launcher checks the admitted annotation update and
+refuses a cleanup record injected during initial Job admission. Invalid or
+wrong-Job cleanup records cannot authorize deletion.
+
+The annotation is a W8-local mechanism. Immediate deletion alone lost its
+target after a transient failure, which independent review reproduced. Reusing
+the existing Job and reconciler preserves ownership without another service,
+callback, setting, credential or public contract. No other area's contract
+changed.
+
+Secret creation and recording a renamed identity are separate Kubernetes
+writes. If recording fails, the launcher attempts immediate UID-fenced cleanup,
+retains the suspended Job and reservation, and reports the target name and UID.
+If cleanup also fails, an operator must remove that Secret. A crash between
+creation and recording has the same residual when admission both renames the
+Secret and strips its Job owner. No atomic cross-object guarantee is claimed.
+
+### Verification
+
+- Whole-repository `go build -p 4 ./...` passes.
+- Vet passes for cluster, engine, runners and wingd, including their subpackages
+  and both acceptance packages.
+- Full engine, runner and component acceptance tests pass. Final launcher and
+  acceptance tests also pass under `-race -p 2`.
+- `TestLauncherRefusesChangedBootstrapW8Components` passes for plan, eval and
+  work. `TestLauncherRetriesRenamedBootstrapCleanupW8Components` covers retry
+  after restart and UID-conflicting replacements. Both defects ran red before
+  their fixes. `TestLauncherReportsBootstrapRecordFailureW8Components` covers
+  failed and silently dropped writes, with immediate cleanup success/failure.
+- Component fixtures enforce UID preconditions and retain deleting Jobs through
+  finalization. They establish no native Kubernetes or Cloud evidence.
+- Independent review of the final immutable snapshot closed its findings and
+  found no concrete regression. Its adapted mutation, restart and malformed
+  reference probes and focused component tests pass.
+- Commentcheck, sleepcheck, docs-mirror drift and `git diff --check` pass.
+
+Checks use `GOWORK=off`, `GOFLAGS=-buildvcs=false` and private caches and temporary
+directories under `/tmp/sw-astra-W8/`. Test package parallelism is at most four.
+No native catalog cell was activated. No additional T1 parked test was ported.
+This continuation deletes **0 obsolete files / 0 legacy subsystem lines**.
+
+### Remaining integration and shared files
+
+W8 remains incomplete. The existing integration list still applies: W3 host
+construction, delegated node routes, generator replay and keeper/source
+composition; W9 bootstrap and daemon Home/foreground grammar; W1/W2/W3 shared
+controller services; Actions exchange; native update ownership and managed
+units; Windows SID transport; and deployed Cloud probes and node cleanup.
+The contract interfaces still have component fakes. No new human decision is
+requested, and no other area's contract is changed.
+
+Shared edits are `tests/acceptance/launcher_publication_w8_test.go` and this
+handoff. Product and source-documentation edits stay in
+`internal/runners/launcher`. No external caller migration was needed. The lead
+retains committing and landing.
+
+The initial installed discovery command preceded loading the swarm brief's
+no-binary rule. No stateful Sparkwing command, candidate, pipeline or Git write
+followed. The shared Git config has no local identity or worktree override.
+Native fixtures remain unavailable. Standards discovery succeeds with its
+installed-binary staleness notice. Worker scratch is removed after final review.

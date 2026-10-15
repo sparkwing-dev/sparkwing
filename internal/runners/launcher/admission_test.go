@@ -53,6 +53,7 @@ func TestLauncherRefusesAdmissionChangesBeforeBootstrap(t *testing.T) {
 		}},
 		{"deadline", func(j *batchv1.Job) { j.Spec.ActiveDeadlineSeconds = nil }},
 		{"binding", func(j *batchv1.Job) { delete(j.Annotations, bindingAnnotation) }},
+		{"cleanup_reference", func(j *batchv1.Job) { j.Annotations[bootstrapAnnotation] = `{"name":"unrelated","uid":"secret-uid"}` }},
 		{"finalizer", func(j *batchv1.Job) { j.Finalizers = nil }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -78,6 +79,12 @@ func TestLauncherRefusesAdmissionChangesBeforeBootstrap(t *testing.T) {
 
 func TestLauncherAcceptsKubernetesDefaults(t *testing.T) {
 	l, kube, _, _ := fixture()
+	kube.PrependReactor("create", "secrets", func(action ktesting.Action) (bool, runtime.Object, error) {
+		secret := action.(ktesting.CreateAction).GetObject().(*corev1.Secret)
+		secret.UID, secret.ResourceVersion = "secret-uid", "3"
+		secret.Annotations = map[string]string{"admission.example/checked": "true"}
+		return false, nil, nil
+	})
 	kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
 		job := action.(ktesting.CreateAction).GetObject().(*batchv1.Job)
 		job.Spec.Parallelism, job.Spec.Completions = ptr(int32(1)), ptr(int32(1))

@@ -35,6 +35,7 @@ const (
 	reservationAnnotation = "sparkwing.dev/node-reservation"
 	cleanupFinalizer      = "sparkwing.dev/cloud-cleanup"
 	bootstrapPath         = "/etc/sparkwing/bootstrap/bootstrap"
+	bootstrapAnnotation   = "sparkwing.dev/bootstrap-cleanup"
 )
 
 var digestPinned = regexp.MustCompile(`^[a-z0-9][a-z0-9.:/_-]*@sha256:[0-9a-f]{64}$`)

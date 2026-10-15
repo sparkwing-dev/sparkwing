@@ -12,6 +12,7 @@ import (
 func validateAdmittedJob(expected, admitted *batchv1.Job) error {
 	if admitted == nil || admitted.Name != expected.Name || admitted.Namespace != expected.Namespace ||
 		admitted.DeletionTimestamp != nil || !slices.Contains(admitted.Finalizers, cleanupFinalizer) ||
+		expected.Annotations[bootstrapAnnotation] != admitted.Annotations[bootstrapAnnotation] ||
 		!equality.Semantic.DeepDerivative(expected.Labels, admitted.Labels) ||
 		!equality.Semantic.DeepDerivative(expected.Annotations, admitted.Annotations) ||
 		!equality.Semantic.DeepDerivative(expected.Spec.Template.Labels, admitted.Spec.Template.Labels) {
@@ -69,4 +70,15 @@ func defaultProbe(p *corev1.Probe) {
 	if p.SuccessThreshold == 0 {
 		p.SuccessThreshold = 1
 	}
+}
+
+func validateAdmittedBootstrap(expected, admitted *corev1.Secret) error {
+	if admitted == nil || admitted.Name != expected.Name || admitted.Namespace != expected.Namespace ||
+		admitted.DeletionTimestamp != nil || admitted.Type != expected.Type || len(admitted.StringData) != 0 ||
+		!equality.Semantic.DeepEqual(expected.Immutable, admitted.Immutable) ||
+		!equality.Semantic.DeepEqual(expected.Data, admitted.Data) ||
+		!equality.Semantic.DeepEqual(expected.OwnerReferences, admitted.OwnerReferences) {
+		return errors.New("Kubernetes changed Cloud bootstrap delivery or teardown ownership")
+	}
+	return nil
 }

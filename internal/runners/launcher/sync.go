@@ -18,6 +18,12 @@ import (
 // ErrContainersRunning keeps the reservation until Kubernetes confirms every container has stopped.
 var ErrContainersRunning = errors.New("Cloud Job containers are still running")
 
+type bootstrapReference struct {
+	Name   string    `json:"name"`
+	UID    types.UID `json:"uid"`
+	JobUID types.UID `json:"job_uid"`
+}
+
 // Sync reconstructs ownership from Kubernetes and retires expired, terminal or cancelled Jobs.
 func (l *Launcher) Sync(ctx context.Context) error {
 	if err := l.validate(); err != nil {
@@ -98,6 +104,13 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 
 func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation) error {
 	namespace := l.Config.Namespace
+	bootstrap := bootstrapReference{Name: job.Name}
+	if reference := job.Annotations[bootstrapAnnotation]; reference != "" {
+		bootstrap = bootstrapReference{}
+		if err := json.Unmarshal([]byte(reference), &bootstrap); err != nil || bootstrap.Name == "" || bootstrap.UID == "" || bootstrap.JobUID == "" || bootstrap.JobUID != job.UID {
+			return fmt.Errorf("Job %s has invalid bootstrap cleanup ownership", job.Name)
+		}
+	}
 	foreground := metav1.DeletePropagationForeground
 	jobErr := l.Kube.BatchV1().Jobs(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}})
 	if apierrors.IsNotFound(jobErr) {
@@ -110,10 +123,7 @@ func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation C
 			return errors.Join(jobErr, lookupErr)
 		}
 	}
-	secretErr := l.Kube.CoreV1().Secrets(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{})
-	if apierrors.IsNotFound(secretErr) {
-		secretErr = nil
-	}
+	secretErr := l.deleteBootstrap(ctx, bootstrap)
 	if err := errors.Join(jobErr, secretErr); err != nil {
 		return err
 	}
@@ -138,6 +148,18 @@ func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation C
 		return err
 	}
 	_, err = l.Kube.BatchV1().Jobs(namespace).Patch(ctx, job.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+func (l *Launcher) deleteBootstrap(ctx context.Context, bootstrap bootstrapReference) error {
+	options := metav1.DeleteOptions{}
+	if bootstrap.UID != "" {
+		options.Preconditions = &metav1.Preconditions{UID: &bootstrap.UID}
+	}
+	err := l.Kube.CoreV1().Secrets(l.Config.Namespace).Delete(ctx, bootstrap.Name, options)
 	if apierrors.IsNotFound(err) {
 		return nil
 	}

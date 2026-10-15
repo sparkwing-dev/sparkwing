@@ -18,6 +18,23 @@ Changes to the authored placement, containers, private volumes, resource budget,
 execution policy or teardown ownership refuse activation. An injected failure
 policy cannot turn an OOM failure into another pod execution.
 
+The admitted bootstrap Secret must retain its exact bytes, immutable flag, type
+and Job owner before activation. Extra data or altered ownership refuses launch
+and starts teardown without reading Secrets or exposing credential bytes. A
+renamed Secret's name and UID are recorded on the suspended Job before teardown.
+`Sync` retries its UID-fenced deletion after a failure or launcher restart and
+retains the reservation and finalizer until cleanup succeeds. The record binds
+to the Job UID and must survive the admitted update. A cleanup record injected
+at Job creation is refused. Added server metadata does not change the bootstrap
+contract.
+
+Secret creation and the cleanup record are separate Kubernetes writes. If the
+record fails, the launcher attempts immediate UID-fenced deletion, retains the
+Job and reservation, and reports the target name and UID. If that deletion also
+fails, an operator must remove the named Secret. A crash between creation and
+recording has the same residual when admission both renames the Secret and
+removes its Job owner. Normal bootstrap Secrets retain their owner reference.
+
 After publishing the bootstrap, the launcher confirms that the controller still
 recognizes the exact awarded binding before activating the Job. Cancellation,
 an unavailable controller or a mismatched decision leaves no runnable Job and
