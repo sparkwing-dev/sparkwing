@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -160,9 +162,10 @@ type LogSegmentUploader struct {
 	base          context.Context
 	runID, nodeID string
 
-	mu                  sync.Mutex
-	attempt, generation int64
-	onWatched           func(bool)
+	mu        sync.Mutex
+	subject   blob.LogSubject
+	prefix    string
+	onWatched func(bool)
 }
 
 var _ logseg.Uploader = (*LogSegmentUploader)(nil)
@@ -172,10 +175,21 @@ var _ logseg.Uploader = (*LogSegmentUploader)(nil)
 func (u *LogSegmentUploader) LiveAttempt() string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.attempt == 0 {
+	if u.subject.Attempt == nil {
 		return ""
 	}
-	return store.LiveLogAttempt(u.attempt, u.generation)
+	return store.LiveLogAttempt(u.subject.Attempt.Attempt, u.subject.Attempt.Generation)
+}
+
+// Subject returns the controller-selected identity after Open, copied for the sink.
+func (u *LogSegmentUploader) Subject() blob.LogSubject {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	subject := u.subject
+	if subject.Attempt != nil {
+		subject.Attempt = new(*subject.Attempt)
+	}
+	return subject
 }
 
 // NewLogSegmentUploader returns an uploader for one node's log. Every
@@ -212,7 +226,9 @@ func (u *LogSegmentUploader) requestCtx(ctx context.Context) (context.Context, c
 
 func (u *LogSegmentUploader) request(ctx context.Context, req store.LogSegmentRequest) (store.LogSegmentGrant, error) {
 	u.mu.Lock()
-	req.Attempt, req.Generation = u.attempt, u.generation
+	if u.subject.Attempt != nil {
+		req.Attempt, req.Generation = u.subject.Attempt.Attempt, u.subject.Attempt.Generation
+	}
 	u.mu.Unlock()
 	rc, cancel := u.requestCtx(ctx)
 	defer cancel()
@@ -220,8 +236,24 @@ func (u *LogSegmentUploader) request(ctx context.Context, req store.LogSegmentRe
 	if err != nil {
 		return grant, err
 	}
+	parts := strings.Split(grant.Prefix, "/")
+	if len(parts) < 4 {
+		return grant, blob.ErrIntegrity
+	}
+	subject := blob.LogSubject{
+		Kind: blob.LogJobAttempt, Team: parts[3], RunID: u.runID,
+		Attempt: &runspec.AttemptIdentity{Team: parts[3], RunID: u.runID, NodeID: u.nodeID, Attempt: grant.Attempt, Generation: grant.Generation},
+	}
+	prefix, err := blob.LogSubjectPrefix(parts[1], subject)
+	if err != nil || prefix != grant.Prefix || (req.Attempt != 0 && (req.Attempt != grant.Attempt || req.Generation != grant.Generation)) {
+		return grant, blob.ErrIntegrity
+	}
 	u.mu.Lock()
-	u.attempt, u.generation = grant.Attempt, grant.Generation
+	if u.prefix != "" && u.prefix != prefix {
+		u.mu.Unlock()
+		return grant, blob.ErrIntegrity
+	}
+	u.prefix, u.subject = prefix, subject
 	onWatched := u.onWatched
 	u.mu.Unlock()
 	if onWatched != nil {
@@ -249,9 +281,18 @@ func (u *LogSegmentUploader) PutSegment(ctx context.Context, seg logseg.Segment,
 // PutManifest seals the log, stamped with the attempt the controller
 // named.
 func (u *LogSegmentUploader) PutManifest(ctx context.Context, m logseg.Manifest) error {
-	u.mu.Lock()
-	m.Attempt, m.Generation = u.attempt, u.generation
-	u.mu.Unlock()
+	subject := u.Subject()
+	want, err := blob.LogSubjectPrefix(logseg.ClassStandard, subject)
+	if err != nil {
+		return err
+	}
+	if m.Subject != nil {
+		got, err := blob.LogSubjectPrefix(logseg.ClassStandard, *m.Subject)
+		if err != nil || got != want {
+			return blob.ErrIntegrity
+		}
+	}
+	m.Subject = &subject
 	rc, cancel := u.requestCtx(ctx)
 	defer cancel()
 	return u.c.SealLog(rc, u.runID, u.nodeID, m)

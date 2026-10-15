@@ -53,7 +53,7 @@ func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBind
 		if err := rows.Scan(&b.RepositoryID, &b.RepositoryOwnerID, &b.Repository, &b.CreatedBy, &created); err != nil {
 			return nil, err
 		}
-		b.CreatedAt = time.Unix(created, 0).UTC()
+		b.CreatedAt = time.Unix(0, created).UTC()
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -73,49 +73,8 @@ func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (G
 	if err != nil {
 		return GitHubRunnerBinding{}, err
 	}
-	b.CreatedAt = time.Unix(created, 0).UTC()
+	b.CreatedAt = time.Unix(0, created).UTC()
 	return b, nil
-}
-
-// AddGitHubRunnerBinding records b for t. Binding a repository id t already
-// binds is ErrAlreadyBound, and a binding past [MaxGitHubRunnerBindings] is
-// ErrBindingLimit; the operator's team is not capped.
-func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error) {
-	repo, ok := ParseGitHubRepo(b.Repository)
-	if !ok || b.RepositoryID <= 0 || b.RepositoryOwnerID <= 0 {
-		return GitHubRunnerBinding{}, fmt.Errorf("%w: a binding needs owner/name, a repository id and an owner id", ErrInvalidInput)
-	}
-	b.Team, b.Repository, b.CreatedAt = t.team, repo.Slug(), now.UTC().Truncate(time.Second)
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return GitHubRunnerBinding{}, err
-	}
-	defer rollbackOrLog(tx)
-	if holdsFreeAllowance(t.team) {
-		if err := t.lockTeamTx(ctx, tx); err != nil {
-			return GitHubRunnerBinding{}, err
-		}
-		var bound int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_runner_bindings WHERE team = ?`,
-			string(t.team)).Scan(&bound); err != nil {
-			return GitHubRunnerBinding{}, err
-		}
-		if bound >= MaxGitHubRunnerBindings {
-			return GitHubRunnerBinding{}, fmt.Errorf("%w: team %s binds %d repositories, the most a team may",
-				ErrBindingLimit, t.team, bound)
-		}
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO github_runner_bindings (team, repository_id, repository_owner_id, repository, created_by, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		string(t.team), b.RepositoryID, b.RepositoryOwnerID, b.Repository, b.CreatedBy, b.CreatedAt.Unix())
-	if isUniqueViolation(err) {
-		return GitHubRunnerBinding{}, ErrAlreadyBound
-	}
-	if err != nil {
-		return GitHubRunnerBinding{}, err
-	}
-	return b, tx.Commit()
 }
 
 // MaxGitHubRunnerBindings bounds the repositories one team binds to GitHub
@@ -128,61 +87,6 @@ var ErrBindingLimit = errors.New("store: this team binds as many repositories as
 
 // ErrAlreadyBound is returned when a team binds a repository it already binds.
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
-
-// RemoveGitHubRunnerBinding deletes t's binding for a repository id and
-// revokes the live credentials minted under it. An unknown id is ErrNotFound.
-func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int64, now time.Time) (revoked []string, err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
-	res, err := tx.ExecContext(ctx, `DELETE FROM github_runner_bindings WHERE team = ? AND repository_id = ?`,
-		string(t.team), repositoryID)
-	if err != nil {
-		return nil, err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return nil, ErrNotFound
-	}
-	at := now.UTC().Unix()
-	like := GitHubRunnerPrincipalPrefix + fmt.Sprint(repositoryID) + ":%"
-	revoked, err = livePrefixesLike(ctx, tx, t.team, like, at)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE tokens SET revoked_at = ?
-		WHERE team = ? AND kind = ? AND principal LIKE ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		at, string(t.team), TokenKindRunner, like, at); err != nil {
-		return nil, err
-	}
-	return revoked, tx.Commit()
-}
-
-func livePrefixesLike(ctx context.Context, tx *storeTx, team Team, like string, at int64) (_ []string, err error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT prefix FROM tokens
-		WHERE team = ? AND kind = ? AND principal LIKE ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		string(team), TokenKindRunner, like, at)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if cerr := rows.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-	}()
-	var out []string
-	for rows.Next() {
-		var prefix string
-		if err := rows.Scan(&prefix); err != nil {
-			return nil, err
-		}
-		out = append(out, prefix)
-	}
-	return out, rows.Err()
-}
 
 // MaxGitHubRunnerCredentials bounds the live credentials one team's GitHub
 // Actions jobs hold at once, since each exchange is unauthenticated until

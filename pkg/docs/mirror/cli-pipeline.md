@@ -749,8 +749,8 @@ sparkwing pipeline sparks update
 
 Pre-compile pipeline binaries after a sparks release
 
-Resolves libraries, compiles the pipeline binary, and uploads it to the
-binary cache. Subsequent runs with matching build inputs can reuse it.
+Resolves libraries, compiles the pipeline binary, and stores it in the
+local binary cache. Subsequent runs with matching build inputs can reuse it.
 Warmup uses the same compilation path and cache key as 'sparkwing run'.
 
 ### Flags

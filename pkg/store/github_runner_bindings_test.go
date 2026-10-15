@@ -108,77 +108,6 @@ func TestGitHubRunnerScopeRefusesOtherTriggerProvenance(t *testing.T) {
 	}
 }
 
-func TestGitHubRunnerBindingsAreTeamScoped(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	now := time.Now()
-
-	b, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{
-		RepositoryID: 42, RepositoryOwnerID: 7, Repository: "Acme/Widgets", CreatedBy: "u1",
-	}, now)
-	if err != nil || b.Team != "acme" || b.Repository != "Acme/Widgets" {
-		t.Fatalf("add = %+v, %v", b, err)
-	}
-	if _, err := acme.AddGitHubRunnerBinding(ctx, b, now); !errors.Is(err, store.ErrAlreadyBound) {
-		t.Fatalf("second add = %v, want ErrAlreadyBound", err)
-	}
-	for _, bad := range []store.GitHubRunnerBinding{
-		{RepositoryID: 1, RepositoryOwnerID: 1, Repository: "no-slash"},
-		{RepositoryID: 0, RepositoryOwnerID: 1, Repository: "a/b"},
-		{RepositoryID: 1, RepositoryOwnerID: 0, Repository: "a/b"},
-		{RepositoryID: 1, RepositoryOwnerID: 1, Repository: "a/b c"},
-	} {
-		if _, err := acme.AddGitHubRunnerBinding(ctx, bad, now); !errors.Is(err, store.ErrInvalidInput) {
-			t.Fatalf("add %+v = %v, want ErrInvalidInput", bad, err)
-		}
-	}
-	if _, err := other.GitHubRunnerBinding(ctx, 42); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("other team read acme's binding: %v", err)
-	}
-	if list, err := other.GitHubRunnerBindings(ctx); err != nil || len(list) != 0 {
-		t.Fatalf("other team lists %+v, %v", list, err)
-	}
-	if _, err := other.RemoveGitHubRunnerBinding(ctx, 42, now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("other team removed acme's binding: %v", err)
-	}
-	if list, err := acme.GitHubRunnerBindings(ctx); err != nil || len(list) != 1 || list[0].RepositoryOwnerID != 7 {
-		t.Fatalf("acme lists %+v, %v", list, err)
-	}
-}
-
-func TestRemovingABindingRevokesItsCredentials(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, st, "acme")
-	now := time.Now()
-	if _, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{
-		RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets",
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	mint := func(principal string) *store.Token {
-		_, tok, err := acme.CreateToken(ctx, principal, store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, now)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return tok
-	}
-	bound, unrelated, laptop := mint("github:42:acme/widgets"), mint("github:421:acme/gadgets"), mint("agent:laptop")
-	revoked, err := acme.RemoveGitHubRunnerBinding(ctx, 42, now)
-	if err != nil || len(revoked) != 1 || revoked[0] != bound.Prefix {
-		t.Fatalf("remove revoked %v, %v; want only %s", revoked, err, bound.Prefix)
-	}
-	if got, err := acme.TeamToken(ctx, bound.Prefix); err != nil || got.RevokedAt == nil {
-		t.Fatalf("bound credential = %+v, %v; want it revoked", got, err)
-	}
-	for _, tok := range []*store.Token{unrelated, laptop} {
-		if got, err := acme.TeamToken(ctx, tok.Prefix); err != nil || got.RevokedAt != nil {
-			t.Fatalf("%s = %+v, %v; want untouched", tok.Principal, got, err)
-		}
-	}
-}
-
 func TestGitHubRunnerScopeClaimsOnlyItsRepositorysNodes(t *testing.T) {
 	st := storetest.Open(t)
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
@@ -305,7 +234,7 @@ func TestGitHubRunnerCredentialMintIsBoundedAndSweepsExpiredOnes(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
-	binding, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"}, now)
+	binding, err := registerGitHubEnrollment(t, st, acme, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +288,7 @@ func TestGitHubRunnerCredentialRemembersItsPush(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	binding, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"}, time.Now())
+	binding, err := registerGitHubEnrollment(t, st, acme, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,29 +308,5 @@ func TestGitHubRunnerCredentialRemembersItsPush(t *testing.T) {
 			[]string{"nodes.claim"}, time.Hour, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
 			t.Errorf("%s: mint = %v, want ErrInvalidInput", name, err)
 		}
-	}
-}
-
-func TestGitHubRunnerMintAfterBindingRemoved(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, st, "acme")
-	now := time.Now()
-	if _, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{
-		RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets",
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	binding, err := acme.GitHubRunnerBinding(ctx, 42)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := acme.RemoveGitHubRunnerBinding(ctx, 42, now); err != nil {
-		t.Fatal(err)
-	}
-	raw, tok, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", mainPush,
-		[]string{"nodes.claim"}, time.Hour, now)
-	if !errors.Is(err, store.ErrNotFound) || raw != "" || tok != nil {
-		t.Fatalf("mint after unbind = %q, %+v, %v; want no credential", raw, tok, err)
 	}
 }

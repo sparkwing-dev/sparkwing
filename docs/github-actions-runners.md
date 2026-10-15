@@ -99,7 +99,12 @@ jobs:
             --idle-exit 2m
 ```
 
-`DELETE /api/v1/runners/github/{repository}` removes a binding and revokes every live credential minted under it. Credential exchange checks the binding again while minting, so an unbind racing with an exchange either stops the mint or revokes the credential.
+`DELETE /api/v1/runners/github/{repository}` removes a binding and revokes its
+Actions roots and descendants in one transaction. Registration and removal
+recheck the current team administrator. Exchange checks the numeric repository
+and owner registration while holding the same team lock, so a concurrent removal
+either stops issuance or ends the new root. Repeating registration returns a
+conflict and leaves the existing consent unchanged.
 
 ## What the credential can do
 
@@ -120,6 +125,9 @@ authority before awarding work. Source, secrets, data and execution reporting
 use the separate capability awarded for that unit. A runner root cannot read
 them or a pipeline's sizing records by itself. Discovery routes remain
 available to live roots.
+
+The cache-grant protocol and its issuance route are removed. Byte-storage
+access uses the authenticated data adapter and the unit's live authority.
 
 ## Runner behavior
 

@@ -9,11 +9,11 @@ Import as `swgit "github.com/sparkwing-dev/sparkwing/sparkwing/git"`. The root p
 ## Functions
 
 - `func ChangedFiles(ctx context.Context, repoDir, since string) ([]string, error)` -- ChangedFiles returns paths (repo-relative) modified between `since` and HEAD in repoDir.
-- `func Clone(ctx context.Context, url, destDir string, opts ...CloneOption) error` -- Clone clones url into destDir.
+- `func Clone(ctx context.Context, url, destDir string, opts ...CloneOption) error` -- Clone acquires url directly into a new destination directory.
 - `func CurrentBranch(ctx context.Context, repoDir string) (string, error)` -- CurrentBranch returns the branch name HEAD points at in repoDir.
 - `func CurrentSHA(ctx context.Context, repoDir string) (string, error)` -- CurrentSHA returns the full HEAD commit SHA in repoDir.
 - `func DefaultBranch(ctx context.Context, repoDir string) (string, error)` -- DefaultBranch returns the repo's default branch name (typically "main" or "master").
-- `func Fetch(ctx context.Context, repoDir string) error` -- Fetch runs `git fetch` in repoDir.
+- `func Fetch(ctx context.Context, repoDir string) error` -- Fetch updates the configured origin directly.
 - `func FilesetHash(ctx context.Context, repoDir string) (string, error)` -- FilesetHash returns a deterministic 12-char hex hash derived from the contents of every file that would land in a Docker build context for repoDir.
 - `func IsDirty(ctx context.Context, repoDir string) (bool, error)` -- IsDirty reports whether the working tree in repoDir has uncommitted changes -- either unstaged or staged-but-not-committed.
 - `func LatestTag(ctx context.Context, repoDir, prefix string) (string, error)` -- LatestTag returns the highest semver tag in repoDir matching the given prefix, or "" if none.
@@ -27,13 +27,13 @@ Import as `swgit "github.com/sparkwing-dev/sparkwing/sparkwing/git"`. The root p
 
 ### type CloneOption
 
-CloneOption configures optional git-clone behavior.
+CloneOption configures a clone.
 
 ```
 type CloneOption func(*cloneConfig)
 ```
 
-- `func WithDepth(n int) CloneOption` -- WithDepth limits the clone to the most recent n commits (--depth n).
+- `func WithDepth(n int) CloneOption` -- WithDepth limits the fetched history to n commits.
 
 ## Variables
 

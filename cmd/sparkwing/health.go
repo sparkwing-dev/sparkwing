@@ -37,7 +37,6 @@ func reportClusterHealth(ctx context.Context, prof *profile.Profile, outputForma
 				probeController(ctx, prof),
 				probeAuth(ctx, prof),
 				probeLogs(ctx, prof),
-				probeGitcache(ctx, prof),
 			},
 		},
 		{

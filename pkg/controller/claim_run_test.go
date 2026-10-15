@@ -506,24 +506,6 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 			t.Errorf("%s = %d from %s with manifest %q, want %d and none", what, code, in.RunID, in.ArtifactManifest, c.want)
 		}
 	}
-	team, err := f.store.ForTeam(ctx, store.Team(olga.team))
-	if err != nil {
-		t.Fatal(err)
-	}
-	copied := func(node string, from store.ClaimInputRequest) (int, *store.Node) {
-		t.Helper()
-		code := f.call("POST", "/api/v1/runs/run-in/nodes/"+node+"/attempt", tokens[node],
-			map[string]any{"outcome": "cached", "output_from": from}, nil)
-		n, _ := team.GetNode(ctx, "run-in", node)
-		return code, n
-	}
-	if code, _ := copied("r", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusUnprocessableEntity {
-		t.Errorf("a report copying an input its node does not declare = %d, want 422", code)
-	}
-	origin, _ := team.GetNode(ctx, "run-origin", "m")
-	if code, n := copied("m", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusOK || n.OutputRef == nil || *n.OutputRef != *origin.OutputRef {
-		t.Errorf("a cache hit's report = %d with ref %+v, want the origin's %+v", code, n.OutputRef, origin.OutputRef)
-	}
 	if !strings.Contains(f.logs.String(), "event=input_undeclared") {
 		t.Error("a refused input was not audited")
 	}

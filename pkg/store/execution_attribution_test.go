@@ -98,7 +98,7 @@ func TestGitHubRunnerAttemptRecordsWorkflowRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, err := tenant.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"}, time.Now())
+	binding, err := registerGitHubEnrollment(t, s, tenant, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"})
 	if err != nil {
 		t.Fatal(err)
 	}

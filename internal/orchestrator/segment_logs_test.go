@@ -6,86 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
-
-type segmentController struct {
-	st  *store.Store
-	url string
-}
-
-func newSegmentController(t *testing.T) (segmentController, string) {
-	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx, now := t.Context(), time.Now()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-s", Pipeline: "demo", Status: "pending", StartedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreatePlanNode(ctx, store.DefaultTeam, "run-s", now); err != nil {
-		t.Fatal(err)
-	}
-	hs := httptest.NewServer(controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
-	t.Cleanup(hs.Close)
-	claim := func(nodeID string) string {
-		c, err := st.ClaimLaunch(ctx, store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
-			store.LaunchClaimRequest{HolderID: "holder-" + nodeID, Lease: time.Minute, Deadline: time.Hour, RunID: "run-s", NodeID: nodeID}, time.Now())
-		if err != nil || c == nil {
-			t.Fatalf("claim %s: %+v %v", nodeID, c, err)
-		}
-		return c.Token
-	}
-	plan := `{"nodes":[{"id":"a","deps":[],"spec_hash":"sha256:` + strings.Repeat("b", 64) + `"}]}`
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, hs.URL+"/api/v1/runs/run-s/plan", strings.NewReader(plan))
-	req.Header.Set("Authorization", "Bearer "+claim(store.PlanNodeID))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("accept plan: %v %v", resp, err)
-	}
-	_ = resp.Body.Close()
-	return segmentController{st: st, url: hs.URL}, claim("a")
-}
-
-func (c segmentController) log(t *testing.T) *logseg.Log {
-	t.Helper()
-	return c.nodeLog(t, "run-s", "a")
-}
-
-func (c segmentController) nodeLog(t *testing.T, runID, nodeID string) *logseg.Log {
-	t.Helper()
-	rec, err := c.st.LatestNodeLog(t.Context(), store.DefaultTeam, runID, nodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	objs, err := fs.NewArtifactStore(c.st.OutputDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	l, err := logseg.Open(t.Context(), objs, rec.Prefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := l.Read(t.Context(), objs, storage.ReadOpts{}); err != nil {
-		t.Fatal(err)
-	}
-	return l
-}
 
 func TestNodeLogStaysLocalOnAControllerWithoutSegments(t *testing.T) {
 	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -78,6 +78,9 @@ func pendingScenarios(t *testing.T, group string) {
 			case "recovery-reconciler-waits-and-reclaims":
 				t.Run("hermetic-library", acceptance.CheckHostReconciliation)
 			}
+			if check := storageBoundaryChecks()[scenario.ID]; check != nil {
+				t.Run("storage-components", check)
+			}
 			typeScriptBoundary(t, scenario.ID)
 			if check, ok := runspecConfigBoundaries()[scenario.ID]; ok {
 				t.Run("runspec-config", func(t *testing.T) {

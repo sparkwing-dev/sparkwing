@@ -39,8 +39,8 @@ func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capab
 		spec.Grants = []capability.Grant{capability.ClaimsLaunch}
 		spec.Metered = true
 	case capability.ProvisionActions:
-		spec.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "github.com/o/r", Ref: "refs/heads/main", SHA: "sha", WorkflowRunID: "workflow"}}
-		spec.Repositories = []string{"github.com/o/r"}
+		rewriteSchemaExec(t, s.db, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,repo_key,created_at) VALUES ('a',42,7,'acme/widgets','gh:42',1)`)
+		spec = actionsSpec(s, "a", "workflow")
 	}
 	return s, spec
 }

@@ -9,11 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
-const testPrefix = "logs/r90/teams/acme/runs/run-1/build/a1-g1/"
+const testPrefix = "logs/r90/teams/acme/runs/run-1/jobs/build/a1-g1/"
 
 type manualTimer struct {
 	mu sync.Mutex
@@ -46,7 +48,10 @@ func (m *manualTimer) fire() bool {
 
 func newSink(t *testing.T, up logseg.Uploader, opts logseg.Options) *logseg.Sink {
 	t.Helper()
-	opts.Run, opts.Node, opts.SpoolDir = "run-1", "build", t.TempDir()
+	opts.SpoolDir = t.TempDir()
+	if opts.Subject.Kind == "" {
+		opts.Subject = keySubject("acme", "run-1", "build", 1, 1)
+	}
 	if opts.AfterFunc == nil {
 		opts.AfterFunc = (&manualTimer{}).after
 	}
@@ -167,7 +172,7 @@ func TestRunnerKilledMidNodeLosesAtMostOneSegment(t *testing.T) {
 	}
 
 	m, err := logseg.SealAbandoned(context.Background(), objs, testPrefix,
-		logseg.Manifest{Run: "run-1", Node: "build", Attempt: 1, Generation: 1},
+		logseg.Manifest{Subject: new(keySubject("acme", "run-1", "build", 1, 1))},
 		logseg.ReasonRunnerLost, objs.putIfAbsent)
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +300,7 @@ func TestReaderStopsAtASegmentFailingItsDigest(t *testing.T) {
 	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
 		t.Fatal(err)
 	}
-	objs.put(logseg.SegmentKey(testPrefix, 2), []byte("tampered"))
+	objs.put(blob.LogSegmentKey(testPrefix, 2), []byte("tampered"))
 	l, got := readAll(t, objs, storage.ReadOpts{})
 	if got != line(1) || l.Broken != 2 {
 		t.Fatalf("read %q, broken %d", got, l.Broken)
@@ -326,6 +331,45 @@ func TestTailReadFetchesOnlyTheSegmentsItNeeds(t *testing.T) {
 	}
 }
 
+func TestSegmentReadsApplyFiltersAcrossCuts(t *testing.T) {
+	objs := newMemObjects()
+	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{SegmentBytes: 1})
+	for _, body := range []string{"alpha", "keep one\n", "beta\n", "keep two", "gamma\n"} {
+		if err := s.Append([]byte(body), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Close(t.Context(), logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		opts storage.ReadOpts
+		want string
+	}{
+		{"all", storage.ReadOpts{}, "alpha\nkeep one\nbeta\nkeep two\ngamma\n"},
+		{"head", storage.ReadOpts{Head: 2}, "alpha\nkeep one\n"},
+		{"tail", storage.ReadOpts{Tail: 2}, "keep two\ngamma\n"},
+		{"grep", storage.ReadOpts{Grep: "keep"}, "keep one\nkeep two\n"},
+		{"range", storage.ReadOpts{Lines: "2:4"}, "keep one\nbeta\nkeep two\n"},
+		{"ordered", storage.ReadOpts{Lines: "2:5", Grep: "keep", Tail: 1, Head: 1}, "keep two\n"},
+		{"empty", storage.ReadOpts{Grep: "absent"}, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, got := readAll(t, objs, test.opts); got != test.want {
+				t.Fatalf("read = %q, want %q", got, test.want)
+			}
+		})
+	}
+	log, err := logseg.Open(t.Context(), objs, testPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := log.Read(t.Context(), objs, storage.ReadOpts{Lines: "invalid"}); err == nil {
+		t.Fatal("invalid line range succeeded")
+	}
+}
+
 func TestNodeSealLosesToControllerSeal(t *testing.T) {
 	objs := newMemObjects()
 	up := newMemUploader(objs, testPrefix)
@@ -334,7 +378,7 @@ func TestNodeSealLosesToControllerSeal(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitStored(t, up, 1)
-	if _, err := logseg.SealAbandoned(context.Background(), objs, testPrefix, logseg.Manifest{},
+	if _, err := logseg.SealAbandoned(context.Background(), objs, testPrefix, logseg.Manifest{Subject: new(keySubject("acme", "run-1", "build", 1, 1))},
 		logseg.ReasonRunnerLost, objs.putIfAbsent); err != nil {
 		t.Fatal(err)
 	}
@@ -428,8 +472,12 @@ func TestSinkPushesLiveOnlyWhileWatched(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(pushed) != 2 || pushed[0] != line(3) || offsets[0] != 2*n || pushed[1] != line(4) || offsets[1] != 3*n {
-		t.Fatalf("live view got %q at %v, want line 3 at %d then line 4 at %d", pushed, offsets, 2*n, 3*n)
+	if len(pushed) != 2 || (offsets[0] != 0 && offsets[0] != 2*n) || pushed[1] != line(4) || offsets[1] != 3*n {
+		t.Fatalf("live view got %q at %v, want a pending suffix then line 4 at %d", pushed, offsets, 3*n)
+	}
+	// safety: storage may signal before the sink records its upload, so the pending suffix can overlap it.
+	if want := (line(1) + line(2) + line(3))[offsets[0]:]; pushed[0] != want {
+		t.Fatalf("pending suffix = %q at %d, want %q", pushed[0], offsets[0], want)
 	}
 }
 

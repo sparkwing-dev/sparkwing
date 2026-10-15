@@ -14,8 +14,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/auth/logout` | `browser_flow_csrf_nonce` |
 | `GET` | `/api/v1/auth/session` | `browser_flow_csrf_nonce` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
-| `POST` | `/api/v1/cache/store-ceiling/measure` | `admin` |
-| `POST` | `/api/v1/cache/store-ceiling/thaw` | `admin` |
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/capacity/profiles` | `runs.read` |
 | `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
@@ -49,12 +47,11 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/data/has-many` | `data.read` or `data.read` or `data.read` |
 | `POST` | `/api/v1/data/memo/copy` | `data.read + data.write` |
 | `POST` | `/api/v1/data/memo/lookup` | `data.read` or `data.read` or `data.read` |
+| `GET` | `/api/v1/data/objects/{key...}` | `public` |
 | `GET` | `/api/v1/data/records` | `data.read` or `data.read` or `data.read` |
 | `POST` | `/api/v1/data/records` | `data.write` or `data.write` |
 | `POST` | `/api/v1/data/upload` | `data.write` or `data.write` |
-| `POST` | `/api/v1/gitcache/git/register` | `admin` |
-| `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
-| `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
+| `PUT` | `/api/v1/data/uploads/{upload}` | `public` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
 | `POST` | `/api/v1/launcher/claim` | `claims.launch` |
@@ -94,8 +91,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/operator/tokens/{token}/rotate` | `operator.tokens` or `operator` |
 | `GET` | `/api/v1/operator/waitlist` | `operator` |
 | `POST` | `/api/v1/operator/waitlist/approve` | `operator` |
-| `GET` | `/api/v1/outputs/objects/{key...}` | `public` |
-| `PUT` | `/api/v1/outputs/uploads/{id}` | `public` |
 | `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/sizing` | `runs.read` or `source.read` |
@@ -119,7 +114,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}/request` | `admin` |
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/cache-grant` | `claim` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/children` | `claim` |
 | `GET` | `/api/v1/runs/{id}/children/{childID}` | `claim` |
 | `GET` | `/api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output` | `claim` |
@@ -128,9 +122,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
-| `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/logs` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/search` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |

@@ -363,9 +363,6 @@ func probeProfile(ctx context.Context, prof *profile.Profile) profileTestReport 
 		probeController(ctx, prof),
 		probeAuth(ctx, prof),
 		probeLogs(ctx, prof))
-	if cache := probeGitcache(ctx, prof); cache.Status != "skip" {
-		report.Probes = append(report.Probes, cache)
-	}
 	for _, p := range report.Probes {
 		if p.Status == "fail" {
 			report.OK = false

@@ -2,26 +2,16 @@ package controller
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: the S3 store presigns and the filesystem store signs URLs back at
-// this controller, so node and agent code is the same against both.
 type outputStore interface {
 	grant(ctx context.Context, u store.Upload) (string, map[string]string, error)
 	commit(ctx context.Context, u store.Upload) error
@@ -30,15 +20,9 @@ type outputStore interface {
 
 var errOutputsUnavailable = errors.New("this controller has no output store")
 
-// safety: the S3 store takes the cache bucket the direct uploads already
-// use; the filesystem store serves a single replica from the store's own
-// output directory.
 func (s *Server) outputs() outputStore {
 	if s.directUploads != nil {
 		return s3Outputs{s: s}
-	}
-	if s.store != nil && s.store.OutputDir() != "" {
-		return fsOutputs{s: s, dir: s.store.OutputDir()}
 	}
 	return nil
 }
@@ -67,171 +51,6 @@ func (o s3Outputs) resolve(r *http.Request, obj store.Upload) (string, time.Time
 		return "", time.Time{}, err
 	}
 	return o.s.signObjectURL(r, bucket, key)
-}
-
-type fsOutputs struct {
-	s   *Server
-	dir string
-}
-
-const outputReadTTL = time.Minute
-
-func (o fsOutputs) pendingPath(id string) string {
-	return filepath.Join(o.dir, "outputs", ".pending", id)
-}
-
-func (o fsOutputs) grant(_ context.Context, u store.Upload) (string, map[string]string, error) {
-	exp := time.Now().Add(directUploadPutTTL).Unix()
-	q := o.s.outputSigner.sign("put", string(u.Team), u.ID, exp)
-	return "/api/v1/outputs/uploads/" + url.PathEscape(u.ID) + "?" + q.Encode(),
-		map[string]string{"Content-Length": strconv.FormatInt(u.Size, 10)}, nil
-}
-
-func (o fsOutputs) commit(ctx context.Context, u store.Upload) error {
-	pending := o.pendingPath(u.ID)
-	final := store.OutputPath(o.dir, u.Key)
-	// safety: the key is this upload's own, so a final file with its size and
-	// digest is one an earlier try moved there, and a retry commits it. A
-	// refused commit leaves it in place, like the S3 store's copy.
-	if err := checkOutputFile(pending, u.Size, u.SHA256); err != nil {
-		if !errors.Is(err, errUploadConflict) || checkOutputFile(final, u.Size, u.SHA256) != nil {
-			return err
-		}
-	} else {
-		if err := os.MkdirAll(filepath.Dir(final), 0o700); err != nil {
-			return err
-		}
-		if err := os.Rename(pending, final); err != nil {
-			return err
-		}
-	}
-	return o.s.store.CommitUpload(ctx, u.Team, u.ID, u.Principal, time.Now())
-}
-
-func (o fsOutputs) resolve(r *http.Request, obj store.Upload) (string, time.Time, error) {
-	expires := time.Now().Add(outputReadTTL).UTC()
-	q := o.s.outputSigner.sign("get", string(obj.Team), obj.Key, expires.Unix())
-	return o.s.externalBaseURL(r) + "/api/v1/outputs/objects/" + obj.Key + "?" + q.Encode(), expires, nil
-}
-
-func checkOutputFile(path string, size int64, sha string) error {
-	f, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("%w: the pending upload is absent", errUploadConflict)
-	}
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	n, err := io.Copy(h, io.LimitReader(f, size+1))
-	if err != nil {
-		return err
-	}
-	if n != size || hex.EncodeToString(h.Sum(nil)) != sha {
-		return fmt.Errorf("%w: pending object size or sha256 does not match the declaration", errUploadMismatch)
-	}
-	return nil
-}
-
-// safety: the MAC key never leaves this process, so only the replica that
-// signed a URL can honor it, which is the filesystem store's single-replica
-// contract.
-type outputSigner []byte
-
-// WithOutputSignKey makes this server sign and honor output URLs with key,
-// so two servers over one output directory accept each other's URLs.
-func (s *Server) WithOutputSignKey(key []byte) *Server {
-	s.outputSigner = outputSigner(key)
-	return s
-}
-
-func newOutputSigner() outputSigner {
-	return outputSigner(rand.Text())
-}
-
-func (k outputSigner) mac(verb, team, subject string, exp int64) string {
-	mac := hmac.New(sha256.New, k)
-	fmt.Fprintf(mac, "sparkwing output v1\x00%s\x00%s\x00%s\x00%d", verb, team, subject, exp)
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func (k outputSigner) sign(verb, team, subject string, exp int64) url.Values {
-	return url.Values{"team": {team}, "exp": {strconv.FormatInt(exp, 10)}, "sig": {k.mac(verb, team, subject, exp)}}
-}
-
-func (k outputSigner) verify(r *http.Request, verb, subject string) (store.Team, bool) {
-	q := r.URL.Query()
-	exp, err := strconv.ParseInt(q.Get("exp"), 10, 64)
-	if err != nil || time.Now().Unix() > exp {
-		return "", false
-	}
-	want := k.mac(verb, q.Get("team"), subject, exp)
-	return store.Team(q.Get("team")), hmac.Equal([]byte(want), []byte(q.Get("sig")))
-}
-
-func (s *Server) handleOutputBlobPut(w http.ResponseWriter, r *http.Request) {
-	o, ok := s.outputs().(fsOutputs)
-	id := r.PathValue("id")
-	team, signed := s.outputSigner.verify(r, "put", id)
-	if !ok || !signed {
-		writeError(w, http.StatusForbidden, errors.New("the upload URL is invalid or expired"))
-		return
-	}
-	u, err := s.store.UploadForTeam(r.Context(), team, id)
-	if err != nil || !u.CommittedAt.IsZero() {
-		writeError(w, http.StatusConflict, errors.New("the upload is unknown or already committed"))
-		return
-	}
-	pending := o.pendingPath(u.ID)
-	if err := os.MkdirAll(filepath.Dir(pending), 0o700); err != nil {
-		s.writeInternalError(w, r, "prepare output upload", err)
-		return
-	}
-	f, err := os.OpenFile(pending, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		s.writeInternalError(w, r, "open output upload", err)
-		return
-	}
-	_, err = io.Copy(f, io.LimitReader(r.Body, u.Size+1))
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = checkOutputFile(pending, u.Size, u.SHA256)
-	}
-	if err != nil {
-		if rerr := os.Remove(pending); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
-			s.logger.Warn("remove refused output upload", "upload_id", u.ID, "err", rerr)
-		}
-		writeError(w, http.StatusUnprocessableEntity, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Server) handleOutputBlobGet(w http.ResponseWriter, r *http.Request) {
-	o, ok := s.outputs().(fsOutputs)
-	key := r.PathValue("key")
-	_, signed := s.outputSigner.verify(r, "get", key)
-	if !ok || !signed || !strings.HasPrefix(key, "outputs/") || strings.Contains(key, "..") {
-		writeError(w, http.StatusForbidden, errors.New("the download URL is invalid or expired"))
-		return
-	}
-	f, err := os.Open(store.OutputPath(o.dir, key))
-	if errors.Is(err, os.ErrNotExist) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "open output", err)
-		return
-	}
-	defer func() { _ = f.Close() }()
-	w.Header().Set("Content-Type", "application/octet-stream")
-	if _, err := io.Copy(w, f); err != nil {
-		s.logger.Warn("serve output", "key", key, "err", err)
-	}
 }
 
 type outputUploadRequest struct {

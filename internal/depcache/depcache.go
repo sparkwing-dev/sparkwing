@@ -1,26 +1,20 @@
-// Package depcache restores and saves the dependency directories a node
-// declares with sparkwing's JobNode.CacheDir. The SDK records each
-// declaration as a [Spec]; the node host restores before the node runs and
-// saves after it succeeds, so the key rules, archive format and backends
-// live in one place for every SDK.
+// Package depcache restores and saves dependency directories around a job.
 package depcache
 
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
@@ -29,7 +23,7 @@ import (
 // Resolver names a cache directory the host finds with the ecosystem's own
 // tool, where the node runs.
 const (
-	ResolverGoModules = "gomod"
+	ResolverGoModules = "go-modules"
 	ResolverNpm       = "npm"
 )
 
@@ -67,27 +61,6 @@ func (s Spec) TargetDir(workdir string) (string, error) {
 	}
 	return filepath.Join(workdir, s.Path), nil
 }
-
-// Segment maps s to a cache-key-safe token, or fallback when nothing safe
-// remains.
-func Segment(s, fallback string) string {
-	safe := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			return r
-		case r == '-', r == '_':
-			return r
-		default:
-			return '-'
-		}
-	}, s)
-	if safe = strings.Trim(safe, "-"); safe == "" {
-		return fallback
-	}
-	return safe
-}
-
-var keyRE = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
 var dirLocks sync.Map
 
@@ -149,15 +122,7 @@ func SaveAll(ctx context.Context, runs []*Run, runErr error) {
 }
 
 func (st *Run) restore(ctx context.Context, workdir string) {
-	lockPath, ok := firstExisting(workdir, st.spec.KeyFiles)
-	if !ok {
-		slog.Warn("depcache: no key file found; dependency cache disabled for this run",
-			"node", st.node, "cache", st.spec.Name, "looked_for", strings.Join(st.spec.KeyFiles, ", "), "workdir", workdir)
-		st.disabled = true
-		return
-	}
-
-	key, err := deriveKey(st.spec.Name, st.spec.KeyScope, lockPath)
+	key, err := depcachekey.Files(workdir, st.spec.Name, st.spec.KeyScope, st.spec.KeyFiles)
 	if err != nil {
 		slog.Warn("depcache: key derivation failed; dependency cache disabled for this run",
 			"node", st.node, "cache", st.spec.Name, "err", err)
@@ -182,17 +147,17 @@ func (st *Run) restore(ctx context.Context, workdir string) {
 	defer unlock()
 
 	b := selectBackend(ctx)
-	hit, err := b.exists(ctx, key)
+	hit, err := b.Exists(ctx, key)
 	if err != nil {
 		slog.Warn("depcache: backend probe failed; running uncached",
-			"node", st.node, "cache", st.spec.Name, "backend", b.label(), "err", err)
+			"node", st.node, "cache", st.spec.Name, "backend", b.Label(), "err", err)
 		st.disabled = true
 		return
 	}
 	if !hit {
 		st.missed = true
 		slog.Info("depcache: miss; will save after success",
-			"node", st.node, "cache", st.spec.Name, "key", key, "backend", b.label())
+			"node", st.node, "cache", st.spec.Name, "key", key, "backend", b.Label())
 		return
 	}
 
@@ -203,15 +168,16 @@ func (st *Run) restore(ctx context.Context, workdir string) {
 	}
 
 	start := time.Now()
-	size, err := b.fetch(ctx, key, dir)
+	size, err := b.Fetch(ctx, key, dir)
 	if err != nil {
+		st.missed = true
 		slog.Warn("depcache: restore failed; running uncached",
 			"node", st.node, "cache", st.spec.Name, "key", key, "err", err)
 		return
 	}
 	slog.Info(fmt.Sprintf("depcache: restored %s (%s) in %s",
 		st.spec.Name, tarsafe.HumanBytes(size), time.Since(start).Round(100*time.Millisecond)),
-		"node", st.node, "key", key, "backend", b.label())
+		"node", st.node, "key", key, "backend", b.Label())
 }
 
 // Save archives the directory after a successful run whose restore missed
@@ -236,7 +202,7 @@ func (st *Run) Save(ctx context.Context, runErr error) {
 
 	b := selectBackend(ctx)
 	start := time.Now()
-	size, err := b.store(ctx, st.key, st.dir)
+	size, err := b.Store(ctx, st.key, st.dir)
 	if err != nil {
 		slog.Warn("depcache: save failed; next run will re-download",
 			"node", st.node, "cache", st.spec.Name, "key", st.key, "err", err)
@@ -244,30 +210,7 @@ func (st *Run) Save(ctx context.Context, runErr error) {
 	}
 	slog.Info(fmt.Sprintf("depcache: saved %s (%s) in %s",
 		st.spec.Name, tarsafe.HumanBytes(size), time.Since(start).Round(100*time.Millisecond)),
-		"node", st.node, "key", st.key, "backend", b.label())
-}
-
-func deriveKey(name, scope, lockPath string) (string, error) {
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		return "", fmt.Errorf("read key file %s: %w", lockPath, err)
-	}
-	return Key(name, scope, data)
-}
-
-// Key derives a platform-specific directory-cache key from captured lockfile bytes.
-func Key(name, scope string, data []byte) (string, error) {
-	h := sha256.New()
-	h.Write([]byte(scope))
-	h.Write([]byte{0})
-	h.Write(data)
-	sum := h.Sum(nil)
-	key := fmt.Sprintf("dep-%s-%s-%s-%s",
-		Segment(name, "dir"), goruntime.GOOS, goruntime.GOARCH, hex.EncodeToString(sum[:8]))
-	if !keyRE.MatchString(key) {
-		return "", fmt.Errorf("derived key %q is not cache-safe", key)
-	}
-	return key, nil
+		"node", st.node, "key", st.key, "backend", b.Label())
 }
 
 func resolveNpmCacheDir(workdir string) (string, error) {
@@ -337,19 +280,6 @@ func resolveGoModCache() (string, error) {
 		return "", fmt.Errorf("resolve GOMODCACHE: %w", err)
 	}
 	return filepath.Join(home, "go", "pkg", "mod"), nil
-}
-
-func firstExisting(workdir string, candidates []string) (string, bool) {
-	for _, c := range candidates {
-		p := c
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(workdir, c)
-		}
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-			return p, true
-		}
-	}
-	return "", false
 }
 
 // safety: an unreadable directory counts as empty, so a restore may write

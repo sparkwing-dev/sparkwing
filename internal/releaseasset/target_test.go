@@ -38,7 +38,7 @@ func TestParseNameRoundTripsTheClosedAssetSet(t *testing.T) {
 func TestTargetNameRejectsNonReleaseCombinations(t *testing.T) {
 	for _, target := range []Target{
 		{Binary: "sparkwing-fake", GOOS: "linux", GOARCH: "amd64"},
-		{Binary: SparkwingCache, GOOS: "windows", GOARCH: "amd64"},
+		{Binary: "sparkwing-cache", GOOS: "linux", GOARCH: "amd64"},
 		{Binary: SparkwingRunner, GOOS: "plan9", GOARCH: "amd64"},
 		{Binary: SparkwingRunner, GOOS: "windows", GOARCH: "386"},
 	} {

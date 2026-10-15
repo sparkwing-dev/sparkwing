@@ -9,7 +9,6 @@
 # Sections, in roughly the order operators care about:
 #   1. controller.*          -- where to claim work from
 #   2. runner.*              -- the work-claiming pool
-#   3. cache.*               -- git + artifact + go-mod proxy
 #   4. serviceAccount.*      -- shared SA for runner pods
 #   5. secrets.*             -- references to pre-created Secrets
 #   6. image / imagePullSecrets -- shared image policy
@@ -34,8 +33,7 @@ controller:
   # uploads, which go through the controller. Reference an existing
   # Secret created out-of-band; the chart does NOT create the secret
   # itself (so you can rotate it without `helm upgrade`). Pipeline code
-  # the runner executes can read this token, so it is never the cache's
-  # grant key (cache.grantKeySecret).
+  # the runner executes can read this token.
   tokenSecret:
     # Name of the Secret in the install namespace.
     name: ""
@@ -57,9 +55,7 @@ runner:
   replicas: 2
 
   image:
-    # Registry-layout fallback only. Pin repository and tag with the
-    # cache image; appVersion is not a runnable public
-    # release default for this chart version.
+    # Pin repository and tag. This chart has no runnable public default image.
     repository: ghcr.io/sparkwing-dev/sparkwing-runner
     tag: "" # falls back to .Chart.AppVersion when empty
     pullPolicy: IfNotPresent
@@ -148,7 +144,7 @@ runner:
 
   # Extra env passed to the runner container. Useful for forwarding
   # AWS_REGION, GOPRIVATE, DOCKER_HOST, etc. An entry here also
-  # overrides a cache.dependencyProxy default of the same name.
+  # supplies the named environment value to the runner.
   extraEnv: []
   # - name: GOPRIVATE
   #   value: github.com/your-org
@@ -158,206 +154,22 @@ runner:
   extraVolumeMounts: []
 
 # -----------------------------------------------------------------------
-# 3. Cache service. Single-replica with RWO storage.
-# -----------------------------------------------------------------------
-cache:
-  # Set to false to omit the cache service. Runner source acquisition
-  # and package managers do not use this service.
-  enabled: true
-
-  # Serve the cache's blob, git and admin endpoints to anyone who can
-  # reach the Service. false (the default) requires
-  # cache.grantKeySecret; true passes --allow-unauthenticated to the
-  # cache and is only appropriate on a bootstrap install, before the
-  # Secret exists.
-  allowUnauthenticated: false
-
-  # The key the controller signs cache grants with and the cache
-  # verifies them with. Grants are the only bearer the cache accepts:
-  # a run's grant opens one team's cache tree for that run, and the
-  # controller signs a short-lived operator grant for its own git
-  # proxy, team purges and store-ceiling calls. So this key is held by
-  # the controller and the cache only, and must name a different Secret
-  # key from controller.tokenSecret; the chart refuses to render
-  # otherwise. The cache reads it as the file cache-grant-key under
-  # --credentials-dir.
-  #   kubectl create secret generic sparkwing-cache-grant-key \
-  #     --from-literal=key=<random 32 bytes>
-  grantKeySecret:
-    name: ""
-    key: key
-
-  # RWO PVC -- replicas: 1 is the only safe value.
-  replicas: 1
-
-  # Size bounds passed to sparkwing-cache. Each entry becomes the flag
-  # of the same name; leave one empty to keep the binary's default.
-  # The dependency-archive cap ships at 500 MB; the store ceilings are off
-  # until you set them, and at or above one every upload is refused
-  # with 507 until a measurement finds the store back under it. Size them
-  # against storage.size below. See docs/caching.md.
-  limits:
-    # Size cap for one dependency archive (default 500MB; 0 accepts any).
-    maxCacheArchiveBytes: ""
-    # Stored bytes across the archive, team and git mirror trees at or
-    # above which every upload is refused. Empty
-    # leaves the store unlimited.
-    maxStoreBytes: ""
-    # Stored files across those trees at or above which every upload is
-    # refused. Empty leaves the count unlimited.
-    maxStoreObjects: ""
-    # Stored bytes at which /health reports a warning, refusing nothing.
-    warnStoreBytes: ""
-    # Stored files at which /health reports a warning.
-    warnStoreObjects: ""
-    # How often the service walks those trees and replaces its running
-    # count with the measurement (default 1h); "0" measures once at
-    # startup.
-    storeReconcile: ""
-
-  image:
-    # Pin this with runner to one compatible revision.
-    repository: ghcr.io/sparkwing-dev/sparkwing-cache
-    tag: "" # falls back to .Chart.AppVersion
-    pullPolicy: IfNotPresent
-
-  # Base URL clients use to reach this cache. The package proxy
-  # rewrites the upstream URLs inside npm packuments and PyPI simple
-  # pages against it, so a fixed base is correct only when every client
-  # dials the cache at the same address. Empty uses the in-cluster
-  # Service URL when service.type is ClusterIP, and otherwise stays
-  # unset so the proxy rewrites each response from its own request Host
-  # -- which is what an out-of-cluster runner pool or a port-forward
-  # needs. Set it when an Ingress or a load balancer is the one address
-  # every client uses.
-  publicUrl: ""
-
-  service:
-    # ClusterIP: only the runner needs to reach the cache. Set to
-    # LoadBalancer / NodePort if you have an out-of-cluster runner
-    # pool you want to share this cache with; that requires
-    # cache.dependencyProxy.enabled=false.
-    type: ClusterIP
-    port: 80
-    targetPort: 8090
-
-  # Pull-through package proxy. The cache pod already serves
-  # /proxy/{npm,pypi,pythonhosted,rubygems,golang,alpine}; enabled
-  # here, the runner container is pointed at it (GOPROXY,
-  # npm_config_registry, PIP_INDEX_URL + PIP_TRUSTED_HOST) and passes
-  # the same wiring to the pods it spawns. A dependency fetch then
-  # stays inside the cluster instead of leaving through the NAT
-  # gateway once per run.
-  #
-  # Failure is graceful: GOPROXY keeps proxy.golang.org and `direct`
-  # as fallbacks, so private modules still resolve via ~/.netrc and a
-  # rolling cache pod does not fail builds. npm and pip have no such
-  # fallback -- if the cache is down, their fetches fail until it is
-  # back, which is the same exposure a build already has on the
-  # gitcache clone.
-  dependencyProxy:
-    # false leaves every package manager on its upstream default and
-    # the cache serves no proxy at all. The proxy takes no credential,
-    # so a cache.service.type other than ClusterIP requires false.
-    # Anything you set in runner.extraEnv with the same name wins
-    # over the defaults below, so you can point one ecosystem at your
-    # own mirror without turning the rest off.
-    enabled: true
-
-  # Repos the cache should pre-warm / proxy, passed as
-  # --auto-register-repos: comma-separated `<alias>=<git-url>` pairs.
-  # Empty = cache acts as a transparent proxy with no preloaded
-  # repos.
-  repos: ""
-
-  # Optional ssh-key Secret for cloning private repos over SSH. Leave
-  # the name empty to clone without it. Once configured, the Secret is
-  # required so a misspelled name cannot silently degrade private
-  # repository access.
-  sshKeySecret:
-    name: ""
-
-  storage:
-    # Persistence is recommended -- a fresh cache pod takes minutes
-    # to warm. Disable only for ephemeral tests.
-    enabled: true
-    size: 20Gi
-    # Empty = use the cluster default StorageClass. Set to e.g.
-    # "gp3" / "premium-rwo" / "managed-csi" if you want a specific
-    # class.
-    storageClassName: ""
-    # Reclaim policy is governed by the StorageClass; the chart
-    # doesn't override it. Be aware that `helm uninstall` will not
-    # delete the PVC by default (annotation
-    # helm.sh/resource-policy=keep).
-    keepOnUninstall: true
-
-  resources:
-    requests:
-      cpu: 10m
-      memory: 128Mi
-    limits:
-      cpu: "1"
-      memory: 1Gi
-
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-
-# -----------------------------------------------------------------------
-# 4. ServiceAccount. The runner and cache pods each get their
-#    own; only the runner's is bound to the chart's Role.
+# 4. ServiceAccount. The runner's
+#    account is bound to the chart's Role.
 # -----------------------------------------------------------------------
 serviceAccount:
   # Create one (true) or use an existing SA you've already RBAC'd.
   create: true
   # Names the runner SA; empty + create=true => generated from
-  # .Release.Name. The cache SA always follows its component name.
+  # .Release.Name.
   name: ""
-  # create=false gives the chart one pre-created account for both
-  # pods, which is the sharing the separate accounts exist to end. The
-  # render fails until you set this true, so the choice is recorded in
-  # your values rather than made by omission.
-  shareAcrossComponents: false
   # Annotations on the SA. Common case: IRSA (EKS) role binding for
   # ECR / S3 access on the runner side.
   #   eks.amazonaws.com/role-arn: arn:aws:iam::123:role/sparkwing-runner
   annotations: {}
 
-# Default-deny ingress for the cache pod. The cache holds the deploy
-# key, mirrored private source, and working-tree snapshots, so only the
-# release's runner and controller pods are admitted to its port.
-networkPolicy:
-  # false removes the policy and leaves reachability to whatever the
-  # cluster's own default is. Every cache route still requires a bearer
-  # token; the policy narrows who can present one.
-  enabled: true
-  # Pod labels of the controller allowed to reach the cache. Empty
-  # admits this release's own controller pod (the one the parent chart
-  # installs). Set it to your controller's labels when it runs under a
-  # different release in the same namespace.
-  controllerPodSelector: {}
-  # Pod labels of the Job pods the k8s runner backend creates. Those
-  # pods carry neither an instance nor a component label, so they need
-  # a peer of their own; they are handed the cache URL and token and
-  # read the dependency proxy through it.
-  runnerJobPodSelector:
-    app.kubernetes.io/name: sparkwing-runner
-  # Extra NetworkPolicy ingress rules, appended verbatim. Needed when
-  # a controller or runner pool runs outside the cluster (give the
-  # rule an ipBlock for its source range), or when a non-ClusterIP
-  # Service has to reach the cache. Example:
-  #   extraIngress:
-  #     - from:
-  #         - ipBlock:
-  #             cidr: 10.42.0.0/16
-  #       ports:
-  #         - protocol: TCP
-  #           port: 8090
-  extraIngress: []
-
 # RBAC. The chart is namespace-scoped: a Role + RoleBinding only.
-# The runner and cache servers reach the controller over HTTP
+# The runners reach the controller over HTTP
 # and never call the Kubernetes API, so the Role carries no rules and
 # no pod mounts a ServiceAccount token by default. Pipelines that
 # must reach the API should bring their own Role outside this chart.
@@ -365,7 +177,7 @@ rbac:
   create: true
 
 # -----------------------------------------------------------------------
-# 5. Image pull secrets. Same list applies to both components.
+# 5. Image pull secrets for the runner.
 # -----------------------------------------------------------------------
 imagePullSecrets: []
 # - name: ghcr-pull-secret
@@ -374,8 +186,7 @@ volumePermissions:
   enabled: true
 
 # -----------------------------------------------------------------------
-# 6. Pod-level security defaults. Applied uniformly across runner +
-#    cache unless a per-component override sets its own.
+# 6. Runner pod security defaults.
 # -----------------------------------------------------------------------
 podSecurityContext:
   runAsNonRoot: true
@@ -389,33 +200,25 @@ podSecurityContext:
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  # Every path the runner and cache pods write lives on a
-  # mounted volume: the component's /data volume, the /tmp scratch
-  # emptyDir, and SPARKWING_HOME inside it. Set false only for an
-  # image that writes to its own layer.
+  # Set false only for an image that writes outside the mounted scratch,
+  # Sparkwing home and Go cache paths.
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
 
 # -----------------------------------------------------------------------
-# 7. Namespace resource guards. The runner clamps a pipeline's declared
-#    pin to runner.jobCeiling, so these are the cluster-side backstop for
-#    anything the runner does not create:
-#    a LimitRange bounds one container, a ResourceQuota bounds the
+# 7. Namespace resource guards. A LimitRange bounds one container,
+#    a ResourceQuota bounds the
 #    namespace total. Both are off by default because an install that
 #    already sizes its pods elsewhere would start failing admission the
 #    moment a quota appears.
 # -----------------------------------------------------------------------
 limitRange:
   # true creates the LimitRange below. Every container in the namespace,
-  # including the Job pods the k8s runner backend creates, is then held
+  # including Jobs from a launcher using this namespace, is then held
   # to it: a pod asking for more than max is rejected at admission.
   enabled: false
-  # Ceiling for one container. Size it above the runner and cache
-  # pods' own limits. It binds on a runner Job only when it sits under
-  # runner.jobCeiling, which the runner already enforces per pod: a pod
-  # asks for a burst limit of twice its core charge and 1.25x its memory,
-  # both capped at runner.jobCeiling.
+  # Size the ceiling above the runner pods' own limits.
   max:
     cpu: "16"
     memory: 64Gi

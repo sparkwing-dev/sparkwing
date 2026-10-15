@@ -51,16 +51,13 @@ run_check "CLI tests" go test ./internal/cli/ -count=1
 run_check "Workflow engine tests" go test ./pkg/workflow/ -count=1
 run_check "Step library tests" go test ./pkg/step/ -count=1
 run_check "Artifact client tests" go test ./pkg/artifact/ -count=1
-run_check "Git cache tests" go test ./cmd/sparkwing-gitcache/ -count=1
 
 echo -e "\n${BOLD}3. Security Tests${RESET}"
 run_check "Auth middleware" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run TestAuthMiddleware -count=1"
 run_check "Webhook signature verification" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run 'TestWebhook|TestVerifySignature' -count=1"
 run_check "Repo URL validation" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run 'TestValidRepo|TestExtractRepo' -count=1"
-run_check "Git ref sanitization" go test ./cmd/sparkwing-gitcache/ -run TestValidateGitRef -count=1
 run_check "Path traversal (docker)" go test ./pkg/step/ -run "TestDockerBuild_Subdir|TestDockerRun_Mount" -count=1
 run_check "Path traversal (shell)" go test ./pkg/step/ -run TestScript_Path -count=1
-run_check "Path traversal (artifact)" go test ./cmd/sparkwing-gitcache/ -run TestArtifactUpload_Directory -count=1
 run_check "YAML injection" go test ./internal/cli/ -run TestYamlEscape -count=1
 run_check "Env var name validation" go test ./internal/cli/ -run TestMasterRunnerManifest_Rejects -count=1
 run_check "Log truncation" go test ./pkg/workflow/ -run TestLimitedWriter -count=1

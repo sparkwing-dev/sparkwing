@@ -15,6 +15,11 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 	if err := checkProvisionOriginTx(ctx, tx, spec, false); err != nil {
 		return capability.Capability{}, err
 	}
+	if spec.Kind == capability.ProvisionActions {
+		if err := (&Tenant{s: tx.store, team: Team(spec.Team)}).lockTeamTx(ctx, tx); err != nil {
+			return capability.Capability{}, err
+		}
+	}
 	if spec.Kind != capability.ProvisionMember {
 		if tx.store.provisions == nil {
 			return capability.Capability{}, authorityError(apierr.Unavailable, "root origin verification is not configured")
@@ -23,6 +28,11 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 			return capability.Capability{}, err
 		}
 		if err := checkProvisionOriginTx(ctx, tx, spec, true); err != nil {
+			return capability.Capability{}, err
+		}
+	}
+	if spec.Kind == capability.ProvisionActions {
+		if err := checkActionsEnrollmentTx(ctx, tx, spec); err != nil {
 			return capability.Capability{}, err
 		}
 	}

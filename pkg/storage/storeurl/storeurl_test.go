@@ -2,10 +2,8 @@ package storeurl
 
 import (
 	"context"
-	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -59,111 +57,35 @@ func TestFsPath(t *testing.T) {
 	}
 }
 
-func TestOpenArtifactStore_FS(t *testing.T) {
+func TestOpenMeasurementStoreFilesystem(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	s, err := OpenArtifactStore(context.Background(), "fs://"+dir)
+	path := filepath.Join(dir, "stored")
+	if err := os.WriteFile(path, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenMeasurementStore(t.Context(), "fs://"+dir, 0)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if s == nil {
-		t.Fatal("nil store")
+	usage, err := s.Usage(t.Context())
+	if err != nil || usage.Bytes != 7 || usage.Objects != 1 || usage.Partial || usage.ObservedAt.IsZero() {
+		t.Fatalf("measurement = %+v, %v", usage, err)
 	}
-}
-
-func TestOpenArtifactStore_HTTP(t *testing.T) {
-	t.Parallel()
-	blobs := map[string]string{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := strings.TrimPrefix(r.URL.Path, "/bin/")
-		switch r.Method {
-		case http.MethodPut:
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			blobs[key] = string(body)
-			w.WriteHeader(http.StatusCreated)
-		case http.MethodGet:
-			body, ok := blobs[key]
-			if !ok {
-				http.NotFound(w, r)
-				return
-			}
-			_, _ = w.Write([]byte(body))
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	}))
-	defer srv.Close()
-
-	s, err := OpenArtifactStore(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if err := s.Put(context.Background(), "artifact-key", strings.NewReader("payload")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	rc, err := s.Get(context.Background(), "artifact-key")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer rc.Close()
-	got, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if string(got) != "payload" {
-		t.Fatalf("payload = %q, want payload", got)
+	if body, err := os.ReadFile(path); err != nil || string(body) != "payload" {
+		t.Fatalf("measurement changed bytes: %q, %v", body, err)
 	}
 }
 
 func TestOpen_BadScheme(t *testing.T) {
 	t.Parallel()
-	if _, err := OpenArtifactStore(context.Background(), "no-scheme"); err == nil {
+	if _, err := OpenMeasurementStore(context.Background(), "no-scheme", 0); err == nil {
 		t.Error("expected err for missing scheme")
 	}
-	_, err := OpenArtifactStore(context.Background(), "ftp://x")
-	if err == nil || !strings.Contains(err.Error(), "ftp") {
-		t.Errorf("err = %v, want mention of ftp", err)
-	}
-	_ = errors.New
-}
-
-func TestOpenArtifactStore_HTTPSendsTheCacheGrant(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_GRANT", "s3cret")
-	seen := map[string]string{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen[r.Method] = r.Header.Get("Authorization")
-		if r.Method == http.MethodPut {
-			w.WriteHeader(http.StatusCreated)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	s, err := OpenArtifactStore(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	ctx := context.Background()
-	if err := s.Put(ctx, "artifact-key", strings.NewReader("payload")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	rc, err := s.Get(ctx, "artifact-key")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	rc.Close()
-	if _, err := s.Has(ctx, "artifact-key"); err != nil {
-		t.Fatalf("Has: %v", err)
-	}
-
-	for _, method := range []string{http.MethodPut, http.MethodGet, http.MethodHead} {
-		if seen[method] != "Bearer s3cret" {
-			t.Errorf("%s Authorization = %q, want the cache bearer", method, seen[method])
+	for _, scheme := range []string{"ftp", "http", "https"} {
+		_, err := OpenMeasurementStore(t.Context(), scheme+"://objects.invalid", 0)
+		if err == nil || !strings.Contains(err.Error(), scheme) {
+			t.Errorf("%s: err = %v, want an unsupported scheme", scheme, err)
 		}
 	}
 }
