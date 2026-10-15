@@ -40,6 +40,19 @@ actors and fences from the credential. Unknown or ended credentials get
 `unauthenticated`. A live
 credential without the grant or binding gets `forbidden`.
 
+The legacy `/api/v1/triggers` family and `/api/v1/runs/{run}/nodes`
+family are removed. So is raw `POST /api/v1/runs/{run}/events`. Intake uses
+`POST /api/v1/runs`, plan insertion uses `/runs/{run}/plan`, and job state
+uses `/runs/{run}/jobs/{job}/transition`. Run and job renewal use their
+`heartbeat` routes. Outputs use the authorized `/api/v1/data` upload,
+commit and record operations. Retired claim tokens and caller-supplied
+execution fences have no execution route.
+
+An absent route returns the shared `not_found` error before credential
+lookup. A method with no handler on a registered path returns
+`method_not_allowed` and `Allow`, also before credential lookup. Neither
+response renews browser sessions.
+
 `GET /api/v1/runs/{run}/jobs` returns a status array from one committed
 snapshot. It accepts member `runs.read` or the live run owner's `trigger.host`.
 `GET /api/v1/runs/{run}/jobs/{job}` also accepts that job's live `data.read`

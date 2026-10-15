@@ -28,6 +28,8 @@ unlock.
 
 ### Changed
 
+- **controller (Breaking):** Remove the legacy trigger and node execution routes, claim-token middleware, raw event append, node output upload path and `Server.WithLocalExecution`. Execution uses the capability-backed run, job and data routes. Missing routes and methods return canonical errors before credential lookup. See [migration guide](docs/migrations/_unreleased.md#legacy-execution-credential-routes).
+
 - **controller (Breaking):** Browser identity linking uses the shared proof policy and canonical errors
   Linking requires the account's direct provider session and one-use state. Embedded controllers supply `WithIdentityLinkWriter`. Nonlocal dashboard pages always require a session. See [migration guide](docs/migrations/_unreleased.md#browser-identity-linking).
 

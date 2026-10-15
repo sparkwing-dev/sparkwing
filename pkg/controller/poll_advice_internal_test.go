@@ -111,14 +111,6 @@ func claimNodeRequest() *http.Request {
 	return req
 }
 
-func TestClaimPollAdvice_LocalExecutionSuggestsNothing(t *testing.T) {
-	srv := newAdviceServer(t).WithLocalExecution()
-	srv.recordQueueActivity(time.Now().Add(-time.Hour))
-	if got := srv.claimPollAdvice(time.Now()); got != 0 {
-		t.Errorf("advice=%s want 0 on a host's own controller", got)
-	}
-}
-
 func TestHandleClaimTrigger_WithholdsAdviceRightAfterAnAward(t *testing.T) {
 	srv := newAdviceServer(t)
 	srv.recordQueueActivity(time.Now())

@@ -278,6 +278,13 @@ func decodeEngineRequest(r *http.Request, body any) error {
 }
 
 func engineLookupError(err error) error {
+	var sqlErr interface{ SQLState() string }
+	if errors.As(err, &sqlErr) {
+		switch sqlErr.SQLState() {
+		case "40001", "40P01", "55P03":
+			return &apierr.Error{Code: apierr.Unavailable, Message: "transaction is temporarily unavailable", Details: map[string]any{"retry_after_ms": 1000}}
+		}
+	}
 	var transition *store.ErrIllegalTransition
 	if errors.As(err, &transition) {
 		code := apierr.IllegalTransition

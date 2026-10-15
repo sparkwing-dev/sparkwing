@@ -4,6 +4,29 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Legacy execution credential cut
+
+The legacy trigger and node execution route families, raw POST run events,
+claim-token router, runner-claim principal conversion, here-token issuance,
+direct node output transport and claim-specific log mutation handlers are
+removed. Final intake, plan, transitions, renewals and data operations keep
+their existing policy/transaction interfaces. No legacy credential fallback
+exists on these execution paths.
+
+The remaining business-route fallback matches a registered method before
+authentication. Missing paths and methods use PolicyRouter's shared error
+writer. Browser middleware likewise bypasses session lookup for missing
+methods and paths. The removed raw event method answers 405 because GET
+events still exists. PostgreSQL contention states 40001, 40P01 and 55P03
+map to the shared unavailable envelope with one-second retry advice on final
+engine operations. Database diagnostics remain private.
+
+Final child transport, claim-input/read-set transport, job log operations,
+debug resume and the old clients that still call retired paths remain
+integration work. Their policy rows stay declared. This cut does not supply
+their missing wire/transaction adapters or count them as acceptance evidence.
+See [the execution cut report](../W2-execution-cut-handoff.md).
+
 ### OIDC claim hard cut
 
 POST `/api/v1/runs/{run}/oidc-token` now registers through PolicyRouter with

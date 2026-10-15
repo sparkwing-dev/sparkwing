@@ -144,29 +144,6 @@ func TestRequestBudget_DefaultsToUnlimited(t *testing.T) {
 	}
 }
 
-func TestRequestBudget_LocalExecutionBudgetsNothing(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	srv := controller.New(st, nil).
-		WithRequestBudget(controller.RequestBudget{ClaimsPerMinute: 1, HeartbeatsPerMinute: 1}).
-		WithLocalExecution()
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-
-	for i := range 5 {
-		resp := claimAs(t, ts.URL, "runner-1")
-		status := resp.StatusCode
-		_ = resp.Body.Close()
-		if status != http.StatusNoContent {
-			t.Fatalf("claim %d status=%d; a host's own controller shares one bucket and must not budget", i, status)
-		}
-	}
-}
-
 // The recommendations must clear the cadence the shipped runners actually use:
 // a pool runner claims every 500ms and a node heartbeat runs every 3s.
 func TestRequestBudget_RecommendationsClearTheShippedCadence(t *testing.T) {

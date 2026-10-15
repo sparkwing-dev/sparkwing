@@ -84,8 +84,9 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 func (s *Server) browserAPI(api http.Handler) http.Handler {
 	legacy := originguard.RefuseCrossSiteWrites(s.cookieSessions(api))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, router := s.routeProbe()
-		if routeRegistered(router, r) {
+		authed, router := s.routeProbe()
+		_, pattern := authed.Handler(r)
+		if routeRegistered(router, r) || pattern == "" {
 			api.ServeHTTP(w, r)
 			return
 		}

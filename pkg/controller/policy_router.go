@@ -76,13 +76,7 @@ func (router *PolicyRouter) Validate() error {
 
 func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, pattern := router.mux.Handler(r); pattern == "" {
-		allowed := router.allowedMethods(r)
-		if len(allowed) != 0 {
-			w.Header().Set("Allow", strings.Join(allowed, ", "))
-			writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
-		} else {
-			writePolicyError(w, &apierr.Error{Code: apierr.NotFound, Message: "route not found"})
-		}
+		writeRouteMiss(w, router.allowedMethods(r))
 		return
 	}
 	router.mux.ServeHTTP(w, r)
@@ -90,20 +84,37 @@ func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (router *PolicyRouter) allowedMethods(r *http.Request) []string {
 	var methods []string
+	for _, endpoint := range router.registered {
+		methods = append(methods, endpoint.Method)
+	}
+	return allowedRouteMethods(router.mux, r, methods)
+}
+
+func allowedRouteMethods(mux *http.ServeMux, r *http.Request, methods []string) []string {
+	var allowed []string
 	seen := make(map[string]bool)
 	probe := r.Clone(r.Context())
-	for _, endpoint := range router.registered {
-		if seen[endpoint.Method] {
+	for _, method := range methods {
+		if seen[method] {
 			continue
 		}
-		seen[endpoint.Method] = true
-		probe.Method = endpoint.Method
-		if _, pattern := router.mux.Handler(probe); pattern != "" {
-			methods = append(methods, probe.Method)
+		seen[method] = true
+		probe.Method = method
+		if _, pattern := mux.Handler(probe); pattern != "" {
+			allowed = append(allowed, method)
 		}
 	}
-	slices.Sort(methods)
-	return methods
+	slices.Sort(allowed)
+	return allowed
+}
+
+func writeRouteMiss(w http.ResponseWriter, allowed []string) {
+	if len(allowed) != 0 {
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+		writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
+		return
+	}
+	writePolicyError(w, &apierr.Error{Code: apierr.NotFound, Message: "route not found"})
 }
 
 func (router *PolicyRouter) checkEndpoint(route capability.RoutePolicy, endpoint Endpoint) error {

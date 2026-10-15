@@ -1,5 +1,28 @@
 # Migrating to the next release
 
+## Legacy execution credential routes
+
+The `/api/v1/triggers` and `/api/v1/runs/{run}/nodes` route families are
+removed, including heartbeat, execution-start, execution-finish, claim input,
+attempt results, node logs and direct node output upload. Raw
+`POST /api/v1/runs/{run}/events` is also removed. Events come from the
+committing state operation.
+
+Use capability-backed `POST /api/v1/runs` for intake, `/runs/{run}/plan`
+for plan acceptance, `/runs/{run}/jobs/{job}/transition` for job changes,
+and the run or job `heartbeat` route for renewal. Use `/api/v1/data` for
+authorized output uploads and records. Retired claim tokens and execution
+headers are no longer an execution credential. Rebuild runner and controller
+consumers together. No alias accepts the previous request shapes.
+
+Embedded controllers remove `Server.WithLocalExecution`. Local execution now
+uses the same capability and self-claim rules. The elected local runtime obtains
+verified peer identity through `Server.HTTP()`.
+
+Absent paths return canonical `not_found` before credential lookup. A
+removed method on a path that still has another method returns canonical
+`method_not_allowed` with `Allow`. Neither refusal renews a browser session.
+
 ## Browser identity linking
 
 Link start and completion use the shared browser proof policy. Use the account's

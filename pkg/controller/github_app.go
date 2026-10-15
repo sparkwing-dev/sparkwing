@@ -25,8 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: a submitted trigger cannot carry this key, because sanitizeTriggerEnv drops
-// every key outside submittedTriggerEnvKeys.
 const envGitHubAppInstallation = "GITHUB_APP_INSTALLATION_ID"
 
 // safety: a connect flow is a few redirects long; a state that outlives that

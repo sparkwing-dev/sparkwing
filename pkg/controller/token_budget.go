@@ -3,8 +3,6 @@ package controller
 import (
 	"context"
 	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -99,9 +97,6 @@ func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key s
 	if t.requests == nil {
 		return true
 	}
-	if s.ownRunLiveness(r) {
-		return true
-	}
 	allowed, wait := t.requests.AllowWithRetry(key, now)
 	if !allowed {
 		observePrincipalThrottled(budgetClassToken)
@@ -112,71 +107,6 @@ func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key s
 		return false
 	}
 	return true
-}
-
-// safety: The unmetered liveness lane requires a live claim fence; the route handler validates the write.
-func (s *Server) ownRunLiveness(r *http.Request) bool {
-	if r.Method != http.MethodPost || s.store == nil {
-		return false
-	}
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok || p == nil {
-		return false
-	}
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
-	if len(parts) < 5 || parts[0] != "api" || parts[1] != "v1" {
-		return false
-	}
-	var runID, nodeID string
-	switch {
-	case len(parts) == 5 && parts[2] == "runs" && parts[4] == "heartbeat":
-		runID = parts[3]
-	case len(parts) == 7 && parts[2] == "runs" && parts[4] == "nodes" && parts[6] == "touch":
-		runID, nodeID = parts[3], parts[5]
-	case len(parts) == 5 && parts[2] == "triggers" && parts[4] == "heartbeat":
-		runID = parts[3]
-	default:
-		return false
-	}
-	if runID == "" || (len(parts) == 7 && nodeID == "") {
-		return false
-	}
-	if parts[2] == "triggers" && !p.HasScope(ScopeTriggersClaim) {
-		return false
-	}
-	if parts[2] == "runs" && !p.HasScope(ScopeNodesClaim) {
-		return false
-	}
-	nodeClaim, triggerClaim := claimIdentityShape(r)
-	if nodeClaim == triggerClaim {
-		return false
-	}
-	if nodeID != "" {
-		if nodeClaim {
-			fence, err := nodeClaimFenceFromRequest(r)
-			if err != nil {
-				return false
-			}
-			held, err := s.store.NodeClaimFenceIsLive(r.Context(), runID, nodeID, fence, time.Now())
-			return err == nil && held
-		}
-	}
-	if triggerClaim {
-		generation, err := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
-		if err != nil || generation < 1 {
-			return false
-		}
-		held, err := s.store.TriggerClaimFenceIsLive(r.Context(), runID, claimIdentity(r), generation, time.Now())
-		return err == nil && held
-	}
-	if parts[2] == "runs" && nodeID == "" {
-		if _, err := nodeClaimFenceFromRequest(r); err != nil {
-			return false
-		}
-		held, err := s.ownsRun(r.Context(), runID, claimIdentity(r))
-		return err == nil && held
-	}
-	return false
 }
 
 // safety: an alarm the operator hears once a minute is a notice; one raised per

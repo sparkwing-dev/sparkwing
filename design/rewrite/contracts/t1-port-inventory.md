@@ -19,6 +19,43 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W2 execution credential retirement removes the seven tests in
+claim_route_internal_test.go with that router. Their principal-with-no-scopes
+expectation is replaced by the final credential/grant policy. The existing
+TestCredentialHTTPAuthenticationBoundary, TestCredentialHTTPTerminalGrace,
+TestCredentialHTTPCancelDrainsReporting and TestCredentialPolicyAlternatives
+retain wrong-kind, binding, ended-authority, replay and cancellation behavior
+against the final snapshot interface. Final engine and store properties retain
+generation and result fencing. These are interface/component proofs, not a
+new native claim or log-tail cell.
+
+TestEngineRetiredExecutionRoutesProperty reaches the actual API and browser
+handlers with generated run/job IDs, old and malformed bearers, session headers
+and cookies. Retired paths return canonical 404 and the raw event method returns
+canonical 405 before session lookup. No refusal changes cookies.
+TestNodeStoreErrorReportsTransientPostgresContention moves to
+TestEngineTransactionContentionProperty through the final transition route.
+It preserves 503 and one-second retry advice for all three PostgreSQL contention
+states, safe 500 for other database faults, and private error details through
+direct, wrapped and joined errors. It uses fake committing transactions.
+
+TestControllerEventsUseTenantAndReplica retires with raw event append. Events
+are emitted by committing state transitions. The retained store event accounting
+suite checks tenant/replica charges, rollback and reopening. Final engine-to-event
+accounting composition remains an integration requirement. The legacy node
+projection test retires with that unused projection. EngineJobsHTTP retains
+the public job shape and private-field exclusion. Black-box legacy runtime
+suites outside these deleted files still need their final caller/fixture ports.
+
+The four tests in local_execution_attempt_test.go and the local-mode budget
+and poll-advice tests retire with Server.WithLocalExecution. A local request
+cannot submit a caller-selected unfenced execution attempt. The final transition
+and claim-input constructors derive executor identity and generation from the
+award. TestEngineRetiredExecutionRoutesProperty refuses the old execution-start
+and execution-finish routes. The existing LocalControllerHTTP and EngineLifecycleHTTP
+components retain verified-peer selection and final transaction authority. Native
+local self-claim execution remains pending with W1/W3/W8/W9 composition.
+
 W2 browser-link ports: the deleted
 TestLinkRefusesAStateFromAnotherAccountSessionOrAReplay,
 TestLinkCompletionNeedsARecentSignIn, TestLinkAttemptsAreRateLimitedPerAccount

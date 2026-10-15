@@ -1,83 +1,12 @@
 package controller
 
 import (
-	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
-	"unicode"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// safety: `pipeline trigger --runner here` hands its caller a credential that
-// hosts one run on the caller's machine. It claims that run's pinned trigger
-// once, reaches only that run's routes, and expires; its secrets reach the run
-// only through the claims it takes, exactly as on any other runner.
-
-// safety: the credential must claim its run within store.HereRunnerClaimWindow;
-// once claimed, the run's trigger and node claims live as long as the
-// credential, which matches the six hours a runner gives a hosted run.
-const hereRunnerCredentialTTL = 6 * time.Hour
-
-// safety: the reason lands on the run's event stream and the audit record, so it is one bounded line.
-const maxHereReason = 200
-
-const hereRunner = "here"
-
-func (s *Server) hereRunnerRequest(r *http.Request, body triggerReq) (*store.HereRunner, error) {
-	switch body.Runner {
-	case "":
-		if body.Reason != "" {
-			return nil, errors.New(`reason is recorded only for runner "here"`)
-		}
-		return nil, nil
-	case hereRunner:
-	default:
-		return nil, errors.New(`runner must be "here" or absent`)
-	}
-	reason := strings.TrimSpace(body.Reason)
-	switch {
-	case reason == "":
-		return nil, errors.New(`runner "here" needs a reason, which the run records`)
-	case len(reason) > maxHereReason:
-		return nil, errors.New("reason is at most 200 bytes")
-	case strings.ContainsFunc(reason, unicode.IsControl):
-		return nil, errors.New("reason is one line of text")
-	case body.ParentRunID != "" || body.RetryOf != "":
-		return nil, errors.New(`runner "here" starts a new run; it takes no parent_run_id or retry_of`)
-	}
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok || p == nil {
-		return nil, errors.New(`runner "here" needs an authenticated caller to record`)
-	}
-	return &store.HereRunner{
-		Reason: reason, By: p.Name, CreatedBy: p.AccountID,
-		Scopes: store.MachineTokenScopes(), TTL: hereRunnerCredentialTTL,
-	}, nil
-}
-
-func (s *Server) admitHereTrigger(ctx context.Context, t *store.Tenant, in triggerIntake, here store.HereRunner) (string, *store.Token, error) {
-	trig, run := triggerRows(in)
-	raw, tok, err := t.CreateHereTriggerWithRun(ctx, trig, run, here, in.At)
-	if err != nil {
-		if errors.Is(err, store.ErrComputeLimit) {
-			return "", nil, err
-		}
-		return "", nil, errors.Join(errors.New("persist the here-runner trigger and its run"), err)
-	}
-	s.recordQueueActivity(in.At)
-	return raw, tok, nil
-}
-
-// safety: the reason is the caller's own justification, recorded so the audit
-// line answers why as well as who; it was held to one bounded line above.
-func noteHereRunnerAudit(ctx context.Context, tok *store.Token, reason string) {
-	noteAuditTarget(ctx, "runner", hereRunner)
-	noteAuditTarget(ctx, "runner_token_prefix", tok.Prefix)
-	noteAuditTarget(ctx, "reason", reason)
-}
 
 // safety: routes are allowlisted, so a route added later answers 403 to a
 // here-runner credential until someone decides how it is confined. Neither

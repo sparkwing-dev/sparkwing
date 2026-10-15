@@ -128,7 +128,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	}
 	ctrl := controller.New(st, nil).
 		WithSecretsCipher(ring.For(st)).
-		WithLocalExecution().
 		WithDashboard(controller.Dashboard{
 			Local:   true,
 			Bundle:  bundle,

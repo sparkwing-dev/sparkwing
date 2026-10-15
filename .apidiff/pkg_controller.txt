@@ -505,7 +505,6 @@ func (s *Server) WithIdleClaimPoll(max time.Duration) *Server
 func (s *Server) WithIdleClaimPollEnforced(on bool) *Server
 func (s *Server) WithLicense(lic *license.License) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
-func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
 func (s *Server) WithLogRetention(days map[store.Team]int) *Server
 func (s *Server) WithMailer(m mailer.Mailer) *Server
@@ -614,7 +613,6 @@ func (s *boundData) LookupDepcache(ctx context.Context, request blob.DepcacheLoo
 func (s *boundData) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)
 func (s *boundData) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error)
 func (s *boundData) Upload(ctx context.Context, intent blob.UploadIntent) (blob.UploadTicket, error)
-func (c *claimTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error
 func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
