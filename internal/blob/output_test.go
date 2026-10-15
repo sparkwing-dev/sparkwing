@@ -3,9 +3,12 @@ package blob_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"math/rand"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -73,7 +76,7 @@ func TestOutputRecordRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			key := record.Key
-			if key.Kind != blob.KindOutput || key.Team != data.Identity.Team || key.Name != data.Identity.RunID || key.Scope.Job != data.Identity.Attempt.Value.NodeID || key.Scope.Pipeline != data.Pipeline || key.Scope.Repo != data.Authority.Repo || key.Scope.Ref != data.Authority.Ref.Scope || key.Scope.Key != "" {
+			if key != blob.ResultRecordKey(data.Identity.Attempt.Value, data.Authority.Repo, data.Authority.Ref.Scope, data.Pipeline, blob.KindOutput) {
 				t.Fatalf("output key = %+v", key)
 			}
 			if record.Digest != digest(body) || signer.commits != 1 || records.request.Source != data.Identity || records.request.Authority != data.Authority || records.request.ManifestDigest.Set || len(records.request.Members) != 0 {
@@ -235,5 +238,57 @@ func TestOutputCancellationAfterUploadPreventsRecordCommit(t *testing.T) {
 	}
 	if signer.commits != 1 || records.request.Digest != "" {
 		t.Fatal("record commit followed a cancelled upload")
+	}
+}
+
+func TestResultRecordKeysKeepAttemptFence(t *testing.T) {
+	property := func(seed [16]byte, attempt, generation uint16) bool {
+		i := identity()
+		i.RunID = fmt.Sprintf("run-%x", seed[:])
+		i.Attempt.Value.RunID = i.RunID
+		i.Attempt.Value.Attempt = int64(attempt) + 1
+		i.Attempt.Value.Generation = int64(generation) + 1
+		a := blob.Authority{CapabilityRef: i.CapabilityRef, Principal: i.Principal, Attempt: i.Attempt, Repo: "gh:1", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}}}
+		for _, kind := range []blob.Kind{blob.KindOutput, blob.KindManifest} {
+			intent := blob.WriteScopeIntent{Kind: kind, Pipeline: "ci", Job: i.Attempt.Value.NodeID, Name: i.RunID}
+			key, err := blob.ResolveWriteKey(a, intent)
+			if err != nil || key != blob.ResultRecordKey(i.Attempt.Value, a.Repo, a.Ref.Scope, "ci", kind) {
+				return false
+			}
+			namespace, err := blob.RecordNamespace(key)
+			if err != nil {
+				return false
+			}
+			for _, change := range []func(*runspec.AttemptIdentity){
+				func(a *runspec.AttemptIdentity) { a.Team += "other" },
+				func(a *runspec.AttemptIdentity) { a.RunID += "other" },
+				func(a *runspec.AttemptIdentity) { a.NodeID += "other" },
+				func(a *runspec.AttemptIdentity) { a.Attempt++ },
+				func(a *runspec.AttemptIdentity) { a.Generation++ },
+			} {
+				other := i.Attempt.Value
+				change(&other)
+				otherKey := blob.ResultRecordKey(other, a.Repo, a.Ref.Scope, "ci", kind)
+				otherNamespace, err := blob.RecordNamespace(otherKey)
+				if err != nil || (key.Team == otherKey.Team && namespace == otherNamespace) {
+					return false
+				}
+			}
+			for _, change := range []func(*blob.WriteScopeIntent){
+				func(q *blob.WriteScopeIntent) { q.Job += "other" },
+				func(q *blob.WriteScopeIntent) { q.Name += "other" },
+				func(q *blob.WriteScopeIntent) { q.Key = "other" },
+			} {
+				forged := intent
+				change(&forged)
+				if _, err := blob.ResolveWriteKey(a, forged); !errors.Is(err, blob.ErrDigestNotReadable) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(2097))}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -69,7 +69,7 @@ func TestStorage(t *testing.T) {
 	t.Run("storage-components/dependency-key-containment", checkStorageKeyContainment)
 	t.Run("storage-components/go-modules-resolver", checkStorageGoModulesResolver)
 	t.Run("storage-log-segments-and-fallback/filesystem-records", checkStorageFilesystemLogRecords)
-	t.Run("storage-log-segments-and-fallback/s3-components", checkStorageS3Logs)
+	t.Run("storage-log-segments-and-fallback/s3-records", checkStorageS3Logs)
 	t.Run("storage-log-segments-and-fallback/filesystem-sink", checkStorageFilesystemLogSink)
 	t.Run("storage-log-segments-and-fallback/s3-sink", checkStorageS3LogSink)
 	t.Run("storage-memo-materialization-failures/filesystem-components", checkStorageFilesystemMaterialization)

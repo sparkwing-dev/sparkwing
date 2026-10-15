@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func validDigest(d Digest) bool {
@@ -107,6 +109,11 @@ func recordNamespace(key RecordKey) (string, error) {
 	}
 }
 
+// ResultRecordKey identifies output or manifest bytes for one exact attempt.
+func ResultRecordKey(attempt runspec.AttemptIdentity, repo runspec.RepoKey, ref RefScope, pipeline string, kind Kind) RecordKey {
+	return RecordKey{Team: attempt.Team, Kind: kind, Scope: Scope{Repo: repo, Ref: ref, Pipeline: pipeline, Job: attempt.NodeID, Key: fmt.Sprintf("%s/%d/%d", attempt.RunID, attempt.Attempt, attempt.Generation)}, Name: "result"}
+}
+
 func resolveWriteKey(a Authority, intent WriteScopeIntent) (RecordKey, error) {
 	var i UploadIdentity
 	if a.Upload.Set {
@@ -122,6 +129,12 @@ func resolveWriteKey(a Authority, intent WriteScopeIntent) (RecordKey, error) {
 	}
 	if a.Attempt.Set && intent.Job != "" && intent.Job != a.Attempt.Value.NodeID {
 		return RecordKey{}, ErrDigestNotReadable
+	}
+	if intent.Kind == KindOutput || intent.Kind == KindManifest {
+		if !i.Attempt.Set || intent.Job != i.Attempt.Value.NodeID || intent.Name != i.RunID || intent.Key != "" {
+			return RecordKey{}, ErrDigestNotReadable
+		}
+		return ResultRecordKey(i.Attempt.Value, a.Repo, a.Ref.Scope, intent.Pipeline, intent.Kind), nil
 	}
 	key := RecordKey{Team: i.Team, Kind: intent.Kind, Scope: Scope{Repo: a.Repo, Ref: a.Ref.Scope, Pipeline: intent.Pipeline, Job: intent.Job, Key: intent.Key}, Name: intent.Name}
 	if _, err := RecordNamespace(key); err != nil {

@@ -129,7 +129,7 @@ authority after manifest I/O. It leaves commit and rollback to the state owner.
 
 The record naming conventions are:
 
-- `ResultBlobKey` names output and manifest records for one destination attempt.
+- `blob.ResultRecordKey` names output and manifest records for one destination attempt.
   The namespace includes the run, attempt and generation. Its name is `result`.
 - Memo records use the repository, verified or manual ref, pipeline, job and hash.
   The name is `output` when the primary digest is the typed output. An optional

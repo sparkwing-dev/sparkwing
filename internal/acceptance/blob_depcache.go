@@ -13,12 +13,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -115,7 +117,20 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if err != nil {
 		return err
 	}
-	data.Records = tenant.BlobRecords(nil)
+	data.Records = tenant.BlobRecords(storage.BlobManifests{Objects: objects})
+	output := blob.OutputData{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
+	body := seed[:]
+	if seed[0]%2 == 0 {
+		body = nil
+	}
+	result, err := output.Put(ctx, body)
+	if err != nil {
+		return fmt.Errorf("store physical output: %w", err)
+	}
+	memoKey, err := blob.ResolveWriteKey(authority, blob.WriteScopeIntent{Kind: blob.KindMemo, Pipeline: "fixture", Job: identity.Attempt.Value.NodeID, Key: fmt.Sprintf("%x", sha256.Sum256(seed[:])), Name: blob.MemoRecordName})
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(root, "lockfile"), seed[:], 0o600); err != nil {
 		return err
 	}
@@ -131,6 +146,18 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	payload := bytes.Repeat(seed[:], 1+int(seed[0]))
 	if err := os.WriteFile(filepath.Join(source, "module"), payload, 0o640); err != nil {
 		return err
+	}
+	artifactData := artifacts.Data{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
+	manifest, err := artifacts.Capture(ctx, artifactData, source, []string{"module"}, func(string) {})
+	if err != nil {
+		return fmt.Errorf("store physical artifacts: %w", err)
+	}
+	manifestHit, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: authority, Key: manifest.Key, Budget: data.Budget})
+	if err != nil || !manifestHit.Found {
+		return fmt.Errorf("read physical artifact manifest: %v", err)
+	}
+	if _, err := data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Authority: authority, Source: identity, Key: memoKey, Digest: result.Digest, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest.Digest}, Members: manifestHit.Members}); err != nil {
+		return fmt.Errorf("store physical memo: %w", err)
 	}
 	backend := depcacheblob.New(data)
 	if _, err := backend.Store(ctx, key, source); err != nil {
@@ -148,7 +175,29 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if err != nil {
 		return err
 	}
-	data.Records = tenant.BlobRecords(nil)
+	data.Records = tenant.BlobRecords(storage.BlobManifests{Objects: objects})
+	output.Records = data.Records
+	if got, err := output.Read(ctx, result.Key); err != nil || !bytes.Equal(got, body) {
+		return fmt.Errorf("reopened physical output differs: %v", err)
+	}
+	hitMemo, err := data.Records.LookupMemo(ctx, blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: identity.Attempt.Value.NodeID, Hash: runspec.Hash(memoKey.Scope.Key)}, Budget: data.Budget})
+	if err != nil || !hitMemo.Found || !hitMemo.Output.Set || hitMemo.Output.Value != result.Digest {
+		return fmt.Errorf("reopened physical memo differs: %+v: %v", hitMemo, err)
+	}
+	copied, err := blob.MaterializeMemo(ctx, data.Bytes, data.Records, blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "fixture", Job: identity.Attempt.Value.NodeID, Hash: runspec.Hash(memoKey.Scope.Key)}, Budget: data.Budget}, Destination: identity.Attempt.Value})
+	if err != nil || !copied.Hit.Found || !bytes.Equal(copied.Output, body) || !copied.Hit.Manifest.Set || copied.Hit.Manifest.Value != manifest.Digest {
+		return fmt.Errorf("materialize physical memo: %+v: %v", copied, err)
+	}
+	artifactData.Records = data.Records
+	if err := os.Mkdir(filepath.Join(root, "staged"), 0o700); err != nil {
+		return err
+	}
+	if _, err := artifacts.Stage(ctx, artifactData, filepath.Join(root, "staged"), []artifacts.Edge{{Record: manifest.Key}}); err != nil {
+		return fmt.Errorf("stage physical memo artifacts: %w", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "staged", "module")); err != nil || !bytes.Equal(got, payload) {
+		return fmt.Errorf("staged physical artifact differs: %v", err)
+	}
 	backend = depcacheblob.New(data)
 	destination := filepath.Join(root, "deps")
 	if _, err := backend.Fetch(ctx, key, destination); err != nil {
@@ -294,6 +343,9 @@ SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_ru
 		}
 	}
 	if _, err := s.DB().ExecContext(ctx, "UPDATE runs SET request_json=? WHERE team=? AND id=?", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`), c.Team, c.Binding.RunID); err != nil {
+		return blob.Authority{}, blob.UploadIdentity{}, err
+	}
+	if _, err := s.DB().ExecContext(ctx, "UPDATE nodes SET spec_json=? WHERE team=? AND run_id=?", []byte(`{"memo":{}}`), c.Team, c.Binding.RunID); err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
 	attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: *commit.Subject.Attempt}

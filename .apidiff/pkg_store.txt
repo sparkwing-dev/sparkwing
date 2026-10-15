@@ -1461,7 +1461,6 @@ type LogSegmentGrant struct {
 
 	Watched bool
 }
-func LogSegmentObjectKey(subject blob.LogSubject, retention string, index int64) (string, error)
 type LogSegmentRequest struct {
 	Attempt    int64
 	Generation int64
@@ -2122,7 +2121,6 @@ type RepoFilter = match.RepoFilter
 func RepoIdentityFromPath(repoPath string) string
 func RepoIdentityFromURL(remote string) string
 func RepoKey(owner, name string) string
-func ResultBlobKey(attempt runspec.AttemptIdentity, repo runspec.RepoKey, ref blob.RefScope, pipeline string, kind blob.Kind) blob.RecordKey
 type RetentionRequest struct {
 	Lease SingletonLease
 	Limit int

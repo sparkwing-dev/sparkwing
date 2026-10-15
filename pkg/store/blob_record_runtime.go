@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"slices"
 	"time"
@@ -212,7 +211,7 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 		return authorityError(apierr.BadRequest, "memo record requires an input hash")
 	}
 	if key.Kind == blob.KindOutput || key.Kind == blob.KindManifest {
-		if key != ResultBlobKey(a.source.Attempt.Value, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, key.Kind) {
+		if key != blob.ResultRecordKey(a.source.Attempt.Value, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, key.Kind) {
 			return authorityError(apierr.Forbidden, "result key differs from attempt fence")
 		}
 	}
@@ -301,11 +300,6 @@ func readBlobRecordTx(ctx context.Context, tx *storeTx, key blob.RecordKey, scop
 		record.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: blob.Digest(manifest.String)}
 	}
 	return record, true, nil
-}
-
-// ResultBlobKey isolates output and manifest records by the destination attempt fence.
-func ResultBlobKey(attempt runspec.AttemptIdentity, repo runspec.RepoKey, ref blob.RefScope, pipeline string, kind blob.Kind) blob.RecordKey {
-	return blob.RecordKey{Team: attempt.Team, Kind: kind, Scope: blob.Scope{Repo: repo, Ref: ref, Pipeline: pipeline, Job: attempt.NodeID, Key: fmt.Sprintf("%s/%d/%d", attempt.RunID, attempt.Attempt, attempt.Generation)}, Name: "result"}
 }
 
 func (r *blobRecords) authorizeDigestTx(ctx context.Context, tx *storeTx, a blobActor, kind blob.Kind, digest blob.Digest) error {

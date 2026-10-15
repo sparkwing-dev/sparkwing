@@ -2,142 +2,132 @@
 
 <!-- design:begin -->
 
-## Merge continuation
+## Implemented
 
-Started at `f22027d7a` during the merge of `bw-3095-rewrite`.
-All seven conflicted paths are resolved in the working files. C1 retains the
-amended contract and both areas' implementation evidence. Both migration copies
-retain W7's storage cuts and the incoming W1 changes. The controller snapshot
-retains the incoming version policy and removes already deleted storage APIs.
-The SDK snapshot matches the merged implementation.
+Continued from `0c89da941`. W7 uses W1's persisted result and memo layouts.
+`blob.ResultRecordKey` is the single output/manifest key builder. Names are
+`result`, and the scope key contains run/attempt/generation. Output, artifact,
+node-host memo, admission, memo copy and terminal result attachment use it.
+`MemoRecordName` is `output`, matching persisted memo lookup. W1's manifest-only
+memo keeps its separate `manifest` name.
 
-The incoming versions of `data_download_claim_provenance_test.go` and
-`direct_upload_test.go` exercise deleted grant and upload APIs. Their existing
-W7 deletions are preserved. These are 813 incoming test lines, not a new deletion
-from W7's HEAD. No Git write ran. The index still reports seven unmerged paths.
-The lead must stage the resolutions and finish the merge.
+This reconciles W7's own C1 paragraphs with W1's real layout. It changes no
+foreign interface shape or schema. The old `store.ResultBlobKey` helper is
+removed with every caller migrated. No alias remains.
 
-## Completed work
+`Tenant.RecordSegments` now consumes `blob.LogObjectKey`. Stored segments start
+at one. The duplicate store key builder and zero-based fixture layouts are gone.
+The filesystem physical-log cell is unskipped. The existing S3 component cell
+now uses real tenant segment records and is named `s3-records`.
 
-The merged W1 publication checker requires an imported attempt's persisted
-finish time. W7's physical manifest fixtures still inserted pending jobs with
-unfinished attempts. Both filesystem and S3 cells failed with `holder_rights`.
-The fixture now imports terminal jobs and finishes each attempt before upload.
+Deleted **23 legacy helper definition lines**, plus their unused imports and
+snapshot entries. The cache service, gitcache, package proxy and cache chart
+remain deleted from earlier sessions. No new component-only cell or archived
+T1 test port was added. Old output/log transport deletion remains incomplete.
 
-Invariant: a terminal node row cannot authorize publication while its exact
-imported attempt is unfinished, and another job's receipt cannot authorize a
-manifest member. Twelve generated cases per backend first refuse the unfinished
-attempt and check that no upload reservation remains. They then finish the
-attempt and retain the existing substituted-metadata, borrowed-receipt,
-independent-upload and reopen assertions. No production authority check changed.
+## Invariants and evidence
 
-The retained build-trust controller test now obtains a tenant before calling
-`TrustLocalBuilds`. This repairs compilation after W1 removed the raw Store API.
-Its execution still fails in the older app fixture's setup because the final
-schema has no `tokens` table. It does not reach the build-trust handler.
+Invariant: each result key identifies its exact tenant/run/job/attempt/generation,
+and caller-selected run/job/scope substitutions cannot select a different result.
+A seeded property generates 96 cases for both output and manifest keys.
 
-Regenerated W7 snapshot entries that the integration merge restored after their
-runtime APIs were deleted: filesystem append logs, log key helpers, raw artifact
-factory/measurement types, storage counting and the daemon artifact-store error.
-Every generated API snapshot matches its counterpart in the merged tree.
-The preexisting `.apidiff/pkg_runner.txt` has no generated counterpart and
-remains W8/lead cleanup, so the whole-directory snapshot check still fails.
+The existing filesystem and S3 archive cells now join OutputData, artifact
+capture, memo commit/materialization and staging to real Tenant.BlobRecords,
+real upload reservations/receipts and verified physical manifests. They reopen
+SQLite before required reads, including explicit empty output. The existing
+corrupt/missing archive, scope refusal and cold-replacement checks remain.
 
-Deleted **0 new runtime lines**. No new parked-test port or native acceptance cell
-is claimed. Earlier cache-service, gitcache, package-proxy and filesystem
-append-log cuts remain deleted. No compatibility transport or runtime mechanism
-was added.
+Physical-log properties join signed transfers to Tenant.RecordSegments and
+ReadLogSegments. They reopen SQLite, verify offset reads and retained bytes,
+replay final manifests and refuse a revoked reader. Lost PUT responses require
+stored-byte verification. Filesystem bytes are real. S3 uses the real signer and
+SDK with a fake object service. Authority/award intake and the unfinished W2
+binding remain fixtures. Native placement and authenticated route coverage are
+not claimed.
 
-## Acceptance and verification
+## Verification
 
-`TestStorage` passes with **79 passing test events and 425 skips**, including 44
-passing implementation cells. Both physical manifest-record cells pass after
-the fixture migration. The skips remain 424 native skeleton cells and the known
-W1 physical log-slot mismatch. The new negative cases are in the existing
-manifest-record cells, rather than a substitute native driver.
-
-Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`,
-`GOCACHE=/tmp/sw-astra-W7/cache`, `GOTMPDIR=/tmp/sw-astra-W7/gotmp` and
-`TMPDIR=/tmp/sw-astra-W7/tmp`. Tests use at most `-p 4`.
+Recreate cache, gotmp and tmp directories beneath `/tmp/sw-astra-W7`.
+Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W7/cache, GOTMPDIR=/tmp/sw-astra-W7/gotmp,
+TMPDIR=/tmp/sw-astra-W7/tmp and `go -C` on the supplied worktree. Tests use -p 4.
 
 Passed:
 
-- `go build -p 4 ./...` for the whole repository.
-- `go test -p 4 ./... -run '^$'`: all 173 package results compile.
-- `go test -p 4 ./internal/blob/... ./internal/artifacts ./internal/depcache ./pkg/storage/...`.
-- `go test -json -p 4 ./tests/acceptance -run '^TestStorage$' -count=1`.
-- Both filesystem/S3 manifest-record cells with `-count=1` and `-race`.
-- `go vet -p 4` for those storage packages and `./tests/acceptance`.
-- `TestPkgDocsContentMatchesDocsRoot` and `TestEmbeddedChangelogMatchesRoot`.
-- `go run ./internal/commentcheck -base main .`: clean across 1,236 files.
-- `go run ./internal/sleepcheck -base HEAD .`.
-- Formatting, all generated snapshot-content comparisons and diff whitespace checks.
+- Whole-repository `go build -p 4 ./...`.
+- `go test -p 4 ./... -run '^$'`, all 173 package compilation results.
+- Full tests for internal/blob/..., internal/artifacts, internal/depcache and pkg/storage/....
+- TestStorage, **81 passing events and 424 native/platform skips**.
+- Scoped store selection, **195 passing events**, with the known red mutation-fence test excluded.
+- Node-host memo/artifact/cache selection, **26 passing events**.
+- Scoped vet over blob, artifacts, depcache, storage, store and acceptance packages.
+- Embedded documentation/changelog drift checks, formatting and diff whitespace.
+- Required commentcheck against main, clean across 1,236 files. Sleepcheck is clean.
+- All generated API snapshot contents match. The inherited orphan pkg_runner snapshot remains.
 
-Reproduced rather than waived:
+The store selection is `^(TestLogPersistence|TestLogSegments|TestRecordSegments|TestBlobRecords|TestBlobResult|TestBlobCopied)`
+with `-skip '^TestBlobRecordsMutationCannotOutliveAuthority$'`.
+The host selection is `^(TestMemo|TestArtifacts|TestCaches)`.
 
-- A temporary Go overlay removing only the physical-log skip fails with
-  `persist physical segment 1: log segment object belongs to another signing slot`.
-  The repository skip remains. W1's final key/index implementation is still open.
-- `TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries` compiles, then fails
-  in `newAppFixture` with `no such table: tokens`. W2 owns that fixture cutover.
+Reproduced separately: TestBlobRecordsMutationCannotOutliveAuthority fails all
+six commit/copy by lease/leaf/ancestor cases. A namespace callback can cross
+expiry before persistence. It leaves one output and exposes the result.
+DESIGN: record mutation authorization. W1b already recorded this as the second
+failure of the mechanism. Its transaction-local publication redesign belongs
+to the lead under the brief's two-strikes rule. No repair or waiver is claimed.
 
-## Amendment and handoff ledger
+## Amendment and handoff audit
 
-Only `amendments-1.md` exists on this branch. All rows naming W7 and all W7
-handoffs were checked against the merged tree. Existing completed work was not
-reimplemented.
-
-| Entry | W7 status | Real integration left |
+| Entry | W7 result | Real integration left |
 | --- | --- | --- |
-| A1-24 | Verified bytes and manifest adapter implemented. | W2 installs W1's transactional checker and manifest reader. |
-| A1-29 | Restricted reads retain authorized member metadata. | W1 resolves repo-reader tenant/default-ref selectors. |
-| A1-30 | Logical remote-cache transport and ref-free selectors implemented. | W2/W9 construct authenticated profile transports. |
-| A1-31 | Tagged job, owner and publication identities checked. Terminal imported-attempt fixture now matches W1. | W2 derives the binding from current authentication. |
-| A1-32 | Upload, receipt/replay and archive/store proofs pass. | W2 binds authenticated reservation, settlement and receipt replay. |
-| A1-33 | Physical publication, collection, manifest reads and measurement implemented. | W2/maintenance bind collection and log expiry. |
-| A1-34 | Signed filesystem/S3 components implemented. | DataAuthority, BindData and NewDataClient still panic as unimplemented. |
-| A1-35 | Output, memo, depcache, staging, collection and tagged-log components implemented. | W1 aligns C1 result/memo keys and physical log slots. |
-| A1-36 | Artifact, memo and depcache layers use common callbacks and refresh after execution. | W3/W8 construct fresh StorageBinding values per attempt/generation. |
-| A1-37 | Contained cache keys and go-modules resolver implemented. Removed lint transport stays deleted. | W3/W8 finish host construction. |
-| A1-43 | Cache-service cut retains historical release assets and two-image release fixtures. | W8 finishes version-aware asset functions. |
-| A1-50 | Read-only cache and publication byte components implemented. | W9 wires explicit profiles, publication and engine clients. |
-| A1-53 | Component, physical/store and sink/backend proofs pass. | T1/lead owns native drivers, platforms and real-repository QA. |
+| A1-24 | Verified manifests use real tenant records. | W2 installs transactional authority bindings. |
+| A1-29 | Members retain verified path/size/mode metadata. | Tenant/default-ref selection for repo-reader exact lookups. |
+| A1-30 | Remote logical cache reads use the persisted memo name. | W2/W9 authenticated profile transport and selector resolution. |
+| A1-31/32 | Exact uploader and upload persistence proofs remain passing. | W2 authenticated reservation, settlement and replay. |
+| A1-33 | Physical publication, verification, deletion and measurement remain implemented. | Maintenance construction for collection and expiry. |
+| A1-34 | W7 consumes declared signer and record interfaces. | DataAuthority, BindData and NewDataClient remain stubs. |
+| A1-35 | Output/memo/artifact/log formats now join real store APIs. | Known W1 mutation-fence redesign and final transport cut. |
+| A1-36/37 | Artifact/memo/cache layers consume the shared layout. | Fresh host StorageBinding construction. |
+| A1-43/50 | Prior cache-service cut and profile components remain. | Engine assets, CLI profiles and separate publication failure. |
+| A1-53 | Real SQLite/physical proofs pass. | Native drivers/platforms and real-repository QA. |
 
-## Remaining implementation and deletion
+The older physical-log and result/memo-layout handoffs are closed by this work.
+Other completed handoffs were checked without reimplementation.
 
-W1's `ResultBlobKey` still uses `Name=result` and a run/attempt/generation
-scope key. C1 requires the run ID as name and an empty scope key. Memo
-persistence still uses `output`/`manifest`, while W7 uses `MemoRecordName=result`.
-Its physical log key differs from `blob.LogObjectKey` and its segment records
-start at zero, while signed segments start at one. These need implementation
-alignment with the existing contract, not a new cross-area contract change.
+## Remaining hard cut and contracts
 
-W2's `DataController.DataAuthority`, `BindData` and `client.NewDataClient` remain
-stubs. Authentication, per-operation reauthorization, exact egress, log routes
-and final upload bindings remain W2's work. W3/W8 must construct live bindings.
-W9 must construct explicit remote-cache and publication profiles. Maintenance
-must bind physical collection and filesystem log expiry.
+Delete controller node_output.go, output_objects_s3.go, output_download_s3.go,
+log_segments.go, client output.go/logsegments.go, orchestrator segment_logs.go,
+their legacy tests and remaining raw artifact/log backends after migrating their
+live callers. These files are not deleted in this continuation.
 
-After those bindings, delete controller `node_output.go`, `output_objects_s3.go`,
-`output_download_s3.go`, `log_segments.go`, client `output.go`/`logsegments.go`,
-orchestrator `segment_logs.go`, their tests and the raw artifact/log backends.
-They still have live callers. W7 components already use the final interfaces
-with contract fakes at the unimplemented boundaries. Native coverage and these
-remaining legacy deletions prevent declaring W7 complete.
+W2/W3/W8/W9 need to connect authenticated data bindings and final host inputs.
+The declared LogTransport and logseg.SegmentRecorder still need bound controller
+and client construction. Controllerwire.Controller declares no segment-commit
+operation. No new foreign contract shape was invented here. The lead must assign
+that missing adapter seam so W7 can retire the old log uploader without another
+protocol. PolicyRouter also remains a stub. Physical collection and filesystem
+expiry need their maintenance construction. No product question is raised.
 
-## Shared files and friction
+## Shared files
 
-Shared edits are the seven conflicted paths, `pkg/controller/build_trust_test.go`,
-`internal/acceptance/blob_manifests.go`, the W7 snapshot corrections in
-`.apidiff/pkg_store.txt` and `.apidiff/pkg_wingwire.txt`, `handoffs.md` and this
-report. W7 snapshot corrections also touch `pkg_storage_fs.txt`,
-`pkg_storage_logseg.txt` and `pkg_storage_storeurl.txt`.
-No caller in another runtime package changed.
+Runtime caller migrations outside W7 are internal/nodehost/memo.go and
+pkg/store/blob_record_runtime.go, blob_lookup.go, blob_result_records.go and
+result_logs.go. Store fixture migrations are blob_records_runtime_test.go,
+log_persistence_test.go, log_publication_test.go and result_runtime_test.go.
+The store documentation updates its removed key helper name.
 
-The supplied Xwing worktree was reused. No Sparkwing binary, pipeline, deployment
-or external service ran. Git staging/commit and native QA remain with the lead.
-Scratch is deleted before the final report. No new product question, contract
-change, dependency, setting, limit or environment variable is requested.
+Shared acceptance edits are internal/acceptance/blob_depcache.go,
+blob_manifests.go, store_logs.go, store_abandoned_logs.go and store_published_logs.go,
+plus tests/acceptance/storage_test.go, storage_logs_test.go, storage_s3_test.go,
+storage_materialization_test.go and storage_publication_test.go. Contract/report
+edits are c1-data.md, handoffs.md and this report. The store API snapshot removes
+the two deleted helper exports. W7 also updates its blob/artifact tests and README.
+
+Friction is the unfinished authenticated adapters, older host callers and the
+known W1 authorization failure. The supplied Xwing worktree was reused. No Git
+write, Sparkwing executable, pipeline, service, deployment or release ran.
+Git identity is unchanged. Scratch is deleted after final inspection.
 
 <!-- design:end -->
 

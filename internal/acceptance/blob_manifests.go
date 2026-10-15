@@ -102,7 +102,7 @@ func CheckBlobManifestRecords(ctx context.Context, root string, objects blob.Obj
 		members := []blob.Member{{Team: attempt.Team, ManifestDigest: manifestDigest, Digest: memberDigest, Path: "file", Size: int64(len(body)), Mode: 0o640}}
 		commit := blob.CommitRecordRequest{
 			Source: request.Intent.Identity, Authority: request.Intent.Authority, Digest: manifestDigest, Members: members,
-			Key: store.ResultBlobKey(request.Intent.Identity.Attempt.Value, "gh:1", blob.RefScope{Ref: "main"}, "fixture", blob.KindManifest),
+			Key: blob.ResultRecordKey(request.Intent.Identity.Attempt.Value, "gh:1", blob.RefScope{Ref: "main"}, "fixture", blob.KindManifest),
 		}
 		forged := commit
 		forged.Members = append([]blob.Member(nil), members...)

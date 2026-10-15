@@ -34,7 +34,6 @@ func (r *storageLogRecords) RecordSegments(_ context.Context, q store.SegmentCom
 }
 
 func checkStorageFilesystemLogRecords(t *testing.T) {
-	t.Skip("W1 record keys and zero-based indexes differ from C1 signed log slots; see handoffs.md")
 	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
 		objects, _ := storageFilesystem(t)
 		signing := &storageLogTransport{objects: objects, class: logseg.ClassFree}

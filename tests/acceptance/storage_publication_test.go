@@ -55,7 +55,7 @@ func checkStoragePublication(t *testing.T, objects blob.ObjectBackend, transfers
 			t.Fatal(err)
 		}
 		for _, record := range []blob.Record{result, manifest} {
-			if record.Source != identity || record.Key.Name != identity.RunID || record.Key.Scope.Job != identity.Attempt.Value.NodeID || record.Key.Scope.Key != "" || record.Key.Scope.Ref.Verified {
+			if record.Source != identity || record.Key != blob.ResultRecordKey(identity.Attempt.Value, authority.Repo, authority.Ref.Scope, data.Pipeline, record.Key.Kind) || record.Key.Scope.Ref.Verified {
 				return false
 			}
 		}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
 type collectionS3 struct{ objects map[string][]byte }
@@ -109,8 +110,14 @@ func checkStorageS3Collection(t *testing.T) {
 func checkStorageS3Logs(t *testing.T) {
 	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
 		objects, transport := storageS3(t)
-		return checkStorageLogRoundTrip(t, objects, transport, func(key string, body []byte) {
-			transport.objects[key] = bytes.Clone(body)
-		}, seed, ordinal, lost)
+		signing := &storageLogTransport{objects: objects, class: logseg.ClassFree}
+		var transfers http.RoundTripper = transport
+		if lost {
+			transfers = storageLostResponse{transport}
+		}
+		if err := acceptance.CheckBlobLogRecords(t.Context(), t.TempDir(), signing, objects, blob.TransferClient{Transport: transfers}, seed, 1+int(ordinal%17)); err != nil {
+			t.Fatal(err)
+		}
+		return true
 	})
 }

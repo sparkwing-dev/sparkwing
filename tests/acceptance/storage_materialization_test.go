@@ -116,7 +116,7 @@ func checkStorageMaterialization(t *testing.T, objects blob.ObjectBackend, trans
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Key.Name != identity.RunID || result.Key.Scope.Key != "" || manifest.Key.Name != identity.RunID || manifest.Key.Scope.Key != "" {
+		if result.Key != blob.ResultRecordKey(identity.Attempt.Value, authority.Repo, authority.Ref.Scope, data.Pipeline, blob.KindOutput) || manifest.Key != blob.ResultRecordKey(identity.Attempt.Value, authority.Repo, authority.Ref.Scope, data.Pipeline, blob.KindManifest) {
 			return false
 		}
 		members := records.results[manifest.Key].Members

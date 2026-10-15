@@ -995,14 +995,16 @@ only for output, manifest, memo and depcache. The transaction checks the user's
 live repo grant and verified-default evidence before constructing those edges.
 
 `blob.OutputData` applies the shared output cap to writes and reads using
-`Store` and `RecordStore`. Output records use kind `output`, the run ID as
-`name`, and the authorized repo/ref/pipeline/producer-job scope with an empty
-scope key. Attempt and generation stay in `Record.Source`. Empty output has an
-explicit blob and record. Reads fail for missing records or bytes and return
-data only after EOF verification and successful close. A memo copy creates its
-destination output record under this same layout.
+`Store` and `RecordStore`. `blob.ResultRecordKey` supplies W1's persisted
+output and manifest layout. `Name` is `result`. `Scope.Key` is
+`<run>/<attempt>/<generation>`, alongside the authorized repo/ref/pipeline/job.
+The exact uploader also stays in `Record.Source`. `ResolveWriteKey` derives this
+layout from the bound attempt and refuses another run/job or a supplied scope
+key. Empty output has an explicit blob and record. Required reads verify EOF and
+successful close. Memo copies use the same destination layout.
 
-`blob.MemoRecordName` is `result` for memo writers and exact-key readers.
+`blob.MemoRecordName` is `output` for memo writers and exact-key readers.
+A manifest-only memo retains W1's separate `manifest` name.
 Read-only remote memo hits verify bounded output, manifest/member agreement
 and member bytes before granting artifact access. Failed lookups or verification
 produce a miss. Caller cancellation remains an error.
@@ -1383,7 +1385,8 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `NewSignedStore` | NewSignedStore verifies transferred bytes and never falls back to cache-service routes. |
 | `ObjectKey` | ObjectKey produces teams/<team>/cas/<sha256> after validating both components. |
 | `MemoKey` | MemoKey cannot share an unclaimed result across pipelines. |
-| `MemoRecordName` | Names the memo result consistently for writers and exact-key readers. |
+| `MemoRecordName` | Names the persisted memo output consistently for writers and exact-key readers. |
+| `ResultRecordKey` | Names output and manifest records for an exact persisted attempt. |
 | `MemoNamespace` | MemoNamespace reserves manual:<ref> for submitter-vouched writes. |
 | `MemoLookup` | MemoLookup uses the authority's server-derived scope and verified default fallback. |
 | `CopyMemoRequest` | CopyMemoRequest creates output and manifest edges atomically with the hit. |

@@ -294,10 +294,7 @@ func (r *memoRun) save(ctx context.Context, output []byte) error {
 	}
 	request := blob.CommitRecordRequest{Source: data.Identity, Authority: data.Authority, Key: key}
 	if len(r.n.Plan.Artifacts) > 0 {
-		manifest, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: data.Authority, Budget: data.Budget, Key: blob.RecordKey{
-			Team: data.Identity.Team, Kind: blob.KindManifest, Name: data.Identity.RunID,
-			Scope: blob.Scope{Repo: data.Authority.Repo, Ref: data.Authority.Ref.Scope, Pipeline: data.Pipeline, Job: r.n.Plan.ID},
-		}})
+		manifest, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: data.Authority, Budget: data.Budget, Key: blob.ResultRecordKey(data.Identity.Attempt.Value, data.Authority.Repo, data.Authority.Ref.Scope, data.Pipeline, blob.KindManifest)})
 		if err != nil {
 			return err
 		}

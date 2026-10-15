@@ -372,7 +372,7 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 		if !part.digest.Set {
 			continue
 		}
-		key := ResultBlobKey(request.Destination, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, part.kind)
+		key := blob.ResultRecordKey(request.Destination, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, part.kind)
 		scope, err := r.rules.RecordNamespace(key)
 		if err != nil {
 			return blob.MemoHit{}, err

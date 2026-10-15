@@ -30,7 +30,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 	manifest := digest(manifestBody)
 	key := blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}
 	result := blob.RecordLookupResult{Found: true, Record: blob.Record{
-		Key:    blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: "result", Scope: blob.Scope{Repo: key.Repo, Ref: blob.RefScope{Ref: "main", Verified: true}, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}},
+		Key:    blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: blob.MemoRecordName, Scope: blob.Scope{Repo: key.Repo, Ref: blob.RefScope{Ref: "main", Verified: true}, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}},
 		Digest: d, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest},
 		RefFacts: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Verified: true}, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "verified-delivery", SHA: "sealed-sha"},
 	}, Members: []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "out", Size: 8, Mode: 0o644}}}
@@ -46,7 +46,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 		return io.NopCloser(strings.NewReader(bodies[tr.Digest])), nil
 	})})
 	r := records{lookup: func(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
-		if q.Key.Name != "result" {
+		if q.Key.Name != blob.MemoRecordName {
 			t.Fatalf("memo lookup cannot find the committed result record: %+v", q.Key)
 		}
 		if !q.VerifiedDefaultOnly || q.Authority.CapabilityRef != "user-repo-read" || q.Authority.Repo != key.Repo || q.Key.Scope.Ref.Ref != "" {

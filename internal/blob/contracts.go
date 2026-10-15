@@ -297,7 +297,7 @@ func NewSignedStore(options SignedStoreOptions) Store { return newSignedStore(op
 func ObjectKey(team string, digest Digest) (string, error) { return objectKey(team, digest) }
 
 // MemoRecordName identifies the result within a scoped memo key.
-const MemoRecordName = "result"
+const MemoRecordName = "output"
 
 // safety: MemoKey cannot share an unclaimed result across pipelines.
 type MemoKey struct {

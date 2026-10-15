@@ -2,6 +2,54 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 merged-store wiring
+
+**Completed W7 record-layout integration.** Output and artifact capture now use
+W1's persisted exact-attempt layout through `blob.ResultRecordKey`. Memo writers
+and exact readers use `MemoRecordName=output`. W1 admission, copy destinations
+and result attachment consume the shared builder. The former
+`store.ResultBlobKey` is deleted and every caller is migrated. C1's W7 layout
+paragraphs now match these real persistence APIs. No schema changed.
+
+Invariant: a result key identifies the exact tenant/run/job/attempt/generation,
+and a caller cannot select another run/job or supply the result scope key.
+A 96-case generated property covers key separation and refused selectors.
+The existing filesystem/S3 archive cells also write output, capture artifacts,
+commit memo, reopen SQLite, materialize memo and stage artifacts using real
+`Tenant.BlobRecords` and verified physical manifests. Only authenticated binding
+and physical S3 service are fixtures. No component-only cell was added.
+
+**Completed W7 physical log wiring.** `Tenant.RecordSegments` now uses
+`blob.LogObjectKey`, and persisted segment numbering starts at one. The duplicate
+`store.LogSegmentObjectKey` and its callers' old layouts are removed. Store and
+acceptance fixtures use the common slots. The existing filesystem-records cell
+is unskipped. The former S3 component cell now uses real tenant segment commits,
+reopens and reads through the committed reader, and is named `s3-records`.
+Both backends exercise lost PUT replies, exact replay, offsets, retained bytes
+and revoked-reader refusal. This closes the physical-log-slot handoff below.
+
+**Remaining W1/W2/W3/W8/W9 integration.** Authenticated DataAuthority, BindData,
+NewDataClient and policy-router methods still panic as unimplemented. Hosts
+still need fresh StorageBinding values. Repo-reader exact lookup still needs
+server-derived tenant/default-ref selection. The controllerwire client has no
+segment-commit method or factory for the declared LogTransport. W2/W9 must bind
+those existing interfaces before the older output/log clients and their host
+callers can be cut over. W7 has not invented a second authentication protocol.
+Physical collection and filesystem expiry still need maintenance construction.
+
+**DESIGN: record mutation authorization.** The known W1b regression still fails.
+CommitRecord and CopyMemo can persist one output and expose a read set after a
+namespace callback crosses a job lease, leaf capability or ancestor expiry.
+W7 reproduced all six cases and left the mechanism unchanged under the brief's
+two-strikes rule. The lead's transaction-local publication redesign remains open.
+
+Full TestStorage passes with 81 passing events and 424 native/platform skips.
+Whole-repository build, all 173 package compilations, storage tests, scoped store
+and host tests, vet, commentcheck, sleepcheck and embedded-doc drift pass.
+The store selection excludes that separately reproduced red regression.
+The two duplicate key builders remove 23 legacy definition lines. The remaining
+output/log transports are still live and remain an unfinished hard cut.
+
 ## From W7 amended merge and manifest fixtures
 
 **Completed W7 merge resolution.** All seven conflicted working paths are

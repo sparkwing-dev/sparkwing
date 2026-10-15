@@ -16,8 +16,9 @@ The controller remains responsible for filtering its results by the live read se
 
 `OutputData.Put` checks the shared 16 MiB output cap and the exact job or imported
 publication binding before upload. It creates a `KindOutput` record after the
-verified receipt. The record uses the run ID as `Name`, with repo, ref, pipeline
-and producer job in `Scope` and an empty `Scope.Key`. Empty output is an explicit
+verified receipt. `ResultRecordKey` uses `Name=result` and a scope key containing
+run, attempt and generation, alongside repo, ref, pipeline and producer job.
+Empty output is an explicit
 blob and record. The store still rechecks liveness and reference authority in
 the record transaction.
 
@@ -49,8 +50,8 @@ failure becomes a miss. A depcache failure returns `ErrNotFound` for a cold star
 The local key's ref is not a remote selector. Remote lookups validate their
 logical key fields and leave the verified default ref to the server, including
 when the local reader has no ref.
-Caller cancellation remains an error. Memo lookups use `MemoRecordName`, shared
-with the writer. A hit must pass output-size and manifest/member agreement
+Caller cancellation remains an error. Memo lookups use `MemoRecordName=output`,
+shared with the writer and persisted memo lookup. A hit must pass output-size and manifest/member agreement
 checks before it grants artifact access.
 Artifact reads are limited to the output, manifest, member and depcache digests
 of accepted cache lookups.
@@ -92,8 +93,7 @@ The filesystem and S3 manifest boundaries generate file metadata and reject
 tenant substitution, corrupt bytes, truncation and malformed members. The SQLite
 record boundaries reject forged metadata and borrowed same-run upload receipts,
 then admit independently verified member uploads and read them after reopening.
-Those record fixtures use W1's `ResultBlobKey`; the output/manifest key and memo
-record-name conflicts with C1 remain open.
+Record fixtures, writers and store checks share `ResultRecordKey`.
 
 Artifact capture and staging live in `internal/artifacts`. Its `Data` value binds
 the byte store, record store and authority to the same job. Capture uploads each
@@ -102,10 +102,9 @@ answer does not establish an upload receipt. It commits the manifest only after
 all uploads succeed. Staging requires an authorized record and verifies both
 the manifest and each member before replacing a destination file.
 
-Artifact records use `KindManifest`, the run ID as `Name`, and the authorized
-repository, ref, pipeline and producer job in `Scope`. `Scope.Key` is empty.
-Attempt and generation stay in `Record.Source`. A memo copy must create its
-destination manifest under the destination run and job's same key layout.
+Artifact records use `KindManifest` and the exact-attempt `ResultRecordKey`
+layout. A memo copy uses that same layout for its destination manifest.
+Attempt and generation also stay in `Record.Source`.
 `Manifest` and `DecodeManifest` define the shared bytes/member agreement for
 staging and memo reads. This includes each file's path, digest, size and mode.
 
@@ -328,3 +327,15 @@ Required artifact reads fail before replacing the affected file. Record
 transactions and controller authorization are fakes. Separate generated capture
 and staging properties check symlink and path containment on Unix. Native
 Windows filesystem evidence remains required.
+
+The filesystem and S3 archive proofs also write outputs, capture artifacts and
+commit memo through real tenant record transactions. They reopen SQLite, verify
+required output bytes, materialize the memo and stage its artifacts. Their data
+signer is a contract fixture around real reservations, receipts and physical
+verification because authenticated controller binding remains separate.
+
+The physical log proofs use real tenant segment commits and reads with both
+backends. Signed slots and stored references share `LogObjectKey`. Segment
+numbering starts at one. They cover replay, reopening, offset reads, retained
+bytes and revoked-reader refusal. Authentication and award issuance are seeded
+fixtures. Native placement and transport acceptance remain separate.

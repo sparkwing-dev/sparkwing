@@ -160,7 +160,7 @@ func TestCaptureCommitsVerifiedMembers(t *testing.T) {
 	if q.Key.Kind != blob.KindManifest || q.Digest != record.Digest || len(q.Members) != 1 {
 		t.Fatalf("commit: %+v", q)
 	}
-	if q.Key.Name != "run" || q.Key.Scope.Pipeline != "pipeline" || q.Key.Scope.Job != "build" || q.Key.Scope.Key != "" {
+	if q.Key != blob.ResultRecordKey(d.Identity.Attempt.Value, d.Authority.Repo, d.Authority.Ref.Scope, d.Pipeline, blob.KindManifest) {
 		t.Fatalf("record key: %+v", q.Key)
 	}
 	if m := q.Members[0]; m.Path != "a.txt" || m.Size != 5 || m.Mode != uint32(info.Mode().Perm()) || m.Digest != digestOf([]byte("alpha")) || m.ManifestDigest != q.Digest {
