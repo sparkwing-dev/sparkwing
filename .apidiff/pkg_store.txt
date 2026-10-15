@@ -1824,6 +1824,7 @@ func (o *Operator) CreateTeam(ctx context.Context, team Team) error
 func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error)
 func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error
+func (o *Operator) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation int64) (GitHubAppInstallation, error)
 func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSchedule, error)
 func (o *Operator) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err error)
@@ -1835,6 +1836,7 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error)
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error
 func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonLease, after string, limit int) ([]ControllerRun, error)
+func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error)
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
@@ -2819,7 +2821,6 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error)
 func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string, now time.Time) ([]Account, error)
-func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
 func (s *Store) AsOperator() *Operator
 func (s *Store) AuthGenerations(ctx context.Context, authority capability.AuthorityRef, team string) (capability.AuthGenerations, error)
 func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
@@ -2851,7 +2852,6 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error)
 func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error)
-func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (s *Store) Close() error
 func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error)
 func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error)
@@ -2894,8 +2894,6 @@ func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error)
 func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error)
-func (s *Store) DeleteCronSchedule(ctx context.Context, id string) error
-func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
@@ -2929,8 +2927,6 @@ func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
-func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
-func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (s *Store) GetNodeLog(ctx context.Context, team Team, runID, nodeID string, attempt, generation int64) (NodeLog, error)
@@ -2962,8 +2958,6 @@ func (s *Store) LatestNodeLog(ctx context.Context, team Team, runID, nodeID stri
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
-func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) ([]CronFire, error)
-func (s *Store) ListCronSchedules(ctx context.Context) ([]CronSchedule, error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
 func (s *Store) ListEgressUsage(ctx context.Context, month string) (_ []EgressUsage, err error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
@@ -3023,7 +3017,6 @@ func (s *Store) ReconcileFreeEventBytes(ctx context.Context) error
 func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, marks map[Team]int64, now time.Time) (err error)
 func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error
 func (s *Store) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
-func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
@@ -3047,7 +3040,6 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req ClaimInputRequest, now time.Time) (ClaimInput, error)
-func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) error
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
 func (s *Store) ReversePayment(
 	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
@@ -3070,11 +3062,6 @@ func (s *Store) SetClaimProfileResolver(resolver ClaimProfileResolver)
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)
 func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error)
-func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
-func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
-func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
-func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
-func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error)
 func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error
 func (s *Store) SetIntakePolicy(policy IntakePolicy)

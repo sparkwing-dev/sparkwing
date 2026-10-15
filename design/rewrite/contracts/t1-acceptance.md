@@ -4,6 +4,13 @@
 
 ## Amendment 1 integration evidence
 
+`TestSurface/surface-schedules-and-managed-timers/store-sqlite` checks schedule
+persistence below CLI, timers and HTTP. Two teams share one repository path.
+Foreign reads, edits and fire history stay inaccessible. A failed history insert
+rolls back the cursor. Reopening preserves both schedule history and operator tick
+metadata. Tenant deletion preserves the other team's schedule. The native
+managed-timer cells remain pending.
+
 `TestPlacement/placement-ordered-matching/store-sqlite` checks that an Actions
 push cannot claim another repository's earlier trigger. Two jobs prove that soft
 preferences rank eligible choices and remain optional. An ineligible oldest job

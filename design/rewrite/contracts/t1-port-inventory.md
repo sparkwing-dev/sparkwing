@@ -1,3 +1,11 @@
+The retained `pkg/store/crons_test.go` suite now uses Tenant for schedule
+operations and Operator for tick metadata. Fired history fixtures seed the final
+same-team run reference. Non-run entries store NULL. Existing cursor, override,
+pause, retention, deduplication and tenant assertions remain active. The SQLite
+`surface_test.go:TestSurface/surface-schedules-and-managed-timers/store-sqlite`
+cell adds rollback and reopening evidence. Native timer and HTTP cells remain
+pending. This adds no archived source-function port identity.
+
 # Acceptance test port inventory
 
 `TestPlacement/placement-ordered-matching/store-sqlite` adds final-store evidence

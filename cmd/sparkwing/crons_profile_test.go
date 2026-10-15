@@ -46,7 +46,7 @@ func newCronsProfileFixture(t *testing.T) *cronsProfileFixture {
 
 func (f *cronsProfileFixture) push(t *testing.T) {
 	t.Helper()
-	svc := &crons.Service{Store: f.store}
+	svc := &crons.Service{Store: f.store, Schedules: teststore.ForTeam(t, f.store, store.DefaultTeam)}
 	if _, err := svc.ArmPushed(context.Background(), crons.ArmPush{
 		RepoURL: "https://github.com/acme/widgets.git",
 		Branch:  "main",
@@ -121,7 +121,7 @@ func TestCronsSetPauseProfile_PausesOnTheController(t *testing.T) {
 	if !strings.Contains(out, "is paused") {
 		t.Errorf("pause did not report the new state:\n%s", out)
 	}
-	rows, err := (&crons.Service{Store: f.store}).List(context.Background())
+	rows, err := (&crons.Service{Store: f.store, Schedules: teststore.ForTeam(t, f.store, store.DefaultTeam)}).List(context.Background())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestCronsInstallAndUninstallProfile_PushesAndRemovesARepository(t *testing.
 		t.Errorf("install did not report the host's own entry:\n%s", out)
 	}
 
-	svc := &crons.Service{Store: f.store}
+	svc := &crons.Service{Store: f.store, Schedules: teststore.ForTeam(t, f.store, store.DefaultTeam)}
 	rows, err := svc.List(context.Background())
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -277,7 +277,7 @@ func TestCronsInstallProfile_PushesOnceARemoteBranchCarriesHeadAndWarnsWhenDirty
 	if !strings.Contains(warning, "uncommitted edits") {
 		t.Errorf("a dirty working tree drew no warning:\n%s", warning)
 	}
-	rows, err := (&crons.Service{Store: f.store}).List(context.Background())
+	rows, err := (&crons.Service{Store: f.store, Schedules: teststore.ForTeam(t, f.store, store.DefaultTeam)}).List(context.Background())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

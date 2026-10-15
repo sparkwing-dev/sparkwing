@@ -4,6 +4,29 @@
 
 ## Amendment 1: authority and execution seams
 
+Schedule reads, edits, deletion and fire history belong to `Tenant`. The thirteen
+implicit-default-team `Store` schedule methods are removed. Local CLI and
+dashboard constructors select the registered DefaultTeam. Controller requests
+retain their authenticated tenant. A deployment tick enumerates teams through
+`Operator.ListCronSchedulesAcrossTeams`, then selects each tenant before resolving
+its schedules. `Service.Schedules` is required for tenant operations. A nil value
+selects deployment enumeration only for Tick.
+
+`Operator.RecordCronTick` and `Operator.GetCronTick` persist deployment tick
+metadata atomically in `settings`. The old Store methods and their
+`sparkwing_meta` writes are removed. The cadence guard reads the same `settings`
+rows its existing writer commits. `Tenant.ArmCronSchedule` writes the required
+`repo_key` through `runspec.CanonicalRepository`. GitHub identities require the
+resolved numeric repository ID. A non-run history entry stores SQL NULL for
+run_id. A fired history entry retains the final same-team run foreign key.
+
+The SQLite `surface-schedules-and-managed-timers/store-sqlite` proof checks two
+teams sharing a repository path, foreign read/edit/history refusal, atomic rollback
+when history insertion fails, nanosecond timestamps, reopening, tick metadata and
+tenant deletion. The generated package property varies 32 pairs of schedules
+and mutation order. Native timers, schedule launch admission and HTTP remain
+integration obligations.
+
 [Amendments 1](amendments-1.md) records the worker requests and assignments.
 These declarations leave transaction implementation with W1.
 

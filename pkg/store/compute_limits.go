@@ -10,17 +10,7 @@ import (
 	"time"
 )
 
-// Compute guards bound what an install can start before the credit ledger
-// bills it. Each guard is one non-negative integer held in sparkwing_meta,
-// and zero means unlimited, so an install that sets none behaves as it did
-// before the guards existed.
-//
-// A guard is measured per principal wherever the ticket's team is a principal:
-// the runner guards count the cloud runners one principal holds, and the node
-// and hourly guards count what one principal's runs carry, applying only when
-// that principal holds a metered token. The two global guards are the
-// operator's own ceiling and count every run on the controller, metered or
-// not.
+// Compute guards use zero for an unlimited operator ceiling.
 const (
 	// ComputeLimitConcurrentRunners caps the cloud runners one team holds
 	// at once, counted across every token of the team.
@@ -196,7 +186,7 @@ var computeLimitsSQL, computeLimitKeyArgs = func() (string, []any) {
 		args = append(args, computeLimitKey(name))
 		keys = append(keys, "?")
 	}
-	return `SELECT key, value FROM sparkwing_meta WHERE key IN (` +
+	return `SELECT key, value FROM settings WHERE key IN (` +
 		strings.Join(keys, ",") + `)`, args
 }()
 

@@ -61,7 +61,7 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 			row.GitHubInstallationID = push.GitHubInstallationID
 			row.GitHubRepositoryID = push.GitHubRepositoryID
 		}
-		stored, created, aerr := s.schedules().ArmCronSchedule(ctx, row, now)
+		stored, created, aerr := s.Schedules.ArmCronSchedule(ctx, row, now)
 		if aerr != nil {
 			return report, aerr
 		}
@@ -79,7 +79,7 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 		report.Schedules = append(report.Schedules, stored)
 	}
 
-	existing, err := s.schedules().ListCronSchedules(ctx)
+	existing, err := s.Schedules.ListCronSchedules(ctx)
 	if err != nil {
 		return report, err
 	}
@@ -94,7 +94,7 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 		} else if sched.GitHubRepositoryID != 0 || sched.RepoPath != push.RepoURL {
 			continue
 		}
-		if err := s.schedules().SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
+		if err := s.Schedules.SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
 			return report, err
 		}
 		report.Withdrawn++
@@ -110,7 +110,7 @@ func (s *Service) DisarmRepoURL(ctx context.Context, repoURL string) (int, error
 	if repoURL == "" {
 		return 0, errors.New("crons: a repository URL is required to disarm pushed schedules")
 	}
-	return s.schedules().DeleteCronSchedulesForRepo(ctx, repoURL)
+	return s.Schedules.DeleteCronSchedulesForRepo(ctx, repoURL)
 }
 
 // ControllerHealth is [Service.Health] for a process that evaluates schedules
@@ -125,7 +125,7 @@ func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
 	for _, r := range rows {
 		health.count(r)
 	}
-	tick, err := s.Store.GetCronTick(ctx)
+	tick, err := s.Store.AsOperator().GetCronTick(ctx)
 	if err != nil {
 		return health, err
 	}

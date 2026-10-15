@@ -105,3 +105,13 @@ and Kubernetes instance correlation before W1 can implement safe cleanup.
 **W1b priority (lead).** After the two items above, prioritize legacy cutovers and real integration over more test coverage: retire the legacy claim-credit, raw storage, output, direct-upload and log paths you own, migrating callers with the smallest change (the W1 scope note above applies to you in the other direction for caller migration only), and join W1's real issuance/start/finish transactions to the billing helpers (A1-27).
 
 **DESIGN approved (lead): W8 pending-claim outcomes.** Invariant: a committed award is always owned, and every independent stop reason (policy refusal, cancellation, idle, claim deadline, version) stays observable to the caller. The pending claim returns the award and the stop reason as independent results. Run adopts any returned award first, then applies the stop reason, joins the held hosts, and returns that reason; the joining defer never replaces a stop reason with success. Existing owners of cancellation, idle, claim-deadline and version checks stay as they are. `TestLoopPendingAwardPreservesPolicyDenial` must go green, plus a property test over interleavings of award delivery and each stop reason.
+
+W1's schedule handle cut is complete. Thirteen implicit-default-team Store
+methods are removed. Local constructors select DefaultTeam. Controller requests
+use their authenticated Tenant, and deployment ticks select each enumerated team.
+Tick metadata belongs to Operator and settings. Arming writes the canonical
+repository key, and non-run history stores a nullable run reference. The SQLite
+surface-schedules-and-managed-timers/store-sqlite cell passes through rollback
+and reopening. W9/W6 still own old cron YAML fixtures and timer/HTTP integration.
+Unverified GitHub push callers must supply resolved repository identity before
+arming. W1 has not changed foreign contracts or W1b implementation files.
