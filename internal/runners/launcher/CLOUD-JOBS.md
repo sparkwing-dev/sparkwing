@@ -107,6 +107,9 @@ kinds in one call. The server supplies team, holder, generation, resources and
 the one-time bootstrap. The launcher has no caller-selected holder override.
 Transport failures never trigger a second claim in the adapter.
 
+`sparkwing-runner launch` uses the shared runner grammar. Both `--image` and
+`--docker-image` require digest-pinned operator images. Namespace defaults to
+`sparkwing-jobs`. Deadlines come from the award rather than a launcher flag.
 `sparkwing-runner launch --poll <duration>` sets the interval between claim and
 reconciliation cycles. The duration must be positive. Omitting it keeps the
 runtime's configured interval, which defaults to five seconds.

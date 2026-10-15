@@ -16,10 +16,11 @@ import (
 )
 
 type stateFixture struct {
-	wingd.FuncRunStore
 	reconcile func(context.Context, store.SingletonLease) (wingd.LocalActivity, error)
 	watch     func(context.Context, func(wingd.LocalActivity) error) error
 }
+
+func (*stateFixture) Ready() error { return nil }
 
 func (*stateFixture) TypeSafeAPIKey(context.Context) (string, error) { return "", nil }
 

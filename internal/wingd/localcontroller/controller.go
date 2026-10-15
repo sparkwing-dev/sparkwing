@@ -18,7 +18,7 @@ import (
 
 // State supplies the local recovery and activity projection over the owned store.
 type State interface {
-	wingd.RunStore
+	Ready() error
 	TypeSafeAPIKey(context.Context) (string, error)
 	Reconcile(context.Context, store.SingletonLease) (wingd.LocalActivity, error)
 	Watch(context.Context, func(wingd.LocalActivity) error) error
@@ -97,13 +97,14 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if err != nil {
 		return nil, err
 	}
-	return &localController{State: services.State, services: services, store: s, queue: queue}, nil
+	return &localController{State: services.State, services: services, store: s, tenant: tenant, queue: queue}, nil
 }
 
 type localController struct {
 	State
 	services Services
 	store    *store.Store
+	tenant   *store.Tenant
 	queue    *runners.Loop
 	mu       sync.Mutex
 	lease    store.SingletonLease

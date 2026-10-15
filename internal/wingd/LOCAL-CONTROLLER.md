@@ -48,6 +48,15 @@ Failure of one stops and joins all three. Store close refuses while those
 workers are running. The runtime continues to own HTTP shutdown and closes the
 composition only after its handlers and admission finalizers join.
 
+Admission reads run state through the composition's `DefaultTeam` handle.
+Cancellation calls `Tenant.TransitionRun` with the elected reaper fence. It
+records the request while live holders drain, and maintenance finishes the run
+after their leases end. Repeated requests preserve the first reason and leave
+terminal results intact. Missing and foreign runs fail. Stale fences cannot mutate state.
+Disconnect finalization logs failures and remains usable during runtime drain
+because admission finalizers join before store close. Readiness requires the
+open, reconciled owner and the shared state binding's readiness check.
+
 Readiness waits for reconciliation, admission startup and the API serving loop.
 When `DashboardAddress` is set, it also waits for the dashboard serving loop.
 An empty address serves only `api.sock`. `AwaitReady` waits for an active start
@@ -107,13 +116,14 @@ the current schema.
 ## Integration requirements
 
 `localcontroller.Config.Bind` still needs the production shared services.
-Its `State` interface supplies admission's run-store operations, the owned
-secrets read, startup reconciliation and live activity observation. The binder
+Its `State` interface supplies readiness, the owned secrets read, startup
+reconciliation and live activity observation. The binder
 also supplies the authenticated API and dashboard handlers, provisioned claimant
 and native host services. `Open` constructs the shared queue from those inputs.
 The SQLite composition tests substitute these foreign boundaries. They prove
-store ownership and leased maintenance, but do not establish working policy
-routes or a production activity projection. `TestNativeStoreOwnerW8/local_controller` exercises `Config.Open`, leased
+store ownership, admission cancellation and leased maintenance. Shared policy
+routes and the production activity projection remain unbound.
+`TestNativeStoreOwnerW8/local_controller` exercises `Config.Open`, leased
 reconciliation, the shared queue, native host, persisted completion and joined
 shutdown. It supplies fixture state/HTTP, enrollment, version policy and source
 services. It does not establish production activity or peer authorization.

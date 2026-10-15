@@ -208,10 +208,19 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		if _, err := owner.Reconcile(ctx); err != nil {
 			t.Fatal(err)
 		}
+		if err := owner.Ready(); err != nil {
+			t.Fatal(err)
+		}
+		if terminal, err := owner.IsRunTerminal("run"); terminal || err != nil {
+			t.Fatalf("owner store before execution: terminal=%t error=%v", terminal, err)
+		}
 		executionErr = owner.Run(ctx, func(wingd.LocalActivity) error { return nil })
 		if executionErr != nil {
 			requireLocalCancellationW8(t, executionErr)
 			executionErr = nil
+		}
+		if terminal, err := owner.IsRunTerminal("run"); !terminal || err != nil {
+			t.Fatalf("owner store after execution: terminal=%t error=%v", terminal, err)
 		}
 	}
 	if executionErr != nil {
@@ -242,10 +251,11 @@ func requireLocalCancellationW8(t *testing.T, err error) {
 }
 
 type nativeLocalStateW8 struct {
-	wingd.FuncRunStore
 	done <-chan struct{}
 	stop context.CancelFunc
 }
+
+func (*nativeLocalStateW8) Ready() error { return nil }
 
 func (*nativeLocalStateW8) TypeSafeAPIKey(context.Context) (string, error) { return "", nil }
 

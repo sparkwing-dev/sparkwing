@@ -13,10 +13,9 @@ type RunStore interface {
 	// means the store could not answer, and admission evicts the run with
 	// that reason rather than admitting it blind.
 	IsRunTerminal(runID string) (bool, error)
-	// FinalizeRun marks a run cancelled because its admission connection
-	// went away without releasing. It reports its own failures.
+	// FinalizeRun requests cancellation after an admission disconnect and reports its own failures.
 	FinalizeRun(runID string)
-	// FinalizeCancelledRuns marks every named run cancelled with reason.
+	// FinalizeCancelledRuns requests cancellation of every named run with reason.
 	FinalizeCancelledRuns(runIDs []string, reason string) error
 	// Ready returns nil when the store is open and usable, else the reason
 	// it is not. It is called on the handshake path, so it must bound its
