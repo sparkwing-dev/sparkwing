@@ -51,6 +51,7 @@ func (s *Server) registerCredentialRoutes(mux *http.ServeMux) {
 	endpoints := []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/secrets", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleListSecrets},
 		{Method: "POST", Pattern: "/api/v1/secrets", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreateSecret},
+		{Method: "GET", Pattern: "/api/v1/secrets/{name}", Authentication: capability.AuthCapability, Decode: secretReadTarget, Handle: s.handleReadSecret},
 		{Method: "DELETE", Pattern: "/api/v1/secrets/{name}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteSecret},
 		{Method: "POST", Pattern: "/api/v1/secrets/rotate", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRotateSecrets},
 		{Method: "GET", Pattern: "/api/v1/team/git-credentials", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleListGitCredentials},

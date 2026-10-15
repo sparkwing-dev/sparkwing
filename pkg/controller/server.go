@@ -55,6 +55,7 @@ type Server struct {
 	resolveCredentialWriter    func(context.Context, store.Team) (CredentialWriter, error)
 	resolveCredentialRotator   func(context.Context, store.Team) (CredentialRotator, error)
 	resolveSourceAuditReader   func(context.Context, store.Team) (SourceAuditReader, error)
+	resolveSecretReader        func(context.Context, store.Team) (SecretReader, error)
 
 	peerPrincipal func(*http.Request) *Principal
 
@@ -357,12 +358,7 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server {
 	return s
 }
 
-// WithSecretsCipher binds the controller's secret encryption-at-rest
-// cipher. A row written before the cipher was configured fails the
-// read with 500; re-set those secrets through the API. Pass nil
-// to keep the controller running unencrypted. The parameter is the
-// local Cipher interface; any concrete type satisfying that method
-// set works -- the default implementation lives in internal/secrets.
+// WithSecretsCipher configures row-bound credential encryption and session-key protection.
 func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	s.secretsCipher = c
 	if s.store != nil {
@@ -953,8 +949,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/credits/units", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
 	mux.Handle("GET /api/v1/credits/payments/{reference}", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaidGrantLookup)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
-
-	mux.Handle("GET /api/v1/secrets/{name}", newClaimSensitiveRoute(claimSecretKinds, secretRunBinding, http.HandlerFunc(s.handleClaimSecret)).orElse(requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret), ScopeTeamAdmin)))
 
 	router := http.NewServeMux()
 	s.registerOperatorRoutes(router)

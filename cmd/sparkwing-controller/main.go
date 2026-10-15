@@ -788,8 +788,7 @@ func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Sto
 		srv.WithSecretsCipher(keylessCipher{})
 		return nil
 	}
-	_, err = srv.ResealStoredSecrets(ctx)
-	return err
+	return nil
 }
 
 // safety: the generated key sits beside the database on its volume, so a

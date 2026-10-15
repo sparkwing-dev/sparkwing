@@ -74,6 +74,8 @@ func decodeCredentialRequest[T any](r *http.Request) (*T, error) {
 
 func credentialWriteError(err error) error {
 	switch {
+	case errors.Is(err, errBoundCipherRequired):
+		return &apierr.Error{Code: apierr.Unavailable, Message: "bound credential encryption is unavailable"}
 	case errors.Is(err, secrets.ErrKeyRefused):
 		return &apierr.Error{Code: apierr.Conflict, Message: "the secrets key is outside this controller home", Hint: "point SPARKWING_SECRETS_KEY_FILE inside this home"}
 	case errors.Is(err, store.ErrSecretLimit):

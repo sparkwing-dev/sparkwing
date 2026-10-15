@@ -54,7 +54,7 @@
     {
       "route": "/api/v1/secrets/{name}",
       "kind": "api",
-      "exempt": "Deletion needs live tenant-admin authority and a committing transaction adapter. Probing the unconfigured controller would measure refusal. Authorized latency, cold start and response bytes are unmeasured.",
+      "exempt": "Reads need live member or declaring claim authority, bound envelopes and the SecretReader transaction. Deletion needs tenant-admin authority and its writer. These adapters and fixtures are absent from the dashboard corpus, so probes would measure refusal. Authorized latency, cold start and response bytes are unmeasured.",
       "baselines": {}
     },
     {

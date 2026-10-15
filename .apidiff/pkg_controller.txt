@@ -253,9 +253,6 @@ func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunReques
 type LauncherSyncReader interface {
 	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 }
-type LegacyCipher interface {
-	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
-}
 func LimitsProfile(name string) (LimitsProfileValues, error)
 const LimitsProfileCloud = "cloud"
 const LimitsProfileCloudFree = "cloud-free"
@@ -420,6 +417,10 @@ const ScopeTriggersClaim = store.ScopeTriggersClaim
 const ScopeTriggersRead = store.ScopeTriggersRead
 func ScopesForRole(role store.Role) []string
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)
+type SecretReader interface {
+	Team() store.Team
+	ReadSecret(context.Context, capability.Authorized) (*store.Secret, error)
+}
 func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
@@ -433,7 +434,6 @@ func (s *Server) Metering() bool
 func (s *Server) MultiTeam() bool
 func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
-func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCounts, error)
 func (s *Server) RunStoragePass(ctx context.Context) (bool, error)
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
@@ -483,6 +483,7 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
+func (s *Server) WithSecretReader(resolve func(context.Context, store.Team) (SecretReader, error)) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server

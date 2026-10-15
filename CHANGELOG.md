@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Secret-by-name reads use the shared capability policy and a tenant transaction that rechecks authority
+  Masked values require a live, declaring claim. Members read unmasked config within their own team. Embedded controllers supply `WithSecretReader`. Startup resealing and `Server.ResealStoredSecrets` are removed. See [migration guide](docs/migrations/_unreleased.md#secret-by-name-reads).
 - **controller (Breaking):** Credential rotation and source-audit reads use the shared team policy
   Rotation updates only the authenticated team's bound secrets and git credentials in one transaction. Audit rows carry capability, repository and job identities. Missing tenant adapters refuse with `policy_missing`. See [migration guide](docs/migrations/_unreleased.md#credential-maintenance).
 - **controller (Breaking):** Secret and git-credential mutations require `team.admin`, session CSRF and tenant transactions that recheck authority before commit

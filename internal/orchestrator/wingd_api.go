@@ -327,21 +327,10 @@ func (a *wingdAPI) handlerFor(ctx context.Context, rw, ro *store.Store) http.Han
 	return a.handler
 }
 
-// safety: a store whose sealed values this daemon cannot open must not gain
-// values sealed under a second key, so its secret routes answer with the
-// reason instead; every other route keeps serving, because runs do not wait
-// on a secrets key.
 func (a *wingdAPI) prepareSecrets(ctx context.Context, rw *store.Store) controller.Cipher {
 	a.secretsProblem = ""
 	cipher := a.secrets.For(rw)
 	if err := a.secrets.MissingKey(ctx, rw); err != nil {
-		return a.refuseSecrets(err)
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), APIRequestTimeout)
-	defer cancel()
-	// safety: prove the key against existing values before serving secret reads.
-	srv := controller.New(rw, a.logger).WithSecretsCipher(cipher)
-	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
 		return a.refuseSecrets(err)
 	}
 	return cipher

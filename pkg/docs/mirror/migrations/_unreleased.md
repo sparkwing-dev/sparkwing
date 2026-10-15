@@ -9,6 +9,25 @@ protects the persisted session signing key. Forged, cross-session and
 foreign-origin proofs return `forbidden`. Key access failures return
 `unavailable`.
 
+## Secret-by-name reads
+
+GET `/api/v1/secrets/{name}` uses the shared capability policy. Member or
+verified local authority with `secrets.read` or `team.admin` reads unmasked
+config in its own team. Masked values require a live `secrets.release` claim
+whose sealed run declares the name and permits its pipeline/shared scope and
+reserved pool. Machine roots and deployment-admin tokens gain no read access.
+
+Embedded controllers supply `WithSecretReader` with the authority-bearing tenant
+transaction. Missing adapters return `policy_missing`. Bound encryption is
+required, errors use the shared API envelope, and all responses use no-store.
+Duplicate selectors and malformed queries fail after authentication.
+
+`Server.ResealStoredSecrets` and `LegacyCipher` are removed with the startup
+migration. Row-secret helpers require BoundCipher and never fall back to
+unbound Seal/Open methods. Plaintext
+and pre-team envelopes remain unreadable. Rewrite them through the authenticated
+credential API. Explicit key rotation remains available for bound envelopes.
+
 ## Credential maintenance
 
 Secret-key rotation requires live member or verified local `team.admin`

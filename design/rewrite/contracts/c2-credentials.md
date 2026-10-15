@@ -179,8 +179,47 @@ ListSecrets and GitCredentials methods. The default resolver uses Store.ForTeam.
 WithCredentialInventoryReader supplies that same contract to embedded
 controllers and tests. A nil or foreign-team reader fails closed. No C1
 signature changes. The replaced legacy list handlers and registrations are
-removed. Credential writes and audited per-claim secret release remain separate
-cutovers.
+removed. Credential writes and secret-by-name reads use the contracts below.
+
+### Secret-by-name reads
+
+GET `/api/v1/secrets/{name}` uses PolicyRouter and the existing member
+`secrets.read`/`team.admin` or live `secrets.release` claim alternatives.
+The authenticated team selects the reader. `run` and `pipeline` are selectors.
+Duplicate selectors, malformed queries and invalid names return `bad_request`
+after authentication. HEAD is refused. All responses use no-store.
+
+Invariant: a masked value leaves only for a live, declaring claim whose sealed
+pipeline/shared scope and reserved pool permit the row. Members and verified
+local peers read unmasked config within their authenticated tenant. Neither a
+machine root nor a deployment-admin token substitutes for a claim or member.
+
+SecretReader is a local C2 interface with Team and
+ReadSecret(ctx, Authorized) (*store.Secret, error). WithSecretReader supplies it.
+Its transaction uses the store clock to recheck ancestry, current membership,
+route grant, claim liveness and cancellation. Claims resolve against the sealed
+run, require the declared name, prefer its pipeline row and fall back only to a
+shared unscoped row. They enforce only_on against reserved and allowed pools
+and refuse here access to restricted secrets. Caller selectors cannot change
+that authority. Member run selectors resolve within the same tenant. Masked
+member reads return forbidden. Selection and the claim's secret_released event
+commit together before returning an envelope. A failed audit commits no release.
+
+The controller requires BoundCipher and binds decryption to the authenticated
+team and every stored row access field. It rejects wrong names and masked
+member results before opening. Invalid envelopes and cipher diagnostics return
+a private internal error without values or partial output. A missing cipher
+returns unavailable. Missing or foreign-team readers return policy_missing.
+Tenant's old ReleaseClaimSecret takes a retired ClaimToken and caller clock.
+It cannot satisfy this interface and is never used as a fallback. W1 must supply
+the authority-bearing transaction. Component tests use committed-fact and reader
+fakes with the real envelope cipher. They do not prove SQL fencing or audits.
+
+Startup no longer calls ResealStoredSecrets. The method and pre-team/plaintext
+migration implementation are deleted, along with LegacyCipher. Row-secret helpers
+require BoundCipher and never fall back to unbound Seal/Open methods. Generated
+tests assert those methods are never called. Reads refuse legacy stored forms. Explicit
+bound key rotation remains the credential-maintenance operation above.
 
 ### Credential mutations
 
@@ -221,7 +260,7 @@ SSH port uses 22. An explicit zero is invalid. Confirmation preserves the
 pinned fingerprint check and returns only public metadata. Secret values and
 git credential bytes never enter mutation responses.
 
-Secret-by-name release remains a separate cutover. Tenant key rotation and
+Secret-by-name reads use SecretReader below. Tenant key rotation and
 source-release audit reads use the maintenance contracts below.
 
 ### Credential maintenance

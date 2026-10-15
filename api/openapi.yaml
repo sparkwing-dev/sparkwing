@@ -2066,23 +2066,22 @@ paths:
         required: true
         schema: {type: string}
     get:
-      x-sparkwing-scope: claim or secrets.read or team.admin
+      x-sparkwing-scope: secrets.read or team.admin or secrets.release
       tags: [secrets]
       summary: Read one secret (value included).
       description: |
-        A bearer reads by name only as the operator or a team's owner; any
-        other bearer, a runner's token included, gets `403` with error
-        `claim_required`. A masked row's value goes
-        only to the operator's bearer token and to a claim that declares
-        it; a dashboard session or a team owner's token gets `403` with
-        error `write_only`, and may still read an unmasked variable.
-        A claim token (a controller-dispatched work node's, a runner's node
-        claim or a runner's trigger claim) reads with `?run=` set to its own
-        run, and only a secret its run's plan declares (`403
-        secret_undeclared` otherwise); each read is recorded as a
-        `secret_released` event on the run, naming the node for a node's
-        claim. A planning claim reads none.
-        Every secrets response carries `Cache-Control: no-store`.
+        Authorized members and verified local peers read unmasked config within
+        their authenticated team. Masked member reads are forbidden. A live
+        declaring claim reads only a name its sealed
+        run declares, under the run's pipeline/shared scope and reserved pools.
+        The store commits each claim release audit with its authority check.
+        Machine and deployment roots gain no read access.
+        Query selectors and headers cannot select a different tenant. Duplicate
+        selectors and malformed queries fail after authentication.
+        Embedded controllers supply an authority-bearing SecretReader. Missing
+        adapters return policy_missing. Bound encryption is required. Invalid
+        envelopes fail without values or cipher diagnostics.
+        Every secrets response carries Cache-Control: no-store.
       responses:
         "200":
           description: Secret.

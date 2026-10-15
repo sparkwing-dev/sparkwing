@@ -456,11 +456,13 @@ func (c mutationSealFailure) OpenBound(string, string, string, bool, bool, strin
 func TestCredentialMutationsHTTPEncryptionFailuresStoreNothing(t *testing.T) {
 	s, _ := credentialMutationStore(t)
 	for _, route := range []int{0, 2} {
-		for _, failure := range []string{"missing", "key refusal", "private"} {
+		for _, failure := range []string{"missing", "unbound", "key refusal", "private"} {
 			b := authorityMember()
 			var cipher controller.Cipher
 			code := apierr.Unavailable
 			switch failure {
+			case "unbound":
+				cipher = plainCipher{}
 			case "key refusal":
 				cipher, code = mutationSealFailure{secrets.ErrKeyRefused}, apierr.Conflict
 			case "private":
