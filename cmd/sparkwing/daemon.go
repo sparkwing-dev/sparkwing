@@ -45,7 +45,6 @@ type daemonReport struct {
 	APISocket           string `json:"api_socket"`
 	APIReady            *bool  `json:"api_ready,omitempty"`
 	APIError            string `json:"api_error,omitempty"`
-	ArtifactStoreError  string `json:"artifact_store_error,omitempty"`
 	InstalledVersion    string `json:"installed_version,omitempty"`
 	DaemonSchemaVersion int    `json:"daemon_schema_version,omitempty"`
 	StoreSchemaVersion  int    `json:"store_schema_version,omitempty"`
@@ -520,7 +519,6 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.DaemonStoreError = info.StoreError
 	report.APIReady = info.APIReady
 	report.APIError = info.APIError
-	report.ArtifactStoreError = info.ArtifactStoreError
 	report.SchemaDiverged = report.DaemonSchemaVersion != 0 && report.StoreSchemaVersion > report.DaemonSchemaVersion
 	if report.SchemaDiverged || report.StoreSchemaError != "" || daemonStoreUnusable(report) || daemonAPIUnusable(report) {
 		report.Healthy = false
@@ -761,9 +759,6 @@ func emitDaemonReport(report daemonReport, output string) error {
 			fmt.Fprintf(os.Stdout, "controller API on %s\n", report.APISocket)
 		default:
 			fmt.Fprintf(os.Stdout, "controller API not served: %s\n", apiFault(report))
-		}
-		if report.ArtifactStoreError != "" {
-			fmt.Fprintf(os.Stdout, "no artifact routes: %s\n", report.ArtifactStoreError)
 		}
 		if report.StoreSchemaError != "" {
 			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)

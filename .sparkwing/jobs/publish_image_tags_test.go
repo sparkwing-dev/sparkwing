@@ -45,7 +45,6 @@ exit 0
 var publishImageBinaries = []string{
 	"sparkwing-controller",
 	"sparkwing-runner",
-	"sparkwing-cache",
 }
 
 func scannedDigest(binary string) string {
@@ -119,7 +118,7 @@ func TestPublishImageTagsGuardsPublishedDigests(t *testing.T) {
 			name:       "an unreadable registry answer fails closed",
 			tag:        "v1.2.3",
 			latest:     true,
-			inspectErr: map[string]string{"sparkwing-cache": "ERROR: 429 Too Many Requests"},
+			inspectErr: map[string]string{"sparkwing-runner": "ERROR: 429 Too Many Requests"},
 			wantFail:   true,
 			wantStderr: []string{
 				"refusing to retag on an unreadable registry answer",

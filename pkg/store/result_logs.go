@@ -7,10 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net/url"
 	"slices"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -74,24 +71,6 @@ func logIdentity(subject blob.LogSubject) (logStreamIdentity, error) {
 	return identity, nil
 }
 
-// LogSegmentObjectKey binds a signing slot to the same subject used by persistence.
-// Signers use the run's persisted retention class, never a caller-selected class.
-func LogSegmentObjectKey(subject blob.LogSubject, retention string, index int64) (string, error) {
-	identity, err := logIdentity(subject)
-	if err != nil {
-		return "", err
-	}
-	for _, part := range []string{subject.Team, subject.RunID, retention} {
-		if part == "." || part == ".." || strings.ContainsAny(part, "/\\\x00") {
-			return "", authorityError(apierr.BadRequest, "invalid log object namespace")
-		}
-	}
-	if retention == "" || index < 0 || index > int64(limits.MaxLogSegmentNumber) {
-		return "", authorityError(apierr.BadRequest, "invalid log signing slot")
-	}
-	return fmt.Sprintf("teams/%s/logs/%s/%s/%s/%d", url.PathEscape(subject.Team), url.PathEscape(retention), url.PathEscape(subject.RunID), identity.id, index), nil
-}
-
 func (t *Tenant) recordSegments(ctx context.Context, commit SegmentCommit) error {
 	if commit.Subject.Team != string(t.team) {
 		return authorityError(apierr.Forbidden, "log subject belongs to another team")
@@ -104,7 +83,7 @@ func (t *Tenant) recordSegments(ctx context.Context, commit SegmentCommit) error
 		return authorityError(apierr.BadRequest, "incomplete reason requires a final log commit")
 	}
 	for _, segment := range commit.Segments {
-		key, err := LogSegmentObjectKey(commit.Subject, commit.RetentionClass, segment.Index)
+		key, err := blob.LogObjectKey(commit.Subject, commit.RetentionClass, segment.Index)
 		if err != nil {
 			return err
 		}
@@ -182,12 +161,12 @@ func (t *Tenant) recordSegments(ctx context.Context, commit SegmentCommit) error
 
 func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []Segment) error {
 	var next, offset int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,0),COALESCE(MAX(end_offset),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset); err != nil {
 		return err
 	}
 	for _, segment := range segments {
 		hash, err := hex.DecodeString(segment.Digest)
-		if err != nil || len(hash) != sha256.Size || hex.EncodeToString(hash) != segment.Digest || segment.ObjectKey == "" || segment.Index < 0 || segment.Index > int64(limits.MaxLogSegmentNumber) || segment.Offset < 0 || segment.Size < 0 {
+		if err != nil || len(hash) != sha256.Size || hex.EncodeToString(hash) != segment.Digest || segment.ObjectKey == "" || segment.Index < 1 || segment.Index > int64(limits.MaxLogSegmentNumber) || segment.Offset < 0 || segment.Size < 0 {
 			return authorityError(apierr.BadRequest, "invalid immutable log segment")
 		}
 		if segment.Size > limits.LogSegmentUploadBytes || segment.Offset > limits.AttemptLogBytes-segment.Size {

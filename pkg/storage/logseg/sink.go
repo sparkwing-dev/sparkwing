@@ -12,6 +12,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 // Cutting bounds and the per-node byte cap. A segment is cut when
@@ -47,9 +49,9 @@ var ErrSealed = errors.New("logseg: the attempt already has a manifest")
 // ErrClosed refuses an append to a sink that has written its manifest.
 var ErrClosed = errors.New("logseg: the sink is closed")
 
-// Options configure a [Sink]. Zero fields take the package defaults.
+// Options bind a [Sink] to one subject. Other zero fields take package defaults.
 type Options struct {
-	Run, Node string
+	Subject blob.LogSubject
 	// SpoolDir holds the spool file; the system temporary directory
 	// when empty.
 	SpoolDir     string
@@ -154,6 +156,10 @@ type Sink struct {
 // values but not its cancellation, so they outlive the request that
 // opened the sink.
 func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error) {
+	if err := opts.Subject.Validate(); err != nil {
+		return nil, err
+	}
+	opts.Subject = cloneSubject(opts.Subject)
 	opts.defaults()
 	spool, err := os.CreateTemp(opts.SpoolDir, "sparkwing-log-*.spool")
 	if err != nil {
@@ -287,7 +293,7 @@ func (s *Sink) SetWatched(watched bool) {
 	}
 	pending := make([]byte, s.written-from)
 	if _, err := s.spool.ReadAt(pending, from); err != nil {
-		s.opts.Logger.Warn("read the log spool for the live view", "run_id", s.opts.Run, "node_id", s.opts.Node, "err", err)
+		s.opts.Logger.Warn("read the log spool for the live view", "subject", s.opts.Subject, "err", err)
 		return
 	}
 	s.opts.Live(from, pending)
@@ -353,7 +359,7 @@ func (s *Sink) drain(ctx context.Context) bool {
 		}
 		if err != nil {
 			s.opts.Logger.Warn("log segment upload failed; the sink keeps it and tries again",
-				"run_id", s.opts.Run, "node_id", s.opts.Node, "segment", seg.N, "err", err)
+				"subject", s.opts.Subject, "segment", seg.N, "err", err)
 			return false
 		}
 		s.mu.Lock()
@@ -443,7 +449,7 @@ func (s *Sink) Close(ctx context.Context, end End) (Manifest, error) {
 // safety: the caller holds mu.
 func (s *Sink) manifestLocked(allUploaded bool, end End) Manifest {
 	m := Manifest{
-		Version: ManifestVersion, Run: s.opts.Run, Node: s.opts.Node,
+		Version: ManifestVersion, Subject: new(cloneSubject(s.opts.Subject)),
 		SealedBy: SealedByNode, SealedAt: time.Now().UTC(),
 		Gaps: s.gaps, Segments: s.uploaded,
 	}

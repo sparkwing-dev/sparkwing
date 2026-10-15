@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -23,7 +20,7 @@ func OpenReadBackendForProfile(ctx context.Context, paths Paths, p *profile.Prof
 // machine's store through the admission daemon, or that holds the standalone
 // store the fallback chose. Opening the state again would take a file that
 // run does not own.
-func resolveLocalBackends(opts *Options, paths Paths, keepState bool) error {
+func resolveLocalBackends(opts *Options, keepState bool) error {
 	if opts.State == nil && !keepState {
 		if opts.DefaultStateDB == "" {
 			return fmt.Errorf("state backend: no state database path resolved")
@@ -36,13 +33,6 @@ func resolveLocalBackends(opts *Options, paths Paths, keepState bool) error {
 	}
 	if opts.State == nil {
 		return fmt.Errorf("state backend: no store resolved")
-	}
-	if opts.ArtifactStore == nil {
-		art, err := localArtifactStore(paths)
-		if err != nil {
-			return fmt.Errorf("local artifact cache: %w", err)
-		}
-		opts.ArtifactStore = art
 	}
 	return nil
 }
@@ -73,8 +63,4 @@ func profileControllerLookup(p *profile.Profile) storeurl.ProfileLookup {
 	return func(string) (string, string, error) {
 		return p.ControllerURL(), p.ControllerToken(), nil
 	}
-}
-
-func localArtifactStore(paths Paths) (storage.ArtifactStore, error) {
-	return fsstore.NewArtifactStore(filepath.Join(paths.Root, "cache"))
 }

@@ -3,7 +3,9 @@ package nodehost
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
+	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -18,11 +20,39 @@ func cachesLayer(cfg *Config, next Executor) Executor {
 		for i, c := range n.Plan.Caches {
 			specs[i] = depcache.Spec(c)
 		}
-		runs := depcache.RestoreAll(ctx, specs, n.Plan.ID, cfg.Session.Dir)
+		cacheCtx, err := cacheContext(ctx, cfg, n)
+		if err != nil {
+			slog.Warn("depcache: storage binding refused; running cold", "node", n.Plan.ID, "err", err)
+			return next(ctx, n)
+		}
+		runs := depcache.RestoreAll(cacheCtx, specs, n.Plan.ID, cfg.Session.Dir)
 		res := next(ctx, n)
-		depcache.SaveAll(ctx, runs, resultErr(res))
+		if res.Outcome != sparkwing.Success {
+			return res
+		}
+		cacheCtx, err = cacheContext(ctx, cfg, n)
+		if err != nil {
+			slog.Warn("depcache: storage binding refused; cache not saved", "node", n.Plan.ID, "err", err)
+			return res
+		}
+		depcache.SaveAll(cacheCtx, runs, nil)
 		return res
 	}
+}
+
+func cacheContext(ctx context.Context, cfg *Config, n *NodeRun) (context.Context, error) {
+	if cfg.Artifacts == nil {
+		return ctx, nil
+	}
+	data, err := cfg.Artifacts(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+	backend := depcacheblob.New(depcacheblob.Data{
+		Bytes: data.Bytes, Records: data.Records, Authority: data.Authority,
+		Identity: data.Identity, Budget: data.Budget,
+	})
+	return depcache.WithBackend(ctx, backend), nil
 }
 
 func resultErr(res Result) error {

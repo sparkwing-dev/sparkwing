@@ -21,6 +21,10 @@ func TestPodEnvCarriesProxyAndCASettingsButNoRunnerCredential(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "runner-github")
 	t.Setenv("NODE_OPTIONS", "--require=/tmp/x.js")
 	t.Setenv("npm_config_cache", "/runner/npm")
+	t.Setenv("GOPROXY", "https://registry.example/go")
+	t.Setenv("npm_config_registry", "https://registry.example/npm")
+	t.Setenv("PIP_INDEX_URL", "https://registry.example/pypi")
+	t.Setenv("PIP_TRUSTED_HOST", "registry.example")
 	masker := secrets.NewMasker()
 	env := strings.Join(podSessionEnv(masker), "\n")
 	for _, want := range []string{
@@ -31,7 +35,7 @@ func TestPodEnvCarriesProxyAndCASettingsButNoRunnerCredential(t *testing.T) {
 			t.Errorf("pod env lacks %s", want)
 		}
 	}
-	for _, leaked := range []string{"GITHUB_TOKEN=", "NODE_OPTIONS=", "npm_config_cache="} {
+	for _, leaked := range []string{"GITHUB_TOKEN=", "NODE_OPTIONS=", "npm_config_cache=", "GOPROXY=", "npm_config_registry=", "PIP_INDEX_URL=", "PIP_TRUSTED_HOST="} {
 		if strings.Contains(env, leaked) {
 			t.Errorf("pod env carries %s", leaked)
 		}
@@ -41,6 +45,20 @@ func TestPodEnvCarriesProxyAndCASettingsButNoRunnerCredential(t *testing.T) {
 	}
 	if got := strings.Join(PodBaseEnv(), "\n"); got != env {
 		t.Fatalf("installs and node processes got different environments:\n%s\n--\n%s", got, env)
+	}
+}
+
+func TestRegistrySettingsRequireTheOperatorAllowList(t *testing.T) {
+	writeMachineSettings(t, "run:\n  submit_env_allow: [GOPROXY, npm_config_registry, PIP_INDEX_URL, PIP_TRUSTED_HOST]\n")
+	values := []string{
+		"GOPROXY=https://registry.example/go",
+		"npm_config_registry=https://registry.example/npm",
+		"PIP_INDEX_URL=https://registry.example/pypi",
+		"PIP_TRUSTED_HOST=registry.example",
+	}
+	got, err := operatorAllowedEnv(values, nil, secrets.NewMasker(), quietLogger())
+	if err != nil || strings.Join(got, "\n") != strings.Join(values, "\n") {
+		t.Fatalf("allowed registry settings = %v, %v", got, err)
 	}
 }
 

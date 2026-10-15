@@ -11,72 +11,41 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - [`sparkwing/cleanup`](sdk-cleanup.md) -- Package cleanup lets a sparks library guarantee that a resource it starts -- a container, a cluster, a release -- is torn down if the step's node dies before the library's own cleanup runs.
 - [`sparkwing/docker`](sdk-docker.md) -- Package docker is the sparkwing SDK's Docker-shelling helper layer: build, push, login, and deterministic tag computation.
 - [`sparkwing/git`](sdk-git.md) -- Package git is the sparkwing SDK's repo-inspection helper layer: commit SHA, branch, dirty-tree detection, deterministic fileset hash, tag listing, and safe tag push.
-- [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs builds cache keys from files, environment variables, and constants.
-- [`sparkwing/planguard`](sdk-planguard.md) -- Package planguard implements the Plan() purity sentinel.
+- [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs builds memo keys from files, environment variables, and constants.
 - [`sparkwing/services`](sdk-services.md) -- Package services is the sparkwing SDK's sidecar-container helper: start sidecars for a function, wait for readiness, and clean up services whose startup succeeded on return, error, panic, or context cancellation.
+- [`sparkwing/sparkwingtest`](sdk-sparkwingtest.md) -- Package sparkwingtest supplies a fake protocol host without a controller or store.
 
 ## Functions
 
-- `func Annotate(ctx context.Context, msg string)` -- Annotate records a persistent, human-readable summary string on the currently-executing Job.
-- `func BindPipelinesFromYAML(cfg interface { EachPipeline(func(name, entrypoint string)) }, )` -- BindPipelinesFromYAML walks every pipeline entry in cfg and installs a Registration under the pipeline's name, sharing the Invoke / Schema / Instance of the registered entrypoint.
-- `func Config(ctx context.Context, name string) (string, error)` -- Config resolves a non-secret config value through the same store as Secret.
-- `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug-level LogRecord.
-- `func DebugEnabled() bool` -- DebugEnabled reports whether SDK-internal verbose logging is on.
+- `func Annotate(ctx context.Context, annotation Annotation)` -- Annotate emits a located annotation during execution and panics on invalid input or host write failure.
+- `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug record; the host decides whether to retain it.
 - `func Error(ctx context.Context, format string, args ...any)` -- Error emits an error-level message.
 - `func GithubOwnerRepo(slug string) (owner, repo string)` -- GithubOwnerRepo splits a "owner/name" slug into its parts.
 - `func Glob(pattern string) ([]string, error)` -- Glob expands a shell-style glob pattern.
 - `func Info(ctx context.Context, format string, args ...any)` -- Info emits an info-level message to the active logger.
 - `func Inputs[T any](ctx context.Context) T` -- Inputs returns the typed Inputs struct that the orchestrator parsed for the current run -- the same value the pipeline's Plan(ctx, plan, in T, rc) method received.
 - `func IsDryRun(ctx context.Context) bool` -- IsDryRun reports whether ctx is in dry-run mode.
-- `func LintCacheBlobKey() string` -- LintCacheBlobKey returns the /cache/<key> identifier for the golangci-lint tool cache for the current WorkDir.
-- `func MustConfig(ctx context.Context, name string) string` -- MustConfig is Config that panics on error.
+- `func Main()` -- Main serves registered pipelines over the node protocol.
+- `func Mask(ctx context.Context, value string) error` -- Mask returns only after host registration so subsequent output cannot race masking.
 - `func MustSecret(ctx context.Context, name string) string` -- MustSecret is Secret that panics on error.
-- `func NodeFromContext(ctx context.Context) string` -- NodeFromContext returns the currently-executing node ID, or "" if unset.
+- `func MustVariable(ctx context.Context, name string) string` -- MustVariable makes a missing required plain value fail the job.
 - `func OIDCToken(ctx context.Context, audience string) (string, error)` -- OIDCToken returns an ID token the controller signed for this run, with aud set to audience.
 - `func Path(parts ...string) string` -- Path joins parts onto WorkDir() and returns the absolute path.
 - `func PipelineSecrets[T any](ctx context.Context) *T` -- PipelineSecrets returns the typed Secrets struct installed on ctx, or nil when the pipeline doesn't implement SecretsProvider.
 - `func ReadFile(path string) ([]byte, error)` -- ReadFile reads the named file.
 - `func Register[T any](name string, factory func() Pipeline[T])` -- Register installs a pipeline under the given name.
-- `func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])` -- RegisterEntrypoint installs a Go work unit (the entrypoint) under the given type-name, matching the `entrypoint:` field in sparkwing.yaml.
-- `func Registered() []string` -- Registered returns the names of all registered pipelines, sorted.
-- `func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error)` -- RestoreLintCache downloads the blob-store seed for the current WorkDir and expands it into the golangci-lint tool-cache directory.
+- `func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])` -- RegisterEntrypoint declares a named SDK entrypoint.
 - `func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error)` -- RunAndAwait triggers a fresh run of pipeline and waits for it to reach terminal state, returning the typed output of nodeID from that run.
-- `func RunWork(ctx context.Context, w *Work) (any, error)` -- RunWork executes w's step DAG.
-- `func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error)` -- SaveLintCache compresses the golangci-lint tool-cache directory for the current WorkDir and PUTs it to gcURL/cache/<key>.
 - `func Secret(ctx context.Context, name string) (string, error)` -- Secret resolves a masked value through the resolver installed on ctx.
-- `func SetGit(g *Git)` -- SetGit attaches a fully-populated Git to the runtime.
-- `func SetWorkDir(dir string)` -- SetWorkDir overrides the WorkDir field on the runtime singleton and updates the Git workDir so live methods follow.
-- `func SkipArgResolve(ctx context.Context) context.Context` -- SkipArgResolve marks ctx so a registration's Invoke builds the plan without resolving and binding WithArgs values.
-- `func StepFromContext(ctx context.Context) string` -- StepFromContext returns the active step ID, or "" outside a step.
 - `func StepGet[T any](ctx context.Context, step *WorkStep) T` -- StepGet blocks until step has completed, then returns its typed output as T. Used inside another step's body when composing values from upstream typed steps.
-- `func Summary(ctx context.Context, markdown string)` -- Summary records a persistent markdown run summary on the currently-executing Job or Step.
-- `func ToolCacheDir(tool string) string` -- ToolCacheDir returns a cache directory for an external tool, scoped to the worktree the pipeline is running in.
-- `func ToolCostCenticores(cores float64) int` -- ToolCostCenticores converts a measured per-invocation core cost into the integer units BoxToolBudget counts in, clamping to at least one so a tool measured at near-zero still draws a unit and cannot be admitted without limit.
-- `func ToolSlot(ctx context.Context, g *ConcurrencyGroup, cost ...int) (release func(), granted bool)` -- ToolSlot takes cost units of g for the duration of one step inside an already-running job, and reports whether it got them.
+- `func Summary(ctx context.Context, markdown string)` -- Summary emits markdown for the active job or step.
+- `func Variable(ctx context.Context, name string) (string, error)` -- Variable distinguishes a declared unmasked value from a secret.
 - `func Warn(ctx context.Context, format string, args ...any)` -- Warn emits a warn-level message.
 - `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
-- `func WithFailure(ctx context.Context, f Failure) context.Context` -- WithFailure returns a context carrying f, read back by a failure-aware recovery callback.
-- `func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context` -- WithResourceReporter installs fn so that sparkwing.Bash / sparkwing.Exec report each finished command's measured CPU and memory.
-- `func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context` -- WithSecretResolver returns a derived ctx carrying the given resolver.
-- `func WithStep(ctx context.Context, stepID string) context.Context` -- WithStep installs the active step ID into ctx so the breadcrumb on records emitted *inside* the step body carries it.
-- `func WithToolSlotProvider(ctx context.Context, p ToolSlotProvider) context.Context` -- WithToolSlotProvider returns ctx carrying p, so ToolSlot called from a job body reaches the daemon this run was admitted by.
 - `func WorkDir() string` -- WorkDir returns the pipeline working directory (the repo root).
 - `func WriteFile(path string, data []byte) error` -- WriteFile writes data to the named file with perm 0o644 (creating or truncating).
 
 ## Types
-
-### type Admission
-
-Admission is the resource share the scheduler reserved for the running job, rather than the capacity of the machine it runs on.
-
-```
-type Admission struct {
-    Cores       float64
-    MemoryBytes int64
-}
-```
-
-- `func Admitted(ctx context.Context) (Admission, bool)` -- Admitted reports the share the scheduler reserved for the running job.
 
 ### type AdmissionClass
 
@@ -105,46 +74,53 @@ type AfterRunFn func(ctx context.Context, err error)
 ```
 
 
-### type ApprovalConfig
+### type Annotation
 
-ApprovalConfig configures a manual approval gate.
+Annotation carries source location and the same severity vocabulary as log records.
 
 ```
-type ApprovalConfig struct {
-    // Message is the operator-facing prompt shown in the dashboard /
-    // CLI. Empty falls back to a generic "Approve <node>?" in the UI.
+type Annotation struct {
+    Level   string
     Message string
-    // Timeout bounds how long the gate waits for a human answer. Zero
-    // means never time out.
-    Timeout time.Duration
-    // OnExpiry selects ApprovalFail, ApprovalDeny, or ApprovalApprove when the
-    // timeout expires. The zero value uses ApprovalFail.
-    OnExpiry ApprovalTimeoutPolicy
+    File    string
+    Line    int
+    Column  int
+    EndLine int
 }
 ```
 
 
-### type ApprovalGate
+### type Approval
 
-ApprovalGate exposes the modifiers supported by manual approval gates.
+Approval exposes only declarative gate behavior because gates execute no job hooks.
 
 ```
-type ApprovalGate struct {
+type Approval struct {
     // contains filtered or unexported fields
 }
 ```
 
-- `func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate` -- JobApproval registers a gate that waits for a human decision.
-- `func (g *ApprovalGate) AfterRun(fn AfterRunFn) *ApprovalGate` -- AfterRun registers a hook that runs after the gate resolves (regardless of outcome).
-- `func (g *ApprovalGate) BeforeRun(fn BeforeRunFn) *ApprovalGate` -- BeforeRun registers a hook that runs before the gate is presented to the operator.
-- `func (g *ApprovalGate) ContinueOnError() *ApprovalGate` -- ContinueOnError marks the gate so a failed resolution is treated as a soft failure for downstream propagation.
-- `func (g *ApprovalGate) ID() string`
-- `func (g *ApprovalGate) Job() *JobNode`
-- `func (g *ApprovalGate) Needs(deps ...Dep) *ApprovalGate` -- Needs declares hard upstream dependencies on the gate.
-- `func (g *ApprovalGate) NeedsOptional(deps ...Dep) *ApprovalGate` -- NeedsOptional declares soft upstream dependencies; missing IDs are silently dropped instead of failing the run.
-- `func (g *ApprovalGate) OnFailure(id string, x any) *ApprovalGate` -- OnFailure registers a recovery node that runs if the gate resolves to ApprovalFail.
-- `func (g *ApprovalGate) Optional() *ApprovalGate` -- Optional marks the gate as optional: a non-Approve resolution doesn't fail downstream nodes whose only dep is this gate.
-- `func (g *ApprovalGate) SkipIf(fn SkipPredicate, opts ...SkipOption) *ApprovalGate` -- SkipIf registers a predicate that skips the gate (treats it as resolved Approve) when fn returns true.
+- `func (a *Approval) ContinueOnError() *Approval` -- ContinueOnError permits dependents after a gate failure.
+- `func (a *Approval) ID() string` -- ID permits gate references without exposing executable-job internals.
+- `func (a *Approval) Needs(deps ...Dep) *Approval` -- Needs waits for prerequisite jobs before requesting a decision.
+- `func (a *Approval) NeedsGenerated(generators ...*Generator) *Approval` -- NeedsGenerated keeps a gate behind the persisted expansion barrier.
+- `func (a *Approval) NeedsIfPresent(deps ...Dep) *Approval` -- NeedsIfPresent permits plans whose optional prerequisite is absent.
+- `func (a *Approval) OnFailure(id string, body any) *JobNode` -- OnFailure declares and returns a recovery job for a failed gate.
+- `func (a *Approval) Optional() *Approval` -- Optional excludes a denied or expired gate from required run success.
+- `func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval` -- SkipIf conditions gate admission without running executable before/after hooks.
+
+### type ApprovalConfig
+
+ApprovalConfig preserves indefinite waiting when Timeout is zero.
+
+```
+type ApprovalConfig struct {
+    Message   string
+    Timeout   time.Duration
+    OnTimeout ApprovalTimeoutPolicy
+}
+```
+
 
 ### type ApprovalTimeoutPolicy
 
@@ -177,27 +153,6 @@ type AwaitOption func(*awaitConfig)
 - `func WithFreshRepo(repo string) AwaitOption` -- WithFreshRepo declares which repo the spawned pipeline lives in (e.g.
 - `func WithFreshTimeout(d time.Duration) AwaitOption` -- WithFreshTimeout bounds the total wait, including admission queue time.
 
-### type AwaitRequest
-
-AwaitRequest is the awaiter's input struct.
-
-```
-type AwaitRequest struct {
-    Pipeline string
-    NodeID   string
-    Args     map[string]string
-    Timeout  time.Duration
-    // Repo, when non-empty, declares which repo the spawned pipeline
-    // lives in. Required for cross-repo awaits; empty falls back to
-    // parent-run inheritance.
-    Repo string
-    // Branch overrides the default branch for the spawned trigger
-    // (effective only when Repo is also set). Empty -> "main".
-    Branch string
-}
-```
-
-
 ### type Base
 
 Base is the marker embedded by every pipeline.
@@ -216,47 +171,17 @@ type BeforeRunFn func(ctx context.Context) error
 ```
 
 
-### type CacheKey
-
-CacheKey is the content-addressed identifier for a node's work.
-
-```
-type CacheKey string
-```
-
-```
-const NoCache CacheKey = "ck:nocache"
-```
-
-- `func Key(parts ...any) CacheKey` -- Key hashes the parts' fmt %v representations, separated by byte 0x1e, into a "ck:" prefix and 16 hexadecimal characters.
-- `func (k CacheKey) IsNoCache() bool` -- IsNoCache reports whether k is the explicit NoCache sentinel.
-
-### type CacheKeyFn
-
-CacheKeyFn computes a key after upstream dependencies complete.
-
-```
-type CacheKeyFn func(ctx context.Context) (CacheKey, error)
-```
-
-
 ### type Checkout
 
-Checkout is what a run's nodes ask of the source checkout a Sparkwing Cloud Job prepares before any pipeline code runs.
+Checkout distinguishes absent source settings from explicit zero and false values.
 
 ```
 type Checkout struct {
-    // Depth is how many commits of history to fetch; zero fetches one.
-    Depth int
-    // FullHistory fetches every commit and overrides Depth.
-    FullHistory bool
-    // Tags fetches the repository's tags.
-    Tags bool
-    // Submodules checks out submodules, which must live in repositories the
-    // team's owner approved for the GitHub App.
-    Submodules bool
-    // LFS fetches Git LFS objects in place of their pointers.
-    LFS bool
+    Depth       *int
+    FullHistory *bool
+    Tags        *bool
+    Submodules  *bool
+    LFS         *bool
 }
 ```
 
@@ -293,11 +218,10 @@ type ConcurrencyGroup struct {
 }
 ```
 
-- `func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup` -- BoxToolBudget builds the conventional ConcurrencyGroup for one external tool sharing one machine: a box-scoped budget measured in hundredths of a core, which queues rather than failing.
 - `func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup` -- NewConcurrencyGroup constructs a ConcurrencyGroup named name with the given limit.
 - `func (g *ConcurrencyGroup) Limit() ConcurrencyLimit` -- Limit returns the group's declared budget.
 - `func (g *ConcurrencyGroup) Name() string` -- Name returns the group's coordination key.
-- `func (g *ConcurrencyGroup) String() string` -- String renders the group for a log line naming what a step is bounded by, so "the gate is slow" has an answer that names the budget.
+- `func (g *ConcurrencyGroup) String() string` -- String includes the group's capacity and effective scope and saturation policy.
 
 ### type ConcurrencyLimit
 
@@ -307,7 +231,7 @@ ConcurrencyLimit is the budget a ConcurrencyGroup enforces.
 type ConcurrencyLimit struct {
     // Capacity is the total budget in author-defined units. With the
     // default member cost of 1 it reads as "max members running at
-    // once". Values <= 0 are treated as 1 by the coordination backend.
+    // once". Capacity must be positive when the host validates the plan.
     //
     // When two live participants declare different capacities for the
     // same group (a version skew across runs), the effective capacity
@@ -334,18 +258,6 @@ type ConcurrencyLimit struct {
 ```
 
 
-### type ConsumeEdge
-
-ConsumeEdge is a resolved consumer->producer artifact edge: the producer whose artifacts this node stages, and the staging prefix (empty stages at the producer's declared relative paths).
-
-```
-type ConsumeEdge struct {
-    Producer string
-    Into     string
-}
-```
-
-
 ### type ConsumeOption
 
 ConsumeOption tunes a JobNode.Consumes declaration.
@@ -358,7 +270,7 @@ type ConsumeOption func(*consumeEdge)
 
 ### type Dep
 
-Dep accepts JobNode, ApprovalGate, and JobGroup handles as dependencies.
+Dep accepts JobNode, Approval, and JobGroup handles as dependencies.
 
 ```
 type Dep interface {
@@ -367,83 +279,9 @@ type Dep interface {
 ```
 
 
-### type DescribeArg
-
-DescribeArg is one CLI-visible argument.
-
-```
-type DescribeArg struct {
-    Name     string   `json:"name"`
-    GoName   string   `json:"go_name"`
-    Short    string   `json:"short,omitempty"`
-    Type     string   `json:"type"`
-    Required bool     `json:"required"`
-    Desc     string   `json:"desc,omitempty"`
-    Default  string   `json:"default,omitempty"`
-    Enum     []string `json:"enum,omitempty"`
-    Secret   bool     `json:"secret,omitempty"`
-    // JobID identifies the job that declared this arg when the arg
-    // came from a [WithArgs] embedding rather than the pipeline-level
-    // [Register] Inputs struct. Empty for pipeline-level args. Used by
-    // the help renderer to group "from job X" annotations and by
-    // tooling that needs to attribute flags to their source.
-    JobID string `json:"job_id,omitempty"`
-}
-```
-
-- `func (a DescribeArg) CheckEnum(raw string) error` -- CheckEnum reports whether raw is allowed by the arg's enum, checking each comma-separated element of a []string arg.
-
-### type DescribePipeline
-
-DescribePipeline is one pipeline's CLI-facing schema.
-
-```
-type DescribePipeline struct {
-    Name     string        `json:"name"`
-    Short    string        `json:"short,omitempty"`
-    Help     string        `json:"help,omitempty"`
-    Examples []Example     `json:"examples,omitempty"`
-    Args     []DescribeArg `json:"args"`
-    // EnvVars are environment variables the pipeline reads as inputs,
-    // declared via the optional [EnvVarDocer] interface. Empty unless
-    // the pipeline opts in.
-    EnvVars []EnvVarDoc `json:"env_vars,omitempty"`
-    // Extra is true when the pipeline's Inputs struct declares a
-    // `flag:",extra"` bag; in that mode unknown flags don't error.
-    Extra bool `json:"extra,omitempty"`
-    // Risks is the sorted, deduplicated union of per-step risk labels
-    // declared anywhere in this pipeline's plan. The dispatcher walks
-    // this set against --sw-allow so an operator or agent dispatching
-    // a pipeline that calls a risk-labeled Step gets a hard refusal
-    // until every label is acknowledged (or --sw-dry-run bypasses).
-    // Empty when no step declares a risk; the gate stays silent.
-    Risks []string `json:"risks,omitempty"`
-    // RisksBySteps is the per-step breakdown so a renderer or agent
-    // can show "this is the step that will refuse" in the error path.
-    // Only populated for pipelines whose Plan() builds successfully
-    // without args during describe; pipelines with required Inputs
-    // degrade to the union field above.
-    RisksBySteps []DescribeStepRisks `json:"risks_by_step,omitempty"`
-}
-```
-
-
-### type DescribeStepRisks
-
-DescribeStepRisks is one row of the per-step risk-label list.
-
-```
-type DescribeStepRisks struct {
-    NodeID string   `json:"node_id"`
-    StepID string   `json:"step_id"`
-    Labels []string `json:"labels"`
-}
-```
-
-
 ### type DirCache
 
-DirCache describes one directory a node restores before running and saves after succeeding: a dependency directory keyed by the content of the lockfile that produced it.
+DirCache declares files restored and saved by the host around a job attempt.
 
 ```
 type DirCache struct {
@@ -451,9 +289,20 @@ type DirCache struct {
 }
 ```
 
-- `func Dir(path string, key KeySource) DirCache` -- Dir declares a cache over an arbitrary directory, keyed by an explicit KeySource.
-- `func GoModules() DirCache` -- GoModules caches the Go module download cache, keyed on go.sum.
-- `func NpmCache() DirCache` -- NpmCache caches npm's content-addressed cache directory, keyed on package-lock.json.
+- `func Dir(path string, key KeySource) DirCache` -- Dir declares a dependency cache rooted at path with explicit key inputs.
+- `func GoModules() DirCache` -- GoModules caches downloaded Go modules using go.sum as its input.
+- `func Npm() DirCache` -- Npm requests npm's download cache without introducing a package proxy.
+- `func (c DirCache) Key(workdir string) (string, error)` -- Key hashes the declaration, platform and first present key file contained in workdir.
+
+### type EnvOption
+
+EnvOption distinguishes process startup settings from body-only environment.
+
+```
+type EnvOption func(*envOptions)
+```
+
+- `func Startup() EnvOption` -- Startup marks interpreter configuration that must never influence plan declarations.
 
 ### type EnvVarDoc
 
@@ -540,28 +389,6 @@ type ExecResult struct {
 ```
 
 
-### type ExpandGenerator
-
-ExpandGenerator is the closure signature for JobFanOutDynamic.
-
-```
-type ExpandGenerator func(ctx context.Context) []*JobNode
-```
-
-
-### type Expansion
-
-Expansion ties a source node to its generator and resulting group.
-
-```
-type Expansion struct {
-    Source *JobNode
-    Group  *JobGroup
-    Gen    ExpandGenerator
-}
-```
-
-
 ### type Failure
 
 Failure describes why a node terminated unsuccessfully.
@@ -607,9 +434,30 @@ const (
 
 - `func (s FailureStage) String() string` -- String returns "action" or "verify".
 
+### type GenerateFn
+
+GenerateFn reconstructs declarations from persisted source output without the source job's body environment.
+
+```
+type GenerateFn func(context.Context, *Plan) error
+```
+
+
+### type Generator
+
+Generator identifies a source expansion whose settlement precedes dependent jobs.
+
+```
+type Generator struct {
+    // contains filtered or unexported fields
+}
+```
+
+- `func (g *Generator) ID() string` -- ID exposes the stable group identifier used in persisted expansion identity.
+
 ### type Git
 
-Git is the run-scoped view of a single git working tree.
+Git is the run-scoped view of a single git working tree, supplied through RunContext.Git.
 
 ```
 type Git struct {
@@ -658,39 +506,6 @@ type InputError struct {
 - `func (e *InputError) Error() string`
 - `func (e *InputError) Unwrap() error`
 
-### type InputField
-
-InputField is one pipeline-flag description, parsed once at registration time.
-
-```
-type InputField struct {
-    Name        string // flag name (no `--` prefix)
-    Short       string // optional one-letter alias
-    GoName      string // original Go field name
-    Type        string // "string" | "bool" | "int" | "int64" | "float64" | "duration" | "[]string"
-    Default     string // raw default value as written in the tag
-    Description string
-    Required    bool
-    Secret      bool     // mask in logs / dashboard
-    Enum        []string // allowed values; empty means unconstrained
-    // contains filtered or unexported fields
-}
-```
-
-- `func (f InputField) IsExtraBag() bool` -- IsExtraBag reports whether this field is the catch-all "extra" map[string]string bag (used to collect unknown args).
-
-### type InputSchema
-
-InputSchema is the resolved description of a pipeline's Inputs struct: one InputField per declared flag, plus a flag indicating whether a `flag:",extra"` bag field is present.
-
-```
-type InputSchema struct {
-    Fields []InputField
-    Extra  bool
-}
-```
-
-
 ### type JobGroup
 
 JobGroup holds nodes for dependency wiring and dashboard grouping.
@@ -703,35 +518,31 @@ type JobGroup struct {
 
 - `func GroupJobs(p *Plan, name string, nodes ...*JobNode) *JobGroup` -- GroupJobs groups existing Plan nodes under name and returns a dependency target covering every member.
 - `func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, any)) *JobGroup` -- JobFanOut registers one job per item during plan construction.
-- `func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (string, any)) *JobGroup` -- JobFanOutDynamic registers one child per item in source's []T output after source completes.
 - `func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup` -- AfterRun registers a post-run hook on every member.
+- `func (g *JobGroup) Artifacts(globs ...string) *JobGroup` -- Artifacts applies published-file patterns to every group member.
 - `func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup` -- BeforeRun registers a pre-run hook on every member.
-- `func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup` -- CacheDir registers dependency-directory caches on every member.
+- `func (g *JobGroup) Cache(caches ...DirCache) *JobGroup` -- Cache applies dependency-file declarations to every group member.
 - `func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup` -- Concurrency enrolls every member of the group in concurrency group g with the given admission cost.
 - `func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup` -- Consumes stages the given producer's artifacts into every member's workspace before it runs, and implies Needs(producer) on each.
 - `func (g *JobGroup) ContinueOnError() *JobGroup` -- ContinueOnError marks every member so downstream dependents proceed even on failure.
-- `func (g *JobGroup) Dynamic() bool` -- Dynamic reports whether this group's membership is determined at dispatch through JobFanOutDynamic.
-- `func (g *JobGroup) Env(key, value string) *JobGroup` -- Env sets a per-node environment variable on every member.
-- `func (g *JobGroup) Err() error` -- Err returns the expansion error, if any.
+- `func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup` -- Env applies the same startup/body distinction to all members.
 - `func (g *JobGroup) Inline() *JobGroup` -- Inline places every member on the dispatcher's host.
-- `func (g *JobGroup) Members() []*JobNode` -- Members returns the group's current nodes.
-- `func (g *JobGroup) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobGroup` -- Memoize memoizes every member of the group.
+- `func (g *JobGroup) Members() []*JobNode` -- Members returns the group's jobs in declaration order.
+- `func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup` -- Memo applies one reuse policy to each static or generated group member.
 - `func (g *JobGroup) Name() string` -- Name returns the group's declared name, or "" for an unnamed (structural-only) group.
 - `func (g *JobGroup) Needs(deps ...Dep) *JobGroup` -- Needs declares an upstream dependency on every member of the group.
-- `func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup` -- NeedsOptional declares optional upstream dependencies on every member; unknown IDs are silently dropped at finalize.
-- `func (g *JobGroup) NeedsTools(names ...string) *JobGroup` -- NeedsTools restricts every member to agents that have the named tools, including the members a JobFanOutDynamic group generates later.
+- `func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup` -- NeedsGenerated carries the same expansion barrier to every group member.
+- `func (g *JobGroup) NeedsIfPresent(deps ...Dep) *JobGroup` -- NeedsIfPresent applies presence-sensitive ordering to every group member.
+- `func (g *JobGroup) NeedsTools(names ...string) *JobGroup` -- NeedsTools restricts every member to agents that have the named tools.
 - `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
-- `func (g *JobGroup) Outputs(globs ...string) *JobGroup` -- Outputs declares the same artifact output globs on every member.
 - `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers sets the same runner-label preference on every member: it holds the node back from a runner that does not advertise it.
-- `func (g *JobGroup) Ready() <-chan struct{}` -- Ready returns a channel that closes once a dynamic group's expansion completes, including on failure.
 - `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires constrains runner claims for every non-inline dispatched member.
 - `func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup` -- Resources pins the same peak on every member of the group.
 - `func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup` -- Retry configures every member to be re-attempted up to attempts additional times on failure.
 - `func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup` -- SkipIf registers a predicate on every member.
 - `func (g *JobGroup) Timeout(d time.Duration) *JobGroup` -- Timeout caps the per-attempt duration on every member.
 - `func (g *JobGroup) Verify(fn VerifyFn) *JobGroup` -- Verify registers a postcondition check on every member.
-- `func (g *JobGroup) WhenRunner(labels ...string) *JobGroup` -- WhenRunner marks every member as conditional on the dispatching runner advertising the listed labels.
 
 ### type JobNode
 
@@ -745,67 +556,35 @@ type JobNode struct {
 
 - `func Job(p *Plan, id string, x any) *JobNode` -- Job registers a Workable or func(context.Context) error under id.
 - `func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode` -- AfterRun registers a hook invoked after Run and all retries finish.
-- `func (n *JobNode) AfterRunHooks() []AfterRunFn`
-- `func (n *JobNode) ApprovalConfig() *ApprovalConfig` -- ApprovalConfig returns the per-node approval configuration, or nil for non-approval nodes.
+- `func (n *JobNode) Artifacts(globs ...string) *JobNode` -- Artifacts distinguishes published files from the job's typed output.
 - `func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode` -- BeforeRun registers a hook to run once before the node's Run method on the first attempt.
-- `func (n *JobNode) BeforeRunHooks() []BeforeRunFn`
-- `func (n *JobNode) CacheDir(caches ...DirCache) *JobNode` -- CacheDir registers dependency-directory caches on the node: the engine restores each declared directory from the cache before the node's BeforeRun hooks and Run (on an exact key hit) and saves it back after a successful Run and its AfterRun hooks when the restore missed.
+- `func (n *JobNode) Cache(caches ...DirCache) *JobNode` -- Cache declares files restored through the host-authorized depcache scope.
 - `func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode` -- Concurrency enrolls the node in concurrency group g with the given admission cost (default 1).
-- `func (n *JobNode) ConcurrencyCost() int` -- ConcurrencyCost returns the admission cost declared via JobNode.Concurrency, or 0 when the node has no membership.
-- `func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the group the node joined via JobNode.Concurrency, or nil when the node declared no membership.
-- `func (n *JobNode) ConsumeEdges() []ConsumeEdge` -- ConsumeEdges returns the artifact edges declared via Consumes, in declaration order, or nil if the node consumes nothing.
 - `func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode` -- Consumes declares that this node stages the artifacts produced by producer into its workspace before it runs, and implies Needs(producer).
 - `func (n *JobNode) ContinueOnError() *JobNode` -- ContinueOnError tells the orchestrator that downstream dependents should proceed even when this node fails.
-- `func (n *JobNode) DepIDs() []string` -- DepIDs returns the node IDs this node depends on: explicit Needs entries and the in-run Ref fields its job struct held at registration.
-- `func (n *JobNode) DirCaches() []DirCache` -- DirCaches returns the node's declared dependency-directory caches, in declaration order.
-- `func (n *JobNode) Env(key, value string) *JobNode` -- Env sets a per-node environment variable.
-- `func (n *JobNode) EnvMap() map[string]string` -- EnvMap returns the node's declared environment.
+- `func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode` -- Env defaults to body scope; startup declarations take effect before attempt process creation.
+- `func (n *JobNode) Generate(fn GenerateFn) *Generator` -- Generate declares an expansion after source success or memo reuse; the host owns acceptance.
 - `func (n *JobNode) ID() string`
 - `func (n *JobNode) Inline() *JobNode` -- Inline places the node on the dispatcher's host.
-- `func (n *JobNode) IsApproval() bool`
-- `func (n *JobNode) IsContinueOnError() bool` -- IsContinueOnError reports whether downstream should ignore this node's failure for dispatch purposes.
-- `func (n *JobNode) IsInline() bool` -- IsInline reports whether the node was marked via Inline() to run on the dispatcher's own host.
-- `func (n *JobNode) IsOptional() bool`
-- `func (n *JobNode) Job() Workable`
-- `func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode` -- Memoize replays a stored result when another node computed the same key.
-- `func (n *JobNode) MemoizeConfig() *MemoizeConfig` -- MemoizeConfig returns the node's resolved memoization configuration, or nil when JobNode.Memoize was not called.
+- `func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode` -- Memo declares result reuse; missing or corrupt cached bytes produce a miss.
 - `func (n *JobNode) Needs(deps ...Dep) *JobNode` -- Needs declares hard upstream dependencies.
-- `func (n *JobNode) NeedsGroups() []*JobGroup` -- NeedsGroups returns any dynamic groups (from JobFanOutDynamic) this node is waiting on.
-- `func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode` -- NeedsOptional declares upstream dependencies that may or may not be present in the plan.
+- `func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode` -- NeedsGenerated waits for expansion settlement and all generated prerequisites.
+- `func (n *JobNode) NeedsIfPresent(deps ...Dep) *JobNode` -- NeedsIfPresent ignores absent dependencies but preserves failure ordering for present jobs.
 - `func (n *JobNode) NeedsTools(names ...string) *JobNode` -- NeedsTools restricts the job to agents that have every named tool on their PATH.
 - `func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode` -- NoProgressTimeout caps how long an attempt may run without emitting a node log record.
-- `func (n *JobNode) NoProgressTimeoutDuration() time.Duration` -- NoProgressTimeoutDuration returns the configured per-attempt inactivity timeout, or zero if disabled.
-- `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure registers a recovery node that runs only when this node terminates with outcome=failed; otherwise it's marked Skipped.
-- `func (n *JobNode) OnFailureNode() *JobNode` -- OnFailureNode returns the recovery node registered via OnFailure, or nil if none.
+- `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure declares and returns a recovery job that runs when this job fails.
 - `func (n *JobNode) Optional() *JobNode` -- Optional marks the node as non-essential: a failure is logged as a warning and does not count toward the run's overall success/fail outcome.
-- `func (n *JobNode) OptionalDepIDs() []string`
-- `func (n *JobNode) OutputGlobs() []string` -- OutputGlobs returns the artifact output globs declared via Outputs (the union across calls), or nil if the node declared none.
-- `func (n *JobNode) OutputType() reflect.Type` -- OutputType returns the concrete Go type of the job's Run output, or nil if the job's Run returns no value beyond error.
-- `func (n *JobNode) Outputs(globs ...string) *JobNode` -- Outputs declares the files this node emits as artifacts, by glob, relative to its working directory.
-- `func (n *JobNode) PipelineRefs() []RefTarget` -- PipelineRefs returns the other pipelines' nodes this node's job holds a RefToLastRun field for, in field order.
 - `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers holds the node back, for the controller's placement hold, from a claim-mode runner that does not advertise the labels while a live runner that does advertise them has a free slot.
-- `func (n *JobNode) PrefersLabels() []string`
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
-- `func (n *JobNode) RequiresLabels() []string` -- RequiresLabels is the job's selector: its Requires terms, then a tool:<name> term for each tool NeedsTools named.
-- `func (n *JobNode) ResourceHints() *ResourceHints` -- ResourceHints returns a copy of the resource pin declared via JobNode.Resources, or nil when the node declared none.
 - `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
-- `func (n *JobNode) ResultStep() *WorkStep` -- ResultStep returns the *WorkStep the Job designated as its typed output via Work's return value, or nil for untyped Jobs.
 - `func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode` -- Retry configures the node to be re-attempted up to attempts additional times on failure.
-- `func (n *JobNode) RetryConfig() RetryConfig` -- RetryConfig returns the resolved retry envelope.
 - `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate the orchestrator evaluates after this node's dependencies complete.
-- `func (n *JobNode) SkipIfBudget() time.Duration` -- SkipIfBudget returns the configured per-predicate evaluation budget, or zero for the orchestrator's default.
-- `func (n *JobNode) SkipPredicates() []SkipPredicate`
 - `func (n *JobNode) Timeout(d time.Duration) *JobNode` -- Timeout caps the per-attempt duration.
-- `func (n *JobNode) TimeoutDuration() time.Duration` -- TimeoutDuration returns the configured per-attempt timeout, or zero if unlimited.
-- `func (n *JobNode) Verifier() VerifyFn` -- Verifier returns the node's Verify postcondition, or nil if none.
 - `func (n *JobNode) Verify(fn VerifyFn) *JobNode` -- Verify checks a postcondition after each successful action attempt.
-- `func (n *JobNode) WhenRunner(labels ...string) *JobNode` -- WhenRunner marks the job as conditional on the dispatching runner advertising the listed labels (same comma-OR / AND semantics as Requires).
-- `func (n *JobNode) WhenRunnerLabels() []string`
-- `func (n *JobNode) Work() *Work` -- Work returns the materialized inner DAG for the node's job.
 
 ### type KeySource
 
-KeySource names the file whose content keys a Dir cache.
+KeySource names files whose content determines a dependency cache key.
 
 ```
 type KeySource struct {
@@ -813,20 +592,7 @@ type KeySource struct {
 }
 ```
 
-- `func KeyFromFile(path string) KeySource` -- KeyFromFile keys a Dir cache on the content of one file, typically a lockfile.
-
-### type LintWarning
-
-LintWarning is a non-fatal Plan-time advisory attached to a node.
-
-```
-type LintWarning struct {
-    NodeID string
-    Code   string // short stable identifier, e.g. "node-stale-cache"
-    Msg    string
-}
-```
-
+- `func KeyFromFile(path string) KeySource` -- KeyFromFile declares a lockfile relative to the job's workspace.
 
 ### type LogRecord
 
@@ -836,7 +602,7 @@ LogRecord is the structured unit every Logger receives.
 type LogRecord struct {
     TS    time.Time      `json:"ts"`
     Level string         `json:"level,omitempty"` // "info" | "warn" | "error"
-    JobID string         `json:"node,omitempty"`  // the wire tag stays "node" for log-format compatibility
+    JobID string         `json:"job,omitempty"`
     Step  string         `json:"step,omitempty"`  // active step ID
     Event string         `json:"event,omitempty"` // "" for a plain message; otherwise one of the Event* constants
     Msg   string         `json:"msg,omitempty"`
@@ -856,32 +622,39 @@ type Logger interface {
 }
 ```
 
-- `func LoggerFromContext(ctx context.Context) Logger` -- LoggerFromContext returns the active logger or a no-op if none is set.
 
-### type MemoizeConfig
+### type MemoKeyFn
 
-MemoizeConfig holds a node's key function and result retention window.
+MemoKeyFn evaluates author-owned inputs before the host scopes their key.
 
 ```
-type MemoizeConfig struct {
-    // Key computes the content key after upstream dependencies
-    // complete. Return [NoCache] with a nil error to bypass memoization.
-    Key CacheKeyFn
-    // TTL bounds how long a stored result remains reusable.
-    TTL time.Duration
-}
+type MemoKeyFn func(context.Context) (MemoValue, error)
 ```
 
 
-### type MemoizeOption
+### type MemoOption
 
-MemoizeOption tunes a JobNode.Memoize declaration.
+MemoOption keeps unset TTL distinct from an explicit duration.
 
 ```
-type MemoizeOption func(*MemoizeConfig)
+type MemoOption func(*memoOptions)
 ```
 
-- `func TTL(d time.Duration) MemoizeOption` -- TTL sets how long a node's memoized result remains reusable.
+- `func MemoTTL(d time.Duration) MemoOption` -- MemoTTL declares retention subject to the host's ceiling at plan acceptance.
+
+### type MemoValue
+
+MemoValue separates job-result reuse from dependency file caches.
+
+```
+type MemoValue string
+```
+
+```
+const NoMemo MemoValue = "memo:none"
+```
+
+- `func MemoKey(parts ...any) MemoValue` -- MemoKey hashes ordered inputs; callers resolve references before hashing.
 
 ### type NoInputs
 
@@ -889,15 +662,6 @@ NoInputs is the empty-struct convention for pipelines that take no flags.
 
 ```
 type NoInputs struct{}
-```
-
-
-### type OIDCTokenSource
-
-OIDCTokenSource signs an ID token for the current run with the given audience.
-
-```
-type OIDCTokenSource func(ctx context.Context, audience string) (string, error)
 ```
 
 
@@ -934,7 +698,7 @@ const (
 
 ### type Outcome
 
-Outcome is a terminal node state.
+Outcome is a persisted terminal job verdict.
 
 ```
 type Outcome string
@@ -942,23 +706,20 @@ type Outcome string
 
 ```
 const (
-    Success   Outcome = "success"
-    Failed    Outcome = "failed"
-    Satisfied Outcome = "satisfied"
-    Cached    Outcome = "cached"
-    Skipped   Outcome = "skipped"
-    Cancelled Outcome = "cancelled"
-
-    // SkippedConcurrent records a full concurrency group with OnLimit [Skip].
-    SkippedConcurrent Outcome = "skipped-concurrent"
-
-    // Superseded records eviction by a concurrency group's [CancelOthers] policy.
+    Success    Outcome = "success"
+    Failed     Outcome = "failed"
+    Cancelled  Outcome = "cancelled"
+    Skipped    Outcome = "skipped"
     Superseded Outcome = "superseded"
 )
 ```
 
-- `func (o Outcome) OK() bool` -- OK reports whether the outcome satisfies downstream dependencies.
-- `func (o Outcome) Terminal() bool` -- Terminal reports true for Outcome values.
+```
+const Memoized Outcome = "memoized"
+```
+
+- `func (o Outcome) OK() bool` -- OK reports whether the verdict satisfies a successful dependency.
+- `func (o Outcome) Terminal() bool` -- Terminal reports whether the verdict belongs to the terminal vocabulary.
 
 ### type ParallelFailurePolicy
 
@@ -972,11 +733,11 @@ type ParallelFailurePolicy string
 const (
     // FailFast cancels ordinary in-flight siblings after the first decisive
     // failure. It is the default and preserves the historical Work behavior.
-    FailFast ParallelFailurePolicy = "fail-fast"
+    FailFast ParallelFailurePolicy = "fail_fast"
     // CollectAll lets every independent or already-ready item finish so one run
     // can report the full failure set. It does not satisfy a failed prerequisite;
     // downstream Needs still require success or an explicit ContinueOnError.
-    CollectAll ParallelFailurePolicy = "collect-all"
+    CollectAll ParallelFailurePolicy = "collect_all"
 )
 ```
 
@@ -992,47 +753,6 @@ type Pipeline[T any] interface {
 ```
 
 
-### type PipelineAwaiter
-
-PipelineAwaiter is the orchestrator-installed backend for RunAndAwait.
-
-```
-type PipelineAwaiter interface {
-    Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
-}
-```
-
-
-### type PipelineAwaiterFunc
-
-PipelineAwaiterFunc adapts a plain function to PipelineAwaiter.
-
-```
-type PipelineAwaiterFunc func(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
-```
-
-- `func (f PipelineAwaiterFunc) Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)`
-
-### type PipelineResolver
-
-PipelineResolver is the backend-facing interface installed on ctx.
-
-```
-type PipelineResolver interface {
-    // contains filtered or unexported methods
-}
-```
-
-
-### type PipelineResolverFunc
-
-PipelineResolverFunc adapts a plain function to PipelineResolver.
-
-```
-type PipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error)
-```
-
-
 ### type Plan
 
 Plan holds the job graph populated by a pipeline's Plan method.
@@ -1045,51 +765,12 @@ type Plan struct {
 
 - `func NewPlan() *Plan`
 - `func (p *Plan) AdmissionClass(class AdmissionClass) *Plan` -- AdmissionClass sets the pipeline's local contention class.
-- `func (p *Plan) AdmissionClassValue() AdmissionClass` -- AdmissionClassValue returns the plan's explicit local contention class.
-- `func (p *Plan) Checkout(c Checkout) *Plan` -- Checkout sets the source checkout every node of a controller-dispatched Cloud run gets.
-- `func (p *Plan) CheckoutValue() *Checkout` -- CheckoutValue returns what Checkout set, or nil for the default.
-- `func (p *Plan) ClaimWait(d time.Duration) *Plan` -- ClaimWait bounds how long each of the run's ready nodes waits for an agent to claim it before the controller fails it as unclaimable.
-- `func (p *Plan) ClaimWaitValue() time.Duration` -- ClaimWaitValue returns the wait ClaimWait set, or zero for the default.
+- `func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval` -- Approval declares a manual gate whose owner enforces waiting and timeout policy.
+- `func (p *Plan) Checkout(config Checkout) *Plan` -- Checkout declares source preferences for host resolution without reading YAML in the SDK.
+- `func (p *Plan) ClaimWait(d time.Duration) *Plan` -- ClaimWait declares how long each ready job may wait for a runner claim.
 - `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires each declared plan-level budget before any node dispatches and releases it when the run reaches a terminal status.
-- `func (p *Plan) ConcurrencyCost() int` -- ConcurrencyCost returns the first plan-level admission cost declared via Plan.Concurrency, or 0 when the plan declared no whole-run coordination.
-- `func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the first group set via Plan.Concurrency, or nil when the plan declared no whole-run coordination.
-- `func (p *Plan) Expansions() []Expansion` -- Expansions returns the registered JobFanOutDynamic generators.
-- `func (p *Plan) GroupSourceIDs(id string) []string` -- GroupSourceIDs returns the ids of the source nodes backing any JobFanOutDynamic Groups this node waits on via Needs(group).
-- `func (p *Plan) Inputs() any` -- Inputs returns the parsed pipeline inputs, or nil for a Plan built directly.
-- `func (p *Plan) IsDynamicNode(id string) bool` -- IsDynamicNode reports whether the node supplies a dynamic fan-out expansion.
-- `func (p *Plan) Job(id string) *JobNode` -- Job returns the node with the given ID, or nil if absent.
-- `func (p *Plan) JobArgs() []DescribeArg` -- JobArgs returns the flags that jobs embedding WithArgs add to the pipeline, in registration order, each stamped with its owning job id.
-- `func (p *Plan) JobGroupNames(id string) []string` -- JobGroupNames returns the names of every declared *JobGroup whose members include the given node.
-- `func (p *Plan) LintWarnings() []LintWarning` -- LintWarnings returns the non-fatal Plan-time advisories accumulated while building this Plan.
-- `func (p *Plan) Nodes() []*JobNode` -- Nodes returns the plan's nodes in insertion order.
-- `func (p *Plan) PlanConcurrency() []PlanConcurrency` -- PlanConcurrency returns every whole-run gate declared via Plan.Concurrency.
 - `func (p *Plan) Priority(n int) *Plan` -- Priority sets this run's local admission priority.
-- `func (p *Plan) PriorityValue() int` -- PriorityValue returns the run's local admission priority.
-- `func (p *Plan) ResourceHints() *ResourceHints` -- ResourceHints returns a copy of the plan-level resource pin declared via Plan.Resources, or nil when the plan declared none.
 - `func (p *Plan) Resources(hints ...ResourceHint) *Plan` -- Resources pins the whole run's peak CPU and memory: an explicit, authoritative charge admission uses verbatim instead of measuring the pipeline.
-
-### type PlanConcurrency
-
-PlanConcurrency records one whole-run concurrency gate.
-
-```
-type PlanConcurrency struct {
-    Group *ConcurrencyGroup
-    Cost  int
-}
-```
-
-
-### type PrefersProvider
-
-PrefersProvider is optionally implemented by a Workable struct to declare its own runner preferences.
-
-```
-type PrefersProvider interface {
-    Prefers() []string
-}
-```
-
 
 ### type Produces
 
@@ -1119,7 +800,6 @@ type PullRequest struct {
 }
 ```
 
-- `func PullRequestFromEnv(env map[string]string) *PullRequest` -- PullRequestFromEnv reconstructs a PullRequest from a trigger's env map, or returns nil when the map does not describe a pull_request event.
 
 ### type Ref
 
@@ -1127,10 +807,10 @@ Ref is a typed reference to another node's output.
 
 ```
 type Ref[T any] struct {
-    // NodeID identifies the producing node. For in-run refs this is
+    // JobID identifies the producing job. For in-run refs this is
     // a sibling node id; for cross-pipeline refs this is a node id
     // inside Pipeline.
-    NodeID string
+    JobID string
 
     // Pipeline names the upstream pipeline when the ref is
     // cross-pipeline. Empty means in-run.
@@ -1159,70 +839,6 @@ type RefOption func(*refOpts)
 
 - `func MaxAge(d time.Duration) RefOption` -- MaxAge bounds cross-pipeline ref resolution to runs whose finished_at is within d.
 
-### type RefTarget
-
-RefTarget is one (pipeline, node) pair discovered on a job struct via collectRefs.
-
-```
-type RefTarget struct {
-    Pipeline string
-    NodeID   string
-}
-```
-
-
-### type Registration
-
-Registration is the registry's record for one pipeline.
-
-```
-type Registration struct {
-    // Name is the invocation name (e.g. "lint", "build-test-deploy").
-    Name string
-
-    // InputType is the reflect.Type of the struct Schema describes.
-    InputType reflect.Type
-
-    // Schema is the resolved input description, parsed once at
-    // registration.
-    Schema InputSchema
-
-    // Invoke is the type-erased entry point: parse the wire-format
-    // args map into the typed Inputs struct, instantiate a fresh
-    // pipeline, and call its Plan.
-    Invoke func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error)
-    // contains filtered or unexported fields
-}
-```
-
-- `func Lookup(name string) (*Registration, bool)` -- Lookup returns the Registration for a registered pipeline name, or ok=false if none.
-- `func (r *Registration) Instance() any` -- Instance returns a fresh pipeline value for this registration, for a caller querying the optional provider interfaces.
-- `func (r *Registration) SecretArgNames() []string` -- SecretArgNames returns the flag names of every secret-marked Inputs field, sorted, regardless of whether the run supplied a value for them.
-- `func (r *Registration) SecretValues(args map[string]string) []string` -- SecretValues resolves the schema's secret-marked Inputs fields against the wire-format args map (applying tag-declared defaults for unset keys) and returns the resolved string values.
-
-### type RequiresProvider
-
-RequiresProvider is optionally implemented by a Workable struct to declare its own hard runner constraint.
-
-```
-type RequiresProvider interface {
-    Requires() []string
-}
-```
-
-
-### type ResolvedPipelineRef
-
-ResolvedPipelineRef is what a PipelineResolver returns: the source run id (for audit) + raw output JSON (for Ref[T].Get to unmarshal).
-
-```
-type ResolvedPipelineRef struct {
-    RunID string
-    Data  []byte
-}
-```
-
-
 ### type ResourceHint
 
 ResourceHint is one option for Plan.Resources or JobNode.Resources.
@@ -1240,6 +856,7 @@ ResourceHints is the resolved resource pin declared via Plan.Resources or JobNod
 
 ```
 type ResourceHints struct {
+
     // Cores is the pinned peak number of CPU cores the work uses.
     // Fractional values are meaningful (0.5 = half a core). Zero means
     // cores were not pinned.
@@ -1248,48 +865,20 @@ type ResourceHints struct {
     // express this via [MemoryGB]; it is stored in bytes. Zero means
     // memory was not pinned.
     MemoryBytes int64
-}
-```
-
-
-### type ResourceReporter
-
-ResourceReporter absorbs a ResourceSample measured when a spawned command finishes.
-
-```
-type ResourceReporter func(ResourceSample)
-```
-
-
-### type ResourceSample
-
-ResourceSample is one measured resource reading for a spawned command: the CPU it drew, averaged over its wall-clock span, and the peak resident memory of its process subtree.
-
-```
-type ResourceSample struct {
-    // CPUMillicores is the command's average CPU draw over its run, in
-    // thousandths of a core (1000 == one core busy for the whole span).
-    CPUMillicores int64
-    // MemoryBytes is the peak resident set size of the command's process
-    // subtree, in bytes.
-    MemoryBytes int64
-    // CPUTime is the raw user+system CPU the command's reaped subtree drew.
-    // The same usage lands in the process's RUSAGE_CHILDREN at reap, so the
-    // orchestrator subtracts this from the node sampler to count it once.
-    CPUTime time.Duration
+    // contains filtered or unexported fields
 }
 ```
 
 
 ### type RetryConfig
 
-RetryConfig is the resolved retry envelope for a Job.
+RetryConfig is the retry envelope for a Job.
 
 ```
 type RetryConfig struct {
     Attempts int
     Backoff  time.Duration
-    Auto     bool
+    // contains filtered or unexported fields
 }
 ```
 
@@ -1302,22 +891,7 @@ RetryOption tunes a Retry(...) call.
 type RetryOption func(*RetryConfig)
 ```
 
-- `func RetryAuto() RetryOption` -- RetryAuto switches the retry mechanism from in-runner step re-run to whole-node re-dispatch.
-- `func RetryBackoff(d time.Duration) RetryOption` -- RetryBackoff sets the initial backoff between retry attempts.
-
-### type RiskBlockedError
-
-RiskBlockedError is the typed error returned when the dispatcher refuses a run because one or more reachable steps declare risk labels the operator hasn't acknowledged via --sw-allow (or --sw-dry-run, which bypasses every gate).
-
-```
-type RiskBlockedError struct {
-    Pipeline      string
-    StepID        string
-    MissingLabels []string
-}
-```
-
-- `func (e *RiskBlockedError) Error() string`
+- `func Backoff(d time.Duration) RetryOption` -- Backoff declares retry delay without selecting an execution placement.
 
 ### type RunContext
 
@@ -1327,12 +901,11 @@ RunContext is the typed environment every Plan and Job sees, populated by the or
 type RunContext struct {
     RunID string
 
-    // Pipeline is the registered name of the invoked pipeline
-    // (e.g. "lint", "build-test-deploy").
+    // Pipeline is the invoked project name, including any alias.
     Pipeline string
 
-    // Git is the run's view of the cloned working tree. Same instance
-    // as `Runtime().Git`. Live methods (IsDirty, FilesetHash, …) shell
+    // Git is the run's view of the cloned working tree.
+    // Live methods (IsDirty, FilesetHash, …) shell
     // out fresh each call; data fields (SHA, Branch, Repo, RepoURL)
     // are the trigger-time snapshot.
     Git *Git
@@ -1341,16 +914,10 @@ type RunContext struct {
 
     StartedAt time.Time
 
-    // NoCache reports that this run was asked to ignore cached per-node
-    // results; cache writes still happen. Plan code reads the signal here
-    // because the orchestrator installs it on the context only after the
-    // plan is built.
-    NoCache bool
+    // NoMemo bypasses memo reads while retaining writes.
+    NoMemo bool
 
-    // DryRun reports that this run was asked to describe its work rather
-    // than apply it. A step body reads the same answer from [IsDryRun];
-    // this field is what a Plan reads, which runs before the orchestrator
-    // installs the mode on the context.
+    // DryRun carries the same sealed mode as IsDryRun during planning and execution.
     DryRun bool
 }
 ```
@@ -1383,29 +950,6 @@ type RunnerInfo struct {
 - `func Runner(ctx context.Context) *RunnerInfo` -- Runner returns the RunnerInfo the orchestrator installed for the current job.
 - `func (r *RunnerInfo) HasLabel(term string) bool` -- HasLabel reports whether the runner advertises the given label term.
 
-### type RuntimeConfig
-
-RuntimeConfig is the snapshot of "what is true about this process at the moment it started." Populated once at package init by walking up from cwd to find the project root; stable for the lifetime of the run.
-
-```
-type RuntimeConfig struct {
-    // WorkDir is the directory the pipeline should treat as the
-    // repo root. Discovered at process init by walking up from cwd
-    // looking for a `.sparkwing/` subdir. Empty when no project
-    // was found above cwd; helpers (Path, ReadFile, ...) then
-    // refuse to run with a clear error.
-    WorkDir string
-
-    // Git describes the source state being built. Same instance
-    // as RunContext.Git. Always non-nil so live methods are safe
-    // to call from init time; data fields stay empty until SetGit
-    // fills them.
-    Git *Git
-}
-```
-
-- `func CurrentRuntime() RuntimeConfig` -- CurrentRuntime returns the RuntimeConfig snapshot for this process.
-
 ### type Scope
 
 Scope selects how far a ConcurrencyGroup's budget reaches: only the nodes of one run, every run on one machine, or the whole fleet coordinating through a shared backend.
@@ -1427,57 +971,6 @@ const (
 )
 ```
 
-
-### type SecretField
-
-SecretField is one entry in the result of InspectPipelineSecrets: the declared secret + (when a SecretResolver is installed on ctx) the resolution outcome.
-
-```
-type SecretField struct {
-    // Name is the secret name as the pipeline asks for it.
-    Name string
-    // GoField is the Go struct field on Secrets() that maps to this secret name.
-    GoField string
-    // Required reports whether the declaration marked this secret
-    // required. Required secrets fail the run at fail-fast time
-    // when the resolver can't find them.
-    Required bool
-    // DeclaredIn identifies the pipeline's typed Secrets struct.
-    DeclaredIn string
-    // Resolved reports whether the resolver returned a value.
-    // Set when a SecretResolver was installed on ctx; left at the
-    // zero value (false) when inspection ran without one.
-    Resolved bool
-    // Note carries the resolution error message (or "not resolved
-    // yet" when no resolver is installed). Empty when Resolved is
-    // true and no error occurred.
-    Note string
-}
-```
-
-- `func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *pipelines.Pipeline) ([]SecretField, error)` -- InspectPipelineSecrets enumerates the pipeline's typed Secrets struct and attempts each field when ctx carries a SecretResolver.
-
-### type SecretResolver
-
-SecretResolver resolves a stored value to (plain, masked) at the moment of the call.
-
-```
-type SecretResolver interface {
-    Resolve(ctx context.Context, name string) (value string, masked bool, err error)
-}
-```
-
-- `func NewSecretResolverFromSpec(_ context.Context, spec backends.Spec) (SecretResolver, error)` -- NewSecretResolverFromSpec builds a SecretResolver for the secrets surface from a backends.Spec.
-
-### type SecretResolverFunc
-
-SecretResolverFunc adapts a function to SecretResolver.
-
-```
-type SecretResolverFunc func(ctx context.Context, name string) (value string, masked bool, err error)
-```
-
-- `func (f SecretResolverFunc) Resolve(ctx context.Context, name string) (string, bool, error)` -- Resolve satisfies SecretResolver.
 
 ### type SecretsProvider
 
@@ -1520,38 +1013,9 @@ type SkipPredicate func(ctx context.Context) bool
 ```
 
 
-### type SparkwingFlagDoc
-
-SparkwingFlagDoc is a public, single-source-of-truth description of one sparkwing-owned flag.
-
-```
-type SparkwingFlagDoc struct {
-    // Name is the long flag name without the leading "--".
-    Name string
-    // Short is the optional one-letter alias without the leading "-"
-    // (e.g. "v" for --sw-verbose). Empty for flags without a short form.
-    Short string
-    // Argument is the value placeholder for value-taking flags
-    // (e.g. "PATH", "REF"); empty for boolean flags.
-    Argument string
-    // Desc is the one-line help text shown in --help output.
-    Desc string
-    // Group is the rendering bucket: currently a single "System"
-    // label. Per-pipeline help uses this to section the footer;
-    // `sparkwing run --help` uses it via FlagSpec.Group.
-    Group string
-    // Hot marks flags an operator reaches for on most runs. Default
-    // --help and tab-completion menus filter to Hot=true entries to
-    // keep the surface small; the long tail surfaces via --help-all.
-    Hot bool
-}
-```
-
-- `func SparkwingFlagDocs() []SparkwingFlagDoc` -- SparkwingFlagDocs returns the canonical sparkwing-owned flag documentation.
-
 ### type StepError
 
-StepError wraps a step body's error with the originating step ID.
+StepError attributes a failure to a step while preserving its underlying cause.
 
 ```
 type StepError struct {
@@ -1578,15 +1042,6 @@ type StepGroup struct {
 - `func (g *StepGroup) Name() string` -- Name returns the group's declared name.
 - `func (g *StepGroup) Needs(deps ...WorkDep) *StepGroup` -- Needs declares an upstream dependency on every member of the group.
 - `func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup` -- SkipIf registers a predicate on every member of the group.
-
-### type ToolSlotProvider
-
-ToolSlotProvider acquires cost units of a ConcurrencyGroup from inside a running job body and returns the release.
-
-```
-type ToolSlotProvider func(ctx context.Context, group *ConcurrencyGroup, cost int) (release func(), err error)
-```
-
 
 ### type TriggerInfo
 
@@ -1626,17 +1081,6 @@ type VerifyFn func(ctx context.Context) error
 ```
 
 
-### type WhenRunnerProvider
-
-WhenRunnerProvider is optionally implemented by a Workable struct to declare its own dispatch-time eligibility labels.
-
-```
-type WhenRunnerProvider interface {
-    WhenRunner() []string
-}
-```
-
-
 ### type WithArgs
 
 WithArgs is the embedded helper a job uses to declare typed args.
@@ -1648,8 +1092,6 @@ type WithArgs[T any] struct {
 ```
 
 - `func (w *WithArgs[T]) Args(ctx context.Context) T` -- Args returns the resolved typed args for the current run.
-- `func (w *WithArgs[T]) ArgsType() reflect.Type` -- ArgsType returns the reflect.Type of T, which the framework reads to find the tags of a job that embeds WithArgs.
-- `func (w *WithArgs[T]) BindFromAny(val any) error` -- BindFromAny stores resolved args.
 
 ### type Work
 
@@ -1662,13 +1104,7 @@ type Work struct {
 ```
 
 - `func NewWork() *Work` -- NewWork returns an empty Work.
-- `func (w *Work) Groups() []*StepGroup` -- Groups returns the StepGroups declared on this Work in declaration order.
-- `func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy` -- ParallelFailurePolicy returns the configured policy.
-- `func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work` -- ParallelFailures sets the policy for independent items in this Work.
-- `func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string` -- PreviewSkipForRange computes the (id -> human-readable reason) skip set this Work would apply under the given --start-at / --stop-at bounds, WITHOUT executing any step body.
-- `func (w *Work) StepByID(id string) *WorkStep` -- StepByID returns the step with the given id, or nil if absent.
-- `func (w *Work) Steps() []*WorkStep` -- Steps returns the work's steps in insertion order.
-- `func (w *Work) TopologicalStepOrder() []string` -- TopologicalStepOrder returns Work item IDs in a stable topological order consistent with their Needs DAG: ties broken by registration order (the order Step was called).
+- `func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work` -- FailurePolicy chooses fail_fast or collect_all without changing dependency requirements.
 
 ### type WorkDep
 
@@ -1693,24 +1129,14 @@ type WorkStep struct {
 
 - `func Step(w *Work, id string, fn any) *WorkStep` -- Step registers a unit of work on this Work.
 - `func (s *WorkStep) ContinueOnError() *WorkStep` -- ContinueOnError marks the step's failure as non-blocking for the rest of the Work: in-flight sibling steps are not cancelled, and downstream steps that .Needs() this one still dispatch.
-- `func (s *WorkStep) DepIDs() []string` -- DepIDs returns the step IDs this step depends on.
 - `func (s *WorkStep) DryRun(fn func(ctx context.Context) error) *WorkStep` -- DryRun installs a dry-run body on this WorkStep.
 - `func (s *WorkStep) Finally() *WorkStep` -- Finally marks a step as cleanup.
-- `func (s *WorkStep) HasDryRun() bool` -- HasDryRun reports whether a dry-run body has been installed.
 - `func (s *WorkStep) ID() string` -- ID returns the step's identifier.
-- `func (s *WorkStep) IsContinueOnError() bool` -- IsContinueOnError reports whether this step's failure is non- blocking for sibling cancellation and downstream Needs() dispatch.
-- `func (s *WorkStep) IsFinally() bool` -- IsFinally reports whether this step is cleanup that survives sibling failure.
-- `func (s *WorkStep) IsOptional() bool` -- IsOptional reports whether this step's failure is masked from the Job's rollup outcome.
-- `func (s *WorkStep) IsSafeWithoutDryRun() bool` -- IsSafeWithoutDryRun reports whether the step is marked safe.
 - `func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep` -- Needs declares hard upstream Step dependencies inside the same Work.
 - `func (s *WorkStep) Optional() *WorkStep` -- Optional marks the step as non-essential: a failure is recorded (still visible in logs and step status) but does not count toward the Job's rollup outcome.
-- `func (s *WorkStep) Output() any` -- Output returns the resolved typed output (after the step completes) or nil.
-- `func (s *WorkStep) OutputType() reflect.Type` -- OutputType returns the typed output reflect.Type, or nil for steps that return only error.
 - `func (s *WorkStep) Risk(labels ...string) *WorkStep` -- Risk marks a WorkStep as gated by the given operator-acknowledged labels.
-- `func (s *WorkStep) Risks() []string` -- Risks returns the labels declared on this step in declaration order with duplicates collapsed.
 - `func (s *WorkStep) SafeWithoutDryRun() *WorkStep` -- SafeWithoutDryRun marks a step as having no side effects, so the dispatcher runs the apply Fn directly under --dry-run rather than requiring a separate dry-run body.
 - `func (s *WorkStep) SkipIf(fn SkipPredicate) *WorkStep` -- SkipIf registers a predicate the runner evaluates after this step's upstream deps complete.
-- `func (s *WorkStep) SkipPredicates() []SkipPredicate` -- SkipPredicates returns the registered skip predicates.
 
 ### type Workable
 
@@ -1726,59 +1152,10 @@ type Workable interface {
 ## Constants
 
 ```
-const (
-    EnvGitHubEventName = "GITHUB_EVENT_NAME"
-    EnvPRNumber        = "GITHUB_PR_NUMBER"
-    EnvPRAction        = "GITHUB_PR_ACTION"
-    EnvPRBaseRef       = "GITHUB_BASE_REF"
-    EnvPRBaseSHA       = "GITHUB_BASE_SHA"
-    EnvPRHeadRef       = "GITHUB_HEAD_REF"
-    EnvPRHeadSHA       = "GITHUB_HEAD_SHA"
-)
-```
-
-```
-const (
-    EventStepStart    = "step_start"
-    EventStepEnd      = "step_end"
-    EventStepSkipped  = "step_skipped"
-    EventWorkFailFast = "work_fail_fast"
-)
-```
-
-```
-const DefaultCacheTTL = 7 * 24 * time.Hour
-```
-
-```
-const EventNodeAnnotation = "node_annotation"
-```
-
-```
-const EventNodeSummary = "node_summary"
-```
-
-```
-const EventPullRequest = "pull_request"
-```
-
-```
 const ExitNotStarted = -1
 ```
 
-```
-const MaxCacheTTL = 35 * 24 * time.Hour
-```
-
-```
-const Paused = "paused"
-```
-
 ## Variables
-
-```
-var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at a different workdir")
-```
 
 ```
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
@@ -1793,36 +1170,5 @@ var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 ```
 
 ```
-var ErrSecretMissing = secretsource.ErrMissing
-```
-
-```
-var RuntimePlumbing = struct {
-    Keys runtimePlumbingKeys
-    Fns  runtimePlumbingFns
-}{
-    Keys: runtimePlumbingKeys{
-        DryRun:           dryRunKey{},
-        Runner:           runnerCtxKey{},
-        StepRange:        stepRangeKey{},
-        JSONRefResolver:  keyJSONRefResolver,
-        PipelineResolver: keyPipelineResolver,
-        PipelineAwaiter:  keyPipelineAwaiter,
-        Inputs:           keyInputs,
-        PipelineSecrets:  keyPipelineSecrets,
-        SecretResolver:   keySecretResolver,
-        Logger:           keyLogger,
-        Node:             keyNode,
-        Admission:        keyAdmission,
-        OIDCTokenSource:  oidcTokenSourceKey{},
-    },
-    Fns: runtimePlumbingFns{
-        PlanInsertExpanded: (*Plan).insertExpanded,
-        JobGroupFinalize:   (*JobGroup).finalize,
-        WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
-        WorkStepMarkDone:   (*WorkStep).markDone,
-        WorkRunStep:        runStep,
-        NodeDirCaches:      dirCacheSpecs,
-    },
-}
+var ErrSecretMissing = errors.New("secret missing")
 ```

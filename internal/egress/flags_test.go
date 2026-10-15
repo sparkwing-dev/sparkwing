@@ -11,7 +11,7 @@ import (
 
 func TestBindDefaultsToUnlimited(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs, egress.ControllerSurfaces)
+	read := egress.Bind(fs)
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestBindDefaultsToUnlimited(t *testing.T) {
 
 func TestBindReadsTheFlags(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs, egress.ControllerSurfaces)
+	read := egress.Bind(fs)
 	if err := fs.Parse([]string{"--egress-daily-alarm-bytes=900", "--egress-max-downloads=4", "--egress-max-log-streams=3"}); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestBindReadsTheFlags(t *testing.T) {
 func TestBindIgnoresTheEnvironment(t *testing.T) {
 	t.Setenv("SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES", "not a number")
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs, egress.ControllerSurfaces)
+	read := egress.Bind(fs)
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -51,32 +51,9 @@ func TestBindIgnoresTheEnvironment(t *testing.T) {
 	}
 }
 
-// safety: a service that cannot tell its callers apart must not offer a
-// per-principal cap, because its refusal would fall on all of them.
-func TestACacheRegistersNoPerPrincipalBudget(t *testing.T) {
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	fs.SetOutput(&strings.Builder{})
-	read := egress.Bind(fs, egress.CacheSurfaces)
-	for _, arg := range []string{"--egress-max-log-streams=2", "--egress-max-downloads=2"} {
-		if err := fs.Parse([]string{arg}); err == nil {
-			t.Errorf("a service with no per-principal budget accepted %s", arg)
-		}
-	}
-	if err := fs.Parse(nil); err != nil {
-		t.Fatal(err)
-	}
-	cfg, _, err := read()
-	if err != nil {
-		t.Fatalf("read = %v, want nil", err)
-	}
-	if cfg.MaxStreamsPerPrincipal != 0 || cfg.MaxDownloadsPerPrincipal != 0 {
-		t.Fatalf("config = %+v, want only the daily alarm", cfg)
-	}
-}
-
 func TestBindRefusesANegativeBudget(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	read := egress.Bind(fs, egress.ControllerSurfaces)
+	read := egress.Bind(fs)
 	if err := fs.Parse([]string{"--egress-daily-alarm-bytes=-1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +80,7 @@ func TestBind_NamedReportsAZeroOnTheCommandLine(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := flag.NewFlagSet("controller", flag.ContinueOnError)
-			read := egress.Bind(fs, egress.ControllerSurfaces)
+			read := egress.Bind(fs)
 			if err := fs.Parse(tc.args); err != nil {
 				t.Fatal(err)
 			}

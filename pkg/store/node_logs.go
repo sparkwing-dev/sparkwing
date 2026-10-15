@@ -247,24 +247,7 @@ func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []N
 	return collectNodeLogs(rows)
 }
 
-// DeleteRunNodeLogs forgets a run's log records once their objects are
-// gone.
-func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error {
-	if _, err := s.exec(ctx, `DELETE FROM node_log_segments WHERE team = ? AND run_id = ?`, string(team), runID); err != nil {
-		return err
-	}
-	_, err := s.exec(ctx, `DELETE FROM node_logs WHERE team = ? AND run_id = ?`, string(team), runID)
-	return err
-}
-
 const nodeLogColumns = `team, run_id, node_id, attempt, generation, prefix, uploaded_through, stored_bytes, charged_bytes, sealed_at, created_at, updated_at`
-
-func nodeLogColumnsOf(alias string) string {
-	return alias + ".team, " + alias + ".run_id, " + alias + ".node_id, " + alias + ".attempt, " + alias + ".generation, " +
-		alias + ".prefix, " + alias + ".uploaded_through, " + alias + ".stored_bytes, " +
-		alias + ".charged_bytes, " + alias + ".sealed_at, " +
-		alias + ".created_at, " + alias + ".updated_at"
-}
 
 func scanNodeLog(row rowScanner) (NodeLog, error) {
 	var l NodeLog

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -23,16 +22,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-var triggerTestGitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
-
 type triggerSpy struct {
-	mu              sync.Mutex
-	reqs            []string
-	bodies          [][]byte
-	failUpload      bool
-	sourceKey       string
-	sourceBytes     []byte
-	sourceCommitted bool
+	mu     sync.Mutex
+	reqs   []string
+	bodies [][]byte
 
 	runStatus string
 	runError  string
@@ -64,32 +57,6 @@ func (s *triggerSpy) handler() http.Handler {
 		s.mu.Unlock()
 
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/data/capabilities":
-			_ = json.NewEncoder(w).Encode(map[string]bool{"source": true, "upload": true, "download": true})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/data/upload":
-			var req struct {
-				Key string `json:"key"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&req)
-			s.mu.Lock()
-			s.sourceKey = req.Key
-			s.mu.Unlock()
-			if s.failUpload {
-				http.Error(w, "upload refused", http.StatusBadGateway)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"upload_id": "up-1", "url": "http://" + r.Host + "/source-object", "headers": map[string]string{}})
-		case r.Method == http.MethodPut && r.URL.Path == "/source-object":
-			body, _ := io.ReadAll(r.Body)
-			s.mu.Lock()
-			s.sourceBytes = body
-			s.mu.Unlock()
-			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/data/commit":
-			s.mu.Lock()
-			s.sourceCommitted = len(s.sourceBytes) > 0
-			s.mu.Unlock()
-			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers":
 			body := make([]byte, r.ContentLength)
 			_, _ = r.Body.Read(body)
@@ -307,57 +274,8 @@ func TestPipelineTrigger_PushedCommitDoesNotUsePublicCache(t *testing.T) {
 	}
 }
 
-func TestPipelineTrigger_WorkingTreeUploadsBeforeAdmissionWithoutOrigin(t *testing.T) {
+func TestPipelineTrigger_WorkingTreeRequiresStorageAuthorityBeforeAdmission(t *testing.T) {
 	spy := &triggerSpy{}
-	srv := httptest.NewServer(spy.handler())
-	defer srv.Close()
-	writeTriggerProfiles(t, srv.URL)
-	withGitCheckout(t, "https://git.example.com/acme/widgets.git", func() {
-		runSnapshotGit(t, ".", "remote", "remove", "origin")
-		base := strings.TrimSpace(runSnapshotGit(t, ".", "rev-parse", "HEAD"))
-		if err := os.WriteFile("README.md", []byte("dirty\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile("untracked.txt", []byte("local\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		stderr := captureStderr(t, func() {
-			_ = captureStdout(t, func() {
-				if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"}); err != nil {
-					t.Fatal(err)
-				}
-			})
-		})
-		if !strings.Contains(stderr, "working tree: base "+base+" snapshot ") {
-			t.Fatalf("stderr = %q", stderr)
-		}
-	})
-	reqs := spy.requests()
-	commitAt, triggerAt := slices.Index(reqs, "POST /api/v1/data/commit"), slices.Index(reqs, "POST /api/v1/triggers")
-	if commitAt < 0 || triggerAt < 0 || commitAt >= triggerAt || !spy.sourceCommitted {
-		t.Fatalf("source must commit before trigger admission: %v", reqs)
-	}
-	if len(spy.sourceBytes) == 0 || !strings.HasPrefix(spy.sourceKey, "sources/") {
-		t.Fatalf("direct source = key %q, bytes %d", spy.sourceKey, len(spy.sourceBytes))
-	}
-	for _, req := range reqs {
-		if strings.Contains(req, "/gitcache/") {
-			t.Fatalf("legacy cache request: %v", reqs)
-		}
-	}
-	var request client.TriggerRequest
-	if err := json.Unmarshal(spy.bodies[0], &request); err != nil {
-		t.Fatal(err)
-	}
-	if request.Git.RepoURL != "" || request.Trigger.Env["SPARKWING_SOURCE_BUNDLE_OBJECT"] != spy.sourceKey ||
-		!triggerTestGitObjectRE.MatchString(request.Git.SHA) {
-		t.Fatalf("source trigger = %+v", request)
-	}
-}
-
-func TestPipelineTrigger_WorkingTreeUploadFailureDoesNotAdmitTrigger(t *testing.T) {
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	spy := &triggerSpy{failUpload: true}
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfiles(t, srv.URL)

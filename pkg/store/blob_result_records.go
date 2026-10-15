@@ -34,7 +34,7 @@ func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team
 		if part.key == nil {
 			continue
 		}
-		if *part.key != ResultBlobKey(attempt, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, part.kind) {
+		if *part.key != blob.ResultRecordKey(attempt, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, part.kind) {
 			return blob.ErrDigestNotReadable
 		}
 		*part.hit, err = records.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: *part.key}, capability.DataWrite)

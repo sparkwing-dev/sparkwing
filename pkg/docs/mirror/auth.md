@@ -684,8 +684,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `secrets.read` | Member or verified local reads of unmasked config through GET `/api/v1/secrets/{name}`. Masked values require a live, declaring `secrets.release` claim |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
-| `storage.count`   | The cache service's scope: POST `/internal/storage/reserve`, `/internal/storage/commit` and `/internal/storage/release` for any team's cache or logs, POST `/internal/downloads/charge`. It reaches no other route, and only the operator mints it, with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`; no team's token may carry it. The cache reads it from the file `controller-token` in its `--credentials-dir` |
-| `admin`           | tokens / users / secrets CRUD, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin` -- except on the
@@ -810,8 +809,7 @@ claim:
   parent's claim token. Anything else answers `403 claim_mismatch`.
 - It reads any node of its run but writes only to its own node. Of the
   run-level writes it makes only a node's own: events, the
-  cache grant, the run's workload OIDC token, the run's source credential and
-  the run's Git proxy. Run
+  run's workload OIDC token and source credential. Run
   create and finish, plan, node create and the readiness routes answer
   `403 claim_mismatch`.
 - Every request carries the claim's own holder, membership, reservation and
@@ -1040,20 +1038,18 @@ token the team holds is revoked, open invitations are withdrawn, queued runs are
 cancelled and running ones asked to stop, and the team no longer resolves for
 any request. Another replica may accept a revoked token from its cache for up to
 a minute, so a background pass, once a minute and at least two minutes after the
-request, then deletes the team's log segments, its artifacts
-and build cache through the cache service, and its rows in every team-owned
-table, secrets and storage watermarks included. A cache grant minted before
-the deletion stays valid for up to six hours, and a log upload URL for fifteen
-minutes, so seven hours after the purge a second pass deletes the log segments
-and the cache tree and sweeps the team-owned tables once more.
+request, then deletes the team's log segments and its rows in every team-owned
+table, secrets and storage watermarks included. Blob reachability cleanup is
+separate from this deletion pass. A signed log upload URL may
+outlive its credential for fifteen minutes. A second pass runs one hour and
+fifteen minutes after the purge and sweeps objects and team-owned tables again.
 One replica works on a deletion at a time, under a five-minute lease it renews
 before each step. A pass that fails leaves the deletion where it was with the
 error recorded and the next pass starts that step again;
 `GET /api/v1/me/team-deletions` shows the requester its state. The slug is
-never registered again. The controller deletes the team's cache tree under
-an operator grant it signs with its `cache-grant-key` credential, the key the
-cache verifies grants with, and the purge deletes the team's segments under
-every retention class's `teams/<team>/` prefix. An owner cannot delete their
+never registered again. The purge deletes the team's segments under every
+retention class's `teams/<team>/` prefix. Cache-grant signing and its credential
+have been removed. An owner cannot delete their
 only team; deleting their account does that.
 
 A user deletes their account with `DELETE /api/v1/me`, typing their email back

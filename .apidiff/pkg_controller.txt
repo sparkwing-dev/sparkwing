@@ -39,11 +39,6 @@ type BoundCipher interface {
 
 	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
-type CacheGrantResponse struct {
-	Grant     string
-	Team      string
-	ExpiresAt time.Time
-}
 type CapabilityManager interface {
 	Team() store.Team
 	ListCapabilities(context.Context, capability.Authorized, capability.InventoryFilter) ([]capability.Metadata, error)
@@ -60,7 +55,6 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
-const ClaimCacheGrantTTL = 5 * time.Minute
 const ClaimPollInterval = 500 * time.Millisecond
 const CloudRetentionDays = 90
 func CompliantClaimPollsPerMinute() int
@@ -419,7 +413,6 @@ const ScopeRunsRead = store.ScopeRunsRead
 const ScopeRunsState = store.ScopeRunsState
 const ScopeRunsWrite = store.ScopeRunsWrite
 const ScopeSecretsRead = store.ScopeSecretsRead
-const ScopeStorageCount = store.StorageCountScope
 const ScopeTeamAdmin = store.ScopeTeamAdmin
 const ScopeTriggersClaim = store.ScopeTriggersClaim
 const ScopeTriggersRead = store.ScopeTriggersRead
@@ -444,14 +437,10 @@ func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
-func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithAuthorization(authorization RouteAuthorization) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
-func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
-func (s *Server) WithCacheGrantKey(key string) *Server
-func (s *Server) WithCachePodURL(url string) *Server
-func (s *Server) WithCacheURL(url string) *Server
+func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server
 func (s *Server) WithCapabilityManager(resolve func(context.Context, store.Team) (CapabilityManager, error)) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithCredentialInventoryReader(resolve func(context.Context, store.Team) (CredentialInventoryReader, error)) *Server
@@ -462,6 +451,7 @@ func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (Cre
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDataController(data *DataController) *Server
+func (s *Server) WithDataObjects(objects blob.ObjectBackend) *Server
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithEngineController(engine *EngineController) *Server
@@ -486,7 +476,6 @@ func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithOperatorAccounts(ids []string) *Server
-func (s *Server) WithOutputSignKey(key []byte) *Server
 func (s *Server) WithPayments(verifier capability.PaymentAuthenticator, ledger PaymentSettler) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
@@ -503,13 +492,10 @@ func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (Sizi
 func (s *Server) WithSourceAuditReader(resolve func(context.Context, store.Team) (SourceAuditReader, error)) *Server
 func (s *Server) WithSourceController(source *SourceController) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
-func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyAddr(addr string) *Server
 type ServicesResponse struct {
 	DataDownloadURL string
-
-	CachePod string
 
 	Dashboard string
 
@@ -558,9 +544,6 @@ type SourceTransactions interface {
 const SpendLimitCode = "spend_limit"
 const StorageMaintenanceInterval = time.Hour
 const TeamDeletionInterval = time.Minute
-type TeamStorage struct {
-	CacheURL string
-}
 type TokenRequestBudget struct {
 	PerTokenMinute int
 
@@ -601,8 +584,6 @@ func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runI
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flowRefusal) Error() string
 func (r *flushingStatusRecorder) Flush()
-func (o fsLogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
-func (o fsLogObjects) List(ctx context.Context, prefix string) ([]string, error)
 func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
 func (g githubProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
 func (g googleProvider) AuthorizeURL(state, verifier, redirectURI string) string
@@ -631,8 +612,6 @@ func (c planSecretCipher) OpenPlanSecret(ctx context.Context, team store.Team, s
 func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (o s3LogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
 func (o s3LogObjects) List(ctx context.Context, prefix string) ([]string, error)
-func (l segmentLogs) Append(context.Context, string, string, []byte) error
-func (l segmentLogs) DeleteRun(ctx context.Context, runID string) error
 func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, node logseg.NodeProgress, now time.Time) (logseg.Completeness, bool, error)
 func (l segmentLogs) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
 func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error)

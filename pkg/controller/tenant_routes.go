@@ -39,7 +39,6 @@ var (
 	resToken              = tenantResource{"token", ownerDeployment}
 	resTeam               = tenantResource{"team", ownerDeployment}
 	resPayment            = tenantResource{"payment", ownerDeployment}
-	resGitCache           = tenantResource{"git cache repository", ownerDeployment}
 )
 
 // safety: teamBoundary refuses a route missing here, and a test fails while
@@ -49,9 +48,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/agents": resNone,
 
 	"GET /api/v1/approvals/pending": resNone,
-
-	"POST /api/v1/cache/store-ceiling/measure": resNone,
-	"POST /api/v1/cache/store-ceiling/thaw":    resNone,
 
 	"GET /api/v1/capacity/profiles":         resNone,
 	"GET /api/v1/capacity/profiles/explain": resNone,
@@ -65,8 +61,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/concurrency/{key}/resolve":        resConcurrencyKey,
 	"GET /api/v1/concurrency/{key}/state":          resConcurrencyKey,
 
-	"GET /api/v1/credits":          resNone,
-	"GET /api/v1/credits/history":  resNone,
 	"GET /api/v1/credits/settings": resNone,
 
 	"GET /api/v1/crons":                  resNone,
@@ -79,10 +73,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/crons/{id}/run":        resCron,
 	"DELETE /api/v1/crons/repos":         resNone,
 	"PUT /api/v1/crons/repos":            resNone,
-
-	"GET /api/v1/gitcache/git/{path...}":  resGitCache,
-	"POST /api/v1/gitcache/git/{path...}": resGitCache,
-	"POST /api/v1/gitcache/git/register":  resNone,
 
 	"POST /api/v1/invitations/{id}/accept": resOwnInvitation,
 
@@ -104,7 +94,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/approvals/{nodeID}":                      resRun,
 	"POST /api/v1/runs/{id}/approvals/{nodeID}/request":              resRun,
 	"GET /api/v1/runs/{id}/attempts":                                 resRun,
-	"POST /api/v1/runs/{id}/cache-grant":                             resRun,
 	"POST /api/v1/runs/{id}/children":                                resRun,
 	"GET /api/v1/runs/{id}/children/{childID}":                       resRun,
 	"GET /api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output": resRun,
@@ -113,9 +102,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/runs/{id}/events":                                   resRun,
 	"POST /api/v1/runs/{id}/events":                                  resRun,
 	"GET /api/v1/runs/{id}/events/stream":                            resRun,
-	"GET /api/v1/runs/{id}/gitcache/git/{path...}":                   resRun,
-	"POST /api/v1/runs/{id}/gitcache/git/{path...}":                  resRun,
-	"POST /api/v1/runs/{id}/gitcache/git/register":                   resRun,
 	"GET /api/v1/runs/{id}/logs":                                     resRun,
 	"GET /api/v1/runs/{id}/logs/{node}":                              resRun,
 	"GET /api/v1/runs/{id}/logs/{node}/completeness":                 resRun,

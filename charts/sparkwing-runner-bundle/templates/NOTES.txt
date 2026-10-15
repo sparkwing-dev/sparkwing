@@ -5,9 +5,6 @@ Sparkwing runner bundle installed.
   Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
 
 {{- $unpinnedImages := empty .Values.runner.image.tag -}}
-{{- if .Values.cache.enabled -}}
-{{- $unpinnedImages = or $unpinnedImages (empty .Values.cache.image.tag) -}}
-{{- end -}}
 {{- if $unpinnedImages }}
 
 WARNING: This chart version has no compatible public default image set.
@@ -18,9 +15,6 @@ from one compatible Sparkwing revision before treating this as runnable.
 
 Components:
   Runner    {{ .Values.runner.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.runner.fullname" . }}
-{{- if .Values.cache.enabled }}
-  Cache     {{ .Values.cache.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.cache.fullname" . }}
-{{- end }}
 
 {{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . }}
 {{- if not $controllerURL }}

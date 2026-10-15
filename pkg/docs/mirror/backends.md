@@ -105,9 +105,9 @@ pipeline and which secrets its runs see.
 
 ## Pipeline binary distribution
 
-Compiled pipeline binaries live in this machine's binary cache. A run
-also fetches a prebuilt binary from, and publishes one to, the git cache
-that `SPARKWING_GITCACHE_URL` names.
+Local runs compile into this machine's binary cache and reuse those bytes
+until the source inputs change. Remote binary transfers use the controller's
+signed data path. See [Storage](storage.md).
 
 ## Migrating from `backends.yaml`
 

@@ -2,7 +2,6 @@ package sourceurl
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net"
@@ -295,22 +294,6 @@ func parseNumericLabel(label string) (uint64, bool) {
 		return 0, false
 	}
 	return v, true
-}
-
-// ClaimedRepoNameFromURL derives the gitcache name for a repository URL. It
-// hashes the validated URL text, so two repositories whose paths end in the
-// same segment never share a claim-scoped cache authorization path. The text is
-// not canonicalized: "host/repo", "host/repo.git" and "git@host:repo" are three
-// names for one repository. The result is always "repo-" and 59 hex digits,
-// which the cache accepts as a register name.
-func ClaimedRepoNameFromURL(repoURL string) string {
-	if normalized, err := ValidateCloneURL(repoURL); err == nil {
-		repoURL = normalized
-	} else {
-		repoURL = strings.TrimSpace(repoURL)
-	}
-	sum := sha256.Sum256([]byte(repoURL))
-	return fmt.Sprintf("repo-%x", sum)[:64]
 }
 
 // Lookup resolves a host name to its addresses; net.DefaultResolver.LookupIPAddr

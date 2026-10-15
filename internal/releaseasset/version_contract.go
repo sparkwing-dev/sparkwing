@@ -18,7 +18,7 @@ func NamesForVersion(version string) ([]string, error) {
 		return nil, fmt.Errorf("invalid release version %q", version)
 	}
 	var names []string
-	for _, binary := range []Binary{Sparkwing, SparkwingCache, SparkwingController, SparkwingRunner} {
+	for _, binary := range []Binary{Sparkwing, "sparkwing-cache", SparkwingController, SparkwingRunner} {
 		for _, goos := range []string{"darwin", "linux", "windows"} {
 			if goos == "windows" && binary != Sparkwing && binary != SparkwingRunner {
 				continue

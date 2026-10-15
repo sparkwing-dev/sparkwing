@@ -144,9 +144,6 @@ api_socket names the controller API socket. api_ready reports whether it is
 bound, and api_error explains a binding failure. A daemon that supports the
 API but cannot bind its socket is unhealthy. Older daemons omit api_ready.
 
-artifact_store_error reports failure to open the configured cache. The daemon
-continues serving with artifact routes disabled.
-
 ### Flags
 
 | Flag | Description |

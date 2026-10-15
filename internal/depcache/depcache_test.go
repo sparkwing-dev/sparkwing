@@ -7,18 +7,22 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	goruntime "runtime"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 )
+
+var keyRE = regexp.MustCompile(`^dep-[a-f0-9]{64}$`)
+
+func keyForFile(name, scope, file string) (string, error) {
+	return depcachekey.Files(filepath.Dir(file), name, scope, []string{filepath.Base(file)})
+}
 
 func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 	dir := t.TempDir()
@@ -27,11 +31,11 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	k1, err := deriveKey("go-modules", "", lock)
+	k1, err := keyForFile("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
-	k2, err := deriveKey("go-modules", "", lock)
+	k2, err := keyForFile("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive again: %v", err)
 	}
@@ -39,9 +43,9 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 		t.Fatalf("key not stable: %q vs %q", k1, k2)
 	}
 	if !keyRE.MatchString(k1) {
-		t.Fatalf("key %q fails the cache service's key pattern", k1)
+		t.Fatalf("key %q is not safe for local archive names", k1)
 	}
-	wantPrefix := "dep-go-modules-" + goruntime.GOOS + "-" + goruntime.GOARCH + "-"
+	wantPrefix := "dep-"
 	if !strings.HasPrefix(k1, wantPrefix) {
 		t.Fatalf("key %q missing prefix %q", k1, wantPrefix)
 	}
@@ -49,7 +53,7 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 	if err := os.WriteFile(lock, []byte("example.com/mod v1.1.0 h1:def\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	k3, err := deriveKey("go-modules", "", lock)
+	k3, err := keyForFile("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive after edit: %v", err)
 	}
@@ -58,13 +62,13 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 	}
 }
 
-func TestDeriveDepCacheKeySanitizesName(t *testing.T) {
+func TestDependencyKeyHashesArbitraryNames(t *testing.T) {
 	dir := t.TempDir()
 	lock := filepath.Join(dir, "lock")
 	if err := os.WriteFile(lock, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	key, err := deriveKey("weird/name with spaces", "", lock)
+	key, err := keyForFile("weird/name with spaces", "", lock)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
@@ -145,7 +149,7 @@ func TestDepCacheArchiveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeArchive(f, src); err != nil {
+	if err := WriteArchive(f, src); err != nil {
 		t.Fatalf("write archive: %v", err)
 	}
 	if err := f.Close(); err != nil {
@@ -351,11 +355,11 @@ func TestDirKeyIncludesPath(t *testing.T) {
 	if err := os.WriteFile(lock, []byte("same content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ka, err := deriveKey("vendor", "service-a/vendor", lock)
+	ka, err := keyForFile("vendor", "service-a/vendor", lock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	kb, err := deriveKey("vendor", "service-b/vendor", lock)
+	kb, err := keyForFile("vendor", "service-b/vendor", lock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +371,7 @@ func TestDirKeyIncludesPath(t *testing.T) {
 func TestStagedExtractLeavesDirCleanOnFailure(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "target")
 	truncated := bytes.NewReader([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00})
-	if err := extractArchiveStaged(truncated, dir); err == nil {
+	if err := ExtractArchiveStaged(t.Context(), truncated, dir); err == nil {
 		t.Fatal("truncated archive extracted without error")
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -388,7 +392,7 @@ func TestLocalDepCacheMissSaveHitCycle(t *testing.T) {
 	ctx := context.Background()
 	const key = "dep-go-modules-test-amd64-0011223344556677"
 
-	hit, err := backend.exists(ctx, key)
+	hit, err := backend.Exists(ctx, key)
 	if err != nil {
 		t.Fatalf("exists on empty store: %v", err)
 	}
@@ -398,7 +402,7 @@ func TestLocalDepCacheMissSaveHitCycle(t *testing.T) {
 
 	src := t.TempDir()
 	populateDepCacheFixture(t, src)
-	size, err := backend.store(ctx, key, src)
+	size, err := backend.Store(ctx, key, src)
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
@@ -406,13 +410,13 @@ func TestLocalDepCacheMissSaveHitCycle(t *testing.T) {
 		t.Fatalf("stored size %d", size)
 	}
 
-	hit, err = backend.exists(ctx, key)
+	hit, err = backend.Exists(ctx, key)
 	if err != nil || !hit {
 		t.Fatalf("exists after store: hit=%v err=%v", hit, err)
 	}
 
 	dest := t.TempDir()
-	got, err := backend.fetch(ctx, key, dest)
+	got, err := backend.Fetch(ctx, key, dest)
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -420,135 +424,6 @@ func TestLocalDepCacheMissSaveHitCycle(t *testing.T) {
 		t.Fatalf("fetch size %d != stored size %d", got, size)
 	}
 	assertDepCacheFixture(t, dest)
-}
-
-func newCacheServiceStub(t *testing.T, token string) (*httptest.Server, *sync.Map) {
-	t.Helper()
-	var blobs sync.Map
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		key := strings.TrimPrefix(r.URL.Path, "/cache/")
-		if !keyRE.MatchString(key) {
-			http.Error(w, "invalid cache key", http.StatusBadRequest)
-			return
-		}
-		switch r.Method {
-		case http.MethodHead:
-			if _, ok := blobs.Load(key); !ok {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		case http.MethodGet:
-			v, ok := blobs.Load(key)
-			if !ok {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "application/gzip")
-			_, _ = w.Write(v.([]byte))
-		case http.MethodPut:
-			data := make([]byte, 0, 1<<20)
-			buf := make([]byte, 32<<10)
-			for {
-				n, err := r.Body.Read(buf)
-				data = append(data, buf[:n]...)
-				if err != nil {
-					break
-				}
-			}
-			blobs.Store(key, data)
-			w.WriteHeader(http.StatusCreated)
-		default:
-			http.Error(w, "GET, HEAD, or PUT only", http.StatusMethodNotAllowed)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv, &blobs
-}
-
-func TestRemoteDepCacheMissSaveHitCycle(t *testing.T) {
-	srv, blobs := newCacheServiceStub(t, "sekrit")
-	t.Setenv("SPARKWING_CACHE_URL", srv.URL)
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	t.Setenv("SPARKWING_CACHE_GRANT", "sekrit")
-
-	backend := selectBackend(context.Background())
-	if _, ok := backend.(*remoteBackend); !ok {
-		t.Fatalf("expected remote backend, got %T", backend)
-	}
-
-	ctx := context.Background()
-	const key = "dep-node-modules-linux-arm64-8899aabbccddeeff"
-
-	hit, err := backend.exists(ctx, key)
-	if err != nil {
-		t.Fatalf("exists: %v", err)
-	}
-	if hit {
-		t.Fatal("phantom hit")
-	}
-
-	src := t.TempDir()
-	populateDepCacheFixture(t, src)
-	size, err := backend.store(ctx, key, src)
-	if err != nil {
-		t.Fatalf("store: %v", err)
-	}
-
-	if _, ok := blobs.Load(key); !ok {
-		t.Fatal("server did not receive the blob")
-	}
-
-	hit, err = backend.exists(ctx, key)
-	if err != nil || !hit {
-		t.Fatalf("exists after store: hit=%v err=%v", hit, err)
-	}
-
-	dest := t.TempDir()
-	got, err := backend.fetch(ctx, key, dest)
-	if err != nil {
-		t.Fatalf("fetch: %v", err)
-	}
-	if got != size {
-		t.Fatalf("fetch size %d != stored %d", got, size)
-	}
-	assertDepCacheFixture(t, dest)
-}
-
-func TestRemoteDepCacheOversizeArchiveSkipsUpload(t *testing.T) {
-	srv, blobs := newCacheServiceStub(t, "")
-	backend := &remoteBackend{baseURL: srv.URL}
-
-	prev := remoteMaxBytes
-	remoteMaxBytes = 64
-	t.Cleanup(func() { remoteMaxBytes = prev })
-
-	src := t.TempDir()
-	populateDepCacheFixture(t, src)
-	_, err := backend.store(context.Background(), "dep-big-linux-amd64-0000000000000000", src)
-	if err == nil {
-		t.Fatal("oversize store did not report an error")
-	}
-	if !strings.Contains(err.Error(), "not uploading") {
-		t.Fatalf("error does not describe the size skip: %v", err)
-	}
-	var uploaded int
-	blobs.Range(func(_, _ any) bool { uploaded++; return true })
-	if uploaded != 0 {
-		t.Fatalf("oversize archive reached the server (%d blobs)", uploaded)
-	}
-}
-
-func TestRemoteDepCacheRejectedAuthSurfacesAsError(t *testing.T) {
-	srv, _ := newCacheServiceStub(t, "right-token")
-	backend := &remoteBackend{baseURL: srv.URL, token: "wrong-token"}
-	if _, err := backend.exists(context.Background(), "dep-x-linux-amd64-0000000000000000"); err == nil {
-		t.Fatal("401 did not surface as an error")
-	}
 }
 
 func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
@@ -578,7 +453,7 @@ func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
 	st.Save(context.Background(), fmt.Errorf("node exploded"))
 
 	backend := selectBackend(context.Background())
-	hit, err := backend.exists(context.Background(), st.key)
+	hit, err := backend.Exists(context.Background(), st.key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -587,7 +462,7 @@ func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
 	}
 
 	st.Save(context.Background(), nil)
-	hit, err = backend.exists(context.Background(), st.key)
+	hit, err = backend.Exists(context.Background(), st.key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,25 +573,4 @@ func dirPerm(t *testing.T, path string) fs.FileMode {
 		t.Fatalf("stat %s: %v", path, err)
 	}
 	return fi.Mode().Perm()
-}
-
-// safety: a host serving several runs names each node's grant on its
-// context, so a node's caches authenticate with its own run's grant, never
-// the one in the process environment.
-func TestRemoteCacheUsesTheNodesGrantOverTheProcesss(t *testing.T) {
-	var got string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.Header.Get("Authorization")
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-	t.Setenv("SPARKWING_CACHE_URL", srv.URL)
-	t.Setenv(authwire.CacheGrantEnv, "process-grant")
-	ctx := WithCacheGrant(context.Background(), "node-grant")
-	if _, err := selectBackend(ctx).exists(ctx, "k"); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "node-grant") {
-		t.Fatalf("the cache saw Authorization %q, want the node's grant", got)
-	}
 }

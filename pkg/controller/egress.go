@@ -57,13 +57,6 @@ func (s *Server) metered(class egress.Class, next http.Handler) http.Handler {
 	return s.meterOn(class, egress.SlotDownload, next)
 }
 
-// safety: the gitcache proxy is the checkout path every node takes, so it
-// is byte-metered but holds no slot; a concurrency cap there refuses the
-// clone rather than the download it was meant to bound.
-func (s *Server) meteredBytes(class egress.Class, next http.Handler) http.Handler {
-	return s.meterOn(class, egress.SlotNone, next)
-}
-
 // safety: one browser tab per node multiplies a live stream without
 // limit, so the stream surface counts its own slot; a stream lasts as
 // long as its node and a download does not.

@@ -41,10 +41,6 @@ type DaemonInfo struct {
 	// from a daemon that predates the field.
 	APIError string
 
-	// ArtifactStoreError is why the daemon serves no artifact routes, empty
-	// when it resolved a cache or none is configured.
-	ArtifactStoreError string
-
 	Draining bool
 }
 
@@ -105,7 +101,6 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 		StoreError:         ack.StoreError,
 		APIReady:           ack.APIReady,
 		APIError:           ack.APIError,
-		ArtifactStoreError: ack.ArtifactStoreError,
 		Draining:           ack.Draining,
 	}, nil
 }

@@ -4,17 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -22,23 +17,6 @@ import (
 // deletions. A request closes the team at once; this pass removes its rows
 // and stored objects.
 const TeamDeletionInterval = time.Minute
-
-// TeamStorage names the services outside the database that hold a team's
-// data, and the operator credentials the controller deletes it with. A
-// service left empty holds nothing for this controller to delete.
-type TeamStorage struct {
-	// CacheURL reaches the cache service, which keeps each team's artifacts,
-	// binaries and build cache in a tree of its own. The controller deletes a
-	// tree with an operator grant signed by its cache grant key.
-	CacheURL string
-}
-
-// WithTeamStorage tells the controller where a team's stored objects live,
-// so deleting a team removes them along with its rows.
-func (s *Server) WithTeamStorage(ts TeamStorage) *Server {
-	s.teamStorage = ts
-	return s
-}
 
 type teamDeletionJSON struct {
 	Slug        string `json:"slug"`
@@ -244,7 +222,7 @@ var teamPurgeDelay = 2 * max(tokenCacheTTL, tenantCacheTTL)
 // verified by its signature alone and writes into the team's storage until it
 // expires, so the cache tree and logs are deleted once more after the
 // longest-lived of them has lapsed.
-const teamRecheckDelay = max(authwire.CacheGrantTTL, logSegmentURLTTL) + time.Hour
+const teamRecheckDelay = logSegmentURLTTL + time.Hour
 
 // safety: A stopped replica keeps a deletion lease only until another can resume it.
 const teamDeletionLease = 5 * time.Minute
@@ -330,12 +308,6 @@ func (s *Server) purgeTeam(ctx context.Context, team store.Team, now time.Time) 
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	if err := s.purgeTeamCache(ctx, team); err != nil {
-		return err
-	}
-	if err := s.holdDeletion(ctx, team, now); err != nil {
-		return err
-	}
 	return op.PurgeTeam(ctx, team, s.deletionHolder(), now, teamRecheckDelay)
 }
 
@@ -349,83 +321,12 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	if err := s.purgeTeamCache(ctx, team); err != nil {
-		return err
-	}
-	if err := s.holdDeletion(ctx, team, now); err != nil {
-		return err
-	}
 	return s.store.AsOperator().FinishTeamRecheck(ctx, team, s.deletionHolder(), now)
 }
 
 func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
-	if objs := s.logObjects(); objs != nil {
-		classes, err := s.teamLogClasses(ctx, objs, team)
-		if err != nil {
-			return err
-		}
-		for _, class := range classes {
-			prefix := logseg.ClassPrefix(class) + "teams/" + string(team) + "/"
-			if _, err := objs.deletePrefix(ctx, prefix); err != nil {
-				return fmt.Errorf("delete the team's log segments under %s: %w", prefix, err)
-			}
-		}
-	}
-	return nil
-}
-
-// safety: an attempt keeps the class it was written under, so a class the operator has since retired still holds
-// logs; the store's own class directories name it even once the configuration and the team's records no longer do.
-func (s *Server) teamLogClasses(ctx context.Context, objs logObjectStore, team store.Team) ([]string, error) {
-	classes := s.logClasses()
-	held, err := objs.classes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list the log retention classes: %w", err)
-	}
-	for _, class := range held {
-		if _, valid := logseg.ClassDays(class); valid && !slices.Contains(classes, class) {
-			classes = append(classes, class)
-		}
-	}
-	return classes, nil
-}
-
-func deleteRemote(ctx context.Context, target, bearer string) error {
-	// #nosec G704 -- the origin is operator configuration; the id is an escaped segment
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
-	if err != nil {
-		return err
-	}
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
-	}
-	// #nosec G704 -- the request keeps the operator-configured origin
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
-	}
-	return nil
-}
-
-func (s *Server) purgeTeamCache(ctx context.Context, team store.Team) error {
-	ts := s.teamStorage
-	if ts.CacheURL == "" {
-		return nil
-	}
-	target := strings.TrimRight(ts.CacheURL, "/") + "/admin/teams/" + url.PathEscape(string(team))
-	bearer, err := s.cacheOperatorBearer(time.Now())
-	if err != nil {
-		return fmt.Errorf("sign the cache deletion: %w", err)
-	}
-	if err := deleteRemote(ctx, target, bearer); err != nil {
-		return fmt.Errorf("delete cache tree: %w", err)
-	}
-	return nil
+	_, err := s.deleteDataLogs(ctx, team, "")
+	return err
 }
 
 // safety: An unsettled checkout or dispute hold blocks account deletion until money is resolved.

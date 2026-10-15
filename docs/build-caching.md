@@ -38,7 +38,6 @@ for ~50% of a cold build. Package downloads are only ~15% of the total.
 | Layer cache (nothing changed) | 0s | 105s (100%) |
 | --no-cache, cache mounts warm | 101s | 4s (4%) |
 | Dep change + warm cache mounts | 101s | 2s vs cold dep change |
-| Cold build + proxy (cached) | 98s | 7s (7%) |
 
 The EKS build is 1.7x slower than the Mac, primarily from CPU limits
 (2 vCPU pod) and EBS disk I/O (network-attached storage).
@@ -58,7 +57,7 @@ rebuild) or pre-compiled base images avoid it.
 
 ## Caching layers -- what each one does
 
-Sparkwing has three caching layers. Each addresses a different failure mode:
+Docker provides two caching layers. Each addresses a different failure mode:
 
 ### 1. Docker layer cache (biggest win: ~99% speedup)
 
@@ -92,34 +91,6 @@ not from skipping downloads.
 **Breaks when:** the base image's runtime version changes (Ruby 3.3 → 3.2
 compiled extensions are incompatible), or build cache is pruned.
 
-### 3. Dependency proxy (reliability + bandwidth, modest speed)
-
-sparkwing-cache includes a package proxy that caches npm, pip, gem, Go
-module, and Alpine package downloads in-cluster. Runners fetch packages
-from the cache proxy instead of the public internet when the pipeline
-points the package manager at it -- there is no automatic interception;
-see "For using the proxy in Dockerfiles" below for the build arg that
-wires it up.
-
-**Speed impact:** ~4s savings on a 104s EKS build. The proxy eliminates
-network egress for cached packages, but since package downloads are only
-~15% of total build time, the absolute savings are small on fast networks.
-
-**Where the proxy matters:**
-
-- **Reliability:** builds succeed when npmjs.org or rubygems.org have outages
-  (stale-on-error fallback serves cached responses)
-- **Bandwidth:** 290MB of cached packages not re-downloaded from the internet
-  on every cold build, across every node
-- **Constrained networks:** air-gapped clusters, metered egress, cross-region
-  builds where registry latency is high
-- **Concurrent builds:** 10 runners building simultaneously don't each fetch
-  the same 200MB from upstream
-
-**Does NOT help when:** the bottleneck is compilation (most builds), the
-network is fast (AWS to npm CDN), or the packages aren't in the cache yet
-(first build).
-
 ## Recommendations
 
 ### For pipeline authors (Dockerfile best practices)
@@ -147,44 +118,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release
 ```
 
-### For using the proxy in Dockerfiles
-
-```dockerfile
-ARG PROXY_URL=""
-
-# npm
-RUN --mount=type=cache,target=/root/.npm \
-    if [ -n "$PROXY_URL" ]; then npm config set registry ${PROXY_URL}/proxy/npm/; fi && \
-    npm ci
-
-# pip
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --index-url ${PROXY_URL:-https://pypi.org}/proxy/pypi/simple/ \
-    --trusted-host sparkwing-cache.sparkwing.svc.cluster.local \
-    -r requirements.txt
-
-# apk (Alpine)
-RUN if [ -n "$PROXY_URL" ]; then \
-      sed -i "s|https://dl-cdn.alpinelinux.org|${PROXY_URL}/proxy/alpine|g" /etc/apk/repositories; \
-    fi && apk add --no-cache git
-```
-
-`PROXY_URL` is a build arg your pipeline sets -- it is not injected
-automatically. Default it to empty (no proxy) and, for in-cluster builds,
-pass the cache's service URL yourself, e.g.
-`--build-arg PROXY_URL=http://sparkwing-cache.sparkwing.svc.cluster.local`
-when invoking the Docker build from your pipeline.
-
 ### What NOT to optimize (and why)
 
 These were all investigated and benchmarked. The savings are real but small
 because **builds are CPU-bound, not network-bound**.
 
 - **Base image pull time** -- only ~2s on fast networks.
-- **Package download caching (proxy/mounts)** -- saves 2–7s on a 105s build.
-  Downloads are ~15% of total time; compilation is ~72%. The proxy's value
-  is reliability (builds work when registries are down) and bandwidth
-  savings, not speed.
 - **P2P artifact distribution** -- overkill at current scale. The dependency
   access pattern (many small files, different per-repo) doesn't benefit from
   peer-to-peer the way large uniform blobs do.
@@ -199,83 +138,6 @@ because **builds are CPU-bound, not network-bound**.
 - **Pre-compiled base images** -- a custom base image with common gems
   pre-installed eliminates compilation entirely for those deps. This is the
   nuclear option: build time drops to seconds, but you own the base image.
-
-## Proxy service
-
-The package proxy is part of sparkwing-cache. It fronts these upstream
-registries:
-
-| Registry | Upstream | URL rewriting |
-|---|---|---|
-| npm | registry.npmjs.org | Yes (tarball URLs in metadata) |
-| pypi | pypi.org | Yes (file URLs in simple index) |
-| pythonhosted | files.pythonhosted.org | No |
-| rubygems | rubygems.org | No |
-| golang | proxy.golang.org | No |
-| alpine | dl-cdn.alpinelinux.org | No |
-
-**URL rewriting:** npm packuments and PyPI simple pages carry absolute
-upstream URLs, so the proxy rewrites them onto itself. It rewrites against
-`--public-url` when that is set, and caches the rewritten body.
-Unset, the cached copy stays exactly as upstream sent it and each response is
-rewritten from its own request's `Host` header, so a caller who sends a forged
-`Host` only ever changes its own response. A per-request response carries
-`Cache-Control: private, max-age=0` and `Vary: Host`, which keeps a shared
-intermediary from handing one client's body to another; a response rewritten
-against the public URL is host-independent and stays `Cache-Control: public`
-for the entry's remaining TTL.
-
-A fixed base is correct only when every client dials the cache at the same
-address, so set it exactly then. The runner-bundle chart does it for you
-through `cache.publicUrl` when `cache.service.type` is `ClusterIP`. On a
-`LoadBalancer` or `NodePort` Service -- or through `kubectl port-forward` --
-clients reach the cache at more than one address, so the chart leaves the
-value empty and the proxy rewrites per request instead. An off-cluster runner
-pool that does share one address can set `cache.publicUrl` itself.
-
-Changing the public URL (setting it, clearing it, or pointing it elsewhere)
-leaves already-cached mutable entries written against the old value. They keep
-being served that way until their TTL expires -- `--proxy-cache-ttl`, 10 minutes
-by default -- so plan for that window, or wipe `--proxy-cache-dir` to end it at
-once. Immutable entries carry no upstream URLs and are unaffected.
-
-**Cache policy:**
-
-Cache misses stage upstream bodies on disk and stream metadata rewrites, so
-memory use does not grow with the download size. Staging needs space in the
-cache directory or the operating system's temporary directory. A failed cache
-publication still serves the staged download. A staging or upstream read
-failure returns HTTP 502 and leaves no partial cache entry.
-
-- Immutable content (.tgz, .whl, .gem, .zip, .jar, .apk): cached until the
-  max-age cleanup threshold (default 168h / 7 days)
-- Metadata (JSON, HTML): 10-minute TTL, stale-on-error fallback
-- Background cleanup: removes expired entries hourly
-
-**Endpoints:**
-
-- `GET /proxy/{registry}/{path}` -- cached reverse proxy
-- `GET /stats` -- cache size per registry
-- `GET /health` -- liveness/readiness
-
-**Configuration (flags):**
-
-- `--proxy-cache-dir` -- cache directory (default: `/data/proxy`)
-- `--proxy-cache-ttl` -- metadata TTL (default: `10m`)
-- `--proxy-max-age` -- cleanup threshold for immutable entries (default: `168h`)
-- `--public-url` -- base URL clients use to reach
-  the proxy, e.g. `http://sparkwing-cache.sparkwing.svc.cluster.local`. A scheme
-  and host, optionally with a `/proxy` path; any other path, a query, or a
-  fragment fails startup with the offending value named. Empty rewrites per
-  request from the `Host` header (default)
-- `--trust-forwarded-host` -- honor
-  `X-Forwarded-Host` and `X-Forwarded-Proto` when rewriting per request. Only
-  set it when a reverse proxy is the only route to the port (default: off).
-  Proxies append, so the right-most element wins and it has to parse as a
-  host with an optional port; anything else is refused with a 400. The flag is
-  inert when `--public-url` is set, because that base ignores the
-  request entirely
-
 
 ## Native frontend exports
 
