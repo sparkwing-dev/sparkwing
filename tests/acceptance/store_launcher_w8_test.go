@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -34,10 +35,13 @@ func TestStoreLauncherW8(t *testing.T) {
 		return false, nil, nil
 	})
 	_, cfg, _ := cloudFixture(launcher.CloudWork)
-	runtime, err := launcher.NewStoreLauncher(t.Context(), server, launcher.StoreRuntimeConfig{
+	runtime, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
 		Kube: kube, Boundary: boundary, Jobs: cfg,
 		Demand: controllerwire.ClaimRequest{RunnerVersion: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 2, AvailableMemoryBytes: 1 << 30},
 		Bearer: func(context.Context) (string, error) { return root.Raw, nil },
+		NewController: func(options client.EngineOptions) (launcher.LauncherController, error) {
+			return runners.StoreController{Engine: server, Bearer: options.Bearer, Launcher: options.Launcher}, nil
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

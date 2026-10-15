@@ -84,22 +84,6 @@ type Resolver struct {
 	command   func(context.Context, string, string, ...string) error
 }
 
-// SDKPlatform declares language support independently of the engine's release asset platform matrix.
-type SDKPlatform struct {
-	SDK  SDKKind
-	GOOS string
-}
-
-// SDKPlatforms includes TypeScript on Windows because hello supplies the bearer without a preload.
-var SDKPlatforms = []SDKPlatform{
-	{GoSDK, "linux"},
-	{GoSDK, "darwin"},
-	{GoSDK, "windows"},
-	{TypeScriptSDK, "linux"},
-	{TypeScriptSDK, "darwin"},
-	{TypeScriptSDK, "windows"},
-}
-
 // VersionInfo retains every published release, including releases beyond their support window.
 type VersionInfo struct {
 	Version      string    `json:"version"`

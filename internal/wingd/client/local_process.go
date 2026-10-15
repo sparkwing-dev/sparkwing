@@ -10,17 +10,34 @@ import (
 )
 
 type processLifecycle struct {
-	*ownerLifecycle
+	wingd.LocalLifecycle
 	control *ownerRuntime
+	home    string
 	start   func(context.Context, wingd.LocalStartOptions) (wingd.LocalStatus, error)
 	gate    chan struct{}
 }
 
 func newProcessLifecycle(home string, runtime wingd.LocalRuntime, units wingd.ManagedUnitManager, owner controllerOwner, start func(context.Context, wingd.LocalStartOptions) (wingd.LocalStatus, error)) *processLifecycle {
+	control := &ownerRuntime{LocalRuntime: runtime, owner: owner}
 	return &processLifecycle{
-		ownerLifecycle: newOwnerLifecycle(home, runtime, units, owner),
-		control:        &ownerRuntime{local: runtime, owner: owner}, start: start, gate: make(chan struct{}, 1),
+		LocalLifecycle: wingd.NewLocalLifecycle(control, units),
+		control:        control, home: home, start: start, gate: make(chan struct{}, 1),
 	}
+}
+
+func (l *processLifecycle) options(opts wingd.LocalStartOptions) (wingd.LocalStartOptions, error) {
+	if opts.Home == "" {
+		opts.Home = l.home
+	}
+	home, err := wingd.HomeDir(opts.Home)
+	if err != nil {
+		return opts, err
+	}
+	if filepath.Clean(home) != filepath.Clean(l.home) {
+		return opts, errors.New("wingd/client: lifecycle is bound to another home")
+	}
+	opts.Home = home
+	return opts, nil
 }
 
 func (l *processLifecycle) lock(ctx context.Context) error {
@@ -48,12 +65,12 @@ func (l *processLifecycle) ensure(ctx context.Context, opts wingd.LocalStartOpti
 	if err != nil {
 		return wingd.LocalStatus{}, err
 	}
-	local, err := l.control.local.Status(ctx)
+	local, err := l.control.LocalRuntime.Status(ctx)
 	if err != nil {
 		return wingd.LocalStatus{}, err
 	}
 	if opts.Standalone || local.PID != 0 || local.Running {
-		return l.ownerLifecycle.EnsureStarted(ctx, opts)
+		return l.LocalLifecycle.EnsureStarted(ctx, opts)
 	}
 	status, err := l.control.owner.Status(ctx)
 	if errors.Is(err, ErrNoDaemon) || (err == nil && !status.Running) {
@@ -101,7 +118,7 @@ func (l *processLifecycle) Stop(ctx context.Context) error {
 		return err
 	}
 	defer func() { <-l.gate }()
-	return l.ownerLifecycle.Stop(ctx)
+	return l.LocalLifecycle.Stop(ctx)
 }
 
 func ensureLocalProcess(ctx context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {

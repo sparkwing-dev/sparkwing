@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"errors"
-	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
@@ -46,61 +45,13 @@ func (o localOwnerClient) Drain(ctx context.Context) error {
 	return Stop(ctx, Options{Home: o.home})
 }
 
-type ownerLifecycle struct {
-	wingd.LocalLifecycle
-	home string
-}
-
-func newOwnerLifecycle(home string, runtime wingd.LocalRuntime, units wingd.ManagedUnitManager, owner controllerOwner) *ownerLifecycle {
-	return &ownerLifecycle{LocalLifecycle: wingd.NewLocalLifecycle(&ownerRuntime{local: runtime, owner: owner}, units), home: home}
-}
-
-func (l *ownerLifecycle) options(opts wingd.LocalStartOptions) (wingd.LocalStartOptions, error) {
-	if opts.Home == "" {
-		opts.Home = l.home
-	}
-	home, err := wingd.HomeDir(opts.Home)
-	if err != nil {
-		return opts, err
-	}
-	if filepath.Clean(home) != filepath.Clean(l.home) {
-		return opts, errors.New("wingd/client: lifecycle is bound to another home")
-	}
-	opts.Home = home
-	return opts, nil
-}
-
-func (l *ownerLifecycle) EnsureStarted(ctx context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {
-	opts, err := l.options(opts)
-	if err != nil {
-		return wingd.LocalStatus{}, err
-	}
-	return l.LocalLifecycle.EnsureStarted(ctx, opts)
-}
-
-func (l *ownerLifecycle) StartDashboard(ctx context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {
-	opts, err := l.options(opts)
-	if err != nil {
-		return wingd.LocalStatus{}, err
-	}
-	return l.LocalLifecycle.StartDashboard(ctx, opts)
-}
-
 type ownerRuntime struct {
-	local wingd.LocalRuntime
+	wingd.LocalRuntime
 	owner controllerOwner
 }
 
-func (r *ownerRuntime) Run(ctx context.Context, opts wingd.LocalStartOptions) error {
-	return r.local.Run(ctx, opts)
-}
-
-func (r *ownerRuntime) AwaitReady(ctx context.Context) (wingd.LocalStatus, error) {
-	return r.local.AwaitReady(ctx)
-}
-
 func (r *ownerRuntime) Status(ctx context.Context) (wingd.LocalStatus, error) {
-	status, err := r.local.Status(ctx)
+	status, err := r.LocalRuntime.Status(ctx)
 	if err != nil || status.PID != 0 || status.Running {
 		return status, err
 	}
@@ -112,13 +63,13 @@ func (r *ownerRuntime) Status(ctx context.Context) (wingd.LocalStatus, error) {
 }
 
 func (r *ownerRuntime) target(ctx context.Context) (controllerOwner, error) {
-	status, err := r.local.Status(ctx)
+	status, err := r.LocalRuntime.Status(ctx)
 	if err != nil {
 		return nil, err
 	}
 	// safety: a starting or draining local process retains ownership until its cleanup joins.
 	if status.PID != 0 || status.Running {
-		return r.local, nil
+		return r.LocalRuntime, nil
 	}
 	return r.owner, nil
 }

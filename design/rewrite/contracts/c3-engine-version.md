@@ -266,8 +266,6 @@ release resolver and need an explicit development workflow during implementation
 | [`Ensure`](../../../internal/engine/resolver.go) | resolves a sealed identity on another executor and requires the same release manifest. |
 | [`Cached`](../../../internal/engine/resolver.go) | returns only an integrity-checked cache entry; absence or damage is a miss. |
 | [`StoreVerified`](../../../internal/engine/resolver.go) | publishes only verified bytes and retains signatures for future integrity checks. |
-| [`SDKPlatform`](../../../internal/engine/engine.go) | declares language support independently of the engine's release asset platform matrix. |
-| [`SDKPlatforms`](../../../internal/engine/engine.go) | includes TypeScript on Windows because hello supplies the bearer without a preload. |
 | [`VersionInfo`](../../../internal/engine/engine.go) | retains every published release, including releases beyond their support window. |
 | [`Restriction`](../../../internal/engine/engine.go) | carries signed notice and enforcement dates; an empty Version means no restriction. |
 | [`VersionIndex`](../../../internal/engine/engine.go) | is signed as the exact JSON body bytes. |
