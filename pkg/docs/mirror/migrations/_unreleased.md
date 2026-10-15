@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Daemon event cursors
+
+Replace `daemon events --offset N` with the returned `--cursor`. Repeat the same
+run, kind, incarnation and since filters on continuation. `--limit` must be
+positive. The default remains 50. Follow cursors until the final page to read
+all matching retained events. Newer arrivals do not shift older pages. Removed or
+edited unread history fails with a hint to restart without the cursor.
+
+JSON emits event rows followed by a `kind: page` object containing `next_cursor`
+and `truncated`, including on empty and final pages. Consumers must distinguish
+that object from event rows. `--explain --run ID` still returns the complete
+related timeline without pagination or page metadata.
+
 ## Daemon lifecycle reports
 
 Daemon status, stop and restart share the local controller lifecycle used by

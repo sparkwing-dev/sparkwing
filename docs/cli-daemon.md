@@ -29,6 +29,10 @@ Inspect and manage the local controller
 
 Read retained local controller events
 
+Show the newest 50 matching records by default, in chronological order within each page. Positive --limit and opaque --cursor continue toward older records with the same filters. Newer arrivals do not shift a continuation. Changed or removed unread history requires restarting without the cursor.
+
+JSON emits event records followed by a page record with next_cursor and truncated. Plain and pretty output send continuation instructions to stderr. --explain reads the complete run timeline, including descendants, without pagination.
+
 ### Flags
 
 | Flag | Description |
@@ -40,7 +44,7 @@ Read retained local controller events
 | `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. |
 | `--since DURATION` | since |
 | `--kind KIND` | kind Repeatable; comma-separated values are accepted. |
-| `--incarnation N` | incarnation |
+| `--incarnation N` | incarnation Must be at least 0. |
 | `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
 | `--explain` | explain |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |

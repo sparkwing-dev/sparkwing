@@ -47,13 +47,16 @@ func Registry() []Command {
 			{Name: "shell", Argument: "NAME", Values: []string{"bash", "zsh", "fish", "powershell"}},
 		}},
 		{Path: "sparkwing daemon", Flags: []Flag{}},
-		{Path: "sparkwing daemon events", Flags: []Flag{
+		{Path: "sparkwing daemon events", Rules: []string{
+			"Show the newest 50 matching records by default, in chronological order within each page. Positive --limit and opaque --cursor continue toward older records with the same filters. Newer arrivals do not shift a continuation. Changed or removed unread history requires restarting without the cursor.",
+			"JSON emits event records followed by a page record with next_cursor and truncated. Plain and pretty output send continuation instructions to stderr. --explain reads the complete run timeline, including descendants, without pagination.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "ID"},
 			{Name: "since", Argument: "DURATION"},
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
-			{Name: "incarnation", Argument: "N"},
+			{Name: "incarnation", Argument: "N", Minimum: 0, HasMinimum: true},
 			{Name: "limit", Argument: "N", Minimum: 1, HasMinimum: true},
-			{Name: "explain", Requires: []string{"run"}},
+			{Name: "explain", Requires: []string{"run"}, Conflicts: []string{"since", "kind", "incarnation", "limit", "cursor"}},
 			{Name: "cursor", Argument: "CURSOR"},
 		}},
 		{Path: "sparkwing daemon recover-state", Flags: []Flag{

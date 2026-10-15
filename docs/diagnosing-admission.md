@@ -20,17 +20,29 @@ sparkwing daemon events --run RUN_ID --explain
 sparkwing daemon events --run RUN_ID --explain -o json
 ```
 
-Both commands read files directly, even when the daemon is down. `events` can
-filter by run, elapsed duration, repeated kind, or incarnation. It shows the
-newest 50 matching records by default. Use `--offset 50` for the previous 50 or
-`--limit 0` for every retained record. New arrivals can shift an offset between
-reads. Unreadable records are skipped, and their count is printed on stderr.
-Records are ordered by timestamp, incarnation, then sequence. JSON output is
-one record per line and is the default when piped; a terminal gets human output.
-With no retained journal, human `events` output prints the directory it checked.
+The command reads files directly, even when the daemon is down. `events` can
+filter by run, elapsed duration, repeated or comma-separated kind, or incarnation.
+It shows the newest 50 matching records by default. `--limit` accepts a positive
+page size. Repeat the same filters with the returned `--cursor` to read older
+records. Each page keeps chronological order. Newer events leave the unread
+history in place, and `--since` keeps the first page's cutoff. If retention or an
+edit changes unread records, continuation fails and asks for a fresh query.
+A late event inserted into the unread history also requires a fresh query.
+
+JSON output is one event per line followed by a `kind: page` record with
+`next_cursor` and `truncated`. The last page has an empty cursor and
+`truncated: false`. JSON is the default when piped. Plain and pretty output send
+continuation instructions to stderr. With no retained journal, human output
+prints the directory it checked and JSON emits an empty final page. Unreadable
+records are skipped, and their count is printed on stderr. Records are ordered
+by timestamp, incarnation, then sequence.
+
 `--explain` renders a run's admission timeline in sentences, including descendant
-node slot requests and attached children owned by that run. Its JSON output
-preserves the structured records. A retained record carries a timestamp, source,
+job slot requests and attached children owned by that run. Its JSON output
+preserves all structured records without page metadata. It requires `--run` and
+cannot be combined with list filters, limits or cursors.
+
+A retained record carries a timestamp, source,
 incarnation, sequence, kind, run identity where known, and decision inputs in
 snake_case `data` fields. Connection records carry the peer PID when the operating
 system supplies it. After a connection identifies its run, later records carry
@@ -130,9 +142,8 @@ and accepts any positive duration. Cancellation keeps completed observations.
 <!-- design:begin -->
 Native runtime construction is not connected in this rewrite build. Doctor
 reports machine observations and returns an unavailable controller error.
-The machine hook survey still uses the legacy repository-settings loader,
-which can migrate configuration. Full read-only inspection also needs the final
-machine reader. Lifecycle tests with fakes cover the CLI composition. Native store-schema,
+The machine hook survey uses the final machine reader. Lifecycle tests with
+fakes cover the CLI composition. Native store-schema,
 service-skew and removed-timer checks still require the runtime implementation.
 Permission repair and process cleanup need controller-owned operations before
 they can be exposed again.

@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **daemon events (Breaking):** Cursor pagination replaces offsets
+  Continuations retain the original time cutoff and unread history across appends. Changed history fails with a restart hint. JSON includes a final page record. See [migration](docs/migrations/_unreleased.md#daemon-event-cursors).
 - **daemon (Breaking):** Status, stop and restart use the shared local controller lifecycle
   JSON reports safe lifecycle state and activity. Restart preserves stopped controllers and waits for shutdown before replacement. Store/API diagnostics move to doctor. Native local-services construction remains an integration requirement. See [migration](docs/migrations/_unreleased.md#daemon-lifecycle-reports).
 - **controller wire (Breaking):** Job reports retain the complete structured failure for recovery

@@ -36,7 +36,7 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--sw-ref REF` | Build the pipeline and run against this Git ref. |
 | `--sw-pipeline-ref REF` | Load the pipeline from this Git ref. |
 | `--sw-detached` | Submit work to the local controller and return before it finishes. |
-| `--sw-workers N` | Positive foreground worker count; refused for detached runs. Must be at least one. |
+| `--sw-workers N` | Positive foreground worker count; refused for detached runs. Must be at least 1. |
 | `--sw-idempotency-key KEY` | Deduplicate detached submissions using this key. |
 | `--sw-request-id ID` | Request identifier for a detached submission. |
 | `--sw-output FORMAT` | Format for run output. Values: pretty, json, plain. |

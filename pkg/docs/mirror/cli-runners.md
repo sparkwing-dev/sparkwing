@@ -40,7 +40,7 @@ Use team credentials. --reserved-for requires team-admin runner registration sup
 | `--runner RUNNER` | Runner name or selection. (required) |
 | `--repos PATTERN` | repos Repeatable; comma-separated values are accepted. |
 | `--label LABEL` | label Repeatable; comma-separated values are accepted. |
-| `--max-concurrent N` | max concurrent Must be at least one. |
+| `--max-concurrent N` | max concurrent Must be at least 1. |
 | `--contribution SPEC` | contribution |
 | `--config PATH` | config |
 | `--force` | Replace an existing object. |

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,120 +38,7 @@ func runDaemon(args []string) error {
 	}
 }
 
-func daemonJournal(home string) ([]journal.Record, int, error) {
-	dir, err := wingd.StateDir(home)
-	if err != nil {
-		return nil, 0, err
-	}
-	return journal.ReadWithStats(dir)
-}
-
-func reportSkippedJournalRecords(skipped int) {
-	if skipped > 0 {
-		fmt.Fprintf(os.Stderr, "Skipped %d unreadable journal records.\n", skipped)
-	}
-}
-
-func runDaemonEvents(args []string) error {
-	fs := flag.NewFlagSet(cmdDaemonEvents.Path, flag.ContinueOnError)
-	run := fs.String("run", "", "run ID")
-	since := fs.Duration("since", 0, "lookback duration")
-	kinds := fs.StringArray("kind", nil, "record kind (repeatable)")
-	incarnation := fs.Int64("incarnation", 0, "daemon incarnation")
-	limit := fs.Int("limit", 50, "maximum records (0 for all)")
-	offset := fs.Int("offset", 0, "matching records to skip from newest")
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	explain := fs.Bool("explain", false, "with --run, explain the run's admission history in sentences")
-	if err := parseAndCheck(cmdDaemonEvents, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *explain {
-		for _, name := range []string{"since", "kind", "incarnation", "limit", "offset"} {
-			if fs.Changed(name) {
-				return fmt.Errorf("daemon events --explain: --%s filters the event list; --explain reads every record of the run", name)
-			}
-		}
-		if *run == "" {
-			return errors.New("daemon events --explain: --run is required")
-		}
-		return explainRunAdmission(*run, *output)
-	}
-	if *since < 0 {
-		return errors.New("daemon events: --since must be nonnegative")
-	}
-	if *incarnation < 0 {
-		return errors.New("daemon events: --incarnation must be nonnegative")
-	}
-	if *limit < 0 || *offset < 0 {
-		return errors.New("daemon events: --limit and --offset must be nonnegative")
-	}
-	format, err := resolveTTYAwareOutput(*output, cmdDaemonEvents.Path)
-	if err != nil {
-		return err
-	}
-	records, skipped, err := daemonJournal("")
-	if err != nil {
-		return err
-	}
-	reportSkippedJournalRecords(skipped)
-	if len(records) == 0 && format != "json" {
-		dir, err := wingd.StateDir("")
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stdout, "No events are retained in %s.\n", dir)
-		return nil
-	}
-	cutoff := time.Now().Add(-*since)
-	selected := make([]journal.Record, 0, len(records))
-	for _, r := range records {
-		if *run != "" && r.RunID != *run && r.DisplayRunID != *run {
-			continue
-		}
-		if *since > 0 && r.TS.Before(cutoff) {
-			continue
-		}
-		if *incarnation != 0 && r.Incarnation != uint64(*incarnation) {
-			continue
-		}
-		if len(*kinds) > 0 && !slices.Contains(*kinds, r.Kind) {
-			continue
-		}
-		selected = append(selected, r)
-	}
-	end := max(0, len(selected)-*offset)
-	start := 0
-	if *limit > 0 {
-		start = max(0, end-*limit)
-	}
-	for _, r := range selected[start:end] {
-		if format == "json" {
-			if err := printJournalJSON(r); err != nil {
-				return err
-			}
-		} else {
-			fmt.Fprintf(os.Stdout, "%s  #%d.%d  %-22s %s %s\n", r.TS.Format(time.RFC3339Nano), r.Incarnation, r.Seq, r.Kind, r.RunID, compactData(r.Data))
-		}
-	}
-	if start > 0 {
-		fmt.Fprintf(os.Stderr, "Older events retained; rerun with the same filters and --offset %d (or --limit 0 for all).\n", *offset+end-start)
-	}
-	return nil
-}
-
-func explainRunAdmission(runID, output string) error {
-	format, err := resolveTTYAwareOutput(output, cmdDaemonEvents.Path)
-	if err != nil {
-		return err
-	}
-	records, skipped, err := daemonJournal("")
-	if err != nil {
-		return err
-	}
-	reportSkippedJournalRecords(skipped)
+func explainRunAdmission(out io.Writer, records []journal.Record, runID, format string) error {
 	children := make(map[string][]string)
 	related := map[string]bool{runID: true}
 	for _, r := range records {
@@ -195,7 +82,7 @@ func explainRunAdmission(runID, output string) error {
 		}
 		found = true
 		if format == "json" {
-			if err := printJournalJSON(r); err != nil {
+			if err := json.NewEncoder(out).Encode(r); err != nil {
 				return err
 			}
 			continue
@@ -208,20 +95,14 @@ func explainRunAdmission(runID, output string) error {
 			}
 			label = name + ": "
 		}
-		fmt.Fprintf(os.Stdout, "%s  %s%s\n", r.TS.Local().Format("2006-01-02 15:04:05"), label, explainEvent(r))
+		if _, err := fmt.Fprintf(out, "%s  %s%s\n", r.TS.Local().Format("2006-01-02 15:04:05"), label, explainEvent(r)); err != nil {
+			return err
+		}
 	}
 	if !found && format != "json" {
-		fmt.Fprintf(os.Stdout, "No retained admission events for %s.\n", runID)
-	}
-	return nil
-}
-
-func printJournalJSON(r journal.Record) error {
-	body, err := json.Marshal(r)
-	if err != nil {
+		_, err := fmt.Fprintf(out, "No retained admission events for %s.\n", runID)
 		return err
 	}
-	fmt.Fprintln(os.Stdout, string(body))
 	return nil
 }
 

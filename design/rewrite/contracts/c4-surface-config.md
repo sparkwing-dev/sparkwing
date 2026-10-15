@@ -52,6 +52,18 @@ No success receipt is emitted after a lifecycle, cancellation or output failure.
 The existing 2/20/30-second status/restart/stop observation budgets remain.
 Native local-services construction and readiness remain W8 integration points.
 
+`daemon events` reads the retained local journal with the final clisurface
+grammar. It selects the newest 50 matching records by default and accepts
+positive limits. Opaque cursors bind the journal directory, normalized filters,
+initial since cutoff and exact unread prefix. Newer appends keep continuation stable.
+Missing, inserted, reordered or edited unread records fail with a restart hint. The cursor
+contains hashes, cutoff and count, never record payloads. It grants no authority.
+JSON emits event rows followed by a page record with next_cursor and truncated,
+including empty and final pages. Plain/pretty continuation goes to stderr.
+`--explain --run` renders the complete related timeline without page metadata.
+It conflicts with list filters and pagination. Offset and zero-limit paths are
+deleted. Journal producer lifecycle remains W8-owned.
+
 Managed controller units call foreground `wingd run --stay --home <absolute-home>`.
 Managed timers call `__tick --home <absolute-home>`. Public dashboard start stays a
 lifecycle client. ManagedUnit retains Home and update re-renders both kinds before

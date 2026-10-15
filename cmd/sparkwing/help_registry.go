@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -66,7 +67,7 @@ func surfaceFlag(flag clisurface.Flag) FlagSpec {
 		spec.Desc += " Values: " + strings.Join(flag.Values, ", ") + "."
 	}
 	if flag.HasMinimum && flag.Name != "limit" {
-		spec.Desc += " Must be at least one."
+		spec.Desc += fmt.Sprintf(" Must be at least %d.", flag.Minimum)
 	}
 	switch {
 	case flag.Argument == "":

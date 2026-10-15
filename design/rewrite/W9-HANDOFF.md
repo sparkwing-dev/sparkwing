@@ -1,3 +1,137 @@
+# W9 retained-event cursor continuation
+
+Started clean at 9ddb98836. W9 remains incomplete. No Git write, Sparkwing
+executable, service, pipeline or release ran. Writes stayed in this worktree and
+/tmp/sw-astra-W9, deleted before reporting.
+
+## Implemented
+
+- daemon events now consumes clisurface, including repeated/comma-separated kinds,
+  day/week lookbacks, positive limits and opaque cursors. Offset and zero-limit
+  paths are removed. The default remains the newest 50 matching records, with
+  chronological order inside each page.
+- Continuation binds the journal directory, normalized selectors, original since
+  cutoff and exact unread prefix. Newer appends do not shift older pages. Deleted,
+  reordered, edited or late-inserted unread records fail with a restart hint.
+  The token contains hashes, a cutoff and a count. It grants no authority and
+  creates no cursor store. Output format and page size may change on continuation.
+- JSON emits event rows and a final page record, including empty/final pages.
+  Human continuation goes to stderr. Explain retains the complete related
+  timeline and descendant traversal, without list filters or page metadata.
+  Read, output and diagnostic failures propagate. Reads still work from retained
+  files without starting a controller or opening the runs store.
+- Help renders each declared numeric minimum. It previously said one for every
+  bound, including incarnation zero. Source guides, migration, changelog,
+  generated references and embedded mirrors are synchronized. The admission
+  guide's obsolete machine-reader warning is corrected against the merged reader.
+
+## Tests, ports and deletions
+
+Invariant: pagination returns each record from the initial retained selection once,
+while newer appends leave its unread prefix intact. Changed history fails loudly.
+FuzzDaemonEventsPagesPreserveRetainedHistory passed its seeds and 3,041 generated
+cases with four workers over three seconds. FuzzDaemonEventCursorDecode passed
+4,490 cases with four workers, including a valid canonical-token seed.
+
+The real-journal TestDaemonEventsCursorKeepsHistoryAcrossAppends fails against
+the preceding daemon.go through a Go overlay with missing final page metadata.
+It passes on the final implementation. The help minimum regression failed with
+Must be at least one and passes with the declared zero bound.
+
+Ported the default-window, filtered-pagination, empty-journal and skipped-record
+regressions to the final metadata/cursor shape. Existing explain descendant
+traversal, admission wording and lifecycle tests remain active.
+Added changed-history/filter/directory, fixed-cutoff, explicit-format,
+help/preflight and read/writer-failure cases. No sleeps were added.
+
+Removed 126 gross lines from daemon.go, including the offset parser/pagination,
+old journal/read wrappers and unchecked JSON writer. Replaced 32 gross old
+journal-test lines. No entire file was deleted. Added production files total
+251 lines. T1's parked port inventory assigns no original test directly to W9.
+
+## Evidence
+
+Go used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W9/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W9/tmp.
+Tests used -p 4 or less.
+
+Passed on the final source:
+
+- go build -p 4 ./... over the whole repository.
+- go vet -p 4 on cmd/sparkwing, clisurface and tests/acceptance. The earlier
+  broader selection also covered controllerwire and controller/client.
+- CLI -short selections TestDaemon, TestExplain, TestDashboard, TestDoctor,
+  TestCommandReferenceMatchesRegistry, TestHelp and FuzzDaemonEvent seeds.
+- Full clisurface, controllerwire and doccheck package tests.
+- Acceptance TestSurface and TestProtocolSchema selections. The expanded
+  TestSurfaceGrammarContract accepts the final event forms and refuses offsets,
+  zero limits, negative incarnations and explain/pagination combinations.
+- Pkg/docs mirror, changelog, link, catalog, private-name and symbol selections.
+- Source doccheck: 308 CLI invocations, 69 HTTP references and 397 links pass.
+  Its 72 partial Go blocks remain partial, not compile evidence.
+- commentcheck -base main, sleepcheck -base HEAD, sync-docs --check,
+  check-changelog, gofmt and git diff --check.
+
+Generated command pages through the existing test renderer with a temporary Go
+overlay, because the brief forbids running Sparkwing executables. The ordinary
+command-reference drift test passes. During porting, one rewritten fixture lacked SPARKWING_HOME. Restoring its
+selection fixed the failure. Earlier red overlay/help checks are regression
+evidence.
+
+No native T1 cell was unskipped. Full CLI/client/native suites, platform services,
+real TTY, runtime producer lifecycle, pipelines and launch QA remain unverified.
+The lead owns independent review, commits and integration checks.
+
+## Amendment and handoff audit
+
+Rechecked every amendments-1 row naming W9 and every W9 entry in handoffs.md.
+Previous completed implementations remain intact.
+
+| Rows / handoff | Disposition and remaining integration |
+| --- | --- |
+| A1-03/08/09/13/14/15/16/17/18/20/22/38/55 | Retained final errors, claim/reconcile/expansion/cloud adapters and complete failure reports. Native producers/controller/store composition remains. |
+| A1-10/11/19; execution identity and alias handoffs | Installer and alias inspection are retained. Real execution constructors still need exact engine/source and granted identity, including alias execution. |
+| A1-29/30/34/37 | Signed-data transport is retained. Native opt-in remote-cache composition, local publication copying and remaining legacy storage consumers are open. |
+| A1-39/40/41/49/50 | Retained local lifecycle/runner schema/here adapters. Event cursor cutover is complete. W8 construction, effective endpoints, native units/schedules/tick and runner startup remain. Initial sealed intake, local hosting and detached-consumer retirement remain W9 work. |
+| A1-43/45/47 | Notices, selected-engine upgrade, settings and guard work are retained. Native engine/index and scheduled sealed-intake composition remain. |
+| A1-51 | Current event help/references and source/embedded docs are synchronized. Remaining initial-trigger and local-runtime consumers still need the final contracts. |
+| A1-52; Windows packaging | Prior workflow/package implementation is retained. Native Windows execution/publication evidence remains unverified. |
+| A1-53 | Component journal/grammar evidence only. Native topology/backend/platform drivers and real-repository QA remain T1/lead work. |
+
+Contract changes needed in other areas remain unchanged. W1/W3/W9 must finalize
+source-attempt identity together across NodeTransition, JobTransitionRequest,
+replay identity and the report producer. W9 must not infer it from mutable state
+or salt a digest. W8 needs the scheduler-pass/managed-schedule and effective
+endpoint seams already recorded below. W1/W2 sizing reset, member annotations
+and runner pool registration remain open. No new human decision is requested.
+
+The next W9 execution work is final initial-trigger intake and local/detached
+hosting, source/pipeline-ref selection, publication and cache-from composition.
+W3 RunHost has no native constructor here, W8 local lifecycle construction still
+returns unavailable and the scheduler has no final controller-owned pass API.
+Use final interfaces with fakes for each composition before owner integration.
+Do not redo the merged machine reader, preparation masking, here resume,
+Windows packaging or job failure transport.
+
+## Shared files, mechanisms and friction
+
+No production file outside W9 ownership changed. Shared files are
+tests/acceptance/surface_contract_test.go, the W9-owned C4 contract prose,
+this handoff, CHANGELOG.md and generated pkg/docs artifacts. No foreign API
+caller migration was needed.
+
+Mechanism added: an opaque continuation fingerprint over the retained unread
+prefix, because offsets shift on appends. It reuses the journal reader and JSON
+page renderer and adds no persisted state, flag, environment variable, timeout,
+service or authority rule. Reverting this W9 event cutover removes it. The
+positive-limit hard cut was already required by C4.
+
+Friction: native owner integration remains incomplete. Overwing discovery/show
+worked despite its stale-binary notice. Fuzz instrumentation rebuilt dependencies
+before execution. Git identity remains Korey Gambill and core.worktree is unset.
+
+---
+
 # W9 failure reporting and daemon lifecycle continuation
 
 Started clean at d294d02fa after the completed integration merge. W9 remains
