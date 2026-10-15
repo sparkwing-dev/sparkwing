@@ -82,3 +82,14 @@ uses the persisted-input constructor and shared claimed host.
 `TestRunnerSourceCancellationJoinsFetchAndRemovesCheckout` blocks a git fetch
 through a process fixture and checks cancellation and cleanup. It exercises
 Unix process handling without network or controller transport.
+
+The orphan orchestrator trigger host and its claimed-node/pod executor are
+removed. Local execution retains its placement and guard helpers in
+`orchestrator/hosted_policy.go`. Runner installation uses the selected engine,
+with the source mask registry preserved through its in-memory request. The
+shared environment builder masks unsplit proxy credentials and consumer-visible
+fragments before any process starts. `TestInstallSDKPreservesRegisteredSecretsProperty`
+and the runner environment ports cover the former install-output and allow-list
+regressions. The retired native fixture does not establish final native placement
+coverage. Production source authorization, service factories and Cloud plan/eval
+hosting remain integration work.

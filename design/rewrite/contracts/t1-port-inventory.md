@@ -997,3 +997,31 @@ W3 trigger host still consumes them.
 No native acceptance cell closes through this cut. The real runner-source
 authorization binding remains required before claiming the allow-list boundary
 through native execution.
+
+
+## W8 orphan trigger and pod executor retirement
+
+`HostTriggerRun` had no production caller. Its claimed-node host was the only
+remaining caller of `hostDispatchedNode`, `hostPodNode` and `nodeClaimKeeper`.
+Those implementations and their obsolete store/HTTP fixture are removed.
+Local execution retains `guardCheck`, `PipelineRequires` and
+`protocolTriggerSource` in `orchestrator/hosted_policy.go`. The source-name table
+stays unchanged. The placement test now expects project defaults for an absent
+entry, as C4 requires. Local envelope tests retain their checkout/file helpers.
+
+| Retired coverage | Replacement and evidence limit |
+| --- | --- |
+| `pod_env_test.go` and `pod_node_env_test.go` | `runners.TestRunnerInstallEnvironmentUsesSharedPolicy` and `TestRunnerOperatorEnvironmentNeverInheritsAuthorityProperty` use the actual shared builder. Registry settings need the allow-list, proxy/CA settings survive, credentials and engine controls cannot be inherited, long allowed values mask and short regions remain readable. |
+| `proxy_mask_test.go` | The complete adversarial table now lives in runners and calls `procenv.Build`. `FuzzRunnerProxyCredentialsRemainMasked` checks raw password delimiters on local and remote installation environments. The shared builder now retains whole userinfo and split credential fragments. The no-credential test uses a username absent from its public output because the shared contract also masks usernames. |
+| `TestRunnerInstallOutputMasksTheProxyCredentials`, `TestInstallOutputMasksACredentialSplitAtTheLineLimit`, `TestRunnerInstallGetsTheOperatorAllowListMasked` | `engine.TestInstallSDKPreservesRegisteredSecretsProperty` executes a signed selected-engine fixture with 16 generated secrets crossing the former 1 MiB line boundary. It failed before source masks were retained. `source.TestAcquirePassesSourceMaskRegistryToSelectedInstaller` checks the acquisition handoff. These cover selected-engine diagnostic transport, rather than a second TypeScript installer. |
+| `TestPodNodeLog_SealsIncompleteAfterALoss` | `logseg.TestSinkRecordsWriterLoss` checks the final shared sink's incomplete manifest and exact dropped-line count. |
+| `run_node_verb_heartbeat_test.go` | `lease.TestKeeperCauses`, `TestKeeperConflictAndStop`, claimed-host renewal/loss tests and W8 native-store renewal components cover the shared keeper. The obsolete `/nodes/.../heartbeat` transport and separate claim-fence adapter retire. |
+| Trigger hosting, drift, cancellation, winner and resume tests | Final `OwnerHost`, `ClaimedNodeHost`, `NativeHost` and `NodeExecutor` suites cover claim-before-execution, live-holder adoption, retry ordinals, drift-before-body, cancellation and sealed resume. `TestNativeStoreOwnerW8` checks embedded, remote, managed and local-controller compositions with real store transitions and fixture services. |
+| Trigger YAML, SDK argument and run-context tests | Final checkout-planning and SDK-planning suites check checkout policy, merged described defaults, guard refusal and retained sealed actor/pull-request context. The retained local YAML and envelope suites still exercise local execution. |
+| Trigger generated topology and recovery tests | Final owner-evaluation, executor replay and expansion suites cover raw topology validation, successful source requirements, nested replay, source lineage and persisted recovery input. Full native generated retry, memo-artifact aggregation and here-with-secret execution remain QA obligations. |
+| `trigger_run_context_test.go` | The final host consumes persisted request/spec seals. Manufacturing a missing run from legacy trigger fields and retrying a separate execution read retire with that API. Sealed context and refusal-before-acquisition tests remain. |
+
+No native catalog cell is newly closed. Remaining full placement scenarios are
+recorded in `../W8-ORPHAN-TRIGGER-CUT.md`. The earlier run-node retirement's
+repository allow-list helpers remain in `run_node_remote.go` pending the real
+machine source-authority binding.

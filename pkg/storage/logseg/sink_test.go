@@ -516,3 +516,20 @@ func TestCloseGivesUpOnAStalledUploadWhenItsContextEnds(t *testing.T) {
 		t.Fatalf("manifest after a stalled upload = %+v, want incomplete with the segment missing", m)
 	}
 }
+
+func TestSinkRecordsWriterLoss(t *testing.T) {
+	objects := newMemObjects()
+	upload := newMemUploader(objects, testPrefix)
+	sink := newSink(t, upload, logseg.Options{})
+	if err := sink.Append([]byte(line(1)), "host", 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	sink.WriterSealed("host", 1, 2)
+	manifest, err := sink.Close(t.Context(), logseg.End{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Status != logseg.StatusIncomplete || manifest.DroppedLines != 2 {
+		t.Fatalf("lost log sealed as complete: %+v", manifest)
+	}
+}

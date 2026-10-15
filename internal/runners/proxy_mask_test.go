@@ -1,14 +1,13 @@
-package orchestrator
+package runners
 
 import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// safety: a proxy setting's credential is masked however a node logs it: the
-// whole value, one member, the userinfo or the password, raw or decoded.
 func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 	for _, tc := range []struct {
 		name, value string
@@ -66,7 +65,9 @@ func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := secrets.NewMasker()
-			maskProxyCredentials(m, tc.value)
+			if _, err := procenv.Build(procenv.Install, procenv.Base{Ambient: []string{"GOPROXY=" + tc.value}, SubmitEnvAllow: []string{"GOPROXY"}, Masker: m}, procenv.Runtime{}); err != nil {
+				t.Fatal(err)
+			}
 			for _, line := range tc.logged {
 				masked := m.Mask("value " + line + " end")
 				for _, secret := range tc.secrets {
@@ -79,11 +80,11 @@ func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 	}
 }
 
-// safety: GOPROXY's keywords and a value with no credential stay readable in logs.
 func TestMaskProxyCredentialsLeavesValuesWithoutACredential(t *testing.T) {
 	m := secrets.NewMasker()
-	maskProxyCredentials(m, "https://proxy.golang.org,direct")
-	maskProxyCredentials(m, "https://a:pw@one.invalid,direct")
+	if _, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: []string{"GOPROXY=https://proxy.golang.org,direct", "HTTPS_PROXY=https://proxy-user:pw@one.invalid"}, Masker: m}, procenv.Runtime{}); err != nil {
+		t.Fatal(err)
+	}
 	if got := m.Mask("fell back to direct via https://proxy.golang.org"); got != "fell back to direct via https://proxy.golang.org" {
 		t.Fatalf("masked %q", got)
 	}

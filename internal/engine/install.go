@@ -20,10 +20,11 @@ import (
 
 // SDKInstallRequest gives the verified matching engine its acquired source and filtered install base.
 type SDKInstallRequest struct {
-	Directory   string   `json:"directory"`
-	PipelineDir string   `json:"pipeline_dir"`
-	SDK         SDKKind  `json:"sdk"`
-	Environment []string `json:"-"`
+	Directory   string          `json:"directory"`
+	PipelineDir string          `json:"pipeline_dir"`
+	SDK         SDKKind         `json:"sdk"`
+	Environment []string        `json:"-"`
+	Masker      *secrets.Masker `json:"-"`
 }
 
 // UnmarshalJSON refuses ambiguous requests and credentials sent through the input pipe.
@@ -73,7 +74,10 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (SD
 	if err := r.verifyInstalledEngine(); err != nil {
 		return SDKCommand{}, err
 	}
-	masker := secrets.NewMasker()
+	masker := request.Masker
+	if masker == nil {
+		masker = secrets.NewMasker()
+	}
 	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: request.Environment, Masker: masker}, procenv.Runtime{})
 	if err != nil {
 		return SDKCommand{}, err

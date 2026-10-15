@@ -1,61 +1,14 @@
 package orchestrator
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// safety: a host stopped with no cause of its own, as a runner shutting down
-// is, leaves its node and run rows to their claims' leases, so the controller
-// hands them to another runner rather than record them cancelled or failed; a
-// run's cancel, a lost claim or a timeout carries a cause and is recorded.
-type stoppingHostState struct {
-	*client.Client
-	shuttingDown func() bool
-}
-
-// safety: no cause of its own is how a runner shutting down stops a host; every other stop names its reason.
-func shuttingDownOn(ctx context.Context) func() bool {
-	return func() bool { return errors.Is(context.Cause(ctx), context.Canceled) }
-}
-
-func (s stoppingHostState) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	if s.shuttingDown() {
-		return nil
-	}
-	return s.Client.FinishRun(ctx, runID, status, errMsg)
-}
-
-func (s stoppingHostState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
-	if s.shuttingDown() {
-		return nil
-	}
-	return s.Client.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
-}
-
-// safety: the node runs under the claim the dispatcher or this runner took,
-// whose fence ctx carries, so every row and log write the host makes is
-// checked against it and the node's terminal row is the result the
-// dispatcher reads.
-func hostDispatchedNode(ctx context.Context, p podNode) (runner.Result, error) {
-	p.state = stoppingHostState{
-		Client:       client.NewWithToken(p.controllerURL, nil, p.token),
-		shuttingDown: shuttingDownOn(ctx),
-	}
-	res, err := hostPodNode(ctx, p)
-	if err != nil {
-		return runner.Result{}, err
-	}
-	return runner.Result{Outcome: res.Outcome, Err: res.Err}, nil
-}
 
 // ErrRepoNotAllowed marks a run whose repository this machine's owner did not
 // allow it to build.

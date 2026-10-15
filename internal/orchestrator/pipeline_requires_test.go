@@ -22,7 +22,7 @@ func TestPipelineRequiresFallsBackToTheProjectDefaults(t *testing.T) {
 	}{
 		{"plain", []string{"linux"}},
 		{"gpu", []string{"gpu"}},
-		{"absent", nil},
+		{"absent", []string{"linux"}},
 	} {
 		got, err := PipelineRequires(dir, tc.pipeline)
 		if err != nil {

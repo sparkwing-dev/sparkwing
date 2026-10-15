@@ -13,7 +13,10 @@ implementation status is recorded in [the W8 handoff](../W8-IMPLEMENTATION.md).
 Source acquisition resolves the exact pin before calling it. The verified selected
 Sparkwing executable implements hidden `__sdk-install`, reads request JSON on stdin,
 inherits only procenv.Install's environment, and writes one SDKCommand JSON value.
-Diagnostics go to masked stderr. The command contains locally built Go argv or
+Diagnostics go to masked stderr. The in-memory request retains the source
+mask registry, including allowed operator values. The registry is excluded from
+JSON and stays in the host that masks the selected engine's complete diagnostics.
+The command contains locally built Go argv or
 Node/main argv without protocol flags or a preload. Installation rechecks the pin
 against Resolved and cannot substitute the host's engine or a remote pipeline binary.
 Eval/work use the accepted identity and the same selected engine's host operations.

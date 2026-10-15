@@ -218,25 +218,35 @@ func registerMasks(masker *secrets.Masker, name, value string, remote bool) erro
 	if remote && len(value) >= limits.OperatorEnvMaskMinLength {
 		values = append(values, value)
 	}
-	for _, address := range proxyAddresses(name, value) {
-		if !strings.Contains(address, "://") {
-			address = "http://" + strings.TrimPrefix(address, "//")
+	addresses := proxyAddresses(name, value)
+	if len(addresses) > 0 {
+		addresses = append([]string{value}, addresses...)
+	}
+	for i, address := range addresses {
+		if strings.Contains(value, "@") && address != "direct" && address != "off" {
+			values = append(values, address)
 		}
-		u, err := url.Parse(address)
-		if err != nil {
-			return fmt.Errorf("invalid proxy URL in %q", name)
+		_, authority, hasScheme := strings.Cut(address, "://")
+		if !hasScheme {
+			authority = strings.TrimPrefix(address, "//")
 		}
-		if u.User != nil {
-			values = append(values, u.User.String(), u.User.Username())
-			if password, ok := u.User.Password(); ok {
-				values = append(values, password)
+		at := strings.LastIndex(authority, "@")
+		if at < 0 {
+			continue
+		}
+		userinfo, host := authority[:at], authority[at+1:]
+		if i > 0 {
+			if _, err := url.Parse("http://" + host); err != nil {
+				return fmt.Errorf("invalid proxy URL in %q", name)
 			}
-			// safety: consumers may log the original escaped spelling as well as decoded credentials.
-			_, authority, _ := strings.Cut(address, "://")
-			authority = strings.FieldsFunc(authority, func(r rune) bool { return r == '/' || r == '?' || r == '#' })[0]
-			userinfo := authority[:strings.LastIndex(authority, "@")]
-			username, password, _ := strings.Cut(userinfo, ":")
-			values = append(values, userinfo, username, password)
+		}
+		username, password, _ := strings.Cut(userinfo, ":")
+		for _, raw := range []string{userinfo, username, password} {
+			decoded, err := url.PathUnescape(raw)
+			if err != nil {
+				return fmt.Errorf("invalid proxy URL in %q", name)
+			}
+			values = append(values, raw, decoded)
 		}
 	}
 	for _, value := range values {
