@@ -46,7 +46,7 @@ func TestDirectSubmodulesFetchWithTheOneReleasedToken(t *testing.T) {
 	opts := httpOnly
 	opts.cred = cred
 	dest := filepath.Join(t.TempDir(), "run")
-	if err := directCheckout(context.Background(), t.TempDir(), srv.URL+"/app.git", "main", "", dest, opts); err != nil {
+	if err := directCheckout(context.Background(), srv.URL+"/app.git", "main", "", dest, opts); err != nil {
 		t.Fatalf("checkout: %v", err)
 	}
 	fetchedMain := seen.Load()
@@ -64,7 +64,7 @@ func TestDirectSubmodulesFetchWithTheOneReleasedToken(t *testing.T) {
 	wrong.Secret = "ghs_wrong"
 	opts.cred = cred
 	again := filepath.Join(t.TempDir(), "run")
-	if err := directCheckout(context.Background(), t.TempDir(), srv.URL+"/app.git", "main", "", again, opts); err != nil {
+	if err := directCheckout(context.Background(), srv.URL+"/app.git", "main", "", again, opts); err != nil {
 		t.Fatal(err)
 	}
 	err := directSubmodules(context.Background(), again, srv.URL+"/", wrong, httpOnly, true)

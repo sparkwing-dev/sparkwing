@@ -99,13 +99,10 @@ role, so put nobody but operators in it. Customer pipelines belong on runners
 whose token's team they own, launched through controller dispatch, which gives
 each Job a claim token for its own work and no Kubernetes API token.
 
-**Cache and source sharing have their own provenance requirements.** A source
-URL and a cache grant alone do not establish that every Git object in a shared
-mirror is public. Other teams read only the cache's separate public mirrors,
-which it fills from origin without a credential; the operator's mirrors may
-still hold objects an earlier release seeded. Assess those separately from
-controller API permissions. This guide makes no tenant-isolation guarantee
-for those shared mirrors.
+**Source and byte storage use separate authority checks.** Source acquisition
+uses a run checkout and its released source credential. The cache service,
+shared mirrors and cache-grant protocol have been removed. A stored digest
+alone grants no byte-storage read authority.
 
 Execution on a self-hosted machine keeps the agent OS user's file,
 network, and process permissions. It can read the agent's
@@ -159,7 +156,7 @@ it. Only a claim token of the run receives a source credential, through
 `POST /api/v1/runs/{run}/source-credential`, and each issue is recorded with
 the team's git credential releases. The operator's launcher token
 receives claim tokens for every team's ready nodes, so whoever holds it reaches
-every team's run secrets, source credentials and cache grants; keep it
+every team's run secrets and source credentials; keep it
 operator-only. Which secrets a run may read through a claim token is declared
 by that run's own plan, so the boundary is the secret's pipeline or shared
 scope, not the declaration. The masker covers step output that goes through
@@ -723,90 +720,13 @@ and the run fails; completing it takes `force_retag: true`, which moves the
 version tag onto bytes nobody pinned. Prefer `publish_images: false` unless
 the published images are known bad.
 
-## Cache service
+## Source and stored bytes
 
-`sparkwing-cache` requires a cache grant, signed with the grant key in the file
-`cache-grant-key` in its `--credentials-dir`, on every route that touches
-repository content: git clone and registration, the binary and
-dependency-archive blob routes, and the admin routes. A run's grant is
-confined to its team and repository; the operator grant the controller signs
-for its own proxy, team purge and store-ceiling calls lasts five minutes and
-reaches every route. The cache accepts no static token, so no person holds a
-credential for it: an operator reaches it through the controller's
-`admin`-scoped `/api/v1/gitcache/...` and `/api/v1/cache/store-ceiling/...`
-routes. The cache serves no source archives, single
-files, uploads or seeds: it fills a mirror only from origin. It
-refuses to start without a grant key unless the operator passes
-`--allow-unauthenticated`, which
-logs a startup warning. The guard has no network-location exemption: an
-in-cluster caller, a port-forward, and an ingress request are all rejected
-without the bearer, because a caller-controlled header cannot prove where a
-request came from. `/health`, `/metrics`, `/stats`, and the pull-through
-package proxy under `/proxy/` stay open, because package managers fetch
-through the proxy without a credential and it serves upstream registry bytes
-rather than repository content. A cache published outside the cluster starts
-with `--disable-proxy`, which drops `/proxy/` and `/stats`, and
-`--metrics-addr`, which moves `/metrics` to a listener the ingress does not
-route to.
-
-The service-token storage and download counter routes are removed. A cache
-credential cannot select a tenant and submit usage. Upload accounting belongs
-to the transaction that verifies and commits the authenticated uploader's ticket.
-
-Registering a repository name validates it against
-`^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a
-different repository requires the token even on an unauthenticated cache.
-Every response carries `X-Content-Type-Options: nosniff`, and blob downloads
-are served as `application/octet-stream` or `application/gzip`.
-
-Off-cluster runners read Git through
-`/api/v1/runs/<run>/gitcache/git/...`. That route requires `nodes.claim`, a
-live claim on the named run, and the repository recorded on its trigger. The
-unscoped `/api/v1/gitcache/git/...` route remains admin-only. The controller
-drops the caller's bearer and presents its own cache credential upstream, and
-permits only registration and upload-pack reads. A
-direct cache receives the run's cache grant instead, which opens only that
-team's blob trees. Every grant names the live claim that asked for it and the
-run's repository and refs; the cache refuses one that names neither, so no
-grant opens a team's whole tree. A claim token's grant lasts five minutes and
-its pod renews it. A runner token's grant, minted through its live node or
-trigger claim fence, lasts six hours or until the token expires, and the cache
-honors it on its signature alone for that window even after the member who
-held the token is removed.
-
-Within a team, a grant carries the repository and refs the controller read
-from the run's trigger, and the cache writes `/cache` and `/bin` entries only
-under the run's own ref. It reads that ref, the pull request's
-base branch, the default branch, and then entries written before grants
-carried a scope, in that order. A branch's run therefore cannot replace or
-delete an entry its base branch's runs restore, and another repository's run
-does not read it. A run's ref counts only when the server holds it: a signed
-GitHub webhook, a schedule that follows the branch tip, or a retry or child of
-one of those that keeps its ref and commit and uploads no source. A run whose
-ref and commit its submitter chose, including a member with `runs.write`
-naming `main` from the CLI, API or dashboard, writes under a ref of its own and
-never over what `main`'s pushes restore. Entries a
-run writes under its own ref are still restored by that ref's later runs, so
-whoever can push a branch can poison that branch's cache.
-
-Content-addressed artifact keys (`artifacts/blobs/<sha256>` and
-`artifacts/manifests/<sha256>`) are the exception: they are shared by the
-whole team, as the controller's direct uploads already store them, so a
-memoized or retried node on another ref can stage what a feature ref
-produced. The cache refuses an upload whose bytes do not hash to the key,
-refuses a grant's delete of one, and every reader checks the digest again, so
-a branch can add artifacts but cannot change the bytes another run stages.
-Which manifest a node stages is decided by the controller's run and memo
-records, not by the cache.
-
-The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
-cache pod (`networkPolicy.enabled`, on by default). It admits the release's
-runner and controller pods plus the Job pods the Kubernetes runner
-backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
-render a non-`ClusterIP` cache Service unless a token Secret is configured. A
-controller or runner pool outside the cluster reaches the cache through
-`networkPolicy.extraIngress`, which is appended to the rule verbatim and takes
-an `ipBlock` for the caller's source range.
+Runners fetch repositories directly using the run's released credentials.
+The machine owner's allowlist gates fallback to that owner's Git credentials.
+Artifact capture and staging verify length and SHA-256 before publishing files.
+The [storage rewrite contract](storage.md) specifies reference-edge authority
+and records the controller and tenant-store integration still required.
 
 `pipeline trigger --working-tree` refuses to upload a snapshot whose manifest
 holds a secret-shaped file: by name, by a key or certificate block in any text
@@ -823,9 +743,6 @@ After record expiry, reachability collection marks unreferenced bytes and
 waits 24 hours before rechecking references and deleting them. Source bytes
 count once against the team's stored bytes. Uncommitted upload tickets release
 their quota holds through leased retention.
-
-The cache's unauthenticated `/metrics` carries no per-repository label, so
-scraping it does not enumerate or confirm the mirror set.
 
 ## Local daemon socket
 

@@ -113,9 +113,8 @@ Clone a gitops repo, patch image tags in `kustomization.yaml`, push, and
 optionally sync ArgoCD. `Deploy` retries on concurrent push conflicts and
 reports whether it changed anything.
 
-**Transport:** the initial clone is via gitcache when reachable (a fast
-read cache); the push always goes direct to GitHub over HTTPS with a PAT
-(`GITHUB_TOKEN`), falling back to SSH. gitcache is never a push target.
+**Transport:** clone and push both go directly to the remote using the
+configured Git credentials.
 
 When `SPARKWING_CONTROLLER` is set, `Deploy` asks the controller to
 authorize the push before it happens: a 403 blocks the deploy, while an

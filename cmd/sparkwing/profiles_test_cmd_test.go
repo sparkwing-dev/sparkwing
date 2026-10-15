@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
@@ -129,23 +127,6 @@ func TestProbeLogsReportsWhetherTheControllerKeepsNodeLogs(t *testing.T) {
 				t.Fatalf("probeLogs = %+v, want status %s", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestProbeGitcacheReportsAnAnnouncedCacheHealthFailure(t *testing.T) {
-	discovery.ResetCache()
-	t.Cleanup(discovery.ResetCache)
-	cache := httptest.NewServer(healthBody(http.StatusServiceUnavailable, `{"status":"degraded"}`))
-	t.Cleanup(cache.Close)
-	ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(discovery.Services{CachePod: cache.URL})
-	}))
-	t.Cleanup(ctrl.Close)
-
-	prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: ctrl.URL, Token: "swu_test"}}
-	got := probeGitcache(context.Background(), prof)
-	if got.Status != "fail" || !strings.Contains(got.Detail, "health returned") {
-		t.Fatalf("announced unhealthy cache probe = %+v, want failure", got)
 	}
 }
 

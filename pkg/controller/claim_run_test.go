@@ -285,11 +285,6 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-sec", work, nil, &sec); code != http.StatusOK || sec.Value != "v-DEPLOY_TOKEN" {
 		t.Fatalf("declared secret = %d %+v", code, sec)
 	}
-	var oidc map[string]any
-	if code := f.call("POST", "/api/v1/runs/run-sec/oidc-token", work, map[string]string{"audience": "sts.amazonaws.com"}, &oidc); code != http.StatusUnprocessableEntity ||
-		!strings.Contains(fmt.Sprint(oidc["error"]), "not yet issued to controller-dispatched nodes") {
-		t.Fatalf("an OIDC token for a work claim = %d %v, want 422 naming the gap", code, oidc)
-	}
 	var refused map[string]any
 	if code := f.call("GET", "/api/v1/secrets/UNDECLARED?run=run-sec", work, nil, &refused); code != http.StatusForbidden || refused["error"] != "secret_undeclared" {
 		t.Fatalf("undeclared secret = %d %v, want 403 secret_undeclared", code, refused)
@@ -595,24 +590,6 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		if code, in := input(c.node, c.req); code != c.want || in.ArtifactManifest != "" {
 			t.Errorf("%s = %d from %s with manifest %q, want %d and none", what, code, in.RunID, in.ArtifactManifest, c.want)
 		}
-	}
-	team, err := f.store.ForTeam(ctx, store.Team(olga.team))
-	if err != nil {
-		t.Fatal(err)
-	}
-	copied := func(node string, from store.ClaimInputRequest) (int, *store.Node) {
-		t.Helper()
-		code := f.call("POST", "/api/v1/runs/run-in/nodes/"+node+"/attempt", tokens[node],
-			map[string]any{"outcome": "cached", "output_from": from}, nil)
-		n, _ := team.GetNode(ctx, "run-in", node)
-		return code, n
-	}
-	if code, _ := copied("r", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusUnprocessableEntity {
-		t.Errorf("a report copying an input its node does not declare = %d, want 422", code)
-	}
-	origin, _ := team.GetNode(ctx, "run-origin", "m")
-	if code, n := copied("m", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusOK || n.OutputRef == nil || *n.OutputRef != *origin.OutputRef {
-		t.Errorf("a cache hit's report = %d with ref %+v, want the origin's %+v", code, n.OutputRef, origin.OutputRef)
 	}
 	if !strings.Contains(f.logs.String(), "event=input_undeclared") {
 		t.Error("a refused input was not audited")

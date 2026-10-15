@@ -216,10 +216,3 @@ func ownClaimBinding(r *http.Request) (string, string) {
 	tok, _ := claimTokenFromContext(r.Context())
 	return tok.RunID, tok.NodeID
 }
-
-var errClaimOIDCUnavailable = errors.New(
-	"OIDC tokens are not yet issued to controller-dispatched nodes; they arrive with Sparkwing Cloud OIDC")
-
-func handleClaimOIDCToken(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusUnprocessableEntity, errClaimOIDCUnavailable)
-}

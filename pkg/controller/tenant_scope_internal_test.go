@@ -60,8 +60,7 @@ func TestTenantCacheEntriesExpire(t *testing.T) {
 	}
 }
 
-// runTeam feeds the cache grant, which opens a team's cache namespace, so it
-// repeats the boundary rather than trusting the middleware in front of it.
+// safety: internal run lookups repeat the tenant boundary without middleware.
 func TestRunTeamRefusesAnotherTeamsRun(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -82,7 +81,7 @@ func TestRunTeamRefusesAnotherTeamsRun(t *testing.T) {
 	srv := New(st, nil)
 
 	ask := func(p *Principal) (store.Team, error) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-b/cache-grant", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-b", nil)
 		req.SetPathValue("id", "run-b")
 		req = req.WithContext(contextWithPrincipal(req.Context(), p))
 		return srv.runTeam(req)

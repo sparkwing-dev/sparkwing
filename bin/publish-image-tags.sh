@@ -21,7 +21,6 @@ fi
 binaries=(
   sparkwing-controller
   sparkwing-runner
-  sparkwing-cache
 )
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/publish-image-tags.XXXXXX")"

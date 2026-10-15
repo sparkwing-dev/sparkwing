@@ -30,6 +30,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+var gitObjectSHA = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
 
@@ -542,7 +544,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Git.RepoURL != "" {
-		// safety: the repo URL becomes a clone target on every runner, so hold it to the gitcache rules.
+		// safety: the repo URL becomes a clone target on every runner, so validate its transport before storing it.
 		validated, verr := sourceurl.ValidateCloneURL(body.Git.RepoURL)
 		if verr != nil {
 			writeError(w, http.StatusBadRequest, fmt.Errorf("git.repo_url: %w", verr))
@@ -1061,7 +1063,7 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// safety: the run's log records are the only index of its segments, so
 	// the segments go first.
-	if _, err := s.deleteRunSegments(r.Context(), s.logObjects(), tenant.Team(), id); err != nil {
+	if _, err := s.deleteDataLogs(r.Context(), tenant.Team(), id); err != nil {
 		s.writeInternalError(w, r, "delete the run's log segments", err)
 		return
 	}

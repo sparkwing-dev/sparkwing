@@ -111,7 +111,7 @@ func bindRunnerClaimFence(r *http.Request, fence store.NodeClaimFence) {
 // under the run is a dispatcher's, which a node claim never acts as. The
 // workload token route checks the claim again before it mints.
 var runnerClaimRunWrites = map[string]bool{
-	"/events": true, "/heartbeat": true, "/cache-grant": true, "/oidc-token": true,
+	"/events": true, "/heartbeat": true,
 }
 
 func runnerClaimReaches(r *http.Request, tok store.ClaimToken) bool {
@@ -135,7 +135,7 @@ func runnerClaimReaches(r *http.Request, tok store.ClaimToken) bool {
 		segment, _, _ := strings.Cut(node, "/")
 		return segment == url.PathEscape(tok.NodeID)
 	}
-	return runnerClaimRunWrites[rest] || strings.HasPrefix(rest, "/gitcache/")
+	return runnerClaimRunWrites[rest]
 }
 
 // safety: D-SEC-08. A node's Ref.Get and RunAndAwait reach these routes and

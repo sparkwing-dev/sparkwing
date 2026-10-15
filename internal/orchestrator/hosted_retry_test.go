@@ -126,7 +126,7 @@ func TestHostedRetry_SurvivesADaemonRestartBetweenWrites(t *testing.T) {
 	api := newRestartableAPI(t, controller.New(st, nil).
 		WithPeerIdentity(testAdminIdentity).
 		Handler())
-	backends, release := HostedBackends(paths, api.sock, nil)
+	backends, release := HostedBackends(paths, api.sock)
 	t.Cleanup(release)
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)

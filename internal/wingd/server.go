@@ -645,7 +645,6 @@ func (d *Daemon) serveConn(c *conn) {
 		apiReady, apiErr := d.apiState()
 		ack.APIReady = &apiReady
 		ack.APIError = apiErr
-		ack.ArtifactStoreError = d.cfg.ArtifactStoreError
 	}
 	if d.cfg.Runs != nil {
 		storeErr := d.cfg.Runs.Ready()

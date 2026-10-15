@@ -13,9 +13,7 @@ type OIDCToken struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// OIDCToken asks the controller to sign an ID token for runID with the
-// given audience. The caller must hold a live claim on the run; any other
-// caller, and a controller with no signing key, gets a not-found error.
+// OIDCToken requests an ID token using a live run-bound oidc.mint capability.
 func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error) {
 	var out OIDCToken
 	err := c.sendJSON(ctx, http.MethodPost, "/api/v1/runs/"+url.PathEscape(runID)+"/oidc-token",

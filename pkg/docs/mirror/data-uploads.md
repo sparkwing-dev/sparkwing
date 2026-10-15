@@ -1,4 +1,4 @@
-# Direct data uploads
+# Data storage
 
 Data routes use live controller capabilities. A job's `data.write` authority
 names its exact run, job, attempt and generation. A run owner can upload only
@@ -66,3 +66,33 @@ download availability separately. An embedded controller supplies these
 adapters through `WithDataController`. Missing wiring fails closed. The
 signing and transaction contracts serve S3 and filesystem backends. Native
 transfer and client integration must be verified before deployment.
+
+## Verified byte transfers
+
+The byte-storage components share `blob.Store` for binaries, source bundles,
+outputs, artifact manifests, memo and dependency caches. `NewSignedStore` uses
+an authenticated `DataSigner` for upload tickets, commits, downloads and presence
+queries. `RecordStore` owns logical names and authorized reference edges.
+
+The filesystem and S3 backends sign one-object transfers. A PUT binds the expected
+size and SHA-256 to a staging object. Commit verifies stored bytes through EOF
+and successful close before publishing an immutable `teams/<team>/cas/<sha256>`
+object. Retrying an interrupted commit verifies an existing final object too.
+Object metadata and a successful physical copy cannot establish a receipt.
+The store rechecks live authority and settles the reservation before it
+records existence and the exact uploader's receipt.
+
+Downloads verify size and SHA-256 at EOF. Artifact staging fails on missing or
+corrupt bytes. Memo becomes a miss and dependency caches run cold. HasMany reports
+presence only within the caller's authorized read set.
+
+Local remote-cache reads require explicit profile opt-in. They read authorized
+verified-default-branch memo, artifacts and dependency caches, never write shared
+records, and never fetch executable pipeline binaries.
+
+Logs use a separate signed segment path and controller-proxied reads. Tagged
+subjects distinguish job attempts from trigger, plan and eval units.
+
+The `swcg` cache-grant protocol and `cache-grant-key` credential are removed.
+Authenticated data routes use live capabilities. There is no compatibility
+endpoint or cache-service fallback.

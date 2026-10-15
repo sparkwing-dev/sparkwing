@@ -121,16 +121,15 @@ Report the connection, its principal, and the probes
 
 Prints the selected profile, its controller, the principal
 and scopes the controller reports for its token, the announced dashboard URL,
-and the controller, auth, logs and gitcache probes. A profile with no
+and the controller, auth and logs probes. A profile with no
 controller reports its storage probes alone. Exits non-zero when a probe
-fails; a controller that keeps no node logs warns without failing, and a controller
-that announces no cache pod URL omits the gitcache probe.
+fails. A controller that keeps no node logs warns without failing.
 
 --cluster answers "is this cluster alive?" for an operator. It adds the probes
 that read /api/v1/agents, /api/v1/triggers (status=claimed) and
 /api/v1/runs?since=24h, in three sections:
 
-  CONNECTIVITY  controller / auth / logs / gitcache
+  CONNECTIVITY  controller / auth / logs
   FLEET         agents (connected vs stale)
   QUEUE         stuck triggers + recent-run success rate
 

@@ -4,6 +4,48 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### OIDC claim hard cut
+
+POST `/api/v1/runs/{run}/oidc-token` now registers through PolicyRouter with
+OIDCMint/BindRun/LiveSensitive and RetryNever. It accepts only audience and
+returns OIDCTokenResponse. Machine roots, account credentials and bootstraps
+cannot mint. Missing/dead authority answers unauthenticated. Live authority
+without the grant or run binding answers forbidden. Minting has no legacy
+scope or claimed-run lookup fallback. Both old handlers are deleted.
+
+The local C2 `controller.OIDCReader` interface is Team() store.Team and
+ReadOIDCFacts(ctx, Authorized) (capability.OIDCFacts, error).
+WithOIDCReader supplies its resolver. The default requires Tenant to implement
+it and refuses missing adapters with policy_missing. No C1 signature changes.
+
+ReadOIDCFacts must use one store-clock transaction to recheck the complete
+live ancestry, awarded/delegated claim, oidc.mint grant, exact team/run binding,
+current holder/generation, cancellation and unit liveness. Derive the pipeline,
+ref, exact SHA, repository identity and original trigger from immutable intake
+and accepted seals, preserving them on retry/child lineage. Only verified App
+delivery facts may yield push, pull_request, release, create or delete and a
+positive repository ID. A PR ref is refs/pull/<number>/head even when its branch
+is main. A tag push keeps refs/tags/<tag>. Only a committed controller schedule
+may yield cron. Unverified/manual origins never gain an App event or repository
+ID. RunnerKind comes from persisted award/enrollment provenance, never request
+headers or the current runner process. The historical OIDC subject spellings
+remain runner, github-actions, user and service.
+
+Return Now and a finite NotAfter no later than every authority ancestor's
+expiry/revocation or binding deadline. Refuse an ended claim with a typed
+unauthenticated error, and leave backend diagnostics private. The HTTP adapter
+also checks the returned team/run and caps expiry by its authenticated leaf
+and binding. It passes only the requested audience to the signer. The existing
+RS256 subject grammar, key rotation, ten-minute default and per-claim 30-token,
+five-minute refill budget remain. The budget is replica-local overload control.
+Already issued provider tokens retain the accepted expiry residual.
+
+C1's production reader remains an integration requirement. Reading legacy
+Trigger/ClaimedRun rows would bypass the final capability boundary. Reading
+RunRow alone cannot supply the transactional live-authority ceiling and all
+verified original event/provenance facts. Those paths are not fallbacks.
+HTTP tests use committed-fact fakes and the real signer/verifier/client.
+
 ### Browser login and transport identity
 
 GET and POST `/login` use PolicyRouter with AuthBrowserFlow. The bounded form
@@ -857,6 +899,7 @@ All capability names below are in `internal/capability`.
 | `controller.SizingReader`, `controller.SizingStore`, `Server.WithSizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 | `controller.CredentialInventoryReader`, `Server.WithCredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
 | `controller.CredentialRotator`, `Server.WithCredentialRotator` | Supply one tenant's authority-bearing atomic secret/git rotation. |
+| `capability.OIDCFacts`, `controller.OIDCReader`, `Server.WithOIDCReader` | Supply authority-rechecked sealed OIDC identity and its complete ancestry expiry ceiling. |
 | `controller.SourceAuditReader`, `Server.WithSourceAuditReader` | Supply one tenant's final committed source-release audit projection. |
 | `controller.CredentialWriter`, `Server.WithCredentialWriter` | Supply tenant credential mutations with committing authority rechecks and actor attribution. Missing adapters refuse writes. |
 | `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |

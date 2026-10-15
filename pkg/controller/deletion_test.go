@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -23,44 +21,10 @@ type teamDeletionBody struct {
 	LastError string `json:"last_error"`
 }
 
-type storageFake struct {
-	mu       sync.Mutex
-	status   int
-	requests []string
-}
-
-func (s *storageFake) handler(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.requests = append(s.requests, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
-	w.WriteHeader(s.status)
-}
-
-func (s *storageFake) seen() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string(nil), s.requests...)
-}
-
-func (s *storageFake) answer(status int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.status = status
-}
-
-func newStorageFakes(t *testing.T) (cache *storageFake, ts controller.TeamStorage) {
-	t.Helper()
-	cache = &storageFake{status: http.StatusNoContent}
-	cacheSrv := httptest.NewServer(http.HandlerFunc(cache.handler))
-	t.Cleanup(cacheSrv.Close)
-	return cache, controller.TeamStorage{CacheURL: cacheSrv.URL}
-}
-
-func newDeletionFixture(t *testing.T, ts controller.TeamStorage) *identityFixture {
+func newDeletionFixture(t *testing.T) *identityFixture {
 	t.Helper()
 	raw, pub := multiTeamLicense(t)
 	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub})
-	f.srv.WithTeamStorage(ts).WithCacheGrantKey("grant-key")
 	return f
 }
 
@@ -89,9 +53,8 @@ func (f *identityFixture) seedRun(team store.Team, id string) {
 // bug: A cached tenant handle may still write until this window passes.
 func afterCacheWindow() time.Time { return time.Now().Add(5 * time.Minute) }
 
-func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
-	cache, ts := newStorageFakes(t)
-	f := newDeletionFixture(t, ts)
+func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsRows(t *testing.T) {
+	f := newDeletionFixture(t)
 	owner := f.user("o", "olga@example.com")
 	personal := owner.team
 	f.createTeam(&owner, "acme")
@@ -141,18 +104,10 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 	}
 
 	f.srv.ProcessTeamDeletions(context.Background(), time.Now())
-	if got := cache.seen(); len(got) != 0 {
-		t.Fatalf("a pass inside the tenant-cache window deleted the cache: %v", got)
+	if _, err := f.store.TeamInfo(context.Background(), "acme"); err != nil {
+		t.Fatalf("a pass inside the tenant-cache window purged the team: %v", err)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
-	got := cache.seen()
-	bearer, ok := strings.CutPrefix(strings.Join(got, ""), "DELETE /admin/teams/acme Bearer ")
-	if len(got) != 1 || !ok {
-		t.Fatalf("cache service saw %v", got)
-	}
-	if g, err := authwire.VerifyCacheGrant("grant-key", bearer, time.Now()); err != nil || !g.Operator {
-		t.Fatalf("the purge's bearer = %+v, %v; want an operator grant signed with the grant key", g, err)
-	}
 	var mine []teamDeletionBody
 	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
 	if len(mine) != 1 || mine[0].State != store.TeamDeletionDone {
@@ -160,36 +115,6 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 	}
 	if _, err := f.store.TeamInfo(context.Background(), "acme"); err == nil {
 		t.Fatal("the team is still registered after the pass")
-	}
-}
-
-func TestTeamDeletionWaitsOutAFailingCacheServiceAndThenFinishes(t *testing.T) {
-	cache, ts := newStorageFakes(t)
-	cache.answer(http.StatusBadGateway)
-	f := newDeletionFixture(t, ts)
-	owner := f.user("o", "olga@example.com")
-	f.createTeam(&owner, "acme")
-	f.seedRun("acme", "run-acme")
-	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "acme"}, nil); code != http.StatusAccepted {
-		t.Fatalf("delete = %d", code)
-	}
-
-	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
-	var mine []teamDeletionBody
-	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
-	if len(mine) != 1 || mine[0].State != store.TeamDeletionPending || mine[0].Attempts != 1 || mine[0].LastError == "" {
-		t.Fatalf("after a failed pass = %+v, want pending with the failure recorded", mine)
-	}
-	ids, err := f.store.AsOperator().TeamRunIDs(context.Background(), "acme")
-	if err != nil || len(ids) != 1 {
-		t.Fatalf("a failed storage purge removed rows: %v, %v", ids, err)
-	}
-
-	cache.answer(http.StatusNoContent)
-	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
-	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
-	if len(mine) != 1 || mine[0].State != store.TeamDeletionDone {
-		t.Fatalf("after the service recovered = %+v, want done", mine)
 	}
 }
 

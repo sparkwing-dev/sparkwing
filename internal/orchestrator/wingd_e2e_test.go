@@ -125,7 +125,7 @@ func openWingdBackends(t *testing.T, home string) (Backends, *store.Store, Paths
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return LocalBackends(p, st, nil), st, p
+	return LocalBackends(p, st), st, p
 }
 
 type wingdGate struct {

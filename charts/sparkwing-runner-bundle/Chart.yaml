@@ -1,16 +1,9 @@
 apiVersion: v2
 name: sparkwing-runner-bundle
 description: |
-  Runner-side bundle for Sparkwing -- deploys sparkwing-runner +
-  sparkwing-cache into a customer-owned namespace.
-  This is the "data plane lives with the runner" Helm chart referenced
-  in decision 0001 (open-core tier strategy): when customers run
-  self-hosted runners against a remote (cloud or self-hosted)
-  controller, this chart bundles every service that needs to live next
-  to the runner so artifacts / git fanout never cross the VPC
-  boundary.
-  Does NOT include the controller, which also serves the dashboard --
-  it ships in the full-self-host chart (sparkwing-full).
+  Sparkwing runners for a customer-owned namespace. Runners connect to
+  a controller for claims and signed data access. Source comes directly
+  from its repository. The controller and dashboard ship in sparkwing-full.
 
 # application: this chart deploys runnable workloads (Deployments,
 # Services, PVCs). A library chart would be wrong here -- there is no

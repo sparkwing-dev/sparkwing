@@ -2,15 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +15,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -604,7 +598,7 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 	}
 
 	if snapshot != nil {
-		key, uploadErr := uploadSourceBundle(runProfile, snapshot)
+		key, uploadErr := uploadSourceBundle(nil, snapshot)
 		if uploadErr != nil {
 			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w", pipelineName, uploadErr)
 		}
@@ -633,37 +627,12 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 	return response, nil
 }
 
-func uploadSourceBundle(runProfile *profile.Profile, snapshot *worktreeSnapshot) (string, error) {
-	f, err := os.Open(snapshot.BundlePath)
+func uploadSourceBundle(data *bincache.SourceData, snapshot *worktreeSnapshot) (string, error) {
+	record, err := bincache.UploadSourceBundle(context.Background(), data, snapshot.SHA, snapshot.BundlePath)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	digest := hex.EncodeToString(h.Sum(nil))
-	var nonce [16]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return "", err
-	}
-	key := "sources/" + digest + "/" + hex.EncodeToString(nonce[:])
-	transport := &http.Client{Timeout: 15 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	data := directdata.New(runProfile.ControllerURL(), runProfile.ControllerToken(), "", transport)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	defer cancel()
-	available, err := data.SourceAvailable(ctx)
-	if err != nil {
-		return "", fmt.Errorf("check direct source support: %w", err)
-	}
-	if !available {
-		return "", errors.New("controller does not support direct source bundles; upgrade it before --working-tree")
-	}
-	if err := data.Upload(ctx, "source", key, f, snapshot.BundleSize, digest); err != nil {
-		return "", err
-	}
-	return key, nil
+	return string(record.Digest), nil
 }
 
 // safety: a durable remote fetch cannot depend on a cache seed from this shell;

@@ -80,14 +80,6 @@ func TestDaemonStatusPrettyNamesTheAPIFault(t *testing.T) {
 			},
 			absent: "controller API",
 		},
-		{
-			name: "no artifact routes",
-			report: daemonReport{
-				Running: true, BinaryVersion: "v1", APISocket: "/tmp/api.sock", APIReady: ptr(true),
-				ArtifactStoreError: "unsupported cache scheme",
-			},
-			want: "no artifact routes: unsupported cache scheme",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1017,3 +1017,24 @@ forged selectors against all three account reads. TestCreditSettingsReadHTTP
 covers the final settings policy and authenticated feature availability.
 The two profile tests reintroduced by the integration conflict remain retired
 in favor of the existing sizing HTTP ports. No native cell is unskipped.
+
+## W2 OIDC mint retirement
+
+The twelve legacy controller OIDC tests and their token/trigger-row fixtures
+are replaced by TestOIDCMintHTTPIdentityAndExpiryProperty, Refusals,
+InputAndBudget, ClientAndKeyRotation and CommittedSubjects in
+`tests/acceptance/oidc_mint_http_test.go`, plus the existing issuer and public
+metadata tests. Real RS256/JWKS verification, the existing client, stable
+repository-specific subjects, all event/ref spellings, PR/tag subjects,
+audience validation, subject-injection refusal, 30-token isolation, distinct
+JTIs, disabled issuer, expiry and tampering are retained. Authority tests now
+refuse roots and accept only live bound oidc.mint awards/delegates.
+
+These are component tests against the actual registered HTTP handler and a
+committed-fact reader fake. C1 must prove original verified-event selection,
+schedule provenance, inheritance, registered runner identity, complete ancestry
+expiry and transactional cancellation/fencing in ReadOIDCFacts. The obsolete six-line dispatched-claim OIDC refusal assertion in
+TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames is reversed by
+the successful awarded-claim mint tests. The old
+Trigger/ClaimedRun readers are deleted from W2. No native credential matrix
+cell or production C1 identity projection is claimed complete by this port.

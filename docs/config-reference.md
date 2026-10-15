@@ -4,23 +4,6 @@
 
 Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated from the Go structs the config parser enforces. `Required` reflects whether the field may be omitted. See [storage backends](backends.md) for profiles and [spark libraries](sparks.md) for library configuration.
 
-## Top level
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `defaults` | `Defaults` | no | Defaults carries the per-pipeline fields each pipeline inherits unless it declares its own. See Defaults for the per-field merge semantics. |
-| `profiles` | `map[string]*profile.Profile` | no | Profiles maps profile name to its surface bundle. The same shape as the profiles section of ~/.config/sparkwing/config.yaml; project profiles are selected by pipeline.profile or by the CLI's --profile, user profiles by --profile alone. |
-| `pipelines` | `[]pipelines.Pipeline` | no |  |
-| `sparks` | `[]sparks.Library` | no |  |
-
-## `defaults`
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `args` | `map[string]string` | no | Args supplies per-arg default values for every pipeline. Each key is layered under pipeline.args (pipeline wins per-key), and the merged map overrides a field's `default` tag while an explicit operator CLI flag overrides it. |
-| `guards` | `pipelines.Guards` | no | Guards apply to every pipeline. Wholesale-replaced by a pipeline that declares its own non-empty guards block. |
-| `requires` | `[]string` | no | Requires are runner labels every pipeline's jobs must satisfy in addition to their own Job.Requires(). Wholesale- replaced by pipeline.requires when set. |
-
 ## Pipeline entry (a `pipelines:` list item)
 
 | Field | Type | Required | Description |

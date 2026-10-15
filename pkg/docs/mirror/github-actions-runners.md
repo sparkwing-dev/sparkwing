@@ -121,6 +121,9 @@ use the separate capability awarded for that unit. A runner root cannot read
 them or a pipeline's sizing records by itself. Discovery routes remain
 available to live roots.
 
+The cache-grant protocol and its issuance route are removed. Byte-storage
+access uses the authenticated data adapter and the unit's live authority.
+
 ## Runner behavior
 
 `sparkwing-runner runner --github-actions` reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, exchanges the token, adds the `github-actions` label, and claims both triggers and nodes. It plans claimed triggers in the job with the in-process node runner. It stops taking new work ten minutes before the credential expires. `--idle-exit` ends the job once no node has been held for that long, and a node in flight keeps the job alive whatever the flag says.

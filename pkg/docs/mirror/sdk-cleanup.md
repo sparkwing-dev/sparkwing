@@ -25,7 +25,7 @@ type Spec struct {
     // retry. Empty Argv makes Register a no-op.
     Argv []string
     // Description names the resource for the reaped event and for
-    // `sparkwing doctor`; defaults to the command when empty.
+    // `sparkwing doctor`; defaults to the command's program name when empty.
     Description string
 }
 ```

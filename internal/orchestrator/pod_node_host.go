@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -38,11 +37,8 @@ type podNode struct {
 	specHash string
 	engine   nodeproto.EngineIdentity
 	identity nodeproto.RunnerIdentity
-	// safety: a dispatched node's caches use its own run's grant, since its host may serve other runs.
-	cacheGrant string
-	state      storage.StateStoreOld
-	artifacts  storage.ArtifactStore
-	logger     *slog.Logger
+	state    storage.StateStoreOld
+	logger   *slog.Logger
 }
 
 // safety: the node's process gets the minimal environment and its own route
@@ -59,7 +55,6 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		return nodehost.Result{}, fmt.Errorf("read node %s: %w", p.nodeID, err)
 	}
 	p.specHash = row.SpecHash
-	ctx = depcache.WithCacheGrant(ctx, p.cacheGrant)
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
 	// safety: ahead of the routes and the node log, so a bad allow list leaves nothing to close.
@@ -96,7 +91,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env, Engine: p.engine, Runner: p.identity, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLauncher, Secrets: masker}},
 		Pipeline: run.Pipeline, Entrypoint: selection.Entrypoint, Args: args, Run: podRunContext(run),
 		StartAt: flags.StartAt, StopAt: flags.StopAt,
-		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
+		State: p.state, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return nlog, nil },
@@ -132,9 +127,9 @@ func podProcessEnv(masker *secrets.Masker, logger *slog.Logger) ([]string, error
 }
 
 // PodBaseEnv is what a runner gives every process of a pipeline it hosts, its
-// dependency installs included: the minimal environment plus the dependency
-// proxy settings the pod's Job or runner was given, so go, npm and pip use the
-// cache's proxy and no runner credential reaches pipeline code or its hooks.
+// dependency installs included: the minimal environment plus the network
+// proxy and CA settings needed to reach external services. Custom registry
+// settings use the operator's run.submit_env_allow list.
 func PodBaseEnv() []string {
 	return engineenv.Minimal(podEnvNames()...)
 }

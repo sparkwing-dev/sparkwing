@@ -55,7 +55,7 @@ func blobRecordFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) {
 }
 
 func blobOutputRequest(intent blob.UploadIntent) blob.CommitRecordRequest {
-	return blob.CommitRecordRequest{Authority: intent.Authority, Source: intent.Identity, Key: ResultBlobKey(intent.Identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindOutput), Digest: intent.Digest}
+	return blob.CommitRecordRequest{Authority: intent.Authority, Source: intent.Identity, Key: blob.ResultRecordKey(intent.Identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindOutput), Digest: intent.Digest}
 }
 
 func addBlobJob(t *testing.T, s *Store, original blob.UploadIntent, id string) blob.UploadIntent {
@@ -159,7 +159,7 @@ func TestBlobRecordsManifestChecksEveryMemberAndKeepsMetadata(t *testing.T) {
 	if _, err := commitTestBlob(t, records.tenant, manifestIntent); err != nil {
 		t.Fatal(err)
 	}
-	key := ResultBlobKey(intent.Identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindManifest)
+	key := blob.ResultRecordKey(intent.Identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindManifest)
 	request := blob.CommitRecordRequest{Authority: intent.Authority, Source: intent.Identity, Key: key, Digest: member.ManifestDigest, Members: []blob.Member{member}}
 	if _, err := records.CommitRecord(t.Context(), request); err != nil {
 		t.Fatal(err)

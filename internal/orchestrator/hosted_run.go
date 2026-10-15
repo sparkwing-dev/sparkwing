@@ -180,7 +180,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: planSink, Engine: entry.Engine, Runner: entry.Runner, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker}},
 		Pipeline: opts.Pipeline, Entrypoint: entry.Pipeline.Entrypoint, Args: invokeArgs, CheckArgs: checkArgs, CheckSecrets: checkSecrets, Run: hostedRunContext(opts, runID),
 		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only,
-		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
+		State: state, Attempts: attempts, Admission: admission,
 		Debug: nodehost.Debug{
 			PauseBefore: opts.Debug.PauseBefore, PauseAfter: opts.Debug.PauseAfter,
 			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(),
@@ -188,9 +188,6 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		Invocation: invocation, Requires: requires,
 		Memo: &nodehost.Memo{
 			Slots: backends.Concurrency, NoCache: opts.NoCache,
-			Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
-				return nodehost.ReadMemoSource(ctx, backends.State, runID, nodeID)
-			},
 		},
 	}
 	cfg.Rehydrate = hostedRehydration(opts)

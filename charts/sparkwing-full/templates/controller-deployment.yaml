@@ -72,9 +72,6 @@ spec:
             {{- with .Values.controller.dashboardURL }}
             - {{ printf "--dashboard-url=%s" . | quote }}
             {{- end }}
-            {{- with (include "sparkwing-full.controller.cacheURL" .) }}
-            - {{ printf "--cache-url=%s" . | quote }}
-            {{- end }}
             {{- with .Values.controller.argon2MemoryBudgetMB }}
             - {{ printf "--argon2-memory-budget-mb=%d" (int .) | quote }}
             {{- end }}

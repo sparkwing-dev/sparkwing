@@ -12,14 +12,12 @@ import (
 type runNodeConfig struct {
 	claimed       bool
 	claimFence    store.NodeClaimFence
-	gitcacheURL   string
-	gitcacheGrant string
 	repoAllowlist *sourceurl.RepoAllowlist
 	hostRemote    remoteNodeHost
 }
 
 type remoteNodeHost func(ctx context.Context, trigger *store.Trigger, run *store.Run,
-	controllerURL, gitcacheURL, cacheGrant, runID, nodeID, token string,
+	controllerURL, runID, nodeID, token string,
 	allow *sourceurl.RepoAllowlist, logger *slog.Logger) (runner.Result, error)
 
 // hack: tests stand a prebuilt pipeline in for the source fetch and build through this option.
@@ -53,13 +51,4 @@ func ClaimedNodeAttempt(node *store.Node) RunNodeOption {
 // created -- builds only the repository that runner already admitted.
 func WithRepoAllowlist(allow sourceurl.RepoAllowlist) RunNodeOption {
 	return func(c *runNodeConfig) { c.repoAllowlist = &allow }
-}
-
-// WithGitcache hands a claimed node the cache and the grant its run's cache
-// traffic carries, so concurrent nodes of different runs never share one.
-func WithGitcache(url, grant string) RunNodeOption {
-	return func(c *runNodeConfig) {
-		c.gitcacheURL = url
-		c.gitcacheGrant = grant
-	}
 }

@@ -112,9 +112,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		},
 		Logger:    logger,
 		Admission: &nodehost.Admission{Slots: slots},
-		Memo: &nodehost.Memo{Slots: slots, NoCache: flags.NoCache, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
-			return nodehost.ReadMemoSource(ctx, c, runID, nodeID)
-		}},
+		Memo:      &nodehost.Memo{Slots: slots, NoCache: flags.NoCache},
 		// safety: the run host's eval processes read secrets through the trigger's claim, which the controller
 		// releases them to, but get no forwarded routes, since only a node's claim backs them; their lines go to
 		// this runner's log, since the node's log belongs to the host that runs it.
@@ -335,17 +333,13 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 	ctx, stop := nodeClaimKeeper(client.NewWithToken(h.controllerURL, nil, n.ClaimToken),
 		req.RunID, req.NodeID, fence, store.MaxLeaseDuration).Run(ctx)
 	defer stop()
-	grant := RequestRunCacheGrant(ctx, h.controllerURL, n.ClaimToken, req.RunID, h.logger)
-	art, err := supervisorArtifactStore(ctx, h.controllerURL, req.RunID, "", grant)
+	res, err := hostDispatchedNode(ctx, podNode{
+		entry: h.entry, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
+		runID: req.RunID, nodeID: req.NodeID, logger: h.logger,
+	})
 	if err == nil {
-		var res runner.Result
-		if res, err = hostDispatchedNode(ctx, podNode{
-			entry: h.entry, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
-			runID: req.RunID, nodeID: req.NodeID, cacheGrant: grant, artifacts: art, logger: h.logger,
-		}); err == nil {
-			res.Err = errors.Join(res.Err, context.Cause(ctx))
-			return res
-		}
+		res.Err = errors.Join(res.Err, context.Cause(ctx))
+		return res
 	}
 	err = errors.Join(err, context.Cause(ctx))
 	// safety: only this claim may write the node now, so a host that never started finishes the row under it.
