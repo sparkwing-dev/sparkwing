@@ -24,6 +24,7 @@ type RunTransactions interface {
 	Members(context.Context) ([]store.Membership, error)
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
 	ReadRun(context.Context, string) (store.RunRow, error)
+	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)

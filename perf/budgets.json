@@ -28,6 +28,12 @@
   },
   "routes": [
     {
+      "route": "/api/v1/runs/{run}/snapshot",
+      "kind": "api",
+      "exempt": "Requires a live trigger-owner claim and a committed scheduling graph, absent from the local dashboard corpus. An unauthenticated probe measures rejection. Latency, cold start and response bytes remain unmeasured; baseline an authorized graph corpus and remove this exemption after store integration.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/team/github-app/automation",
       "kind": "api",
       "exempt": "GET preview reads third-party GitHub state; PUT and DELETE change consent. Probing writes would measure rejection rather than the authorized operation. List-only latency is unmeasured.",

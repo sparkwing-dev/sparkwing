@@ -1019,6 +1019,70 @@ pipelines. No Sparkwing binary or git write is used. The scratch directory
 The CLI probe test fixture is updated and compile-checked. Its socket-based
 runtime test is left for the lead's native test lane.
 
+### Owner snapshot cutover
+
+`GET /api/v1/runs/{run}/snapshot` is registered through `PolicyRouter`.
+Only live trigger authority with `trigger.host` and the exact run binding
+reaches it. Members, work/plan claims, bootstrap delivery and nodehost
+audiences are refused. Cancellation, owner lapse, revoked ancestry and
+membership loss retain the common liveness behavior.
+
+`EngineController.Snapshot` takes one `Tenant.ReadSnapshot` and passes that
+same value to `RunSnapshot.Scheduling`. The response uses projection order,
+persisted job status and declarations, store time and generator membership.
+Empty jobs, generators and group members encode as arrays. Missing, duplicate
+or foreign rows and malformed declarations fail before any response is
+written. Claimant prefixes, holders, actor records and execution seals are
+excluded from this private scheduling wire.
+
+The local C2 extension is `EngineController.ProjectScheduling`, an optional
+callback with the existing C1 projection signature. The default calls
+`store.RunSnapshot.Scheduling`. C1's projection is a panic stub in this tree,
+so the callback lets acceptance tests supply its contract without adding a
+second graph implementation. Removing the field and its fixture override
+undoes this seam after C1 integration. `RunTransactions` adds the unchanged
+`Tenant.ReadSnapshot` signature. No other area's contract changes.
+
+`TestEngineSnapshotHTTP` proves one read, projection ordering, accepted and
+empty groups, explicit arrays and private-field exclusion. Refusal tests
+cover identity, ancestry, audience, grants, run binding, current membership,
+lease expiry, cancellation, lookup ordering, unavailable dependencies,
+corrupt persistence and unsupported methods. A separate case proves a
+cancellation first observed in the committed read reaches the owner. These
+are real-server HTTP tests with fake C1 reads and projection, not database
+consistency, native transport or scheduling-algorithm proofs. No parked test
+is ported and no full T1 topology scenario is unskipped by this addition.
+
+Real integration still requires C1 `ReadSnapshot` and `RunSnapshot.Scheduling`,
+committed authentication/binding readers, and W9's engine client. No new C1
+contract gap blocks this adapter. The earlier issuance/rotation, claim
+delivery/profile, result-digest, attempt attribution and unit-renewal gaps
+remain. Run detail also needs C1's declared attempt/log history read boundary
+and C4's safe input projection before the complete display can be supplied.
+
+The replaced Snapshot stub and its comment remove six lines. There is no
+legacy snapshot route or handler to delete. The shared source change is
+the read-route entry in `internal/orchestrator/wingd_api.go`; its inventory
+check covers the new registration. Generated OpenAPI, API reference, auth
+documentation, embedded mirrors and the controller API snapshot follow it.
+`perf/budgets.json` records the route as exempt because its live owner and
+graph are absent from the dashboard corpus. Latency, cold start and response
+bytes are unmeasured. The exemption names the authorized corpus needed to
+replace it; fake HTTP timings are not a performance baseline.
+No new issuer, cache, setting, limit or environment variable is added.
+
+Snapshot verification passes the whole-repository build, scoped vet,
+capability/API-error tests, executable acceptance proofs, controller policy
+and signer tests, daemon route inventory, API generation/schema drift,
+documentation symbols/mirrors and changed-line comment policy. The new
+snapshot tests exercise 46 HTTP cases with no sockets or sleeps. Commands use
+`GOWORK=off`, `GOFLAGS=-buildvcs=false`, scratch-owned Go caches/temp files and
+at most four test-package workers. The controller API snapshot is regenerated
+without changing unrelated package snapshots. Full legacy controller tests,
+native topology cells, SQL consistency, performance measurements and
+Sparkwing pipelines remain for the lead. No Sparkwing binary or git write
+is used, and `/tmp/sw-astra-W2/` is deleted after verification.
+
 ## Open questions for the lead
 
 1. **Root origins and sessions.** Section 5.1 names three issuance forms but

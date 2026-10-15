@@ -6,6 +6,13 @@ resource's team before authorization and derives actors and fences from the
 credential. Unknown or ended credentials get `unauthenticated`. A live
 credential without the grant or binding gets `forbidden`.
 
+`GET /api/v1/runs/{run}/snapshot` requires a live trigger owner with
+`trigger.host` bound to that run. It returns one committed scheduling view,
+including generated jobs and empty generator groups. Ordinary members and
+work or plan claims cannot read this private owner view. Cancellation and
+owner lease loss refuse new reads. A cancellation committed after
+authentication appears in the returned snapshot.
+
 Token revocation and member updates use the same policy router. A team token is
 revoked at `DELETE /api/v1/tokens/{token}`. Deployment service/operator roots use
 `DELETE /api/v1/operator/tokens/{token}` with `operator.tokens` or an operator

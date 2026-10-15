@@ -133,6 +133,10 @@ func (f *engineTransactions) ReadRun(_ context.Context, run string) (store.RunRo
 	return f.run, f.readErr
 }
 
+func (f *engineTransactions) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
+	return store.RunSnapshot{}, f.readErr
+}
+
 func (f *engineTransactions) ReadNode(_ context.Context, ref store.NodeRef) (store.NodeRow, error) {
 	if ref != f.node.Ref {
 		return store.NodeRow{}, &apierr.Error{Code: apierr.NotFound, Message: "job not found"}

@@ -22,6 +22,9 @@ type EngineController struct {
 	// ResolveOperator supplies deployment revocation without exposing a tenant.
 	// A nil resolver uses Store.AsOperator.
 	ResolveOperator func(context.Context) (AuthorityRevoker, error)
+	// ProjectScheduling supplies the shared graph projection to embedded controllers
+	// and tests. A nil projector uses store.RunSnapshot.Scheduling.
+	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.
@@ -39,12 +42,6 @@ func (s *EngineController) Claim(ctx context.Context, authorized capability.Auth
 // RunDetail uses runspec.DisplayRequest/DisplaySpec and the same safe projection
 // for local and remote reads. Claim execution inputs are on their private wire.
 func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error) {
-	panic("unimplemented: controller-wire")
-}
-
-// Snapshot takes one ReadSnapshot and its Scheduling projection, including empty
-// generator groups. Remote owners cannot assemble a schedule from separate reads.
-func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error) {
 	panic("unimplemented: controller-wire")
 }
 

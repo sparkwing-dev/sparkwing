@@ -37,6 +37,10 @@ func (s *Server) engineEndpoints() []Endpoint {
 			Decode: engine.runResultTarget, Handle: engine.handlePlan,
 		},
 		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}/snapshot", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleSnapshot,
+		},
+		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/finish", Authentication: capability.AuthCapability,
 			Decode: engine.runResultTarget, Handle: engine.handleFinish,
 		},

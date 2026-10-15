@@ -190,6 +190,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/transition` | `node.result` or `node.result` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/plan` | `node.result` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/retry` | `runs.control` |
+| `GET` | `/api/v1/runs/{run}/snapshot` | `trigger.host` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
 | `POST` | `/api/v1/secrets/rotate` | `admin` |
