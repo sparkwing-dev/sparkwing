@@ -186,7 +186,7 @@ func decodeSegment(stored []byte, seg Segment) ([]byte, error) {
 	return body, nil
 }
 
-func readObject(ctx context.Context, objs Objects, key string, limit int64) ([]byte, error) {
+func readObject(ctx context.Context, objs SegmentObjects, key string, limit int64) ([]byte, error) {
 	rc, err := objs.Get(ctx, key)
 	if err != nil {
 		if rc != nil {

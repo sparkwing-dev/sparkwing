@@ -59,6 +59,12 @@ generation fences both signing and segment commits. Eval logs retain a separate
 source-job generation. The uploader verifies bytes, uses batches of sixteen
 segment URLs and seals the committed segment list with a manifest.
 
+The batch signer derives every key from that identity and uses the run's stored
+retention class. It checks the backend lifecycle before returning sixteen PUT
+URLs and one manifest URL with a fifteen-minute expiry. The filesystem signer
+accepts an identical retry and refuses different bytes under an existing key.
+These URLs grant no log download access.
+
 The reader uses authorized segment records, verifies each segment before sending
 its bytes and resumes at an uncompressed byte offset. It reports how many bytes
 it sent even when a later segment fails. Objects without a persisted log record

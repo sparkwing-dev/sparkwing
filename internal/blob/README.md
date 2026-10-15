@@ -78,6 +78,14 @@ then copies with a source ETag fence and a destination create-only condition.
 Both backends verify an existing final object before adopting it on a retry.
 Filesystem reads remain subject to the client's EOF verification.
 
+The filesystem backend also exposes `SignLogPut` for the separate tagged-log
+upload path. These PUT-only slots expire after fifteen minutes and enforce the
+shared segment or manifest size bound. The first payload wins. An identical
+retry succeeds, and different bytes cannot replace it. This path reuses the
+filesystem signer and immutable writer. Its URLs grant no log download access.
+`Get` opens a log object only for a controller-side authorized segment read.
+The controller still owns record checks, retention sweeps and egress accounting.
+
 An object commit does not create a live blob or a receipt. The controller must
 reauthorize the immutable upload ticket, call `CommitObject`, and commit the blob
 row and exact uploader receipt in the store transaction. Only afterward may it

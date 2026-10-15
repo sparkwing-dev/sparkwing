@@ -2,13 +2,19 @@
 
 func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness
 func AttemptPrefix(class, team, runID, nodeID string, attempt, generation int64) (string, error)
+type BatchSigner struct {
+	Objects    LogPutSigner
+	ClassReady func(context.Context, string) error
+	Now        func() time.Time
+}
+func (s BatchSigner) Sign(ctx context.Context, request blob.LogSigningRequest, class string) (blob.LogUploadBatch, error)
 func ClassDays(class string) (int, bool)
 const ClassFree = "r30"
 func ClassPrefix(class string) string
 const ClassStandard = "r90"
 type CommittedReader struct {
 	Records SegmentLookup
-	Objects Objects
+	Objects SegmentObjects
 }
 func (r CommittedReader) Read(ctx context.Context, actor store.Actor, request blob.LogReadRequest, out io.Writer) (result ReadResult, err error)
 type Completeness struct {
@@ -51,6 +57,9 @@ func (l *Log) LossLine() []byte
 func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]byte, error)
 func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error)
 func (l *Log) Verify(ctx context.Context, objs Objects) error
+type LogPutSigner interface {
+	SignLogPut(context.Context, string, time.Time) (string, error)
+}
 type Manifest struct {
 	Subject      *blob.LogSubject
 	Version      int
@@ -142,6 +151,9 @@ type SegmentLookup interface {
 	ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error)
 }
 func SegmentNumber(prefix, key string) (int, bool)
+type SegmentObjects interface {
+	Get(context.Context, string) (io.ReadCloser, error)
+}
 type SegmentRecorder interface {
 	RecordSegments(context.Context, store.SegmentCommit) error
 }

@@ -19,11 +19,16 @@ type SegmentLookup interface {
 	ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error)
 }
 
+// SegmentObjects opens exact persisted object keys; listings cannot authorize logs.
+type SegmentObjects interface {
+	Get(context.Context, string) (io.ReadCloser, error)
+}
+
 // CommittedReader serves persisted segments behind the controller's log reader.
 // Object listings and manifests never establish read authority.
 type CommittedReader struct {
 	Records SegmentLookup
-	Objects Objects
+	Objects SegmentObjects
 }
 
 // ReadResult retains the exact emitted byte count even when a later read fails,

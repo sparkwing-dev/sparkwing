@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -68,6 +69,10 @@ func (f *Filesystem) Sign(ctx context.Context, object capability.ObjectToSign) (
 	if err := validateObject(object, f.now()); err != nil {
 		return capability.SignedObject{}, err
 	}
+	return f.signObject(object)
+}
+
+func (f *Filesystem) signObject(object capability.ObjectToSign) (capability.SignedObject, error) {
 	encoded, err := json.Marshal(object)
 	if err != nil {
 		return capability.SignedObject{}, err
@@ -101,7 +106,11 @@ func (f *Filesystem) signedRequest(r *http.Request) (capability.ObjectToSign, er
 	if err := json.Unmarshal(b, &object); err != nil {
 		return object, ErrDigestNotReadable
 	}
-	if r.Method != object.Method || validateObject(object, f.now()) != nil {
+	validate := validateObject
+	if strings.HasPrefix(object.Key, "logs/") {
+		validate = validateFilesystemLog
+	}
+	if r.Method != object.Method || validate(object, f.now()) != nil {
 		return object, ErrDigestNotReadable
 	}
 	return object, nil
@@ -115,7 +124,11 @@ func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if object.Method == http.MethodPut {
-		if err := f.put(r, object); err != nil {
+		put := f.put
+		if strings.HasPrefix(object.Key, "logs/") {
+			put = f.putLog
+		}
+		if err := put(r, object); err != nil {
 			code := http.StatusInternalServerError
 			if errors.Is(err, ErrIntegrity) {
 				code = http.StatusBadRequest
