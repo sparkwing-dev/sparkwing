@@ -130,7 +130,7 @@ func IsDirty(ctx context.Context, repoDir string) (bool, error) {
 // small skip list. .dockerignore is honored in both modes.
 //
 // Paths, file permissions, and contents contribute to the hash. Unreadable
-// inputs return an error; tracked files absent from disk are omitted.
+// inputs or ignore rules return an error; tracked files absent from disk are omitted.
 // File contents are read from disk (not from the git blob) so
 // staged-but-not-committed changes are reflected in the hash --
 // content addressing keys off the tree the build will actually see.
@@ -142,11 +142,14 @@ func FilesetHash(ctx context.Context, repoDir string) (string, error) {
 	if files == nil {
 		files = listFilesystemFiles(repoDir)
 	}
+	ignore, err := loadDockerignore(repoDir)
+	if err != nil {
+		return "", fmt.Errorf("fileset hash ignore rules: %w", err)
+	}
 	if len(files) == 0 {
 		return "", nil
 	}
 
-	ignore := loadDockerignore(repoDir)
 	seen := map[string]bool{}
 	keep := files[:0]
 	for _, f := range files {
@@ -251,14 +254,17 @@ func listFilesystemFiles(repoDir string) []string {
 	return files
 }
 
-func loadDockerignore(repoDir string) []string {
+func loadDockerignore(repoDir string) ([]string, error) {
 	path := ".dockerignore"
 	if repoDir != "" {
 		path = filepath.Join(repoDir, ".dockerignore")
 	}
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var patterns []string
 	for _, line := range strings.Split(string(data), "\n") {
@@ -267,7 +273,7 @@ func loadDockerignore(repoDir string) []string {
 			patterns = append(patterns, line)
 		}
 	}
-	return patterns
+	return patterns, nil
 }
 
 func matchesIgnore(path string, patterns []string) bool {
