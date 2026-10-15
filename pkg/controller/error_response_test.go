@@ -29,26 +29,6 @@ func TestWriteErrorMasksInternalDetails(t *testing.T) {
 	}
 }
 
-func TestResetNodeForAutoRetryMasksStoreFailure(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(st, nil).Handler()
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-private/nodes/node-private/auto-retry/reset", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if body := rec.Body.String(); body != "{\"error\":\"internal server error\"}\n" {
-		t.Fatalf("body = %q", body)
-	}
-}
-
 func TestAgentRoutesMaskStoreFailures(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

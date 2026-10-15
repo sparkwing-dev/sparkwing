@@ -22,12 +22,7 @@ func PublicNode(node *store.Node) *store.Node {
 	out.ClaimGeneration = 0
 	out.ClaimMembershipID = ""
 	out.ExecutorID = ""
-	out.RequiredCoordinatorID = ""
 	out.ReservationID = ""
-	out.AvoidCoordinatorID = ""
-	out.AvoidExecutorKind = ""
-	out.AvoidExecutorID = ""
-	out.AvoidUntil = nil
 	if node.ExecutionAttempts != nil {
 		out.ExecutionAttempts = make([]store.ExecutionAttempt, len(node.ExecutionAttempts))
 		for i, attempt := range node.ExecutionAttempts {

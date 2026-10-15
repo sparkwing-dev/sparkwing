@@ -12,6 +12,25 @@ import (
 
 func holderRefusal() error { return &ErrIllegalTransition{Reason: ReasonHolderRights} }
 
+func checkPublisherTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string) error {
+	principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+	if err != nil {
+		return err
+	}
+	c := principal.Capability
+	if actor.Kind != ActorOperator || c.Team != string(team) || c.Audience != capability.Controller || c.Prefix != actor.CapabilityPrefix || c.Binding.Kind != capability.BindingRun || c.Binding.RunID != runID || !slices.Contains(c.Grants, capability.DataWrite) || c.Data == nil || c.Data.Use != capability.DataPublish || c.Data.RunID != runID {
+		return holderRefusal()
+	}
+	var mode, repo string
+	if err := tx.QueryRowContext(ctx, `SELECT intake_mode,repo_key FROM runs WHERE team=? AND id=?`, team, runID).Scan(&mode, &repo); err != nil {
+		return err
+	}
+	if mode != "publish" || c.Data.RepositoryKey != repo {
+		return holderRefusal()
+	}
+	return nil
+}
+
 func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string, now time.Time) error {
 	ref := actor.Owner
 	if ref.RunID != "" && ref.RunID != runID {
@@ -21,11 +40,12 @@ func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runI
 		if actor.Kind != ActorController || ref.Name != "controller.owner" {
 			return holderRefusal()
 		}
-		var dispatch string
-		if err := tx.QueryRowContext(ctx, `SELECT dispatch FROM runs WHERE team=? AND id=?`, team, runID).Scan(&dispatch); err != nil {
+		var dispatch, mode string
+		var accepted int64
+		if err := tx.QueryRowContext(ctx, `SELECT dispatch,intake_mode,plan_accepted_generation FROM runs WHERE team=? AND id=?`, team, runID).Scan(&dispatch, &mode, &accepted); err != nil {
 			return err
 		}
-		if dispatch != "controller" {
+		if dispatch != "controller" || mode != "execute" || accepted <= 0 {
 			return holderRefusal()
 		}
 		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: ref.Generation}, "controller.owner", now)
@@ -81,7 +101,7 @@ func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, act
 
 func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string, now time.Time) error {
 	switch actor.Kind {
-	case ActorController:
+	case ActorController, ActorRunHost:
 		return checkOwnerTx(ctx, tx, team, actor, runID, now)
 	case ActorReaper:
 		return checkReaperTx(ctx, tx, actor, now)

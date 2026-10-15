@@ -47,7 +47,9 @@ type PlanSecretOpener interface {
 
 // SetPlanSecretOpener configures server-side identifier validation before the store is shared.
 // Acceptance refuses encrypted secret validation when no opener is configured.
-func (s *Store) SetPlanSecretOpener(opener PlanSecretOpener) { s.planSecretOpener = opener }
+func (s *Store) SetPlanSecretOpener(opener PlanSecretOpener) {
+	s.planSecretOpener = opener
+}
 
 type planSecretValues []string
 

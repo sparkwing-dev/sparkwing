@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strings"
+	"fmt"
+	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -27,113 +31,117 @@ func planClaimWait(snapshot []byte) int64 {
 	return (time.Duration(plan.ClaimWaitMS) * time.Millisecond).Nanoseconds()
 }
 
-func (s *Store) failStaleQueuedNodes(ctx context.Context, wait time.Duration) ([][2]string, error) {
-	if wait <= 0 {
-		return nil, nil
-	}
-	now := time.Now().UnixNano()
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
-	rows, err := tx.QueryContext(ctx, `SELECT n.run_id, n.node_id, n.attention_reason, n.kind FROM nodes n JOIN runs r ON r.id = n.run_id
- WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
-   AND COALESCE(n.placement_hold_from, n.ready_at) + CASE WHEN r.claim_wait_ns > 0 THEN r.claim_wait_ns ELSE ? END < ?`,
-		wait.Nanoseconds(), now)
-	if err != nil {
-		return nil, err
-	}
-	var pairs [][2]string
-	var reasons []string
-	for rows.Next() {
-		var rid, nid, reason, kind string
-		if err := rows.Scan(&rid, &nid, &reason, &kind); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		// safety: the launcher takes every node the Cloud image can run whose
-		// team can pay, so its node that waited out the claim wait needs a tool
-		// the image lacks or compute its team cannot pay for, and the wait is
-		// what ends a run that could otherwise never finish.
-		if reason == "" && kind != "" {
-			reason = "Sparkwing Cloud did not launch this node before its claim wait ran out: " +
-				"it needs a tool the Cloud runner image lacks, or the team could not pay for it"
-		}
-		if reason == "" {
-			reason = "no agent claimed this node before its claim wait ran out"
-		}
-		pairs = append(pairs, [2]string{rid, nid})
-		reasons = append(reasons, "unclaimable: "+reason)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	for i, p := range pairs {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE nodes
-   SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?, ready_at = NULL
- WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
-			reasons[i], FailureQueueTimeout, now, p[0], p[1]); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return pairs, nil
-}
-
-// RecordAgentLabels stores the labels the agent holding tokenPrefix advertised
+// RecordAgentLabels stores the labels the agent holding prefix advertised
 // on its latest claim, which say what it could run while it is offline.
-func (s *Store) RecordAgentLabels(ctx context.Context, tokenPrefix string, labels []string) error {
+func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error {
 	raw, err := json.Marshal(match.SelfAsserted(labels))
 	if err != nil {
 		return err
 	}
-	_, err = s.exec(ctx, `UPDATE tokens SET advertised_labels_json = ? WHERE prefix = ?`, raw, tokenPrefix)
-	return err
+	return s.inTx(ctx, func(tx *storeTx) error {
+		principal, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+		if err != nil {
+			return err
+		}
+		if !registeredClaimant(principal.Capability) {
+			return authorityError(apierr.Forbidden, "agent labels require an unbound machine claimant")
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,last_used_at=? WHERE team=? AND prefix=?`, raw, tx.now().UnixNano(), principal.Capability.Team, prefix)
+		return err
+	})
 }
 
 // RegisteredAgent is a live agent credential of a team, online or not.
 type RegisteredAgent struct {
-	Name, TokenPrefix string
-	// Profile is what the agent advertised on its latest claim.
+	Name, CapabilityPrefix string
+	// Profile combines enrollment and granted identity with last observed labels.
 	Profile  match.Profile
 	LastSeen time.Time
 }
 
-// ListRegisteredAgents lists team's unrevoked, unexpired agent credentials:
-// runner tokens and machine-family team tokens.
+// ListRegisteredAgents reads the team's live machine claimants and their last
+// observed labels. Capability ancestry supplies granted identity and pools.
 func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]RegisteredAgent, error) {
-	rows, err := s.query(ctx, `SELECT t.prefix, t.principal, t.advertised_labels_json, t.last_used_at
-  FROM tokens t
- WHERE t.team = ? AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > ?)
-   AND (t.kind = 'runner' OR (t.kind = 'team' AND substr(t.principal, 1, 6) = 'agent:'))
- ORDER BY t.prefix`, string(team), time.Now().Unix())
+	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer closeRowsOrLog(rows)
+	defer rollbackOrLog(tx)
+	agents, err := registeredAgentObservationsTx(ctx, tx, team)
+	if err != nil {
+		return nil, err
+	}
 	var out []RegisteredAgent
-	for rows.Next() {
-		var a RegisteredAgent
-		var principal string
-		var advertised []byte
-		var used sql.NullInt64
-		if err := rows.Scan(&a.TokenPrefix, &principal, &advertised, &used); err != nil {
+	for _, observed := range agents {
+		agent, err := registeredAgentTx(ctx, tx, team, observed)
+		var denied *apierr.Error
+		if errors.As(err, &denied) && denied.Code == apierr.Unauthenticated {
+			continue
+		}
+		if err != nil {
 			return nil, err
 		}
-		a.Name = strings.TrimPrefix(principal, agentPrincipalPrefix)
-		a.Profile = match.Profile{Name: a.Name, Class: match.ClassAgent}
-		if len(advertised) > 0 && json.Unmarshal(advertised, &a.Profile.Labels) == nil {
+		if agent != nil {
+			out = append(out, *agent)
+		}
+	}
+	return out, tx.Commit()
+}
+
+func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at FROM capabilities
+ WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
+ AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, tx.now().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var observations []RegisteredAgent
+	for rows.Next() {
+		var a RegisteredAgent
+		var advertised []byte
+		var used sql.NullInt64
+		if err := rows.Scan(&a.CapabilityPrefix, &advertised, &used); err != nil {
+			return nil, err
+		}
+		if len(advertised) > 0 {
+			if err := json.Unmarshal(advertised, &a.Profile.Labels); err != nil {
+				return nil, fmt.Errorf("decode agent labels: %w", err)
+			}
 			a.Profile.Labels = match.SelfAsserted(a.Profile.Labels)
 		}
 		if used.Int64 > 0 {
-			a.LastSeen = time.Unix(used.Int64, 0)
+			a.LastSeen = time.Unix(0, used.Int64).UTC()
 		}
-		out = append(out, a)
+		observations = append(observations, a)
 	}
-	return out, rows.Err()
+	return observations, rows.Err()
+}
+
+func registeredAgentTx(ctx context.Context, tx *storeTx, team Team, observed RegisteredAgent) (*RegisteredAgent, error) {
+	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observed.CapabilityPrefix}, false)
+	if err != nil {
+		return nil, err
+	}
+	principal := chain[0].principal
+	if principal.Capability.Team != string(team) || !registeredClaimant(principal.Capability) {
+		return nil, nil
+	}
+	profile := match.Profile{}
+	if tx.store.claimProfiles != nil {
+		profile, _, err = tx.store.claimProfiles.ResolveClaimProfile(ctx, principal)
+		if err != nil {
+			return nil, err
+		}
+	}
+	profile = authenticatedClaimProfile(principal.Capability, profile, false)
+	profile.Labels = observed.Profile.Labels
+	observed.Name, observed.Profile = profile.Name, profile
+	return &observed, nil
+}
+
+func registeredClaimant(c capability.Capability) bool {
+	return c.Subject.Kind == capability.SubjectMachine && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone && (slices.Contains(c.Grants, capability.NodesClaim) || slices.Contains(c.Grants, capability.TriggersClaim))
 }
 
 // WaitingNode is a ready node no agent holds, with what a claim of it checks.
@@ -144,39 +152,61 @@ type WaitingNode struct {
 	Repo          match.Repository
 	Request       match.Resources
 	Attention     string
+	AllowedPools  []string
 }
 
-// ListWaitingNodes lists up to limit unpinned nodes, ordered by run and node
+// ListWaitingNodes lists up to limit ready nodes, ordered by run and node
 // after the key after, that first became ready before readyBefore and that no
 // agent has claimed. A controller-dispatched node is the launcher's, so no
 // agent's absence explains its wait and it is not listed.
 func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error) {
-	rows, err := s.query(ctx, `SELECT n.run_id, n.node_id, n.team, n.needs_labels, n.attention_reason,
-       n.requested_cores, n.requested_memory_bytes, tr.repo_url, tr.github_owner, tr.github_repo, tr.trigger_env
-  FROM nodes n LEFT JOIN triggers tr ON tr.id = n.run_id AND tr.team = n.team
- WHERE n.ready_at IS NOT NULL AND COALESCE(n.placement_hold_from, n.ready_at) < ?
-   AND n.claimed_by IS NULL AND n.`+nodeNotDone+` AND n.`+nodeTriggerDispatched+`
-   AND n.required_coordinator_id = '' AND n.required_executor_location = ''
+	if limit <= 0 {
+		return nil, errors.New("waiting node limit must be positive")
+	}
+	rows, err := s.query(ctx, `SELECT n.run_id,n.node_id,n.team,n.execution_json,n.attention_reason,
+       r.repo_display,r.request_json,r.allowed_pools
+  FROM nodes n JOIN runs r ON r.id=n.run_id AND r.team=n.team
+ WHERE n.ready_at IS NOT NULL AND n.ready_at < ?
+   AND n.claimed_by IS NULL AND n.status='pending' AND n.cancel_requested_at IS NULL
+   AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL
+   AND r.dispatch='host' AND r.intake_mode='execute'
    AND (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))
  ORDER BY n.run_id, n.node_id LIMIT ?`, readyBefore.UnixNano(), after[0], after[0], after[1], limit)
 	if err != nil {
 		return nil, err
 	}
-	defer closeRowsOrLog(rows)
+	defer rows.Close()
 	var out []WaitingNode
 	for rows.Next() {
 		var n WaitingNode
-		var team string
-		var needs, env []byte
-		var url, owner, repo sql.NullString
-		if err := rows.Scan(&n.RunID, &n.NodeID, &team, &needs, &n.Attention,
-			&n.Request.Cores, &n.Request.MemoryBytes, &url, &owner, &repo, &env); err != nil {
+		var execution, request, pools []byte
+		if err := rows.Scan(&n.RunID, &n.NodeID, &n.Team, &execution, &n.Attention,
+			&n.Repo.URL, &request, &pools); err != nil {
 			return nil, err
 		}
-		n.Team = Team(team)
-		decodeCandidateLabels(n.RunID, n.NodeID, needs, &n.Selector)
-		if url.Valid {
-			n.Repo = triggerRunRepository(&Trigger{RepoURL: url.String, GithubOwner: owner.String, GithubRepo: repo.String}, env)
+		var settings runspec.JobExecutionSettings
+		if err := json.Unmarshal(execution, &settings); err != nil {
+			return nil, fmt.Errorf("decode waiting job %s/%s: %w", n.RunID, n.NodeID, err)
+		}
+		n.Selector, n.Request = settings.Requires.Value, matchingResources(settings.Resources.Value)
+		if !validMatchingResources(n.Request) {
+			return nil, fmt.Errorf("invalid resources for waiting job %s/%s", n.RunID, n.NodeID)
+		}
+		if err := json.Unmarshal(pools, &n.AllowedPools); err != nil {
+			return nil, fmt.Errorf("decode waiting run pools: %w", err)
+		}
+		var seal runspec.SealedRequest
+		if err := json.Unmarshal(request, &seal); err != nil {
+			return nil, fmt.Errorf("decode waiting run request: %w", err)
+		}
+		if n.Repo.URL == "" {
+			n.Repo.URL = seal.Request.Git.Repository.Display
+		}
+		switch runner := seal.Request.Options.Runner.Value; runner.Kind {
+		case runspec.RunnerName:
+			n.Selector = append(n.Selector, "name="+runner.Value)
+		case runspec.RunnerLabel:
+			n.Selector = append(n.Selector, runner.Value)
 		}
 		out = append(out, n)
 	}
@@ -203,7 +233,9 @@ func (s *Store) SetNodeAttention(ctx context.Context, updates []NodeAttention) e
 	var errs []error
 	for _, u := range updates {
 		if _, err := s.exec(ctx, `UPDATE nodes SET attention_reason = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone,
+ WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL
+ AND status='pending' AND cancel_requested_at IS NULL
+ AND EXISTS (SELECT 1 FROM runs r WHERE r.team=nodes.team AND r.id=nodes.run_id AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL)`,
 			u.Reason, string(u.Team), u.RunID, u.NodeID); err != nil {
 			errs = append(errs, err)
 		}

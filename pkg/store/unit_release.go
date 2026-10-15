@@ -94,5 +94,5 @@ func releaseOwnerUnitTx(ctx context.Context, tx *storeTx, claim UnitClaim, unit 
 	if claim.Kind == capability.UnitEval {
 		return writeEvalRecoveryTx(ctx, tx, target, owner, "pending", tx.now())
 	}
-	return writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", tx.now())
+	return writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}, tx.now())
 }

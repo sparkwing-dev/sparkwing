@@ -16,9 +16,19 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"paidGrantForPaymentTx":       "provider payment identity is resolved before the payer is known; the configured mode and persisted checkout select the grant",
-	"paymentWarningTeamTx":        "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
-	"(*Store).settlePaymentFacts": "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
+	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
+	"readAuthorityTx":                     "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
+	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
+	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
+	"advanceAuthGenerationsTx":            "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
+	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
+	"readMatchingInputsTx":                "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
+	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
+	"(*Operator).maintainRetention":       "the elected deployment maintenance pass expires sessions across teams while preserving live capability ancestry",
+	"deleteRetentionMetricsTx":            "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
+	"paidGrantForPaymentTx":               "provider payment identity is resolved before the payer is known; the configured mode and persisted checkout select the grant",
+	"paymentWarningTeamTx":                "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
+	"(*Store).settlePaymentFacts":         "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
 	"(*Store).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
 		"under the ledger lock",
@@ -55,7 +65,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"the asker is no answer; it is the read every other claim predicate is built from",
 	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
 		"a scope that is not exactly one team is refused there",
-	"(*Store).bumpMismatchedNodes": "shares the claim scan's runtime predicate and its refusal",
 	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
@@ -63,8 +72,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"names one team's row and the fence checked before it proves the caller holds that run",
 	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
 		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
-	"(*Store).RecordAgentLabels": "writes the one credential the claim authenticated with; a token " +
-		"prefix is unique across teams",
 	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
 		"award and the read after it are of the row the scoped select just locked",
 	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
@@ -119,8 +126,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).usageRuns": "counts every team's runs per week for the operator's usage metrics, " +
 		"which report totals across teams and name none",
-	"(*Store).expiredRetainedRuns": "the retention window is the deployment's, so the sweep finds every team's " +
-		"expired runs and releases each against the team read off its own row",
 	"(*Store).PruneSpentIdentity": "deletes every team's invitations, tokens and runner credentials that stopped " +
 		"admitting anyone, because a sweep that pruned one team would leave the rest to grow",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
@@ -131,41 +136,17 @@ var reviewedUnscopedSQL = map[string]string{
 		"another team is refused; a dispute id is unique across teams",
 	"(*Store).reapExpiredTriggers": "the trigger-lease reaper returns every team's lapsed claims to the queue, because a " +
 		"sweep that only reaped one team would leave the rest held",
-	"(*Store).reapQueueExpiredRuns": "the queue-deadline sweep ends every team's runs no claimant took; each write names a " +
-		"run its own scan selected by global id",
-	"(*Store).reapStalePendingRuns": "the stale-run sweep fails every team's pending runs whose trigger is gone or " +
-		"finished; each write names a run its own scan selected by global id",
-	"(*Store).reapStaleRunningRuns": "the stale-run sweep fails every team's running runs no orchestrator heartbeats",
-	"(*Store).reapTimedOutApprovals": "the approval sweep resolves every team's approvals past their timeout; each write " +
-		"names an approval its own scan selected",
-	"(*Store).reconcileOrphanedLocalRuns": "the orphan sweep fails every team's runs whose orchestrator stopped " +
-		"heartbeating, and cancels pending nodes left under any terminal run",
-	"(*Store).orphanedRunsQuery": "the orphan sweep's scan of every team's running runs, with each run's own nodes' " +
-		"heartbeats",
-	"(*Store).cascadeOrphanedNodes": "fails the open nodes of a run an orphan sweep selected by global id from its own " +
-		"scan",
-	"(*Store).failNodesInRun": "the trigger-claim sweep fails the open nodes of a run it reaped; the global run id comes " +
-		"off that sweep's own scan",
-	"(*Store).failStaleQueuedNodes": "the queue-wait sweep fails every team's ready nodes no runner claimed in time",
-	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails and retries every team's nodes whose runner lease " +
+
+	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails every team's nodes whose runner lease " +
 		"lapsed; each write names a node its own locked scan selected",
 	"(*Store).ReapExpiredNodeClaims": "clears every team's lapsed node claims in one locked pass; each write names a node " +
 		"its own scan selected",
-	"(*Store).expirePendingAgentLossRetriesTx": "expires every team's agent-loss retries past their deadline, " +
-		"because a claim that expired only its own team's would leave the rest queued past it",
-	"(*Store).ListExpiredClaims": "the local trigger consumer's sweep lists every lapsed trigger claim on the store before " +
-		"judging each one",
-	"(*Store).FinishLapsedClaim": "closes a lapsed trigger claim the local consumer's sweep selected by global id; the run " +
-		"it checks is the trigger's own",
+
 	"(*Store).PruneRunsOlderThan": "the run retention window is the deployment's, so the prune finds every team's expired " +
 		"runs",
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
 	"(*Store).ExpireSessions":   "the identity prune deletes every team's expired sessions",
-	"(*Store).sweepTable": "the retention sweep deletes every team's events and node metrics past the window that the " +
-		"run's own retention allows",
-	"(*Store).expireRunStorage": "the storage retention pass frees one expired run's events and usage, named by the global " +
-		"run id and principal its own scan selected",
-	"txLiveRunningRunIDs": "the concurrency reapers ask which of the runs they found in any team are still live",
+	"txLiveRunningRunIDs":       "the concurrency reapers ask which of the runs they found in any team are still live",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
 	"(*Store).ExpiredOutputRuns": "the output retention sweep finds every team's expired or deleted runs holding outputs, " +
@@ -190,8 +171,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"claimant credential and generation, and a token prefix is unique across teams",
 	"(*Store).TriggerExecutionAttemptBelongsToLiveClaim": "matches the trigger's live claim and its attempt against the " +
 		"exact claimant credential and generation, and a token prefix is unique across teams",
-	"(*Store).PrincipalHoldsNodeClaim": "matches the node's live claim against the exact claimant credential, and a token " +
-		"prefix is unique across teams",
 	"(*Store).PrincipalHoldsRunClaim": "matches a live claim on the run's nodes against the exact claimant credential, and " +
 		"a token prefix is unique across teams",
 	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +
@@ -246,19 +225,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).chargeStorageTx": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
 		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
 		"a backfill would read every quota as unlimited",
-	"(*Store).createAgentLossRetryTx": "the expired-claim reaper files a lost node's retry for the source run its own scan " +
-		"selected by global id; the retry's trigger and run take the source run's team",
-	"(*Store).mergeAgentLossRetryTx": "the expired-claim reaper folds another lost node into the retry it already filed " +
-		"for the same source run, named by global id",
-	"snapshotAgentLossRetryNodesTx": "copies one source run's nodes onto the retry the reaper filed for it, by global id, " +
-		"and also runs as the v31 schema step before the team column exists",
-	"persistAgentLossRetryNodeSourceTx": "writes one source node's snapshot for the retry the reaper filed, by global id, " +
-		"and also runs as the v31 schema step before the team column exists",
-	"loadAgentLossRetryNodeSourceTx": "reads the snapshot a retry was filed with by the retry's global id, on the reaper's " +
-		"path and in the v31 schema step that predates the team column",
-	"(*Store).requiredAgentLossRetryNodeSourceTx": "the deny-all markers a pre-snapshot retry carries were written before " +
-		"the team column, so scoping this read to a team would let a legacy retry run unrefused; the retry id is global " +
-		"and its node read follows",
 }
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a

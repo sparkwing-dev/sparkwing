@@ -32,6 +32,15 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	if run.FinishedAt != nil {
 		return nil, nil
 	}
+	if run.Dispatch == string(runspec.DispatchController) {
+		var accepted int64
+		if err := tx.QueryRowContext(ctx, `SELECT plan_accepted_generation FROM runs WHERE team=? AND id=?`, target.team, run.ID).Scan(&accepted); err != nil {
+			return nil, err
+		}
+		if accepted > 0 {
+			return nil, nil
+		}
+	}
 	now = tx.now()
 	if owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 > now.UnixNano() {
 		return nil, nil
@@ -39,8 +48,8 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	cancelled := owner.cancelled.Valid || run.CancelRequestedAt != nil
 	expired := owner.deadline.Valid && owner.deadline.Int64 <= now.UnixNano()
 	lapsed := owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 <= now.UnixNano()
-	wait := run.Request.Request.Options.ClaimWait
-	queuedOut := !owner.started.Valid && wait.Set && wait.Value > 0 && !run.Request.AdmittedAt.Add(wait.Value).After(now)
+	wait := runClaimWait(run)
+	queuedOut := !owner.started.Valid && wait.Set && wait.Value > 0 && !run.CreatedAt.Add(wait.Value).After(now)
 	if !cancelled && !expired && !lapsed && !queuedOut && owner.status != "failed" && owner.status != "done" {
 		return nil, nil
 	}
@@ -50,13 +59,13 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	failed := owner.status == "failed" || expired || queuedOut || owner.disruptions >= limits.MaxDisruptions || lapsed && owner.started.Valid && run.Request.Request.Origin == runspec.OriginLocal
 	result := &ReapedUnit{Team: target.team, RunID: target.ref.RunID, Kind: string(target.kind), Generation: owner.generation, Disruptions: owner.disruptions, Requeued: !cancelled && !failed, Cancelled: cancelled, Failed: failed && !cancelled}
 	if result.Requeued {
-		return result, writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", now)
+		return result, writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", actor, now)
 	}
 	status := "failed"
 	if cancelled {
 		status = "done"
 	}
-	if err := writeOwnerRecoveryTx(ctx, tx, target, owner, status, now); err != nil {
+	if err := writeOwnerRecoveryTx(ctx, tx, target, owner, status, actor, now); err != nil {
 		return nil, err
 	}
 	if cancelled && run.CancelRequestedAt == nil {

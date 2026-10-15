@@ -199,33 +199,6 @@ func TestClaimToken_ALaterGenerationFencesTheEarlierToken(t *testing.T) {
 	wantClaimAuth(t, f.s, second, store.ClaimSensitive, now, nil)
 }
 
-// An automatic retry puts the claim generation back to zero, so the reset
-// attempt's token must not come back to life when the retry's claim reaches
-// the same generation.
-func TestClaimToken_AutoRetryResetRetiresTheAttemptsToken(t *testing.T) {
-	f := claimForToken(t, "run-retry")
-	ctx := context.Background()
-	now := time.Now()
-	old := f.mint(t, now)
-	if err := f.s.FinishNodeWithReason(ctx, "run-retry", "build", "failed", "boom", nil, store.FailureUnknown, nil); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
-	if err := f.s.ResetNodeForAutoRetry(ctx, "run-retry", "build"); err != nil {
-		t.Fatalf("reset: %v", err)
-	}
-	if err := f.s.MarkNodeReady(ctx, "run-retry", "build"); err != nil {
-		t.Fatalf("ready: %v", err)
-	}
-	retry, err := f.s.ClaimNextReadyNode(ctx, f.identity, "holder-2", time.Minute, nil)
-	if err != nil || retry == nil || retry.ClaimGeneration != f.node.ClaimGeneration {
-		t.Fatalf("retry claim: %+v %v", retry, err)
-	}
-	for _, class := range claimTokenClasses {
-		wantClaimAuth(t, f.s, old, class, now, store.ErrClaimTokenInvalid)
-	}
-	claimedFixture{s: f.s, identity: f.identity, node: retry}.mint(t, now)
-}
-
 func TestClaimToken_ResultCommitsOnceAndReplaysOnlyTheSameResult(t *testing.T) {
 	f := claimForToken(t, "run-result")
 	ctx := context.Background()

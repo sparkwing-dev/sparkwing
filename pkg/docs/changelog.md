@@ -139,6 +139,8 @@ unlock.
 
 ### Fixed
 - **store:** HasMany returns a budget error when its final read reaches the deadline, with no partial presence result.
+- **store (Breaking):** Verified App redelivery returns the original run for each pipeline without requiring a client idempotency key
+  One delivery can start several pipelines. The schema drops uniqueness on unsigned delivery headers, replay lookups accept only the signed replay key, and `TriggerWebhookDeliveryIndexName` is removed. Idempotent admission also rechecks authority after input hashing, so an expired credential cannot recover a prior run.
 - **store:** Memo output commits enforce the 16 MiB output cap. Oversized persisted memo outputs produce a cache miss before copying result edges. Required output lookups report corruption.
 
 - **store:** Published job logs use the live run-bound publisher and exact imported terminal attempt. Segment commits preserve their seal and retention without requiring a local execution lease or changing the job result.
@@ -188,6 +190,10 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **store + controller + cli (Breaking):** Remove dispatch snapshots and `sparkwing debug rerun`
+  The store no longer exposes `NodeDispatch`, `WriteNodeDispatch`, `GetNodeDispatch` or `ListNodeDispatches`. The controller no longer serves the node `/dispatch` and `/dispatches` routes.
+- **runs bounce (Breaking):** Removed the command, controller routes and store APIs for restarting a job in place
+  Use `runs cancel` and `runs retry` to restart a run.
 - **store + controller (Breaking):** Removed `Store.ClaimExpiredSourceBundles`, `Store.DeleteSourceBundleRows`, `Store.PruneExpiredUploads`, `DirectCacheMaxAge` and `controller.CacheObjectMaxAge`. Source bundle lifetime uses record expiry and leased reachability GC. Cache listings no longer delete bytes by object age.
 - **store (Breaking):** Removed `Store.PruneExpiredCacheObjects`. Final blob lifetime uses record expiry and leased reachability GC.
 - **store (Breaking):** Removed the unused `CreditMaxChargeSeconds`, `StorageRateMicroPerGBDay` and `StorageFreeAllowanceBytes` scalar getters. Read those values through `CreditSettings`.

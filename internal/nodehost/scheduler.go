@@ -47,7 +47,7 @@ type Config struct {
 	Heartbeat time.Duration
 	// Admission admits each node before it runs; nil admits every node at once.
 	Admission *Admission
-	// Debug holds the run's debug pauses and bounce requests.
+	// Debug selects the run's operator pauses.
 	Debug Debug
 	// Invocation is the run row's invocation record, which the read paths
 	// redact secret arguments by.
@@ -206,7 +206,7 @@ type Layer func(cfg *Config, next Executor) Executor
 
 // safety: the order is the envelope's nesting, outermost first: debug pauses, then skip_if, which the
 // dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, memo, which
-// copies a hit before any admission lease or group slot is taken, admission, bounce, artifacts, caches,
+// copies a hit before any admission lease or group slot is taken, admission, artifacts, caches,
 // retries, the worker cap and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
 var layers = []Layer{
 	debugLayer,
@@ -214,7 +214,6 @@ var layers = []Layer{
 	approvalsLayer,
 	memoLayer,
 	admissionLayer,
-	bounceLayer,
 	artifactsLayer,
 	cachesLayer,
 	retryLayer,
@@ -674,18 +673,11 @@ func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode)
 	return rows, nil
 }
 
-// safety: a resumed run's finished node keeps the result its row records and
-// is never run or written again; an unfinished row, or one the reaper failed
-// because its holder was lost, is run again.
+// safety: terminal results survive resume; the reaper returns recoverable work to pending.
 func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *store.Node) {
 	id := n.ID
 	if row.Status != "done" || row.Outcome == "" {
 		return
-	}
-	if row.FailureReason == store.FailureAgentLost {
-		if r, ok := baseState(s.run.State).(lostNodeResetter); ok && r.ResetNodeForAutoRetry(ctx, s.run.ID, id) == nil {
-			return
-		}
 	}
 	res := Result{Outcome: sparkwing.Outcome(row.Outcome), Reason: row.FailureReason, recorded: true}
 	if row.Error != "" {
@@ -718,12 +710,6 @@ func recordedOutput(ctx context.Context, st storage.StateStoreOld, runID, id str
 		return nil, nil
 	}
 	return out, err
-}
-
-// safety: the store reopens a node whose holder was lost only for the run's own trigger holder, and only while no
-// agent-loss retry run took the run over, so the node never runs in both.
-type lostNodeResetter interface {
-	ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 }
 
 func pendingRow(run *Run, n nodeproto.PlanNode) store.Node {

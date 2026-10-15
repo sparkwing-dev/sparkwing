@@ -748,7 +748,6 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 		{"triggers", "claim_principal"},
 		{"approvals", "approver"},
 		{"cron_schedules", "armed_by"},
-		{"node_bounces", "requested_by"},
 		{"debug_pauses", "released_by"},
 		{"credit_grants", "created_by"},
 		{"nodes", "claim_principal"},

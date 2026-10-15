@@ -71,10 +71,10 @@ func (s *Store) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, err
 	 SELECT team,run_id,node_id,'node' AS kind,0 AS source_generation,lease_expires_at AS due FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at<=? AND status<>'done'
  UNION ALL
-	 SELECT n.team,n.run_id,n.node_id,'node',0,n.ready_at FROM nodes n
+	 SELECT n.team,n.run_id,n.node_id,'node',0,n.queue_started_at FROM nodes n
 	 JOIN runs r ON r.team=n.team AND r.id=n.run_id
-	 WHERE n.status='pending' AND n.claimed_by IS NULL AND n.ready_at IS NOT NULL
-	 AND r.claim_wait_ns>0 AND n.ready_at<=?-r.claim_wait_ns
+	 WHERE n.status='pending' AND n.claimed_by IS NULL AND n.queue_started_at IS NOT NULL
+	 AND r.claim_wait_ns>0 AND n.queue_started_at<=?-r.claim_wait_ns
 	 UNION ALL
 	 SELECT n.team,n.run_id,n.node_id,'node',0,a.requested_at FROM nodes n
 	 JOIN approvals a ON a.team=n.team AND a.run_id=n.run_id AND a.node_id=n.node_id
@@ -83,7 +83,7 @@ func (s *Store) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, err
 	 UNION ALL
 	 SELECT t.team,t.id,'',t.unit_kind,0,COALESCE(t.lease_expires_at,t.expires_at,t.created_at) AS due FROM triggers t
  JOIN runs r ON r.team=t.team AND r.id=t.id
-	 WHERE r.status IN ('pending','running') AND NOT (r.dispatch='controller' AND r.sealed_at IS NOT NULL) AND (
+	 WHERE r.status IN ('pending','running') AND NOT (r.dispatch='controller' AND r.plan_accepted_generation>0) AND (
  (t.status='claimed' AND t.lease_expires_at<=?) OR
  (t.status IN ('pending','claimed') AND t.expires_at<=?) OR
 	 (t.status='pending' AND r.claim_wait_ns>0 AND r.created_at<=?-r.claim_wait_ns) OR
@@ -165,8 +165,8 @@ func reapUnclaimedNodeTx(ctx context.Context, tx *storeTx, target expiredUnit, a
 			to = NodeSuccess
 		}
 	} else {
-		wait := run.Request.Request.Options.ClaimWait
-		if row.Status != StatusPending || row.ReadyAt == nil || !wait.Set || wait.Value <= 0 || row.ReadyAt.Add(wait.Value).After(now) {
+		wait := runClaimWait(run)
+		if row.Status != StatusPending || row.QueueStartedAt == nil || !wait.Set || wait.Value <= 0 || row.QueueStartedAt.Add(wait.Value).After(now) {
 			return nil, nil
 		}
 	}

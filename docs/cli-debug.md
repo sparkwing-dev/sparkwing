@@ -17,7 +17,6 @@ or resume execution. Pause settings apply to the launched run.
 - `release` -- Resume a paused node
 - `attach` -- kubectl exec into a paused node's pod (cluster mode)
 - `env` -- Print a paused node's environment and working directory + claim holder
-- `rerun` -- Reproduce a node's dispatch frame in an interactive shell
 
 ### Examples
 
@@ -102,46 +101,6 @@ sparkwing debug release --run run-fictional --node tests
 
 # Release in prod
 sparkwing debug release --run run-fictional --node tests --profile prod
-```
-
-## `sparkwing debug rerun`
-
-Reproduce a node's dispatch frame in an interactive shell
-
-Opens an interactive shell using a node's recorded environment and working
-directory. Local execution writes upstream reference outputs beneath the
-run's rerun directory. Cluster execution creates a temporary pod using
---image, else the profile's rerun_image in config.yaml, attaches to it,
-and deletes it on exit.
-
-Snapshots omit credential names and values and remove URL credentials.
-Controller access to the captured environment requires an admin token.
-The command lists omitted keys so you can supply required credentials.
-Secrets resolve when accessed, and the selected runner image applies.
-
---seq selects an attempt index; its default selects the latest attempt.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--run ID` | Run ID holding the node (required) |
-| `--node NAME` | Node ID to reproduce (required) |
-| `--seq N` | Attempt index; -1 selects most recent |
-| `--profile NAME` | Profile name (cluster mode) |
-| `--image REF` | Runner image for cluster-mode debug pod (cluster mode) |
-
-### Examples
-
-```sh
-# Rerun locally
-sparkwing debug rerun --run run-fictional --node tests
-
-# Rerun a specific attempt
-sparkwing debug rerun --run run-fictional --node tests --seq 1
-
-# Rerun in prod
-sparkwing debug rerun --run run-fictional --node tests --profile prod --image ghcr.io/me/runner:v1
 ```
 
 ## `sparkwing debug run`

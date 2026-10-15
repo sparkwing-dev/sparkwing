@@ -16,7 +16,7 @@ Each top-level key is a section with one owner:
 
 | Section | Holds | Written by |
 |---|---|---|
-| `profiles` | named connections to controllers and storage backends, keyed by profile name; `rerun_image` names the image `sparkwing debug rerun` uses on that profile's cluster | `sparkwing cloud connect`, `sparkwing configure profiles` |
+| `profiles` | named connections to controllers and storage backends, keyed by profile name | `sparkwing cloud connect`, `sparkwing configure profiles` |
 | `repos` | the repo registry: `repos` (registered checkouts) and `fallback_paths`; `auto_register` (default `true`) and `include_worktrees` (default `false`) govern automatic registration | `sparkwing run` (auto-registration), `sparkwing repos add` |
 | `admission` | the admission policy (`mode`, `custom`, `jev`) and the machine `budget` | you |
 | `agent` | what `sparkwing-runner agent` runs: controller, token, capacity | `sparkwing cluster runners add` |

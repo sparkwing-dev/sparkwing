@@ -309,7 +309,6 @@ func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithOutputSignKey(key []byte) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
-func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server

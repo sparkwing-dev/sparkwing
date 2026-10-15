@@ -1,9 +1,11 @@
 package store
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -115,6 +117,40 @@ func TestReleaseUnitRefusesForgedStartedAndCancelledClaims(t *testing.T) {
 			var holder string
 			if err := s.db.QueryRow(`SELECT claimed_by FROM nodes WHERE run_id='run'`).Scan(&holder); err != nil || holder != "machine" {
 				t.Fatalf("refused release changed holder: %q, %v", holder, err)
+			}
+		})
+	}
+}
+
+func TestReleaseUnitCannotRequeueCancelledOwnerWork(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, claim := releaseFixture(t, kind)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,claimed_by=NULL,lease_expires_at=NULL`)
+			operator := authorityRoot("operator", "a")
+			operator.Grants = []capability.Grant{capability.RunsControl}
+			authorityPersist(t, s, operator)
+			tenant := &Tenant{s: s, team: "a"}
+			_, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: claim.RunID, To: RunCancelled, Cause: RunCancel, Actor: Actor{Kind: ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}, CapabilityPrefix: operator.Prefix}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := tenant.ReadRun(t.Context(), claim.RunID)
+			if err != nil || before.CancelRequestedAt == nil {
+				t.Fatalf("cancellation = %+v, %v", before, err)
+			}
+			beforeEvents, err := tenant.ReadStateEvents(t.Context(), claim.RunID, 0, 10)
+			if err != nil || len(beforeEvents) == 0 {
+				t.Fatalf("cancellation events = %+v, %v", beforeEvents, err)
+			}
+			err = s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix)
+			var denied *apierr.Error
+			if !errors.As(err, &denied) || denied.Code != apierr.LockHeld {
+				t.Fatalf("cancelled owner release = %v", err)
+			}
+			events, err := tenant.ReadStateEvents(t.Context(), claim.RunID, beforeEvents[len(beforeEvents)-1].Seq, 10)
+			if err != nil || len(events) != 0 {
+				t.Fatalf("refused release events = %+v, %v", events, err)
 			}
 		})
 	}

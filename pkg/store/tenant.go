@@ -77,8 +77,7 @@ var ErrNoTeam = errors.New("store: team is required")
 //     cancel nothing. assertRunBelongsToTeamTx is the check to copy.
 //  7. Helpers: a helper that still takes *Store and reads a tenant-owned
 //     table is a hole the receiver change does not close. Give it a
-//     `team Team` parameter and pass t.team. loadAgentLossRetry and
-//     assertRunMutationFenceTx were both such holes.
+//     `team Team` parameter and pass t.team.
 //  8. Lookups that fail open: a lookup whose miss means "no limit"
 //     inverts when it is scoped. [Store.StorageQuotaFor] returns an
 //     unlimited quota on a miss and [StorageQuota] reads a zero limit as
@@ -175,16 +174,6 @@ type Operator struct{ s *Store }
 // AsOperator returns the unscoped handle.
 func (s *Store) AsOperator() *Operator { return &Operator{s: s} }
 
-// ListRunsAcrossTeams returns runs from every team, newest first.
-func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error) {
-	return o.s.listRuns(ctx, allTeams(), f)
-}
-
-// CountRunsAcrossTeams counts runs from every team, ignoring f's Limit.
-func (o *Operator) CountRunsAcrossTeams(ctx context.Context, f RunFilter) (int, error) {
-	return o.s.countRuns(ctx, allTeams(), f)
-}
-
 // RunTeam reports which team owns the run runID, for a sweep that found the
 // id across teams and has to act on it through that team's handle.
 // [ErrNotFound] when no run carries the id.
@@ -241,9 +230,6 @@ func allTeams() teamScope { return teamScope{all: true} }
 // because a scoped query on an unclassified table cannot be written; the
 // guard in tenant_classification_internal_test.go refuses either mistake.
 var tenantTables = []string{
-	"agent_loss_retries",
-	"agent_loss_retry_legacy_deny_all",
-	"agent_loss_retry_node_sources",
 	"approvals",
 	"business_events",
 	"card_attempts",
@@ -277,8 +263,6 @@ var tenantTables = []string{
 	"github_runner_credentials",
 	"invitations",
 	"memberships",
-	"node_bounces",
-	"node_dispatches",
 	"node_execution_attempts",
 	"node_log_segments",
 	"node_logs",

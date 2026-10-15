@@ -24,6 +24,7 @@ type RunRow struct {
 	Dispatch          string
 	AllowedPools      []string
 	Owner             *OwnerLeaseRef
+	CreatedAt         time.Time
 	CancelRequestedAt *time.Time
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
@@ -89,6 +90,7 @@ type ReconciledNode struct {
 	Node   NodeRow
 	Claim  *ClaimAward
 	Source *MaterializeSource
+	// Bearer is delivered only to the executing host after the self-claim commits.
 	Bearer []byte `json:"-"`
 }
 
@@ -171,7 +173,7 @@ func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64,
 // Materialization reads outcome and authorized result edges from persisted source state,
 // never from a caller assertion. Source.Kind must match Policy; SourceNone forbids Source.
 func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error) {
-	panic("unimplemented: c1-data")
+	return t.reconcileNode(ctx, request)
 }
 
 // RenewOwner also renews self-claimed jobs and continuously live plan and job concurrency holders atomically.

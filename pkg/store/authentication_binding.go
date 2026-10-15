@@ -1,0 +1,127 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+)
+
+func authenticationBindingTx(ctx context.Context, tx *storeTx, c capability.Capability) (capability.BindingState, error) {
+	out := capability.BindingState{Current: c.Binding}
+	if c.Binding.RunID == "" {
+		return out, nil
+	}
+	var cancel, finished sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT cancel_requested_at,finished_at FROM runs WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&cancel, &finished); err != nil {
+		return out, err
+	}
+	out.RunCancelled, out.RunFinished = cancel.Valid, finished.Valid
+	switch c.Binding.Kind {
+	case capability.BindingTrigger:
+		if err := authenticationOwnerTx(ctx, tx, c, &out); err != nil {
+			return out, err
+		}
+	case capability.BindingNode:
+		if err := authenticationNodeTx(ctx, tx, c, &out); err != nil {
+			return out, err
+		}
+	case capability.BindingRun:
+		if c.Unit == capability.UnitPlan {
+			if err := authenticationOwnerTx(ctx, tx, c, &out); err != nil {
+				return out, err
+			}
+		}
+	}
+	if c.Binding.Expansion != nil {
+		if err := authenticationExpansionTx(ctx, tx, c, &out); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+func authenticationOwnerTx(ctx context.Context, tx *storeTx, c capability.Capability, out *capability.BindingState) error {
+	var lease, finished, cancelled sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation,lease_expires_at,finished_at,cancel_requested_at FROM triggers WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&out.Current.Holder, &out.Current.Generation, &lease, &finished, &cancelled)
+	if err != nil {
+		return err
+	}
+	out.HereClaimed = out.Current.Generation > 0
+	out.RunCancelled = out.RunCancelled || cancelled.Valid
+	out.FinishedAt = stateTime(finished)
+	if lease.Valid {
+		out.LeaseExpiresAt = *stateTime(lease)
+	}
+	if finished.Valid && out.Current.Generation == c.Binding.Generation {
+		out.Current.Holder = c.Binding.Holder
+	}
+	if c.Unit != "" {
+		var sealed int
+		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM log_streams WHERE team=? AND run_id=? AND subject_kind='owner_unit' AND unit_kind=? AND generation=? AND sealed_at IS NOT NULL`, c.Team, c.Binding.RunID, c.Unit, out.Current.Generation).Scan(&sealed)
+		out.LogSealed = sealed > 0
+	}
+	return err
+}
+
+func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capability, out *capability.BindingState) error {
+	var lease, finished, cancelled sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation,attempt,lease_expires_at,finished_at,cancel_requested_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`, c.Team, c.Binding.RunID, c.Binding.NodeID).Scan(&out.Current.Holder, &out.Current.Generation, &out.Current.Attempt, &lease, &finished, &cancelled)
+	if err != nil {
+		return err
+	}
+	out.FinishedAt = stateTime(finished)
+	out.RunCancelled = out.RunCancelled || cancelled.Valid
+	if lease.Valid {
+		out.LeaseExpiresAt = *stateTime(lease)
+	}
+	if finished.Valid && out.Current.Generation == c.Binding.Generation {
+		out.Current.Holder = c.Binding.Holder
+		if out.Current.Attempt > 0 {
+			err = tx.QueryRowContext(ctx, `SELECT holder FROM node_attempts WHERE team=? AND run_id=? AND node_id=? AND generation=? AND attempt=?`, c.Team, c.Binding.RunID, c.Binding.NodeID, out.Current.Generation, out.Current.Attempt).Scan(&out.Current.Holder)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	var sealed int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM log_streams WHERE team=? AND run_id=? AND subject_kind='job_attempt' AND node_id=? AND generation=? AND attempt=? AND sealed_at IS NOT NULL`, c.Team, c.Binding.RunID, c.Binding.NodeID, out.Current.Generation, out.Current.Attempt).Scan(&sealed)
+	out.LogSealed = sealed > 0
+	return err
+}
+
+func authenticationExpansionTx(ctx context.Context, tx *storeTx, c capability.Capability, out *capability.BindingState) error {
+	expansion := &capability.ExpansionState{Lease: *c.Binding.Expansion}
+	var lease sql.NullInt64
+	if expansion.Lease.Kind == capability.UnitTrigger {
+		err := tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation,lease_expires_at FROM triggers WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease)
+		if err != nil {
+			return err
+		}
+	} else if expansion.Lease.Kind == capability.UnitEval {
+		var owner string
+		var generation int64
+		var current, until sql.NullInt64
+		err := tx.QueryRowContext(ctx, `SELECT COALESCE(e.claimed_by,''),e.generation,e.lease_expires_at,e.owner_lease_name,e.owner_generation,l.generation,l.until FROM eval_units e LEFT JOIN leases l ON l.name=e.owner_lease_name WHERE e.team=? AND e.run_id=? AND e.source_node_id=? AND e.source_generation=?`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation).Scan(&expansion.Lease.Holder, &expansion.Lease.Generation, &lease, &owner, &generation, &current, &until)
+		if err != nil {
+			return err
+		}
+		if owner == "controller.owner" && current.Valid && current.Int64 == generation {
+			expansion.ControllerLeaseExpiresAt = stateTime(until)
+		}
+		var sealed int
+		err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM log_streams WHERE team=? AND run_id=? AND subject_kind='owner_unit' AND unit_kind='eval' AND source_node_id=? AND source_generation=? AND generation=? AND sealed_at IS NOT NULL`, c.Team, c.Binding.RunID, c.Binding.NodeID, c.Binding.Generation, expansion.Lease.Generation).Scan(&sealed)
+		if err != nil {
+			return err
+		}
+		out.LogSealed = sealed > 0
+	} else {
+		return errors.New("unknown expansion lease kind")
+	}
+	if lease.Valid {
+		expansion.ExpiresAt = *stateTime(lease)
+	}
+	out.Expansion = expansion
+	return nil
+}

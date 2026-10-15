@@ -123,10 +123,7 @@ func (v Verdict) String() string {
 	return string(v.Reason)
 }
 
-// EvaluateOld reports whether p could ever run d: the repository filter, then the
-// selector, then the request against capacity. It reads no availability, so a
-// busy agent is still eligible.
-func EvaluateOld(p Profile, d Demand) Verdict {
+func evaluateRequirements(p Profile, d Demand) Verdict {
 	if p.Accept != nil && d.Repo != nil && !admitsRepo(p.Accept, *d.Repo, d.Trigger) {
 		return Verdict{Reason: ReasonRepo}
 	}
@@ -163,7 +160,7 @@ func TermSatisfied(p Profile, term string) bool {
 }
 
 // SelfAsserted drops the labels an agent may not assert for itself: the fixed
-// keys name, class and team, and the placement vocabulary. os= and arch= stay,
+// keys name, class, team and pool, and the placement vocabulary. os= and arch= stay,
 // because they only steer scheduling.
 func SelfAsserted(labels []string) []string {
 	out := make([]string, 0, len(labels))
@@ -171,7 +168,7 @@ func SelfAsserted(labels []string) []string {
 		label = strings.TrimSpace(label)
 		key, _, _ := strings.Cut(label, "=")
 		switch {
-		case label == "", label == "local", key == "location", key == "name", key == "class", key == "team":
+		case label == "", label == "local", key == "location", key == "name", key == "class", key == "team", key == "pool":
 			continue
 		}
 		out = append(out, label)

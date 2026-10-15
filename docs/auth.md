@@ -553,12 +553,12 @@ mapping is in the generated [api-reference.md](api-reference.md):
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`: starting new work |
-| `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
+| `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET `/api/v1/runs/{id}/logs`, `/runs/{id}/logs/{node}`, `/runs/{id}/logs/{node}/stream`, `/runs/{id}/logs/{node}/completeness`, `/runs/{id}/logs/search` and `/runs/grep` |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | Releases no secret. A bearer holding it without `admin` or `team.admin` is answered `403 claim_required` on GET `/api/v1/secrets/{name}`; a node reads its run's secrets with its claim token. Tokens minted with it keep authenticating, and no team token or runner token is minted with it |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
@@ -593,13 +593,8 @@ A warm-pool dispatcher hands nodes to a pool on that same set. It opens and
 closes each claim round while holding the run's trigger claim, so the readiness
 routes admit it without an `admin` token.
 
-A route can narrow a field below its route scope. The node dispatch reads
-(`GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and `/dispatches`) admit
-`runs.read`, but fill `env_json` only for an `admin` principal. Every reader
-still gets `redacted_keys`, the names the snapshot dropped as credentials.
-Registered secret string values are masked in child-run events and dispatch
-scalar snapshots before storage, including values escaped by JSON. Numeric
-fields retain their types and precision.
+Registered secret string values are masked in child-run events before storage,
+including values escaped by JSON. Numeric fields retain their types and precision.
 
 For registered multiline secrets, each complete nonblank line is also masked
 using literal matching. Identical short or common text elsewhere can therefore
@@ -733,7 +728,7 @@ without `runs.read` or `triggers.read` is admitted when it holds a live claim
 on that run, and refused with `403 missing_scope` otherwise.
 
 `mark-ready`, `revoke-ready`, and `finalize-ready` take `runs.state` plus the
-live claim on the run's trigger, the same gate `auto-retry/reset` carries. A
+live claim on the run's trigger. A
 node claim never satisfies them: readiness is a dispatcher decision, and the
 dispatcher is whoever claimed the trigger. A caller that does not hold that
 claim gets `403 claim_required`, and a run with no trigger row answers `404`.
@@ -752,7 +747,7 @@ already lapsed, because a lapsed row proves nothing about who is calling. The
 `admin` bypasses all of it.
 
 A `nodes.claim` token also reaches only the runs it is working on. The node
-read routes (`GET nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`) and
+read routes (`GET nodes/{id}`, `nodes/{id}/output`) and
 `POST /runs/{id}/heartbeat` answer `403 claim_required` unless the caller holds
 an unexpired claim on some node of that run. `admin` bypasses; so does
 `runs.read` on the reads, which already grants the wider view through
@@ -955,7 +950,7 @@ identities, memberships and sessions go, and every token it minted in any team
 is revoked. Teams the user is the only member of, their personal space
 included, are deleted as above. In teams the user shares, rows that recorded
 the user stay with the team and name `deleted user` instead: runs, triggers,
-approvals, cron schedules armed, node bounces, debug-pause releases, credit
+approvals, cron schedules armed, debug-pause releases, credit
 grants, node and trigger claims, secrets, egress usage (bytes kept, merged per
 month) and the text of event payloads. The match is on the account's email and
 every email its sign-in identities asserted, never a linked sign-in's, in every

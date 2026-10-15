@@ -126,7 +126,7 @@ func TestExpansionEvalKeepsSourceAndLeaseFencesSeparate(t *testing.T) {
 			eval.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 2, Expansion: &capability.LeaseRef{Kind: capability.UnitEval, ID: unitID, Holder: "eval-host", Generation: 8}}
 			authorityPersist(t, tenant.s, eval)
 			request.Actor.Authority.ID, request.Actor.CapabilityPrefix = eval.Prefix, eval.Prefix
-			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller' WHERE id='run'`)
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','controller',4,?)`, now.Add(time.Minute).UnixNano())
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,generation,claimed_by,capability_prefix,lease_expires_at,owner_generation) VALUES ('a','run','job',2,'running',8,'eval-host','evaluation',?,4)`, now.Add(time.Minute).UnixNano())
 			switch problem {

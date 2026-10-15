@@ -19,6 +19,10 @@ import (
 // Issue persists one capability within its intake, claim or exchange transaction.
 // Raw must not leave the transaction until its commit succeeds.
 func (s *Store) Issue(ctx context.Context, tx *storeTx, request capability.IssueRequest) (capability.Issued, error) {
+	return s.issueTx(ctx, tx, request, nil)
+}
+
+func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.IssueRequest, prospective *awardRow) (capability.Issued, error) {
 	if tx == nil || tx.store != s {
 		return capability.Issued{}, authorityError(apierr.BadRequest, "issuance requires this store's transaction")
 	}
@@ -35,14 +39,13 @@ func (s *Store) Issue(ctx context.Context, tx *storeTx, request capability.Issue
 	var err error
 	switch {
 	case request.Kind == capability.Award && request.Award != nil:
-		c, err = awardCapabilityTx(ctx, tx, *request.Award)
+		c, err = awardCapabilityTx(ctx, tx, *request.Award, prospective)
 	case request.Kind == capability.Exchange && request.Exchange != nil:
 		c, err = exchangeCapabilityTx(ctx, tx, *request.Exchange)
 	case request.Kind == capability.Delegate && request.Provision != nil:
 		c, err = provisionCapabilityTx(ctx, tx, *request.Provision)
 	case request.Kind == capability.Delegate && request.Delegate != nil:
-		// safety: C2 owns narrowing; an unavailable validator must never turn into permissive issuance.
-		return capability.Issued{}, authorityError(apierr.Unavailable, "capability delegation validation is unavailable")
+		c, err = delegateCapabilityTx(ctx, tx, *request.Delegate)
 	default:
 		return capability.Issued{}, authorityError(apierr.BadRequest, "issuance kind does not match variant")
 	}
@@ -118,7 +121,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 	case capability.UnitNode:
 		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,attempt,lease_expires_at,cancel_requested_at FROM nodes WHERE run_id = ? AND node_id = ? AND status <> 'done'"+tx.forUpdate(), unit.RunID, unit.NodeID).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.attempt, &row.lease, &row.cancel)
 	case capability.UnitEval:
-		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at FROM eval_units WHERE run_id = ? AND source_node_id = ? AND source_generation = ? AND status IN ('claimed','running')"+tx.forUpdate(), unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease)
+		err = tx.QueryRowContext(ctx, "SELECT team,COALESCE(claimed_by,''),capability_prefix,generation,expires_at,lease_expires_at FROM eval_units WHERE run_id = ? AND source_node_id = ? AND source_generation = ? AND status IN ('pending','claimed','running')"+tx.forUpdate(), unit.RunID, unit.NodeID, unit.SourceGeneration).Scan(&row.team, &row.holder, &row.prefix, &row.generation, &row.expiry, &row.lease)
 	default:
 		return row, authorityError(apierr.BadRequest, "unknown award unit")
 	}
@@ -134,7 +137,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 	if runCancel.Valid || row.cancel.Valid || (status != "pending" && status != "running") {
 		return row, authorityError(apierr.LockHeld, "award run is no longer executable")
 	}
-	if !row.expiry.Valid && spec.Unit == capability.UnitNode {
+	if !row.expiry.Valid && (spec.Unit == capability.UnitNode || spec.Unit == capability.UnitEval) {
 		err = tx.QueryRowContext(ctx, "SELECT expires_at FROM triggers WHERE team = ? AND id = ?", row.team, row.run).Scan(&row.expiry)
 		if err != nil && err != sql.ErrNoRows {
 			return row, err
@@ -143,7 +146,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 	return row, nil
 }
 
-func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec) (capability.Capability, error) {
+func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec, prospective *awardRow) (capability.Capability, error) {
 	policy, ok := awardPolicy(spec.Purpose)
 	if !ok || policy.Unit != spec.Unit || (spec.Delivery != capability.DeliveryDirect && spec.Delivery != capability.DeliveryBootstrap) {
 		return capability.Capability{}, authorityError(apierr.BadRequest, "invalid award purpose")
@@ -169,6 +172,13 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	row, err := loadAwardRowTx(ctx, tx, spec)
 	if err != nil {
 		return capability.Capability{}, err
+	}
+	if prospective != nil {
+		// safety: the locked row supplies scope; the claim transaction supplies only its next fence.
+		if prospective.team != row.team || prospective.run != row.run || prospective.node != row.node || row.holder != "" || row.prefix != "" || prospective.generation != row.generation+1 {
+			return capability.Capability{}, holderRefusal()
+		}
+		row.holder, row.generation, row.lease = prospective.holder, prospective.generation, prospective.lease
 	}
 	if !launcher && claimant.Capability.Team != row.team {
 		return capability.Capability{}, authorityError(apierr.Forbidden, "claimant belongs to another team")
@@ -210,7 +220,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if parent.Capability.ExpiresAt != nil && (c.ExpiresAt == nil || parent.Capability.ExpiresAt.Before(*c.ExpiresAt)) {
 		c.ExpiresAt = parent.Capability.ExpiresAt
 	}
-	if c.ExpiresAt == nil && !here {
+	if c.ExpiresAt == nil && !here && parent.Capability.Subject.Kind != capability.SubjectLocal && parent.Capability.Purpose != capability.PurposeHere {
 		return capability.Capability{}, authorityError(apierr.Unavailable, "awarded unit deadline is unavailable")
 	}
 	if here {
@@ -251,7 +261,10 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		start = capability.BillingAtStart
 		executor = "cloud"
 	}
-	if here {
+	if parent.Capability.Subject.Kind == capability.SubjectLocal {
+		executor = "local"
+	}
+	if here || parent.Capability.Purpose == capability.PurposeHere {
 		executor = "here"
 	}
 	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: false, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnit}
@@ -329,14 +342,14 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 		return capability.Capability{}, authorityError(apierr.Forbidden, "member provisioning exceeds session authority")
 	}
 	for _, g := range spec.Grants {
-		if g == capability.TeamAdmin || !slices.Contains(p.Capability.Grants, g) {
+		if !slices.Contains(p.Capability.Grants, g) {
 			return capability.Capability{}, authorityError(apierr.Forbidden, "member provisioning exceeds session grants")
 		}
 	}
-	if spec.ExpiresAt == nil || !spec.ExpiresAt.After(tx.now()) || (p.Capability.ExpiresAt != nil && spec.ExpiresAt.After(*p.Capability.ExpiresAt)) {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "member expiry exceeds session lifetime")
+	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(tx.now()) {
+		return capability.Capability{}, authorityError(apierr.Forbidden, "member root expiry has passed")
 	}
-	return capability.Capability{Team: spec.Team, Subject: spec.Subject, Audience: capability.Controller, Grants: slices.Clone(spec.Grants), Binding: spec.Binding, Issuance: capability.Delegate, ExpiresAt: spec.ExpiresAt, Parent: spec.Authority, ReservedPools: []string{}, Repositories: []string{}}, nil
+	return capability.Capability{Team: spec.Team, Subject: spec.Subject, Audience: capability.Controller, Grants: slices.Clone(spec.Grants), Binding: spec.Binding, Issuance: capability.Delegate, ExpiresAt: spec.ExpiresAt, ReservedPools: []string{}, Repositories: []string{}}, nil
 }
 
 func bindExchangedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, bootstrap string) error {
