@@ -60,6 +60,8 @@ The author SDK owns declarations, typed input and output access, protocol servin
 
 `sparkwingtest.New` snapshots option values, including Git and pull-request metadata. Reusing and changing an options value for another fixture cannot change an existing fixture's plans. Injected service callbacks remain test-owned dependencies.
 
+Fake-host records mask attribute keys and nested values, including numeric, boolean and null values whose text contains a registered secret. Longer masks precede their prefixes. `Host.Records` preserves attribute numbers as `json.Number` so masking and snapshots never round large integers.
+
 ## Public symbol inventory
 
 Each row names one exported type or function. Retain means its declared signature is part of the target. New means its declaration is in a contract file. Delete means engine plumbing or a removed author feature. Types retain their author-facing fields except the field cuts stated above. Constructors and fluent methods retain their existing invalid-input behavior unless a host-owned validation rule above supersedes it.

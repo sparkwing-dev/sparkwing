@@ -141,7 +141,7 @@ func TestFakeHostRunsPublicSDKAndMasksRecords(t *testing.T) {
 		}
 		switch record.Event {
 		case "annotation":
-			annotation = record.Level == "warn" && record.Attrs["file"] == "main.go" && record.Attrs["line"] == float64(4)
+			annotation = record.Level == "warn" && record.Attrs["file"] == "main.go" && record.Attrs["line"] == json.Number("4")
 		case "summary":
 			summary = record.Msg == "***"
 		default:

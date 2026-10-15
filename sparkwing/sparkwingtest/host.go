@@ -1,11 +1,13 @@
 package sparkwingtest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -97,9 +99,16 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 func (h *host) Records() []sparkwing.LogRecord {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	raw, _ := json.Marshal(h.records)
+	raw, err := json.Marshal(h.records)
+	if err != nil {
+		panic(err)
+	}
 	var records []sparkwing.LogRecord
-	_ = json.Unmarshal(raw, &records)
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&records); err != nil {
+		panic(err)
+	}
 	return records
 }
 
@@ -204,6 +213,7 @@ func (h *host) Mask(ctx context.Context, value string) error {
 		}
 	}
 	h.masks = append(h.masks, value)
+	slices.SortFunc(h.masks, func(a, b string) int { return len(b) - len(a) })
 	return nil
 }
 
@@ -230,11 +240,17 @@ func (h *host) emit(frame nodeproto.FrameLog, job string) {
 	ts, _ := time.Parse(time.RFC3339Nano, frame.TS)
 	attrs := map[string]any{}
 	if len(frame.Attrs) > 0 && string(frame.Attrs) != "null" {
-		if err := json.Unmarshal(frame.Attrs, &attrs); err != nil {
+		if !json.Valid(frame.Attrs) {
+			panic("invalid log attributes")
+		}
+		// safety: rounding a numeric secret before masking can conceal the match.
+		decoder := json.NewDecoder(bytes.NewReader(frame.Attrs))
+		decoder.UseNumber()
+		if err := decoder.Decode(&attrs); err != nil {
 			panic(err)
 		}
 	}
-	maskAttrs(attrs, mask)
+	attrs = maskAttrs(attrs, mask).(map[string]any)
 	message := mask(frame.Message)
 	if (frame.Event == "annotation" || frame.Event == "summary") && int64(len(message)) > limits.AnnotationBytes {
 		message = limits.Record(message)
@@ -245,25 +261,30 @@ func (h *host) emit(frame nodeproto.FrameLog, job string) {
 	h.records = append(h.records, sparkwing.LogRecord{TS: ts, JobID: job, Level: frame.Level, Step: frame.Step, Event: frame.Event, Msg: message, Attrs: attrs})
 }
 
-func maskAttrs(v any, mask func(string) string) {
+func maskAttrs(v any, mask func(string) string) any {
 	switch value := v.(type) {
 	case map[string]any:
+		out := make(map[string]any, len(value))
 		for k, x := range value {
-			if s, ok := x.(string); ok {
-				value[k] = mask(s)
-			} else {
-				maskAttrs(x, mask)
-			}
+			out[mask(k)] = maskAttrs(x, mask)
 		}
+		return out
 	case []any:
 		for i, x := range value {
-			if s, ok := x.(string); ok {
-				value[i] = mask(s)
-			} else {
-				maskAttrs(x, mask)
-			}
+			value[i] = maskAttrs(x, mask)
+		}
+	case string:
+		return mask(value)
+	case json.Number, bool, nil:
+		text := "null"
+		if value != nil {
+			text = fmt.Sprint(value)
+		}
+		if masked := mask(text); masked != text {
+			return masked
 		}
 	}
+	return v
 }
 
 func newHost(opts Options) Host {
@@ -289,6 +310,7 @@ func newHost(opts Options) Host {
 			h.masks = append(h.masks, v.Value)
 		}
 	}
+	slices.SortFunc(h.masks, func(a, b string) int { return len(b) - len(a) })
 	return h
 }
 

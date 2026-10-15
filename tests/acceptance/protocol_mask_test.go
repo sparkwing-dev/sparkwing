@@ -2,13 +2,73 @@ package acceptance_test
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 	"testing/synctest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
+
+func testGoSDKFakeHostAttributeMasks(t *testing.T) {
+	for _, test := range []struct {
+		name, secret, attrs, want string
+	}{
+		{"keys", "attribute-sentinel", `{"attribute-sentinel":"visible","nested":{"prefix-attribute-sentinel":true}}`, `{"***":"visible","nested":{"prefix-***":true}}`},
+		{"numbers", "1234567", `{"pin":1234567,"nested":[12345678,{"pin":1234567}]}`, `{"pin":"***","nested":["***8",{"pin":"***"}]}`},
+		{"large-numbers", "9007199254740993", `{"pin":9007199254740993}`, `{"pin":"***"}`},
+		{"escaped-values", "attribute\"sentinel\nvalue", `{"nested":[{"value":"attribute\"sentinel\nvalue"}]}`, `{"nested":[{"value":"***"}]}`},
+		{"unmasked-number", "attribute-sentinel", `{"number":9007199254740993,"count":3}`, `{"number":9007199254740993,"count":3}`},
+		{"boolean", "true", `{"flag":true,"other":false}`, `{"flag":"***","other":false}`},
+		{"null", "null", `{"empty":null}`, `{"empty":"***"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			host := sparkwingtest.New(sparkwingtest.Options{Secrets: map[string]sparkwingtest.Secret{
+				"TOKEN": {Value: test.secret, Masked: true},
+			}})
+			t.Cleanup(func() { _ = host.Close() })
+			sdkserve.ServicesFrom(host.Context(t.Context())).Emit(nodeproto.FrameLog{
+				Message: "visible", Attrs: json.RawMessage(test.attrs),
+			})
+			records := host.Records()
+			if len(records) != 1 || records[0].Msg != "visible" {
+				t.Fatalf("fixture did not retain its control record: %+v", records)
+			}
+			raw, err := json.Marshal(records[0].Attrs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want map[string]any
+			decoder := json.NewDecoder(strings.NewReader(test.want))
+			decoder.UseNumber()
+			if err := decoder.Decode(&want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(records[0].Attrs, want) {
+				t.Fatalf("masked attributes = %s, want %s", raw, test.want)
+			}
+		})
+	}
+	t.Run("overlapping-registrations", func(t *testing.T) {
+		host := sparkwingtest.New(sparkwingtest.Options{})
+		t.Cleanup(func() { _ = host.Close() })
+		ctx := host.Context(t.Context())
+		for _, value := range []string{"prefix", "prefix-tail"} {
+			if err := sparkwing.Mask(ctx, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		sparkwing.Info(ctx, "prefix-tail")
+		records := host.Records()
+		if len(records) != 1 || records[0].Msg != "***" {
+			t.Fatalf("overlapping masks exposed part of a registered value: %+v", records)
+		}
+	})
+}
 
 type maskAcknowledgement struct {
 	sdkserve.Services
@@ -71,7 +131,7 @@ func testGoSDKMaskAcknowledgement(t *testing.T) {
 				t.Errorf("unmasked record: %+v", record)
 			}
 		}
-		if records[1].Event != "annotation" || records[1].Attrs["file"] != "main.go" || records[1].Attrs["line"] != float64(3) || records[2].Event != "summary" {
+		if records[1].Event != "annotation" || records[1].Attrs["file"] != "main.go" || records[1].Attrs["line"] != json.Number("3") || records[2].Event != "summary" {
 			t.Fatalf("annotation and summary = %+v", records)
 		}
 	})

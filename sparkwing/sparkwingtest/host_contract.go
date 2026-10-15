@@ -32,6 +32,7 @@ type Host interface {
 	Plan(context.Context, string, map[string]string) (nodeproto.PlanDoc, error)
 	RunStep(context.Context, *sparkwing.Plan, string, string) (json.RawMessage, error)
 	Eval(ctx context.Context, plan *sparkwing.Plan, jobID, closureID string, input json.RawMessage) (json.RawMessage, error)
+	// Records returns isolated log snapshots with numeric attributes represented as json.Number.
 	Records() []sparkwing.LogRecord
 	Masks() []string
 	Close() error
