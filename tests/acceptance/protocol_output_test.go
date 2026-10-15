@@ -69,6 +69,7 @@ func testGoSDKOutputFailures(t *testing.T) {
 	}{
 		{name: "missing"},
 		{name: "corrupt", raw: json.RawMessage(`{"broken":`)},
+		{name: "non-json-whitespace", raw: json.RawMessage("\u00a0null")},
 		{name: "unavailable", err: &apierr.Error{Code: apierr.Unavailable, Message: "fixture unavailable"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -98,14 +99,41 @@ func testGoSDKOutputFailures(t *testing.T) {
 			}
 		})
 	}
-	t.Run("explicit-null", func(t *testing.T) {
-		host := sparkwingtest.New(sparkwingtest.Options{RunPipeline: func(context.Context, string, map[string]string) (json.RawMessage, error) {
-			return json.RawMessage(`null`), nil
-		}})
-		t.Cleanup(func() { _ = host.Close() })
-		output, err := sparkwing.RunAndAwait[any, sparkwing.NoInputs](host.Context(t.Context()), "child", "output")
-		if err != nil || output != nil {
-			t.Fatalf("explicit null output = %v, %v", output, err)
-		}
-	})
+	for _, test := range []struct {
+		name string
+		raw  json.RawMessage
+		want any
+	}{
+		{name: "explicit-null", raw: json.RawMessage(`null`)},
+		{name: "formatted-null", raw: json.RawMessage("\n\t null \r\n")},
+		{name: "null-string", raw: json.RawMessage(`"null"`), want: "null"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			host := sparkwingtest.New(sparkwingtest.Options{
+				Outputs: map[string]json.RawMessage{"output": test.raw},
+				Latest: func(context.Context, string, string) (json.RawMessage, error) {
+					return test.raw, nil
+				},
+				RunPipeline: func(context.Context, string, map[string]string) (json.RawMessage, error) {
+					return test.raw, nil
+				},
+			})
+			t.Cleanup(func() { _ = host.Close() })
+			ctx := host.Context(t.Context())
+			output, err := sparkwing.RunAndAwait[any, sparkwing.NoInputs](ctx, "child", "output")
+			if err != nil || output != test.want {
+				t.Fatalf("child output = %v, %v, want %v", output, err, test.want)
+			}
+			ref := sparkwing.RefToLastRun[any]("upstream", "output")
+			if value := ref.Get(ctx); value != test.want {
+				t.Fatalf("latest output = %v, want %v", value, test.want)
+			}
+			if value, present := ref.TryGet(ctx); value != test.want || present != (test.want != nil) {
+				t.Errorf("latest optional output = (%v, %t), want (%v, %t)", value, present, test.want, test.want != nil)
+			}
+			if value, present := (sparkwing.Ref[any]{JobID: "output"}).TryGet(ctx); value != test.want || !present {
+				t.Errorf("in-run optional output = (%v, %t), want (%v, true)", value, present, test.want)
+			}
+		})
+	}
 }

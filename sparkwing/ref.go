@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -203,7 +204,7 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 	if resolved == nil || len(resolved.Data) == 0 {
 		return out, false, fmt.Errorf("sparkwing: Ref.Get(%s): %w", r.describe(), ErrRefAbsent)
 	}
-	if string(resolved.Data) == "null" {
+	if strings.Trim(string(resolved.Data), " \t\r\n") == "null" {
 		return out, false, nil
 	}
 	if err := json.Unmarshal(resolved.Data, &out); err != nil {
