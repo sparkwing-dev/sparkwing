@@ -600,7 +600,7 @@ additional T1 inventory port or native catalog activation is claimed.
 
 ### Seventh-session evidence
 
-- Whole-repository `go build -p 4 ./...` passed.
+- Whole-repository `go build -p 4 ./...` passed on the final tree.
 - Vet passed for wingd and its subpackages, engine, runners and launcher,
   cluster and both acceptance packages.
 - `go test -race -p 2 ./internal/wingd/client ./internal/wingd -run '^TestLocal'
@@ -2016,3 +2016,56 @@ including both identity-environment regressions and the vendor drift check.
 override. All owned check sessions completed. Worker scratch was deleted.
 The lead retains independent review, staging and committing. W8 remains
 incomplete at the real-integration boundaries listed above.
+
+## Continuation: controller and store lifecycle components
+
+`tests/acceptance/runner_store_w8_test.go` joins the existing W8 loop and
+Hosting implementation to the real EngineController and SQLite store. Machine
+roots use Store.ProvisionCapability. A test transport resolves each raw bearer
+through Store.LookupCapability and calls the controller methods in process.
+Enrollment and software-policy providers, hosts and keeper runtime are fakes.
+Accepted run/plan fixtures are inserted directly, so this does not prove intake,
+planning, authentication middleware, HTTP or api.sock.
+
+The trigger and job components claim through the same loop, confirm and renew
+the awarded authority, complete through the controller, read persisted success,
+and refuse renewal after completion. The job component checks the granted
+engine/runner/fence at NodeInput, award ordinal zero, Applied.Attempt one and
+persisted ordinal one. Source cleanup follows keeper join. A separate component
+revokes the machine root after acquisition and proves the real renewal refuses
+host preparation and keeper startup. Its first fixture called deployment-root
+revocation for a tenant machine and failed. Tenant self-revocation is the correct
+public boundary, and that corrected fixture passes.
+
+All 26 W8 amendment rows and the W8 handoffs retain their existing scope.
+A1-08/18/39 gain these component proofs. No native catalog cell is activated,
+no T1 inventory test is newly ported, and no production implementation or old
+code is changed. Deleted production lines/files in this continuation: **0/0**.
+The sole shared Go file added is the acceptance test. W8-AMENDMENTS-1.md updates
+those three rows. No other-area caller or contract changes.
+
+Contract changes still needed are the recorded W3 run/plan/eval granted identity
+and common selected-engine process constructor, W9 plan-without-job bootstrap
+grammar, and explicit workspace-off binary-cache key operation. W3 host factories,
+delegated routes and replay inputs remain undeclared. Source projection/acquisition,
+Keeper.Run, remote-owner operations, W9 EngineClient/DataClient, shared local
+controller services and final CLI factories still need integration. Plan/eval
+resource awards and SyncLauncher remain controller gaps. Native Windows/SID,
+Kubernetes probes/cleanup, actual hello, native placement cells and real-repository
+QA remain open. No new product question or production mechanism was introduced.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W8/cache, GOTMPDIR=/tmp/sw-astra-W8/gotmp and
+TMPDIR=/tmp/sw-astra-W8/tmp. All commands use this worktree through `go -C`.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- Vet passed for runners, engine, cluster, wingd and subpackages, plus both acceptance packages. Focused vet also covers the final new test.
+- Full runners and engine suites passed. The final `go test -p 4 ./tests/acceptance ./internal/acceptance -count=1 -timeout=2m` passed, including both new test functions. Acceptance took 14.592 seconds.
+- Cluster passed with only its socket-based metrics listener excluded, as required by the swarm sandbox boundary.
+- Focused local-runtime, lifecycle, control, dashboard, drain and managed-unit tests passed in wingd and its client.
+- Required `commentcheck -base main` passed across 1,010 files. `sleepcheck -base HEAD`, gofmt and `git diff --check` passed.
+
+The lead retains independent review and committing. No Sparkwing executable,
+pipeline, deployment, release or Git write ran. Shared Git config has no author
+or core.worktree override. All owned check processes finished. Worker scratch
+was deleted. W8 remains incomplete at the integration boundaries above.
