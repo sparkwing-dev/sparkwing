@@ -265,7 +265,19 @@ func nodeModifiersSuffix(n *nodeproto.JobSpec) string {
 		bits = append(bits, label)
 	}
 	for _, membership := range n.Concurrency {
-		parts := []string{"group=" + membership.Group, fmt.Sprintf("cap=%d", membership.Capacity), fmt.Sprintf("cost=%d", membership.Cost), "scope=" + membership.Scope, membership.OnLimit}
+		parts := []string{"group=" + membership.Group}
+		if membership.Capacity != nil {
+			parts = append(parts, fmt.Sprintf("cap=%d", *membership.Capacity))
+		}
+		if membership.Cost != nil {
+			parts = append(parts, fmt.Sprintf("cost=%d", *membership.Cost))
+		}
+		if membership.Scope != nil {
+			parts = append(parts, "scope="+*membership.Scope)
+		}
+		if membership.OnLimit != nil {
+			parts = append(parts, *membership.OnLimit)
+		}
 		if membership.QueueTimeoutMS != nil {
 			parts = append(parts, "queue_timeout="+(time.Duration(*membership.QueueTimeoutMS)*time.Millisecond).String())
 		}

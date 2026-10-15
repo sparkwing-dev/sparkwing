@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func budgetEnvSandbox(t *testing.T) string {
@@ -14,6 +15,9 @@ func budgetEnvSandbox(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("SPARKWING_CONFIG", "")
+	if err := os.Unsetenv("SPARKWING_CONFIG"); err != nil {
+		t.Fatal(err)
+	}
 	return filepath.Join(dir, "sparkwing", "config.yaml")
 }
 
@@ -136,31 +140,13 @@ func TestResolveBudget_MalformedConfigFails(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	writeBudgetConfig(t, path, "admission:\n  budget: half of it\n")
 
-	if _, err := ResolveBudget(""); err == nil || !strings.Contains(err.Error(), path+" admission.budget") {
+	if _, err := ResolveBudget(""); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "admission.budget") {
 		t.Fatalf("resolve error = %v; want an error naming the file and key", err)
 	}
 }
 
-func TestResolveBudget_CopiesALegacyBudgetFileIntoConfig(t *testing.T) {
-	path := budgetEnvSandbox(t)
-	t.Setenv("SPARKWING_HOME", filepath.Dir(filepath.Dir(filepath.Dir(path))))
-	legacy := filepath.Join(filepath.Dir(path), "budget")
-	writeBudgetConfig(t, legacy, "# leave room for the desktop\n6,enforce\n")
-
-	got, err := ResolveBudget("")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got.Budget.Cores != 6 || !got.Budget.Enforce || got.Source != BudgetSourceConfig {
-		t.Fatalf("budget = %+v from %q, want the legacy file's 6,enforce from config.yaml", got.Budget, got.Source)
-	}
-	if body, err := os.ReadFile(legacy); err != nil || !strings.Contains(string(body), "6,enforce") {
-		t.Fatalf("the legacy file = %q, %v; want it left in place for older binaries", body, err)
-	}
-}
-
 func TestConfigResolvedBudget_UnrecordedSourceIsUnknown(t *testing.T) {
-	b, err := ParseBudget("4")
+	b, err := userconfig.ParseBudget("4")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

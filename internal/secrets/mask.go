@@ -5,36 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net/url"
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-type WrappedLogger struct {
-	inner  sparkwing.Logger
-	masker *Masker
-}
-
-func MaskingLogger(inner sparkwing.Logger, masker *Masker) sparkwing.Logger {
-	if inner == nil || masker == nil {
-		return inner
-	}
-	return &WrappedLogger{inner: inner, masker: masker}
-}
-
-func (l *WrappedLogger) Log(level, msg string) {
-	l.inner.Log(level, l.masker.Mask(msg))
-}
-
-func (l *WrappedLogger) Emit(rec sparkwing.LogRecord) {
-	rec.Msg = l.masker.Mask(rec.Msg)
-	rec.Attrs = l.masker.MaskAttrs(rec.Attrs)
-	l.inner.Emit(rec)
-}
 
 type Masker struct {
 	mu     sync.RWMutex
@@ -85,9 +60,10 @@ func encodedForms(value string) []string {
 		return nil
 	}
 	query := url.QueryEscape(value)
+	// safety: a JSON spelling differs from value only by a backslash escape, which ordinary text rarely holds,
+	// so it registers at any length; JSON masking sees no other spelling of a short secret.
+	jsonForms := []string{trimJSONString(string(jsonHTML)), trimJSONString(jsonPlain.String())}
 	candidates := []string{
-		trimJSONString(string(jsonHTML)),
-		trimJSONString(jsonPlain.String()),
 		query,
 		strings.ReplaceAll(query, "+", "%20"),
 		url.PathEscape(value),
@@ -100,6 +76,11 @@ func encodedForms(value string) []string {
 		candidates = append(candidates, std, strings.NewReplacer("+", "-", "/", "_").Replace(std))
 	}
 	var out []string
+	for _, c := range jsonForms {
+		if c != value && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
 	for _, c := range candidates {
 		if len(c) >= minEncodedFormLen && c != value && !slices.Contains(out, c) {
 			out = append(out, c)
@@ -141,8 +122,9 @@ func embeddedBase64(value string, lead int) string {
 	return encoded[start:end]
 }
 
+// Mask replaces every registered value in s with ***. A nil Masker masks nothing.
 func (m *Masker) Mask(s string) string {
-	if s == "" {
+	if m == nil || s == "" {
 		return s
 	}
 	m.mu.RLock()
@@ -159,204 +141,40 @@ func (m *Masker) Mask(s string) string {
 	return s
 }
 
-const maskAttrsMaxDepth = 8
-
-const maskedValue = "***"
-
-func (m *Masker) MaskAttrs(attrs map[string]any) map[string]any {
-	if m == nil || len(attrs) == 0 {
-		return attrs
+// MaskJSON masks raw's canonical encoding as text, so a value is found in a
+// key or a number, and in a string however it was escaped. It returns that
+// canonical text even when nothing matched. Masked JSON that no longer parses, such as a
+// masked number, comes back as {"masked_attrs": text}, so JSON in is JSON out.
+func (m *Masker) MaskJSON(raw []byte) []byte {
+	text, valid := string(raw), json.Valid(raw)
+	if valid {
+		var v any
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if dec.Decode(&v) == nil && enc.Encode(v) == nil {
+			text = strings.TrimSuffix(buf.String(), "\n")
+		}
 	}
-	m.mu.RLock()
-	none := len(m.values) == 0
-	m.mu.RUnlock()
-	if none {
-		return attrs
-	}
-	out, _ := m.maskAttrs(attrs, 0)
-	return out
-}
-
-// MaskJSON masks decoded string values so JSON escaping cannot hide a secret.
-// Unchanged payloads retain their bytes; invalid JSON uses literal text masking.
-func (m *Masker) MaskJSON(payload []byte) []byte {
-	if m == nil || len(payload) == 0 {
-		return payload
-	}
-	m.mu.RLock()
-	none := len(m.values) == 0
-	m.mu.RUnlock()
-	if none {
-		return payload
-	}
-	masked, changed := m.maskJSON(json.RawMessage(payload), 0)
-	if changed {
-		encoded, err := json.Marshal(masked)
+	masked := m.Mask(text)
+	if valid && !json.Valid([]byte(masked)) {
+		out, err := json.Marshal(map[string]string{"masked_attrs": masked})
 		if err != nil {
-			// safety: an unexpected encoding error must not restore the original secret-bearing payload.
-			return []byte(`"***"`)
+			return []byte(`{"masked_attrs":"***"}`)
 		}
-		return encoded
+		return out
 	}
-	if json.Valid(payload) {
-		return payload
-	}
-	text := m.Mask(string(payload))
-	if text == string(payload) {
-		return payload
-	}
-	return []byte(text)
+	return []byte(masked)
 }
-
-func (m *Masker) maskAttrs(attrs map[string]any, depth int) (map[string]any, bool) {
-	if len(attrs) == 0 {
-		return attrs, false
-	}
-	var out map[string]any
-	for k, v := range attrs {
-		mv, changed := m.maskValue(v, depth+1)
-		if !changed {
-			continue
-		}
-		if out == nil {
-			out = make(map[string]any, len(attrs))
-			maps.Copy(out, attrs)
-		}
-		out[k] = mv
-	}
-	if out == nil {
-		return attrs, false
-	}
-	return out, true
-}
-
-func (m *Masker) maskValue(v any, depth int) (any, bool) {
-	if depth > maskAttrsMaxDepth {
-		if s, ok := v.(string); ok && s == maskedValue {
-			return v, false
-		}
-		return maskedValue, true
-	}
-	switch t := v.(type) {
-	case json.Number:
-		return t, false
-	case string:
-		masked := m.Mask(t)
-		return masked, masked != t
-	case []string:
-		var out []string
-		for i, s := range t {
-			masked := m.Mask(s)
-			if masked == s {
-				continue
-			}
-			if out == nil {
-				out = slices.Clone(t)
-			}
-			out[i] = masked
-		}
-		if out == nil {
-			return t, false
-		}
-		return out, true
-	case []any:
-		var out []any
-		for i, e := range t {
-			masked, changed := m.maskValue(e, depth+1)
-			if !changed {
-				continue
-			}
-			if out == nil {
-				out = slices.Clone(t)
-			}
-			out[i] = masked
-		}
-		if out == nil {
-			return t, false
-		}
-		return out, true
-	case map[string]any:
-		return m.maskAttrs(t, depth)
-	case []byte:
-		masked := m.Mask(string(t))
-		if masked == string(t) {
-			return t, false
-		}
-		return []byte(masked), true
-	case map[string]string:
-		var out map[string]string
-		for k, s := range t {
-			masked := m.Mask(s)
-			if masked == s {
-				continue
-			}
-			if out == nil {
-				out = maps.Clone(t)
-			}
-			out[k] = masked
-		}
-		if out == nil {
-			return t, false
-		}
-		return out, true
-	case error:
-		masked := m.Mask(t.Error())
-		if masked == t.Error() {
-			if _, changed := m.maskJSON(t, depth); !changed {
-				return t, false
-			}
-			masked = maskedValue
-		}
-		return maskedError{msg: masked, err: t}, true
-	default:
-		// safety: text and JSON sinks can render different fields of the same value.
-		rendered := fmt.Sprint(v)
-		masked := m.Mask(rendered)
-		if masked == rendered {
-			return m.maskJSON(v, depth)
-		}
-		return masked, true
-	}
-}
-
-func (m *Masker) maskJSON(v any, depth int) (any, bool) {
-	switch v.(type) {
-	case nil, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr, float32, float64:
-		return v, false
-	}
-
-	encoded, err := json.Marshal(v)
-	if err != nil {
-		return v, false
-	}
-	var decoded any
-	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.UseNumber()
-	if err := decoder.Decode(&decoded); err != nil {
-		return v, false
-	}
-	switch decoded.(type) {
-	case map[string]any, []any, string:
-		return m.maskValue(decoded, depth)
-	default:
-		return v, false
-	}
-}
-
-type maskedError struct {
-	msg string
-	err error
-}
-
-func (e maskedError) Error() string { return e.msg }
-
-func (e maskedError) MarshalJSON() ([]byte, error) { return json.Marshal(e.msg) }
-
-func (e maskedError) Unwrap() error { return e.err }
 
 // Values returns a copy of masking patterns: whole values, nonblank multiline
 // components, and their encoded forms.
 func (m *Masker) Values() []string {
+	if m == nil {
+		return nil
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]string, len(m.values))
@@ -374,4 +192,56 @@ func (m *Masker) ContainsSecret(identifier string) bool {
 		}
 	}
 	return false
+}
+
+// Stream masks one text stream that arrives as lines, and as pieces of a line
+// too long to hold whole, so a value split across pieces is still masked.
+// One goroutine owns a Stream.
+type Stream struct {
+	m    *Masker
+	held string
+}
+
+// Stream returns a stream masked with m's values; a nil m masks nothing.
+func (m *Masker) Stream() *Stream { return &Stream{m: m} }
+
+// Mask masks text and returns what can be shown now. Text ends a line when
+// lineEnd is set and is a piece of one otherwise; a piece keeps back the tail
+// that could start a value until the next text arrives.
+func (s *Stream) Mask(text string, lineEnd bool) string {
+	text, s.held = s.held+text, ""
+	if !lineEnd {
+		cut := s.safeCut(text)
+		text, s.held = text[:cut], text[cut:]
+	}
+	return s.m.Mask(text)
+}
+
+// Drop forgets the held tail of a line whose rest was lost, so no later line
+// completes a value the tail starts.
+func (s *Stream) Drop() { s.held = "" }
+
+// safety: the held rest is shorter than the longest value, so the next piece
+// can complete a value it starts; a value straddling the cut moves the cut
+// past its end, which bounds both the hold and the scan.
+func (s *Stream) safeCut(text string) int {
+	values := s.m.Values()
+	longest := 0
+	for _, v := range values {
+		longest = max(longest, len(v))
+	}
+	cut := max(0, len(text)-max(0, longest-1))
+	for moved := true; moved; {
+		moved = false
+		for _, v := range values {
+			lo, hi := max(0, cut-len(v)+1), min(len(text), cut+len(v)-1)
+			if lo >= hi {
+				continue
+			}
+			if i := strings.Index(text[lo:hi], v); i >= 0 && lo+i < cut {
+				cut, moved = lo+i+len(v), true
+			}
+		}
+	}
+	return cut
 }

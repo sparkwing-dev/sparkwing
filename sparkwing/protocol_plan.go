@@ -70,17 +70,18 @@ func resourceDocument(r *ResourceHints) *nodeproto.ResourceSpec {
 	return s
 }
 
-func concurrencyDocument(g *ConcurrencyGroup, cost int) nodeproto.ConcurrencySpec {
+func concurrencyDocument(g *ConcurrencyGroup, cost *int) nodeproto.ConcurrencySpec {
 	l := g.limit
-	scope := l.Scope
-	if scope == "" {
-		scope = ScopeGlobal
+	spec := nodeproto.ConcurrencySpec{Group: g.name, Capacity: &l.Capacity, Cost: cost, QueueTimeoutMS: milliseconds(l.QueueTimeout), CancelTimeoutMS: milliseconds(l.CancelTimeout)}
+	if l.Scope != "" {
+		scope := string(l.Scope)
+		spec.Scope = &scope
 	}
-	policy := l.OnLimit
-	if policy == "" {
-		policy = Queue
+	if l.OnLimit != "" {
+		policy := string(l.OnLimit)
+		spec.OnLimit = &policy
 	}
-	return nodeproto.ConcurrencySpec{Group: g.name, Scope: string(scope), Capacity: l.Capacity, Cost: cost, OnLimit: string(policy), QueueTimeoutMS: milliseconds(l.QueueTimeout), CancelTimeoutMS: milliseconds(l.CancelTimeout)}
+	return spec
 }
 
 func jobDocument(p *Plan, n *JobNode) nodeproto.JobSpec {

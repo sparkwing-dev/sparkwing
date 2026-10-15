@@ -45,6 +45,8 @@ type Request struct {
 	Failure  *JobFailure       `json:"failure,omitempty"`
 	Closure  string            `json:"closure,omitempty"`
 	Input    json.RawMessage   `json:"input,omitempty"`
+	// Target identifies the active request cancelled by OpCancel, including eval without job/step.
+	Target string `json:"target,omitempty"`
 }
 
 // safety: EngineIdentity permits actionable mismatch diagnostics without stamping every request.
@@ -258,8 +260,8 @@ func (r Request) Validate() error {
 			return bad("eval needs a closure")
 		}
 	case OpCancel:
-		if r.Job == "" || r.Step == "" {
-			return bad("cancel needs job and step")
+		if r.Target == "" && r.Job == "" || r.Target != "" && (r.Job != "" || r.Step != "") {
+			return bad("cancel needs target alone, or job with optional step")
 		}
 	default:
 		return &apierr.Error{Code: apierr.UnknownOp, Message: fmt.Sprintf("unknown node operation %q; rebuild .sparkwing if the SDK is older than the engine", r.Op)}
@@ -268,6 +270,7 @@ func (r Request) Validate() error {
 		r.Op != OpPlan && (r.Pipeline != "" || r.Args != nil || r.Run != nil) ||
 		r.Op != OpRunStep && (r.Attempt != 0 || r.Failure != nil) ||
 		r.Op != OpRunStep && r.Op != OpCancel && (r.Job != "" || r.Step != "") ||
+		r.Op != OpCancel && r.Target != "" ||
 		r.Op != OpEval && (r.Closure != "" || len(r.Input) != 0) {
 		return bad("request carries fields for another operation")
 	}
@@ -412,11 +415,11 @@ func requestFields(obj map[string]json.RawMessage, op Op) error {
 	case OpEval:
 		allowed["closure"], allowed["input"] = true, true
 	case OpCancel:
-		allowed["job"], allowed["step"] = true, true
+		allowed["job"], allowed["step"], allowed["target"] = true, true, true
 	default:
 		return nil
 	}
-	for _, key := range []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "failure", "closure", "input"} {
+	for _, key := range []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "failure", "closure", "input", "target"} {
 		if raw, found := obj[key]; found && (!allowed[key] || string(raw) == "null" && key != "input") {
 			return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("operation %s cannot carry %s", op, key)}
 		}
@@ -427,6 +430,24 @@ func requestFields(obj map[string]json.RawMessage, op Op) error {
 	if err := requiredString(obj, "op"); err != nil {
 		return err
 	}
+	if op == OpCancel {
+		if _, target := obj["target"]; target {
+			if _, job := obj["job"]; job {
+				return fmt.Errorf("%w: cancel selectors cannot be mixed", ErrMalformed)
+			}
+			if _, step := obj["step"]; step {
+				return fmt.Errorf("%w: cancel selectors cannot be mixed", ErrMalformed)
+			}
+			return requiredString(obj, "target")
+		}
+		if err := requiredString(obj, "job"); err != nil {
+			return err
+		}
+		if _, step := obj["step"]; step {
+			return requiredString(obj, "step")
+		}
+	}
+
 	if op == OpPlan {
 		if raw, ok := obj["args"]; !ok || !isObject(raw) {
 			return &apierr.Error{Code: apierr.BadRequest, Message: "plan args must be an object"}

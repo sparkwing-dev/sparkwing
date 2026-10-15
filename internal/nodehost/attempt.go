@@ -103,7 +103,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	// safety: registered before the process starts, so an environment dump never logs a live bearer.
 	a.Masker.Register(bearer)
 	cfg := base
-	cfg.Sink = sink
+	cfg.Sink, cfg.Masker = sink, a.Masker
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env)
 	cfg.Binding = &nodeproto.ProcessBinding{RunID: run.ID, JobID: id, Routes: nodeproto.ProcessRoutes{URL: a.Routes.URL(), Bearer: bearer}}
 	cfg.Env = append(withoutRunnerEnv(cfg.Env), dryRunEnv(n)...)
@@ -130,15 +130,13 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	} else {
 		res = failed(err)
 	}
-	sink.Flush()
 	revoke()
-	out := &LineWriter{Sink: sink, Level: LevelInfo}
+	out := NewLineWriter(sink, LevelInfo, a.Masker)
 	// safety: a cancelled node's cleanups still run, each bounded by CleanupTimeout.
 	if err := a.Routes.RunCleanups(context.WithoutCancel(ctx), bearer, CleanupScope{Dir: cfg.Dir, Env: cfg.Env, Log: out}); err != nil {
 		run.Logger.Warn("nodehost: node cleanups", "run", run.ID, "node", id, "err", err)
 	}
 	out.Flush()
-	sink.Flush()
 	return res
 }
 
@@ -251,14 +249,20 @@ func attemptEnv(base []string, nodeEnv map[string]nodeproto.EnvValue) []string {
 	return env
 }
 
-// LineWriter hands what is written to it to Sink as text lines at Level; a
-// line that grows past the session's line limit goes in pieces, whose split
-// values a [LogSink] still masks whole. Call Flush once writing ends. It is
-// unlocked, so one goroutine writes at a time.
+// LineWriter masks what is written to it as one text stream and hands each
+// line to a [LogSink] at one level; a line that grows past the session's line
+// limit goes in pieces, masked whole across them. Call Flush once writing
+// ends. It is unlocked, so one goroutine writes at a time.
 type LineWriter struct {
-	Sink  *LogSink
-	Level string
-	buf   []byte
+	sink   *LogSink
+	level  string
+	stream *secrets.Stream
+	buf    []byte
+}
+
+// NewLineWriter returns a writer whose lines reach sink at level, masked with masker.
+func NewLineWriter(sink *LogSink, level string, masker *secrets.Masker) *LineWriter {
+	return &LineWriter{sink: sink, level: level, stream: masker.Stream()}
 }
 
 func (w *LineWriter) Write(p []byte) (int, error) {
@@ -268,19 +272,18 @@ func (w *LineWriter) Write(p []byte) (int, error) {
 		if i < 0 {
 			break
 		}
-		w.Sink.Text(w.Level, strings.TrimSuffix(string(w.buf[:i]), "\r"))
+		w.sink.Text(w.level, w.stream.Mask(strings.TrimSuffix(string(w.buf[:i]), "\r"), true))
 		w.buf = w.buf[i+1:]
 	}
 	if len(w.buf) >= maxTextLine {
-		w.Flush()
+		w.sink.Text(w.level, w.stream.Mask(string(w.buf), false))
+		w.buf = nil
 	}
 	return len(p), nil
 }
 
-// Flush hands any unterminated rest to the sink.
+// Flush hands the unterminated rest, and any tail held for it, to the sink.
 func (w *LineWriter) Flush() {
-	if len(w.buf) > 0 {
-		w.Sink.Text(w.Level, string(w.buf))
-		w.buf = nil
-	}
+	w.sink.Text(w.level, w.stream.Mask(string(w.buf), true))
+	w.buf = nil
 }

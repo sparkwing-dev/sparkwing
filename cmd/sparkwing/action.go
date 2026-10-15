@@ -329,7 +329,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
+	_, cfg, err := projectconfig.Discover(cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +344,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	var out []Pipeline
 	seen := map[string]struct{}{}
 	if cfg != nil {
-		for _, p := range cfg.Pipelines {
+		for _, p := range cfg.Registry().Pipelines {
 			if p.Hidden && !includeHidden {
 				continue
 			}

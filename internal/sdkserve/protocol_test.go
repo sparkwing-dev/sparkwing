@@ -21,6 +21,10 @@ type wireOperations struct {
 	stepStopped chan struct{}
 }
 
+func (f *wireOperations) Document(any) nodeproto.PlanDoc {
+	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}
+}
+
 func (f *wireOperations) Context(ctx context.Context, _ nodeproto.RunContext, _ nodeproto.RunnerIdentity, _ Services) context.Context {
 	return ctx
 }

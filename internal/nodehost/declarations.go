@@ -25,12 +25,16 @@ func jobHash(job nodeproto.JobSpec) string {
 
 // ConcurrencyKey scopes a validated group using host-owned run and machine identity.
 func ConcurrencyKey(c nodeproto.ConcurrencySpec, runID, boxID string) string {
-	switch c.Scope {
+	return scopedConcurrencyKey(c.Group, value(c.Scope), runID, boxID)
+}
+
+func scopedConcurrencyKey(name, scope, runID, boxID string) string {
+	switch scope {
 	case "run":
-		return "run:" + runID + ":" + c.Group
+		return "run:" + runID + ":" + name
 	case "box":
-		return "box:" + boxID + ":" + c.Group
+		return "box:" + boxID + ":" + name
 	default:
-		return "global:" + c.Group
+		return "global:" + name
 	}
 }

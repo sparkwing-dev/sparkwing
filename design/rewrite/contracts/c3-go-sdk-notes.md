@@ -28,6 +28,52 @@ The author SDK owns declarations, typed input and output access, protocol servin
 - Cross-pipeline `Ref.TryGet` treats JSON null as absent, including null surrounded by JSON whitespace. `Ref.Get` returns the zero value. An in-run null output remains present, and the JSON string `"null"` remains a value. Invalid JSON fails instead of becoming absence.
 - `sparkwingtest.Host.Context` installs only the fixture's runner, inputs, secret classification and service answers. `Plan`, `RunStep` and `Eval` exercise SDK operations without controller/store imports. Planning has no execution binding, so secret, variable, output, latest-output, child, OIDC and Mask calls fail before reading fixture answers or invoking callbacks. Declaration logs remain available. RunStep records carry the host-bound job. Plan and eval records go to run logs without a job. Records and masks are snapshots. Cancelled service calls never invoke fixture callbacks. `Close` cancels outstanding fake requests and releases resources. Fixtures share no mutable global state.
 
+## Dependency cache keys
+
+`DirCache.Key(workdir string) (string, error)` exposes dependency-input hashing
+without importing engine packages. It reads the first present declared key file
+through a directory root that rejects escaping symlinks. Absolute paths and
+parent traversal fail. The hash covers the cache name, key scope, OS, architecture
+and exact file bytes. Moving the checkout preserves it. Host authorization still
+selects the repository and ref namespace. This helper grants no storage access.
+
+## Service records and fixture validation
+
+The Go protocol transport sends Mask, annotation and summary writes through the
+shared node-host service routes. Each write waits for an object acknowledgement.
+A record write error fails its body or evaluation with the canonical error.
+Ordinary logs continue over the frame pipe.
+
+Annotations require an execution context. The fake host refuses annotation and summary
+writes after fixture cancellation, including writes from retained detached contexts.
+Refused writes add no records. Eval records remain in run logs without a job.
+
+The fake host retains accepted declaration snapshots. It refuses a dynamic mask
+that occurs in an accepted identifier before changing its registry. Later plans
+and generated declarations use that same registry. Acceptance and registration
+share one fixture lock so neither can race past the other.
+Mask registration also rechecks fixture cancellation under that lock, so a call
+admitted before Close cannot commit after Close returns.
+
+The fake host refuses an empty OIDC callback result, matching the node-host
+transport's nonempty token requirement.
+
+Closing a fake host cancels and joins admitted plan, step, eval and service callback
+calls. Active callbacks remain cancellable when callers use `context.WithoutCancel`.
+New calls fail after closing begins, including service calls whose contexts detach
+cancellation from the fixture. Close runs outside those calls.
+
+The shared v2 corpus at `internal/nodeproto/conformance/testdata/v2-corpus.json`
+contains declaration and error vectors in addition to process sessions. Its
+`plans` rows include raw JSON, canonical JSON, SHA-256, expected validation code,
+and any expansion or secret context. `inner_errors` supplies the shared decoder
+cases. W4's reader checks them against structural validation and the canonical
+hash owner. Other SDKs consume these same rows for parity.
+Go builders also reproduce the source-presence, approval-condition and snake_case
+job vectors. Jobs and steps omit empty closure objects, preserving their shared
+canonical hashes. The Go process corpus uses the native acceptance pipe driver
+on Unix and Windows.
+
 ## Acceptance evidence required
 
 | Scenario | Contract proved |
@@ -43,11 +89,13 @@ The author SDK owns declarations, typed input and output access, protocol servin
 | Mask acknowledgement followed by log, annotation and summary | No registration race, correct masking and host envelope |
 | Secret-bearing job, step, group and approval IDs | Decision 90 refusal without exposing the secret in diagnostics |
 | Retry with Backoff and no auto option | Application retries retain the claim |
-| Pinned SDK with unsupported protocol | Actionable mismatch and the A32 negotiated-version contract |
+| Older pinned SDK and active signed security policy | Exact matching engine and twelve-month controller API compatibility under D102-103; actionable revocation when required |
 
-## Open questions for the lead
+## Contract interpretations
 
-1. §3.2/A27 requires parity for approval plus SkipIf, while A28 and the chapter cut approval hooks. This contract keeps SkipIf as an admission condition and removes executable BeforeRun/AfterRun hooks, matching the shared validator and the all-features launch scope. The lead should confirm that distinction against A28.
+Amendment 1 ratifies the interpretations below. They are not approval gates.
+
+1. §3.2/A27 requires parity for approval plus SkipIf, while A28 and the chapter cut approval hooks. This contract keeps SkipIf as an admission condition and removes executable BeforeRun/AfterRun hooks, matching the shared validator and the all-features launch scope. Amendment 1 ratifies that distinction under A28 and decision 99.
 2. `JobNode` is the retained Go handle name because `Job` is the constructor. Renaming the handle would require a new name absent from the frozen design.
 ## Cross-area assumptions
 

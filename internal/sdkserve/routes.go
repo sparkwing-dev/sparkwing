@@ -19,12 +19,16 @@ import (
 )
 
 type routeServices struct {
+	ctx       context.Context
 	binding   *nodeproto.ProcessBinding
 	emit      func(nodeproto.FrameLog)
 	transport http.RoundTripper
 }
 
 func (s *routeServices) call(ctx context.Context, method, path string, body, out any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s.binding == nil {
 		return fmt.Errorf("host services require an execution binding")
 	}
@@ -171,10 +175,40 @@ func (s *routeServices) OIDC(ctx context.Context, audience string) (string, erro
 	return out.Token, err
 }
 
-func (s *routeServices) Mask(context.Context, string) error {
-	return &apierr.Error{Code: apierr.Unavailable, Message: "the host route contract does not provide mask registration"}
+func (s *routeServices) acknowledge(ctx context.Context, path string, request any) error {
+	var ack map[string]json.RawMessage
+	if err := s.call(ctx, "POST", path, request, &ack); err != nil {
+		return err
+	}
+	if ack == nil {
+		return fmt.Errorf("host acknowledgement must be an object")
+	}
+	return nil
 }
-func (s *routeServices) Emit(r nodeproto.FrameLog) { s.emit(r) }
+
+func (s *routeServices) Mask(ctx context.Context, value string) error {
+	return s.acknowledge(ctx, "/node/v1/masks", nodeproto.MaskRequest{Value: value})
+}
+func (s *routeServices) Emit(r nodeproto.FrameLog) {
+	var err error
+	switch r.Event {
+	case "annotation":
+		request := nodeproto.AnnotationRequest{Level: r.Level, Message: r.Message, Step: r.Step}
+		if len(r.Attrs) != 0 {
+			err = json.Unmarshal(r.Attrs, &request)
+		}
+		if err == nil {
+			err = s.acknowledge(s.ctx, "/node/v1/annotations", request)
+		}
+	case "summary":
+		err = s.acknowledge(s.ctx, "/node/v1/summary", nodeproto.SummaryRequest{Markdown: r.Message, Step: r.Step})
+	default:
+		s.emit(r)
+	}
+	if err != nil {
+		panic(err)
+	}
+}
 
 func (s *routeServices) RegisterCleanup(ctx context.Context, argv []string, description string) (string, error) {
 	var out struct {

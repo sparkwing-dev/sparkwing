@@ -2,13 +2,12 @@ package nodeproto
 
 import (
 	"encoding/json"
-	"testing"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"testing"
 )
 
-func TestExpansionPreservesExistingConcurrency(t *testing.T) {
-	group := ConcurrencySpec{Group: "pool", Capacity: 3, Cost: 1, Scope: "run", OnLimit: "queue"}
+func TestExpansionPreservesConcurrencyDeclarations(t *testing.T) {
+	group := ConcurrencySpec{Group: "pool", Capacity: new(3), Cost: new(1), Scope: new("run"), OnLimit: new("queue")}
 	ctx := planContext()
 	ctx.Expansion, ctx.SourceJob = true, "source"
 	ctx.ExistingJobs = []JobSpec{{
@@ -20,13 +19,13 @@ func TestExpansionPreservesExistingConcurrency(t *testing.T) {
 			changed := group
 			switch field {
 			case "cost":
-				changed.Cost = 2
+				changed.Cost = new(2)
 			case "capacity":
-				changed.Capacity = 4
+				changed.Capacity = new(4)
 			case "scope":
-				changed.Scope = "box"
+				changed.Scope = new("box")
 			case "on_limit":
-				changed.OnLimit = "fail"
+				changed.OnLimit = new("fail")
 			}
 			raw, err := json.Marshal(PlanDoc{Jobs: []JobSpec{{
 				ID: "child", Groups: []string{"generator"},
@@ -35,10 +34,7 @@ func TestExpansionPreservesExistingConcurrency(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			code := apierr.PlanInvalid
-			if field == "cost" {
-				code = ""
-			}
+			code := apierr.Code("")
 			t.Run("job-membership", func(t *testing.T) { checkPlan(t, string(raw), ctx, code) })
 			planContext := ctx
 			planContext.ExistingJobs = append([]JobSpec(nil), ctx.ExistingJobs...)

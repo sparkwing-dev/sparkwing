@@ -12,6 +12,7 @@ import (
 // Operations keeps author code out of the transport's dependency graph.
 type Operations interface {
 	Context(context.Context, nodeproto.RunContext, nodeproto.RunnerIdentity, Services) context.Context
+	Document(any) nodeproto.PlanDoc
 	Describe(context.Context) (nodeproto.DescribeDoc, error)
 	Plan(context.Context, string, map[string]string, nodeproto.RunContext) (any, nodeproto.PlanDoc, error)
 	RunStep(context.Context, any, nodeproto.Request) (nodeproto.RunResult, error)

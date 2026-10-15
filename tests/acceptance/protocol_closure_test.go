@@ -1,6 +1,7 @@
 package acceptance_test
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -11,6 +12,42 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
+
+func testGoSDKFakeHostEvalRunLogs(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	source := sparkwing.Job(plan, "source", func(context.Context) error { return nil })
+	generated := source.Generate(func(ctx context.Context, expanded *sparkwing.Plan) error {
+		sparkwing.Info(ctx, "generator output")
+		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "generator annotation"})
+		sparkwing.Summary(ctx, "generator summary")
+		sparkwing.Job(expanded, "child", func(ctx context.Context) error {
+			sparkwing.Info(ctx, "child output")
+			return nil
+		})
+		return nil
+	})
+	host := sparkwingtest.New(sparkwingtest.Options{})
+	t.Cleanup(func() { _ = host.Close() })
+	if _, err := host.Eval(t.Context(), plan, "source", generated.ID(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.RunStep(t.Context(), plan, "child", "run"); err != nil {
+		t.Fatal(err)
+	}
+	records := host.Records()
+	if len(records) != 4 {
+		t.Fatalf("records = %+v, want three generator records and one child record", records)
+	}
+	for i, record := range records {
+		want := ""
+		if i == 3 {
+			want = "child"
+		}
+		if record.JobID != want {
+			t.Errorf("record %q has job %q, want %q", record.Msg, record.JobID, want)
+		}
+	}
+}
 
 func testGoSDKClosureIdentifiers(t *testing.T) {
 	protocolgo.Register()

@@ -34,6 +34,8 @@ func (declarationServicesPipeline) Plan(ctx context.Context, plan *sparkwing.Pla
 		_, err = sparkwing.OIDCToken(ctx, "audience")
 	case "mask":
 		err = sparkwing.Mask(ctx, "declaration-mask")
+	case "annotation":
+		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "declaration annotation"})
 	case "log":
 		sparkwing.Info(ctx, "declaration log")
 	}
@@ -72,7 +74,7 @@ func testGoSDKDeclarationServices(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { _ = host.Close() })
-	for _, service := range []string{"secret", "variable", "output", "latest", "child", "oidc", "mask"} {
+	for _, service := range []string{"secret", "variable", "output", "latest", "child", "oidc", "mask", "annotation"} {
 		t.Run(service, func(t *testing.T) {
 			_, err := host.Plan(t.Context(), "acceptance-declaration-services", map[string]string{"service": service})
 			var failure *apierr.Error

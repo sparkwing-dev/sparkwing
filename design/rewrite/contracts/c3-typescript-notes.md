@@ -265,7 +265,9 @@ The declaration file passes the installed TypeScript compiler with `--noEmit --s
 | C4 environment | Startup/body phase, fixed interpreter-start names, inherited cleanup env and argv handle transport must match `procenv`. |
 | C4 limits | Retry, memo, fan-out, output, annotation and deadline limits are validated by the shared host contract. |
 
-## Open questions for the lead
+## Contract interpretations
+
+Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 - A28 cuts approval hook methods, while §3.2/A27 name approval plus SkipIf as parity work. The chosen contract retains `Approval.skipIf` as a condition and cuts executable before/after hooks. Decision 99 requires the condition on every placement. Both SDKs and the protocol capability table use this reading.
 

@@ -132,7 +132,7 @@ func (s *scheduler) sourceOutput(ctx context.Context, prior *store.Node) (json.R
 	if prior.OutputRef == nil {
 		return nil, true, nil
 	}
-	outputs, ok := s.run.State.(sourceOutputs)
+	outputs, ok := baseState(s.run.State).(sourceOutputs)
 	if !ok {
 		return nil, false, fmt.Errorf("copy source node %s output: the runs store cannot read it", prior.NodeID)
 	}

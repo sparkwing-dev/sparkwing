@@ -20,6 +20,16 @@ import (
 type sdkOperations struct{}
 
 func init() { sdkserve.DefaultOperations = sdkOperations{} }
+func recoveredError(value any) *apierr.Error {
+	if failure, ok := value.(error); ok {
+		var structured *apierr.Error
+		if errors.As(failure, &structured) {
+			return structured
+		}
+	}
+	return sdkError(apierr.SDKError, fmt.Sprint(value))
+}
+
 func sdkVersion() string {
 	if b, ok := debug.ReadBuildInfo(); ok {
 		if b.Main.Path == "github.com/sparkwing-dev/sparkwing" {
@@ -33,6 +43,8 @@ func sdkVersion() string {
 	}
 	return "development"
 }
+
+func (sdkOperations) Document(plan any) nodeproto.PlanDoc { return planDocument(plan.(*Plan)) }
 
 func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context {
 	ctx = sdkserve.WithServices(ctx, s)
@@ -138,7 +150,7 @@ func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Reque
 	result.Outcome = "failed"
 	defer func() {
 		if v := recover(); v != nil {
-			result.Error = sdkError(apierr.SDKError, fmt.Sprint(v))
+			result.Error = recoveredError(v)
 			err = nil
 		}
 	}()
@@ -199,8 +211,16 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 	if !ok {
 		return result, sdkError(apierr.NoPlan, "no SDK plan")
 	}
-	p.evalMu.Lock()
-	defer p.evalMu.Unlock()
+	// safety: a queued eval must honor cancellation without waiting for another closure.
+	select {
+	case p.evalGate <- struct{}{}:
+		defer func() { <-p.evalGate }()
+	case <-ctx.Done():
+		return result, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	n := closureJob(p, req.Closure)
 	if n == nil || (req.Job != "" && n.id != req.Job && !generatorClosure(n, req.Closure)) {
 		return result, sdkError(apierr.UnknownClosure, "closure is not declared for the bound job")
@@ -212,7 +232,7 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 	defer func() {
 		if v := recover(); v != nil {
 			result.Value = json.RawMessage("null")
-			result.Error = sdkError(apierr.SDKError, fmt.Sprint(v))
+			result.Error = recoveredError(v)
 			err = nil
 		}
 	}()

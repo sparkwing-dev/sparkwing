@@ -169,7 +169,7 @@ func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode {
 
 type concurrencyMembership struct {
 	group *ConcurrencyGroup
-	cost  int
+	cost  *int
 }
 
 // Concurrency enrolls every member of the group in concurrency group g
@@ -184,7 +184,7 @@ func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup {
 // PlanConcurrency records one whole-run concurrency gate.
 type planConcurrency struct {
 	Group *ConcurrencyGroup
-	Cost  int
+	Cost  *int
 }
 
 // Concurrency gates the whole run on concurrency group g: the run acquires
@@ -221,7 +221,7 @@ func sameConcurrencyGroup(a, b *ConcurrencyGroup) bool {
 	return a.name == b.name && a.limit.Scope == b.limit.Scope
 }
 
-func concurrencyCost(g *ConcurrencyGroup, subject string, cost ...int) int {
+func concurrencyCost(g *ConcurrencyGroup, subject string, cost ...int) *int {
 	if len(cost) > 1 {
 		panic("sparkwing: Concurrency accepts at most one cost")
 	}
@@ -232,5 +232,8 @@ func concurrencyCost(g *ConcurrencyGroup, subject string, cost ...int) int {
 	if c <= 0 || (g.limit.Capacity > 0 && c > g.limit.Capacity) {
 		panic(fmt.Sprintf("sparkwing: invalid concurrency cost for %s", subject))
 	}
-	return c
+	if len(cost) == 0 {
+		return nil
+	}
+	return &c
 }

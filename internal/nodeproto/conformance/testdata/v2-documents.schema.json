@@ -161,11 +161,7 @@
         }
       },
       "required": [
-        "group",
-        "scope",
-        "capacity",
-        "cost",
-        "on_limit"
+        "group"
       ],
       "type": "object"
     },

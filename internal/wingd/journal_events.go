@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 )
 
@@ -35,7 +36,7 @@ func (d *Daemon) recordJournal(kind string, c *conn, data map[string]any) {
 	d.journal.Enqueue(r)
 }
 
-func journalBudget(b Budget) map[string]any {
+func journalBudget(b userconfig.Budget) map[string]any {
 	return map[string]any{"cores": b.Cores, "cores_fraction": b.CoresFraction, "memory_bytes": b.MemoryBytes, "memory_fraction": b.MemoryFraction, "enforce": b.Enforce, "ignore_external": b.IgnoreExternal, "raw": b.Raw}
 }
 

@@ -47,8 +47,15 @@ type server struct {
 	closeInput func()
 	ids        map[string]bool
 	steps      map[[2]string]context.CancelFunc
+	active     map[string]*activeRequest
 	mu         sync.Mutex
 	workers    sync.WaitGroup
+}
+
+type activeRequest struct {
+	job, step string
+	stop      context.CancelFunc
+	done      chan struct{}
 }
 
 // Serve negotiates once and joins every request when its input closes.
@@ -61,7 +68,7 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s := &server{cfg: cfg, out: out, ids: map[string]bool{}, steps: map[[2]string]context.CancelFunc{}, stop: cancel, closeInput: func() {}}
+	s := &server{cfg: cfg, out: out, ids: map[string]bool{}, steps: map[[2]string]context.CancelFunc{}, active: map[string]*activeRequest{}, stop: cancel, closeInput: func() {}}
 	if closer, ok := in.(io.Closer); ok {
 		s.closeInput = func() { _ = closer.Close() }
 	}
@@ -114,13 +121,7 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 			result, err := s.execute(ctx, req, s.run)
 			s.reply(req.ID, result, err)
 		case nodeproto.OpCancel:
-			key := [2]string{req.Job, req.Step}
-			s.mu.Lock()
-			if stop := s.steps[key]; stop != nil {
-				stop()
-			}
-			s.mu.Unlock()
-			s.reply(req.ID, struct{}{}, nil)
+			s.cancelRequest(req)
 		default:
 			s.start(ctx, req)
 		}
@@ -167,6 +168,10 @@ func (s *server) start(ctx context.Context, req nodeproto.Request) {
 		}
 	}
 	ctx, stop := context.WithCancel(ctx)
+	active := &activeRequest{job: req.Job, step: req.Step, stop: stop, done: make(chan struct{})}
+	s.mu.Lock()
+	s.active[req.ID] = active
+	s.mu.Unlock()
 	if req.Op == nodeproto.OpRunStep {
 		s.mu.Lock()
 		s.steps[key] = stop
@@ -182,6 +187,36 @@ func (s *server) start(ctx context.Context, req nodeproto.Request) {
 		delete(s.steps, key)
 		s.mu.Unlock()
 		s.reply(req.ID, result, err)
+		s.mu.Lock()
+		delete(s.active, req.ID)
+		close(active.done)
+		s.mu.Unlock()
+	}()
+}
+
+func (s *server) cancelRequest(req nodeproto.Request) {
+	if req.Job != "" && (s.hello.Binding == nil || req.Job != s.hello.Binding.JobID) {
+		s.reply(req.ID, nil, protocolError("cancel does not match the process job binding"))
+		return
+	}
+	s.mu.Lock()
+	selected := []*activeRequest{}
+	for id, work := range s.active {
+		if req.Target == id || req.Target == "" && req.Job == work.job && (req.Step == "" || req.Step == work.step) {
+			selected = append(selected, work)
+		}
+	}
+	s.mu.Unlock()
+	for _, work := range selected {
+		work.stop()
+	}
+	s.workers.Add(1)
+	go func() {
+		defer s.workers.Done()
+		for _, work := range selected {
+			<-work.done
+		}
+		s.reply(req.ID, struct{}{}, nil)
 	}()
 }
 
@@ -211,7 +246,7 @@ func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeprot
 	if req.Run != nil {
 		rc = *req.Run
 	}
-	services := &routeServices{binding: s.hello.Binding, emit: s.emit}
+	services := &routeServices{ctx: ctx, binding: s.hello.Binding, emit: s.emit}
 	if req.Op == nodeproto.OpPlan || req.Op == nodeproto.OpDescribe {
 		services.binding = nil
 	}

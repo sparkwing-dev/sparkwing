@@ -38,7 +38,7 @@ type JobSpec struct {
 	Caches              []CacheSpec         `json:"caches,omitempty"`
 	Concurrency         []ConcurrencySpec   `json:"concurrency,omitempty"`
 	Resources           *ResourceSpec       `json:"resources,omitempty"`
-	Closures            ClosureSpec         `json:"closures,omitempty"`
+	Closures            ClosureSpec         `json:"closures,omitzero"`
 	SkipIfBudgetMS      *int64              `json:"skip_if_budget_ms,omitempty"`
 	Steps               []StepSpec          `json:"steps,omitempty"`
 	ResultStep          string              `json:"result_step,omitempty"`
@@ -62,7 +62,7 @@ type StepSpec struct {
 	ContinueOnError   bool        `json:"continue_on_error,omitempty"`
 	HasDryRun         bool        `json:"has_dry_run,omitempty"`
 	SafeWithoutDryRun bool        `json:"safe_without_dry_run,omitempty"`
-	Closures          ClosureSpec `json:"closures,omitempty"`
+	Closures          ClosureSpec `json:"closures,omitzero"`
 }
 
 // safety: ClosureSpec references executable code; persisted generated specs never serialize closures.
@@ -76,14 +76,15 @@ type ClosureSpec struct {
 }
 
 // safety: ConcurrencySpec is shared at plan and job scope; only the host computes scoped keys.
+// Omitted concurrency and [] both mean no declarations. Explicit null is invalid.
 type ConcurrencySpec struct {
-	Group           string `json:"group"`
-	Scope           string `json:"scope"`
-	Capacity        int    `json:"capacity"`
-	Cost            int    `json:"cost"`
-	OnLimit         string `json:"on_limit"`
-	QueueTimeoutMS  *int64 `json:"queue_timeout_ms,omitempty"`
-	CancelTimeoutMS *int64 `json:"cancel_timeout_ms,omitempty"`
+	Group           string  `json:"group"`
+	Scope           *string `json:"scope,omitempty"`
+	Capacity        *int    `json:"capacity,omitempty"`
+	Cost            *int    `json:"cost,omitempty"`
+	OnLimit         *string `json:"on_limit,omitempty"`
+	QueueTimeoutMS  *int64  `json:"queue_timeout_ms,omitempty"`
+	CancelTimeoutMS *int64  `json:"cancel_timeout_ms,omitempty"`
 }
 
 // safety: ResourceSpec preserves unset values until the setting's seal point.

@@ -266,7 +266,7 @@ type recordedBatch struct {
 func storedExpansions(ctx context.Context, st storage.StateStoreOld, runID string, n nodeproto.JobSpec) ([]recordedBatch, error) {
 	out := make([]recordedBatch, 0, len(n.Closures.Generate))
 	var rows []*store.Node
-	if lister, ok := st.(nodeLister); ok {
+	if lister, ok := baseState(st).(nodeLister); ok {
 		var err error
 		if rows, err = lister.ListNodes(context.WithoutCancel(ctx), runID); err != nil {
 			return nil, fmt.Errorf("read the nodes %s generated: %w", n.ID, err)

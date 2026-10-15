@@ -3,57 +3,237 @@
     {
       "name": "describe",
       "requests": [
-        {"op": "describe", "contains": "conformance"}
+        {
+          "op": "describe",
+          "contains": "conformance"
+        }
       ]
     },
     {
       "name": "plan_once",
       "requests": [
-        {"op": "plan", "contains": "task"},
-        {"op": "plan", "code": "protocol_error"}
+        {
+          "op": "plan",
+          "contains": "task"
+        },
+        {
+          "op": "plan",
+          "code": "protocol_error"
+        }
       ]
     },
     {
       "name": "execution",
       "binding": true,
       "requests": [
-        {"op": "plan", "contains": "task"},
-        {"op": "run_step", "contains": "success"},
-        {"op": "eval", "kind": "skip", "contains": "false"},
-        {"op": "eval", "kind": "memo", "contains": "fixture-key"},
-        {"op": "eval", "kind": "before", "contains": "null"},
-        {"op": "eval", "kind": "verify", "contains": "null"},
-        {"op": "eval", "kind": "after", "contains": "null"},
-        {"op": "eval", "kind": "generate", "contains": "generated"},
-        {"op": "cancel"}
+        {
+          "op": "plan",
+          "contains": "task"
+        },
+        {
+          "op": "run_step",
+          "contains": "success"
+        },
+        {
+          "op": "eval",
+          "kind": "skip",
+          "contains": "false"
+        },
+        {
+          "op": "eval",
+          "kind": "memo",
+          "contains": "fixture-key"
+        },
+        {
+          "op": "eval",
+          "kind": "before",
+          "contains": "null"
+        },
+        {
+          "op": "eval",
+          "kind": "verify",
+          "contains": "null"
+        },
+        {
+          "op": "eval",
+          "kind": "after",
+          "contains": "null"
+        },
+        {
+          "op": "eval",
+          "kind": "generate",
+          "contains": "generated"
+        },
+        {
+          "op": "cancel"
+        }
       ]
     },
     {
       "name": "body_failure",
       "binding": true,
       "requests": [
-        {"op": "plan", "name": "fail-body"},
-        {"op": "run_step", "contains": "fixture body failed"}
+        {
+          "op": "plan",
+          "name": "fail-body"
+        },
+        {
+          "op": "run_step",
+          "contains": "fixture body failed"
+        }
       ]
     },
     {
       "name": "hook_failure",
       "binding": true,
       "requests": [
-        {"op": "plan", "name": "fail-eval"},
-        {"op": "eval", "kind": "before", "contains": "fixture hook failed"}
+        {
+          "op": "plan",
+          "name": "fail-eval"
+        },
+        {
+          "op": "eval",
+          "kind": "before",
+          "contains": "fixture hook failed"
+        }
       ]
     },
     {
       "name": "unknown_operation",
       "requests": [
-        {"op": "future_operation", "code": "unknown_op"}
+        {
+          "op": "future_operation",
+          "code": "unknown_op"
+        }
       ]
     },
     {
       "name": "major_mismatch",
       "protocol": 1,
       "requests": []
+    }
+  ],
+  "plans": [
+    {
+      "name": "concurrency-omitted",
+      "raw": "{\"jobs\":[],\"concurrency\":[{\"group\":\"gate\"}]}",
+      "canonical": "{\"concurrency\":[{\"group\":\"gate\"}],\"jobs\":[]}",
+      "sha256": "43717b2bb0fd838aef81f3a9f58085d7f65720395fe2a4e9e0a51a8c92797a34",
+      "code": ""
+    },
+    {
+      "name": "concurrency-explicit-defaults",
+      "raw": "{\"concurrency\":[{\"group\":\"gate\",\"scope\":\"global\",\"capacity\":1,\"cost\":1,\"on_limit\":\"queue\"}],\"jobs\":[]}",
+      "canonical": "{\"concurrency\":[{\"capacity\":1,\"cost\":1,\"group\":\"gate\",\"on_limit\":\"queue\",\"scope\":\"global\"}],\"jobs\":[]}",
+      "sha256": "d6a49a972936ec6b1a0dc57eccc88086f00c97a4cf54b21e241eb9d02359fdf8",
+      "code": ""
+    },
+    {
+      "name": "concurrency-explicit-zero",
+      "raw": "{\"jobs\":[],\"concurrency\":[{\"group\":\"gate\",\"cost\":0}]}",
+      "canonical": "{\"concurrency\":[{\"cost\":0,\"group\":\"gate\"}],\"jobs\":[]}",
+      "sha256": "2059a716f69979cc2081717f58cfc9d8b46e424405bd199c25ea017c6246325d",
+      "code": "plan_invalid"
+    },
+    {
+      "name": "concurrency-explicit-empty",
+      "raw": "{\"jobs\":[],\"concurrency\":[{\"group\":\"gate\",\"scope\":\"\"}]}",
+      "canonical": "{\"concurrency\":[{\"group\":\"gate\",\"scope\":\"\"}],\"jobs\":[]}",
+      "sha256": "7f91e2e613bc03e48d2c9db0b198a7daf74aa120ce7ef311d128ff49ea383e9d",
+      "code": "plan_invalid"
+    },
+    {
+      "name": "source-omitted",
+      "raw": "{\"jobs\":[],\"source\":{}}",
+      "canonical": "{\"jobs\":[],\"source\":{}}",
+      "sha256": "389e136948714a715342ddb3444843d60d0982a5b9c00923a431b7fd1cdc705a",
+      "code": ""
+    },
+    {
+      "name": "source-explicit-false",
+      "raw": "{\"jobs\":[],\"source\":{\"tags\":false,\"full_history\":false}}",
+      "canonical": "{\"jobs\":[],\"source\":{\"full_history\":false,\"tags\":false}}",
+      "sha256": "21d3cdaffed0c3648aed5769cea8f078b6a9cb8be46a19a244fc5f83ec52a774",
+      "code": ""
+    },
+    {
+      "name": "snake-case-job",
+      "raw": "{\"jobs\":[{\"id\":\"compile\",\"steps\":[{\"id\":\"run\"}],\"failure_policy\":\"collect_all\",\"continue_on_error\":true}]}",
+      "canonical": "{\"jobs\":[{\"continue_on_error\":true,\"failure_policy\":\"collect_all\",\"id\":\"compile\",\"steps\":[{\"id\":\"run\"}]}]}",
+      "sha256": "cdeb373cd5cd216e9fdb306f701fea58c5a9da1b00c84489756a6a91a6c2d240",
+      "code": ""
+    },
+    {
+      "name": "approval-condition",
+      "raw": "{\"jobs\":[{\"id\":\"approve\",\"approval\":{\"timeout_ms\":0},\"closures\":{\"skip_if\":[\"approve/skip/0\"]}}]}",
+      "canonical": "{\"jobs\":[{\"approval\":{\"timeout_ms\":0},\"closures\":{\"skip_if\":[\"approve/skip/0\"]},\"id\":\"approve\"}]}",
+      "sha256": "a925938bc9e145ea2805a6375150aaacdc24fa7b5e87a6a947b94ff147c5cde1",
+      "code": ""
+    },
+    {
+      "name": "secret-identifier",
+      "raw": "{\"jobs\":[{\"id\":\"build-token\",\"steps\":[{\"id\":\"run\"}]}]}",
+      "canonical": "{\"jobs\":[{\"id\":\"build-token\",\"steps\":[{\"id\":\"run\"}]}]}",
+      "sha256": "02573254a9db5e976b55374d6f7ef2f3ba82395164b8e72a966b54ebdfd6ad10",
+      "code": "secret_in_identifier",
+      "secrets": [
+        "token"
+      ]
+    },
+    {
+      "name": "generated-declaration",
+      "raw": "{\"jobs\":[{\"id\":\"child\",\"groups\":[\"generated-group\"],\"deps\":[\"seed\"],\"steps\":[{\"id\":\"run\"}]}]}",
+      "canonical": "{\"jobs\":[{\"deps\":[\"seed\"],\"groups\":[\"generated-group\"],\"id\":\"child\",\"steps\":[{\"id\":\"run\"}]}]}",
+      "sha256": "5f64c60d48bcf1e026e1c30865649ff56bded6569cbce141275f105c057e8f4c",
+      "code": "",
+      "source_job": "seed",
+      "existing_jobs": [
+        {
+          "id": "seed",
+          "steps": [
+            {
+              "id": "run"
+            }
+          ],
+          "closures": {
+            "generate": [
+              "generated-group"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "inner_errors": [
+    {
+      "name": "inner",
+      "raw": "{\"code\":\"forbidden\",\"message\":\"denied\",\"hint\":\"request access\",\"details\":{\"field\":\"jobs[0].id\"}}",
+      "valid": true
+    },
+    {
+      "name": "additive",
+      "raw": "{\"code\":\"future_code\",\"message\":\"\",\"future\":true}",
+      "valid": true
+    },
+    {
+      "name": "missing-message",
+      "raw": "{\"code\":\"forbidden\"}",
+      "valid": false
+    },
+    {
+      "name": "double-envelope",
+      "raw": "{\"error\":{\"code\":\"forbidden\",\"message\":\"denied\"}}",
+      "valid": false
+    },
+    {
+      "name": "duplicate",
+      "raw": "{\"code\":\"forbidden\",\"code\":\"cancelled\",\"message\":\"denied\"}",
+      "valid": false
+    },
+    {
+      "name": "null",
+      "raw": "null",
+      "valid": false
     }
   ]
 }

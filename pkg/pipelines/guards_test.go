@@ -14,8 +14,8 @@ func TestParseGuardToken_KnownShapes(t *testing.T) {
 		arg  string
 		val  string
 	}{
-		{"profile:local", pipelines.KindProfileLocal, "", ""},
-		{"profile:controller", pipelines.KindProfileController, "", ""},
+		{"where:local", pipelines.KindProfileLocal, "", ""},
+		{"where:controller", pipelines.KindProfileController, "", ""},
 		{"arg:image=nginx:latest", pipelines.KindArg, "image", "nginx:latest"},
 	}
 	for _, tc := range cases {
@@ -33,8 +33,8 @@ func TestParseGuardToken_KnownShapes(t *testing.T) {
 func TestParseGuardToken_Errors(t *testing.T) {
 	cases := []string{
 		"unknown-thing",
-		"profile:name=",
-		"profile:name=prod",
+		"where:name=",
+		"where:name=prod",
 		"arg:noequals",
 		"arg:=novalue",
 		"arg:flag=",
@@ -55,14 +55,14 @@ func TestGuardToken_Matches(t *testing.T) {
 		return tok.Matches(c)
 	}
 
-	if !match("profile:local", ctxLocal) {
-		t.Error("profile:local should match local ctx")
+	if !match("where:local", ctxLocal) {
+		t.Error("where:local should match local ctx")
 	}
-	if match("profile:local", ctxProd) {
-		t.Error("profile:local should NOT match prod ctx")
+	if match("where:local", ctxProd) {
+		t.Error("where:local should NOT match prod ctx")
 	}
-	if !match("profile:controller", ctxProd) {
-		t.Error("profile:controller should match prod ctx")
+	if !match("where:controller", ctxProd) {
+		t.Error("where:controller should match prod ctx")
 	}
 	if !match("arg:image=nginx", ctxProd) {
 		t.Error("arg match should fire")
@@ -75,19 +75,19 @@ func TestGuardToken_Matches(t *testing.T) {
 func TestGuards_EvaluateRejectFiresFirst(t *testing.T) {
 	g := pipelines.Guards{
 		Require: []string{"arg:image=nginx"},
-		Reject:  []string{"profile:local"},
+		Reject:  []string{"where:local"},
 	}
 	err := g.Evaluate("deploy-prod", pipelines.GuardContext{ProfileIsLocal: true})
 	if err == nil {
 		t.Fatal("expected reject to fire")
 	}
-	if !strings.Contains(err.Error(), "rejected") || !strings.Contains(err.Error(), "profile:local") {
+	if !strings.Contains(err.Error(), "rejected") || !strings.Contains(err.Error(), "where:local") {
 		t.Errorf("error should name reject + token; got %v", err)
 	}
 }
 
 func TestGuards_EvaluateRequireUnsatisfied(t *testing.T) {
-	g := pipelines.Guards{Require: []string{"profile:controller"}}
+	g := pipelines.Guards{Require: []string{"where:controller"}}
 	err := g.Evaluate("deploy-prod", pipelines.GuardContext{ProfileIsLocal: true})
 	if err == nil || !strings.Contains(err.Error(), "requires") {
 		t.Errorf("expected require failure; got %v", err)
@@ -96,8 +96,8 @@ func TestGuards_EvaluateRequireUnsatisfied(t *testing.T) {
 
 func TestGuards_EvaluateAllSatisfiedNoError(t *testing.T) {
 	g := pipelines.Guards{
-		Require: []string{"profile:controller", "arg:image=nginx"},
-		Reject:  []string{"profile:local"},
+		Require: []string{"where:controller", "arg:image=nginx"},
+		Reject:  []string{"where:local"},
 	}
 	err := g.Evaluate("deploy-prod", pipelines.GuardContext{
 		ProfileIsLocal: false,
@@ -116,8 +116,8 @@ func TestGuards_EvaluateEmptyIsNoop(t *testing.T) {
 }
 
 func TestParseGuardToken_ProfileNameIsRemoved(t *testing.T) {
-	_, err := pipelines.ParseGuardToken("profile:name=prod")
-	if err == nil || !strings.Contains(err.Error(), "profile:name= is removed") {
-		t.Fatalf("profile:name=prod = %v, want the removal named", err)
+	_, err := pipelines.ParseGuardToken("where:name=prod")
+	if err == nil || !strings.Contains(err.Error(), "where:name= is removed") {
+		t.Fatalf("where:name=prod = %v, want the removal named", err)
 	}
 }

@@ -35,6 +35,7 @@ type Host interface {
 	// Records returns isolated log snapshots with numeric attributes represented as json.Number.
 	Records() []sparkwing.LogRecord
 	Masks() []string
+	// Close cancels and joins active operations and service callbacks. Call it outside those calls.
 	Close() error
 }
 

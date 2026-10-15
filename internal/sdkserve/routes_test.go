@@ -204,3 +204,53 @@ func TestHostRoutesPreserveExplicitEmptyValues(t *testing.T) {
 		t.Fatalf("explicit null latest output = %s, %v", output, err)
 	}
 }
+
+func TestMaskUsesAcknowledgedBoundRoute(t *testing.T) {
+	s := fakeRoutes(t, "POST", "/node/v1/masks", `{"value":"sensitive"}`, `{}`)
+	if err := s.Mask(t.Context(), "sensitive"); err != nil {
+		t.Fatal(err)
+	}
+	s.transport = routeTransport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"secret_in_identifier","message":"identifier collision","details":{"field":"jobs[0].id"}}}`)), Header: http.Header{}}, nil
+	})
+	if err := s.Mask(t.Context(), "sensitive"); err == nil || strings.Contains(err.Error(), "sensitive") {
+		t.Fatalf("mask refusal = %v", err)
+	}
+	s.binding = nil
+	if err := s.Mask(t.Context(), "sensitive"); err == nil {
+		t.Fatal("unbound mask accepted")
+	}
+}
+
+func TestRecordsUseAcknowledgedBoundRoutes(t *testing.T) {
+	for _, test := range []struct {
+		name, path, body string
+		frame            nodeproto.FrameLog
+	}{
+		{"annotation", "/node/v1/annotations", `{"level":"warn","message":"message","file":"main.go","line":3,"end_line":5,"column":2,"step":"s"}`, nodeproto.FrameLog{Event: "annotation", Level: "warn", Message: "message", Step: "s", Attrs: json.RawMessage(`{"file":"main.go","line":3,"end_line":5,"column":2}`)}},
+		{"summary", "/node/v1/summary", `{"markdown":"# Markdown","step":"s"}`, nodeproto.FrameLog{Event: "summary", Message: "# Markdown", Step: "s"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := fakeRoutes(t, "POST", test.path, test.body, `{}`)
+			s.ctx = t.Context()
+			s.Emit(test.frame)
+			s.transport = routeTransport(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 500, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"write failed"}}`)), Header: http.Header{}}, nil
+			})
+			defer func() {
+				if recover() == nil {
+					t.Fatal("record write failure was ignored")
+				}
+			}()
+			s.Emit(test.frame)
+		})
+	}
+	for _, ack := range []string{`null`, `[]`, `"ok"`, ``} {
+		t.Run("mask-ack="+ack, func(t *testing.T) {
+			s := fakeRoutes(t, "POST", "/node/v1/masks", `{"value":"secret"}`, ack)
+			if err := s.Mask(t.Context(), "secret"); err == nil {
+				t.Fatal("invalid acknowledgement accepted")
+			}
+		})
+	}
+}

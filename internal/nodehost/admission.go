@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -103,8 +104,12 @@ type group struct {
 
 func (a *Admission) admit(ctx context.Context, n *NodeRun, next Executor) Result {
 	var local, remote []group
-	for _, spec := range n.Plan.Concurrency {
-		g := group{key: ConcurrencyKey(spec, n.Run.ID, a.boxID()), policy: spec.OnLimit, capacity: spec.Capacity, cost: spec.Cost, queueTO: millis(value(spec.QueueTimeoutMS)), cancelTO: millis(value(spec.CancelTimeoutMS))}
+	specs, err := settings.ResolveConcurrency(n.Plan.Concurrency)
+	if err != nil {
+		return Result{Outcome: sparkwing.Failed, Err: err}
+	}
+	for _, spec := range specs {
+		g := group{key: scopedConcurrencyKey(spec.Group, spec.Scope, n.Run.ID, a.boxID()), policy: spec.OnLimit, capacity: spec.Capacity, cost: spec.Cost, queueTO: millis(value(spec.QueueTimeoutMS)), cancelTO: millis(value(spec.CancelTimeoutMS))}
 		if a.Daemon != nil && (spec.Scope == "box" || spec.Scope == "run") {
 			local = append(local, g)
 		} else {

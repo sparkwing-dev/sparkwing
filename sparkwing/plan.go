@@ -17,7 +17,7 @@ import (
 // Build a Plan via [NewPlan], attach jobs with [Job], and chain
 // dependencies with [JobNode.Needs].
 type Plan struct {
-	evalMu                    sync.Mutex
+	evalGate                  chan struct{}
 	generated                 map[string][]nodeproto.JobSpec
 	secretInputs              []string
 	registration              *registration
@@ -46,7 +46,7 @@ type Plan struct {
 }
 
 func NewPlan() *Plan {
-	return &Plan{byID: map[string]*JobNode{}}
+	return &Plan{byID: map[string]*JobNode{}, evalGate: make(chan struct{}, 1)}
 }
 
 func recoveryChain(root *JobNode) iter.Seq[*JobNode] {

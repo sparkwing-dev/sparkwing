@@ -317,7 +317,9 @@ type Annotation struct {
 }
 
 // safety: Annotate preserves structured location while the host masks and enforces the 128 KiB limit.
+// It requires an execution context. A host write failure panics so the operation reports failure.
 func Annotate(ctx context.Context, annotation Annotation) {
+	sdkserve.RequireExecution(ctx, "sparkwing.Annotate")
 	if annotation.Level == "" {
 		annotation.Level = "info"
 	}

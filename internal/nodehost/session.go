@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 var (
@@ -45,11 +46,12 @@ var reapTimeout = 10 * time.Second
 var sinkQueueBytes = 8 << 20
 
 // Sink receives everything an SDK process writes other than replies. The
-// session calls it from several goroutines at once. Masking and storage are
-// the sink's job.
+// session calls it from several goroutines at once. The session masks text;
+// masking records and storing both are the sink's job.
 type Sink interface {
 	// Text receives one stdout line at LevelInfo or stderr line at LevelWarn,
-	// verbatim apart from its line ending.
+	// masked, without its line ending. A line longer than the session holds
+	// arrives in pieces.
 	Text(level, line string)
 	// Record receives a frame-pipe log record. Step is kept only while a
 	// run_step for that step is in flight.
@@ -75,6 +77,8 @@ type SessionConfig struct {
 	// implicitly.
 	Env  []string
 	Sink Sink
+	// Masker masks stdout and stderr as they reach the sink; nil masks nothing.
+	Masker *secrets.Masker
 	// Grace is how long the process gets to exit after its request pipe
 	// closes, and between SIGTERM and SIGKILL. Zero means
 	// procgroup.DefaultTerminationGrace.
@@ -199,16 +203,16 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 		watchDone: make(chan struct{}),
 	}
 	s.holding = cfg.HoldOutput
-	for range 3 {
-		q := newSinkQueue()
+	for _, level := range []string{"", LevelInfo, LevelWarn} {
+		q := newSinkQueue(level, cfg.Masker)
 		q.held = cfg.HoldOutput
 		s.queues = append(s.queues, q)
 		go q.run(cfg.Sink)
 	}
 	s.streams.Add(3)
 	go s.readFrames(parent[1], s.queues[0])
-	go s.readText(parent[2], LevelInfo, s.queues[1])
-	go s.readText(parent[3], LevelWarn, s.queues[2])
+	go s.readText(parent[2], s.queues[1])
+	go s.readText(parent[3], s.queues[2])
 	go s.watch(ctx)
 	helloCtx, cancel := context.WithTimeout(ctx, cmp.Or(cfg.DescribeTimeout, 30*time.Second))
 	defer cancel()
@@ -332,7 +336,7 @@ func (s *Session) Close() (Usage, error) {
 		// counted, so the log does not read as complete.
 		abandoned := !s.await(delivered)
 		for _, q := range s.queues {
-			s.lost += q.lost(abandoned)
+			s.lost += q.end(abandoned)
 		}
 		s.usage = s.sampler.Stop(s.cmd.ProcessState)
 		err := s.failure()
@@ -533,11 +537,12 @@ func (s *Session) attribute(rec nodeproto.FrameLog) nodeproto.FrameLog {
 	return rec
 }
 
-func (s *Session) readText(f *os.File, level string, q *sinkQueue) {
+func (s *Session) readText(f *os.File, q *sinkQueue) {
 	defer s.streams.Done()
 	defer f.Close()
 	br := bufio.NewReaderSize(f, 64<<10)
 	var line []byte
+	piece := false
 	for {
 		chunk, err := br.ReadSlice('\n')
 		line = append(line, chunk...)
@@ -552,27 +557,48 @@ func (s *Session) readText(f *os.File, level string, q *sinkQueue) {
 					end--
 				}
 			}
-			q.push(sinkItem{level: level, text: string(line[:end]), size: end})
+			piece = errors.Is(err, bufio.ErrBufferFull)
+			// safety: a piece's trailing CR waits for the next piece, so a CRLF split at the limit still ends one line.
+			cr := piece && line[end-1] == '\r'
+			if cr {
+				end--
+			}
+			q.push(sinkItem{text: string(line[:end]), piece: piece, size: end})
 			line = line[:0]
+			if cr {
+				line = append(line, '\r')
+			}
 		}
 		if err != nil && !errors.Is(err, bufio.ErrBufferFull) {
+			// safety: a stream that ends right after a piece still ends its line, so the held tail is shown.
+			if piece {
+				q.push(sinkItem{})
+			}
 			return
 		}
 	}
 }
 
 type sinkItem struct {
-	level, text string
-	rec         *nodeproto.FrameLog
-	size        int
+	text string
+	// safety: a piece continues the same line so masking can retain its unfinished tail.
+	piece bool
+	// safety: a dropped piece cannot be completed by a later line.
+	cut  bool
+	rec  *nodeproto.FrameLog
+	size int
 	// safety: closed in place of a delivery, so a waiter knows every item
 	// queued before it has reached the sink.
 	mark chan struct{}
 }
 
 // safety: each stream's lines reach the sink through its own queue, so a pipe
-// reader never waits on the sink.
+// reader never waits on the sink, and are masked as they leave it, so a
+// secret registered while a line waited is masked too.
 type sinkQueue struct {
+	level  string
+	stream *secrets.Stream
+
 	mu      sync.Mutex
 	items   []sinkItem
 	bytes   int
@@ -586,10 +612,11 @@ type sinkQueue struct {
 	held        bool
 	withholding bool
 	withheld    int
+	abandoned   bool
 }
 
-func newSinkQueue() *sinkQueue {
-	return &sinkQueue{wake: make(chan struct{}, 1), done: make(chan struct{})}
+func newSinkQueue(level string, masker *secrets.Masker) *sinkQueue {
+	return &sinkQueue{level: level, stream: masker.Stream(), wake: make(chan struct{}, 1), done: make(chan struct{})}
 }
 
 func (q *sinkQueue) push(item sinkItem) {
@@ -604,6 +631,7 @@ func (q *sinkQueue) push(item sinkItem) {
 	if q.bytes > 0 && q.bytes+item.size > sinkQueueBytes {
 		q.dropped++
 		q.total++
+		q.items[len(q.items)-1].cut = true
 	} else {
 		q.items = append(q.items, item)
 		q.bytes += item.size
@@ -647,10 +675,14 @@ func (q *sinkQueue) notice(rec nodeproto.FrameLog) {
 	q.signal()
 }
 
-// safety: an abandoned queue still runs, so its item in delivery counts as lost too.
-func (q *sinkQueue) lost(abandoned bool) int {
+// safety: an abandoned queue delivers nothing more, so a piece's held tail is
+// never shown and the rest of its line never arrives late; what it never
+// delivered, its item in delivery included, counts as lost.
+func (q *sinkQueue) end(abandoned bool) int {
 	q.mu.Lock()
+	defer q.signal()
 	defer q.mu.Unlock()
+	q.abandoned = abandoned
 	n := q.total
 	if abandoned {
 		select {
@@ -685,6 +717,10 @@ func (q *sinkQueue) run(sink Sink) {
 	defer close(q.done)
 	for {
 		q.mu.Lock()
+		if q.abandoned {
+			q.mu.Unlock()
+			return
+		}
 		if len(q.items) == 0 || q.held {
 			dropped, closed := q.dropped, q.closed && !q.held
 			if q.held {
@@ -717,7 +753,12 @@ func (q *sinkQueue) run(sink Sink) {
 		case item.rec != nil:
 			sink.Record(*item.rec)
 		default:
-			sink.Text(item.level, item.text)
+			if text := q.stream.Mask(item.text, !item.piece); text != "" || !item.piece {
+				sink.Text(q.level, text)
+			}
+		}
+		if item.cut {
+			q.stream.Drop()
 		}
 	}
 }

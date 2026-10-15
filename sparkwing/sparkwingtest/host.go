@@ -24,37 +24,46 @@ type host struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	mu      sync.Mutex
+	work    sync.WaitGroup
 	masks   []string
 	records []sparkwing.LogRecord
+	plans   []json.RawMessage
 }
 
 func (h *host) Context(ctx context.Context) context.Context {
 	return h.context(ctx, "")
 }
 
-func (h *host) context(ctx context.Context, job string) context.Context {
+func (h *host) linkedContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(ctx)
 	if h.ctx.Err() != nil {
 		cancel()
 	}
 	stop := context.AfterFunc(h.ctx, cancel)
 	context.AfterFunc(ctx, func() { stop() })
+	return ctx, cancel
+}
+
+func (h *host) context(ctx context.Context, job string) context.Context {
+	ctx, _ = h.linkedContext(ctx)
 	rc := h.runContext(h.opts.Run.Pipeline)
 	r := h.opts.Runner
-	return sdkserve.DefaultOperations.Context(ctx, rc, nodeproto.RunnerIdentity{Name: r.Name, Type: r.Type, Labels: r.Labels}, boundServices{h, job})
+	return sdkserve.DefaultOperations.Context(ctx, rc, nodeproto.RunnerIdentity{Name: r.Name, Type: r.Type, Labels: r.Labels}, boundServices{host: h, ctx: ctx, job: job})
 }
 
 type boundServices struct {
 	*host
+	ctx context.Context
 	job string
 }
 
-func (s boundServices) Emit(frame nodeproto.FrameLog) { s.host.emit(frame, s.job) }
+func (s boundServices) Emit(frame nodeproto.FrameLog) { s.host.emit(s.ctx, frame, s.job) }
 func (h *host) Plan(ctx context.Context, name string, args map[string]string) (nodeproto.PlanDoc, error) {
 	ctx = h.Context(ctx)
-	if err := ctx.Err(); err != nil {
+	if err := h.begin(ctx); err != nil {
 		return nodeproto.PlanDoc{}, err
 	}
+	defer h.work.Done()
 	_, doc, err := sdkserve.DefaultOperations.Plan(ctx, name, args, h.runContext(name))
 	if err != nil {
 		return doc, err
@@ -63,12 +72,16 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 	if err != nil {
 		return doc, err
 	}
-	return nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: h})
+	return h.accept(raw)
 }
 
 func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string) (json.RawMessage, error) {
 	ctx = h.context(ctx, job)
-	if err := ctx.Err(); err != nil {
+	if err := h.begin(ctx); err != nil {
+		return nil, err
+	}
+	defer h.work.Done()
+	if err := h.remember(p); err != nil {
 		return nil, err
 	}
 	result, err := sdkserve.DefaultOperations.RunStep(ctx, p, nodeproto.Request{Job: job, Step: step, Attempt: 1})
@@ -83,7 +96,11 @@ func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string)
 
 func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string, input json.RawMessage) (json.RawMessage, error) {
 	ctx = h.Context(ctx)
-	if err := ctx.Err(); err != nil {
+	if err := h.begin(ctx); err != nil {
+		return nil, err
+	}
+	defer h.work.Done()
+	if err := h.remember(p); err != nil {
 		return nil, err
 	}
 	result, err := sdkserve.DefaultOperations.Eval(ctx, p, nodeproto.Request{Job: job, Closure: closure, Input: input})
@@ -92,6 +109,9 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 	}
 	if result.Error != nil {
 		return nil, result.Error
+	}
+	if err := h.remember(p); err != nil {
+		return nil, err
 	}
 	return result.Value, nil
 }
@@ -117,9 +137,32 @@ func (h *host) Masks() []string {
 	defer h.mu.Unlock()
 	return append([]string(nil), h.masks...)
 }
-func (h *host) Close() error { h.cancel(); return nil }
+func (h *host) Close() error {
+	h.mu.Lock()
+	h.cancel()
+	h.mu.Unlock()
+	h.work.Wait()
+	return nil
+}
 
-func executionError(ctx context.Context) error {
+func (h *host) begin(ctx context.Context) error {
+	// safety: Close prevents new work before waiting for admitted calls to finish.
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.ctx.Err(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h.work.Add(1)
+	return nil
+}
+
+func (h *host) executionError(ctx context.Context) error {
+	if err := h.ctx.Err(); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -130,7 +173,7 @@ func executionError(ctx context.Context) error {
 }
 
 func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
-	if err := executionError(ctx); err != nil {
+	if err := h.executionError(ctx); err != nil {
 		return "", false, err
 	}
 	v, ok := h.opts.Secrets[name]
@@ -146,7 +189,7 @@ func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
 }
 
 func (h *host) Output(ctx context.Context, job string) (json.RawMessage, error) {
-	if err := executionError(ctx); err != nil {
+	if err := h.executionError(ctx); err != nil {
 		return nil, err
 	}
 	raw, ok := h.opts.Outputs[job]
@@ -157,33 +200,54 @@ func (h *host) Output(ctx context.Context, job string) (json.RawMessage, error) 
 }
 
 func (h *host) Latest(ctx context.Context, p, j string, _ time.Duration) (json.RawMessage, error) {
-	if err := executionError(ctx); err != nil {
+	if err := h.executionError(ctx); err != nil {
 		return nil, err
 	}
 	if h.opts.Latest == nil {
 		return nil, sparkwing.ErrRefAbsent
 	}
+	if err := h.begin(ctx); err != nil {
+		return nil, err
+	}
+	defer h.work.Done()
+	ctx, cancel := h.linkedContext(ctx)
+	defer cancel()
 	return h.opts.Latest(ctx, p, j)
 }
 
 func (h *host) RunPipeline(ctx context.Context, r sdkserve.ChildRequest) (json.RawMessage, error) {
-	if err := executionError(ctx); err != nil {
+	if err := h.executionError(ctx); err != nil {
 		return nil, err
 	}
 	if h.opts.RunPipeline == nil {
 		return nil, errors.New("fake host has no child pipeline handler")
 	}
+	if err := h.begin(ctx); err != nil {
+		return nil, err
+	}
+	defer h.work.Done()
+	ctx, cancel := h.linkedContext(ctx)
+	defer cancel()
 	return h.opts.RunPipeline(ctx, r.Pipeline, r.Args)
 }
 
 func (h *host) OIDC(ctx context.Context, a string) (string, error) {
-	if err := executionError(ctx); err != nil {
+	if err := h.executionError(ctx); err != nil {
 		return "", err
 	}
 	if h.opts.OIDCToken == nil {
 		return "", sparkwing.ErrOIDCUnavailable
 	}
+	if err := h.begin(ctx); err != nil {
+		return "", err
+	}
+	defer h.work.Done()
+	ctx, cancel := h.linkedContext(ctx)
+	defer cancel()
 	token, err := h.opts.OIDCToken(ctx, a)
+	if err == nil && token == "" {
+		err = fmt.Errorf("host OIDC response needs a token")
+	}
 	if err == nil {
 		err = h.Mask(ctx, token)
 	}
@@ -199,7 +263,7 @@ func (h *host) ReleaseCleanup(context.Context, string) error {
 }
 
 func (h *host) Mask(ctx context.Context, value string) error {
-	if err := executionError(ctx); err != nil {
+	if err := h.executionError(ctx); err != nil {
 		return err
 	}
 	if value == "" {
@@ -207,6 +271,14 @@ func (h *host) Mask(ctx context.Context, value string) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if err := h.executionError(ctx); err != nil {
+		return err
+	}
+	for _, plan := range h.plans {
+		if _, err := nodeproto.ValidatePlan(plan, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: registeredMasks{value}}); err != nil {
+			return err
+		}
+	}
 	for _, v := range h.masks {
 		if v == value {
 			return nil
@@ -217,20 +289,50 @@ func (h *host) Mask(ctx context.Context, value string) error {
 	return nil
 }
 
-func (h *host) ContainsSecret(id string) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, v := range h.masks {
-		if strings.Contains(id, v) {
+func (h *host) remember(p *sparkwing.Plan) error {
+	raw, err := json.Marshal(sdkserve.DefaultOperations.Document(p))
+	if err != nil {
+		return err
+	}
+	_, err = h.accept(raw)
+	return err
+}
+
+type registeredMasks []string
+
+func (values registeredMasks) ContainsSecret(id string) bool {
+	for _, value := range values {
+		if value != "" && strings.Contains(id, value) {
 			return true
 		}
 	}
 	return false
 }
 
-func (h *host) emit(frame nodeproto.FrameLog, job string) {
+func (h *host) accept(raw json.RawMessage) (nodeproto.PlanDoc, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	doc, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: registeredMasks(h.masks)})
+	if err == nil && (len(h.plans) == 0 || !bytes.Equal(raw, h.plans[len(h.plans)-1])) {
+		h.plans = append(h.plans, raw)
+	}
+	return doc, err
+}
+
+func (h *host) ContainsSecret(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return registeredMasks(h.masks).ContainsSecret(id)
+}
+
+func (h *host) emit(ctx context.Context, frame nodeproto.FrameLog, job string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if frame.Event == "annotation" || frame.Event == "summary" {
+		if err := h.executionError(ctx); err != nil {
+			panic(err)
+		}
+	}
 	mask := func(s string) string {
 		for _, v := range h.masks {
 			s = strings.ReplaceAll(s, v, "***")

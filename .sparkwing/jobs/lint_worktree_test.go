@@ -24,8 +24,6 @@ func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	requireGolangciLint(t)
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	t.Setenv("SPARKWING_CACHE_GRANT", "")
 	root := t.TempDir()
 
 	origin := filepath.Join(root, "origin")
@@ -43,7 +41,7 @@ func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 	previous := sparkwing.WorkDir()
 	sparkwing.SetWorkDir(worktree)
 	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
-	t.Cleanup(func() { _ = os.RemoveAll(sparkwing.ToolCacheDir("golangci-lint")) })
+	t.Cleanup(func() { _ = os.RemoveAll(pipelineCacheDir("golangci-lint")) })
 
 	writeGoFile(t, filepath.Join(worktree, "internal", "negative_control.go"),
 		ineffassignViolation("internal"))

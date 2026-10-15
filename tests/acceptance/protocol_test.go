@@ -43,7 +43,7 @@ func TestProtocol(t *testing.T) {
 					}
 					if scenario.ID == "protocol-mask-acknowledgement" && target.ID == "local-go-"+runtime.GOOS {
 						t.Run("sdk-service-contract", testGoSDKMaskAcknowledgement)
-						t.Skip("real-host registration requires the missing C2 acknowledged Mask route contract")
+						t.Skip("real HTTP registration and host sink installation require W2/W3 placement drivers")
 					}
 					if scenario.ID == "protocol-go-sdk-fake-host-and-linkage" && target.ID == "local-go-"+runtime.GOOS {
 						t.Run("sdk-linkage", func(t *testing.T) {
@@ -55,6 +55,15 @@ func TestProtocol(t *testing.T) {
 						t.Run("sdk-frame-boundaries", testGoSDKFrameLimit)
 						t.Run("sdk-reply-frame-boundaries", testGoSDKReplyFrameLimit)
 						t.Run("public-fake-host", testGoSDKFakeHost)
+						t.Run("empty-oidc-token", testGoSDKRefusesEmptyOIDCToken)
+						t.Run("colliding-masks", testGoSDKRefusesCollidingMasks)
+						t.Run("later-mask-collisions", testGoSDKMaskRegistryGuardsLaterDeclarations)
+						t.Run("approval-condition", testGoSDKApprovalCondition)
+						t.Run("queued-eval-cancellation", testGoSDKQueuedEvalCancellation)
+						t.Run("fake-host-close", testGoSDKFakeHostCloseJoinsWork)
+						t.Run("closed-fake-host-services", testGoSDKClosedFakeHostServices)
+						t.Run("mask-close-race", testGoSDKMaskCannotCommitAfterClose)
+						t.Run("dependency-cache-keys", testGoSDKDependencyCacheKeys)
 						t.Run("fileset-path-names", testGoSDKFilesetPathNames)
 						t.Run("fileset-ignore-read-failure", testGoSDKFilesetIgnoreReadFailure)
 						t.Run("declaration-services", testGoSDKDeclarationServices)
@@ -63,6 +72,7 @@ func TestProtocol(t *testing.T) {
 						t.Run("fake-host-run-snapshot", testGoSDKFakeHostRunSnapshot)
 						t.Run("entrypoint-alias", testGoSDKEntrypointAlias)
 						t.Run("closure-identifiers", testGoSDKClosureIdentifiers)
+						t.Run("eval-run-logs", testGoSDKFakeHostEvalRunLogs)
 						t.Run("job-arguments", testGoSDKJobArguments)
 						t.Run("recovery-chains", testGoSDKRecoveryChains)
 						t.Run("replay-environment", testGoSDKReplayEnvironment)

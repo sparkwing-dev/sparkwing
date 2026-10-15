@@ -1,21 +1,19 @@
-//go:build unix
-
 package conformance
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
 type corpus struct {
@@ -40,7 +38,10 @@ type corpusStep struct {
 
 func TestGoSDKConformsV2(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "gofixture")
-	build := exec.Command("go", "build", "-o", bin, "./gofixture")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	build := exec.CommandContext(t.Context(), "go", "build", "-p", "4", "-o", bin, "./gofixture")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build fixture: %v\n%s", err, output)
 	}
@@ -121,12 +122,7 @@ func TestGoSDKConformsV2(t *testing.T) {
 }
 
 type fixtureProcess struct {
-	command   *exec.Cmd
-	request   *os.File
-	frames    *nodeproto.Reader
-	frameR    *os.File
-	stdout    bytes.Buffer
-	stderr    bytes.Buffer
+	process   *acceptance.GoSDKProcess
 	plan      nodeproto.PlanDoc
 	wire      *Schema
 	documents *Schema
@@ -134,15 +130,8 @@ type fixtureProcess struct {
 
 func startFixture(t *testing.T, bin string) *fixtureProcess {
 	t.Helper()
-	requestR, requestW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	frameR, frameW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := &fixtureProcess{request: requestW, frames: nodeproto.NewReader(frameR), frameR: frameR}
+	p := &fixtureProcess{}
+	var err error
 	p.wire, err = LoadSchema(filepath.Join("testdata", "v2-wire.schema.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -151,38 +140,17 @@ func startFixture(t *testing.T, bin string) *fixtureProcess {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.command = exec.CommandContext(t.Context(), bin, protofd.Arg)
-	p.command.Dir = t.TempDir()
-	for _, item := range os.Environ() {
-		if !strings.HasPrefix(item, "SPARKWING_") {
-			p.command.Env = append(p.command.Env, item)
-		}
-	}
-	p.command.ExtraFiles = []*os.File{requestR, frameW}
-	p.command.Stdout, p.command.Stderr = &p.stdout, &p.stderr
-	if err := p.command.Start(); err != nil {
+	p.process, err = acceptance.StartGoSDKProcess(t.Context(), bin)
+	if err != nil {
 		t.Fatal(err)
 	}
-	_ = requestR.Close()
-	_ = frameW.Close()
-	t.Cleanup(func() {
-		_ = requestW.Close()
-		_ = frameR.Close()
-		if p.command.ProcessState == nil {
-			_ = p.command.Process.Kill()
-			_ = p.command.Wait()
-		}
-	})
+	t.Cleanup(p.process.Close)
 	return p
 }
 
 func (p *fixtureProcess) send(t *testing.T, req nodeproto.Request) {
 	t.Helper()
-	raw, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.request.Write(append(raw, '\n')); err != nil {
+	if err := p.process.Send(req); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -190,9 +158,10 @@ func (p *fixtureProcess) send(t *testing.T, req nodeproto.Request) {
 func (p *fixtureProcess) reply(t *testing.T) nodeproto.Reply {
 	t.Helper()
 	for {
-		line, err := p.frames.ReadLine()
+		line, err := p.process.NextFrame()
 		if err != nil {
-			t.Fatalf("frame read: %v; stderr: %s", err, p.stderr.String())
+			p.process.Close()
+			t.Fatalf("frame read: %v; stderr: %s", err, p.process.Stderr())
 		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(line, &fields); err != nil {
@@ -273,13 +242,7 @@ func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodeproto.Reque
 
 func (p *fixtureProcess) end(t *testing.T) {
 	t.Helper()
-	if err := p.request.Close(); err != nil {
+	if err := p.process.Finish(); err != nil {
 		t.Fatal(err)
-	}
-	if line, err := p.frames.ReadLine(); err != io.EOF {
-		t.Errorf("frame after end of requests: %q, %v", line, err)
-	}
-	if err := p.command.Wait(); err != nil {
-		t.Fatalf("fixture exited: %v; stderr: %s", err, p.stderr.String())
 	}
 }

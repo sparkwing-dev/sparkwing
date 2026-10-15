@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -26,7 +27,10 @@ type runEnd struct {
 // outlives it until release.
 func (a *Admission) hostRun(ctx context.Context, run *Run, cancel context.CancelCauseFunc, body func(context.Context) runEnd) (end runEnd, release func()) {
 	release = func() {}
-	claims, inStore := a.planGroups(run.Doc, run.ID)
+	claims, inStore, err := a.planGroups(run.Doc, run.ID)
+	if err != nil {
+		return runEnd{status: "failed", err: err}, release
+	}
 	if len(inStore) > 0 && a.Slots == nil {
 		return runEnd{status: "failed", err: fmt.Errorf("plan concurrency group %q: no coordination store", inStore[0].key)}, release
 	}
@@ -85,11 +89,14 @@ func runHolder(run *Run) slotHolder {
 
 // safety: each list is in key order, so two runs never take one another's
 // groups in opposite orders.
-func (a *Admission) planGroups(doc nodeproto.PlanDoc, runID string) (claims []wingwire.SemaphoreClaim, inStore []group) {
-	pcs := doc.Concurrency
+func (a *Admission) planGroups(doc nodeproto.PlanDoc, runID string) (claims []wingwire.SemaphoreClaim, inStore []group, err error) {
+	pcs, err := settings.ResolveConcurrency(doc.Concurrency)
+	if err != nil {
+		return nil, nil, err
+	}
 	seen := map[string]bool{}
 	for _, pc := range pcs {
-		key := ConcurrencyKey(pc, runID, a.boxID())
+		key := scopedConcurrencyKey(pc.Group, pc.Scope, runID, a.boxID())
 		if key == "" || seen[key] {
 			continue
 		}
@@ -110,7 +117,7 @@ func (a *Admission) planGroups(doc nodeproto.PlanDoc, runID string) (claims []wi
 	}
 	slices.SortFunc(claims, func(x, y wingwire.SemaphoreClaim) int { return strings.Compare(x.Name, y.Name) })
 	slices.SortFunc(inStore, func(x, y group) int { return strings.Compare(x.key, y.key) })
-	return claims, inStore
+	return claims, inStore, nil
 }
 
 // safety: semaphores-only unless the plan declares resources, as the

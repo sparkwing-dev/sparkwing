@@ -73,7 +73,7 @@ func TestConcurrencyMembershipHasIndependentCost(t *testing.T) {
 		{"id":"large","steps":[{"id":"run"}],"concurrency":[{"group":"pool","capacity":3,"cost":2,"scope":"run","on_limit":"queue"}]}
 	]}`
 	checkPlan(t, raw, planContext(), "")
-	checkPlan(t, strings.Replace(raw, `"capacity":3,"cost":2`, `"capacity":4,"cost":2`, 1), planContext(), apierr.PlanInvalid)
+	checkPlan(t, strings.Replace(raw, `"capacity":3,"cost":2`, `"capacity":4,"cost":2`, 1), planContext(), "")
 }
 
 func TestExpansionCannotDependOnItsOwnBarrierConsumer(t *testing.T) {
@@ -121,8 +121,6 @@ func TestValidatePlanValuesAndCapabilities(t *testing.T) {
 	for name, raw := range map[string]string{
 		"failure policy":        `{"jobs":[{"id":"a","failure_policy":"collect-all","steps":[{"id":"s"}]}]}`,
 		"concurrency scope":     `{"jobs":[],"concurrency":[{"group":"g","scope":"planet","capacity":1,"cost":1,"on_limit":"queue"}]}`,
-		"concurrency cost":      `{"jobs":[],"concurrency":[{"group":"g","scope":"run","capacity":1,"cost":2,"on_limit":"queue"}]}`,
-		"concurrency conflict":  `{"jobs":[{"id":"a","steps":[{"id":"s"}],"concurrency":[{"group":"g","scope":"run","capacity":2,"cost":1,"on_limit":"queue"}]}],"concurrency":[{"group":"g","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}`,
 		"negative retry":        `{"jobs":[{"id":"a","retry":{"attempts":-1},"steps":[{"id":"s"}]}]}`,
 		"negative memory":       `{"jobs":[],"resources":{"memory_bytes":-1}}`,
 		"memo key without memo": `{"jobs":[{"id":"a","closures":{"memo_key":"key"},"steps":[{"id":"s"}]}]}`,

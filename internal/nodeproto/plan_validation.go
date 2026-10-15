@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
 	"sort"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -16,7 +15,6 @@ type planValidator struct {
 	jobs         map[string]JobSpec
 	closures     map[string]string
 	generators   map[string]string
-	concurrency  map[string]ConcurrencySpec
 	capabilities map[PlanCapability]bool
 	newJobs      []string
 }
@@ -44,7 +42,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 	v := &planValidator{
 		context: context, paths: map[string]string{}, jobs: map[string]JobSpec{},
 		closures: map[string]string{}, generators: map[string]string{},
-		concurrency: map[string]ConcurrencySpec{}, capabilities: map[PlanCapability]bool{},
+		capabilities: map[PlanCapability]bool{},
 	}
 	for _, row := range CapabilityTable() {
 		if _, exists := v.capabilities[row.Feature]; exists {
@@ -260,16 +258,16 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path string
 		if err := v.identifier(spec.Group, at+".group"); err != nil {
 			return err
 		}
-		if spec.Capacity <= 0 || spec.Cost <= 0 || spec.Cost > spec.Capacity {
-			return planInvalid(at, "capacity and cost must be positive, with cost at most capacity")
+		if spec.Capacity != nil && *spec.Capacity <= 0 || spec.Cost != nil && *spec.Cost <= 0 {
+			return planInvalid(at, "explicit capacity and cost must be positive")
 		}
-		if !planOneOf(spec.Scope, "global", "run", "box") {
+		if spec.Scope != nil && !planOneOf(*spec.Scope, "global", "run", "box") {
 			return planInvalid(at+".scope", "unknown scope")
 		}
-		if !planOneOf(spec.OnLimit, "queue", "fail", "skip", "cancel_others") {
+		if spec.OnLimit != nil && !planOneOf(*spec.OnLimit, "queue", "fail", "skip", "cancel_others") {
 			return planInvalid(at+".on_limit", "unknown limit policy")
 		}
-		if spec.Scope == "box" {
+		if spec.Scope != nil && *spec.Scope == "box" {
 			if err := v.feature(CapabilityBoxConcurrency, at+".scope"); err != nil {
 				return err
 			}
@@ -277,13 +275,6 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path string
 		if spec.QueueTimeoutMS != nil && *spec.QueueTimeoutMS < 0 || spec.CancelTimeoutMS != nil && *spec.CancelTimeoutMS < 0 {
 			return planInvalid(at, "timeout is negative")
 		}
-		if previous, exists := v.concurrency[spec.Group]; exists {
-			previous.Cost = spec.Cost
-			if !reflect.DeepEqual(previous, spec) {
-				return planInvalid(at+".group", "concurrency group has conflicting definitions")
-			}
-		}
-		v.concurrency[spec.Group] = spec
 	}
 	return nil
 }

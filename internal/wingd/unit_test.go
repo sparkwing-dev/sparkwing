@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -222,7 +223,7 @@ func TestApplyHeadroom_AdmitsWithHeadroom(t *testing.T) {
 
 func TestApplyHeadroom_IgnoreExternalAdmitsUnderLoad(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
-	d.cfg.Budget = Budget{IgnoreExternal: true}
+	d.cfg.Budget = userconfig.Budget{IgnoreExternal: true}
 	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, BusyCores: 7.5, FreeMemoryBytes: 16 << 30, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 
 	dec, _, err := d.ledger.Submit(admission.Request{ID: "ok", Cores: 2})
@@ -239,7 +240,7 @@ func TestApplyHeadroom_IgnoreExternalAdmitsUnderLoad(t *testing.T) {
 
 func TestApplyHeadroom_IgnoreExternalStillDetectsSaturation(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
-	d.cfg.Budget = Budget{IgnoreExternal: true}
+	d.cfg.Budget = userconfig.Budget{IgnoreExternal: true}
 	holder := &conn{role: roleHolder, finalizable: true}
 	d.conns[holder] = struct{}{}
 

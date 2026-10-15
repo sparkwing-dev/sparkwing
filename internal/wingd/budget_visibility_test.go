@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -11,7 +12,7 @@ import (
 
 func TestQueueState_NamesBudgetSource(t *testing.T) {
 	home := shortHome(t)
-	budget, err := wingd.ParseBudget("50%,ignore-external")
+	budget, err := userconfig.ParseBudget("50%,ignore-external")
 	if err != nil {
 		t.Fatalf("parse budget: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestQueueState_UnsetBudgetIsReported(t *testing.T) {
 
 func TestQueueState_UnrecordedBudgetSourceIsNotGuessed(t *testing.T) {
 	home := shortHome(t)
-	budget, err := wingd.ParseBudget("4")
+	budget, err := userconfig.ParseBudget("4")
 	if err != nil {
 		t.Fatalf("parse budget: %v", err)
 	}

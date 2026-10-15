@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -43,9 +42,11 @@ type LogSinkConfig struct {
 	RunID  string
 	NodeID string
 	Log    RecordWriter
-	State  NodeState
-	// Masker is the run's; every secret registered with it before a line
-	// arrives is masked in that line.
+	// State is nil for output with no node row, such as plan code's, whose
+	// annotations and summaries are dropped.
+	State NodeState
+	// Masker is the run's; every secret registered with it before a record
+	// arrives is masked in that record.
 	Masker *secrets.Masker
 	// Now stamps each record; nil means time.Now.
 	Now func() time.Time
@@ -54,30 +55,12 @@ type LogSinkConfig struct {
 }
 
 // LogSink is the [Sink] that stores one node's SDK output: it masks every
-// line and record, stamps it with the host's clock, attributes it to the
-// node, and writes node_annotation and node_summary records to the store.
-// Call [LogSink.Flush] once the session has closed.
+// record, stamps each line and record with the host's clock, attributes it to
+// the node, and writes node_annotation and node_summary records to the store.
 type LogSink struct {
 	cfg LogSinkConfig
 	ctx context.Context
-
-	mu sync.Mutex
-	// safety: the session splits a line longer than maxTextLine, so the tail
-	// of a long piece waits for the next piece of the same stream, and a
-	// secret spanning the split is masked whole.
-	carry [2]string
 }
-
-// safety: only the stdout reader sends LevelInfo text and only the stderr
-// reader LevelWarn, so the level names the stream a carry belongs to.
-func stream(level string) int {
-	if level == LevelInfo {
-		return 0
-	}
-	return 1
-}
-
-var streamLevels = [2]string{LevelInfo, LevelWarn}
 
 // safety: an allowlist, so an event the SDK invents can never pass as a host lifecycle record.
 var sdkEvents = map[string]bool{
@@ -93,8 +76,8 @@ var logLevels = map[string]bool{"debug": true, "info": true, "warn": true, "erro
 // NewLogSink returns a sink for cfg's node. Store writes outlive ctx's
 // cancellation, so a cancelled node's last annotations still land.
 func NewLogSink(ctx context.Context, cfg LogSinkConfig) (*LogSink, error) {
-	if cfg.RunID == "" || cfg.NodeID == "" || cfg.Log == nil || cfg.State == nil || cfg.Masker == nil {
-		return nil, errors.New("log sink: run, node, log, state and masker are required")
+	if cfg.RunID == "" || cfg.NodeID == "" || cfg.Log == nil || cfg.Masker == nil {
+		return nil, errors.New("log sink: run, node, log and masker are required")
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -102,58 +85,12 @@ func NewLogSink(ctx context.Context, cfg LogSinkConfig) (*LogSink, error) {
 	return &LogSink{cfg: cfg, ctx: context.WithoutCancel(ctx)}, nil
 }
 
-// Text stores one stdout or stderr line as a plain message at level.
+// Text stores one stdout or stderr line, which the session or a [LineWriter]
+// has masked, as a plain message at level.
 func (s *LogSink) Text(level, line string) {
-	src := stream(level)
-	s.mu.Lock()
-	text := s.carry[src] + line
-	s.carry[src] = ""
-	if len(line) >= maxTextLine {
-		cut := s.safeCut(text)
-		text, s.carry[src] = text[:cut], text[cut:]
+	if line != "" {
+		s.emitText(sparkwing.LogRecord{Level: level, Msg: line})
 	}
-	s.mu.Unlock()
-	if text != "" {
-		s.emitText(sparkwing.LogRecord{Level: level, Msg: s.cfg.Masker.Mask(text)})
-	}
-}
-
-// Flush stores the held tail of any split line.
-func (s *LogSink) Flush() {
-	s.mu.Lock()
-	carry := s.carry
-	s.carry = [2]string{}
-	s.mu.Unlock()
-	for src, text := range carry {
-		if text != "" {
-			s.emitText(sparkwing.LogRecord{Level: streamLevels[src], Msg: s.cfg.Masker.Mask(text)})
-		}
-	}
-}
-
-// safety: the held rest is shorter than the longest value, so the next piece
-// can complete a value it starts; a value straddling the cut moves the cut
-// past its end, which bounds both the hold and the scan.
-func (s *LogSink) safeCut(text string) int {
-	values := s.cfg.Masker.Values()
-	longest := 0
-	for _, v := range values {
-		longest = max(longest, len(v))
-	}
-	cut := max(0, len(text)-max(0, longest-1))
-	for moved := true; moved; {
-		moved = false
-		for _, v := range values {
-			lo, hi := max(0, cut-len(v)+1), min(len(text), cut+len(v)-1)
-			if lo >= hi {
-				continue
-			}
-			if i := strings.Index(text[lo:hi], v); i >= 0 && lo+i < cut {
-				cut, moved = lo+i+len(v), true
-			}
-		}
-	}
-	return cut
 }
 
 // Record stores one frame-pipe record. A host-reserved or unknown event is
@@ -167,45 +104,49 @@ func (s *LogSink) Record(rec nodeproto.FrameLog) {
 		out.Event = rec.Event
 	}
 	if len(rec.Attrs) > 0 {
-		out.Attrs = s.maskAttrs(rec.Attrs)
+		out.Attrs = attrsOf(s.cfg.Masker.MaskJSON(rec.Attrs))
 	}
 	if err := s.persist(out); err != nil {
-		s.emit(sparkwing.LogRecord{
+		s.host(sparkwing.LogRecord{
 			Level: "warn", Event: "state_write_failed", Step: out.Step,
-			Msg:   out.Event + " state write failed",
-			Attrs: map[string]any{"error": s.cfg.Masker.Mask(err.Error())},
+			Msg: out.Event + " state write failed", Attrs: map[string]any{"error": err.Error()},
 		})
 	}
 	s.emit(out)
 }
 
-// safety: masking the canonical JSON text as a whole reaches keys and numbers
-// too; text the masking left unparseable is stored as one masked string.
-func (s *LogSink) maskAttrs(raw json.RawMessage) map[string]any {
-	text := string(raw)
-	var v any
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if dec.Decode(&v) == nil {
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
-		enc.SetEscapeHTML(false)
-		if enc.Encode(v) == nil {
-			text = strings.TrimSuffix(buf.String(), "\n")
-		}
-	}
-	masked := s.cfg.Masker.Mask(text)
+// safety: masked attrs that are not an object are stored as one string, so a
+// record's attrs are always a map.
+func attrsOf(masked []byte) map[string]any {
 	var out map[string]any
-	dec = json.NewDecoder(strings.NewReader(masked))
+	dec := json.NewDecoder(bytes.NewReader(masked))
 	dec.UseNumber()
 	if dec.Decode(&out) != nil || dec.More() {
-		return map[string]any{"masked_attrs": masked}
+		return map[string]any{"masked_attrs": string(masked)}
 	}
 	return out
 }
 
+// safety: a record the host writes is masked as an SDK record is, its attrs
+// through their JSON; attrs with no secret keep their Go values.
+func maskRecord(m *secrets.Masker, rec sparkwing.LogRecord) sparkwing.LogRecord {
+	rec.Msg = m.Mask(rec.Msg)
+	if len(rec.Attrs) == 0 {
+		return rec
+	}
+	if raw, err := json.Marshal(rec.Attrs); err != nil {
+		rec.Attrs = map[string]any{"masked_attrs": m.Mask(fmt.Sprint(rec.Attrs))}
+	} else if masked := m.MaskJSON(raw); !bytes.Equal(masked, raw) {
+		rec.Attrs = attrsOf(masked)
+	}
+	return rec
+}
+
 func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 	c, run, node := s.cfg, s.cfg.RunID, s.cfg.NodeID
+	if c.State == nil {
+		return nil
+	}
 	switch rec.Event {
 	case "job_annotation":
 		message := boundedRecord(attrString(rec.Attrs, "message", rec.Msg), "annotation")
@@ -257,6 +198,27 @@ func (s *LogSink) emit(rec sparkwing.LogRecord) {
 		s.cfg.Progress()
 	}
 }
+
+func (s *LogSink) host(rec sparkwing.LogRecord) { s.emit(maskRecord(s.cfg.Masker, rec)) }
+
+// MaskingLogger returns a logger that masks each record with m as a node's
+// records are masked, then hands it to inner. A run's renderer and envelope
+// log sit behind one, as a backstop under each source's own masking.
+func MaskingLogger(inner sparkwing.Logger, m *secrets.Masker) sparkwing.Logger {
+	if inner == nil {
+		return nil
+	}
+	return maskingLogger{inner: inner, m: m}
+}
+
+type maskingLogger struct {
+	inner sparkwing.Logger
+	m     *secrets.Masker
+}
+
+func (l maskingLogger) Log(level, msg string) { l.inner.Log(level, l.m.Mask(msg)) }
+
+func (l maskingLogger) Emit(rec sparkwing.LogRecord) { l.inner.Emit(maskRecord(l.m, rec)) }
 
 func (s *LogSink) emitText(rec sparkwing.LogRecord) {
 	tw, ok := s.cfg.Log.(TextWriter)
