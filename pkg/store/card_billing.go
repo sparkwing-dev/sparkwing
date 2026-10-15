@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -133,9 +132,7 @@ type Card struct {
 	Fingerprint   string
 	Brand         string
 	Last4         string
-	// AddedAt is when the card was added. Given to SaveCard, it is when the
-	// owner completed the setup, to the second, and a setup completed before
-	// a card on file saved the same way is refused with ErrStaleCardSetup.
+	// AddedAt orders setups by completion time, or receipt time when absent.
 	AddedAt time.Time
 }
 
@@ -344,57 +341,10 @@ var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already 
 // SaveCard records the card an owner added through Stripe. A charge that
 // failed on the old card is tried again at once. A non-zero c.AddedAt orders
 // saves by setup completion; without it the card is stamped now.
-func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) (err error) {
-	if c.Customer == "" || c.PaymentMethod == "" || c.Fingerprint == "" {
-		return fmt.Errorf("%w: a card names its customer, payment method and fingerprint", ErrInvalidInput)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return err
-	}
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return err
-	}
-	// hack: with no column for it, a completion time is stored in whole seconds
-	// and a receipt time never is, so a card saved without one, including every
-	// save from before ordering, never makes a later ordered save look stale.
-	addedAt, newerThan := now.UnixNano(), int64(math.MaxInt64)
-	if addedAt%int64(time.Second) == 0 {
-		addedAt++
-	}
-	if !c.AddedAt.IsZero() {
-		addedAt = c.AddedAt.Unix() * int64(time.Second)
-		newerThan = addedAt
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE teams SET card_customer = ?, card_payment_method = ?,
-	    card_fingerprint = ?, card_brand = ?, card_last4 = ?, card_added_at = ?
-	    WHERE name = ? AND (card_added_at % 1000000000 <> 0 OR card_added_at <= ?)`,
-		c.Customer, c.PaymentMethod, c.Fingerprint, c.Brand, c.Last4, addedAt, string(t.team), newerThan)
-	if err != nil {
-		return err
-	}
-	saved, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if saved == 0 {
-		return ErrStaleCardSetup
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE card_charges SET next_attempt_at = ? WHERE team = ? AND state = ?`,
-		now.UnixNano(), string(t.team), CardChargeOpen); err != nil {
-		return err
-	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
-		Team: t.team, Kind: BusinessEventCardAdded, SubjectID: c.PaymentMethod, Actor: actor, At: now,
-		Attrs: map[string]any{"brand": c.Brand, "last4": c.Last4},
-	}); err != nil {
-		return err
-	}
-	return tx.Commit()
+func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		return saveCardTx(ctx, tx, t.team, c, actor, now)
+	})
 }
 
 // SetSpendBudget sets the owner's budget, which stops Cloud usage when the
@@ -848,15 +798,6 @@ func parseRefundKey(key string) (string, int64, bool) {
 	}
 	attempt, err := strconv.ParseInt(key[i+1:], 10, 64)
 	return key[:i], attempt, err == nil && attempt >= 0
-}
-
-func cardRefundBackoff(ctx context.Context, s *Store, team Team, paymentIntent string) time.Duration {
-	var attempts int
-	if err := s.queryRow(ctx, `SELECT attempts FROM card_refunds WHERE team = ? AND payment_intent = ?`,
-		string(team), paymentIntent).Scan(&attempts); err != nil {
-		return cardRefundRetryAfter[0]
-	}
-	return cardRefundRetryAfter[min(attempts, len(cardRefundRetryAfter)-1)]
 }
 
 // safety: the business event's unique subject is what reports a threshold

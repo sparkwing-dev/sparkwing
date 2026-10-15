@@ -2,6 +2,27 @@
 
 <!-- design:begin -->
 
+## Payment mutation transactions
+
+Card setup, collection, payment reversal, dispute hold/release, warning and
+refund-queue mutations have transaction-local owners. Their existing Tenant and
+Operator entry points call those owners in a store transaction. Payment receipt
+settlement can use the same owners without nesting transactions or committing
+financial state before its receipt. No new unverified payment entry point exists.
+
+Card setup ordering uses the supplied completion timestamp at nanosecond
+precision, or receipt time when completion time is absent. Older timestamps
+cannot replace the saved card. The subsecond migration marker is removed.
+Collection amounts must fit the credit ledger's integer representation.
+Refund retry state is read and updated under one transaction and ledger lock.
+
+`TestPaymentMutationsRollBackWithReceipt` exercises eight mutations against a
+failing receipt boundary and checks their financial state after reopening.
+Generated properties cover refund conservation, payer isolation, immutable
+replay, setup ordering and unrepresentable collection amounts. Verified event
+dispatch beyond checkout still requires C2's expanded proof and the matching
+payment receipt and setup correlation schema.
+
 ## Log byte accounting
 
 `Segment.Offset` and `Segment.Size` describe decoded log bytes. `StoredBytes`

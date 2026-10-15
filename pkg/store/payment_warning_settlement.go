@@ -7,6 +7,12 @@ import (
 )
 
 func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, now time.Time) (Team, error) {
+	if w.WarningID == "" || w.PaymentIntent == "" {
+		return "", fmt.Errorf("%w: a warning names itself and its payment", ErrInvalidInput)
+	}
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return "", err
+	}
 	actionable := 0
 	if w.Actionable {
 		actionable = 1
