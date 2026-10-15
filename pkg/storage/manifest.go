@@ -8,10 +8,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// BlobManifests supplies verified physical members to the store's authorized record transaction.
+// BlobManifests verifies physical manifests for the store's authorized record transaction.
 type BlobManifests struct{ Objects blob.ObjectBackend }
 
-// ReadBlobManifest reads the tenant and digest selected by the record transaction.
+// VerifyBlobManifest verifies the tenant, digest and members selected by the record transaction.
+func (m BlobManifests) VerifyBlobManifest(ctx context.Context, team store.Team, digest blob.Digest, members []blob.Member) error {
+	if m.Objects == nil {
+		return fmt.Errorf("manifest reader requires an object backend")
+	}
+	return m.Objects.VerifyManifest(ctx, string(team), digest, members)
+}
+
+// ReadBlobManifest reads admitted members for authorized record lookup.
 func (m BlobManifests) ReadBlobManifest(ctx context.Context, team store.Team, digest blob.Digest) ([]blob.Member, error) {
 	if m.Objects == nil {
 		return nil, fmt.Errorf("manifest reader requires an object backend")

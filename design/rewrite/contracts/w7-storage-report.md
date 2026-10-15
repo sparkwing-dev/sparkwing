@@ -1,136 +1,137 @@
-# W7 storage continuation
+# W7 adversarial review fixes
 
 <!-- design:begin -->
 
-## Implemented
+Review baseline: `deea866fb`. Findings 1-7 are closed. Worktree Git metadata was not written, and no
+Sparkwing binary ran. The selected environment and checkout were reused.
 
-Starting HEAD is `062f60e4c`. The checkout was clean. The three merge conflicts
-were already resolved. W3's hosted_run, trigger_host and pod_node_host deletions
-remain intact. No Git write was made.
+## Finding status
 
-The existing filesystem-sink, s3-sink and filesystem round-trip properties now
-use `Tenant.RecordSegments` and `Tenant.ReadLogSegments` instead of the in-memory
-segment ledger. The sink, compression, batch signer, signed transfers and
-committed reader remain real. Each property runs 128 generated cases covering
-job, trigger, plan and eval subjects. Eval's lease generation remains separate
-from its source generation. Databases close between generated cases.
+1. **FIXED - DESIGN: manifest admission memory.** Invariant: stored object size
+   cannot drive controller memory allocation independently of submitted metadata.
+   Admission now calls `VerifyManifest` with the commit request's members. A
+   streaming decoder compares each entry directly. Its representation budget
+   derives from the submitted paths/digests and worst-case JSON escaping, rather
+   than stored byte length. Whitespace runs outside strings use constant memory.
+   Unknown fields, extra entries and metadata disagreements fail. Length and
+   SHA-256 still cover every original byte through EOF; close must succeed.
+   The existing transaction retains member existence, authority and mutation
+   checks. Admitted-record reads stream entries too. No manifest byte cap,
+   setting, schema table or compatibility shim was added.
+2. **FIXED - memo authority errors.** Invariant: authorization, authentication and
+   claim-fence failures never become successful cache absence. Wrapped
+   `ErrDigestNotReadable`, forbidden, unauthenticated and lock-held errors survive
+   copy and byte-read failures. Missing/corrupt bytes still miss. Corrected both
+   the unit `refused_edge` assertion and the filesystem/S3 acceptance assertions
+   that required the wrong policy. Updated the source README.
+3. **FIXED - source object format.** Snapshot import explicitly initializes SHA-1.
+   The conflicting SHA-256 receiving-host default is covered directly and in the
+   ambient-Git-controls property. The fixture also pins its producer format.
+4. **FIXED - log authority comments.** Documented identical final-payload replay,
+   conflicting persisted seals, and completeness from persisted records. Missing
+   or corrupt segment bytes fail reads. Removed the physical-manifest authority
+   and abandonment-manifest claims.
+5. **FIXED - storage responsibility comments.** Removed host-state/state-handle
+   claims and the assertion that `SafeSegment` governs SDK job names. Existing
+   hierarchical-job prefix and single-segment validation tests pass.
+6. **FIXED - artifact directory comments.** Documented that outside directories
+   and wildcard matches warn and skip, while literal outside files fail. Expanded
+   the containment property to generate both literal `link` and wildcard matches,
+   checking that skipped directories commit only an empty manifest and never
+   publish outside bytes.
+7. **FIXED - binary integrity comments.** Removed claims that remote binaries
+   lack digest verification. Documented compiler-key freshness separately from
+   remote EOF/digest verification and local compiler-keyed binary reuse.
 
-The invariant is that persisted log bytes can be read only under current
-authority for the exact tagged subject and generation. The properties reopen
-SQLite before offset reads, refuse foreign subjects and generations, and refuse
-a revoked reader without emitting bytes. Concurrent duplicate deliveries retain
-one copy and per-writer ordering. Live offsets match reopened bytes. Lost PUT
-responses require physical verification before the real segment transaction.
-Corrupt committed objects fail before output. Both backends retain spool cleanup
-and exact final-manifest checks.
+## Reproduction and verification
 
-Claim issuance and authenticated signing remain contract fixtures. Filesystem
-objects and signed transfers are real. S3 uses the real signer and SDK against
-the existing fake object service. No new acceptance cell, registry, scenario
-catalog, production wrapper or contract was added. The shared job-claim fixture
-was extracted because both depcache and owner-log fixtures need its persisted
-authority envelope. The original depcache entrypoint retains its behavior.
+The manifest regression failed before implementation: a 16 MiB whitespace prefix
+caused **36,240,064 allocated bytes** for an empty member list. Its final tests
+cover leading, trailing and interior padding, oversized field names/values and
+arrays, malformed token spacing, fully escaped schema fields, exact member
+agreement, close and cancellation failures. A generated property checks bounded
+allocation for valid padded and malformed manifests. A real SQLite `CommitRecord`
+with physical filesystem bytes reproduces the small-commit/large-object scenario.
+Admitted reads and verification of padded manifests allocate under 2 MiB in the
+regression; generated admission cases allocate under 512 KiB.
 
-## Deleted and production lines
+Memo unit and generated authority cases ran red first. The source-format test ran
+red under `GIT_DEFAULT_HASH=sha256` before initialization was pinned. The two memo
+acceptance cells also failed on their incorrect nil-error assertions before those
+were corrected. Findings 4-7 describe incorrect prose rather than incorrect
+runtime behavior; their behavioral checks already pass. No source-text tests or
+manufactured runtime failures were added for those prose claims.
 
-Removed the two residual raw-storage errors `storage.ErrNotFound` and
-`storage.ErrPreconditionFailed`: **7 production lines deleted**, zero added.
-Object-read test callers now use the real backend's `blob.ErrNotFound`.
-The unused in-memory acceptance segment ledger and its synthetic subject
-constructor are deleted.
+All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
+`GOCACHE=/tmp/sw-astra-W7/gocache`, and Go/test scratch under `/tmp/sw-astra-W7`.
+Tests used `-p 4` or fewer workers.
 
-W7's net production Go delta against main is **-6,875 lines** under the lead's
-area prefixes and exclusions for tests, testdata, acceptance and contract files.
-That is **245 lines within** the -6,630 budget. The diff contains 4,914 added and
-11,789 deleted production lines. This session's production delta is **-7**.
-
-The cache command/service, gitcache, package proxy, cache chart, raw S3 output
-and log backends, run-directory log fallback, direct source-fetch clients and
-credential transport remain deleted. Historical signed release assets remain.
-No legacy file was restored. The deletion manifests retain the prior cuts.
-
-## Verification
-
-Go commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
-`GOCACHE=/tmp/sw-gocache`, and scratch beneath `/tmp/sw-astra-W7`.
-Tests use `-p 4`. Pipelines, independent review and landing remain with the lead.
-
-- Whole-repository `go build ./...`: pass after the production deletion.
-- Tests for blob/..., artifacts, depcache and pkg/storage/...: pass.
-- Existing `TestStorage`: pass in 135.458 seconds, 70 pass events, 424 skips,
-  zero failures. Native skipped cells remain unclaimed.
-- Final changed log-cell check after prompt database cleanup: pass. The three
-  existing cells cover 384 generated cases in total.
-- Controller `TestCommittedDashboard*` and `TestLogSubmissionRoutes*`: pass.
-- Vet on storage, controller and tests/acceptance: pass.
-- `internal/doccheck`: pass.
-- `commentcheck -base main .`: clean across 2,185 files.
+- Whole repository `go build ./...`: pass.
+- Full tests for `internal/blob/...`, artifacts, bincache and `pkg/storage/...`: pass.
+- Focused store record/result/materialization tests and the real
+  `TestMaterializedResultCopiesBytesThroughControllerAndHost`: pass.
+- Controller `TestDataStorageAttachesVerifiedResultRecords`: pass.
+- Six existing acceptance cells pass: filesystem/S3 manifests, manifest-records,
+  and memo-materialization components. Manifest cells now exercise admission
+  verification as well as admitted-member reads. No new cell or skip was added.
+- Manifest metadata fuzzing: 1,936 executions; pass. Memo authority fuzzing:
+  76,530 executions; pass. Existing source-control fuzz seeds pass.
+- Vet across changed packages, store, controller and acceptance: pass.
+- `internal/doccheck`: pass. `commentcheck -base main .`: clean, 2,253 files.
 - `git diff --check`: pass.
 
-A broader controller selection also ran `TestAnUnwiredFreeTierLogsOnceAtStartup`
-and `TestTeamLogReadsAreNotRefusedPastTheDownloadCap`. Both fail in unchanged
-fixtures with `tokens: insert: SQL logic error: no such table: tokens (1)`.
-These fixtures belong to W2's credential migration. They were left unchanged.
-The narrower tests covering the migrated caller pass. No archived test port was
-added. HTTP/api.sock, PostgreSQL, native Windows/Darwin, placement, deployment,
-release and real-repository proofs remain unclaimed.
+No archived test port was required. Native sockets, PostgreSQL, deployments,
+releases and whole-repository test suites remain lead-owned and were not run.
 
-## Remaining handoffs and contract changes needed
+## Contract amendment and shared files
 
-A1-24/29/30/31/32/33/34/35 retain W7's real tenant upload/record integrations and
-physical backends. A1-36/37 retain the host and SDK contract consumers. A1-43's
-historical assets remain. Materialization remains closed by W1b's real
-controller/host byte-copy proof. A1-50 composition and A1-53 native evidence
-remain assigned to their owners. Lead-owned amendments and handoffs were read
-and left unchanged.
+C1's local data contract now separates `VerifyBlobManifest` for admission from
+`ReadBlobManifest` for admitted-record lookup. `ObjectBackend` has the matching
+`VerifyManifest` operation. The existing read operation remains necessary for
+record lookup metadata; it is not a compatibility alias. The amendment is recorded
+in `c1-data.md`. No new foreign DESIGN request remains from this review.
 
-The prior session's reproduced foreign seams remain present in this checkout:
+The minimal shared W1 integration is `pkg/store/blob_record_runtime.go`: its
+existing reader interface gains verification, and admission passes the submitted
+members instead of reading another list. Shared tests are
+`pkg/store/blob_records_runtime_test.go` and the new
+`pkg/store/blob_manifest_stream_test.go`. Acceptance changes are confined to
+`data_binding_test.go`, `storage_manifests_test.go`, and
+`storage_materialization_test.go`. Lead-owned handoffs and amendments were not
+edited. Source documentation is in `internal/blob/README.md` and GoDoc.
 
-- W1/W2 account-scoped remote-cache authority loses `data.read` when
-  `readAuthorityTx` intersects an unbound account grant with `ScopesForRole`.
-  W2 requires that repository-bound account reader. W7 does not substitute a
-  machine or widen membership policy.
-- W1 A1-29's default-ref selection still constructs a record namespace before
-  selecting the verified server default. RemoteCache leaves the local ref out
-  as contracted. W7 does not guess the server's default branch.
-- W1/W2 still need a tenant-authorized selected-output digest projection in the
-  run snapshot before W1 can remove OutputRef, node_outputs and data_objects.
-  The remaining output metadata and receipt caller are outside W7's byte paths.
-- W2 must supply authenticated `blob.LogTransport` and `SegmentRecorder` host
-  clients, including uncertain-upload verification through `UploadVerifier`.
-  W7 uses those interfaces. It does not copy authentication or authorization.
-- W3/W8/W9 must supply fresh data/log bindings per attempt and owner generation,
-  remote-cache opt-in, and source-bundle intake in production host construction.
-- W1 must expose an elected, fenced expired-ticket selector before physical
-  staging cleanup can consume it. W7's deletion backends are ready.
+Mechanism added: a whitespace-normalizing streaming JSON reader and a
+request-derived representation budget behind the admission verifier. Replacing
+`ReadAll` with a plain JSON decoder is insufficient because that decoder can
+buffer arbitrary padding or individual hostile values. Removing the verifier and
+restoring the member-returning admission call undoes the structural change.
 
-No foreign contract was changed. W7's byte implementation and legacy cuts are
-in place, but authenticated remote-reader and production host bindings remain
-open. The area is therefore still CONTINUE.
+## Deletions and budget
 
-## Shared files, assumptions and friction
+Replaced the whole-object buffer and repeated decode, removed stale comments,
+and kept every prior legacy service/cache/proxy/chart deletion intact. This wave
+adds **232** and removes **58** production Go lines in W7: net **+174**.
+W7 against main, including the untracked new production file, is **-6,701**
+(**5,109 added / 11,810 deleted**), **71 lines within** the -6,630 budget.
+No legacy file was restored.
 
-Production edits are confined to owned `pkg/storage/storage.go`.
-The one-line foreign caller migration is `pkg/controller/log_reads_test.go`.
-Owned test migration is `pkg/storage/logseg/memory_test.go`.
-Acceptance helpers changed in `tests/acceptance/blob_depcache_test.go`,
-`storage_logs_test.go`, `storage_log_sink_test.go` and the new test-only
-`storage_log_persistence_test.go`. The existing registries are unchanged.
-Source documentation changed in `internal/blob/README.md` and
-`pkg/storage/logseg/README.md`.
+## Existing handoffs and friction
 
-No new interface, retry mechanism, environment variable, credential policy or
-production setting was added. Fixture graph intake remains seeded because
-this check joins W7's sink to W1b's real persistence and W2's signing contract.
-Replacing that fixture with real claim issuance is a separate native proof.
+The previous report's unrelated integrations remain assigned to their owners:
+W1/W2's repository-bound remote-cache reader and verified default-ref selection;
+W1's remaining selected-output projection and elected expired-ticket selector;
+and W2/W3/W8/W9's authenticated data/log transports and production host bindings.
+This review does not claim those broader rewrite integrations are complete.
+Materialization remains covered by the real controller/host byte-copy proof.
+There are no open questions for findings 1-7.
 
-Friction: the legacy controller tests still refer to a removed tokens table.
-The prior fake log ledger also hid the distinction between persisted subject
-selection and synthetic read results. The existing cells now exercise the real
-selection and authority checks.
-
-Scratch `/tmp/sw-astra-W7` is removed at exit. Shared `/tmp/sw-gocache` is retained.
+Friction: the first standards match saw no diff and returned only standing cards;
+matching after the shared seam change discovered the remaining applicable cards.
+No required capability failed. Test Git writes were confined to temporary source
+fixtures. Local repository Git config has no injected user/core.worktree entries.
+All scratch and caches under `/tmp/sw-astra-W7` are removed after checks. The
+shared `/tmp/sw-gocache` was not used or deleted.
 
 <!-- design:end -->
 
-STATUS: CONTINUE
+STATUS: COMPLETE

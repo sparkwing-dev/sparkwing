@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -96,7 +97,11 @@ func TestMemoMaterializationFailures(t *testing.T) {
 				return io.NopCloser(strings.NewReader(bodies[q.Digest])), nil
 			})})
 			got, err := blob.MaterializeMemo(t.Context(), bytes, records, blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: a, Budget: blob.Budget{Deadline: deadline}}, Destination: i.Attempt.Value})
-			if err != nil {
+			if failure == "refused_edge" {
+				if !errors.Is(err, blob.ErrDigestNotReadable) {
+					t.Fatalf("authority refusal became a miss: %v", err)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
 			if failure == "none" || failure == "empty_output" {
@@ -124,4 +129,50 @@ func TestMemoMaterializationCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation = %v", err)
 	}
+}
+
+func FuzzMemoAuthorityFailuresStayErrors(f *testing.F) {
+	for stage := uint8(0); stage < 4; stage++ {
+		for kind := uint8(0); kind < 4; kind++ {
+			f.Add(stage, kind, "authority refused")
+		}
+	}
+	f.Fuzz(func(t *testing.T, stage, kind uint8, message string) {
+		var refusal error = blob.ErrDigestNotReadable
+		if kind%4 != 0 {
+			code := []apierr.Code{apierr.Forbidden, apierr.Unauthenticated, apierr.LockHeld}[(kind-1)%3]
+			refusal = &apierr.Error{Code: code, Message: message}
+		}
+		wrapped := fmt.Errorf("memo: %w", refusal)
+		output, file := digest(`"result"`), digest("file")
+		body := fmt.Sprintf(`{"entries":[{"path":"file","digest":"%s","size":4,"mode":420}]}`, file)
+		manifest := digest(body)
+		hit := blob.MemoHit{
+			Found:    true,
+			Output:   runspec.Optional[blob.Digest]{Set: true, Value: output},
+			Manifest: runspec.Optional[blob.Digest]{Set: true, Value: manifest},
+			Members:  []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: file, Path: "file", Size: 4, Mode: 420}},
+		}
+		records := memoRecords{copy: func(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error) {
+			if stage%4 == 0 {
+				return blob.MemoHit{}, wrapped
+			}
+			return hit, nil
+		}}
+		bodies := map[blob.Digest]string{output: `"result"`, manifest: body, file: "file"}
+		target := []blob.Digest{output, output, manifest, file}[stage%4]
+		s := &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
+			if q.Digest == target {
+				return blob.SignedTransfer{}, wrapped
+			}
+			return blob.SignedTransfer{Digest: q.Digest, Size: int64(len(bodies[q.Digest]))}, nil
+		}}
+		bytes := blob.NewSignedStore(blob.SignedStoreOptions{Signer: s, HTTPClient: transfer(func(_ context.Context, q blob.SignedTransfer, _ io.Reader) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(bodies[q.Digest])), nil
+		})})
+		got, err := blob.MaterializeMemo(t.Context(), bytes, records, blob.CopyMemoRequest{Lookup: blob.MemoLookup{Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}, Destination: identity().Attempt.Value})
+		if !errors.Is(err, refusal) || got.Hit.Found || len(got.Output) != 0 {
+			t.Fatalf("authority failure became result %+v, error %v; want %v", got, err, refusal)
+		}
+	})
 }

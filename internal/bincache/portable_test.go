@@ -76,9 +76,6 @@ func TestCompilePipeline_PassesTrimpathAndStrips(t *testing.T) {
 	}
 }
 
-// The cache stores no digest of the binary it serves, so a build flag the key
-// does not name hands every local and shared cache a stale binary that nothing
-// downstream can detect.
 func TestCompilePipeline_BuildFlagsAreNamedInTheCacheKey(t *testing.T) {
 	log := installFakeGo(t)
 	dir := newPipelineDir(t)

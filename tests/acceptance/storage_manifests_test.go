@@ -68,6 +68,17 @@ func checkStorageManifests(t *testing.T, objects blob.ObjectBackend, transfers b
 		for i, e := range manifest.Entries {
 			members[i] = blob.Member{Team: team, ManifestDigest: digest, Digest: e.Digest, Path: e.Path, Size: e.Size, Mode: e.Mode}
 		}
+		if err := reader.VerifyBlobManifest(t.Context(), store.Team(team), digest, members); err != nil {
+			t.Logf("verify manifest: %v", err)
+			return false
+		}
+		if len(members) != 0 {
+			badMembers := append([]blob.Member(nil), members...)
+			badMembers[0].Mode++
+			if err := reader.VerifyBlobManifest(t.Context(), store.Team(team), digest, badMembers); !errors.Is(err, blob.ErrIntegrity) {
+				return false
+			}
+		}
 		got, err := reader.ReadBlobManifest(t.Context(), store.Team(team), digest)
 		if err != nil || !reflect.DeepEqual(got, members) {
 			t.Logf("read manifest: %+v: %v", got, err)

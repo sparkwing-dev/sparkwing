@@ -2,17 +2,50 @@ package blob
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-// ReadManifest verifies tenant CAS bytes before returning members for authorized record admission.
+// VerifyManifest verifies tenant CAS bytes against submitted members before record admission.
+func (f *Filesystem) VerifyManifest(ctx context.Context, team string, digest Digest, members []Member) error {
+	reader, err := f.manifestReader(ctx, team, digest)
+	if err != nil {
+		return err
+	}
+	return finishManifest(reader, verifyManifestStream(reader, Blob{Team: team, Digest: digest}, members))
+}
+
+// VerifyManifest verifies tenant CAS bytes against submitted members before record admission.
+func (s *S3) VerifyManifest(ctx context.Context, team string, digest Digest, members []Member) error {
+	reader, err := s.manifestReader(ctx, team, digest)
+	if err != nil {
+		return err
+	}
+	return finishManifest(reader, verifyManifestStream(reader, Blob{Team: team, Digest: digest}, members))
+}
+
+// ReadManifest reads members of an admitted manifest through verified tenant CAS bytes.
 func (f *Filesystem) ReadManifest(ctx context.Context, team string, digest Digest) ([]Member, error) {
+	reader, err := f.manifestReader(ctx, team, digest)
+	if err != nil {
+		return nil, err
+	}
+	return readManifestMembers(reader, team, digest)
+}
+
+// ReadManifest reads members of an admitted manifest through verified tenant CAS bytes.
+func (s *S3) ReadManifest(ctx context.Context, team string, digest Digest) ([]Member, error) {
+	reader, err := s.manifestReader(ctx, team, digest)
+	if err != nil {
+		return nil, err
+	}
+	return readManifestMembers(reader, team, digest)
+}
+
+func (f *Filesystem) manifestReader(ctx context.Context, team string, digest Digest) (*verifiedReader, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -31,11 +64,10 @@ func (f *Filesystem) ReadManifest(ctx context.Context, team string, digest Diges
 	if err != nil {
 		return nil, errors.Join(err, file.Close())
 	}
-	return readManifestObject(ctx, file, Blob{Team: team, Digest: digest, Size: info.Size()})
+	return newVerifiedReader(ctx, file, SignedTransfer{Digest: digest, Size: info.Size()}), nil
 }
 
-// ReadManifest verifies tenant CAS bytes before returning members for authorized record admission.
-func (s *S3) ReadManifest(ctx context.Context, team string, digest Digest) ([]Member, error) {
+func (s *S3) manifestReader(ctx context.Context, team string, digest Digest) (*verifiedReader, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -56,29 +88,36 @@ func (s *S3) ReadManifest(ctx context.Context, team string, digest Digest) ([]Me
 	if object.ContentLength == nil || *object.ContentLength < 0 {
 		return nil, errors.Join(ErrIntegrity, object.Body.Close())
 	}
-	return readManifestObject(ctx, object.Body, Blob{Team: team, Digest: digest, Size: *object.ContentLength})
+	return newVerifiedReader(ctx, object.Body, SignedTransfer{Digest: digest, Size: *object.ContentLength}), nil
 }
 
-func readManifestObject(ctx context.Context, body io.ReadCloser, object Blob) ([]Member, error) {
-	reader := newVerifiedReader(ctx, body, SignedTransfer{Digest: object.Digest, Size: object.Size})
-	raw, err := io.ReadAll(reader)
-	err = errors.Join(err, reader.Close(), ctx.Err())
-	if err != nil {
-		return nil, err
-	}
-	if !reader.Verified() {
-		return nil, ErrIntegrity
-	}
-	var manifest Manifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return nil, ErrIntegrity
-	}
-	members := make([]Member, len(manifest.Entries))
-	for i, entry := range manifest.Entries {
-		members[i] = Member{Team: object.Team, ManifestDigest: object.Digest, Digest: entry.Digest, Path: entry.Path, Size: entry.Size, Mode: entry.Mode}
-	}
-	if _, err := DecodeManifest(raw, object.Digest, object.Team, members); err != nil {
+func readManifestMembers(reader *verifiedReader, team string, digest Digest) ([]Member, error) {
+	members := []Member{}
+	paths := map[string]bool{}
+	err := walkManifestStream(&manifestJSONReader{reader: reader}, func(entry ManifestEntry) error {
+		if entry.Size < 0 || !validDigest(entry.Digest) || paths[entry.Path] {
+			return ErrIntegrity
+		}
+		paths[entry.Path] = true
+		members = append(members, Member{Team: team, ManifestDigest: digest, Digest: entry.Digest, Path: entry.Path, Size: entry.Size, Mode: entry.Mode})
+		return nil
+	})
+	if err := finishManifest(reader, err); err != nil {
 		return nil, err
 	}
 	return members, nil
+}
+
+func finishManifest(reader *verifiedReader, err error) error {
+	if err != nil {
+		err = errors.Join(ErrIntegrity, reader.err)
+	}
+	err = errors.Join(err, reader.Close(), reader.ctx.Err())
+	if err != nil {
+		return err
+	}
+	if !reader.Verified() {
+		return ErrIntegrity
+	}
+	return nil
 }

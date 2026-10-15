@@ -94,10 +94,7 @@ func (lb *lockedBuffer) Bytes() []byte {
 	return append([]byte(nil), lb.buf.Bytes()...)
 }
 
-// pipelineBuildFlags are the `go build` flags CompilePipeline passes. keyParts
-// hashes them into the cache key: the cache serves a stored binary without ever
-// digesting its bytes, so a flag the key does not name would hand every local
-// and shared cache a stale binary forever. Tests replace it to prove that.
+// safety: compiler flags belong in the freshness key; remote digest verification cannot detect a stale build.
 var pipelineBuildFlags = []string{"-trimpath", "-ldflags", "-s -w"}
 
 // CompileOptions binds compiler subprocesses and diagnostics to captured inputs.

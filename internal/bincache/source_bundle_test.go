@@ -20,6 +20,10 @@ func TestSourceBundleImportsExactSnapshotWithoutOrigin(t *testing.T) {
 	checkSourceBundleImport(t, "", nil)
 }
 
+func TestSourceBundleImportsSHA1UnderSHA256Default(t *testing.T) {
+	checkSourceBundleImport(t, "", map[string]string{"GIT_DEFAULT_HASH": "sha256"})
+}
+
 func TestSourceBundleRefusesSymlinkedSparkwing(t *testing.T) {
 	for _, target := range []string{"external", "relative-external", "internal"} {
 		t.Run(target, func(t *testing.T) { checkSourceBundleImport(t, target, nil) })
@@ -42,7 +46,7 @@ func FuzzSourceBundleImportIgnoresAmbientGitControls(f *testing.F) {
 			"GIT_CONFIG_GLOBAL": path, "GIT_CONFIG_SYSTEM": path,
 			"GIT_CONFIG": path, "GIT_CONFIG_PARAMETERS": "invalid config",
 			"GIT_CONFIG_COUNT": "invalid count", "GIT_CONFIG_KEY_0": "core.hooksPath",
-			"GIT_CONFIG_VALUE_0": path,
+			"GIT_CONFIG_VALUE_0": path, "GIT_DEFAULT_HASH": "sha256",
 		}
 		checkSourceBundleImport(t, "", environment)
 		assertEmptyDirectory(t, outside)
@@ -78,7 +82,7 @@ func checkSourceBundleImport(t *testing.T, linkTarget string, environment map[st
 	if err := os.MkdirAll(sourceDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	git("init", "--quiet")
+	git("init", "--object-format=sha1", "--quiet")
 	if err := os.WriteFile(filepath.Join(sourceDir, "source.txt"), []byte("from bundle\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
