@@ -80,7 +80,7 @@ func TestEngineClientOneTimeAuthorityDoesNotReplay(t *testing.T) {
 		{"exchange", func(c controllerwire.Controller) error { _, err := c.Exchange(t.Context()); return err }},
 		{"here-intake", func(c controllerwire.Controller) error { _, err := c.CreateRun(t.Context(), here); return err }},
 		{"retry-intake", func(c controllerwire.Controller) error {
-			_, err := c.Retry(t.Context(), "r1", controllerwire.RetryRequest{IdempotencyKey: "retry-key"})
+			_, err := c.Retry(t.Context(), "r1", controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "retry-key"})
 			return err
 		}},
 	} {

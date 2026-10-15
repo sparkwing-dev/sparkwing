@@ -156,6 +156,9 @@ func (c *engineClient) Retry(ctx context.Context, run string, input controllerwi
 	if !validSelector(run) {
 		return result, &apierr.Error{Code: apierr.BadRequest, Message: "invalid run selector"}
 	}
+	if err := input.Validate(); err != nil {
+		return result, err
+	}
 	err := c.request(ctx, "POST", "/api/v1/runs/{run}/retry", "/api/v1/runs/"+url.PathEscape(run)+"/retry", input.IdempotencyKey, input, &result)
 	return result, err
 }

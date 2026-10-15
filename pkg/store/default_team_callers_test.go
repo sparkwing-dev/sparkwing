@@ -36,7 +36,6 @@ var defaultTeamCallers = map[string]string{
 	"cmd/sparkwing.findExistingSubmission":                             defaultTeamCli,
 	"cmd/sparkwing.persistSubmission":                                  defaultTeamCli,
 	"cmd/sparkwing.resetNamedProfile":                                  defaultTeamCli,
-	"cmd/sparkwing.retryLocalRuns":                                     defaultTeamCli,
 	"cmd/sparkwing.runCapacityReset":                                   defaultTeamCli,
 	"cmd/sparkwing.runCapacityStats":                                   defaultTeamCli,
 	"cmd/sparkwing.runCronsShow":                                       defaultTeamCrons,

@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -120,7 +119,13 @@ func remoteFollowExit(ctx context.Context, prof *namedProfile, runID string, fol
 	if followErr != nil {
 		fmt.Fprintf(os.Stderr, "note: follow of %s ended early (%v); reading the run's status\n", runID, followErr)
 	}
-	status, fetchErr := orchestrator.RemoteRunOutcome(ctx, prof.ControllerURL(), prof.ControllerToken(), runID, os.Stderr)
+	reader, err := client.NewRunReader(client.EngineOptions{
+		URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil },
+	})
+	if err != nil {
+		return followExitResult(prof.Name, runID, "", err, followErr)
+	}
+	status, fetchErr := triggeredRunOutcome(ctx, reader, runID, os.Stderr)
 	return followExitResult(prof.Name, runID, status, fetchErr, followErr)
 }
 

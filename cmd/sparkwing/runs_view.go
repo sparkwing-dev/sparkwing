@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 )
 
 func renderObservedRun(ctx context.Context, reader controllerwire.RunReader, out io.Writer, detail controllerwire.RunDetail, opts runStatusOptions) error {
@@ -172,11 +173,8 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 	if detail.Engine != nil {
 		fmt.Fprintf(&text, "engine\t%s\n", detail.Engine.Version)
 	}
-	for _, notice := range detail.Notices {
-		fmt.Fprintf(&text, "warning: %s\n", notice.Reason)
-		if notice.Hint != "" {
-			fmt.Fprintf(&text, "hint: %s\n", notice.Hint)
-		}
+	if err := writeEngineNotices(&text, detail.Notices); err != nil {
+		return err
 	}
 	if opts.view == "timeline" {
 		writeRunTimeline(&text, detail, opts.width)
@@ -231,4 +229,18 @@ func displayTime(value *time.Time) string {
 		return "-"
 	}
 	return value.Format(time.RFC3339Nano)
+}
+
+func writeEngineNotices(out io.Writer, notices []engine.Notice) error {
+	for _, notice := range notices {
+		if _, err := fmt.Fprintf(out, "warning: %s\n", notice.Reason); err != nil {
+			return err
+		}
+		if notice.Hint != "" {
+			if _, err := fmt.Fprintf(out, "hint: %s\n", notice.Hint); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

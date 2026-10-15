@@ -319,6 +319,10 @@ Select --run, including --run - for IDs on stdin, or --older-than. Age selection
 
 Trigger fresh runs copying pipeline + args from old ones
 
+Select --failed to reuse successful jobs or --all-jobs to execute the sealed plan again. Retry preserves the source request, plan, source trust and actor. The controller records the retrier separately.
+
+Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.
+
 ### Flags
 
 | Flag | Description |
@@ -327,7 +331,7 @@ Trigger fresh runs copying pipeline + args from old ones
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. (required) |
+| `--run RUN_ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. Repeatable; comma-separated values are accepted. (required) |
 | `--failed` | failed |
 | `--all-jobs` | all jobs |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |

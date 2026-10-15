@@ -1,3 +1,160 @@
+# W9 retry and triggered-outcome continuation
+
+W9 remains incomplete. This session started clean at 83fe557b8 with no merge
+conflicts. Git metadata is unchanged. Bootstrap read installed discovery info
+before the swarm brief was loaded. No candidate runtime, daemon, service,
+Sparkwing pipeline or release ran. All writes stayed in this worktree and
+/tmp/sw-astra-W9, which is removed before the final report.
+
+## Implemented
+
+- Replaced runs retry's pflag/direct-store/standalone path with clisurface and
+  Controller.Retry through the existing local/profile connection factory.
+  Repeated --run, comma lists and stdin IDs are deduplicated before intake.
+  Invalid selection/output, help and cancellation are handled before connection.
+  Each source gets a separate idempotency key. Failure receipts retain structured
+  errors, successful receipts retain the allocated number and replay marker, and
+  output failures or cancellation stop further submissions.
+- Added RetryMode (failed/all) and RetryRequest.Validate in W9's wire owner.
+  The original wire request had no way to carry the required CLI selection.
+  Missing/unknown mode and missing key fail before transport. Existing retry
+  transport fixtures now supply the mode. Automatic replay remains disabled
+  because the source may hold a here reservation.
+- Kept retry destination identity separate from the original request seal.
+  Invariant: retry cannot rewrite the original sealed request. A regression first
+  reproduced the mistaken requirement that the two run IDs match. The receipt
+  now accepts the original request ID unchanged across retry chains. The wire
+  contract explicitly records the two identities.
+- Retry output projects only source/new IDs, number, replay and structured error.
+  Invariant: changing sealed inputs or a one-time here bearer cannot change
+  public output or diagnostics. The fuzz test varies those private inputs and
+  compares output/diagnostics with an independent baseline. Here retries return
+  incomplete exit 3 after intake until a final host binding exists. Their JSON
+  failure receipt identifies the new run without its bearer. No claim or legacy
+  here adapter was added.
+- Post-trigger outcome reads now use one public RunDetail through RunReader.
+  Removed the old separate run/node/step/approval reads and unconditional retry
+  timer. The shared transport handles qualified transient failures. Permission
+  refusals are not retried. Failure summaries use job details, and run status,
+  upgrade output and trigger output share the engine-notice writer.
+- Deleted the undispatched trigger-management CLI and unused legacy RetryRun and
+  ListTriggers client methods. A remaining orchestrator contention test now polls
+  runs through its existing client instead of the removed trigger-list method.
+- Updated retry source documentation, migration notes, command rules and the
+  generated CLI reference. The embedded mirrors/changelog and W9 client API snapshot agree.
+  CLI documentation was regenerated in-process without running a Sparkwing CLI.
+
+## Tests and deletions
+
+Added 14 test functions and one fuzz target. TestRetrySelectionContract passes
+for failed/all across both HTTP and api.sock-shaped fake transports.
+TestRetryRejectsUnspecifiedModeBeforeTransport passes its invalid-input cases.
+The full acceptance package passes with its native T1 skips unchanged. These
+are contract tests, not native lifecycle or transaction acceptance.
+
+Ported the old terminal-outcome summaries, unavailable-read refusal, retry of a
+qualified transport blip and invalid-connection behavior to the final reader and
+shared client boundaries. Replaced old standalone/local retry-refusal fixtures
+with a controller-connection refusal test. Final preservation of execution env,
+seals and authorized successful-job reuse remains W1/W2/W3/W6 acceptance work.
+The parked T1 inventory assigns no source function directly to W9.
+
+Removed 742 gross lines across the retired retry/trigger/outcome paths:
+166 in runs_actions.go, 206 in triggers.go, 78 in legacy client methods,
+45 in the old outcome helper, 30 in the old process retry test and 217 in the
+standalone/outcome test files. This excludes smaller replacements and generated
+files. Three complete files were deleted: cmd/sparkwing/triggers.go,
+cmd/sparkwing/runs_standalone_test.go and
+internal/orchestrator/remote_run_outcome_test.go (423 lines total).
+
+## Verification
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4
+and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9.
+
+Passed on final source:
+
+- Whole-repository go build -p 4 ./... .
+- Focused go vet over cmd/sparkwing, clisurface, controllerwire,
+  controller/client, orchestrator and tests/acceptance.
+- Full clisurface, controllerwire, doccheck and tests/acceptance suites.
+- CLI tests selected by ^(TestRetry|TestTriggeredOutcome|TestSurface|
+  TestCollectRunIDs|Test.*Upgrade|TestRunStatus|TestAllCommands|TestDiscovery|
+  TestEveryDiscovered|TestCommandsMarkdown|TestEmbeddedReference|
+  TestEveryPageExemption|TestRepoDocsNameOnlyDispatched|TestShippedProse|
+  TestHonestyCheck|FuzzRetry).
+- Controller/client tests selected by ^TestEngine.
+- Pkg/docs embedded content/changelog/privacy, read, guide, migration, list,
+  search, section, catalog and command-name checks using the prior handoff's
+  Test(PkgDocsContent|EmbeddedChangelog|EmbeddedDocsCarry|EveryRecordedScrub|
+  ScrubPatterns|Read_|ReadGuide|Migrations|List|Search|Sections|SectionBody|
+  Guide|Catalog|DocsName) selection.
+- FuzzRetryReceiptsExcludeExecutionInputs with two workers for three seconds:
+  2,505 generated executions on final source. An earlier run passed 4,528.
+- commentcheck -base HEAD (23 Go files), sleepcheck -base HEAD,
+  W9 client API snapshot regeneration/comparison, sync-docs --check, gofmt and diff --check.
+
+Full API snapshot regeneration also found seven unrelated baselines already
+behind their unchanged public packages: pkg_controller, pkg_match,
+pkg_projectconfig, pkg_storage, pkg_storage_storeurl, pkg_store and sparkwing.
+Their baseline bytes were restored from HEAD to keep this worker in scope.
+Only pkg_controller_client.txt changed for W9. A whole-tree snapshot refresh is
+lead work; the full check is not claimed clean after restoring those baselines.
+
+The temporary CLI-doc generator was removed too early during its first run,
+causing vet to miss its source. Generation was rerun to completion before
+cleanup. Final focused vet passes without temporary sources. The first vet also
+found the remaining ListTriggers caller described above. No native socket,
+platform, PostgreSQL or deployment evidence is claimed. The lead owns pipelines,
+independent review and landing.
+
+## Contract changes needed and remaining integration
+
+Local W9 contract amendment: RetryRequest now requires mode=failed|all and a
+key. Omitting the selection would silently lose --all-jobs. Undo is removal of
+the field and CLI cutover together. No foreign contract was edited.
+
+W1 must extend IntakeRequest or provide its selected-retry transaction input.
+The final IntakeRequest has no retry selection field. It must retain mode in the
+idempotency digest and persist the reuse/all selection without rewriting source
+seals. W2 must consume RetryRequest.Validate and bind that transaction in
+EngineController.Retry. Both adapters remain stubs in this worktree. W9's fakes
+exercise the complete proposal/receipt boundary without implementing their
+transactions. The mode transport is implemented, not its store behavior.
+
+W3/W8/W9 still need here hosting, retained private bearer/resume, local detached
+hosting, source acquisition, publication and read-only cache composition. Here
+retry currently returns incomplete after allocation and does not retain its
+bearer. Recover through a fresh request; the abandoned reservation retains its
+original expiry. This is unfinished integration, not a permanent feature limit.
+The existing legacy trigger intake and here-claim path remain to be replaced.
+
+Earlier open questions remain: a sealed reason field for here intake, profile
+scope enrollment, pool-reserving runner provisioning, sizing reset, run-level
+annotations/member rights, local scheduler/tick operation and managed-unit/log
+construction, shared Go installer environment/output binding and ReadFailure's
+successful no-failure result. Remaining W9 work in older handoffs still applies.
+There is no new environment variable, flag, timeout, cap or authority rule.
+
+## Shared files and friction
+
+Shared production deletion: internal/orchestrator/jobs_cli_remote.go loses only
+its W9-only RemoteRunOutcome/getRunRetrying helper and timer.
+Shared tests: internal/orchestrator/remote_run_outcome_test.go (ported/deleted),
+internal/orchestrator/wingd_api_contention_test.go (one poll and its sample name),
+pkg/store/default_team_callers_test.go (removed the deleted CLI caller),
+tests/acceptance/retry_contract_test.go, engine_amendments_test.go and
+surface_contract_test.go. Also changed CHANGELOG.md, pkg/docs mirrors/changelog,
+.apidiff/pkg_controller_client.txt, the W9 wire contract document and this handoff.
+Other implementation and tests are inside W9's owned paths.
+
+Friction: cross-area runtime and selected-retry transaction contracts are still
+unfinished. Socket/native integration is left to the lead. The local worktree
+was reused as instructed. Git identity is Korey Gambill and core.worktree is
+unset. No commit was attempted.
+
+---
+
 # W9 protocol schema and guide continuation
 
 W9 remains incomplete. HEAD remains df4f991b6. The six merge-conflict contents

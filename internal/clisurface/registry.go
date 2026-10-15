@@ -512,8 +512,11 @@ func Registry() []Command {
 			{Name: "dry-run"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs retry", Flags: []Flag{
-			{Name: "run", Argument: "RUN_ID", Required: true},
+		{Path: "sparkwing runs retry", Rules: []string{
+			"Select --failed to reuse successful jobs or --all-jobs to execute the sealed plan again. Retry preserves the source request, plan, source trust and actor. The controller records the retrier separately.",
+			"Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.",
+		}, Flags: []Flag{
+			{Name: "run", Argument: "RUN_ID", Required: true, Repeatable: true, CommaList: true},
 			{Name: "failed", Conflicts: []string{"all-jobs"}},
 			{Name: "all-jobs", Conflicts: []string{"failed"}},
 			{Name: "profile", Argument: "NAME"},

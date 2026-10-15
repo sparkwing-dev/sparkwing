@@ -107,7 +107,7 @@ func TestEngineAmendmentsNeverReplayOneTimeAuthority(t *testing.T) {
 			for _, call := range []func(controllerwire.Controller) error{
 				func(c controllerwire.Controller) error { _, err := c.CreateRun(t.Context(), here); return err },
 				func(c controllerwire.Controller) error {
-					_, err := c.Retry(t.Context(), "r1", controllerwire.RetryRequest{IdempotencyKey: "stable-retry"})
+					_, err := c.Retry(t.Context(), "r1", controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "stable-retry"})
 					return err
 				},
 				func(c controllerwire.Controller) error {

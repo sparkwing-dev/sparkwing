@@ -254,13 +254,12 @@ schedule is weighed the same way. Submission also refuses a pipeline name
 absent from that source before queuing work. Run a risk-declaring pipeline in
 the foreground with `--sw-allow`.
 
-`sparkwing runs retry` refuses local retries because the original execution
-environment is unavailable. Captured submission environments are deleted when
-execution starts. Submit a new run from the
-intended checkout and environment. A queued local retry also fails before
-dispatch if its execution environment is unavailable. Node retries within a
-live run keep that run's environment. Controller-backed retries use their
-configured execution context.
+`sparkwing runs retry` uses the selected controller, including the local
+controller when no profile is supplied. Select `--failed` or `--all-jobs`.
+The CLI does not open the local store or substitute its current environment.
+Retry intake, reuse and here handoff still need shared runtime integration.
+See [rewrite integration](architecture.md). Job retries within a live run keep
+that run's environment.
 
 `--sw-ref` and `--sw-priority` are the exceptions, because both ride on
 the trigger. A detached launch resolves the ref to a commit, builds the
@@ -1225,12 +1224,10 @@ simply missing.
 store that holds the run, so they act on a standalone run in its own
 store.
 
-`runs cancel` and `runs retry` cannot act on a standalone run at all, and
-say so rather than reporting it missing. Cancel needs something arbitrating the run,
-and a standalone run is by definition one no daemon arbitrates, so
-nothing is watching its store for a cancel request; stop the process or
-wait. Retry submits a new run, which needs a daemon or a controller to
-admit it; start the pipeline again from its repository.
+`runs cancel` and `runs retry` use the selected controller API. They do not
+search or mutate old standalone store files. An unavailable controller fails
+before any intake. See [rewrite integration](architecture.md) for the remaining
+local-runtime and retry bindings.
 
 The start record of a standalone run carries `standalone: true` and
 `standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`,

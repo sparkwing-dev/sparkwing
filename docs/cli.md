@@ -65,9 +65,10 @@ no allow, so the launch weighs the declarations before it persists the run, and
 weighs what the run will execute: the `--sw-ref` worktree when the launch names
 a ref, the binary an armed schedule pinned, the working tree otherwise. A
 scheduled run goes through the same submission and is refused the same way.
-`sparkwing runs retry` is not weighed yet: it re-queues the source run's own
-declarations, so a retry of a risk-declaring run is not refused. Run a
-risk-labeled pipeline in the foreground, where `--sw-allow` authorizes it.
+`sparkwing runs retry` submits an explicit failed/all-jobs selection to the
+controller. The CLI never replaces the source run's sealed risk permissions
+with its caller's environment. Retry intake and reuse still need the shared
+controller transaction adapter. See [rewrite integration](architecture.md).
 
 `--profile NAME` selects the store a read verb reads (this machine's
 state or a controller, and any controller auth). Execution still happens

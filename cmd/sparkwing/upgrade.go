@@ -129,15 +129,5 @@ func writeUpgradeReport(out io.Writer, format string, result engine.UpgradeResul
 			return err
 		}
 	}
-	for _, notice := range report.Notices {
-		if _, err := fmt.Fprintln(out, "warning: "+notice.Reason); err != nil {
-			return err
-		}
-		if notice.Hint != "" {
-			if _, err := fmt.Fprintln(out, "hint: "+notice.Hint); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return writeEngineNotices(out, report.Notices)
 }

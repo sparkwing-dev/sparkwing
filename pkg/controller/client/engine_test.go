@@ -71,7 +71,7 @@ func TestEngineClientRoutes(t *testing.T) {
 			return c.Cancel(ctx, "r1", controllerwire.CancelRequest{Reason: "stop"})
 		}},
 		{"retry", "POST", "/api/v1/runs/r1/retry", controllerwire.CreateRunResponse{RunID: "r2", Number: 43}, func(c controllerwire.Controller) (any, error) {
-			return c.Retry(ctx, "r1", controllerwire.RetryRequest{IdempotencyKey: "key"})
+			return c.Retry(ctx, "r1", controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "key"})
 		}},
 	}
 	for _, tt := range tests {

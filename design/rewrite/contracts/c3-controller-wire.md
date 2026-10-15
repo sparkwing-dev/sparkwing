@@ -129,6 +129,27 @@ ceilings. `Spec.Declarations` retains both layers for expansion and retry.
 intake. The store derives the scope and digest and stores them on the run, so
 executable and published intake both replay without creating another run.
 
+`RetryRequest.Mode` is required: `failed` reuses authorized successful jobs,
+while `all` executes the complete sealed plan. `RetryRequest.Validate` refuses
+an unknown/absent mode or absent idempotency key before intake. The mode joins
+the exact-body digest, so the same key with a different mode conflicts. Neither
+selection changes the original request, plan, source authority, actor or captured
+environment. The controller records the retrier as separate lineage.
+`CreateRunResponse.RunID` identifies the newly allocated retry. Its `Request`
+retains the original seal's run identity and hash, including across retry chains.
+Consumers must not rewrite or equate those identities.
+
+The CLI submits both local and profile retries through `Controller.Retry`.
+It resolves and deduplicates all flag/stdin selectors before submitting any run.
+Each selected source gets a separate idempotency key. JSON receipts expose only
+source/new IDs, allocated number, replay and structured failure. Sealed requests
+and one-time here bearers never enter output. A here retry with no host binding
+returns incomplete exit 3 after intake, retains the returned run ID in its JSON
+failure receipt, and makes no claim that hosting started. Native here handoff
+and retained-bearer resume remain W3/W8/W9 integration requirements. W1/W2 must
+implement selected retry intake/materialization and consume the shared validator.
+No other area's contract or authority rule changed with this W9 wire amendment.
+
 HTTP bodies cannot select an actor, granted identity, billing provenance or
 claim fence. C2 middleware authorizes the complete route alternative and C1
 rechecks it in the mutation transaction. A session reference survives intake

@@ -2,9 +2,14 @@
 
 Sparkwing's rewrite uses shared contracts for state, credentials, hosting, storage
 and controller transport. The CLI already uses typed controller clients for run
-observations, schedules, credentials and data operations. Native controller,
+observations, retries, schedules, credentials and data operations. Retry selection
+is explicit, and receipts exclude execution inputs and here credentials. Native controller,
 host, runner and storage composition still needs integration evidence. A passing
 transport test does not establish a working deployment.
+
+Retry intake and reuse still need the controller's transaction adapter. Here
+retry handoff also needs the shared host. An incomplete handoff exits 3 and
+identifies the new run instead of reporting that it started.
 
 See [local dashboard integration](native-mode.md), [controller connections](backends.md)
 and [self-hosting](self-hosting.md) for the related surfaces.

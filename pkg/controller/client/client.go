@@ -678,47 +678,6 @@ func (c *Client) FinishTrigger(ctx context.Context, triggerID string) error {
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
 
-// ListTriggers fetches triggers filtered by f. Mirrors
-// store.ListTriggers.
-func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error) {
-	q := url.Values{}
-	if len(f.Statuses) > 0 {
-		q.Set("status", strings.Join(f.Statuses, ","))
-	}
-	if len(f.Pipelines) > 0 {
-		q.Set("pipeline", strings.Join(f.Pipelines, ","))
-	}
-	if f.Repo != "" {
-		q.Set("repo", f.Repo)
-	}
-	if f.Limit > 0 {
-		q.Set("limit", fmt.Sprintf("%d", f.Limit))
-	}
-	u := c.baseURL + "/api/v1/triggers"
-	if enc := q.Encode(); enc != "" {
-		u += "?" + enc
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
-	}
-	var body struct {
-		Triggers []*store.Trigger `json:"triggers"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Triggers, nil
-}
-
 // GetTrigger fetches a single trigger's full row. Returns
 // store.ErrNotFound on 404.
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error) {
@@ -766,43 +725,6 @@ func (c *Client) CancelRun(ctx context.Context, runID string) error {
 		return notFound(resp)
 	default:
 		return readHTTPError(resp)
-	}
-}
-
-// RetryRun queues a fresh run rerunning the named source. Returns
-// the new run id. Pass full=true to opt into "rerun all" mode
-// (re-execute every node, ignoring skip-passed rehydration); the
-// default false picks "rerun from failed" so passed nodes reuse
-// their prior outputs.
-//
-// ErrNotFound when srcRunID doesn't exist.
-func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error) {
-	path := fmt.Sprintf("/api/v1/runs/%s/retry", url.PathEscape(srcRunID))
-	if full {
-		path += "?full=1"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusAccepted, http.StatusCreated:
-		var body struct {
-			ID string `json:"id"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			return "", err
-		}
-		return body.ID, nil
-	case http.StatusNotFound:
-		return "", notFound(resp)
-	default:
-		return "", readHTTPError(resp)
 	}
 }
 

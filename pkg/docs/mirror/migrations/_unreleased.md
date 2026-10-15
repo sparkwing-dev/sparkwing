@@ -723,6 +723,19 @@ Nothing converts an old pin.
 - **Plan document:** dependency caches are listed under `caches` instead
   of `dir_caches`, including in `sparkwing pipeline plan --static -o json`.
 
+## Retry requests and receipts
+
+Use `runs retry --run RUN --failed` to reuse successful jobs or `--all-jobs`
+to execute the complete sealed plan again. Repeated `--run`, comma lists and
+`--run -` select multiple runs. The old `full=1` query and legacy retry client
+method are removed. Each source run gets an independent idempotency key.
+
+Local and remote retries use the controller API. JSON emits one safe receipt
+or structured failure per source run. Plain emits new run IDs. The CLI no longer
+opens local or standalone state files to retry runs. Native retry intake, reuse
+and here handoff still require integration. An incomplete here handoff exits 3
+and its JSON failure receipt identifies the created run without its credential.
+
 ## The pipeline binary answers only the node protocol
 
 The compiled pipeline binary no longer runs, plans or inspects a pipeline by

@@ -127,8 +127,8 @@ func TestWingdAPIReadsDoNotWaitOnAForeignWriter(t *testing.T) {
 		runID := fmt.Sprintf("r%d", i)
 		key := fmt.Sprintf("memo:m%d", i)
 		holder := fmt.Sprintf("h%d", i)
-		loop("triggerpoll", 500*time.Millisecond, func(ctx context.Context) error {
-			_, err := c.ListTriggers(ctx, store.TriggerFilter{Statuses: []string{"pending"}, Limit: 50})
+		loop("runpoll", 500*time.Millisecond, func(ctx context.Context) error {
+			_, err := c.ListRuns(ctx, store.RunFilter{Statuses: []string{"pending"}, Limit: 50})
 			return err
 		})
 		loop("nodebeat", 5*time.Second, func(ctx context.Context) error {
@@ -151,10 +151,10 @@ func TestWingdAPIReadsDoNotWaitOnAForeignWriter(t *testing.T) {
 	wg.Wait()
 	<-held
 
-	for _, kind := range []string{"triggerpoll", "nodebeat", "slotbeat", "admission"} {
+	for _, kind := range []string{"runpoll", "nodebeat", "slotbeat", "admission"} {
 		col.report(t, kind)
 	}
-	for _, kind := range []string{"triggerpoll", "nodebeat", "slotbeat", "admission"} {
+	for _, kind := range []string{"runpoll", "nodebeat", "slotbeat", "admission"} {
 		if n, errs := col.outcome(kind); n == 0 {
 			t.Errorf("%s produced no samples, so the ceiling below proves nothing", kind)
 		} else if errs > 0 {

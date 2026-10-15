@@ -356,9 +356,6 @@ var (
 	cmdHooksInstall                   = surfaceCommand("sparkwing pipeline hooks install")
 	cmdHooksUninstall                 = surfaceCommand("sparkwing pipeline hooks uninstall")
 	cmdHooksStatus                    = surfaceCommand("sparkwing pipeline hooks status")
-	cmdTriggers                       = Command{Path: "sparkwing cluster triggers", Hidden: true}
-	cmdTriggersList                   = Command{Path: "sparkwing cluster triggers list", Hidden: true}
-	cmdTriggersGet                    = Command{Path: "sparkwing cluster triggers get", Hidden: true}
 	cmdRunners                        = surfaceCommand("sparkwing runners")
 	cmdRunnersAdd                     = surfaceCommand("sparkwing runners add")
 	cmdRunnersRemove                  = surfaceCommand("sparkwing runners remove")

@@ -267,7 +267,28 @@ type CancelRequest struct {
 	Reason string `json:"reason"`
 }
 type RetryRequest struct {
-	IdempotencyKey string `json:"idempotency_key"`
+	IdempotencyKey string    `json:"idempotency_key"`
+	Mode           RetryMode `json:"mode"`
+}
+
+// RetryMode selects reuse of successful jobs or execution of the complete sealed plan.
+// Neither mode changes the original request, plan, source trust or actor.
+type RetryMode string
+
+const (
+	RetryFailed RetryMode = "failed"
+	RetryAll    RetryMode = "all"
+)
+
+// Validate refuses an ambiguous retry before intake can allocate a new run.
+func (r RetryRequest) Validate() error {
+	if r.Mode != RetryFailed && r.Mode != RetryAll {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "retry requires mode failed or all"}
+	}
+	if r.IdempotencyKey == "" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "retry requires an idempotency key"}
+	}
+	return nil
 }
 
 // JobDetail is a safe status view, not execution authority or a raw job declaration.
