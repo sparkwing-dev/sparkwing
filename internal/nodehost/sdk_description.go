@@ -34,7 +34,7 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 				p.Masker.Register(*arg.Default)
 			}
 		}
-		if pipeline.Name == input.Run.Pipeline {
+		if pipeline.Name == input.Entrypoint {
 			selected = pipeline
 		}
 	}

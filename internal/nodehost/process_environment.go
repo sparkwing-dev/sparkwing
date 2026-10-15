@@ -35,27 +35,32 @@ func (e SDKEnvironment) planning(ctx context.Context, input PlanningProcessInput
 }
 
 func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity) ([]string, error) {
+	env, _, err := e.jobEnvironments(ctx, kind, accepted, nodeID, generation, specHash, runner, false)
+	return env, err
+}
+
+func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity, cleanup bool) ([]string, []string, error) {
 	if err := context.Cause(ctx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if e.Store == nil || accepted.RunID == "" || nodeID == "" || generation < 0 || specHash == "" {
-		return nil, errors.New("SDK job environment requires persisted job identity")
+		return nil, nil, errors.New("SDK job environment requires persisted job identity")
 	}
 	var spec runspec.Spec
 	if err := json.Unmarshal(accepted.Spec, &spec); err != nil || accepted.SpecHash == "" || accepted.PlanHash == "" || string(spec.Hash) != accepted.SpecHash || string(spec.PlanHash) != accepted.PlanHash {
-		return nil, executorError(apierr.SpecDrift, "SDK environment differs from the accepted run")
+		return nil, nil, executorError(apierr.SpecDrift, "SDK environment differs from the accepted run")
 	}
 	ref := store.NodeRef{RunID: accepted.RunID, NodeID: nodeID}
 	row, err := e.Store.ReadNode(ctx, ref)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if row.Ref != ref || row.Generation != generation || row.SpecHash != specHash {
-		return nil, executorError(apierr.SpecDrift, "SDK environment differs from the persisted job")
+		return nil, nil, executorError(apierr.SpecDrift, "SDK environment differs from the persisted job")
 	}
 	var job nodeproto.JobSpec
 	if err := json.Unmarshal(row.Spec, &job); err != nil || job.ID != nodeID {
-		return nil, executorError(apierr.PlanDrift, "SDK environment has an invalid job declaration")
+		return nil, nil, executorError(apierr.PlanDrift, "SDK environment has an invalid job declaration")
 	}
 	assignments := make([]procenv.Assignment, 0, len(job.Env))
 	for name, value := range job.Env {
@@ -68,24 +73,41 @@ func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted Acc
 	}
 	jobEnv, err := split(assignments)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	runtime := sdkRuntime(executorRunContext(spec), runner)
 	// safety: retry seals retain the source run ID; runtime identity belongs to the destination row.
 	runtime.RunID = accepted.RunID
 	runtime.JobID, runtime.Startup = nodeID, jobEnv.Startup
 	if err := context.Cause(ctx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if kind == procenv.StepTool {
+	if kind == procenv.StepTool || kind == procenv.Cleanup {
 		runtime.Startup = append(runtime.Startup, jobEnv.Body...)
 		attempt, err := e.build(ctx, procenv.Attempt, spec.Request.Request.Env, runtime)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return e.build(ctx, procenv.StepTool, spec.Request.Request.Env, procenv.Runtime{AttemptEnv: attempt})
+		env, err := e.build(ctx, kind, spec.Request.Request.Env, procenv.Runtime{AttemptEnv: attempt})
+		return env, nil, err
 	}
-	return e.build(ctx, kind, spec.Request.Request.Env, runtime)
+	env, err := e.build(ctx, kind, spec.Request.Request.Env, runtime)
+	if err != nil || !cleanup {
+		return env, nil, err
+	}
+	complete := env
+	if len(jobEnv.Body) != 0 {
+		runtime.Startup = append(slices.Clone(runtime.Startup), jobEnv.Body...)
+		complete, err = e.build(ctx, procenv.Attempt, spec.Request.Request.Env, runtime)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	complete, err = e.build(ctx, procenv.Cleanup, spec.Request.Request.Env, procenv.Runtime{AttemptEnv: complete})
+	if err != nil {
+		return nil, nil, err
+	}
+	return env, complete, nil
 }
 
 func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runspec.EnvSnapshot, runtime procenv.Runtime) ([]string, error) {

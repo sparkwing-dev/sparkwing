@@ -1,5 +1,10 @@
 # C3 protocol and SDK contract
 
+[Services and process environments](w3-services-continuation.md) completes the
+shared service registrar, separates pipeline aliases from registered entries,
+and supplies complete native cleanup environments. Native runtime migration
+and legacy deletion remain open.
+
 [Checkout planning](w3-checkout-continuation.md) connects the common owner to
 acquired project files, shared argument and guard resolution, and plan-dependent
 settings for the second seal. Native entry-point migration remains open.

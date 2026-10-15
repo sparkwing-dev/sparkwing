@@ -92,7 +92,7 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			cfg := ProtocolSessionConfig{
 				Environments: sdkTestEnvironment(s), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
 				Revoke:      func() error { revoked = true; return nil },
-				RunCleanups: func(context.Context) error { cleaned = true; return nil },
+				RunCleanups: func(context.Context, CleanupScope) error { cleaned = true; return nil },
 				Log: func(_ context.Context, log nodeproto.FrameLog) error {
 					if log.Message == "entered" && lost {
 						cancel(lease.ErrLeaseLost)

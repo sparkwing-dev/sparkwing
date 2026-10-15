@@ -219,7 +219,7 @@ func TestProtocolSessionCancelledEvalJoinsTargetAndKeepsSession(t *testing.T) {
 			}
 			return nil
 		}
-		cfg.RunCleanups = func(context.Context) error { cleaned.Store(true); return nil }
+		cfg.RunCleanups = func(context.Context, CleanupScope) error { cleaned.Store(true); return nil }
 	})
 	protocolTestHello(t, session)
 	ctx, cancel := context.WithCancelCause(t.Context())
@@ -287,7 +287,7 @@ func TestProtocolSessionCloseRevokesAndJoinsBeforeCleanup(t *testing.T) {
 	var revoked, cleaned atomic.Bool
 	session := protocolTestSession(t, "normal", func(cfg *ProtocolSessionConfig) {
 		cfg.Revoke = func() error { revoked.Store(true); return nil }
-		cfg.RunCleanups = func(context.Context) error {
+		cfg.RunCleanups = func(context.Context, CleanupScope) error {
 			if !revoked.Load() {
 				return errors.New("cleanup before revocation")
 			}
@@ -438,7 +438,7 @@ func TestProtocolSessionChild(t *testing.T) {
 			switch request.Op {
 			case nodeproto.OpPlan:
 				job := sdkStartupJob(strings.TrimPrefix(mode, "startup_"))
-				if os.Getenv("SDK_STARTUP") == "change" {
+				if os.Getenv("NODE_OPTIONS") == "change" {
 					job.Steps[0].ID = "changed"
 				}
 				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
@@ -610,7 +610,7 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache(t *testing.T) {
 	}
 	var sessions []*ProtocolSession
 	cleaned := 0
-	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(nil), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context) error { cleaned++; return nil }}
+	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(nil), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context, CleanupScope) error { cleaned++; return nil }}
 	p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
 		process, err := cfg.StartPlanning(ctx, input, log)
 		if process != nil {
@@ -725,7 +725,7 @@ func ownerPolicyNativeSkip(t *testing.T, mode string) {
 			}
 			return nil
 		},
-		RunCleanups: func(context.Context) error {
+		RunCleanups: func(context.Context, CleanupScope) error {
 			cleaned++
 			if mode == "cleanup" {
 				return errors.New("private cleanup error")
@@ -764,7 +764,7 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 		return binding, nil
 	}
 	revoked, cleaned := false, false
-	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context) error {
+	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context, CleanupScope) error {
 		if !revoked {
 			return errors.New("routes still live during cleanup")
 		}

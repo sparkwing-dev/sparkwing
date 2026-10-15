@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"sync"
 	"time"
 
@@ -33,10 +34,11 @@ type ProtocolSessionConfig struct {
 	Environments    SDKEnvironment
 	Log             func(context.Context, nodeproto.FrameLog) error
 	Revoke          func() error
-	RunCleanups     func(context.Context) error
+	RunCleanups     func(context.Context, CleanupScope) error
 	Activity        ExecutorActivity
 	ParseFrame      func([]byte) (nodeproto.Frame, error)
 	ValidateRequest func(nodeproto.Request) error
+	cleanupEnv      []string
 }
 
 // Start implements ExecutorDependencies.Start. The executor sends hello after
@@ -46,11 +48,12 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 		return nil, cfg.failedStartup(errors.New("SDK process requires a source entry"))
 	}
 	cfg.Command, cfg.Directory, cfg.Activity = input.Entry.Command, input.Entry.Directory, activity
-	env, err := cfg.Environments.job(ctx, procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
 	if err != nil {
 		return nil, cfg.failedStartup(err)
 	}
 	cfg.Environment = env
+	cfg.cleanupEnv = complete
 	return cfg.start(ctx)
 }
 
@@ -61,11 +64,12 @@ func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input Eval
 		return nil, cfg.failedStartup(errors.New("SDK evaluation requires a source entry"))
 	}
 	cfg.Command, cfg.Directory = input.Entry.Command, input.Entry.Directory
-	env, err := cfg.Environments.job(ctx, procenv.Eval, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Eval, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
 	if err != nil {
 		return nil, cfg.failedStartup(err)
 	}
 	cfg.Environment = env
+	cfg.cleanupEnv = complete
 	return cfg.start(ctx)
 }
 
@@ -84,6 +88,7 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 		return nil, cfg.failedStartup(err)
 	}
 	cfg.Environment = env
+	cfg.cleanupEnv = slices.Clone(env)
 	return cfg.start(ctx)
 }
 
@@ -534,7 +539,11 @@ func (s *ProtocolSession) Close() error {
 // Cleanup runs host-registered cleanups after Close has revoked and joined.
 func (s *ProtocolSession) Cleanup(ctx context.Context) error {
 	if s.cfg.RunCleanups != nil {
-		return s.cfg.RunCleanups(ctx)
+		env := s.cfg.cleanupEnv
+		if env == nil {
+			env = s.cfg.Environment
+		}
+		return s.cfg.RunCleanups(ctx, CleanupScope{Dir: s.cfg.Directory, Env: append([]string{}, env...)})
 	}
 	return nil
 }

@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -175,7 +177,7 @@ func TestNativeSDKStartsLoadCapturedValuesBeforeSharedEnvironmentPolicy(t *testi
 }
 
 func sdkStartupJob(value string) nodeproto.JobSpec {
-	return nodeproto.JobSpec{ID: "build", Env: map[string]nodeproto.EnvValue{"SDK_STARTUP": {Value: value, Startup: true}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	return nodeproto.JobSpec{ID: "build", Env: map[string]nodeproto.EnvValue{"NODE_OPTIONS": {Value: value}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 }
 
 func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
@@ -201,9 +203,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 			}
 			input.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "startup_" + value}
 			policy := sdkTestEnvironment(st)
-			policy.Split = func(values []procenv.Assignment) (procenv.JobEnv, error) {
-				return procenv.JobEnv{Startup: values}, nil
-			}
+			policy.Split = procenv.SplitJobEnv
 			policy.Build = func(_ procenv.Kind, _ procenv.Base, runtime procenv.Runtime) ([]string, error) {
 				env := []string{"GORACE=atexit_sleep_ms=0"}
 				for _, assignment := range runtime.Startup {
@@ -214,7 +214,7 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 			body, revoked, cleaned := false, false, false
 			cfg := ProtocolSessionConfig{
 				Environments: policy, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
-				Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context) error { cleaned = true; return nil },
+				Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context, CleanupScope) error { cleaned = true; return nil },
 				Log: func(_ context.Context, log nodeproto.FrameLog) error {
 					body = body || log.Message == "body entered"
 					return nil
@@ -236,6 +236,94 @@ func TestNativeSDKStartupChangeRefusesDriftBeforeBody(t *testing.T) {
 			last := st.changes[len(st.changes)-1]
 			if last.Cause != store.CauseReport || wantBody && last.To != store.NodeSuccess || !wantBody && (last.To != store.NodeFailed || !strings.Contains(last.Extra.Result.Reason, "plan_drift")) {
 				t.Fatalf("transition=%+v", last)
+			}
+		})
+	}
+}
+
+func TestNativeSDKCleanupGetsCompleteAttemptEnvironment(t *testing.T) {
+	for _, kind := range []procenv.Kind{procenv.Attempt, procenv.Eval} {
+		t.Run(map[procenv.Kind]string{procenv.Attempt: "attempt", procenv.Eval: "eval"}[kind], func(t *testing.T) {
+			input, st, _, _ := executorFixture(t)
+			input.Entry.Directory = t.TempDir()
+			job := nodeproto.JobSpec{ID: input.NodeID, Env: map[string]nodeproto.EnvValue{
+				"GOMAXPROCS": {Value: "2"}, "NODE_OPTIONS": {Value: "--no-warnings"},
+				"DOCKER_HOST": {Value: "tcp://declared:2375"}, "BODY": {Value: "after-plan"},
+			}}
+			st.row.Spec, _ = json.Marshal(job)
+			captured := []string{"GORACE=atexit_sleep_ms=0", "DOCKER_HOST=tcp://captured:2375", "API_TOKEN=private-value"}
+			var spec runspec.Spec
+			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+				t.Fatal(err)
+			}
+			spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"GORACE": "atexit_sleep_ms=0", "DOCKER_HOST": "tcp://captured:2375", "API_TOKEN": "private-value"})
+			input.Accepted.Spec, _ = json.Marshal(spec)
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "environment"}
+			cleanups := &ProcessCleanups{}
+			if _, err := cleanups.Register([]string{"/bin/sh", "-c", `printf '%s' "$DOCKER_HOST" > cleanup-env`}, ""); err != nil {
+				t.Fatal(err)
+			}
+			revoked, cleaned := false, false
+			cfg := ProtocolSessionConfig{
+				Environments: SDKEnvironment{Base: procenv.Base{Local: true, Captured: captured}, Store: st},
+				ParseFrame:   protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
+				Revoke: func() error { revoked = true; return nil },
+				RunCleanups: func(ctx context.Context, scope CleanupScope) error {
+					cleaned = true
+					if !revoked || scope.Dir != input.Entry.Directory {
+						t.Fatal("cleanup ran before revocation or in another directory")
+					}
+					for _, entry := range []string{"GOMAXPROCS=2", "NODE_OPTIONS=--no-warnings", "BODY=after-plan", "DOCKER_HOST=tcp://declared:2375", "SPARKWING_JOB_ID=build"} {
+						if !slices.Contains(scope.Env, entry) {
+							t.Fatalf("cleanup omitted %s: %v", entry, scope.Env)
+						}
+					}
+					if strings.Contains(strings.Join(scope.Env, "\n"), "private-value") || slices.Contains(scope.Env, "DOCKER_HOST=tcp://captured:2375") {
+						t.Fatal("cleanup inherited a credential or lost the body override")
+					}
+					return cleanups.Run(ctx, scope)
+				},
+			}
+			var process ExecutorProcess
+			if kind == procenv.Attempt {
+				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+			} else {
+				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = process.Close() })
+			session := process.(*ProtocolSession)
+			protocolTestHello(t, session)
+			reply, err := session.Request(t.Context(), nodeproto.Request{ID: "environment", Op: nodeproto.OpDescribe})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var startup []string
+			if err := json.Unmarshal(reply.Result, &startup); err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range []string{"GOMAXPROCS=2", "NODE_OPTIONS=--no-warnings", "DOCKER_HOST=tcp://captured:2375"} {
+				if !slices.Contains(startup, entry) {
+					t.Fatalf("native startup omitted %s", entry)
+				}
+			}
+			if slices.Contains(startup, "BODY=after-plan") || strings.Contains(strings.Join(startup, "\n"), "private-value") {
+				t.Fatal("body value or credential reached startup")
+			}
+			if err := process.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := process.Cleanup(t.Context()); err != nil || !cleaned {
+				t.Fatalf("cleanup=%t error=%v", cleaned, err)
+			}
+			if raw, err := os.ReadFile(filepath.Join(input.Entry.Directory, "cleanup-env")); err != nil || string(raw) != "tcp://declared:2375" {
+				t.Fatalf("cleanup tool environment=%q error=%v", raw, err)
 			}
 		})
 	}

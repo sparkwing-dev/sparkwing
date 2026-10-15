@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -26,6 +27,14 @@ type ProcessServices struct {
 	Masks      *MaskRegistry
 	Annotation func(context.Context, capability.Authorized, nodeproto.AnnotationRequest) error
 	Summary    func(context.Context, capability.Authorized, nodeproto.SummaryRequest) error
+	Secrets    []string
+	Secret     func(context.Context, capability.Authorized, string) (string, bool, error)
+	Output     func(context.Context, capability.Authorized, string) (json.RawMessage, error)
+	Latest     func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error)
+	OIDC       func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error)
+	StartChild func(context.Context, capability.Authorized, ChildRequest) (string, error)
+	AwaitChild func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error)
+	Cleanups   *ProcessCleanups
 }
 
 // ProcessEndpointRegistrar is implemented by the common policy router.
@@ -39,8 +48,21 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 	if router == nil || resolve == nil {
 		return errors.New("process services require policy router and live resolver")
 	}
-	for _, path := range []string{"/node/v1/masks", "/node/v1/annotations", "/node/v1/summary"} {
-		endpoint := controller.Endpoint{Method: http.MethodPost, Pattern: path, Authentication: capability.AuthCapability, Decode: serviceEvidence}
+	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/node/v1/masks"},
+		{http.MethodPost, "/node/v1/annotations"},
+		{http.MethodPost, "/node/v1/summary"},
+		{http.MethodGet, "/node/v1/secrets/{name}"},
+		{http.MethodGet, "/node/v1/jobs/{job}/output"},
+		{http.MethodGet, "/node/v1/pipelines/{name}/latest"},
+		{http.MethodPost, "/node/v1/oidc-token"},
+		{http.MethodPost, "/node/v1/children"},
+		{http.MethodGet, "/node/v1/children/{run}/await"},
+		{http.MethodPost, "/node/v1/cleanups"},
+		{http.MethodDelete, "/node/v1/cleanups/{cleanup}"},
+	} {
+		path := route.path
+		endpoint := controller.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: serviceEvidence}
 		endpoint.Handle = func(w http.ResponseWriter, request *http.Request, auth capability.Authorized) error {
 			service, err := resolve(request.Context(), auth)
 			if err != nil {
@@ -49,12 +71,17 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 			if service == nil || service.Masks == nil || service.Masks.masker == nil || service.RunID != auth.Binding.RunID || service.Job.ID != auth.Binding.NodeID || service.RunID == "" || service.Job.ID == "" {
 				return executorError(apierr.SpecDrift, "service binding differs from its live process")
 			}
-			if err := service.write(request, auth, path); err != nil {
+			body, status, err := service.serve(request, auth, path)
+			if err != nil {
 				return maskHostError(err, service.Masks.mask)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
-			return json.NewEncoder(w).Encode(nodeproto.ServiceAcknowledged{})
+			w.WriteHeader(status)
+			if status == http.StatusNoContent {
+				return nil
+			}
+			return json.NewEncoder(w).Encode(body)
 		}
 		if err := router.Register(endpoint); err != nil {
 			return err
@@ -64,6 +91,13 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 }
 
 func serviceEvidence(request *http.Request) (capability.RequestEvidence, error) {
+	evidence := capability.RequestEvidence{Target: capability.Target{SecretName: request.PathValue("name"), NodeID: request.PathValue("job"), Pipeline: request.PathValue("name"), ChildRunID: request.PathValue("run"), CleanupID: request.PathValue("cleanup")}}
+	if evidence.Target.NodeID == "" {
+		evidence.Target.NodeID = request.URL.Query().Get("job")
+	}
+	if request.Method == http.MethodGet || request.Method == http.MethodDelete {
+		return evidence, nil
+	}
 	defer request.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(request.Body, limits.JSONRequestBytes+1))
 	if err != nil {
@@ -74,7 +108,34 @@ func serviceEvidence(request *http.Request) (capability.RequestEvidence, error) 
 		return capability.RequestEvidence{}, executorError(apierr.PayloadTooLarge, "service request exceeds JSON envelope limit")
 	}
 	sum := sha256.Sum256(body)
-	return capability.RequestEvidence{ResultDigest: hex.EncodeToString(sum[:])}, nil
+	evidence.ResultDigest = hex.EncodeToString(sum[:])
+	return evidence, nil
+}
+
+func (s *ProcessServices) serve(request *http.Request, auth capability.Authorized, path string) (any, int, error) {
+	switch path {
+	case "/node/v1/masks", "/node/v1/annotations", "/node/v1/summary":
+		return nodeproto.ServiceAcknowledged{}, http.StatusOK, s.write(request, auth, path)
+	case "/node/v1/cleanups":
+		if s.Cleanups == nil {
+			return nil, 0, serviceUnavailable()
+		}
+		var body processCleanupRequest
+		if err := decodeService(request, &body); err != nil {
+			return nil, 0, err
+		}
+		id, err := s.Cleanups.Register(body.Argv, body.Description)
+		return struct {
+			ID string `json:"id"`
+		}{id}, http.StatusCreated, err
+	case "/node/v1/cleanups/{cleanup}":
+		if s.Cleanups == nil {
+			return nil, 0, serviceUnavailable()
+		}
+		return nil, http.StatusNoContent, s.Cleanups.Release(request.PathValue("cleanup"))
+	default:
+		return s.read(request, auth, path)
+	}
 }
 
 func (s *ProcessServices) write(request *http.Request, auth capability.Authorized, path string) error {
@@ -90,6 +151,9 @@ func (s *ProcessServices) write(request *http.Request, auth capability.Authorize
 		var body nodeproto.AnnotationRequest
 		if err := decodeService(request, &body); err != nil {
 			return err
+		}
+		if body.Level == "" {
+			body.Level = "info"
 		}
 		if !logLevels[body.Level] || body.Line < 0 || body.EndLine < 0 || body.Column < 0 {
 			return executorError(apierr.BadRequest, "invalid annotation level or location")
@@ -128,8 +192,17 @@ func (s *ProcessServices) step(id string) error {
 }
 
 func decodeService(request *http.Request, target any) error {
-	raw, err := io.ReadAll(io.LimitReader(request.Body, limits.JSONRequestBytes+1))
-	if err != nil || int64(len(raw)) > limits.JSONRequestBytes {
+	bound := limits.JSONRequestBytes
+	switch target.(type) {
+	case *ChildRequest:
+		bound = maxChildBody
+	case *processCleanupRequest:
+		bound = maxCleanupBody
+	case *processOIDCRequest:
+		bound = 4 << 10
+	}
+	raw, err := io.ReadAll(io.LimitReader(request.Body, bound+1))
+	if err != nil || int64(len(raw)) > bound {
 		return executorError(apierr.BadRequest, "cannot decode service request")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -162,7 +235,7 @@ func decodeService(request *http.Request, target any) error {
 	case *nodeproto.MaskRequest:
 		required = []string{"value"}
 	case *nodeproto.AnnotationRequest:
-		required = []string{"level", "message"}
+		required = []string{"message"}
 	case *nodeproto.SummaryRequest:
 		required = []string{"markdown"}
 	}

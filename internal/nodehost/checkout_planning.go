@@ -108,7 +108,7 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	if err != nil {
 		return out, err
 	}
-	inputs, err := checkoutPlanningSettings(input)
+	inputs, entrypoint, err := checkoutPlanningSettings(input)
 	if err != nil {
 		return out, err
 	}
@@ -120,9 +120,9 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	if err != nil {
 		return out, err
 	}
-	resolved := runspec.Resolved{Engine: input.Entry.Engine.Identity, Env: request.Env, Entrypoint: request.Source.Entrypoint, Settings: runspec.ExecutionSettings{Options: request.Options}}
+	resolved := runspec.Resolved{Engine: input.Entry.Engine.Identity, Env: request.Env, Entrypoint: entrypoint, Settings: runspec.ExecutionSettings{Options: request.Options}}
 	resolveDefaultBranch(&resolved, request.Git, input.Entry.DefaultBranch)
-	process := PlanningProcessInput{Entry: input.Entry, Runner: input.Runner, Args: args, SecretArgs: request.SecretArgs.Value, Environment: request.Env, Run: executorRunContext(runspec.Spec{Request: input.Request, Resolved: resolved})}
+	process := PlanningProcessInput{Entry: input.Entry, Entrypoint: entrypoint, Runner: input.Runner, Args: args, SecretArgs: request.SecretArgs.Value, Environment: request.Env, Run: executorRunContext(runspec.Spec{Request: input.Request, Resolved: resolved})}
 	prepared, err := p.Prepare(ctx, process, input.Planning)
 	if err != nil {
 		return out, err
@@ -149,25 +149,30 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	}, nil
 }
 
-func checkoutPlanningSettings(input CheckoutPlanningInput) (settings.Inputs, error) {
+func checkoutPlanningSettings(input CheckoutPlanningInput) (settings.Inputs, string, error) {
 	inputs := settings.Inputs{Sealed: settings.Values{Args: input.Request.Request.RequestedArgs}, Context: settings.Context{Submitter: true}}
+	entrypoint := input.Request.Request.Source.Entrypoint
+	if entrypoint == "" {
+		entrypoint = input.Request.Request.Pipeline
+	}
 	if len(input.Project) == 0 {
-		return inputs, nil
+		return inputs, entrypoint, nil
 	}
 	cfg, err := projectconfig.Parse(input.Project)
 	if err != nil {
-		return inputs, err
+		return inputs, "", err
 	}
 	if cfg.Defaults != nil {
 		inputs.Defaults = settings.Values{Args: cfg.Defaults.Args, Guards: cfg.Defaults.Guards}
 	}
 	for _, pipeline := range cfg.Pipelines {
 		if pipeline.Name == input.Request.Request.Pipeline {
+			entrypoint = pipeline.Entrypoint
 			inputs.Pipeline = settings.Values{Args: pipeline.Args, Guards: pipeline.Guards}
 			break
 		}
 	}
-	return inputs, nil
+	return inputs, entrypoint, nil
 }
 
 func resolveDefaultBranch(resolved *runspec.Resolved, git runspec.Git, acquired string) {

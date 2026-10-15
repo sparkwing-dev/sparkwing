@@ -439,6 +439,12 @@ The source reports describe residual failures that their committed tests do not 
 
 ## W3 recovery port after amendment integration
 
+The [W3 services continuation](w3-services-continuation.md) adds alias selection,
+complete service registration and native startup/cleanup environment proofs.
+Existing service acceptance helpers exercise all eleven handlers. It closes no
+additional parked row. The old dispatcher-event test still needs its final-store
+port and is recorded as failed evidence.
+
 `lifecycle-dependency-verdicts/hermetic-recovery-graph` ports
 `TestRecoveryWaitsOnItsOwnDeps`, `TestRecoveryIsCancelledByAFailedDepOfItsOwn`
 and reverses `TestRecoveryWaitsOnItsParentAlone`. The remote host projects the

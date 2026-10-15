@@ -23,6 +23,7 @@ import (
 // request/YAML winners; describe fills only absent keys. Planning has no job bearer.
 type PlanningProcessInput struct {
 	Entry       *source.Entry
+	Entrypoint  string
 	Runner      nodeproto.RunnerIdentity
 	Run         nodeproto.RunContext
 	Args        map[string]string
@@ -66,6 +67,9 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		return PreparedPlanning{}, errors.New("SDK planning requires acquired code and sealed run identity")
 	}
 	input = clonePlanningProcessInput(input)
+	if input.Entrypoint == "" {
+		input.Entrypoint = input.Run.Pipeline
+	}
 	for _, name := range input.SecretArgs {
 		p.Masker.Register(input.Args[name])
 	}
@@ -114,7 +118,7 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		return PreparedPlanning{}, p.planningError(ctx, err, logs.known)
 	}
 	input.Args = maps.Clone(prepared.Args)
-	planning.Inputs.Engine, planning.Inputs.Pipeline = input.Entry.Engine.Identity, input.Run.Pipeline
+	planning.Inputs.Engine, planning.Inputs.Pipeline, planning.Inputs.Entrypoint = input.Entry.Engine.Identity, input.Run.Pipeline, input.Entrypoint
 	runner := struct {
 		Granted nodeproto.RunnerIdentity
 		Target  releaseasset.Target
@@ -135,7 +139,7 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		logs := planningLogs{masker: p.Masker, sink: p.Log, known: true}
 		var raw json.RawMessage
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
-			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Run.Pipeline, Args: maps.Clone(input.Args), Run: &input.Run}, &raw)
+			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw)
 		})
 		if err != nil {
 			return nil, p.planningError(ctx, err, true)

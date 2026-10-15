@@ -25,6 +25,7 @@ type checkoutSDK struct {
 	description nodeproto.PipelineDescription
 	args        map[string]string
 	run         *nodeproto.RunContext
+	entrypoint  string
 }
 
 func (p *checkoutSDK) Request(ctx context.Context, request nodeproto.Request) (nodeproto.Reply, error) {
@@ -34,6 +35,7 @@ func (p *checkoutSDK) Request(ctx context.Context, request nodeproto.Request) (n
 	}
 	if request.Op == nodeproto.OpPlan {
 		p.args, p.run = request.Args, request.Run
+		p.entrypoint = request.Pipeline
 	}
 	return p.expansionSDK.Request(ctx, request)
 }
@@ -41,7 +43,7 @@ func (p *checkoutSDK) Request(ctx context.Context, request nodeproto.Request) (n
 // CheckCheckoutPlanning exercises checkout arguments and guard evidence through owner acceptance.
 func CheckCheckoutPlanning(t *testing.T) {
 	t.Helper()
-	for _, mode := range []string{"merged", "empty_guard", "local", "controller", "argument", "sdk_default", "origin_head", "sealed_default", "app_default", "default_reject_feature", "default_reject_trunk", "missing_default_when", "missing_default_unless", "missing_location", "refused", "invalid"} {
+	for _, mode := range []string{"merged", "alias", "empty_guard", "local", "controller", "argument", "sdk_default", "origin_head", "sealed_default", "app_default", "default_reject_feature", "default_reject_trunk", "missing_default_when", "missing_default_unless", "missing_location", "refused", "invalid"} {
 		t.Run(mode, func(t *testing.T) { checkCheckoutPlanning(t, mode) })
 	}
 }
@@ -81,7 +83,11 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 	case "invalid":
 		when = "[profile:local]"
 	}
-	project := []byte("defaults:\n  args: {explicit: defaults, inherited: defaults, default: defaults}\n  guards: {when: [where:controller]}\npipelines:\n  - name: build\n    entrypoint: .sparkwing\n    args: {explicit: pipeline, inherited: pipeline}\n    guards: {when: " + when + ", unless: " + unless + "}\n    requires: [pool=build]\n")
+	entrypoint := "build"
+	if mode == "alias" {
+		request.Pipeline, entrypoint = "deploy-prod", "Deploy"
+	}
+	project := []byte("defaults:\n  args: {explicit: defaults, inherited: defaults, default: defaults}\n  guards: {when: [where:controller]}\npipelines:\n  - name: " + request.Pipeline + "\n    entrypoint: " + entrypoint + "\n    args: {explicit: pipeline, inherited: pipeline}\n    guards: {when: " + when + ", unless: " + unless + "}\n    requires: [pool=build]\n")
 	identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
 	entry := &source.Entry{Engine: engine.Resolved{Identity: identity}, DefaultBranch: "trunk"}
 	if strings.HasPrefix(mode, "missing_default") {
@@ -113,7 +119,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 			return plan, err
 		},
 		Start: func(context.Context, nodehost.PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (nodehost.ExecutorProcess, error) {
-			process := &checkoutSDK{expansionSDK: expansionSDK{plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}}, description: nodeproto.PipelineDescription{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "sdk", Default: &defaultArg}, {Name: "secret", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}}}
+			process := &checkoutSDK{expansionSDK: expansionSDK{plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{}}}, description: nodeproto.PipelineDescription{Name: entrypoint, Args: []nodeproto.ArgumentDescription{{Name: "sdk", Default: &defaultArg}, {Name: "secret", Secret: true, Default: &secretArg}}, Secrets: []nodeproto.SecretDeclaration{{Name: "REQUIRED"}, {Name: "OPTIONAL", Optional: true}}}}
 			processes = append(processes, process)
 			return process, nil
 		},
@@ -155,7 +161,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		t.Fatal("checkout preparation changed the intake or engine identity")
 	}
 	if wantPassed {
-		if len(processes) != 2 || processes[1].args["sdk"] != defaultArg || processes[1].run.Git.DefaultBranch != resolved.DefaultBranch.Value || processes[1].run.RunID != "run" {
+		if len(processes) != 2 || processes[1].args["sdk"] != defaultArg || processes[1].run.Git.DefaultBranch != resolved.DefaultBranch.Value || processes[1].run.RunID != "run" || processes[1].run.Pipeline != request.Pipeline || processes[1].entrypoint != entrypoint || resolved.Entrypoint != entrypoint {
 			t.Fatal("planner did not receive resolved arguments and run facts")
 		}
 		wantPR := &nodeproto.PullRequest{Number: 42, Action: "opened", BaseRef: "trunk", BaseSHA: "base-sha", HeadRef: "feature", HeadSHA: "head-sha"}

@@ -36,6 +36,7 @@ func TestMaskRegistryRefusesAcceptedIdentifiersBeforeRegistering(t *testing.T) {
 		})
 	}
 }
+
 func TestMaskRegistryProtectsLaterExpansionAndFailedAcceptance(t *testing.T) {
 	masker := secrets.NewMasker()
 	registry := NewMaskRegistry(masker)
@@ -61,6 +62,7 @@ func (r *serviceRegistrar) Register(endpoint controller.Endpoint) error {
 	r.endpoints = append(r.endpoints, endpoint)
 	return nil
 }
+
 func serviceFixture(t *testing.T) (*serviceRegistrar, *ProcessServices, capability.Authorized) {
 	t.Helper()
 	masker := secrets.NewMasker()
@@ -72,6 +74,7 @@ func serviceFixture(t *testing.T) (*serviceRegistrar, *ProcessServices, capabili
 	}
 	return routes, service, authorized
 }
+
 func callService(t *testing.T, routes *serviceRegistrar, authorized capability.Authorized, path, body string) (*httptest.ResponseRecorder, error) {
 	t.Helper()
 	for _, endpoint := range routes.endpoints {
@@ -92,9 +95,10 @@ func callService(t *testing.T, routes *serviceRegistrar, authorized capability.A
 	t.Fatal("missing service registration")
 	return nil, nil
 }
+
 func TestProcessServicesAcknowledgeMaskAndPreserveBoundRecords(t *testing.T) {
 	routes, service, auth := serviceFixture(t)
-	if len(routes.endpoints) != 3 {
+	if len(routes.endpoints) != 11 {
 		t.Fatal("missing node service route")
 	}
 	out, err := callService(t, routes, auth, "/node/v1/masks", `{"value":"credential"}`)
@@ -110,6 +114,11 @@ func TestProcessServicesAcknowledgeMaskAndPreserveBoundRecords(t *testing.T) {
 	if err != nil || annotation.Message != "***" || annotation.File != "***.go" || annotation.EndLine != 4 || annotation.Column != 3 || annotation.Step != "step" || strings.TrimSpace(out.Body.String()) != "{}" {
 		t.Fatalf("annotation=%+v error=%v", annotation, err)
 	}
+	for _, body := range []string{`{"message":"default level"}`, `{"level":"","message":"default level"}`} {
+		if _, err := callService(t, routes, auth, "/node/v1/annotations", body); err != nil || annotation.Level != "info" {
+			t.Fatalf("default annotation level=%s error=%v", annotation.Level, err)
+		}
+	}
 	var summary nodeproto.SummaryRequest
 	service.Summary = func(_ context.Context, _ capability.Authorized, request nodeproto.SummaryRequest) error {
 		summary = request
@@ -121,6 +130,7 @@ func TestProcessServicesAcknowledgeMaskAndPreserveBoundRecords(t *testing.T) {
 		t.Fatalf("summary length=%d, error=%v", len(summary.Markdown), err)
 	}
 }
+
 func TestProcessServicesRefuseUnknownStepsAndPropagateMaskedWrites(t *testing.T) {
 	routes, service, auth := serviceFixture(t)
 	if err := service.Masks.Register("credential"); err != nil {

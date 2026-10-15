@@ -168,7 +168,7 @@ func (s *Server) RunCleanups(ctx context.Context, bearer string, scope CleanupSc
 }
 
 // safety: failures name argv[0] only, since later arguments may carry secrets.
-func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io.Writer) {
+func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io.Writer) error {
 	name := c.argv[0]
 	if c.description != "" {
 		fmt.Fprintf(log, "cleanup %s: %s\n", name, c.description)
@@ -178,7 +178,7 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io
 	path, err := lookPathIn(name, env)
 	if err != nil {
 		fmt.Fprintf(log, "cleanup %s failed: not found in the node's PATH\n", name)
-		return
+		return errors.New("registered cleanup program is unavailable")
 	}
 	ctx, cancel := context.WithTimeout(ctx, CleanupTimeout)
 	defer cancel()
@@ -195,6 +195,7 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io
 	case ctx.Err() != nil:
 		fmt.Fprintf(log, "cleanup %s failed: cancelled\n", name)
 	case err == nil || errors.Is(err, exec.ErrWaitDelay):
+		return nil
 	case errors.Is(err, procgroup.ErrCleanup):
 		fmt.Fprintf(log, "cleanup %s failed: the processes it started could not be stopped\n", name)
 	case errors.As(err, &exit):
@@ -202,6 +203,7 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io
 	default:
 		fmt.Fprintf(log, "cleanup %s failed: could not run\n", name)
 	}
+	return errors.New("registered cleanup command failed")
 }
 
 // safety: never nil, since a nil Env hands a cleanup the host's environment.

@@ -207,7 +207,7 @@ func TestOwnerPolicySkipShortCircuitsBeforeBody(t *testing.T) {
 }
 
 func TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull(t *testing.T) {
-	for _, raw := range []string{`"key"`, `null`, `""`, `42`, `{}`, `false`} {
+	for _, raw := range []string{`"key"`, `null`, `""`, `42`, `{}`, `false`, `failed_null`} {
 		t.Run(raw, func(t *testing.T) {
 			in, _, deps, processes := policyFixture(t, func(job *nodeproto.JobSpec) {
 				job.Memo = &nodeproto.MemoSpec{}
@@ -220,6 +220,9 @@ func TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull(t *testing.T) {
 					if request.Op == nodeproto.OpEval {
 						if request.Closure != "memo" || request.Attempt != 0 {
 							t.Error("memo changed closure or created an attempt")
+						}
+						if raw == "failed_null" {
+							return nodeproto.EvalResult{Value: json.RawMessage(`null`), Error: &apierr.Error{Code: apierr.SDKError, Message: "closure failed"}}, nil
 						}
 						return nodeproto.EvalResult{Value: json.RawMessage(raw)}, nil
 					}

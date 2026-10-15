@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -103,5 +104,67 @@ func CheckHostServices(t *testing.T) {
 	}
 	if err := call("/node/v1/summary", nodeproto.SummaryRequest{Markdown: "unknown step", Step: "other"}); err == nil {
 		t.Fatal("record attributed to an undeclared step")
+	}
+	checkRegisteredServiceReads(t, routes, service, auth)
+}
+
+func checkRegisteredServiceReads(t *testing.T, routes *processServiceRoutes, service *nodehost.ProcessServices, auth capability.Authorized) {
+	t.Helper()
+	if len(routes.endpoints) != 11 {
+		t.Fatal("node-host registration is incomplete")
+	}
+	service.Secrets = []string{"TOKEN"}
+	service.Secret = func(context.Context, capability.Authorized, string) (string, bool, error) {
+		return "released-secret", true, nil
+	}
+	service.Output = func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
+		return json.RawMessage(`null`), nil
+	}
+	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (nodehost.ProcessOutput, error) {
+		return nodehost.ProcessOutput{RunID: "prior", Output: json.RawMessage(`{"value":7}`)}, nil
+	}
+	service.OIDC = func(context.Context, capability.Authorized, string) (nodehost.ProcessOIDCToken, error) {
+		return nodehost.ProcessOIDCToken{Token: "minted-credential", ExpiresAt: time.Unix(2e9, 0)}, nil
+	}
+	service.StartChild = func(context.Context, capability.Authorized, nodehost.ChildRequest) (string, error) {
+		return "child", nil
+	}
+	service.AwaitChild = func(context.Context, capability.Authorized, string, string, time.Duration) (nodehost.ProcessChildResult, error) {
+		return nodehost.ProcessChildResult{RunID: "child", Status: "failed", Error: "released-secret"}, nil
+	}
+	service.Cleanups = &nodehost.ProcessCleanups{}
+	for _, test := range []struct {
+		method, path, target, body, want string
+		status                           int
+	}{
+		{"GET", "/node/v1/secrets/{name}", "/node/v1/secrets/TOKEN", "", `"value":"released-secret"`, 200},
+		{"GET", "/node/v1/jobs/{job}/output", "/node/v1/jobs/producer/output", "", `"output":null`, 200},
+		{"GET", "/node/v1/pipelines/{name}/latest", "/node/v1/pipelines/build/latest?job=producer", "", `"run_id":"prior"`, 200},
+		{"POST", "/node/v1/oidc-token", "/node/v1/oidc-token", `{"audience":"cloud"}`, `"token":"minted-credential"`, 200},
+		{"POST", "/node/v1/children", "/node/v1/children", `{"pipeline":"build"}`, `"run_id":"child"`, 201},
+		{"GET", "/node/v1/children/{run}/await", "/node/v1/children/child/await", "", `"error":"***"`, 200},
+		{"POST", "/node/v1/cleanups", "/node/v1/cleanups", `{"argv":["tool"]}`, `"id":"1"`, 201},
+		{"DELETE", "/node/v1/cleanups/{cleanup}", "/node/v1/cleanups/1", "", "", 204},
+	} {
+		endpoint, ok := routes.endpoints[test.path]
+		if !ok || endpoint.Method != test.method {
+			t.Fatalf("missing service %s %s", test.method, test.path)
+		}
+		request := httptest.NewRequest(test.method, test.target, strings.NewReader(test.body))
+		for key, value := range map[string]string{"name": "TOKEN", "job": "producer", "run": "child", "cleanup": "1"} {
+			request.SetPathValue(key, value)
+		}
+		evidence, err := endpoint.Decode(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		auth.Target = evidence.Target
+		reply := httptest.NewRecorder()
+		if err := endpoint.Handle(reply, request, auth); err != nil || reply.Code != test.status || !strings.Contains(reply.Body.String(), test.want) {
+			t.Fatalf("%s %s: status=%d body=%s error=%v", test.method, test.path, reply.Code, reply.Body, err)
+		}
+	}
+	if !service.Masks.ContainsSecret("released-secret") || !service.Masks.ContainsSecret("minted-credential") {
+		t.Fatal("service released a credential before masking it")
 	}
 }

@@ -3,7 +3,6 @@ package nodehost
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -254,9 +253,9 @@ func waitParam(raw string) (time.Duration, bool) {
 	if raw == "" {
 		return defaultAwait, true
 	}
-	ms, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || ms < 0 || time.Duration(ms)*time.Millisecond > maxAwait {
+	wait, err := serviceDuration(raw)
+	if err != nil || wait > maxAwait {
 		return 0, false
 	}
-	return time.Duration(ms) * time.Millisecond, true
+	return wait, true
 }
