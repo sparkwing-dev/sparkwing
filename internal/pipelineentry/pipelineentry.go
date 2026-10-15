@@ -1,6 +1,6 @@
 // Package pipelineentry says how a host starts a repository's pipeline as an
-// SDK process: a compiled Go binary, or node running a TypeScript entry behind
-// the SDK's bootstrap preload. A .sparkwing whose package.json depends on
+// SDK process: a compiled Go binary or Node running a TypeScript entry.
+// A .sparkwing whose package.json depends on
 // @sparkwing/sdk is TypeScript; any other is a Go module.
 package pipelineentry
 
@@ -12,13 +12,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 )
@@ -40,15 +38,8 @@ type Command []string
 // Binary is the command for a compiled pipeline binary.
 func Binary(path string) Command { return Command{path} }
 
-// Node is the command for a TypeScript entry: the bootstrap is preloaded
-// with --import so it scrubs the node bearer before the entry's imports run.
-func Node(node, bootstrap, entry string) Command {
-	path := filepath.ToSlash(bootstrap)
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	return Command{node, "--import", (&url.URL{Scheme: "file", Path: path}).String(), entry}
-}
+// Node is the command for a TypeScript entry.
+func Node(node, entry string) Command { return Command{node, entry} }
 
 // Exec returns the command that starts the SDK process.
 func (c Command) Exec() *exec.Cmd {
@@ -114,26 +105,13 @@ func TypeScript(sparkwingDir string) (Command, error) {
 		return nil, fmt.Errorf("pipeline entry: %w", err)
 	}
 	sdkDir := filepath.Join(sparkwingDir, "node_modules", filepath.FromSlash(SDKPackage))
-	var sdk struct {
-		Exports json.RawMessage `json:"exports"`
-	}
+	var sdk struct{}
 	err := readPackage(filepath.Join(sdkDir, "package.json"), &sdk)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %s has no %s", ErrNotInstalled, sparkwingDir, SDKPackage)
 	}
 	if err != nil {
 		return nil, err
-	}
-	var exports map[string]json.RawMessage
-	var rel string
-	if json.Unmarshal(sdk.Exports, &exports) != nil || json.Unmarshal(exports["./bootstrap"], &rel) != nil || rel == "" {
-		return nil, fmt.Errorf("the installed %s exports no ./bootstrap preload; install an SDK that matches this engine", SDKPackage)
-	}
-	// safety: the preload must be the very module the SDK imports, and Node.js
-	// names a module by its resolved path, so a linked SDK resolves here too.
-	bootstrap, err := filepath.EvalSymlinks(filepath.Join(sdkDir, filepath.FromSlash(rel)))
-	if err != nil {
-		return nil, fmt.Errorf("%s bootstrap: %w", SDKPackage, err)
 	}
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -142,7 +120,7 @@ func TypeScript(sparkwingDir string) (Command, error) {
 	if node, err = filepath.Abs(node); err != nil {
 		return nil, err
 	}
-	return Node(node, bootstrap, entry), nil
+	return Node(node, entry), nil
 }
 
 // InstallTypeScript runs npm ci in sparkwingDir with env, less the engine's
