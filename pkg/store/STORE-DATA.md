@@ -171,6 +171,11 @@ large requests. It checks the budget after its final read and returns an empty
 presence result with `blob.ErrBudget` when the deadline has passed.
 
 `MarkBlobTombstones` and `CollectBlobTombstones` require the maintenance lease.
+Leased record expiry and reachability GC replace `ExpiredOutputRuns`,
+`ReleaseRunOutputs` and `ForgetRunOutputs`. The controller's output-key sweep
+and its separate `output_runs` and `output_tombstones` bookkeeping are removed.
+Copied output records keep their bytes and manifest members after the source
+run is deleted. Collection removes the graph after its last record disappears.
 Collection checks its persisted holder, generation and expiry before selecting
 candidates, including empty passes and passes with only grace-period tombstones.
 Each deletion rechecks the fence in its own transaction. A supplied expiry cannot

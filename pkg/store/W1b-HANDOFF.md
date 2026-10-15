@@ -1,10 +1,133 @@
 # W1b handoff
 
-Continues `add732b73`. W1b remains incomplete.
-This continuation is uncommitted.
-The lead owns review, commits, pipelines and native integration.
+Continues `192217078` after integration merge `5697741c1`. W1b remains incomplete.
+The lead owns commits, independent review, pipelines and native integration.
 
 ## Current continuation
+
+Retired the legacy output-key retention sweep. Output lifetime now has the
+existing leased record-expiry and blob-reachability owners. Removed
+Store.ExpiredOutputRuns, Store.ReleaseRunOutputs, Store.ForgetRunOutputs,
+ExpiredOutputRun and the duplicate store.OutputRetention constant. Removed the
+controller sweep, its pending-file sweep and physical deletion helpers, both
+invocation sites, and the obsolete output_runs/output_tombstones writes and
+filters in the remaining legacy output adapter. No shim or new production
+mechanism was added. The final schema already omits those tables.
+
+Deleted **677 legacy Go lines**: **367 runtime lines** and **310 test lines**.
+The API snapshot removes eight more lines. Other legacy output/direct-upload,
+log and claim-credit consumers still exist and require their owners' cutover.
+
+Invariant: a committed copy keeps its bytes after its source retires; collection
+wins only when no live record names those bytes.
+
+Added TestBlobCopiedOutputSurvivesSourceCollection. The real final CopyMemo and
+CollectBlobTombstones implementations run against SQLite with contract-fake
+namespace/edge rules and a physical deleter. Three fixed orderings and 48 seeded
+generated orderings cover copy-first, collection-first and concurrent execution.
+A stale tombstone is seeded before source retirement. A winning copy preserves
+one output and one blob. A collected source produces a miss with no output or
+read edge. Monthly upload usage remains one object and the original byte count.
+Retained-byte reports reflect the surviving physical inventory. This proves
+SQLite serialization, not PostgreSQL advisory-lock behavior or physical bytes.
+
+Extended storage-reachability-and-retention-tails/store-data-sqlite. Its seeded
+copied output and transitive manifest graph survive deletion of the source run
+and reopening. Removing the last copy exposes the graph to collection. Retained
+bytes fall from 55 to 19 to zero as the copy graph and final source record go.
+Existing newest-success pin, grace, failure, receipt, fence and takeover checks
+remain. No native cell was activated and no archived T1 inventory row was newly
+closed. Seven old tests (six store, one controller) are replaced by these final
+copy/retention proofs and the existing pinned-output and retained-byte proofs.
+
+## Verification
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
+and GOCACHE/GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1b/. Use
+`go -C /home/bombuntu/.xwing/envs/1088/sparkwing`. Recreate cache and tmp
+subdirectories before reproducing.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./pkg/store/... ./pkg/controller/... ./internal/acceptance/...
+  ./tests/acceptance/...` passed.
+- The expanded selection from the previous continuation attempted **198
+  top-level tests / 488 cases**. **196 tests / 486 cases pass**. Two catalog
+  guards fail as detailed below. The selection excludes the known red
+  TestBlobRecordsMutationCannotOutliveAuthority. No suite-wide green is claimed.
+- `go test -json -p 4 ./internal/acceptance/... ./tests/acceptance/...
+  -run '^(TestStorage|TestBilling)$' -count=1` passed **2 top-level tests / 43
+  cases**, including all **12 SQLite data/billing proofs**, with **562 native
+  and platform skips**. After the last retained-byte assertions, the new copy
+  property and complete TestStorage selection passed again.
+- Required `commentcheck -base main` passed across **920 files**. Session
+  sleepcheck, embedded docs/changelog drift, sync-docs --check and whitespace
+  checks passed. Regenerated API output confirms all five removed exports are
+  absent. Aggregate snapshots still have inherited W1 drift (60 store diff
+  lines); only this continuation's eight removed snapshot lines were changed.
+- Reproduced the known publication-fence regression separately. All six
+  commit/copy x lease/leaf/ancestor cases still persist a record at expiry and
+  fail their first generated input. Production repair remains pending the
+  lead's two-strikes redesign decision recorded below.
+
+The expanded store selection is the previous Manual selection plus
+TestGrantCredits, TestCreditGrant, TestCreditReversal, TestCreditHistory,
+TestCreditsBalanceIs, TestCreditsDefaultTenant, TestTenantSQLScope,
+TestTenantWriters and TestTenantTwins. The new property is selected by TestBlob.
+
+## Required W1 catalog cleanup
+
+W1 files were left untouched under the split ownership instruction. This cut
+needs two exact metadata edits before the store guards can pass:
+
+- In pkg/store/tenant.go, delete output_runs and output_tombstones from
+  tenantTables. Neither table exists in the final schema or has a runtime
+  writer after this cut. TestTenantWriters_EveryTenantTableHasAWriterThatSetsTheKey
+  reports those two stale entries.
+- In pkg/store/tenant_sql_scope_guard_test.go, delete the reviewedUnscopedSQL
+  entry for (*Store).ExpiredOutputRuns. The method is removed.
+  TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey reports that stale
+  exemption. Do not add writers or exemptions to satisfy these guards.
+
+## Amendment audit and remaining integration
+
+A1-24 retains the transaction-owned data checker and binding proof. A1-27 still
+needs W1's issuance/start/wait/renewal/finish/reaping joins to the existing billing
+helpers. The unstarted at_award refund marker and explicit customer-runner waiting
+input still need the prior W1/W2 contract agreement. C2 SettleBilling is a stub.
+A1-28 retains committed-checkout event persistence; W2 still owns verified provider
+handoff and retirement of caller-selected paid grants. VerifiedPaymentEvent.Event
+and provider verification remain stubs.
+
+A1-29 through A1-35 retain upload/receipt/provenance/member/reference/depcache,
+tombstone and tagged-log persistence. A1-35's old output retention sweep is now
+removed. The record publication redesign below still blocks those mutations.
+W7's namespace/edge policy, verified manifests, physical verification/deletion,
+staging cleanup and binary execution remain integrations. W2/W9 data/log
+transports, trusted replica identity and proxy egress remain integrations.
+Unexecuted materialization destinations and imported owner-log identities still
+need the prior cross-owner contracts. Result attachment needs the real manifest
+reader. A1-53 needs native evidence. handoffs.md adds no W1b assignment.
+
+No foreign contract shape or schema changed. Native placements, PostgreSQL,
+providers, backends, binary execution, race and full legacy suites were not run.
+The brief assigns pipelines and independent review to the lead.
+
+## Shared files and friction
+
+Minimal other-package caller deletions are pkg/controller/node_output.go,
+node_output_internal_test.go, server.go and storage_pass.go. Shared proof and
+documentation files are internal/acceptance/store_reachability.go,
+design/rewrite/contracts/c1-data.md, CHANGELOG.md, generated pkg/docs/changelog.md
+and .apidiff/pkg_store.txt. Other changes are W1b-owned pkg/store files.
+
+Friction was the stale W1 catalogs exposed by the cut and the prior unresolved
+record-publication design. An initial compile check found one remaining legacy
+copy test using expireRun; that test is also replaced by the final property.
+No Sparkwing binary, service, provider, deployment, release, Git write or harness
+memory write ran. Git identity remains Korey's default with no core.worktree
+setting. Scratch is deleted after final inspection.
+
+## Previous continuation (committed in 192217078)
 
 DESIGN: record mutation authorization.
 

@@ -1154,10 +1154,6 @@ type ExpansionSubmission struct {
 	Failure          *ExpansionFailure
 }
 func ExpectedSchemaVersion() int
-type ExpiredOutputRun struct {
-	Team  Team
-	RunID string
-}
 const FailureAgentLost = "agent_lost"
 const FailureComputeLimit = "compute_limit"
 const FailureCreditsExhausted = "credits_exhausted"
@@ -1910,7 +1906,6 @@ type OutputRef struct {
 	Size   int64
 	SHA256 string
 }
-const OutputRetention = 30 * 24 * time.Hour
 type OutputUploadGrant struct {
 	UploadID  string
 	Key       string
@@ -2948,7 +2943,6 @@ func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExchangeCapability(ctx context.Context, spec capability.ExchangeSpec) (capability.Issued, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
-func (s *Store) ExpiredOutputRuns(ctx context.Context, now time.Time, limit int) (out []ExpiredOutputRun, err error)
 func (s *Store) FailCardAttempt(
 	ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time,
 ) (team Team, first bool, err error)
@@ -2970,7 +2964,6 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
-func (s *Store) ForgetRunOutputs(ctx context.Context, team Team, runID string, deleted []Upload) (err error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
@@ -3097,7 +3090,6 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID, actor, reason string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
-func (s *Store) ReleaseRunOutputs(ctx context.Context, team Team, runID string) (_ []Upload, err error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
 func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error)

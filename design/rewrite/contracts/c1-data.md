@@ -735,6 +735,14 @@ bytes independently of their originating run. Upload-ticket expiry releases
 quota through the leased final retention pass. Physical GC wiring remains with
 the storage adapter.
 
+`Store.ExpiredOutputRuns`, `Store.ReleaseRunOutputs`, `Store.ForgetRunOutputs`,
+`ExpiredOutputRun` and the store's duplicate `OutputRetention` constant are removed
+with the controller's output-key sweep. Leased record expiry and reachability GC
+own output lifetime. A copied output and its transitive manifest members survive
+source-run deletion and reopening. Their bytes become collectible after the last
+copy disappears. Copies add no upload usage. The SQLite retention proof checks
+both deletion stages, and generated store tests race memo copying with collection.
+
 Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;
 settlement is idempotent by reservation ID. Log reads meter egress exactly and
