@@ -140,14 +140,6 @@ func clientCalls() []struct {
 			_, err := c.GetNodeOutput(ctx, "r1", "n1")
 			return err
 		}},
-		{"GetNodeDispatch", func(ctx context.Context, c *client.Client) error {
-			_, err := c.GetNodeDispatch(ctx, "r1", "n1", 1)
-			return err
-		}},
-		{"ListNodeDispatches", func(ctx context.Context, c *client.Client) error {
-			_, err := c.ListNodeDispatches(ctx, "r1", "n1")
-			return err
-		}},
 		{"GetApproval", func(ctx context.Context, c *client.Client) error {
 			_, err := c.GetApproval(ctx, "r1", "n1")
 			return err

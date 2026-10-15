@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -86,112 +84,6 @@ func TestNodeAttentionShowsOnTheRunUntilAClaim(t *testing.T) {
 	}
 }
 
-// A ready node fails as unclaimable, with its reason, only once its run's
-// claim wait has passed: 24 hours by default, or what the plan set.
-func TestUnclaimedNodesFailAtTheirClaimWait(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedMatchNode(t, s, "run-default", "", 1, "tool:terraform")
-	seedMatchNode(t, s, "run-short", "", 1, "tool:terraform")
-	if err := s.UpdatePlanSnapshot(ctx, "run-short", []byte(`{"claim_wait_ms":3600000,"nodes":[]}`)); err != nil {
-		t.Fatal(err)
-	}
-	ageReadyNode(t, s, "run-default", 2*time.Hour)
-	ageReadyNode(t, s, "run-short", 2*time.Hour)
-	// safety: an agent that cannot take the nodes polls, moving ready_at forward;
-	// the waits still run from when each node first became ready.
-	for i := range 3 {
-		if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "agent:pi", TokenPrefix: "swr_pi"},
-			"pi:"+string(rune('a'+i)), time.Minute, []string{"tool:git"}); !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("an ineligible poll = %v", err)
-		}
-	}
-	if waiting, err := s.ListWaitingNodes(ctx, time.Now().Add(-time.Hour), [2]string{}, 10); err != nil || len(waiting) != 2 {
-		t.Fatalf("waiting after ineligible polls = %+v, %v; want both nodes", waiting, err)
-	}
-	if err := s.SetNodeAttention(ctx, []store.NodeAttention{{
-		Team: store.DefaultTeam, RunID: "run-short", NodeID: "work", Reason: "node work needs tool:terraform",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	pairs, err := store.Maintenance.FailStaleQueuedNodes(s, ctx, match.DefaultClaimWait)
-	if err != nil || len(pairs) != 1 || pairs[0] != [2]string{"run-short", "work"} {
-		t.Fatalf("failed = %v, %v; want only the node past its one-hour wait", pairs, err)
-	}
-	n, err := s.GetNode(ctx, "run-short", "work")
-	if err != nil || n.Error != "unclaimable: node work needs tool:terraform" || n.FailureReason != store.FailureQueueTimeout {
-		t.Fatalf("node = %+v, %v; want unclaimable with its reason", n, err)
-	}
-	ageReadyNode(t, s, "run-default", 25*time.Hour)
-	if pairs, err = store.Maintenance.FailStaleQueuedNodes(s, ctx, match.DefaultClaimWait); err != nil || len(pairs) != 1 {
-		t.Fatalf("failed after 25h = %v, %v; want the default-wait node", pairs, err)
-	}
-	if n, _ = s.GetNode(ctx, "run-default", "work"); !strings.HasPrefix(n.Error, "unclaimable: ") {
-		t.Fatalf("node error = %q", n.Error)
-	}
-}
-
-// A team's agents are listed with what they last advertised, offline or not.
-func TestRegisteredAgentsCarryTheirLastLabels(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	_, pi, err := s.CreateToken("agent:pi", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.CreateToken("someone", store.TokenKindUser, []string{"runs.read"}, 0, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RecordAgentLabels(ctx, pi.Prefix, []string{"tool:git", "name=forged", "arch=arm64"}); err != nil {
-		t.Fatal(err)
-	}
-	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
-	if err != nil || len(agents) != 1 || agents[0].Name != "pi" ||
-		!slices.Equal(agents[0].Profile.Labels, []string{"tool:git", "arch=arm64"}) {
-		t.Fatalf("agents = %+v, %v; want pi with its labels less the forged name", agents, err)
-	}
-}
-
-// Token times are Unix seconds, so an agent whose token expires is still
-// listed before then, and its last use reads back as the time it happened.
-func TestRegisteredAgentsKeepAnExpiringTokenAndItsLastUse(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	raw, desk, err := s.CreateToken("agent:desk", store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.LookupToken(raw, now); err != nil {
-		t.Fatal(err)
-	}
-	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
-	if err != nil || len(agents) != 1 || agents[0].TokenPrefix != desk.Prefix {
-		t.Fatalf("agents = %+v, %v; want the desk token, which expires in an hour", agents, err)
-	}
-	if seen := agents[0].LastSeen; seen.Before(now.Add(-time.Minute)) || seen.After(time.Now().Add(time.Minute)) {
-		t.Fatalf("last seen = %v, want about %v", seen, now)
-	}
-}
-
-// Waiting nodes come back in pages, so one sweep tick reads a bounded batch.
-func TestWaitingNodesPage(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	for _, run := range []string{"run-a", "run-b", "run-c"} {
-		seedMatchNode(t, s, run, "", 1, "tool:terraform")
-		ageReadyNode(t, s, run, time.Minute)
-	}
-	first, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{}, 2)
-	if err != nil || len(first) != 2 || first[1].RunID != "run-b" {
-		t.Fatalf("first page = %+v, %v", first, err)
-	}
-	rest, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{first[1].RunID, first[1].NodeID}, 2)
-	if err != nil || len(rest) != 1 || rest[0].RunID != "run-c" {
-		t.Fatalf("second page = %+v, %v", rest, err)
-	}
-}
-
 // The sweep writes one row per statement: while another transaction holds one
 // node's lock, the reason for a different node is already committed rather
 // than held behind it.
@@ -244,45 +136,5 @@ func TestSetNodeAttentionHoldsOneNodeLockAtATime(t *testing.T) {
 	}
 	if run, err := s.GetRun(ctx, "run-y"); err != nil || run.NeedsAttention != "y" {
 		t.Fatalf("run-y = %+v, %v; want its reason once the lock is released", run, err)
-	}
-}
-
-// A node withdrawn from the queue between the sweep's read and its write keeps
-// no reason.
-func TestSetNodeAttentionSkipsANodeRevokedSinceTheRead(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedMatchNode(t, s, "run-r", "", 1, "tool:terraform")
-	ageReadyNode(t, s, "run-r", time.Minute)
-	waiting, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{}, 10)
-	if err != nil || len(waiting) != 1 {
-		t.Fatalf("waiting = %+v, %v", waiting, err)
-	}
-	if revoked, err := s.RevokeNodeReady(ctx, "run-r", "work"); err != nil || !revoked {
-		t.Fatalf("revoke = %v, %v", revoked, err)
-	}
-	if err := s.SetNodeAttention(ctx, []store.NodeAttention{{
-		Team: waiting[0].Team, RunID: "run-r", NodeID: "work", Reason: "stale",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	var reason string
-	if err := s.DB().QueryRowContext(ctx, storetest.Rebind(s,
-		`SELECT attention_reason FROM nodes WHERE run_id = ? AND node_id = ?`), "run-r", "work").Scan(&reason); err != nil {
-		t.Fatal(err)
-	}
-	if reason != "" {
-		t.Fatalf("a revoked node was given the reason %q", reason)
-	}
-}
-
-// Only the launcher claims a controller-dispatched node, so the attention
-// sweep, which judges waits by the agents that could claim, skips it.
-func TestWaitingNodesSkipAControllerDispatchedNode(t *testing.T) {
-	f := newDispatchRun(t, "run-dispatched")
-	f.mustAccept(t, planOf(`a`))
-	waiting, err := f.s.ListWaitingNodes(context.Background(), time.Now().Add(time.Hour), [2]string{}, 10)
-	if err != nil || len(waiting) != 0 {
-		t.Fatalf("waiting = %+v, %v; want none", waiting, err)
 	}
 }

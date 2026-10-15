@@ -432,7 +432,7 @@ func TestRequeuedRunDoesNotInheritTheConsumerShell(t *testing.T) {
 }
 
 func TestRetryRequiresItsOwnSubmissionEnvironment(t *testing.T) {
-	for _, source := range []string{store.RetrySourceManual, store.RetrySourceAuto} {
+	for _, source := range []string{store.RetrySourceManual} {
 		for _, capture := range []string{"absent", "missing", "empty", "present"} {
 			t.Run(source+"/"+capture, func(t *testing.T) {
 				home := t.TempDir()

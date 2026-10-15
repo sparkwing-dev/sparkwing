@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -105,13 +104,6 @@ func TestLocalStateServesEveryRunCoordinationMethod(t *testing.T) {
 	}
 	if err := state.RecordWaitObservation(ctx, "demo", 250*time.Millisecond); err != nil {
 		t.Fatalf("RecordWaitObservation: %v", err)
-	}
-
-	if _, err := state.ReconcileOrphanedLocalRuns(ctx, time.Hour); err != nil {
-		t.Fatalf("ReconcileOrphanedLocalRuns: %v", err)
-	}
-	if _, err := state.ReconcileOrphanedLocalRuns(ctx, 0); !errors.Is(err, ErrOrphanThresholdRequired) {
-		t.Errorf("zero-threshold err = %v, want ErrOrphanThresholdRequired", err)
 	}
 }
 

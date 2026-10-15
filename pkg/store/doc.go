@@ -13,11 +13,8 @@
 //
 // # Tenancy
 //
-// Every row that belongs to a team carries a team column; the tables
-// that belong to the deployment -- the schema version, the meta
-// bag and the executor fleet -- do not. The
-// classification is the tenantTables and operatorTables lists in
-// tenant.go, and a test fails on a table missing from both.
+// Every row that belongs to a team carries a team column. [SchemaTables]
+// classifies tenant and deployment tables, and schema tests reject omissions.
 //
 // [Store.ForTeam] returns a [*Tenant], the handle a request-serving
 // caller uses: its methods take no team, every statement they issue
@@ -35,13 +32,23 @@
 //
 // # Schema
 //
-// A fresh database gets the baseline in schema_sqlite.sql or
-// schema_postgres.sql, its sparkwing_schema_version row and its seed rows
+// A fresh database gets the baseline in schema.sql, its
+// sparkwing_schema_version row and its seed rows
 // in one transaction; Postgres takes an advisory lock first so two openers
 // cannot both create it. Open refuses a database that records any other
 // schema version and tells the operator to delete it: no older store is
-// upgraded. The two files describe one schema, and a test compares what
-// each builds.
+// upgraded. [TranslateSchema] maps the baseline to PostgreSQL while
+// preserving its checks, keys and predicates.
+//
+// # Recovery
+//
+// [Store.ReapUnits] uses the elected controller.reaper lease to recover
+// expired claims, enforce queue deadlines and resolve approval timeouts.
+// It rechecks the lease and the selected work inside each transaction.
+// A timeout records the reaper lease holder as the approval resolver.
+// Local consumers leave recovery to this elected pass.
+// [Tenant.FinishRunAndUnit] commits a terminal verdict and owner closure
+// together, so recovery does not need a separate finish-repair sweep.
 //
 // # Primary records
 //

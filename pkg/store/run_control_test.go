@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -128,105 +127,6 @@ func (f dispatchRun) expireGate(t *testing.T, nodeID string) {
 		time.Now().Add(-time.Hour).UnixNano(), f.run, nodeID); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func reapApprovals(t *testing.T, s *store.Store) [][2]string {
-	t.Helper()
-	pairs, err := store.Maintenance.ReapTimedOutApprovals(s, context.Background())
-	if err != nil {
-		t.Fatalf("reap approvals: %v", err)
-	}
-	return pairs
-}
-
-// A gate is decided once. A person resolving it and the reaper timing it out
-// race under the run row; exactly one commits, the other writes nothing, and
-// the gate's outcome and its dependent follow the winner.
-func TestApproval_ResolveAndTimeoutHaveOneWinner(t *testing.T) {
-	for i := range 6 {
-		f := newDispatchRun(t, "run-gate-race-"+string(rune('a'+i)))
-		f.mustAccept(t, planOf(`gate|"approval":{"timeout_ms":60000,"on_timeout":"approve"}`, "after:gate"))
-		if n := f.node(t, "gate"); n.Status != store.NodeStatusApprovalPending {
-			t.Fatalf("gate = %s, want approval_pending", n.Status)
-		}
-		f.expireGate(t, "gate")
-		var wg sync.WaitGroup
-		var resolveErr, reapErr error
-		var reaped [][2]string
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			_, resolveErr = f.s.ResolveApproval(context.Background(), f.run, "gate", store.ApprovalResolutionDenied, "korey", "no")
-		}()
-		go func() {
-			defer wg.Done()
-			reaped, reapErr = store.Maintenance.ReapTimedOutApprovals(f.s, context.Background())
-		}()
-		wg.Wait()
-		if reapErr != nil {
-			t.Fatalf("reap: %v", reapErr)
-		}
-		humanWon := resolveErr == nil
-		if !humanWon && !errors.Is(resolveErr, store.ErrLockHeld) {
-			t.Fatalf("resolve: %v", resolveErr)
-		}
-		if reaperWon := len(reaped) == 1; reaperWon == humanWon {
-			t.Fatalf("round %d: resolve err %v and reaper decided %v; exactly one must win", i, resolveErr, reaped)
-		}
-		a, err := f.s.GetApproval(context.Background(), f.run, "gate")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if humanWon {
-			if a.Resolution != store.ApprovalResolutionDenied {
-				t.Fatalf("resolution = %s after the person won", a.Resolution)
-			}
-			f.wantOutcome(t, "gate", "failed")
-			f.wantOutcome(t, "after", "cancelled")
-			continue
-		}
-		if a.Resolution != store.ApprovalResolutionTimedOut {
-			t.Fatalf("resolution = %s after the reaper won", a.Resolution)
-		}
-		f.wantOutcome(t, "gate", "success")
-		f.wantReleased(t, "after", true)
-	}
-}
-
-// The reaper decides a controller gate by its on_timeout policy, and never
-// before its timeout; a gate with no timeout waits for a person.
-func TestApproval_TimeoutHonoursOnTimeout(t *testing.T) {
-	f := newDispatchRun(t, "run-gate-policy")
-	f.mustAccept(t, planOf(
-		`approve|"approval":{"timeout_ms":1000,"on_timeout":"approve"}`, "after-approve:approve",
-		`deny|"approval":{"timeout_ms":1000,"on_timeout":"deny"}`, "after-deny:deny",
-		`fail|"approval":{"timeout_ms":1000}`,
-		`fresh|"approval":{"timeout_ms":3600000}`,
-		`forever|"approval":{}`,
-	))
-	if got := reapApprovals(t, f.s); len(got) != 0 {
-		t.Fatalf("reaped %v before any timeout passed", got)
-	}
-	for _, id := range []string{"approve", "deny", "fail", "forever"} {
-		f.expireGate(t, id)
-	}
-	if got := reapApprovals(t, f.s); len(got) != 3 {
-		t.Fatalf("reaped %v, want the three expired gates with a timeout", got)
-	}
-	f.wantOutcome(t, "approve", "success")
-	f.wantReleased(t, "after-approve", true)
-	f.wantOutcome(t, "deny", "failed")
-	f.wantOutcome(t, "after-deny", "cancelled")
-	f.wantOutcome(t, "fail", "failed")
-	for _, id := range []string{"fresh", "forever"} {
-		if n := f.node(t, id); n.Status != store.NodeStatusApprovalPending {
-			t.Fatalf("%s = %s/%s, want still waiting", id, n.Status, n.Outcome)
-		}
-	}
-	if _, err := f.s.ResolveApproval(context.Background(), f.run, "fresh", store.ApprovalResolutionApproved, "korey", ""); err != nil {
-		t.Fatal(err)
-	}
-	f.wantOutcome(t, "fresh", "success")
 }
 
 // An approval gate opens only once its upstreams succeed, and is never

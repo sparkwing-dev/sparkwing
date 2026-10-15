@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"time"
 )
 
 // Dialect identifies the SQL flavor a Store is backed by. The Store
@@ -123,6 +124,21 @@ func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
 type storeTx struct {
 	tx      *sql.Tx
 	dialect Dialect
+	store   *Store
+}
+
+func (s *Store) now() time.Time {
+	if s.clock != nil {
+		return s.clock().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (t *storeTx) now() time.Time {
+	if t.store != nil {
+		return t.store.now()
+	}
+	return time.Now().UTC()
 }
 
 // safety: Postgres takes a fresh snapshot per statement unless the isolation
@@ -140,7 +156,7 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &storeTx{tx: tx, dialect: s.dialect}, nil
+	return &storeTx{tx: tx, dialect: s.dialect, store: s}, nil
 }
 
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
@@ -148,7 +164,7 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &storeTx{tx: tx, dialect: s.dialect}, nil
+	return &storeTx{tx: tx, dialect: s.dialect, store: s}, nil
 }
 
 func (t *storeTx) forUpdate() string {

@@ -72,30 +72,23 @@ func approvalOutcome(resolution, approver, comment, onTimeout string) (string, s
 	return outcomeFailed, "unknown approval resolution: " + resolution
 }
 
-// safety: resolve and timeout both come here under the run row, so the first
-// to commit decides the gate and the other finds it decided and writes
-// nothing (false). With onlyExpired the gate is decided only once its timeout
-// has passed at now.
+// safety: the run lock serializes competing gate resolutions.
 func resolveApprovalTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, resolution, approver, comment string,
-	now time.Time, onlyExpired bool,
+	now time.Time,
 ) (bool, error) {
 	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
 		return false, err
 	}
 	var onTimeout string
-	var requestedAt, timeoutMS int64
-	err := tx.QueryRowContext(ctx, `SELECT a.on_timeout, a.requested_at, a.timeout_ms FROM approvals a
+	err := tx.QueryRowContext(ctx, `SELECT a.on_timeout FROM approvals a
   JOIN nodes n ON n.team = a.team AND n.run_id = a.run_id AND n.node_id = a.node_id
  WHERE a.team = ? AND a.run_id = ? AND a.node_id = ? AND a.resolved_at IS NULL AND n.status = ?`,
-		string(team), runID, nodeID, NodeStatusApprovalPending).Scan(&onTimeout, &requestedAt, &timeoutMS)
+		string(team), runID, nodeID, NodeStatusApprovalPending).Scan(&onTimeout)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
-	}
-	if onlyExpired && (timeoutMS <= 0 || requestedAt+timeoutMS*int64(time.Millisecond) >= now.UnixNano()) {
-		return false, nil
 	}
 	if err := stampApprovalTx(ctx, tx, team, runID, nodeID, resolution, approver, comment, now); err != nil {
 		return false, err
@@ -128,7 +121,7 @@ func (s *Store) resolveControllerApproval(ctx context.Context, team Team, runID,
 	if err != nil {
 		return false, err
 	}
-	resolved, err := resolveApprovalTx(ctx, tx, team, runID, nodeID, resolution, approver, comment, time.Now(), false)
+	resolved, err := resolveApprovalTx(ctx, tx, team, runID, nodeID, resolution, approver, comment, time.Now())
 	if err != nil {
 		return true, err
 	}
@@ -138,56 +131,9 @@ func (s *Store) resolveControllerApproval(ctx context.Context, team Team, runID,
 	return true, tx.Commit()
 }
 
-const maxExpiredApprovalsPerPass = 500
-
 type teamNodeRef struct {
 	team          Team
 	runID, nodeID string
-}
-
-func (s *Store) expiredControllerApprovals(ctx context.Context, now time.Time) ([]teamNodeRef, error) {
-	rows, err := s.query(ctx, `SELECT a.team, a.run_id, a.node_id FROM approvals a
-  JOIN nodes n ON n.team = a.team AND n.run_id = a.run_id AND n.node_id = a.node_id
- WHERE a.resolved_at IS NULL AND a.timeout_ms > 0 AND a.requested_at + (a.timeout_ms * 1000000) < ?
-   AND n.kind = ? ORDER BY a.requested_at LIMIT ?`, now.UnixNano(), nodeKindApproval, maxExpiredApprovalsPerPass)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsOrLog(rows)
-	var out []teamNodeRef
-	for rows.Next() {
-		var e teamNodeRef
-		if err := rows.Scan(&e.team, &e.runID, &e.nodeID); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-// safety: each gate is decided in a transaction of its own under its run row,
-// so a pass never holds two runs' locks at once.
-func (s *Store) timeOutControllerApprovals(ctx context.Context, now time.Time) ([][2]string, error) {
-	expired, err := s.expiredControllerApprovals(ctx, now)
-	if err != nil {
-		return nil, err
-	}
-	var out [][2]string
-	for _, e := range expired {
-		var resolved bool
-		err := s.inTx(ctx, func(tx *storeTx) (err error) {
-			resolved, err = resolveApprovalTx(ctx, tx, e.team, e.runID, e.nodeID, ApprovalResolutionTimedOut,
-				approvalControllerActor, "timeout enforced by controller", now, true)
-			return err
-		})
-		if err != nil {
-			return out, err
-		}
-		if resolved {
-			out = append(out, [2]string{e.runID, e.nodeID})
-		}
-	}
-	return out, nil
 }
 
 // safety: a run with no controller planning node reports handled false and
