@@ -1,74 +1,25 @@
-package sparkwing_test
+package sparkwing
 
-import (
-	"context"
-	"testing"
+import "testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
-)
-
-func TestAnnotate_EmitsStructuredRecord(t *testing.T) {
-	cases := []struct {
-		name string
-		msg  string
-	}{
-		{name: "plain", msg: "processed 1234 records · 12 failed"},
-		{name: "empty", msg: ""},
-		{name: "unicode", msg: "imported  · 99% coverage"},
+func TestAnnotateEmitsLocation(t *testing.T) {
+	recorder := &recordingEmitter{}
+	ctx := withTestNode(withTestLogger(t.Context(), recorder), "ingest")
+	Annotate(ctx, Annotation{Level: "warn", Message: "check this", File: "src/main.go", Line: 12, Column: 3})
+	if len(recorder.records) != 1 {
+		t.Fatalf("annotations = %+v", recorder.records)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := &recordingEmitter{}
-			ctx := sparkwingruntime.WithLogger(context.Background(), rec)
-			ctx = sparkwingruntime.WithNode(ctx, "ingest")
-			sparkwing.AnnotateOld(ctx, tc.msg)
-
-			if len(rec.records) != 1 {
-				t.Fatalf("got %d records, want 1", len(rec.records))
-			}
-			r := rec.records[0]
-			if r.Event != sparkwing.EventNodeAnnotation {
-				t.Errorf("Event = %q, want %q", r.Event, sparkwing.EventNodeAnnotation)
-			}
-			if r.Msg != tc.msg {
-				t.Errorf("Msg = %q, want %q", r.Msg, tc.msg)
-			}
-			if got, _ := r.Attrs["message"].(string); got != tc.msg {
-				t.Errorf("Attrs[message] = %q, want %q", got, tc.msg)
-			}
-			if r.JobID != "ingest" {
-				t.Errorf("JobID = %q, want %q", r.JobID, "ingest")
-			}
-			if r.TS.IsZero() {
-				t.Error("TS should be set")
-			}
-		})
+	record := recorder.records[0]
+	if record.Event != "annotation" || record.Level != "warn" || record.Msg != "check this" || record.Attrs["file"] != "src/main.go" || record.Attrs["line"] != 12 || record.Attrs["column"] != 3 {
+		t.Fatalf("annotation = %+v", record)
 	}
 }
 
-func TestAnnotate_NoLogger_NoPanic(t *testing.T) {
-	sparkwing.AnnotateOld(context.Background(), "should be a no-op")
-}
-
-func TestAnnotate_MultipleCallsAccumulate(t *testing.T) {
-	rec := &recordingEmitter{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), rec)
-	ctx = sparkwingruntime.WithNode(ctx, "n")
-	sparkwing.AnnotateOld(ctx, "first")
-	sparkwing.AnnotateOld(ctx, "second")
-	sparkwing.AnnotateOld(ctx, "third")
-
-	if len(rec.records) != 3 {
-		t.Fatalf("got %d records, want 3", len(rec.records))
-	}
-	wantMsgs := []string{"first", "second", "third"}
-	for i, want := range wantMsgs {
-		if rec.records[i].Msg != want {
-			t.Errorf("records[%d].Msg = %q, want %q", i, rec.records[i].Msg, want)
+func TestAnnotateRejectsUnknownLevel(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("invalid level accepted")
 		}
-		if rec.records[i].Event != sparkwing.EventNodeAnnotation {
-			t.Errorf("records[%d].Event = %q, want %q", i, rec.records[i].Event, sparkwing.EventNodeAnnotation)
-		}
-	}
+	}()
+	Annotate(t.Context(), Annotation{Level: "warning", Message: "bad level"})
 }

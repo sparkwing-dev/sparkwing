@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -122,7 +121,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 	}))
 
 	sparkwing.Job(plan, "collect", work(func(w *sparkwing.Work) *sparkwing.WorkStep {
-		w.ParallelFailures(sparkwing.CollectAll)
+		w.FailurePolicy(sparkwing.CollectAll)
 		independentStarted, prerequisiteFailed := make(chan struct{}), make(chan struct{})
 		reject := sparkwing.Step(w, "reject", func(ctx context.Context) error {
 			if err := wait(ctx, independentStarted, "independent start"); err != nil {
@@ -140,6 +139,23 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 			return nil
 		})
 		return sparkwing.Step(w, "dependent", say("dependent ran")).Needs(reject)
+	}))
+
+	sparkwing.Job(plan, "finally-chain", work(func(w *sparkwing.Work) *sparkwing.WorkStep {
+		started := make(chan struct{})
+		slow := sparkwing.Step(w, "slow", func(ctx context.Context) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		sparkwing.Step(w, "reject", func(ctx context.Context) error {
+			if err := wait(ctx, started, "slow start"); err != nil {
+				return err
+			}
+			return errors.New("rejected")
+		})
+		pending := sparkwing.Step(w, "pending", say("pending ran")).Needs(slow)
+		return sparkwing.Step(w, "cleanup", say("cleanup ran")).Needs(pending).Finally()
 	}))
 
 	sparkwing.Job(plan, "continue", work(func(w *sparkwing.Work) *sparkwing.WorkStep {
@@ -175,5 +191,5 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 
 func main() {
 	sparkwing.Register[inputs]("steps", func() sparkwing.Pipeline[inputs] { return pipeline{} })
-	runner.Main()
+	sparkwing.Main()
 }

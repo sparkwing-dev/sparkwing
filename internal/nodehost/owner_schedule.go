@@ -59,10 +59,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			return RunCompletion{}, err
 		}
 		decision := decide(graph)
-		if decision.Outcome != "" && len(active) == 0 {
-			if len(decision.Nodes) != 0 {
-				return RunCompletion{}, errors.New("schedule cannot finish with unapplied decisions")
-			}
+		if decision.Outcome != "" && len(active) == 0 && len(decision.Nodes) == 0 {
 			return h.finish(ctx, input, decision)
 		}
 		changed := false

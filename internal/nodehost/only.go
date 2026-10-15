@@ -10,17 +10,17 @@ import (
 
 // safety: --sw-only keeps the matched nodes and what they depend on; OnFailure recovery nodes and nodes a
 // generator adds later are never cut, as in the dispatcher.
-func onlySkips(doc nodeproto.PlanDocOld, pattern, start, stop string) (map[string]string, error) {
+func onlySkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map[string]string, error) {
 	if pattern == "" {
 		return nil, nil
 	}
 	if start != "" || stop != "" {
 		return nil, fmt.Errorf("--only is mutually exclusive with --start-at / --stop-at")
 	}
-	byID := make(map[string]nodeproto.PlanNode, len(doc.Nodes))
+	byID := make(map[string]nodeproto.JobSpec, len(doc.Jobs))
 	keep := map[string]bool{}
 	var ids, matched []string
-	for _, n := range doc.Nodes {
+	for _, n := range doc.Jobs {
 		byID[n.ID] = n
 		ids = append(ids, n.ID)
 		ok, err := path.Match(pattern, n.ID)
@@ -31,7 +31,7 @@ func onlySkips(doc nodeproto.PlanDocOld, pattern, start, stop string) (map[strin
 			matched = append(matched, n.ID)
 		}
 	}
-	if len(doc.Nodes) == 0 {
+	if len(doc.Jobs) == 0 {
 		return nil, nil
 	}
 	if len(matched) == 0 {
@@ -42,11 +42,11 @@ func onlySkips(doc nodeproto.PlanDocOld, pattern, start, stop string) (map[strin
 		matched = matched[:len(matched)-1]
 		if n, ok := byID[id]; ok && !keep[id] {
 			keep[id] = true
-			matched = append(matched, n.Deps...)
+			matched = append(matched, n.Needs...)
 		}
 	}
 	skip := map[string]string{}
-	for _, n := range doc.Nodes {
+	for _, n := range doc.Jobs {
 		if !keep[n.ID] && n.OnFailureOf == "" {
 			skip[n.ID] = fmt.Sprintf("outside --only=%q", pattern)
 		}
@@ -56,12 +56,12 @@ func onlySkips(doc nodeproto.PlanDocOld, pattern, start, stop string) (map[strin
 
 // safety: a controller-dispatched run has no host to record skips, so --sw-only cuts the nodes from the plan the
 // controller accepts; a recovery node goes with its cut parent, since nothing it recovers can run.
-func cutOutsideOnly(doc nodeproto.PlanDocOld, raw []byte, pattern string) (nodeproto.PlanDocOld, []byte, error) {
+func cutOutsideOnly(doc nodeproto.PlanDoc, raw []byte, pattern string) (nodeproto.PlanDoc, []byte, error) {
 	skips, err := onlySkips(doc, pattern, "", "")
 	if err != nil || len(skips) == 0 {
 		return doc, raw, err
 	}
-	keep := func(n nodeproto.PlanNode) bool {
+	keep := func(n nodeproto.JobSpec) bool {
 		_, cut := skips[n.ID]
 		_, parentCut := skips[n.OnFailureOf]
 		return !cut && (n.OnFailureOf == "" || !parentCut)
@@ -71,15 +71,15 @@ func cutOutsideOnly(doc nodeproto.PlanDocOld, raw []byte, pattern string) (nodep
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return doc, nil, err
 	}
-	if err := json.Unmarshal(fields["nodes"], &nodes); err != nil {
+	if err := json.Unmarshal(fields["jobs"], &nodes); err != nil {
 		return doc, nil, err
 	}
-	if len(nodes) != len(doc.Nodes) {
-		return doc, nil, fmt.Errorf("--only: the plan lists %d nodes, its document %d", len(nodes), len(doc.Nodes))
+	if len(nodes) != len(doc.Jobs) {
+		return doc, nil, fmt.Errorf("--only: the plan lists %d nodes, its document %d", len(nodes), len(doc.Jobs))
 	}
 	var keptRaw []json.RawMessage
-	var kept []nodeproto.PlanNode
-	for i, n := range doc.Nodes {
+	var kept []nodeproto.JobSpec
+	for i, n := range doc.Jobs {
 		if keep(n) {
 			kept, keptRaw = append(kept, n), append(keptRaw, nodes[i])
 		}
@@ -88,10 +88,10 @@ func cutOutsideOnly(doc nodeproto.PlanDocOld, raw []byte, pattern string) (nodep
 	if err != nil {
 		return doc, nil, err
 	}
-	fields["nodes"] = list
+	fields["jobs"] = list
 	if raw, err = json.Marshal(fields); err != nil {
 		return doc, nil, err
 	}
-	doc.Nodes = kept
+	doc.Jobs = kept
 	return doc, raw, nil
 }

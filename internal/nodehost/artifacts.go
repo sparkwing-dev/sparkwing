@@ -17,7 +17,7 @@ func artifactsLayer(cfg *Config, next Executor) Executor {
 		return next
 	}
 	return func(ctx context.Context, n *NodeRun) Result {
-		outputs := n.Plan.Outputs
+		outputs := n.Plan.Artifacts
 		edges := make([]artifacts.Edge, 0, len(n.Plan.Consumes))
 		for _, c := range n.Plan.Consumes {
 			edges = append(edges, artifacts.Edge{Producer: c.Producer, Into: c.Into})

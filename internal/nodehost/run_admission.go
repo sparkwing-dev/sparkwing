@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -28,7 +29,10 @@ type runEnd struct {
 // outlives it until release.
 func (a *Admission) hostRun(ctx context.Context, run *Run, cancel context.CancelCauseFunc, body func(context.Context) runEnd) (end runEnd, release func()) {
 	release = func() {}
-	claims, inStore := a.planGroups(run.Doc)
+	claims, inStore, err := a.planGroups(run.Doc, run.ID)
+	if err != nil {
+		return runEnd{status: "failed", err: err}, release
+	}
 	if len(inStore) > 0 && a.Slots == nil {
 		return runEnd{status: "failed", err: fmt.Errorf("plan concurrency group %q: no coordination store", inStore[0].key)}, release
 	}
@@ -43,7 +47,7 @@ func (a *Admission) hostRun(ctx context.Context, run *Run, cancel context.Cancel
 		case end.status == "success" && !end.skipped:
 			return Result{Outcome: sparkwing.Success}
 		case end.skipped:
-			return Result{Outcome: sparkwing.SkippedConcurrent}
+			return Result{Outcome: sparkwing.Skipped}
 		}
 		return Result{Outcome: sparkwing.Failed}
 	}
@@ -57,7 +61,7 @@ func (a *Admission) hostRun(ctx context.Context, run *Run, cancel context.Cancel
 	}
 	// safety: a store group refused the run before the lease or any node.
 	switch res.Outcome {
-	case sparkwing.SkippedConcurrent:
+	case sparkwing.Skipped:
 		return runEnd{status: "success", skipped: true}, release
 	case sparkwing.Superseded:
 		return stoppedRun(ctx, &lease.CancelError{Reason: "plan concurrency group: admission evicted; run `sparkwing queue` to inspect the queue"}), release
@@ -87,34 +91,35 @@ func runHolder(run *Run) slotHolder {
 
 // safety: each list is in key order, so two runs never take one another's
 // groups in opposite orders.
-func (a *Admission) planGroups(doc nodeproto.PlanDocOld) (claims []wingwire.SemaphoreClaim, inStore []group) {
-	pcs := doc.PlanConcs
-	if doc.PlanConc != nil {
-		pcs = append([]nodeproto.PlanConc{*doc.PlanConc}, pcs...)
+func (a *Admission) planGroups(doc nodeproto.PlanDoc, runID string) (claims []wingwire.SemaphoreClaim, inStore []group, err error) {
+	pcs, err := settings.ResolveConcurrency(doc.Concurrency)
+	if err != nil {
+		return nil, nil, err
 	}
 	seen := map[string]bool{}
 	for _, pc := range pcs {
-		if pc.Key == "" || seen[pc.Key] {
+		key := scopedConcurrencyKey(pc.Group, pc.Scope, runID, a.boxID())
+		if key == "" || seen[key] {
 			continue
 		}
-		seen[pc.Key] = true
-		local := strings.HasPrefix(pc.Key, nodeproto.ConcurrencyKeyRunPrefix) || strings.HasPrefix(pc.Key, nodeproto.ConcurrencyKeyBoxPrefix)
+		seen[key] = true
+		local := pc.Scope == "run" || pc.Scope == "box"
 		if a.Daemon != nil && local {
 			claims = append(claims, wingwire.SemaphoreClaim{
-				Name: pc.Key, Cost: pc.Cost, Capacity: pc.Capacity, Policy: wingwire.Policy(pc.OnLimit),
-				QueueTimeoutMS: pc.QueueTimeoutMS, CancelTimeoutMS: pc.CancelTimeoutMS,
+				Name: key, Cost: pc.Cost, Capacity: pc.Capacity, Policy: wingwire.Policy(pc.OnLimit),
+				QueueTimeoutMS: value(pc.QueueTimeoutMS), CancelTimeoutMS: value(pc.CancelTimeoutMS),
 			})
 			continue
 		}
 		inStore = append(inStore, group{
-			key: pc.Key, policy: pc.OnLimit, capacity: pc.Capacity, cost: pc.Cost,
-			queueTO:  time.Duration(pc.QueueTimeoutMS) * time.Millisecond,
-			cancelTO: time.Duration(pc.CancelTimeoutMS) * time.Millisecond,
+			key: key, policy: pc.OnLimit, capacity: pc.Capacity, cost: pc.Cost,
+			queueTO:  time.Duration(value(pc.QueueTimeoutMS)) * time.Millisecond,
+			cancelTO: time.Duration(value(pc.CancelTimeoutMS)) * time.Millisecond,
 		})
 	}
 	slices.SortFunc(claims, func(x, y wingwire.SemaphoreClaim) int { return strings.Compare(x.Name, y.Name) })
 	slices.SortFunc(inStore, func(x, y group) int { return strings.Compare(x.key, y.key) })
-	return claims, inStore
+	return claims, inStore, nil
 }
 
 // safety: semaphores-only unless the plan declares resources, as the
@@ -126,11 +131,11 @@ func (a *Admission) runLease(ctx context.Context, run *Run, claims []wingwire.Se
 	}
 	doc := run.Doc
 	req := wingwire.AdmissionRequest{
-		RunID: run.ID, Pipeline: doc.Pipeline, Semaphores: claims,
+		RunID: run.ID, Pipeline: run.Pipeline, Semaphores: claims,
 		SemaphoresOnly: !hostAdmitted(doc), Priority: a.priority(doc), Class: a.class(doc),
 	}
 	if !req.SemaphoresOnly {
-		req.Resources = wingwire.HostResources{Cores: doc.Resources.Cores, MemoryBytes: doc.Resources.MemoryBytes}
+		req.Resources = wingwire.HostResources{Cores: value(doc.Resources.Cores), MemoryBytes: value(doc.Resources.MemoryBytes)}
 	}
 	acquireCtx := ctx
 	if key, timeout := tightestQueueTimeout(claims); timeout > 0 {

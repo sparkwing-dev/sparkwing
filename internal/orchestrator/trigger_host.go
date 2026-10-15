@@ -47,8 +47,10 @@ type TriggerHost struct {
 	Dir   string
 	// Runner dispatches each node, as a Kubernetes Job or to a warm runner.
 	// Nil hosts each node in this process under a claim of its own.
-	Runner runner.Runner
-	Logger *slog.Logger
+	Runner   runner.Runner
+	Engine   nodeproto.EngineIdentity
+	Identity nodeproto.RunnerIdentity
+	Logger   *slog.Logger
 }
 
 var errTriggerClaimEnded = errors.New("the trigger claim ended, so the run stopped")
@@ -113,7 +115,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	}
 	rehydrate := hostedRehydration(Options{RetryOf: trig.RetryOf, Full: trig.Full})
 	res, err := nodehost.Execute(ctx, nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env},
+		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env, Engine: h.Engine, Runner: h.Identity, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementRunnerHosted, Secrets: masker}},
 		Pipeline: trig.Pipeline, Args: args, CheckArgs: checkArgs,
 		Run: rc, Requires: requires, Invocation: flags.Invocation(),
 		StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
@@ -260,7 +262,7 @@ func triggerHostArgs(ctx context.Context, c *client.Client, trig *store.Trigger,
 // safety: a run row the controller does not have yet is planned from the trigger alone, its run flags included,
 // as every pod then reads it; one it failed to answer for is retried and then refused, because planning without the row's pull request
 // would hash differently from the pods that read it, and every node would fail with plan_drift.
-func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) (nodeproto.RunContextOld, runflags.Flags, error) {
+func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) (nodeproto.RunContext, runflags.Flags, error) {
 	var row *store.Run
 	var err error
 	for attempt := 1; ; attempt++ {
@@ -272,7 +274,7 @@ func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigge
 		select {
 		case <-ctx.Done():
 			wait.Stop()
-			return nodeproto.RunContextOld{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, errors.Join(err, ctx.Err()))
+			return nodeproto.RunContext{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, errors.Join(err, ctx.Err()))
 		case <-wait.C:
 		}
 	}
@@ -280,7 +282,7 @@ func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigge
 	case errors.Is(err, store.ErrNotFound) || (err == nil && row == nil):
 		row = &store.Run{ID: trig.ID, TriggerUser: trig.TriggerUser, Invocation: runflags.FromTriggerEnv(trig.TriggerEnv).Invocation()}
 	case err != nil:
-		return nodeproto.RunContextOld{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, err)
+		return nodeproto.RunContext{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, err)
 	}
 	planned := *row
 	planned.ID, planned.TriggerSource = trig.ID, trig.TriggerSource
@@ -324,12 +326,12 @@ func dispatchThrough(r runner.Runner, pipeline string) nodehost.Executor {
 	return func(ctx context.Context, n *nodehost.NodeRun) nodehost.Result {
 		req := runner.Request{
 			RunID: n.Run.ID, NodeID: n.Plan.ID, Pipeline: pipeline,
-			ClaimWait: time.Duration(n.Run.Doc.ClaimWaitMS) * time.Millisecond,
+			ClaimWait: time.Duration(pointerValue(n.Run.Doc.ClaimWaitMS)) * time.Millisecond,
 		}
 		// safety: the node's retries and their backoff run on its host, so its Job outlives them all.
 		req.Timeout = nodehost.AttemptsBudget(n.Plan)
-		if m := n.Plan.Modifiers; m != nil {
-			req.Cores, req.MemoryBytes = m.ResCores, m.ResMemoryBytes
+		if resources := n.Plan.Resources; resources != nil {
+			req.Cores, req.MemoryBytes = pointerValue(resources.Cores), pointerValue(resources.MemoryBytes)
 		}
 		res := r.RunNode(ctx, req)
 		out := nodehost.Result{Outcome: res.Outcome, Err: res.Err}

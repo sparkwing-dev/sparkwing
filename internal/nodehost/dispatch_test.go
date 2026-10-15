@@ -9,23 +9,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func hostDispatched(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDocOld, dispatch Executor) RunResult {
+func hostDispatched(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, dispatch Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{Dispatch: dispatch, ClaimedRowPoll: 5 * time.Millisecond}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	s.loop(ctx)
@@ -54,8 +54,8 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	var downstream atomic.Bool
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "build"}, {ID: "test", Deps: deps("build")},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}, func(ctx context.Context, n *NodeRun) Result {
 		if n.Plan.ID == "test" {
 			downstream.Store(true)
@@ -77,7 +77,7 @@ func TestDispatchFinishesARowTheRemoteHostNeverWrote(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}},
 		func(context.Context, *NodeRun) Result {
 			return Result{Outcome: sparkwing.Failed, Err: errors.New("claim refused: credits exhausted")}
 		})
@@ -94,8 +94,8 @@ func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
 	st := openStore(t)
 	var calls atomic.Int32
 	ctx := t.Context()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{
-		ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 3, TimeoutMS: 1},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{
+		ID: "flaky", TimeoutMS: new(int64(1)), Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}},
 	}}}, func(ctx context.Context, n *NodeRun) Result {
 		calls.Add(1)
 		// safety: the remote host owns the node's timeout, so the run host's context carries no deadline of its own.
@@ -125,8 +125,8 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 		<-out
 		cancel(&lease.CancelError{Reason: "cancelled by operator"})
 	}()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "build"}, {ID: "test", Deps: deps("build")},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}, func(ctx context.Context, n *NodeRun) Result {
 		if n.Plan.ID == "test" {
 			downstream.Store(true)
@@ -150,7 +150,7 @@ func TestDispatchAdoptsTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	finished := make(chan error, 1)
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}},
 		func(ctx context.Context, n *NodeRun) Result {
 			won, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:other", time.Minute, store.NamedClaimOptions{})
 			if err != nil {
@@ -184,7 +184,7 @@ func TestDispatchStopsWaitingOnAHolderWhoseLeaseLapsed(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}},
 		func(ctx context.Context, n *NodeRun) Result {
 			if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:dead", time.Millisecond, store.NamedClaimOptions{}); err != nil {
 				t.Errorf("claim: %v", err)
@@ -206,9 +206,9 @@ func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range []store.Node{
-		{RunID: testRunID, NodeID: "held", Status: "pending", SpecHash: "sha256:held"},
-		{RunID: testRunID, NodeID: "lost", Status: "pending", SpecHash: "sha256:lost"},
-		{RunID: testRunID, NodeID: "build", Status: "pending", SpecHash: "sha256:old"},
+		{RunID: testRunID, NodeID: "held", Status: "pending", SpecHash: jobHash(nodeproto.JobSpec{ID: "held", Steps: []nodeproto.StepSpec{{ID: "body"}}})},
+		{RunID: testRunID, NodeID: "lost", Status: "pending", SpecHash: jobHash(nodeproto.JobSpec{ID: "lost", Steps: []nodeproto.StepSpec{{ID: "body"}}})},
+		{RunID: testRunID, NodeID: "build", Status: "pending", SpecHash: jobHash(nodeproto.JobSpec{ID: "build", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}})},
 	} {
 		if err := st.CreateNode(ctx, row); err != nil {
 			t.Fatal(err)
@@ -220,13 +220,13 @@ func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 	if err := st.FinishNodeWithReason(ctx, testRunID, "lost", "failed", "holder lost", nil, store.FailureAgentLost, nil); err != nil {
 		t.Fatal(err)
 	}
-	run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, resume: true}
-	err := s.add(ctx, ctx, []nodeproto.PlanNode{
-		{ID: "held", SpecHash: "sha256:held"}, {ID: "lost", SpecHash: "sha256:lost"}, {ID: "build", SpecHash: "sha256:new"},
+	err := s.add(ctx, ctx, []nodeproto.JobSpec{
+		{ID: "held", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "lost", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}, nil)
-	var perr *nodeproto.Error
-	if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanDrift {
+	var perr *apierr.Error
+	if !errors.As(err, &perr) || perr.Code != apierr.PlanDrift {
 		t.Fatalf("add = %v, want plan_drift", err)
 	}
 	if row := nodeRow(t, st, "held"); row.Status == "done" || row.ClaimedBy != "pool:live" {
@@ -240,7 +240,7 @@ func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 // safety: a resumed node's claim is what keeps it from running twice, so a
 // host that dispatches nothing cannot resume.
 func TestResumeNeedsDispatch(t *testing.T) {
-	_, err := Execute(t.Context(), Config{Run: nodeproto.RunContextOld{RunID: testRunID}, Resume: true, State: openStore(t)})
+	_, err := Execute(t.Context(), Config{Run: nodeproto.RunContext{RunID: testRunID}, Resume: true, State: openStore(t)})
 	if err == nil || !strings.Contains(err.Error(), "Resume needs Dispatch") {
 		t.Fatalf("Execute = %v, want Resume refused without Dispatch", err)
 	}

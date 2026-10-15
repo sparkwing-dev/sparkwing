@@ -512,7 +512,7 @@ func TestProtocolSessionChild(t *testing.T) {
 			case nodeproto.OpPlan:
 				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "empty", "last"}}}}})
 			case nodeproto.OpEval:
-				if request.Job != "build" || string(request.Input) != `{"count":2}` {
+				if request.Job != "" || string(request.Input) != `{"count":2}` {
 					os.Exit(6)
 				}
 				raw, _ := json.Marshal([]nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}}})

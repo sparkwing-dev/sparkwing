@@ -1,5 +1,9 @@
 # C3 protocol and SDK contract
 
+[Settlement and expansion continuation](w3-settlement-continuation.md) consumes
+the amended step snapshots and concurrency context, resolves the working merge
+contents and adds real Go SDK process proofs. Native runtime migration remains open.
+
 [Services and process environments](w3-services-continuation.md) completes the
 shared service registrar, separates pipeline aliases from registered entries,
 and supplies complete native cleanup environments. Native runtime migration

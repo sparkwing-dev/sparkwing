@@ -127,14 +127,7 @@ func CheckGeneratorReplay(t *testing.T) {
 			sdk := &executionSDK{expansionSDK: expansionSDK{plan: input.Accepted.Plan}, input: input, mode: "success", trace: &trace}
 			process := &replaySDK{executionSDK: sdk, failure: recovery, evaluate: func(request nodeproto.Request) (json.RawMessage, error) {
 				calls = append(calls, request.Closure)
-				expectedSource := "source"
-				if crossSource && request.Closure == "peers" {
-					expectedSource = "other-source"
-				}
-				if request.Closure == "ancestors" {
-					expectedSource = "root"
-				}
-				if request.Job != expectedSource || string(request.Input) != `{"value":7}` {
+				if request.Job != "" || string(request.Input) != `{"value":7}` {
 					return nil, errors.New("replay lost recorded source output")
 				}
 				jobs := []nodeproto.JobSpec{}
@@ -259,7 +252,7 @@ func (p *replaySDK) Request(ctx context.Context, request nodeproto.Request) (nod
 	if request.Op == nodeproto.OpRunStep && !reflect.DeepEqual(request.Failure, p.failure) {
 		return nodeproto.Reply{}, errors.New("body lost persisted recovery failure")
 	}
-	if request.Op != nodeproto.OpEval || request.Job != "source" && request.Job != "other-source" && request.Job != "root" {
+	if request.Op != nodeproto.OpEval || request.Closure != "target" && request.Closure != "peers" && request.Closure != "ancestors" && request.Closure != "empty" {
 		return p.executionSDK.Request(ctx, request)
 	}
 	value, err := p.evaluate(request)

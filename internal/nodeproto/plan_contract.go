@@ -38,7 +38,7 @@ type JobSpec struct {
 	Caches              []CacheSpec         `json:"caches,omitempty"`
 	Concurrency         []ConcurrencySpec   `json:"concurrency,omitempty"`
 	Resources           *ResourceSpec       `json:"resources,omitempty"`
-	Closures            ClosureSpec         `json:"closures,omitempty"`
+	Closures            ClosureSpec         `json:"closures,omitzero"`
 	SkipIfBudgetMS      *int64              `json:"skip_if_budget_ms,omitempty"`
 	Steps               []StepSpec          `json:"steps,omitempty"`
 	ResultStep          string              `json:"result_step,omitempty"`
@@ -62,7 +62,7 @@ type StepSpec struct {
 	ContinueOnError   bool        `json:"continue_on_error,omitempty"`
 	HasDryRun         bool        `json:"has_dry_run,omitempty"`
 	SafeWithoutDryRun bool        `json:"safe_without_dry_run,omitempty"`
-	Closures          ClosureSpec `json:"closures,omitempty"`
+	Closures          ClosureSpec `json:"closures,omitzero"`
 }
 
 // safety: ClosureSpec references executable code; persisted generated specs never serialize closures.
@@ -146,11 +146,12 @@ type SecretMatcher interface{ ContainsSecret(identifier string) bool }
 
 // safety: ValidationContext supplies host facts without admitting those fields in SDK JSON.
 type ValidationContext struct {
-	Placement    Placement
-	Secrets      SecretMatcher
-	Expansion    bool
-	ExistingJobs []JobSpec
-	SourceJob    string
+	Placement           Placement
+	Secrets             SecretMatcher
+	Expansion           bool
+	ExistingJobs        []JobSpec
+	ExistingConcurrency []ConcurrencySpec
+	SourceJob           string
 }
 
 // safety: ValidatePlan is the only strict decoder for initial plans and generated expansions.
@@ -159,5 +160,6 @@ type ValidationContext struct {
 // transaction. Structural validity alone never authorizes persistence or execution.
 // Errors implement C2 apierr's error contract; the full invariant list is in c3-protocol-sdk.md.
 func ValidatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, error) {
-	panic("unimplemented: c3-protocol-sdk")
+	plan, err := validatePlan(raw, context)
+	return plan, sanitizePlanError(err, context.Secrets)
 }

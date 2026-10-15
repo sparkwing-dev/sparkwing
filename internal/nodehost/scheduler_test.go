@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -63,24 +63,24 @@ func (f *fakeExec) ran(id string) bool {
 	return slices.Contains(f.calls, id)
 }
 
-func hostDoc(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDocOld, exec Executor) RunResult {
+func hostDoc(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateNodes(doc.Nodes); err != nil {
+	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	return hostAccepted(t, ctx, st, doc, exec)
 }
 
-func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDocOld, exec Executor) RunResult {
+func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
 	t.Helper()
 	cfg := Config{Execute: exec}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	s.loop(ctx)
@@ -125,11 +125,11 @@ func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 		}
 	}
 	fx := &fakeExec{bodies: map[string]Executor{"b": meet(bIn, cIn), "c": meet(cIn, bIn)}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "d", Deps: deps("b", "c")},
-		{ID: "b", Deps: deps("a")},
-		{ID: "c", Deps: deps("a")},
-		{ID: "a"},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "d", Needs: deps("b", "c"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "c", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
 	res := hostDoc(t, ctx, st, doc, fx.run)
@@ -154,18 +154,18 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke"), Reason: store.FailureVerify}
 	}
 	fx := &fakeExec{bodies: map[string]Executor{"build": fail, "lint": fail, "flaky": fail, "maybe": fail}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "build", Modifiers: &nodeproto.PlanModifiers{OnFailure: "build-recover"}},
-		{ID: "test", Deps: deps("build")},
-		{ID: "deploy", Deps: deps("test")},
-		{ID: "build-recover", OnFailureOf: "build"},
-		{ID: "docs"},
-		{ID: "docs-recover", OnFailureOf: "docs"},
-		{ID: "lint", Modifiers: &nodeproto.PlanModifiers{ContinueOnError: true}},
-		{ID: "after-lint", Deps: deps("lint")},
-		{ID: "flaky"},
-		{ID: "after-flaky", OptionalDeps: deps("flaky", "absent")},
-		{ID: "maybe", Modifiers: &nodeproto.PlanModifiers{Optional: true}},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "deploy", Needs: deps("test"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "build-recover", OnFailureOf: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "docs", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "docs-recover", OnFailureOf: "docs", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "lint", ContinueOnError: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "after-lint", Needs: deps("lint"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "flaky", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "after-flaky", NeedsIfPresent: deps("flaky", "absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "maybe", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
 	res := hostDoc(t, t.Context(), st, doc, fx.run)
@@ -183,7 +183,7 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 			t.Errorf("node %s ran", id)
 		}
 	}
-	if f := fx.seen["build-recover"].Failure; f == nil || *f != (nodeproto.Failure{Node: "build", Stage: "verify", Message: "broke"}) {
+	if f := fx.seen["build-recover"].Failure; f == nil || f.Job != "build" || f.Stage != "verify" || f.Error == nil || f.Error.Message != "broke" {
 		t.Errorf("recovery failure = %+v, want build's verify failure", f)
 	}
 	want := "nodes failed: [build lint flaky]; 3 more cancelled with the run"
@@ -197,9 +197,9 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"maybe": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
 	}}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "maybe", Modifiers: &nodeproto.PlanModifiers{Optional: true}},
-		{ID: "after", OptionalDeps: deps("absent")},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "maybe", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "after", NeedsIfPresent: deps("absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 	res := hostDoc(t, t.Context(), st, doc, fx.run)
 	if res.Status != "success" {
@@ -217,10 +217,10 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 		<-ctx.Done()
 		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 	}}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "slow"},
-		{ID: "next", Deps: deps("slow")},
-		{ID: "later", Deps: deps("next")},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "later", Needs: deps("next"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
 	res := hostDoc(t, ctx, st, doc, fx.run)
@@ -241,11 +241,11 @@ func TestSchedulerAStalledPlanFailsItsPendingNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	fx := &fakeExec{}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "a", Deps: deps("b")}, {ID: "b", Deps: deps("a")}}}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Needs: deps("b"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	cfg := Config{Execute: fx.run}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler)}
-	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), nodes: doc.Nodes}
-	for _, n := range doc.Nodes {
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
+	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), nodes: doc.Jobs}
+	for _, n := range doc.Jobs {
 		if err := st.CreateNode(t.Context(), pendingRow(run, n)); err != nil {
 			t.Fatal(err)
 		}
@@ -260,7 +260,7 @@ func TestSchedulerAStalledPlanFailsItsPendingNodes(t *testing.T) {
 
 func TestSchedulerWithoutAnExecutorFailsTheNode(t *testing.T) {
 	st := openStore(t)
-	res := hostDoc(t, t.Context(), st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, nil)
+	res := hostDoc(t, t.Context(), st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, nil)
 	if res.Status != "failed" {
 		t.Errorf("status = %s, want failed", res.Status)
 	}
@@ -272,19 +272,19 @@ func TestSchedulerAddsNodesWhileTheRunGoes(t *testing.T) {
 	var addErrs []error
 	fx := &fakeExec{bodies: map[string]Executor{"targets": func(ctx context.Context, n *NodeRun) Result {
 		addErrs = append(addErrs,
-			n.Run.Add(ctx, nodeproto.PlanNode{ID: "test-linux", Deps: deps("targets")}, nodeproto.PlanNode{ID: "test-darwin", Deps: deps("targets")}),
-			n.Run.Add(ctx, nodeproto.PlanNode{ID: "targets"}))
+			n.Run.Add(ctx, nodeproto.JobSpec{ID: "test-linux", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, nodeproto.JobSpec{ID: "test-darwin", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}}),
+			n.Run.Add(ctx, nodeproto.JobSpec{ID: "targets", Steps: []nodeproto.StepSpec{{ID: "body"}}}))
 		return Result{Outcome: sparkwing.Success}
 	}}}
-	res := hostDoc(t, t.Context(), st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "targets"}}}, fx.run)
+	res := hostDoc(t, t.Context(), st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "targets", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
 	if res.Status != "success" || !slices.Equal(res.Order[:1], []string{"targets"}) || len(res.Order) != 3 {
 		t.Fatalf("status=%s order=%v, want targets then its two generated nodes", res.Status, res.Order)
 	}
 	if addErrs[0] != nil {
 		t.Errorf("add: %v", addErrs[0])
 	}
-	var perr *nodeproto.Error
-	if !errors.As(addErrs[1], &perr) || perr.Code != nodeproto.CodePlanInvalid {
+	var perr *apierr.Error
+	if !errors.As(addErrs[1], &perr) || perr.Code != apierr.PlanInvalid {
 		t.Errorf("adding a duplicate node: err = %v, want plan_invalid", addErrs[1])
 	}
 	wantRow(t, st, "test-linux", sparkwing.Success, "")
@@ -300,12 +300,11 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 		}
 		return Result{Outcome: sparkwing.Success}
 	}}}
-	doc := nodeproto.PlanDocOld{Requires: []string{"linux"}, Nodes: []nodeproto.PlanNode{
-		{ID: "base"},
-		{ID: "gpu", Deps: deps("base"), OptionalDeps: deps("extra"), Modifiers: &nodeproto.PlanModifiers{
-			RunsOn: []string{"gpu", "linux"}, WhenRunner: []string{"big"}, Prefers: []string{"fast"},
-			ResCores: 4, ResMemoryBytes: 1 << 30,
-		}},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"),
+			Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Steps: []nodeproto.StepSpec{{ID: "body"}},
+		},
 	}}
 	res := hostDoc(t, t.Context(), st, doc, fx.run)
 	if res.Status != "success" {
@@ -323,38 +322,38 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 
 func TestValidateNodesRefusesAnInvalidPlan(t *testing.T) {
 	for name, tc := range map[string]struct {
-		nodes []nodeproto.PlanNode
+		nodes []nodeproto.JobSpec
 		want  string
 	}{
 		"cycle": {
-			nodes: []nodeproto.PlanNode{{ID: "a", Deps: deps("c")}, {ID: "b", Deps: deps("a")}, {ID: "c", Deps: deps("b")}},
-			want:  "dependency cycle a -> c -> b -> a",
+			nodes: []nodeproto.JobSpec{{ID: "a", Needs: deps("c"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "c", Needs: deps("b"), Steps: []nodeproto.StepSpec{{ID: "body"}}}},
+			want:  "dependency cycle",
 		},
-		"missing dep":      {nodes: []nodeproto.PlanNode{{ID: "a", Deps: deps("ghost")}}, want: "needs ghost"},
-		"duplicate node":   {nodes: []nodeproto.PlanNode{{ID: "a"}, {ID: "a"}}, want: "node a twice"},
-		"no id":            {nodes: []nodeproto.PlanNode{{}}, want: "no id"},
-		"missing recovery": {nodes: []nodeproto.PlanNode{{ID: "r", OnFailureOf: "ghost"}}, want: "recovers ghost"},
+		"missing dep":      {nodes: []nodeproto.JobSpec{{ID: "a", Needs: deps("ghost"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "job dependency is absent"},
+		"duplicate node":   {nodes: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "duplicate job ID"},
+		"no id":            {nodes: []nodeproto.JobSpec{{Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "identifier is empty"},
+		"missing recovery": {nodes: []nodeproto.JobSpec{{ID: "r", OnFailureOf: "ghost", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "recovery source is absent"},
 		"optional dep cycle": {
-			nodes: []nodeproto.PlanNode{{ID: "a", OptionalDeps: deps("b")}, {ID: "b", Deps: deps("a")}},
+			nodes: []nodeproto.JobSpec{{ID: "a", NeedsIfPresent: deps("b"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}}},
 			want:  "dependency cycle",
 		},
 		"duplicate closure": {
-			nodes: []nodeproto.PlanNode{
-				{ID: "a", Closures: &nodeproto.PlanClosures{SkipIf: []string{"x"}}},
-				{ID: "b", Work: &nodeproto.PlanWork{Steps: []nodeproto.PlanStep{{ID: "s", Closures: &nodeproto.PlanClosures{Verify: "x"}}}}},
+			nodes: []nodeproto.JobSpec{
+				{ID: "a", Closures: nodeproto.ClosureSpec{SkipIf: []string{"x"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "b", Steps: []nodeproto.StepSpec{{ID: "s", Closures: nodeproto.ClosureSpec{Verify: "x"}}}},
 			},
-			want: "closure id x belongs to both node a and step b/s",
+			want: "closure ID is not unique",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := validateNodes(tc.nodes)
-			var perr *nodeproto.Error
-			if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanInvalid || !strings.Contains(perr.Message, tc.want) {
+			err := validateNodes(tc.nodes, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}})
+			var perr *apierr.Error
+			if !errors.As(err, &perr) || perr.Code != apierr.PlanInvalid || !strings.Contains(perr.Message, tc.want) {
 				t.Fatalf("err = %v, want plan_invalid naming %q", err, tc.want)
 			}
 		})
 	}
-	if err := validateNodes([]nodeproto.PlanNode{{ID: "a", OptionalDeps: deps("absent")}, {ID: "r", OnFailureOf: "a"}}); err != nil {
+	if err := validateNodes([]nodeproto.JobSpec{{ID: "a", NeedsIfPresent: deps("absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "r", OnFailureOf: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
 		t.Errorf("a plan with an absent optional dependency and a recovery node: %v", err)
 	}
 }
@@ -367,7 +366,7 @@ func TestSchedulerDeadlineFailsTheRun(t *testing.T) {
 		<-ctx.Done()
 		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 	}}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "slow"}, {ID: "next", Deps: deps("slow")}}}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 
 	res := hostDoc(t, ctx, st, doc, fx.run)
 	want := "nodes failed: [slow]; 1 more cancelled with the run"
@@ -386,7 +385,7 @@ func TestSchedulerPlainCancelFailsTheRun(t *testing.T) {
 		cancel()
 		return Result{Outcome: sparkwing.Success}
 	}}}
-	res := hostDoc(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, fx.run)
+	res := hostDoc(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
 	if res.Status != "failed" || !errors.Is(res.Err, context.Canceled) {
 		t.Errorf("status=%s err=%v, want failed with the cancel", res.Status, res.Err)
 	}
@@ -406,7 +405,7 @@ func TestSchedulerARefusedOutputFailsTheNodeRow(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"big": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Success, Output: []byte(`"huge"`)}
 	}}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "big"}, {ID: "after", Deps: deps("big")}}}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "big", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "after", Needs: deps("big"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	res := hostDoc(t, t.Context(), refusingOutput{st}, doc, fx.run)
 	if res.Status != "failed" {
 		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
@@ -431,7 +430,7 @@ func TestSchedulerARefusedOutputWithAHugeReasonStillFailsTheNodeRow(t *testing.T
 	fx := &fakeExec{bodies: map[string]Executor{"big": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Success, Output: []byte(`"huge"`)}
 	}}}
-	res := hostDoc(t, t.Context(), refusingOutputLoudly{st}, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "big"}}}, fx.run)
+	res := hostDoc(t, t.Context(), refusingOutputLoudly{st}, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "big", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
 	if res.Status != "failed" {
 		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
 	}
@@ -459,7 +458,7 @@ func TestSchedulerRecordsAFailedCommandWithHugeOutput(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"test": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New(huge)}
 	}}}
-	res := hostDoc(t, t.Context(), cappedFinish{st}, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "test"}}}, fx.run)
+	res := hostDoc(t, t.Context(), cappedFinish{st}, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "test", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
 	if res.Status != "failed" {
 		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
 	}
@@ -494,15 +493,15 @@ func TestNodeErrorBoundingNeverSplitsASecret(t *testing.T) {
 			masker := secrets.NewMasker()
 			masker.Register(secret)
 			arg := afterRunArgOf(Result{Outcome: sparkwing.Failed, Err: errors.New(tc.raw)})
-			if arg.Error != tc.raw {
-				t.Errorf("after_run input is %d bytes, want the whole %d-byte error", len(arg.Error), len(tc.raw))
+			if arg.Error == nil || arg.Error.Message != tc.raw {
+				t.Errorf("after_run input is %d bytes, want the whole %d-byte error", len(arg.Error.Message), len(tc.raw))
 			}
 			log := &recordingLog{}
 			sink, err := NewLogSink(t.Context(), LogSinkConfig{RunID: "run", NodeID: "node", State: noState{}, Log: log, Masker: masker})
 			if err != nil {
 				t.Fatal(err)
 			}
-			sink.Record(nodeproto.LogRecord{Level: "error", Msg: arg.Error})
+			sink.Record(nodeproto.FrameLog{Level: "error", Message: arg.Error.Message})
 			if len(log.records) != 1 || strings.Contains(log.records[0].Msg, tc.fragment) {
 				t.Errorf("a hook logging its error leaked %q: %+v", tc.fragment, log.records)
 			}
@@ -540,12 +539,12 @@ func TestSchedulerAddHonoursTheCallersDeadline(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"gen": func(ctx context.Context, n *NodeRun) Result {
 		addCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
-		addErr = n.Run.Add(addCtx, nodeproto.PlanNode{ID: "child", Deps: deps("gen")})
+		addErr = n.Run.Add(addCtx, nodeproto.JobSpec{ID: "child", Needs: deps("gen"), Steps: []nodeproto.StepSpec{{ID: "body"}}})
 		return Result{Outcome: sparkwing.Success}
 	}}}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := hostDoc(t, ctx, stallingCreate{st}, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "gen"}}}, fx.run)
+	res := hostDoc(t, ctx, stallingCreate{st}, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gen", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
 	if !errors.Is(addErr, context.DeadlineExceeded) {
 		t.Errorf("add err = %v, want the caller's deadline", addErr)
 	}

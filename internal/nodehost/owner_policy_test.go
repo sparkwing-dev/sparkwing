@@ -171,7 +171,7 @@ func TestOwnerPolicySkipShortCircuitsBeforeBody(t *testing.T) {
 			if request.Op != nodeproto.OpEval {
 				return nil, nil
 			}
-			if request.Job != "build" || request.Attempt != 0 {
+			if request.Job != "" || request.Attempt != 0 {
 				t.Errorf("owner evaluation manufactured an attempt: %+v", request)
 			}
 			evaluated = append(evaluated, request.Closure)

@@ -1,5 +1,12 @@
 # Cross-area handoffs
 
+W3's [settlement continuation](w3-settlement-continuation.md) records the latest
+disposition of every W3 entry below. Findings 5 and 6 now have shared scheduler
+and real Go process evidence. Native router/constructor migration, legacy event
+ports and the remaining runtime deletion are still open. The merged W4
+concurrency tests accept differing memberships, which needs reconciliation with
+finding 5's mismatch-refusal wording.
+
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
 ## From W4 review fixes (2026-10-15)
@@ -21,3 +28,5 @@ Each worker acts on every entry naming its area. Entries come from area reviews 
 
 W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./internal/nodehost -run '^TestHostedRunEmitsTheDispatchersEvents$' -count=1` fails compilation. `events_test.go` still references PlanDocOld, PlanModifiers, PlanNode, PlanConsume, PlanApproval, PlanClosures and SkippedConcurrent. Its auto retry branches and node_auto_retry expectations describe removed behavior. Other node-host test files fail on old APIs too. The two orchestrator RetryAuto tests still pass removed `auto=true` to the fixture and need porting to retained retry semantics.
 
+
+**W3: `internal/nodehost` tests fail after the W4 protocol merge (c30046f22).** `go test ./internal/nodehost/` fails TestAdmissionLeasesHostAroundEachNode, TestAdmissionPriorityAndClassPrecedence and TestAdmissionRunHoldingTheHostTakesOnlySemaphores, then hangs until the 10-minute test timeout. The W4 review (review/areas/W4-review-3.md, findings 2, 4, 5, 9) names node-host gaps against protocol v2: `routes.go` still installs the old version-header/426 gate and `/nodes` routes, eval results ignore `EvalResult.Error`, generated declarations skip strict expansion validation, and startup/cleanup environments bypass procenv. Fix those, and make no test able to hang: a test that waits must fail on a deadline.

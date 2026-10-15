@@ -19,7 +19,7 @@ func memoArtifactRun(h *artifactHarness, src func() (MemoSource, error), ran *bo
 	}}
 	return &memoRun{
 		cfg: &Config{Artifacts: h.art}, m: m, adm: &Admission{Slots: m.Slots},
-		n: &NodeRun{Run: h.run, Plan: nodeproto.PlanNode{ID: "build", Outputs: []string{"app.bin"}}},
+		n: &NodeRun{Run: h.run, Plan: nodeproto.JobSpec{ID: "build", Artifacts: []string{"app.bin"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}},
 		next: func(context.Context, *NodeRun) Result {
 			*ran = true
 			return Result{Outcome: sparkwing.Success, Output: []byte(`"own"`)}
@@ -30,7 +30,7 @@ func memoArtifactRun(h *artifactHarness, src func() (MemoSource, error), ran *bo
 
 func publishArtifact(t *testing.T, h *artifactHarness, node, body string) string {
 	t.Helper()
-	res, _ := h.exec(t.TempDir(), nodeproto.PlanNode{ID: node, Outputs: []string{"app.bin"}}, func(dir string) Result {
+	res, _ := h.exec(t.TempDir(), nodeproto.JobSpec{ID: node, Artifacts: []string{"app.bin"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, func(dir string) Result {
 		return writeFile(dir, "app.bin", body)
 	})
 	if res.Outcome != sparkwing.Success {
@@ -42,7 +42,7 @@ func publishArtifact(t *testing.T, h *artifactHarness, node, body string) string
 func stagedArtifact(t *testing.T, h *artifactHarness) (Result, string) {
 	t.Helper()
 	dir := t.TempDir()
-	res, _ := h.exec(dir, nodeproto.PlanNode{ID: "consumer", Consumes: []nodeproto.PlanConsume{{Producer: "build"}}},
+	res, _ := h.exec(dir, nodeproto.JobSpec{ID: "consumer", Consumes: []nodeproto.ArtifactInput{{Producer: "build"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		func(string) Result { return Result{Outcome: sparkwing.Success} })
 	data, _ := os.ReadFile(filepath.Join(dir, "app.bin"))
 	return res, string(data)

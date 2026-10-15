@@ -1,11 +1,13 @@
-// Package inputs builds cache keys from files, environment variables, and constants.
+// Package inputs builds memo keys from files, environment variables, and constants.
 package inputs
 
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -30,109 +32,6 @@ type repoFilesConfig struct {
 func Ignore(patterns ...string) RepoFilesOption {
 	return func(config *repoFilesConfig) {
 		config.ignore = append(config.ignore, patterns...)
-	}
-}
-
-// RepoFiles hashes every tracked file. Ignore excludes matching tracked paths.
-func RepoFilesOld(options ...RepoFilesOption) sparkwing.CacheKeyFn {
-	config := repoFilesConfig{}
-	for _, option := range options {
-		option(&config)
-	}
-	matcher, patternError := buildIgnoreMatcher(config.ignore)
-
-	return func(ctx context.Context) (sparkwing.CacheKey, error) {
-		if patternError != nil {
-			return "", patternError
-		}
-		hash, err := hashTrackedFiles(ctx, matcher)
-		if err != nil {
-			return "", fmt.Errorf("RepoFiles: %w", err)
-		}
-		return sparkwing.CacheKey("ck:" + hash), nil
-	}
-}
-
-// Files hashes tracked files matching the supplied patterns.
-// Patterns follow the same rules as Ignore.
-func FilesOld(globs ...string) sparkwing.CacheKeyFn {
-	matcher, patternError := buildIncludeMatcher(globs)
-	return func(ctx context.Context) (sparkwing.CacheKey, error) {
-		if patternError != nil {
-			return "", patternError
-		}
-		hash, err := hashTrackedFiles(ctx, matcher)
-		if err != nil {
-			return "", fmt.Errorf("Files: %w", err)
-		}
-		return sparkwing.CacheKey("ck:" + hash), nil
-	}
-}
-
-// Tree hashes every regular file under root and skips symlinks.
-// Relative roots resolve against the repository root.
-// A missing or non-directory root returns an error.
-func TreeOld(root string) sparkwing.CacheKeyFn {
-	return func(ctx context.Context) (sparkwing.CacheKey, error) {
-		absolute, err := resolveTreeRoot(ctx, root)
-		if err != nil {
-			return "", fmt.Errorf("Tree: %w", err)
-		}
-		hash, err := hashTree(ctx, absolute)
-		if err != nil {
-			return "", fmt.Errorf("Tree: %w", err)
-		}
-		return sparkwing.CacheKey("ck:" + hash), nil
-	}
-}
-
-// Env hashes the named environment variables in sorted name order.
-// Unset variables hash differently from empty variables.
-func EnvOld(names ...string) sparkwing.CacheKeyFn {
-	sorted := append([]string(nil), names...)
-	sort.Strings(sorted)
-	return func(_ context.Context) (sparkwing.CacheKey, error) {
-		var builder strings.Builder
-		for _, name := range sorted {
-			builder.WriteString(name)
-			builder.WriteByte('=')
-			if value, ok := os.LookupEnv(name); ok {
-				builder.WriteString(value)
-			} else {
-				builder.WriteString("\x00unset")
-			}
-			builder.WriteByte('\x1e')
-		}
-		sum := sha256.Sum256([]byte(builder.String()))
-		return sparkwing.CacheKey(fmt.Sprintf("ck:%x", sum[:6])), nil
-	}
-}
-
-// Const returns the supplied key.
-func ConstOld(s string) sparkwing.CacheKeyFn {
-	return func(_ context.Context) (sparkwing.CacheKey, error) { return sparkwing.CacheKey(s), nil }
-}
-
-// Compose combines keys with sparkwing.Key.
-// An input error or empty key returns an error.
-// NoCache stops evaluation and bypasses memoization.
-func ComposeOld(resolvers ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn {
-	return func(ctx context.Context) (sparkwing.CacheKey, error) {
-		parts := make([]any, 0, len(resolvers))
-		for index, resolve := range resolvers {
-			key, err := resolve(ctx)
-			if err != nil {
-				return "", fmt.Errorf("Compose input %d: %w", index, err)
-			}
-			if key == sparkwing.NoCache {
-				return sparkwing.NoCache, nil
-			}
-			if key == "" {
-				return "", fmt.Errorf("Compose input %d: empty key", index)
-			}
-			parts = append(parts, string(key))
-		}
-		return sparkwing.Key(parts...), nil
 	}
 }
 
@@ -197,12 +96,12 @@ func compilePattern(pattern string) (pathMatcher, error) {
 		return func(path string) (bool, error) { return strings.HasPrefix(path, pattern), nil }, nil
 	case !strings.ContainsRune(pattern, '/'):
 		if _, err := filepath.Match(pattern, ""); err != nil {
-			return nil, fmt.Errorf("cache input pattern %q: %w", pattern, err)
+			return nil, fmt.Errorf("memo input pattern %q: %w", pattern, err)
 		}
 		return func(path string) (bool, error) {
 			matched, err := filepath.Match(pattern, filepath.Base(path))
 			if err != nil {
-				return false, fmt.Errorf("cache input pattern %q: %w", pattern, err)
+				return false, fmt.Errorf("memo input pattern %q: %w", pattern, err)
 			}
 			return matched, nil
 		}, nil
@@ -255,7 +154,14 @@ func resolveTreeRoot(ctx context.Context, root string) (string, error) {
 }
 
 func hashTree(ctx context.Context, root string) (string, error) {
-	info, err := os.Stat(root)
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	if resolved != filepath.Clean(root) {
+		return "", fmt.Errorf("Tree: %s traverses a symlink", root)
+	}
+	info, err := os.Lstat(root)
 	if err != nil {
 		return "", err
 	}
@@ -297,13 +203,11 @@ func hashTree(ctx context.Context, root string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read %s: %w", relative, err)
 		}
-		digest.Write([]byte(relative))
-		digest.Write([]byte{0})
-		digest.Write(contents)
-		digest.Write([]byte{0})
+		writeHashPart(digest, []byte(relative))
+		writeHashPart(digest, contents)
 	}
 	sum := digest.Sum(nil)
-	return fmt.Sprintf("%x", sum)[:12], nil
+	return fmt.Sprintf("%x", sum), nil
 }
 
 func hashTrackedFiles(ctx context.Context, keep pathMatcher) (string, error) {
@@ -335,17 +239,41 @@ func hashTrackedFiles(ctx context.Context, keep pathMatcher) (string, error) {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		contents, err := os.ReadFile(filepath.Join(root, file))
+		path := filepath.Join(root, file)
+		info, err := os.Lstat(path)
 		if err != nil {
 			return "", fmt.Errorf("read %s: %w", file, err)
 		}
-		digest.Write([]byte(file))
-		digest.Write([]byte{0})
-		digest.Write(contents)
-		digest.Write([]byte{0})
+		var contents []byte
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return "", fmt.Errorf("read %s: %w", file, err)
+			}
+			contents = []byte(target)
+		} else {
+			contents, err = os.ReadFile(path)
+		}
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", file, err)
+		}
+		writeHashPart(digest, []byte(file))
+		if info.Mode()&os.ModeSymlink != 0 {
+			writeHashPart(digest, []byte{1})
+		} else {
+			writeHashPart(digest, []byte{0})
+		}
+		writeHashPart(digest, contents)
 	}
 	sum := digest.Sum(nil)
-	return fmt.Sprintf("%x", sum)[:12], nil
+	return fmt.Sprintf("%x", sum), nil
+}
+
+func writeHashPart(digest hash.Hash, part []byte) {
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(part)))
+	digest.Write(length[:])
+	digest.Write(part)
 }
 
 func repoRoot(ctx context.Context) (string, error) {

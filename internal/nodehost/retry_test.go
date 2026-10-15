@@ -28,9 +28,10 @@ func (s retryState) GetNode(context.Context, string, string) (*store.Node, error
 	return &store.Node{AttemptsConsumed: s.consumed}, nil
 }
 
-func retryNode(m nodeproto.PlanModifiers) *NodeRun {
-	run := &Run{ID: testRunID, State: retryState{}, Logger: slog.New(slog.DiscardHandler)}
-	return &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: "flaky", Modifiers: &m}}
+func retryNode(m nodeproto.JobSpec) *NodeRun {
+	m.ID = "flaky"
+	run := &Run{ID: testRunID, State: retryState{}, Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
+	return &NodeRun{Run: run, Plan: m}
 }
 
 func TestRetryStartsPastTheAttemptsTheNodeAlreadySpent(t *testing.T) {
@@ -44,7 +45,7 @@ func TestRetryStartsPastTheAttemptsTheNodeAlreadySpent(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &failUntil{}
-			n := retryNode(nodeproto.PlanModifiers{Retry: 2})
+			n := retryNode(nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 2}, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 			n.Run.State = retryState{consumed: tc.consumed}
 			res := retryLayer(nil, f.run)(t.Context(), n)
 			if fmt.Sprint(f.attempts) != fmt.Sprint(tc.want) || res.Outcome != sparkwing.Failed {
@@ -76,14 +77,14 @@ func (f *failUntil) run(_ context.Context, n *NodeRun) Result {
 func TestRetryRunsTheBudgetAndKeepsTheLastFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		mods    nodeproto.PlanModifiers
+		mods    nodeproto.JobSpec
 		ok      int
 		want    []int
 		outcome sparkwing.Outcome
 	}{
-		{"no retry", nodeproto.PlanModifiers{}, 0, []int{1}, sparkwing.Failed},
-		{"every attempt fails", nodeproto.PlanModifiers{Retry: 2}, 0, []int{1, 2, 3}, sparkwing.Failed},
-		{"second attempt passes", nodeproto.PlanModifiers{Retry: 3}, 2, []int{1, 2}, sparkwing.Success},
+		{"no retry", nodeproto.JobSpec{Steps: []nodeproto.StepSpec{{ID: "body"}}}, 0, []int{1}, sparkwing.Failed},
+		{"every attempt fails", nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 2}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, 0, []int{1, 2, 3}, sparkwing.Failed},
+		{"second attempt passes", nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, 2, []int{1, 2}, sparkwing.Success},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &failUntil{ok: tc.ok}
@@ -112,7 +113,7 @@ func TestRetryBackoffDoublesUpToFiveMinutes(t *testing.T) {
 	} {
 		synctest.Test(t, func(t *testing.T) {
 			f := &failUntil{}
-			retryLayer(nil, f.run)(t.Context(), retryNode(nodeproto.PlanModifiers{Retry: 3, RetryBackoffMS: tc.backoffMS}))
+			retryLayer(nil, f.run)(t.Context(), retryNode(nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 3, BackoffMS: new(int64(tc.backoffMS))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}))
 			var gaps []time.Duration
 			for i := 1; i < len(f.at); i++ {
 				gaps = append(gaps, f.at[i].Sub(f.at[i-1]))
@@ -132,7 +133,7 @@ func TestRetryStopsWhenTheRunIsCancelled(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			res = retryLayer(nil, f.run)(ctx, retryNode(nodeproto.PlanModifiers{Retry: 5, RetryBackoffMS: 60_000}))
+			res = retryLayer(nil, f.run)(ctx, retryNode(nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 5, BackoffMS: new(int64(60_000))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}))
 		}()
 		synctest.Wait()
 		cancel()
@@ -144,7 +145,7 @@ func TestRetryStopsWhenTheRunIsCancelled(t *testing.T) {
 		cancelled := func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Cancelled} }
 		calls := 0
 		counted := func(ctx context.Context, n *NodeRun) Result { calls++; return cancelled(ctx, n) }
-		retryLayer(nil, counted)(t.Context(), retryNode(nodeproto.PlanModifiers{Retry: 3}))
+		retryLayer(nil, counted)(t.Context(), retryNode(nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}))
 		if calls != 1 {
 			t.Errorf("a cancelled attempt ran %d times, want 1", calls)
 		}
@@ -175,7 +176,7 @@ func (s *stateWrites) FinishNodeWithReason(ctx context.Context, runID, nodeID, o
 
 func TestRetryLeavesTheRowRunningBetweenAttempts(t *testing.T) {
 	st := &stateWrites{Store: openStore(t)}
-	retry := &nodeproto.PlanModifiers{Retry: 1}
+	retry := &nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 1}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	var during *store.Node
 	body := func(ctx context.Context, n *NodeRun) Result {
 		if n.Attempt == 1 {
@@ -188,7 +189,7 @@ func TestRetryLeavesTheRowRunningBetweenAttempts(t *testing.T) {
 		during = row
 		return Result{Outcome: sparkwing.Success}
 	}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "flaky", Modifiers: retry}}}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: retry.Retry, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	if res := hostDoc(t, t.Context(), st, doc, body); res.Status != "success" {
 		t.Fatalf("status %s err %v, want success", res.Status, res.Err)
 	}
@@ -210,7 +211,7 @@ func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
 		close(failed)
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("flake")}
 	}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 1, RetryBackoffMS: int64(time.Hour / time.Millisecond)}}}}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 1, BackoffMS: new(int64(int64(time.Hour / time.Millisecond)))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	done := make(chan RunResult)
 	go func() { done <- hostDoc(t, ctx, st, doc, body) }()
 	<-failed
@@ -230,15 +231,15 @@ func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
 func TestAttemptsBudgetCoversEveryAttemptAndBackoff(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		m    *nodeproto.PlanModifiers
+		m    *nodeproto.JobSpec
 		want time.Duration
 	}{
-		{"no timeout", &nodeproto.PlanModifiers{Retry: 3}, 0},
-		{"one attempt", &nodeproto.PlanModifiers{TimeoutMS: 5 * 60_000}, 5 * time.Minute},
-		{"retry with backoff", &nodeproto.PlanModifiers{TimeoutMS: 5 * 60_000, Retry: 1, RetryBackoffMS: 6 * 60_000}, 16 * time.Minute},
-		{"doubling backoff", &nodeproto.PlanModifiers{TimeoutMS: 60_000, Retry: 2, RetryBackoffMS: 1_000}, 3*time.Minute + 3*time.Second},
+		{"no timeout", &nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, 0},
+		{"one attempt", &nodeproto.JobSpec{TimeoutMS: new(int64(5 * 60_000)), Steps: []nodeproto.StepSpec{{ID: "body"}}}, 5 * time.Minute},
+		{"retry with backoff", &nodeproto.JobSpec{TimeoutMS: new(int64(5 * 60_000)), Retry: &nodeproto.RetrySpec{Attempts: 1, BackoffMS: new(int64(6 * 60_000))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, 16 * time.Minute},
+		{"doubling backoff", &nodeproto.JobSpec{TimeoutMS: new(int64(60_000)), Retry: &nodeproto.RetrySpec{Attempts: 2, BackoffMS: new(int64(1_000))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, 3*time.Minute + 3*time.Second},
 	} {
-		if got := AttemptsBudget(nodeproto.PlanNode{ID: "n", Modifiers: tc.m}); got != tc.want {
+		if got := AttemptsBudget(*tc.m); got != tc.want {
 			t.Errorf("%s: budget = %s, want %s", tc.name, got, tc.want)
 		}
 	}

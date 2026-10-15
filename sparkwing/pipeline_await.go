@@ -18,7 +18,7 @@ import (
 //
 // Remote-handoff primitive: RunAndAwait always submits the new run
 // as a trigger through the controller, which dispatches it to a
-// runner that fetches source via gitcache and executes the pipeline
+// runner that acquires the sealed source and executes the pipeline
 // in a separate process. That makes it the right tool for
 // cross-process work (different repo, different fleet, different
 // schedule) and the wrong tool for in-process composition. When
@@ -55,6 +55,7 @@ import (
 //
 // Callers that can't import the target's Inputs type pass
 // sparkwing.NoInputs and use WithFreshArgs as the escape hatch.
+// Missing output fails the call. An explicit JSON null decodes to the zero Out.
 func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error) {
 	var zero Out
 	cfg := awaitConfig{}
@@ -65,7 +66,7 @@ func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts
 	if aw == nil {
 		return zero, errors.New("sparkwing: RunAndAwait: no awaiter installed in context (called outside the orchestrator?)")
 	}
-	resolved, err := aw.Await(ctx, AwaitRequest{
+	resolved, err := aw.await(ctx, awaitRequest{
 		Pipeline: pipeline,
 		NodeID:   nodeID,
 		Args:     cfg.args,
@@ -76,8 +77,8 @@ func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts
 	if err != nil {
 		return zero, fmt.Errorf("RunAndAwait(%s/%s): %w", pipeline, nodeID, err)
 	}
-	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
-		return zero, nil
+	if resolved == nil || len(resolved.Data) == 0 {
+		return zero, fmt.Errorf("RunAndAwait(%s/%s): %w", pipeline, nodeID, ErrRefAbsent)
 	}
 	var out Out
 	if err := json.Unmarshal(resolved.Data, &out); err != nil {
@@ -158,7 +159,7 @@ func WithFreshBranch(branch string) AwaitOption {
 // AwaitRequest is the awaiter's input struct. Implementations POST a
 // trigger, poll for terminal state, and fetch the target node's
 // output.
-type AwaitRequest struct {
+type awaitRequest struct {
 	Pipeline string
 	NodeID   string
 	Args     map[string]string
@@ -175,19 +176,19 @@ type AwaitRequest struct {
 // PipelineAwaiter is the orchestrator-installed backend for
 // RunAndAwait. Both local mode and cluster-mode pod runners
 // provide an implementation; user code never implements this.
-type PipelineAwaiter interface {
-	Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
+type pipelineAwaiter interface {
+	await(ctx context.Context, req awaitRequest) (*resolvedPipelineRef, error)
 }
 
 // PipelineAwaiterFunc adapts a plain function to PipelineAwaiter.
-type PipelineAwaiterFunc func(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
+type pipelineAwaiterFunc func(ctx context.Context, req awaitRequest) (*resolvedPipelineRef, error)
 
-func (f PipelineAwaiterFunc) Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error) {
+func (f pipelineAwaiterFunc) await(ctx context.Context, req awaitRequest) (*resolvedPipelineRef, error) {
 	return f(ctx, req)
 }
 
-func pipelineAwaiterFromContext(ctx context.Context) PipelineAwaiter {
-	if a, ok := ctx.Value(keyPipelineAwaiter).(PipelineAwaiter); ok {
+func pipelineAwaiterFromContext(ctx context.Context) pipelineAwaiter {
+	if a, ok := ctx.Value(keyPipelineAwaiter).(pipelineAwaiter); ok {
 		return a
 	}
 	return nil

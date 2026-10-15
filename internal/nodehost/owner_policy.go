@@ -44,7 +44,7 @@ func (h *OwnerEvaluator) SkipIf(ctx context.Context, input EvaluationInput) (Ski
 				return err
 			}
 			defer cancel()
-			value, evalErr := h.eval(bounded, session, code, id, nil)
+			value, evalErr := h.eval(bounded, session, code, id, nil, nil)
 			if ctx.Err() == nil && errors.Is(context.Cause(bounded), context.DeadlineExceeded) {
 				result.TimedOut = append(result.TimedOut, i)
 				return nil
@@ -105,7 +105,7 @@ func (h *OwnerEvaluator) MemoKey(ctx context.Context, input EvaluationInput) (st
 			return err
 		}
 		defer cancel()
-		value, err := h.eval(bounded, session, code, job.Closures.MemoKey, nil)
+		value, err := h.eval(bounded, session, code, job.Closures.MemoKey, nil, nil)
 		if err != nil {
 			return err
 		}

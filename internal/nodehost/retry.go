@@ -14,10 +14,10 @@ import (
 
 func retryLayer(cfg *Config, next Executor) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
-		m := n.Plan.Modifiers
+		m := n.Plan.Retry
 		first, budget := max(n.Attempt, 1), 1
 		if m != nil {
-			budget += max(m.Retry, 0)
+			budget += max(m.Attempts, 0)
 		}
 		// safety: attempts an earlier run of the node's lineage spent, as an agent-loss retry's row carries, come
 		// out of its budget, so a node that keeps losing its executor stops being retried.
@@ -37,7 +37,7 @@ func retryLayer(cfg *Config, next Executor) Executor {
 			attempt.Attempt = first
 			return next(ctx, &attempt)
 		}
-		backoff := millis(m.RetryBackoffMS)
+		backoff := millis(value(m.BackoffMS))
 		// safety: one rule for both the loop and the attempt's Retried, so after_run
 		// runs in exactly the attempt the loop ends on.
 		retries := func(r Result) bool { return r.Outcome == sparkwing.Failed && !r.Final && ctx.Err() == nil }
@@ -79,15 +79,19 @@ func retryAnnounce(ctx context.Context, cfg *Config, n *NodeRun, ordinal, budget
 // AttemptsBudget is the longest node n runs on one host: every attempt its
 // retries allow at its timeout_ms, and the backoff between them. Zero means
 // the node declares no timeout.
-func AttemptsBudget(n nodeproto.PlanNode) time.Duration {
-	m := n.Modifiers
-	if m == nil || m.TimeoutMS <= 0 {
+func AttemptsBudget(n nodeproto.JobSpec) time.Duration {
+	if value(n.TimeoutMS) <= 0 {
 		return 0
 	}
-	retries := max(m.Retry, 0)
-	total := time.Duration(retries+1) * millis(m.TimeoutMS)
+	retries := 0
+	var backoff time.Duration
+	if n.Retry != nil {
+		retries = max(n.Retry.Attempts, 0)
+		backoff = millis(value(n.Retry.BackoffMS))
+	}
+	total := time.Duration(retries+1) * millis(value(n.TimeoutMS))
 	for i := 1; i <= retries; i++ {
-		total += scaledBackoff(millis(m.RetryBackoffMS), i)
+		total += scaledBackoff(backoff, i)
 	}
 	if total < 0 {
 		return math.MaxInt64

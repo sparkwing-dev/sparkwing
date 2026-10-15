@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
@@ -21,7 +20,7 @@ func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
 	}
 
 	t.Setenv("SPARKWING_HOME", home)
-	if err := storeDescribe(t.TempDir(), "schema", sdkserve.DescribeDoc{Protocol: nodeproto.VersionOld}); err != nil {
+	if err := storeDescribe(t.TempDir(), "schema", nodeproto.DescribeDoc{}); err != nil {
 		t.Fatal(err)
 	}
 	describe := describeCachePath("schema")

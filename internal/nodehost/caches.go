@@ -14,7 +14,11 @@ func cachesLayer(cfg *Config, next Executor) Executor {
 		if len(n.Plan.Caches) == 0 {
 			return next(ctx, n)
 		}
-		runs := depcache.RestoreAll(ctx, n.Plan.Caches, n.Plan.ID, cfg.Session.Dir)
+		specs := make([]depcache.Spec, len(n.Plan.Caches))
+		for i, c := range n.Plan.Caches {
+			specs[i] = depcache.Spec(c)
+		}
+		runs := depcache.RestoreAll(ctx, specs, n.Plan.ID, cfg.Session.Dir)
 		res := next(ctx, n)
 		depcache.SaveAll(ctx, runs, resultErr(res))
 		return res

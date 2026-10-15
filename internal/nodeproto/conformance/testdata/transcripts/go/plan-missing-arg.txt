@@ -1,2 +1,0 @@
--> {"args":{},"id":"1","op":"plan","pipeline":"conformance","run":{"git":{"branch":"main","repo":"acme/app","sha":"4f2c1e0"},"run_id":"run-1","trigger":{"source":"push"}}}
-<- {"error":{"code":"invalid_args","message":"inputs for pipeline \"conformance\": --env is required"},"ok":false,"reply":"1"}

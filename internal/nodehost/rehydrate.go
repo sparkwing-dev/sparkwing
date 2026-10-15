@@ -24,7 +24,7 @@ type sourceOutputs interface {
 }
 
 // safety: only successful results can be reused by a new retry run.
-func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode) (Result, bool) {
+func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.JobSpec) (Result, bool) {
 	r := s.rehydrate
 	if r == nil || s.rerun[n.ID] {
 		return Result{}, false
@@ -46,7 +46,7 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode) (Resul
 	}
 	// safety: a node planned differently in the source, as a generator may regenerate it, ran other work, so
 	// its result is not this node's to copy.
-	if prior.SpecHash != n.SpecHash {
+	if prior.SpecHash != jobHash(n) {
 		return s.runsAgain(n.ID)
 	}
 	generator := generatesNodes(n, sparkwing.Outcome(prior.Outcome))

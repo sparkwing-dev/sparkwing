@@ -42,7 +42,7 @@ func (Gate) Examples() []sparkwing.Example {
 
 func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Resources(sparkwing.Cores(gateCoreReservation(runtime.NumCPU())))
-	sparkwing.Job(plan, rc.Pipeline, p).Timeout(gateRunTimeout)
+	sparkwing.Job(plan, rc.Pipeline, p).Timeout(gateRunTimeout).Cache(lintCache())
 	return nil
 }
 
@@ -109,7 +109,7 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 }
 
 func (p *Gate) workForCPU(w *sparkwing.Work, cpuCount int) (*sparkwing.WorkStep, error) {
-	w.ParallelFailures(sparkwing.FailFast)
+	w.FailurePolicy(sparkwing.FailFast)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
 	formattersStep := sparkwing.Step(w, "formatters", runFormatters).Needs(gofmtStep)
 	vetStep := sparkwing.Step(w, "vet", runVet).Needs(formattersStep)

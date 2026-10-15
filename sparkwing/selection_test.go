@@ -1,114 +1,38 @@
-package sparkwing_test
+package sparkwing
 
 import (
-	"reflect"
+	"context"
+	"slices"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestPrefers_StoresLabelsInDeclarationOrder(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "build", &buildJob{}).
-		Prefers("cloud-linux", "local")
-
-	got := n.PrefersLabels()
-	want := []string{"cloud-linux", "local"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("PrefersLabels = %v, want %v", got, want)
+func TestRunnerLabelsReachPlanDocument(t *testing.T) {
+	plan := NewPlan()
+	Job(plan, "build", func(context.Context) error { return nil }).
+		Requires("gpu", "arch=arm64").Prefers("cloud-linux")
+	job := planDocument(plan).Jobs[0]
+	if !slices.Equal(job.Requires, []string{"gpu", "arch=arm64"}) || !slices.Equal(job.Prefers, []string{"cloud-linux"}) {
+		t.Fatalf("runner labels = requires %v, prefers %v", job.Requires, job.Prefers)
 	}
 }
 
-func TestPrefers_EmptyClears(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "build", &buildJob{}).
-		Prefers("cloud-linux").
-		Prefers()
-	if got := n.PrefersLabels(); got != nil {
-		t.Fatalf("PrefersLabels after clear: %v", got)
+func TestRunnerLabelsCanBeCleared(t *testing.T) {
+	plan := NewPlan()
+	Job(plan, "build", func(context.Context) error { return nil }).
+		Requires("gpu").Requires().Prefers("cloud-linux").Prefers()
+	job := planDocument(plan).Jobs[0]
+	if len(job.Requires) != 0 || len(job.Prefers) != 0 {
+		t.Fatalf("cleared runner labels = requires %v, prefers %v", job.Requires, job.Prefers)
 	}
 }
 
-func TestPrefers_IgnoresEmptyStrings(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "build", &buildJob{}).Prefers("", "cloud-linux", "")
-	got := n.PrefersLabels()
-	if len(got) != 1 || got[0] != "cloud-linux" {
-		t.Fatalf("PrefersLabels: %v", got)
-	}
-}
-
-func TestPrefers_ReturnedSliceIsCopy(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "build", &buildJob{}).Prefers("a", "b")
-	got := n.PrefersLabels()
-	got[0] = "mutated"
-	if n.PrefersLabels()[0] != "a" {
-		t.Fatal("PrefersLabels returned slice is not a copy")
-	}
-}
-
-func TestWhenRunner_StoresLabels(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "preflight", &buildJob{}).WhenRunner("local")
-	got := n.WhenRunnerLabels()
-	if len(got) != 1 || got[0] != "local" {
-		t.Fatalf("WhenRunnerLabels: %v", got)
-	}
-}
-
-func TestWhenRunner_EmptyClears(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "preflight", &buildJob{}).
-		WhenRunner("local").
-		WhenRunner()
-	if got := n.WhenRunnerLabels(); got != nil {
-		t.Fatalf("WhenRunnerLabels after clear: %v", got)
-	}
-}
-
-func TestWhenRunner_AcceptsCommaSeparatedTerm(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "preflight", &buildJob{}).WhenRunner("local,cloud-linux")
-	got := n.WhenRunnerLabels()
-	if len(got) != 1 || got[0] != "local,cloud-linux" {
-		t.Fatalf("WhenRunnerLabels: %v (commas should be preserved verbatim; matcher splits at evaluation)", got)
-	}
-}
-
-func TestGroup_PrefersDelegatesToMembers(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	a := sparkwing.Job(plan, "a", &buildJob{})
-	b := sparkwing.Job(plan, "b", &buildJob{})
-	g := sparkwing.GroupJobs(plan, "g", a, b).Prefers("cloud-linux")
-	_ = g
-	if got := a.PrefersLabels(); len(got) != 1 || got[0] != "cloud-linux" {
-		t.Errorf("a.PrefersLabels = %v", got)
-	}
-	if got := b.PrefersLabels(); len(got) != 1 || got[0] != "cloud-linux" {
-		t.Errorf("b.PrefersLabels = %v", got)
-	}
-}
-
-func TestGroup_WhenRunnerDelegatesToMembers(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	a := sparkwing.Job(plan, "a", &buildJob{})
-	b := sparkwing.Job(plan, "b", &buildJob{})
-	g := sparkwing.GroupJobs(plan, "g", a, b).WhenRunner("local")
-	_ = g
-	if got := a.WhenRunnerLabels(); len(got) != 1 || got[0] != "local" {
-		t.Errorf("a.WhenRunnerLabels = %v", got)
-	}
-	if got := b.WhenRunnerLabels(); len(got) != 1 || got[0] != "local" {
-		t.Errorf("b.WhenRunnerLabels = %v", got)
-	}
-}
-
-func TestRequires_StillTrimsEmpty_AfterCommaWork(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "x", &buildJob{}).Requires("", "linux,macos", "")
-	got := n.RequiresLabels()
-	if len(got) != 1 || got[0] != "linux,macos" {
-		t.Fatalf("RequiresLabels = %v", got)
+func TestGroupPrefersAppliesToEveryMember(t *testing.T) {
+	plan := NewPlan()
+	a := Job(plan, "a", func(context.Context) error { return nil })
+	b := Job(plan, "b", func(context.Context) error { return nil })
+	GroupJobs(plan, "pair", a, b).Prefers("cloud-linux")
+	jobs := planDocument(plan).Jobs
+	if !slices.Equal(jobs[0].Prefers, []string{"cloud-linux"}) || !slices.Equal(jobs[1].Prefers, []string{"cloud-linux"}) {
+		t.Fatalf("group preferences = %+v", jobs)
 	}
 }

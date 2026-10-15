@@ -60,19 +60,20 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 				ready = ready && finished[need]
 				blocked = blocked || failed[need] && !steps[need].ContinueOnError
 			}
-			if parent.Err() != nil || (fatal || ctx.Err() != nil) && !step.Finally || ready && blocked && !step.Finally {
+			if !ready {
+				continue
+			}
+			if parent.Err() != nil || (fatal || ctx.Err() != nil) && !step.Finally || blocked && !step.Finally {
 				delete(pending, step.ID)
 				finished[step.ID] = true
 				failed[step.ID] = true
 				changed = true
 				continue
 			}
-			if !ready {
-				continue
-			}
 			delete(pending, step.ID)
 			running[step.ID] = true
 			changed = true
+			settled := settledSteps(job.Steps, finished)
 			go func() {
 				stepCtx := ctx
 				if step.Finally && ctx.Err() != nil {
@@ -80,7 +81,7 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 					stepCtx, cancel = context.WithTimeout(parent, limits.CleanupTimeout)
 					defer cancel()
 				}
-				raw, err := h.step(stepCtx, session, input, spec, step)
+				raw, err := h.step(stepCtx, session, input, spec, step, settled)
 				done <- executorStepResult{id: step.ID, output: raw, err: err}
 			}()
 		}
@@ -138,9 +139,19 @@ type executorCleanupError struct{ err error }
 func (e *executorCleanupError) Error() string { return e.err.Error() }
 func (e *executorCleanupError) Unwrap() error { return e.err }
 
-func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, step nodeproto.StepSpec) (json.RawMessage, error) {
+func settledSteps(steps []nodeproto.StepSpec, finished map[string]bool) []string {
+	settled := []string{}
+	for _, step := range steps {
+		if finished[step.ID] {
+			settled = append(settled, step.ID)
+		}
+	}
+	return settled
+}
+
+func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, step nodeproto.StepSpec, settled []string) (json.RawMessage, error) {
 	for _, closure := range step.Closures.SkipIf {
-		raw, err := h.eval(ctx, session, input, closure, nil)
+		raw, err := h.eval(ctx, session, input, closure, nil, settled)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +174,7 @@ func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input
 		}
 	}
 	var result nodeproto.RunResult
-	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: input.NodeID, Step: step.ID, Attempt: int(input.Attempt)}, &result); err != nil {
+	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: input.NodeID, Step: step.ID, Attempt: int(input.Attempt), Settled: settled}, &result); err != nil {
 		return nil, err
 	}
 	if err := executorResultFailure(result); err != nil {

@@ -41,7 +41,7 @@ func (s *executorSession) call(ctx context.Context, request nodeproto.Request, r
 		return err
 	}
 	request.ID = strconv.FormatInt(s.sequence.Add(1), 10)
-	if request.Op == nodeproto.OpRunStep || request.Op == nodeproto.OpEval {
+	if request.Op == nodeproto.OpRunStep {
 		request.Failure = s.failure
 	}
 	reply, err := s.process.Request(ctx, request)
@@ -123,9 +123,13 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 	return executorError(apierr.PlanDrift, "SDK did not reconstruct the accepted job")
 }
 
-func (h *sdkCode) eval(ctx context.Context, session *executorSession, input NodeInput, closure string, payload json.RawMessage) (json.RawMessage, error) {
+func (h *sdkCode) eval(ctx context.Context, session *executorSession, input NodeInput, closure string, payload json.RawMessage, settled []string) (json.RawMessage, error) {
 	var result nodeproto.EvalResult
-	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpEval, Job: input.NodeID, Closure: closure, Input: payload, Attempt: int(input.Attempt)}, &result); err != nil {
+	request := nodeproto.Request{Op: nodeproto.OpEval, Closure: closure, Input: payload}
+	if settled != nil {
+		request.Attempt, request.Settled = int(input.Attempt), settled
+	}
+	if err := session.call(ctx, request, &result); err != nil {
 		return nil, err
 	}
 	if result.Error != nil {

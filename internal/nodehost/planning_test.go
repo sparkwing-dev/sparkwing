@@ -193,7 +193,7 @@ func TestPlanInitialIncompleteInputsBypassCache(t *testing.T) {
 }
 
 func TestPlanInitialNeverCachesUnvalidatedPlans(t *testing.T) {
-	for _, kind := range []string{"planner error", "validation error", "hash error", "invalid hash", "expansion", "existing jobs", "source job", "missing secrets"} {
+	for _, kind := range []string{"planner error", "validation error", "hash error", "invalid hash", "expansion", "existing jobs", "existing concurrency", "source job", "missing secrets"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newPlanningFixture(t)
 			functions := f.functions()
@@ -210,6 +210,8 @@ func TestPlanInitialNeverCachesUnvalidatedPlans(t *testing.T) {
 				f.input.Validation.Expansion = true
 			case "existing jobs":
 				f.input.Validation.ExistingJobs = []nodeproto.JobSpec{{ID: "existing"}}
+			case "existing concurrency":
+				f.input.Validation.ExistingConcurrency = []nodeproto.ConcurrencySpec{{Group: "existing"}}
 			case "source job":
 				f.input.Validation.SourceJob = "generator"
 			case "missing secrets":

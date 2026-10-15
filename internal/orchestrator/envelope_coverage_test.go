@@ -234,7 +234,7 @@ func newEnvelopeRig(t *testing.T, daemon bool) *envelopeRig {
 		r.daemon = &watchedAdmitter{
 			Admitter: &hostedAdmitter{
 				la: testWingdAdmission(home, nil), backends: LocalBackends(paths, st, nil), pipeline: "envelope",
-				plan: func() *nodeproto.PlanDocOld { return nil },
+				plan: func() *nodeproto.PlanDoc { return nil },
 			},
 			queued: make(chan string, 64), refused: make(chan string, 64),
 		}
@@ -259,7 +259,7 @@ func (r *envelopeRig) start(runID, pipeline string, args map[string]string, twea
 			Entry: pipelineentry.Binary(os.Args[0]), Dir: r.t.TempDir(), Grace: 2 * time.Second,
 			Env: append(engineenv.Strip(os.Environ()), nodeProtocolEntryEnv+"=1", "GORACE=atexit_sleep_ms=0"),
 		},
-		Pipeline: pipeline, Args: args, Run: nodeproto.RunContextOld{RunID: runID},
+		Pipeline: pipeline, Args: args, Run: nodeproto.RunContext{RunID: runID},
 		State: r.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 		Attempts: &nodehost.Attempts{
 			Routes: r.routes, Resolver: noEnvelopeSecrets{}, Masker: secrets.NewMasker(),
@@ -360,7 +360,7 @@ func TestEnvelope_SimultaneousMemoNodesAcrossPipelinesRunOneBody(t *testing.T) {
 	hit := r.run("memo-hit", "envelope-b", args)
 	wantRun(t, hit, "success")
 	for _, id := range []string{"build", "twin"} {
-		if n := r.node("memo-hit", id); n.Outcome != string(sparkwing.Cached) || r.output("memo-hit", id) != want {
+		if n := r.node("memo-hit", id); n.Outcome != string(sparkwing.Memoized) || r.output("memo-hit", id) != want {
 			t.Errorf("memo-hit/%s = %s with %s, want cached with the leader's output", id, n.Outcome, r.output("memo-hit", id))
 		}
 	}
@@ -374,7 +374,7 @@ func TestEnvelope_SimultaneousMemoNodesAcrossPipelinesRunOneBody(t *testing.T) {
 // nothing produced.
 func TestEnvelope_ASkippedMemoLeaderLeavesItsFollowerToRun(t *testing.T) {
 	r := newEnvelopeRig(t, false)
-	groupKey := nodeproto.ConcurrencyGroupKey("memo-skip-grp", "global", "", nil)
+	groupKey := nodehost.ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "memo-skip-grp"}, "", "")
 	if resp, err := r.st.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{
 		Key: groupKey, HolderID: "other/x", RunID: "other", NodeID: "x", Capacity: 1, Policy: "queue",
 	}); err != nil || resp.Kind != store.AcquireGranted {
@@ -390,7 +390,7 @@ func TestEnvelope_ASkippedMemoLeaderLeavesItsFollowerToRun(t *testing.T) {
 	recv(t, r.gate.deadline, r.slots.waiting, "the follower coalescing on the leader")
 	close(release)
 	wantRun(t, <-lead, "success")
-	if n := r.node("skip-lead", "lead"); n.Outcome != string(sparkwing.SkippedConcurrent) {
+	if n := r.node("skip-lead", "lead"); n.Outcome != string(sparkwing.Skipped) {
 		t.Fatalf("lead = %s (%s), want skipped by its full group", n.Outcome, n.Error)
 	}
 	body := r.gate.next(t)
@@ -496,82 +496,6 @@ func TestEnvelope_QueuedGroupNodesDoNotBlockIndependentWork(t *testing.T) {
 	wantRun(t, <-res, "success")
 }
 
-func rollbackBodies(t *testing.T, marker string) int {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(marker, "rollback"))
-	if os.IsNotExist(err) {
-		return 0
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Count(string(data), "body")
-}
-
-// A memoized recovery node reuses its earlier result in a later run.
-func TestEnvelope_ARecoveryNodeMemoizes(t *testing.T) {
-	r := newEnvelopeRig(t, false)
-	marker := t.TempDir()
-	args := r.args("recover-memo", "key", "rollback-pinned", "marker", marker)
-	wantRun(t, r.run("recover-1", "envelope-a", args), "failed")
-	wantRun(t, r.run("recover-2", "envelope-a", args), "failed")
-	if n := r.node("recover-1", "rollback"); n.Outcome != string(sparkwing.Success) {
-		t.Fatalf("first rollback = %s (%s), want success", n.Outcome, n.Error)
-	}
-	if n := r.node("recover-2", "rollback"); n.Outcome != string(sparkwing.Cached) {
-		t.Fatalf("second rollback = %s (%s), want cached", n.Outcome, n.Error)
-	}
-	if got := rollbackBodies(t, marker); got != 1 {
-		t.Fatalf("rollback body ran %d times, want once", got)
-	}
-}
-
-// A recovery node's skip_if is evaluated, and a true one skips it.
-func TestEnvelope_ARecoveryNodeHonorsSkipIf(t *testing.T) {
-	r := newEnvelopeRig(t, false)
-	marker := t.TempDir()
-	wantRun(t, r.run("recover-skip", "envelope-a", r.args("recover-skip", "marker", marker)), "failed")
-	if n := r.node("recover-skip", "rollback"); n.Outcome != string(sparkwing.Skipped) {
-		t.Fatalf("rollback = %s (%s), want skipped", n.Outcome, n.Error)
-	}
-	if got := rollbackBodies(t, marker); got != 0 {
-		t.Fatalf("rollback body ran %d times, want never", got)
-	}
-}
-
-// A recovery node takes a slot of its concurrency group like any node: with
-// the group's one slot held and OnLimit:Fail, it fails without running.
-func TestEnvelope_ARecoveryNodeTakesAConcurrencySlot(t *testing.T) {
-	r := newEnvelopeRig(t, true)
-	marker := t.TempDir()
-	res := r.start("recover-conc", "envelope-a", r.args("recover-conc", "marker", marker), nil)
-	var hold, deploy *gateArrival
-	for hold == nil || deploy == nil {
-		switch a := r.gate.next(t); a.who {
-		case "recover-conc/hold":
-			hold = a
-		case "recover-conc/deploy":
-			deploy = a
-		default:
-			t.Fatalf("unexpected body %s", a.who)
-		}
-	}
-	deploy.release("fail")
-	if who := recv(t, r.gate.deadline, r.daemon.refused, "the rollback refused by its full group"); who != "recover-conc/rollback" {
-		t.Fatalf("the daemon refused %s, want the rollback", who)
-	}
-	hold.release("ok")
-	wantRun(t, <-res, "failed")
-	if n := r.node("recover-conc", "rollback"); n.Outcome != string(sparkwing.Failed) {
-		t.Fatalf("rollback = %s (%s), want failed on the full group", n.Outcome, n.Error)
-	}
-	if got := rollbackBodies(t, marker); got != 0 {
-		t.Fatalf("rollback body ran %d times while the group was full", got)
-	}
-}
-
-// A local run plans with the checkout's sparkwing.yaml args under its own:
-// the pipeline's entry over the project defaults, the invocation over both.
 func TestHostedRunLayersTheCheckoutsYAMLArgsUnderItsOwn(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: hosts two runs, each node in a process of the test binary")

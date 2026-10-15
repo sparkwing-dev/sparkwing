@@ -439,6 +439,14 @@ The source reports describe residual failures that their committed tests do not 
 
 ## W3 recovery port after amendment integration
 
+The [settlement continuation](w3-settlement-continuation.md) adds ten real Go SDK
+process cases through the common executor. These port the result-read, parallel,
+failure, Finally, optional and SkipIf parts of TestHostDrivesSteps. Step windows,
+dry-run variants and stored step rows remain open. The existing generator-barrier
+component cell now has twelve cases using the real owner scheduler, shared graph
+projection/decider and strict validator. Its SDK and persistence are fakes.
+No additional whole inventory row or native placement cell is claimed complete.
+
 The [W3 services continuation](w3-services-continuation.md) adds alias selection,
 complete service registration and native startup/cleanup environment proofs.
 Existing service acceptance helpers exercise all eleven handlers. It closes no

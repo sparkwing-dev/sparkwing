@@ -54,7 +54,7 @@ func approvalGate(ctx context.Context, cfg *Config, n *NodeRun) Result {
 	}
 	appr := store.Approval{
 		RunID: run.ID, NodeID: id, RequestedAt: start,
-		Message: gate.Message, TimeoutMS: gate.TimeoutMS, OnTimeout: onTimeout,
+		Message: gate.Message, TimeoutMS: value(gate.TimeoutMS), OnTimeout: onTimeout,
 	}
 	if err := run.State.CreateApproval(writeCtx, appr); err != nil {
 		return failed(fmt.Errorf("CreateApproval: %w", err))
@@ -65,8 +65,8 @@ func approvalGate(ctx context.Context, cfg *Config, n *NodeRun) Result {
 		Attrs: map[string]any{"timeout_ms": gate.TimeoutMS},
 	})
 	var deadline time.Time
-	if gate.TimeoutMS > 0 {
-		deadline = start.Add(time.Duration(gate.TimeoutMS) * time.Millisecond)
+	if value(gate.TimeoutMS) > 0 {
+		deadline = start.Add(time.Duration(value(gate.TimeoutMS)) * time.Millisecond)
 	}
 
 	r := pollApproval(ctx, run, id, deadline, onTimeout)

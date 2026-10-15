@@ -146,6 +146,9 @@ func TestValidatePlanCacheHitRefusesStaleIdentityAndExpansion(t *testing.T) {
 		"expansion jobs": func(_ *PlanCacheEntry, _ *PlanCacheInputs, v *nodeproto.ValidationContext) {
 			v.ExistingJobs = []nodeproto.JobSpec{{ID: "prior"}}
 		},
+		"expansion concurrency": func(_ *PlanCacheEntry, _ *PlanCacheInputs, v *nodeproto.ValidationContext) {
+			v.ExistingConcurrency = []nodeproto.ConcurrencySpec{{Group: "prior"}}
+		},
 		"expansion source":        func(_ *PlanCacheEntry, _ *PlanCacheInputs, v *nodeproto.ValidationContext) { v.SourceJob = "prior" },
 		"missing secret registry": func(_ *PlanCacheEntry, _ *PlanCacheInputs, v *nodeproto.ValidationContext) { v.Secrets = nil },
 	}

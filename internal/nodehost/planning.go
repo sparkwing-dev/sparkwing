@@ -133,7 +133,7 @@ func planFresh(ctx context.Context, input PlanningInput, key PlanCacheKey, eligi
 }
 
 func initialPlanningContext(validation nodeproto.ValidationContext) error {
-	if validation.Expansion || len(validation.ExistingJobs) != 0 || validation.SourceJob != "" {
+	if validation.Expansion || len(validation.ExistingJobs) != 0 || len(validation.ExistingConcurrency) != 0 || validation.SourceJob != "" {
 		return errors.New("initial planning cannot supply generator expansions")
 	}
 	if validation.Secrets == nil {

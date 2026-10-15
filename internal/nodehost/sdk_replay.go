@@ -74,6 +74,7 @@ func (h *sdkCode) replaySource(ctx context.Context, session *executorSession, in
 	}
 	validation := h.Validation
 	validation.Expansion, validation.SourceJob = true, source.ID
+	validation.ExistingConcurrency = input.Accepted.Plan.Concurrency
 	validation.ExistingJobs, err = replayTopology(existing, snapshot, expected)
 	if err != nil {
 		return nil, err

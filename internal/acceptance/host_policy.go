@@ -28,7 +28,7 @@ func (p *policySDK) Request(ctx context.Context, request nodeproto.Request) (nod
 	if request.Op != nodeproto.OpEval {
 		return p.expansionSDK.Request(ctx, request)
 	}
-	if request.Job != "gate" || request.Attempt != 0 || len(request.Input) != 0 || request.Closure != "condition" {
+	if request.Job != "" || request.Attempt != 0 || len(request.Input) != 0 || request.Closure != "condition" {
 		return nodeproto.Reply{}, errors.New("policy changed its accepted identity")
 	}
 	p.calls = append(p.calls, request.Closure)

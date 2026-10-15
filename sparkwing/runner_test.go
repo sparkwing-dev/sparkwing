@@ -1,41 +1,38 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestRunner_NilWithoutInstall(t *testing.T) {
-	if got := sparkwing.Runner(context.Background()); got != nil {
+	if got := Runner(context.Background()); got != nil {
 		t.Errorf("Runner(ctx) without WithRunner = %+v, want nil", got)
 	}
 }
 
 func TestRunner_NilReceiverHasLabelSafe(t *testing.T) {
-	var r *sparkwing.RunnerInfo
+	var r *RunnerInfo
 	if r.HasLabel("anything") {
 		t.Error("HasLabel on nil receiver returned true")
 	}
 }
 
 func TestWithRunner_RoundTrip(t *testing.T) {
-	want := &sparkwing.RunnerInfo{
+	want := &RunnerInfo{
 		Name:   "cloud-linux",
 		Type:   "kubernetes",
 		Labels: []string{"cloud-linux", "os=linux", "arch=amd64"},
 	}
-	ctx := sparkwingruntime.WithRunner(context.Background(), want)
-	got := sparkwing.Runner(ctx)
+	ctx := withTestRunner(context.Background(), want)
+	got := Runner(ctx)
 	if got != want {
 		t.Errorf("Runner(ctx) returned different pointer: %p vs %p", got, want)
 	}
 }
 
 func TestRunnerInfo_HasLabel_BareAndCommaOR(t *testing.T) {
-	r := &sparkwing.RunnerInfo{Labels: []string{"local", "os=darwin", "arch=arm64"}}
+	r := &RunnerInfo{Labels: []string{"local", "os=darwin", "arch=arm64"}}
 	cases := []struct {
 		term string
 		want bool
@@ -58,8 +55,8 @@ func TestRunnerInfo_HasLabel_BareAndCommaOR(t *testing.T) {
 }
 
 func TestWithRunner_NilInfoStillReadsAsNil(t *testing.T) {
-	ctx := sparkwingruntime.WithRunner(context.Background(), nil)
-	if got := sparkwing.Runner(ctx); got != nil {
+	ctx := withTestRunner(context.Background(), nil)
+	if got := Runner(ctx); got != nil {
 		t.Errorf("Runner(ctx) after WithRunner(nil) = %+v, want nil", got)
 	}
 }

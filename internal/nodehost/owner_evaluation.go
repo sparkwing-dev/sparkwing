@@ -182,6 +182,7 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 	}
 	validation := h.Validation
 	validation.Expansion, validation.SourceJob = true, code.NodeID
+	validation.ExistingConcurrency = code.Accepted.Plan.Concurrency
 	validation.ExistingJobs = make([]nodeproto.JobSpec, 0, len(snapshot.Nodes))
 	for _, row := range snapshot.Nodes {
 		var existing nodeproto.JobSpec

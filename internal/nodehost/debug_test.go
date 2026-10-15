@@ -63,19 +63,19 @@ func fastDebugPolls(t *testing.T) {
 	t.Cleanup(func() { debugPausePoll = prevPause })
 }
 
-func hostDebug(t *testing.T, ctx context.Context, ds *debugStore, doc nodeproto.PlanDocOld, dbg Debug, exec Executor) RunResult {
+func hostDebug(t *testing.T, ctx context.Context, ds *debugStore, doc nodeproto.PlanDoc, dbg Debug, exec Executor) RunResult {
 	t.Helper()
 	if err := ds.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateNodes(doc.Nodes); err != nil {
+	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	cfg := Config{Execute: exec, Debug: dbg}
-	run := &Run{ID: testRunID, Doc: doc, State: ds, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: testRunID, Doc: doc, State: ds, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	s.loop(ctx)
@@ -109,7 +109,7 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 				}
 				return Result{Outcome: sparkwing.Success}
 			}}}
-			doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}, {ID: "deploy", Deps: deps("build"), Modifiers: &nodeproto.PlanModifiers{Optional: true}}}}
+			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "deploy", Needs: deps("build"), Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 
@@ -124,7 +124,7 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 			if fx.ran("deploy") {
 				t.Error("deploy ran while build was paused")
 			}
-			if row := nodeRow(t, ds.Store, "build"); row.Status != sparkwing.Paused {
+			if row := nodeRow(t, ds.Store, "build"); row.Status != "paused" {
 				t.Errorf("build row status %q while paused, want paused", row.Status)
 			}
 			if err := ds.ReleaseDebugPause(ctx, testRunID, "build", "alice", store.PauseReleaseManual); err != nil {
@@ -148,7 +148,7 @@ func TestDebugPauseExpiresOnItsTimeout(t *testing.T) {
 	fx := &fakeExec{}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	res := hostDebug(t, ctx, ds, doc, Debug{PauseBefore: []string{"build"}, PauseTimeout: time.Millisecond}, fx.run)
 
 	if res.Status != "success" || !fx.ran("build") {
@@ -170,7 +170,7 @@ func TestDebugCancelDuringAPauseCancelsTheNode(t *testing.T) {
 			if kind == store.PauseReasonAfter {
 				dbg = Debug{PauseAfter: []string{"build"}}
 			}
-			doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}, {ID: "deploy", Deps: deps("build")}}}
+			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "deploy", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			runCtx, stop := context.WithCancel(ctx)
@@ -205,10 +205,10 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 			return Result{Outcome: sparkwing.Failed, Err: errors.New("still broke")}
 		},
 	}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "gate", Approval: &nodeproto.PlanApproval{Message: "go?"}},
-		{ID: "deploy", Deps: deps("gate"), Modifiers: &nodeproto.PlanModifiers{OnFailure: "rollback"}},
-		{ID: "rollback", OnFailureOf: "deploy"},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "go?"}},
+		{ID: "deploy", Needs: deps("gate"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "rollback", OnFailureOf: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 	dbg := Debug{PauseBefore: []string{"gate", "rollback"}, PauseAfter: []string{"gate", "rollback"}}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)

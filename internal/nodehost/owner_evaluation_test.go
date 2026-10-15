@@ -53,7 +53,7 @@ func TestOwnerEvaluationCombinesAllGenerators(t *testing.T) {
 				if r.Op != nodeproto.OpEval {
 					return nil, nil
 				}
-				if string(r.Input) != `{"count":2}` || r.Job != in.NodeID || r.Attempt != 0 {
+				if string(r.Input) != `{"count":2}` || r.Job != "" || r.Attempt != 0 {
 					t.Fatalf("eval = %+v", r)
 				}
 				jobs := []nodeproto.JobSpec{}
@@ -297,13 +297,13 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 		}
 		if r.Closure == "ancestor" {
 			replayed++
-			if r.Job != "root" || string(r.Input) != `{"root":true}` {
+			if r.Job != "" || string(r.Input) != `{"root":true}` {
 				t.Fatalf("replay = %+v", r)
 			}
 			jobs, _ := json.Marshal([]nodeproto.JobSpec{source})
 			return nodeproto.EvalResult{Value: jobs}, nil
 		}
-		if r.Job != "build" || string(r.Input) != `{"count":2}` {
+		if r.Job != "" || string(r.Input) != `{"count":2}` {
 			t.Fatalf("expansion = %+v", r)
 		}
 		return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
