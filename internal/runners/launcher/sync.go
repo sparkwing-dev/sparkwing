@@ -34,7 +34,8 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
-		remove := job.DeletionTimestamp != nil || jobFinished(job) || (job.Spec.Suspend != nil && *job.Spec.Suspend)
+		// safety: a live suspended Job may still be publishing its bootstrap on another launcher.
+		remove := job.DeletionTimestamp != nil || jobFinished(job)
 		deadline, deadlineErr := time.Parse(time.RFC3339Nano, job.Annotations[deadlineAnnotation])
 		if deadlineErr != nil {
 			errs = append(errs, fmt.Errorf("Job %s has invalid deadline: %w", job.Name, deadlineErr))
@@ -44,16 +45,12 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			remove = true
 		}
 		if !remove {
-			states, err := l.Control.Sync(ctx, []CloudJobBinding{binding})
+			retire, err := l.shouldRetire(ctx, binding)
 			if err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			if len(states) != 1 || states[0].Binding != binding {
-				errs = append(errs, errors.New("controller sync returned a mismatched binding"))
-				continue
-			}
-			remove = states[0].Delete
+			remove = retire
 		}
 		if remove {
 			if err := l.teardown(ctx, &job, reservation); err != nil && !errors.Is(err, ErrContainersRunning) {
@@ -62,6 +59,26 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (l *Launcher) shouldRetire(ctx context.Context, binding CloudJobBinding) (bool, error) {
+	states, err := l.Control.Sync(ctx, []CloudJobBinding{binding})
+	if err != nil {
+		return false, err
+	}
+	if len(states) != 1 || !sameBinding(states[0].Binding, binding) {
+		return false, errors.New("controller sync returned a mismatched binding")
+	}
+	return states[0].Delete, nil
+}
+
+func sameBinding(a, b CloudJobBinding) bool {
+	// safety: transport preserves instants, not Go's monotonic clock or time-zone identity.
+	if !a.OwnerDeadline.Equal(b.OwnerDeadline) || !a.AttemptDeadline.Equal(b.AttemptDeadline) || !a.ParentCapabilityExpiry.Equal(b.ParentCapabilityExpiry) {
+		return false
+	}
+	a.OwnerDeadline, a.AttemptDeadline, a.ParentCapabilityExpiry = b.OwnerDeadline, b.AttemptDeadline, b.ParentCapabilityExpiry
+	return a == b
 }
 
 func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error) {

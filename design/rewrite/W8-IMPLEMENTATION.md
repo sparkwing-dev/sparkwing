@@ -705,3 +705,77 @@ or pipeline ran. No Git metadata was written. All Go caches, temporary files,
 review snapshots and cross-compile outputs stay under `/tmp/sw-astra-W8/`,
 which is removed after checks and review finish. Changes are uncommitted for
 the lead.
+
+## Ninth session: Cloud publication and reconciliation
+
+`Sync` preserves a suspended Job while its controller award remains live.
+Another launcher can reconcile between suspended Job creation and bootstrap
+publication without deleting the Job or releasing its dedicated node.
+Suspension now uses the same controller, cancellation and deadline checks as
+active execution. Controller errors or mismatched decisions preserve ownership
+and reach the caller. A crashed publisher's resources retire after authority
+ends or the Job deadline expires. Reconciliation does not resume publication.
+
+`LaunchOne` confirms the exact award through `CloudControl.Sync` after Secret
+creation and before activation. Cancellation, unavailable authority or a
+mismatched response starts teardown before making the Job runnable. The shared
+comparison checks all binding fields exactly, with timestamp instants compared
+through `time.Time.Equal`. JSON transport can discard monotonic clock data or
+change time-zone representation without changing the award. A nanosecond change
+to any deadline or parent expiry remains a mismatch.
+
+### Ninth-session evidence
+
+- Whole-repository `go build -p 4 ./...` passes.
+- Vet passes for runners and subpackages, cluster, engine, wingd and subpackages,
+  and both acceptance packages.
+- Full engine, runners and subpackages, and acceptance tests pass.
+- Full launcher and acceptance race tests pass.
+- `TestLauncherPublicationSurvivesConcurrentReconciliationW8Components` and
+  `TestLauncherCancellationDuringPublicationW8Components` pass for plan, eval
+  and work. These are fake-Kubernetes component cells, not native catalog cells.
+- The new unit tests cover live, cancelled, unreachable and expired suspended
+  Jobs with bootstrap retention/cleanup, mismatched retirement decisions,
+  preactivation refusal, and timestamp transport identity. The publication and
+  timestamp regressions ran red before their fixes.
+- Independent review approved the corrected immutable source snapshot. Its
+  crash-recovery overlay also verified retention during controller unavailability
+  followed by cleanup at expiry. Review found an acceptance assertion that
+  confused finalizer removal with activation. The corrected assertion checks
+  `spec.suspend`, and the reviewer reran both full packages successfully.
+- Commentcheck, sleepcheck, docs-mirror drift and `git diff --check` pass.
+
+Checks use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and `GOCACHE`, `GOTMPDIR` and
+`TMPDIR` beneath `/tmp/sw-astra-W8/`. Go test package parallelism is at most four.
+No additional native acceptance cell or T1 parked-test port is claimed.
+
+### Ninth-session contracts, remaining work and shared files
+
+No exported API or other area's contract changed. No callers need migration.
+The existing `CloudControl.Sync` interface supplies both reconciliation and
+preactivation checks. No new setting, duration, credential, persisted phase or
+runtime interface was introduced. This session deletes **0 obsolete files and
+0 legacy subsystem lines**. It removes the unconditional suspended-Job teardown
+and shares the existing binding check.
+
+The Cloud entrypoint contract gaps remain concrete. The Job builder emits
+`--unit`, `--attempt`, `--source-job`, `--source-generation` and `--engine`, while
+W9's registry omits them and requires `--job` for plan units. W3 also needs a
+plan/eval executor boundary that performs the awarded unit without taking over
+controller scheduling. The source-init/bootstrap handoff and W2/W9 exchange
+transport must be defined before composing those entrypoints. This session
+adds no substitute protocol or generic callback wrapper around those gaps.
+
+The runner/controller factories, native managed controller/timer arguments,
+Actions exchange, native update ownership, Windows SID transport, and deployed
+Cloud probes/cleanup remain open as listed above. W8 remains incomplete. No new
+human decision is requested.
+
+Shared edits are only `tests/acceptance/launcher_publication_w8_test.go` and this
+handoff. Product edits stay in `internal/runners/launcher`, including its source
+documentation. Native Kubernetes, platform services and sockets remain outside
+the evidence. Standards discovery succeeded despite its installed-binary
+staleness notice. An initial installed `sparkwing info --for-agent` call preceded
+loading the swarm brief's no-binary rule. No candidate or stateful Sparkwing
+command followed. No Git metadata was written. Worker scratch is deleted after
+the final checks and reviewer finish. The lead retains committing and landing.

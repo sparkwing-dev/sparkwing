@@ -18,6 +18,11 @@ Changes to the authored placement, containers, private volumes, resource budget,
 execution policy or teardown ownership refuse activation. An injected failure
 policy cannot turn an OOM failure into another pod execution.
 
+After publishing the bootstrap, the launcher confirms that the controller still
+recognizes the exact awarded binding before activating the Job. Cancellation,
+an unavailable controller or a mismatched decision leaves no runnable Job and
+starts teardown.
+
 `Sync` reconstructs ownership from persisted Job and
 node metadata. It adopts live Jobs and retires cancelled, expired or terminal
 Jobs. Teardown deletes the bootstrap Secret and retains the node reservation
@@ -26,6 +31,11 @@ removal and reservation-scoped cleanup before another Job can reserve the node.
 If Job deletion fails, teardown still deletes its bootstrap after confirming
 that the persisted Job has the original UID. An unknown or replacement Job
 retains its bootstrap and reservation until ownership can be established.
+
+A suspended Job follows the same authority check as an active Job because
+another launcher may still be publishing its bootstrap. Suspension alone never
+authorizes teardown. Cancelled or expired awards still retire suspended Jobs.
+Controller errors preserve ownership and reach the caller.
 
 The builder uses a readiness-gated native DinD sidecar, fixed aggregate 20 GiB
 scratch, a separate customer service account and no API-token automount. Its

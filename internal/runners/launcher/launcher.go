@@ -116,6 +116,14 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 	if _, err = l.Kube.CoreV1().Secrets(l.Config.Namespace).Create(ctx, r.BootstrapSecret, metav1.CreateOptions{}); err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
+	// safety: reservation probes and publication may outlive the award's execution authority.
+	retire, err := l.shouldRetire(ctx, award.Binding)
+	if err == nil && retire {
+		err = errors.New("Cloud award ended before Job activation")
+	}
+	if err != nil {
+		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
+	}
 	remaining := int64(time.Until(r.JobDeadline) / time.Second)
 	if remaining <= 0 {
 		return true, errors.Join(limits.ErrNoTime, l.teardown(ctx, created, r.Reservation))
