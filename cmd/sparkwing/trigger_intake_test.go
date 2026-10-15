@@ -15,7 +15,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -23,10 +25,15 @@ import (
 type initialTriggerController struct {
 	controllerwire.Controller
 	create func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
+	read   func(context.Context, string) (controllerwire.RunDetail, error)
 }
 
 func (c initialTriggerController) CreateRun(ctx context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
 	return c.create(ctx, request)
+}
+
+func (c initialTriggerController) ReadRun(ctx context.Context, run string) (controllerwire.RunDetail, error) {
+	return c.read(ctx, run)
 }
 
 func initialTriggerRequest(here bool) controllerwire.CreateRunRequest {
@@ -301,4 +308,67 @@ func FuzzInitialTriggerDiagnosticsExcludePrivateInputs(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestInitialHereHandoffClaimsAndRunsSharedHost(t *testing.T) {
+	request := initialTriggerRequest(true)
+	response := initialTriggerResponse(t, request)
+	response.HereBearer = "private-initial-bearer"
+	award := hereAward(t)
+	award.RunID, award.Binding.RunID, award.Request = response.RunID, response.RunID, response.Request
+	credentials := hereCredentials{dir: t.TempDir()}
+	options := client.EngineOptions{URL: "https://controller.example"}
+	var calls []string
+	controller := initialTriggerController{
+		Controller: hereTestController{claim: func(_ context.Context, claim controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			calls = append(calls, "claim")
+			if claim.RunID != response.RunID || len(claim.Kinds) != 1 || claim.Kinds[0] != capability.UnitTrigger {
+				t.Fatalf("claim = %+v", claim)
+			}
+			return controllerwire.ClaimResponse{Claim: &award}, nil
+		}},
+		create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+			calls = append(calls, "intake")
+			return response, nil
+		},
+	}
+	deps := hereDependencies{
+		credentials: func() (hereCredentials, error) { return credentials, nil },
+		version:     "v1.2.3",
+		resolve: func(ctx context.Context, opts client.EngineOptions) (hereRuntime, error) {
+			retained, err := credentials.load(options.URL, response.RunID)
+			presented, presentationErr := opts.Bearer(ctx)
+			if err != nil || presentationErr != nil || retained != response.HereBearer || presented != retained {
+				t.Fatalf("initial authority was not retained before claiming: %v %v", err, presentationErr)
+			}
+			return hereRuntime{controller: controller, bind: func(ctx context.Context, opts client.EngineOptions, unit controllerwire.ClaimedUnit) (hereHostSession, error) {
+				calls = append(calls, "bind")
+				presented, err := opts.Bearer(ctx)
+				if err != nil || presented != award.Capability || unit.RunID != response.RunID {
+					t.Fatalf("binding did not receive the award: %v", err)
+				}
+				return hereHostSession{host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+					calls = append(calls, "host")
+					var sealed runspec.Request
+					if err := json.Unmarshal(input.SealedRequest, &sealed); err != nil || sealed.Pipeline != request.Request.Pipeline || input.RunID != response.RunID || input.RequestHash != string(response.Request.Hash) || input.Accepted != nil || input.Owner.Owner.Holder != award.Binding.Holder {
+						t.Fatalf("shared host received different inputs: %+v, %v", input, err)
+					}
+					return nodehost.RunCompletion{Outcome: "success"}, nil
+				}), close: func() error { calls = append(calls, "close"); return nil }}, nil
+			}}, nil
+		},
+	}
+	var out bytes.Buffer
+	err := submitTriggeredRun(t.Context(), request, false, "json", &out, triggerSubmission{
+		Controller: controller,
+		here: func(ctx context.Context, receipt controllerwire.CreateRunResponse) error {
+			return handoffHereRun(ctx, options, receipt, deps)
+		},
+	})
+	if err != nil || strings.Join(calls, ",") != "intake,claim,bind,host,close" {
+		t.Fatalf("handoff calls = %v, error = %v", calls, err)
+	}
+	if strings.Contains(out.String(), response.HereBearer) || strings.Contains(out.String(), award.Capability) {
+		t.Fatal("receipt exposed authority")
+	}
 }

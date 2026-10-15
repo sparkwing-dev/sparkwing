@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type hereTestController struct {
@@ -63,6 +64,7 @@ func hereAward(t *testing.T) controllerwire.ClaimedUnit {
 		RunID: "retry-run", UnitID: "owner-unit", Capability: "awarded-private-capability", Request: request,
 		Binding:        capability.Binding{Kind: capability.BindingTrigger, RunID: "retry-run", Generation: 7, Holder: "granted-holder"},
 		LeaseExpiresAt: time.Unix(900, 0),
+		Runner:         nodeproto.RunnerIdentity{Name: "granted-here", Type: "here", Labels: []string{"os=linux"}},
 	}
 }
 
@@ -573,6 +575,42 @@ func FuzzHereAwardsCannotChangeRunBinding(f *testing.F) {
 		valid := unitRun == "retry-run" && bindingRun == "retry-run" && holder != "" && generation > 0
 		if valid && (err != nil || input.RunID != "retry-run") || !valid && err == nil {
 			t.Fatal("here award crossed its named run fence")
+		}
+	})
+}
+
+func FuzzHerePreparationCannotReplaceAward(f *testing.F) {
+	f.Add("forged-run", "forged-holder", "forged-label", int64(51))
+	f.Add("", "", "", int64(0))
+	f.Fuzz(func(t *testing.T, run, holder, label string, generation int64) {
+		award := hereAward(t)
+		expected, err := nodehost.NewRunInput(award)
+		if err != nil {
+			t.Fatal(err)
+		}
+		called, closed := false, false
+		_, err = runHereAward(t.Context(), client.EngineOptions{}, award.RunID, award,
+			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+				prepared := nodehost.RunInput{
+					RunID: run, RequestHash: run, SealedRequest: []byte(run),
+					GrantedRunner: nodeproto.RunnerIdentity{Name: run, Type: holder, Labels: []string{label}},
+					Owner:         store.Actor{Kind: store.ActorOperator, CapabilityPrefix: "bound-authority", Owner: store.OwnerLeaseRef{RunID: run, Holder: holder, Generation: generation}},
+				}
+				award.Runner.Labels[0] = label
+				return hereHostSession{input: prepared, close: func() error { closed = true; return nil }, host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+					called = true
+					if input.RunID != expected.RunID || input.RequestHash != expected.RequestHash || !bytes.Equal(input.SealedRequest, expected.SealedRequest) || input.Owner.Kind != expected.Owner.Kind || input.Owner.Owner != expected.Owner.Owner || !reflect.DeepEqual(input.GrantedRunner, expected.GrantedRunner) || input.Owner.CapabilityPrefix != "bound-authority" {
+						t.Fatal("preparation replaced awarded identity or sealed input")
+					}
+					var request runspec.Request
+					if json.Unmarshal(input.SealedRequest, &request) != nil || !reflect.DeepEqual(request, award.Request.Request) {
+						t.Fatal("host did not receive the request shape consumed by OwnerHost")
+					}
+					return nodehost.RunCompletion{Outcome: "success"}, nil
+				})}, nil
+			})
+		if err != nil || !called || !closed {
+			t.Fatalf("hosted=%t closed=%t error=%v", called, closed, err)
 		}
 	})
 }

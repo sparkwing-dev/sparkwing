@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 
@@ -88,15 +89,62 @@ type access struct {
 	credential source.Credential
 	err        error
 	calls      int
+	read       func(context.Context, source.Spec) (source.Credential, error)
 }
 
-func (a *access) GitCredential(context.Context, source.Spec) (source.Credential, error) {
+func (a *access) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error) {
 	a.calls++
+	if a.read != nil {
+		return a.read(ctx, spec)
+	}
 	return a.credential, a.err
 }
 
 func (a *access) BundleURL(context.Context, string) (string, error) {
 	return "", errors.New("unexpected bundle request")
+}
+
+func TestPrepareCheckoutCancellationStopsCredentialRelease(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	reached := make(chan struct{})
+	a := &access{read: func(ctx context.Context, _ source.Spec) (source.Credential, error) {
+		close(reached)
+		<-ctx.Done()
+		return source.Credential{}, context.Cause(ctx)
+	}}
+	workspace := t.TempDir()
+	options := source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: workspace, Access: a}
+	var returned *source.Entry
+	done := make(chan error, 1)
+	go func() {
+		entry, err := source.PrepareCheckout(ctx, source.Spec{
+			RepoKey: "git:github.com/team/repo", RemoteURL: "https://github.com/team/repo", SHA: strings.Repeat("a", 40),
+		}, options)
+		returned = entry
+		if entry != nil {
+			err = errors.Join(err, errors.New("cancelled checkout returned an entry"), entry.Close())
+		}
+		done <- err
+	}()
+	select {
+	case <-reached:
+	case <-ctx.Done():
+		t.Fatal("source acquisition did not reach credential release")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || returned != nil {
+			t.Fatalf("source cancellation returned %v, %v", returned, err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("source acquisition did not join credential release")
+	}
+	remaining, err := os.ReadDir(workspace)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("cancelled acquisition left a workspace: %v, %v", remaining, err)
+	}
 }
 
 func TestPrepareCheckoutRequiresSealedSHAAndAuthorizedCredential(t *testing.T) {

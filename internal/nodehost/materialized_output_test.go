@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -37,7 +38,10 @@ func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
 				state.row.OutputRecord = nil
 			}
 			records := &selectedOutputRecords{t: t, key: key, authority: blob.Authority{CapabilityRef: "owner"}}
-			input.Storage = StorageBinding{Bytes: &memoTestBytes{body: `{"count":2}`}, Records: records, Authority: records.authority}
+			data := &scriptedStorage{onGet: func(context.Context, blob.GetRequest) (blob.VerifiedReader, error) {
+				return &outputReader{Reader: bytes.NewReader([]byte(`{"count":2}`))}, nil
+			}}
+			input.Storage = StorageBinding{Bytes: data, Records: records, Authority: records.authority}
 			deps.ReadOutput = nil
 			process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 				if request.Op == nodeproto.OpEval {

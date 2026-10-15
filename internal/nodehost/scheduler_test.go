@@ -1,63 +1,321 @@
 package nodehost
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
-	"unicode/utf8"
+	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const testRunID = "run-sched"
 
+func openStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
 func deps(ids ...string) []string { return ids }
 
-func TestValidateNodesRefusesAnInvalidPlan(t *testing.T) {
-	for name, tc := range map[string]struct {
-		nodes []nodeproto.JobSpec
-		want  string
-	}{
-		"cycle": {
-			nodes: []nodeproto.JobSpec{{ID: "a", Needs: deps("c"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "c", Needs: deps("b"), Steps: []nodeproto.StepSpec{{ID: "body"}}}},
-			want:  "dependency cycle",
-		},
-		"missing dep":      {nodes: []nodeproto.JobSpec{{ID: "a", Needs: deps("ghost"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "job dependency is absent"},
-		"duplicate node":   {nodes: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "duplicate job ID"},
-		"no id":            {nodes: []nodeproto.JobSpec{{Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "identifier is empty"},
-		"missing recovery": {nodes: []nodeproto.JobSpec{{ID: "r", OnFailureOf: "ghost", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "recovery source is absent"},
-		"optional dep cycle": {
-			nodes: []nodeproto.JobSpec{{ID: "a", NeedsIfPresent: deps("b"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}}},
-			want:  "dependency cycle",
-		},
-		"duplicate closure": {
-			nodes: []nodeproto.JobSpec{
-				{ID: "a", Closures: nodeproto.ClosureSpec{SkipIf: []string{"x"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "b", Steps: []nodeproto.StepSpec{{ID: "s", Closures: nodeproto.ClosureSpec{Verify: "x"}}}},
-			},
-			want: "closure ID is not unique",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			err := validateNodes(tc.nodes, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}})
-			var perr *apierr.Error
-			if !errors.As(err, &perr) || perr.Code != apierr.PlanInvalid || !strings.Contains(perr.Message, tc.want) {
-				t.Fatalf("err = %v, want plan_invalid naming %q", err, tc.want)
+func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "d", Needs: deps("b", "c"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "c", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	b, c := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	var order []string
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		mu.Lock()
+		order = append(order, input.NodeID)
+		mu.Unlock()
+		var mine, other chan struct{}
+		if input.NodeID == "b" {
+			mine, other = b, c
+		}
+		if input.NodeID == "c" {
+			mine, other = c, b
+		}
+		if mine != nil {
+			close(mine)
+			select {
+			case <-other:
+			case <-ctx.Done():
+				return context.Cause(ctx)
 			}
-		})
+		}
+		return f.report(ctx, input, store.NodeSuccess)
+	})
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "success" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	if err := validateNodes([]nodeproto.JobSpec{{ID: "a", NeedsIfPresent: deps("absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "r", OnFailureOf: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		t.Errorf("a plan with an absent optional dependency and a recovery node: %v", err)
+	if len(order) != 4 || order[0] != "a" || order[3] != "d" {
+		t.Fatalf("order=%v", order)
+	}
+	for _, id := range []string{"a", "b", "c", "d"} {
+		row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		if err != nil || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess {
+			t.Errorf("%s row=%+v error=%v", id, row, err)
+		}
 	}
 }
 
-func TestBoundedNodeErrTextKeepsUTF8AndShortText(t *testing.T) {
-	if got := boundedNodeErrText("short"); got != "short" {
-		t.Errorf("short text = %q, want it unchanged", got)
+func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "deploy", Needs: deps("test"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "build-recover", OnFailureOf: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "docs", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "docs-recover", OnFailureOf: "docs", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "lint", ContinueOnError: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "after-lint", Needs: deps("lint"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "flaky", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "after-flaky", NeedsIfPresent: deps("flaky", "absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "maybe", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	}})
+	var mu sync.Mutex
+	ran := map[string]bool{}
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		mu.Lock()
+		ran[input.NodeID] = true
+		mu.Unlock()
+		outcome := store.NodeSuccess
+		if slices.Contains([]string{"build", "lint", "flaky", "maybe"}, input.NodeID) {
+			outcome = store.NodeFailed
+		}
+		return f.report(ctx, input, outcome)
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "failed" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	got := boundedNodeErrText(strings.Repeat("é", nodeErrTextMaxBytes))
-	if !utf8.ValidString(got) || len(got) > nodeErrTextMaxBytes {
-		t.Errorf("bounded text is %d bytes, valid UTF-8 %v", len(got), utf8.ValidString(got))
+	for id, want := range map[string]store.NodeState{"build": store.NodeFailed, "test": store.NodeCancelled, "deploy": store.NodeCancelled, "build-recover": store.NodeSuccess, "docs-recover": store.NodeSkipped, "after-lint": store.NodeSuccess, "after-flaky": store.NodeCancelled, "maybe": store.NodeFailed} {
+		row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		if err != nil || row.Outcome != want || row.Status != store.StatusDone {
+			t.Errorf("%s row=%+v error=%v, want %s", id, row, err, want)
+		}
+	}
+	for _, id := range []string{"test", "deploy", "docs-recover", "after-flaky"} {
+		if ran[id] {
+			t.Errorf("%s ran", id)
+		}
+	}
+}
+
+func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "maybe", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "after", NeedsIfPresent: deps("absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	}})
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		outcome := store.NodeSuccess
+		if input.NodeID == "maybe" {
+			outcome = store.NodeFailed
+		}
+		return f.report(ctx, input, outcome)
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "success" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
+	}
+	row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "after"})
+	if err != nil || row.Outcome != store.NodeSuccess {
+		t.Fatalf("row=%+v error=%v", row, err)
+	}
+}
+
+func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Accepted.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range snapshot.Nodes {
+		if row.Status != store.StatusPending || row.StartedAt != nil {
+			t.Errorf("initial row=%+v", row)
+		}
+		if row.Ref.NodeID == "gpu" {
+			var job nodeproto.JobSpec
+			if err := json.Unmarshal(row.Spec, &job); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(job.Needs, []string{"base"}) || !slices.Equal(job.NeedsIfPresent, []string{"extra"}) || !slices.Equal(row.Execution.Requires.Value, []string{"gpu", "linux", "big"}) || !slices.Equal(row.Execution.Prefers.Value, []string{"fast"}) || row.Execution.Resources.Value.Cores.Value != 4 || row.Execution.Resources.Value.MemoryBytes.Value != 1<<30 {
+				t.Fatalf("job=%+v execution=%+v", job, row.Execution)
+			}
+		}
+	}
+}
+
+func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "later", Needs: deps("next"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		if input.NodeID != "slow" {
+			return errors.New("downstream body started during cancellation")
+		}
+		ref := store.NodeRef{RunID: f.Accepted.RunID, NodeID: input.NodeID}
+		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
+		started, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(input.Attempt)})
+		if err != nil {
+			return err
+		}
+		if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Accepted.RunID, Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel, Reason: "interrupted by SIGINT"}); err != nil {
+			return err
+		}
+		_, err = f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseReport, SourceAttempt: new(started.Attempt), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}}})
+		return err
+	})
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "cancelled" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
+	}
+	snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Accepted.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.State != store.RunCancelled || snapshot.Run.CancelReason != "interrupted by SIGINT" || snapshot.Run.FinishedAt == nil {
+		t.Fatalf("run=%+v", snapshot.Run)
+	}
+	for _, row := range snapshot.Nodes {
+		if row.Status != store.StatusDone || row.Outcome != store.NodeCancelled || row.Ref.NodeID != "slow" && row.StartedAt != nil {
+			t.Errorf("cancelled row=%+v", row)
+		}
+	}
+}
+
+func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}})
+			bounded, stop := context.WithTimeout(t.Context(), 5*time.Second)
+			defer stop()
+			ctx, cancel := context.WithCancelCause(bounded)
+			defer cancel(nil)
+			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+				if input.NodeID != "slow" {
+					return errors.New("downstream body started after host cancellation")
+				}
+				cancel(cause)
+				return context.Cause(ctx)
+			})
+			_, err := f.Host.Run(ctx, f.Input)
+			if !errors.Is(err, cause) {
+				t.Fatalf("error=%v, want %v", err, cause)
+			}
+			row, err := f.Tenant.ReadNode(bounded, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "next"})
+			if err != nil || row.StartedAt != nil || row.ClaimedBy != "" {
+				t.Fatalf("downstream row=%+v error=%v", row, err)
+			}
+		})
+	}
+}
+
+func TestSchedulerWithoutAnExecutorFailsLoudly(t *testing.T) {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err := f.Host.Run(ctx, f.Input)
+	if err == nil || !strings.Contains(err.Error(), "node host") {
+		t.Fatalf("error=%v", err)
+	}
+	row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "a"})
+	if err != nil || row.StartedAt != nil {
+		t.Fatalf("row=%+v error=%v", row, err)
+	}
+}
+
+func TestSchedulerARefusedOutputFailsTheNodeAndDependants(t *testing.T) {
+	for _, message := range []string{"output refused", strings.Repeat("upload refused\n", 200<<10)} {
+		t.Run(fmt.Sprintf("%d-bytes", len(message)), func(t *testing.T) {
+			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "big", ResultStep: "body", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "after", Needs: deps("big"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}})
+			_, _, dependencies, _ := executorFixture(t)
+			dependencies.Store = f.State
+			dependencies.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
+				return &executorProcess{plan: f.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"huge"`)}}, nil
+			}
+			refused := errors.New(message)
+			dependencies.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) { return nil, refused }
+			executor, err := NewNodeExecutor(dependencies)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.Host.Executor = executor
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			completion, err := f.Host.Run(ctx, f.Input)
+			if err != nil || completion.Outcome != "failed" {
+				t.Fatalf("completion=%+v error=%v", completion, err)
+			}
+			for id, outcome := range map[string]store.NodeState{"big": store.NodeFailed, "after": store.NodeCancelled} {
+				row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+				if err != nil || row.Outcome != outcome {
+					t.Fatalf("%s row=%+v error=%v", id, row, err)
+				}
+			}
+			events, err := f.Tenant.ReadStateEvents(ctx, f.Accepted.RunID, 0, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, event := range events {
+				if event.NodeID != "big" || event.Kind != "job_failed" {
+					continue
+				}
+				var result store.NodeResult
+				if err := json.Unmarshal(event.Payload, &result); err != nil {
+					t.Fatal(err)
+				}
+				if len(result.MaskedError) > int(limits.ErrorBytes) || !strings.Contains(result.MaskedError, "refused") {
+					t.Fatalf("failure has %d bytes: %q", len(result.MaskedError), result.MaskedError)
+				}
+				found = true
+			}
+			if !found {
+				t.Fatal("output refusal has no committed failure")
+			}
+		})
 	}
 }

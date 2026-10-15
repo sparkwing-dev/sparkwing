@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -27,7 +29,6 @@ type OwnerStore interface {
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
 	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
-	RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error)
 }
 
 // OwnerPlanning supplies checkout facts and SDK planning without replacing intake.
@@ -54,9 +55,14 @@ type OwnerLayerResult struct {
 // Source supplies the shared acquisition path. Acquire may replace it with a
 // trusted adapter that uses RunInput's sealed request and persisted acceptance.
 type OwnerHost struct {
-	Snapshots CapturedEnvironmentLoader
-	Store     OwnerStore
-	Lease     lease.Keeper
+	bindAdmission func(*OwnerHost, store.Actor)
+	retainRemote  bool
+	Snapshots     CapturedEnvironmentLoader
+	Store         OwnerStore
+	Lease         lease.Keeper
+	// Renew reports current compute through the authenticated unit renewal transaction.
+	Renew     func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Computing func(string) bool
 	Source    source.Options
 	Acquire   func(context.Context, RunInput) (*source.Entry, error)
 	Prepare   func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
@@ -66,10 +72,14 @@ type OwnerHost struct {
 	Decide    func(store.ScheduleSnapshot) store.ScheduleDecision
 	Wait      func(context.Context, store.RunSnapshot) error
 	WaitNode  WaitNodeChange
+	Debug     DebugBoundaryWaiter
 	Layer     func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)
 	Local     func(store.NodeRow) bool
+	Admit     func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error
+	Around    func(context.Context, AcceptedRun, func(context.Context) (RunCompletion, error)) (RunCompletion, error)
 	// AdoptClaim retains the private award for per-attempt process delegation.
 	AdoptClaim func(context.Context, store.ReconciledNode) error
+	Delegator  OwnerDelegator
 	Executor   NodeHost
 	Expand     func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
 	// Mask shares the source and SDK secret registry and protects returned errors.
@@ -86,17 +96,31 @@ var (
 // Run requires an initial successful renewal before acquiring source or resuming work.
 // It joins every executor and renewal before returning, including error paths.
 func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunCompletion, err error) {
-	if h.Store == nil || h.Wait == nil || h.Mask == nil {
-		return completion, errors.New("run host requires store, state follower and masking adapters")
+	if h.bindAdmission != nil {
+		copy := *h
+		h = &copy
+		h.bindAdmission(h, input.Owner)
 	}
-	defer func() { err = maskHostError(err, h.Mask) }()
+	if h.Store == nil || h.Wait == nil || h.Mask == nil || h.Renew == nil {
+		return completion, errors.New("run host requires store, unit renewal, state follower and masking adapters")
+	}
+	defer func() {
+		if cause := context.Cause(parent); cause != nil && !errors.Is(err, cause) {
+			err = errors.Join(cause, err)
+		}
+		err = maskHostError(err, h.Mask)
+	}()
 	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != input.RunID {
 		return completion, errors.New("run host requires a bound owner and sealed request")
 	}
 	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
 		return completion, errors.New("run host requires a positive renewal interval below its lease")
 	}
-	ctx, stop := h.keepOwner(parent, input.Owner)
+	var preparing atomic.Bool
+	preparing.Store(true)
+	ctx, stop := h.keepOwner(parent, input.Owner, func() bool {
+		return preparing.Load() || h.Computing != nil && h.Computing(input.RunID)
+	})
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return completion, err
@@ -124,6 +148,9 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 			return completion, errors.New("resume differs from persisted acceptance")
 		}
 		input.Accepted = &persisted
+		if _, err := selectionSkips(persisted.Plan, snapshot.Run.Spec.Resolved.Settings.Options); err != nil {
+			return completion, err
+		}
 		if h.Masks != nil {
 			namespace := persisted.Plan
 			for _, row := range snapshot.Nodes {
@@ -163,6 +190,29 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 			return completion, err
 		}
 	}
+	preparing.Store(false)
+	if h.Around != nil {
+		completion, err := h.Around(ctx, accepted, func(ctx context.Context) (RunCompletion, error) {
+			return h.schedule(ctx, input, accepted, entry)
+		})
+		var refused *AdmissionFailure
+		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
+			policy := admissionPolicy(refused, input.Owner.Owner.Generation)
+			outcome := store.RunFailed
+			if refused.Outcome == store.NodeSkipped {
+				outcome = store.RunSuccess
+			}
+			_, err = h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunTransition{
+				RunID: input.RunID, Actor: input.Owner, To: outcome, Cause: store.RunPolicyRefused,
+				OwnerPolicy: &policy, Reason: refused.Reason,
+			}})
+			if err != nil {
+				return RunCompletion{}, err
+			}
+			completion = RunCompletion{Outcome: string(outcome), Reason: refused.Reason}
+		}
+		return completion, err
+	}
 	return h.schedule(ctx, input, accepted, entry)
 }
 
@@ -191,10 +241,13 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 	return source.Acquire(ctx, spec, options)
 }
 
-func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor) (context.Context, func()) {
+func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor, computing func() bool) (context.Context, func()) {
+	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: actor.Owner.RunID, Holder: actor.Owner.Holder, Generation: actor.Owner.Generation}, computing) {
+		return parent, func() {}
+	}
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
-		beat, err := h.Store.RenewOwner(ctx, actor)
+		beat, err := h.Renew(ctx, actor, computing())
 		return lease.Beat{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
 	return startHostKeeper(parent, keeper)
@@ -251,6 +304,9 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	}
 	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Functions)
 	if err != nil {
+		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
+	}
+	if _, err := selectionSkips(plan.Plan, row.Request.Request.Options); err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
 	if prepared.Resolve != nil {

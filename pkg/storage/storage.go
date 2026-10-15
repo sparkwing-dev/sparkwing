@@ -73,9 +73,6 @@ type LogStore interface {
 	// in the run.
 	ReadRun(ctx context.Context, runID string) ([]byte, error)
 
-	// Stream opens a live-tail stream for one node's log, resuming after
-	// the cursor [WithLogCursor] put on ctx, if any. Implementations
-	// that don't support streaming return (nil, nil); the caller falls
-	// back to polling Read.
+	// Stream opens a live tail using the cursor from WithLogCursor.
 	Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 }

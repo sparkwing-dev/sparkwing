@@ -125,7 +125,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		return err
 	}
 	if handlePath != "" {
-		if err := orchestrator.PublishRunHandle(handlePath, orchestrator.NewRunHandle(response.RunID, pipeline, "", "pending")); err != nil {
+		if err := orchestrator.PublishRunHandle(handlePath, orchestrator.NewRunHandle(response.RunID, pipeline, "pending")); err != nil {
 			return fmt.Errorf("run %s is admitted but its handle could not be published: %w", response.RunID, err)
 		}
 	}

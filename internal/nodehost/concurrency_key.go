@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // ConcurrencyKey scopes a validated group using host-owned run and machine identity.
@@ -25,22 +26,21 @@ func scopedConcurrencyKey(name, scope, runID, boxID string) string {
 	return scope + ":" + strconv.Itoa(len(identity)) + ":" + identity + ":" + name
 }
 
-// ParseConcurrencyKey recovers the scope, host identity and group from a host key.
-func ParseConcurrencyKey(key string) (scope, identity, group string, ok bool) {
-	scope, rest, found := strings.Cut(key, ":")
-	if !found {
-		return "", "", "", false
+const memoKeyPrefix = "memo:"
+
+// ScopeLabelFromKey renders the scope and complete host identity of a concurrency key.
+func ScopeLabelFromKey(key string) string {
+	if strings.HasPrefix(key, memoKeyPrefix) {
+		return "content-cache"
 	}
-	if scope == "global" {
-		return scope, "", rest, true
+	scope, identity, _, ok := runspec.ParseConcurrencyKey(key)
+	if !ok {
+		return "unknown"
 	}
-	if scope != "run" && scope != "box" {
-		return "", "", "", false
+	switch scope {
+	case "global":
+		return "global"
+	default:
+		return scope + " (" + identity + ")"
 	}
-	size, rest, found := strings.Cut(rest, ":")
-	n, err := strconv.Atoi(size)
-	if !found || err != nil || n < 0 || n >= len(rest) || strconv.Itoa(n) != size || rest[n] != ':' {
-		return "", "", "", false
-	}
-	return scope, rest[:n], rest[n+1:], true
 }

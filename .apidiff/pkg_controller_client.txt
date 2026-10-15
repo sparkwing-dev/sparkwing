@@ -49,31 +49,13 @@ func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, erro
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error)
 type RotatedToken struct {
 	Capability   string
-	New          TokenInfo
+	New          capability.Metadata
 	OldPrefix    string
 	OldRevokedAt time.Time
 }
 type RunnerTokenManager interface {
 	controllerwire.TokenManager
 	EnrollRunner(context.Context, EnrollRunnerRequest) (*CreatedToken, error)
-}
-type TokenInfo struct {
-	Prefix         string
-	Team           string
-	Subject        TokenSubject
-	Audience       string
-	Grants         []string
-	CreatedBy      string
-	IssuedAt       time.Time
-	ExpiresAt      *time.Time
-	LastUsedAt     *time.Time
-	RevokedAt      *time.Time
-	GitCredentials bool
-	Metered        bool
-}
-type TokenSubject struct {
-	Kind string
-	ID   string
 }
 
 # methods on un-declared receiver types (likely a bug)

@@ -110,8 +110,8 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					}
 					transport := hostStateController{
 						renew: func(ctx context.Context, unit string, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
-							if unit != award.UnitID || body.Executing {
-								t.Fatal("empty plan changed its award or reported compute")
+							if unit != award.UnitID || !body.Executing {
+								t.Fatal("preparation changed its award or omitted compute")
 							}
 							_, err := state.RenewOwner(ctx, state.actor)
 							return controllerwire.RenewalResponse{}, err
@@ -129,6 +129,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					owner.Renew = adapter.RenewOwner
 					host := cliNativeOwner(t, adapter, owner)
 					bind := func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error) {
 						return hereHostSession{host: host, input: nodehost.RunInput{Owner: store.Actor{Kind: store.ActorController, Owner: store.OwnerLeaseRef{RunID: "foreign-run"}}}, close: func() error { closed++; return nil }}, nil

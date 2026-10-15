@@ -2,146 +2,137 @@
 
 <!-- design:begin -->
 
-## Implemented and deleted
+## Merge and implementation
 
-Resolved the five conflict contents in browser_reads.go, log_reads.go,
-log_segments.go, log_segments_internal_test.go and logseg/reader.go. The three
-integration deletions stay deleted. Dashboard logs keep the committed reader,
-request actor and stream cancellation. No conflict markers remain. The index
-still lists the five paths as unmerged because this worker made no Git metadata
-writes. The lead must stage them and finish the merge. HEAD is 8a188d36f and
-MERGE_HEAD is 9e151731d.
+Resolved the working contents of all 49 conflicts between HEAD 826174e1f and
+integration 793c59b19. No conflict marker remains. No Git metadata was written,
+so all 49 paths still need the lead to stage them before completing the merge.
+[The file list](w7-storage-merge-files.txt) records every resolution and edit.
 
-Removed the store-local output directory, RecordLocalOutput, writeLocalOutput,
-GetNodeOutput, ReadOutputFile, output key generators and output URL grants.
-Removed ResolveClaimInput and its unused output selectors. Store.FinishNode and
-FinishNodeWithReason now accept metadata only. The obsolete scheduler, Attempts,
-its layers and local/remote route server had no external production caller.
-They are deleted with their output consumers and StateStoreOld. Shared helpers
-used by the native host remain. Native hosts retain StorageBinding,
-OutputRecords.ReadResult and committed materialized selectors.
+Kept integration's seven production node-host deletions, totaling 353 lines:
+attempt.go, closures.go, maskstate.go, memo.go, podnode.go, routes_children.go and
+scheduler.go. The deleted orchestrator hosting files remain absent. W3's moved
+native-host tests and shared scripted storage fakes remain in their new package.
 
-Removed the separate backend LiveLogReader, StreamLiveLog, controller adapter and
-web fallback. The bound segment reader owns persisted and live-ring delivery.
-A backend without a stream returns HTTP 501. There is no alternate log byte path.
+Adapted those tests to W7's exact ResultRecordKey layout. Output tests retain
+foreign-layout and foreign-name refusals. Artifact publication refreshes the key
+with each awarded attempt. The native masking test now uses blob.ErrNotFound
+instead of the deleted store.ErrOutputNotStored. The complete nodehost suite
+passes, including these tests and their existing fuzz seeds.
 
-Invariant: a revoked reader cannot open or emit a later committed segment.
-The new generated real-SQLite property revokes the capability after the first
-segment. It reproduced the second segment escaping before the fix. The reader
-now rechecks current records and authority before each later segment, opens only
-the first object, preserves its partial byte count and reports no completeness.
+Removed the unused RunHandle.LogPath field and NewRunHandle's log-path argument.
+Its production caller passed an empty string. The CLI caller and handle test use
+the reduced signature. Removed the stale LogStore comment promising a polling
+fallback. Migration notes explain controller log reads, and the generated docs
+mirror matches the source.
 
-Moved implemented declarations from blob/contracts.go to types.go and from
-log_contract.go to logs.go. ObjectBackend lives in objects.go. Removed nine
-forwarding wrappers and exported their existing implementations in place.
-Deleted the unused StateStore contract, which had no consumer or test double.
-The frozen interface shapes are unchanged.
+The existing real-store wiring remains intact. The materialization integration
+passes through the real tenant, controller wire, host and exact output bytes.
+Filesystem and S3 archive, receipt, record, collection and log acceptance checks
+pass. No new component acceptance cell or replacement fake was added.
 
-The cache command/service, gitcache, package proxy, cache chart, raw S3 output
-and log stores, and run-directory log fallback remain absent. Historical signed
-release matrices remain unchanged.
+The cache command/service, gitcache proxy, package proxy, cache chart, raw S3
+output/log backends and run-directory log fallback remain absent. Historical
+signed release matrices remain unchanged.
 
-## Production line counts and budget
+## Production line count
 
-W7's net production delta against main is **-5,131 lines** using the lead's area
-prefixes, excluding tests, testdata, acceptance and remaining contract files, and
-including untracked production files. W7 is **1,499 lines over** its -6,630 budget.
-Across the rewrite, 39 former W7 production files totaling 8,050 lines are absent.
+W7 has **-5,134 net production Go lines against main**, versus its -6,630 budget.
+The overage is **1,496 lines**. Its current production tree has 10,505 lines,
+compared with 15,639 on main. Thirty-nine former production files totaling
+**8,050 lines** are absent. Counts use the lead's W7 prefixes and exclude tests,
+testdata, acceptance and contract-named files. They include current worktree
+contents rather than treating an unresolved index as the completed tree.
 
-This continuation removes **6,041 net production lines** across W7 and the shared
-caller cuts, counting declaration moves without a filename exclusion. It deletes
-24 former production files totaling 3,521 lines and trims the other dead callers.
-Raw W7 production shrank 117 lines. The lead's filename-based scanner instead
-shows +648 against this session's HEAD because the former 765-line scaffold set
-is no longer excluded. Types and implementations are now counted together.
+This continuation trims three W7 production lines and two shared production
+lines, besides retaining integration's 353 lines of node-host deletions. It does
+not claim those W3 deletions as new W7 storage work.
 
-Budget justification for lead review: the estimate did not size the complete
-physical signer/publication/verification implementations and tagged upload
-protocol added by the authority amendments. The real filesystem and S3 backends
-need separate physical operations. The tagged uploader is 311 lines, batch signer
-69 and committed reader 138. types.go and logs.go account for 677 lines of the
-now-counted declarations. Removing either physical backend, exact upload identity,
-immutable verification or current-authority checks would drop a required C1
-behavior. No compatibility adapter, new product limit or acceptance cell was added.
-The overage remains for the lead to take to Korey.
+The previous budget justification remains for lead review. The estimate did not
+size the complete physical signing, publication and verification backends and
+tagged upload protocol required by the authority amendments. Moving implemented
+scaffolding into types.go and logs.go also made 677 declaration lines count as
+production. Both physical backends and exact uploader/current-authority checks
+are required. The overage has not been waived, and W7 is not COMPLETE.
 
-## Verification and retained ports
+## Checks
 
-Go checks used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
-GOCACHE=/tmp/sw-gocache. Final tests used TMPDIR=/tmp/sw-astra-W7 and
-GOTMPDIR=/tmp/sw-astra-W7/go.
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-gocache and GOTMPDIR=/tmp/sw-astra-W7/go. Tests use -p 4.
 
-- Whole-repository go build ./... passes after the final cuts.
-- Full internal/nodehost suite passes in 8.852 seconds.
-- Storage unit suites pass for internal/blob/..., internal/artifacts,
-  internal/depcache, internal/depcachekey and pkg/storage/.... Blob and logseg
-  suites pass again after moving their declarations.
-- TestMaterializedResultCopiesBytesThroughControllerAndHost passes in 0.379
-  seconds through the real tenant, controller wire, host and exact output bytes.
-- Focused controller TestCommittedDashboard* and TestDataStorage* pass in 6.302
-  seconds. This includes the new between-segment revocation property.
-- Focused web stream/format tests and the backend bound-log refusal test pass.
-  The former live-ring fallback test now checks the bound stream and resume cursor.
-- Final TestStorage passes in 124.377 seconds with 263 passing test events,
-  424 skips and zero failures. Filesystem/S3 records, archives, reference edges,
-  memo, remote cache and tagged-log cells remain green. No new cell was added.
-- Vet passes for storage, artifacts, depcache, controller, store, nodehost,
-  backend, web and acceptance packages. commentcheck is clean across 2,107 files.
-  git diff --check, the docs mirror check and internal/doccheck pass.
+| Check | Result |
+| --- | --- |
+| Whole-repository go build ./... after the final edits | Pass |
+| Full internal/nodehost suite | Pass, 21.805 s |
+| internal/blob/..., artifacts, depcache, depcachekey and pkg/storage/... | Pass |
+| TestMaterializedResultCopiesBytesThroughControllerAndHost in pkg/store | Pass, 0.369 s |
+| Controller TestCommittedDashboard* and TestDataStorage* | Pass, 3.810 s |
+| Focused backend and web log/API tests | Pass |
+| TestPublishRunHandleKeepsFirstReceipt | Pass |
+| Vet on storage, nodehost, orchestrator, CLI, backend, web, controller and store | Pass |
+| TestStorage acceptance | Pass, 93.047 s, 69 passing test events, 424 skips, zero failures |
+| commentcheck -base main . | Clean across 2,152 files |
+| internal/doccheck, docs mirror check and git diff --check | Pass |
 
-Removed local roundtrip tests are covered by the real materialization integration.
-Missing/corrupt/oversized output remains covered by TestOutputReadRefusals,
-TestDownloadRequiresVerifiedEOF and the existing required-output acceptance proof.
-Publication refusal remains covered by TestNodeExecutorMissingOutputPublisherFailsLoudly.
-Native Owner, Executor and ProcessServices tests remain. Obsolete scheduler/route
-fixtures are deleted. Existing metadata-only store/profile test calls were migrated.
+Existing storage acceptance cells remain green for filesystem/S3 records,
+manifests, archives, reference-edge isolation, reachable-byte collection, tagged
+log commits and reads, sink replay, memo failure behavior, read-only remote
+cache and publication. The acceptance event count changed with integration's
+harness cleanup. Skipped native targets remain skipped. No whole-repository
+suite, pipeline, native OS/placement, PostgreSQL, deployment or release is claimed.
 
-No whole-repository test suite, pipeline, native OS/placement, PostgreSQL, release
-or independent review is claimed. Legacy raw-lifecycle fixtures still fail at
-CreateRun because runs.args_json does not exist. This affects the prior backend
-roundtrip fixture and old finish/step fixtures. No legacy schema was recreated.
+No new test port was required in this continuation. W3's moved native tests were
+preserved and adapted. Earlier storage ports remain in the existing acceptance
+suite. No security policy changed. The retained binding invariant is that an
+output or manifest can be published only under its exact awarded result key.
 
-## Remaining contracts and integration
+## Contract changes needed and open integration
 
-W1/W2 still own the legacy OutputRef metadata path in pkg/store/node_output.go,
-node_attempt.go and store.go. Legacy billed attempt completion and launcher
-cancellation reach it, and internal/orchestrator/receipt reads Node.OutputRef.
-It still references data_objects and node_outputs. Removing it needs an
-authorized result-digest reporting projection or receipt construction from the
-committed result records, then removal of the old attempt/finish/read plumbing.
-No second byte adapter or synthetic result was added to preserve it.
+**W1/W2 reporting contract:** the remaining legacy OutputRef metadata path in
+pkg/store/node_output.go, node_attempt.go and store.go still reaches data_objects
+and node_outputs. The receipt builder consumes Node.OutputRef.SHA256. The final
+NodeRow exposes OutputRecord selectors, but no result-digest reporting projection.
+The lead should assign one tenant-scoped projection that resolves each persisted
+selector to its committed digest in the reporting snapshot. It must include
+materialized results and refuse a selector for another tenant or result. Then
+migrate the receipt reader and remove OutputRef, its report/finish API, the old
+validation and node_outputs queries together. Using a raw digest from a caller
+or granting data.read to a runs.read-only reader would change the authority
+contract. Neither was added here. No foreign frozen contract was changed.
 
-W2 still supplies authenticated LogTransport signing/verification/read and
-SegmentRecorder adapters. W3/W8 supply fresh per-attempt and owner log bindings.
-W7 consumes those declared interfaces. DataController.BindData and NewDataClient
-are real implementations in this tree, not panic stubs. Production construction
-still needs the declared access/authority composition.
+**W2:** authenticated blob.LogTransport signing, verification and proxied reads,
+and the SegmentRecorder adapter, remain open. W7's logseg.Data uses those
+interfaces and the real tenant segment APIs. DataController.BindData and
+NewDataClient are implemented, but the standalone construction still calls only
+WithDataObjects. DataController.Access, download charging and authenticated
+serving composition must be supplied by W2's declared production composition.
 
-Operator log-retention overrides must reach the sealed IntakePolicyFacts through
-its policy owner. The unused WithLogRetention map is not a retention selector.
-W1's expired-upload cleanup still needs a fenced selector for physical staging
-keys. These are existing handoffs. No foreign frozen contract was changed.
+**W3/W8:** connect fresh per-attempt and owner log/storage bindings to the native
+host. W7 supplies the byte/record and tagged-log implementations. This report
+claims no native placement evidence from contract fixtures.
 
-A1-29/30/31/33 are implemented with the real store and physical backend seams.
-The related A1-24/32/34/35/36/37 consumers remain on the merged tenant, uploader,
-record and binding interfaces. A1-43's historical assets are preserved. A1-50
-production composition and A1-53 native evidence remain with their assigned areas.
-The 15:40 materialization closure is verified and no longer blocks byte-path cuts.
+**W1 policy/maintenance:** operator log-retention changes must enter sealed
+IntakePolicyFacts. Expired-upload physical staging cleanup needs a fenced
+selector from the store. Existing lease and retention contracts remain intact.
 
-## Shared files and friction
+A1-29/30/31/33 remain implemented. A1-24/32/34/35/36/37 consumers keep their real
+store or declared foreign-interface wiring. A1-43's historical release assets
+remain intact. A1-50 composition and A1-53 native evidence remain with their
+assigned owners. The 15:40 materialization closure no longer blocks byte cuts.
 
-The exact changed/deleted file list, including shared tests, is in
-[w7-storage-cut-files.txt](w7-storage-cut-files.txt). Shared production changes
-are confined to dead output callers and the log reader/backend/web wiring.
-Source docs, migration notes and changelog are updated, and their mirrors match.
-Lead-owned amendments and handoffs were not edited.
+## Shared edits and friction
 
-A final parallel check attempt could not compile because shared-cache archives
-for standard-library and project packages disappeared. Neither worker cleaned
-the cache. The archives reappeared, the serial build passed, and the final checks
-above then passed. The shared cache is retained. No local Git identity or
-core.worktree override was set. The lead owns staging, merge completion, API
-snapshot regeneration, review and budget ratification. Scratch is removed at exit.
+Shared continuation edits are cmd/sparkwing/run_host.go,
+internal/orchestrator/run_handle.go and its test, docs/migrations/_unreleased.md
+and its generated mirror. Conflict resolutions also touch internal/nodehost,
+internal/web/server_test.go and the migration documents. The file list records
+all paths. Lead-owned handoffs and amendments were not edited.
+
+The prompt named three conflicts, but the actual index contained 49. All working
+contents are resolved, and every integration-deleted conflict path is absent.
+The no-Git-write rule leaves staging and merge completion with the lead. The
+legacy result-digest projection and the unwaived budget overage remain open.
+W7 scratch is removed at exit. The shared build cache is retained.
 
 <!-- design:end -->
 

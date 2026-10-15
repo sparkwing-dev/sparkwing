@@ -300,7 +300,7 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause st
 		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Mask)
 		extra.Result = &result
 	}
-	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), Extra: extra})
+	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), SourceAttempt: &input.Attempt, Extra: extra})
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
 	}
@@ -321,6 +321,10 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store
 	}
 	if ctx.Err() != nil {
 		result = store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Mask(context.Cause(ctx).Error()))}
+		var admission *AdmissionFailure
+		if errors.As(context.Cause(ctx), &admission) && admission.Outcome == store.NodeSuperseded {
+			result.Outcome, result.Reason = admission.Outcome, admission.Reason
+		}
 	}
 	if result.Outcome == "" {
 		result = h.failure(runErr)

@@ -487,6 +487,41 @@ func FuzzLocalRunPrivateResponseDiagnostics(f *testing.F) {
 	})
 }
 
+func FuzzDetachedIntakeDiagnosticsNeverExposeArguments(f *testing.F) {
+	f.Add([]byte("value"), false)
+	f.Add([]byte("value"), true)
+	f.Fuzz(func(t *testing.T, data []byte, canonical bool) {
+		secret := "private-argument-" + hex.EncodeToString(data)
+		award := localTestAward(t)
+		var calls []string
+		deps := localRuntimeFor(t, award, true, &calls)
+		resolve := deps.resolve
+		deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+			runtime, err := resolve(ctx, options)
+			runtime.controller = localTestController{create: func(context.Context, controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+				cause := error(errors.New("intake failed: " + secret))
+				if canonical {
+					cause = &apierr.Error{Code: apierr.InvalidArgs, Message: "intake failed: " + secret}
+				}
+				return controllerwire.CreateRunResponse{}, cause
+			}}
+			return runtime, err
+		}
+		var out bytes.Buffer
+		err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, []string{"--password", secret}, &out, deps)
+		if err == nil || strings.Contains(err.Error(), secret) || strings.Contains(out.String(), secret) {
+			t.Fatal("intake diagnostic exposed an argument")
+		}
+		var structured *apierr.Error
+		if errors.As(err, &structured) {
+			raw, marshalErr := json.Marshal(structured)
+			if marshalErr != nil || strings.Contains(string(raw), secret) {
+				t.Fatal("structured intake diagnostic exposed an argument")
+			}
+		}
+	})
+}
+
 func TestLocalOwnerResumePreservesAcceptedPlan(t *testing.T) {
 	award := localTestAward(t)
 	plan := json.RawMessage(`{"jobs":[]}`)

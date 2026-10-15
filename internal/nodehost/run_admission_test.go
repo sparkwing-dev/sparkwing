@@ -7,6 +7,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
+func (d *fakeDaemon) lease(runID string) *fakeLease {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.leases[runID]
+}
+
 func planGrouped(scope, onLimit string, nodes ...string) nodeproto.PlanDoc {
 	concurrency := nodeproto.ConcurrencySpec{Group: "deploys", Scope: new(scope), Capacity: new(1)}
 	if onLimit != "" {
