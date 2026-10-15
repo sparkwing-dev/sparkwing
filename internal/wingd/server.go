@@ -72,6 +72,7 @@ type Daemon struct {
 	draining            bool
 	shuttingDown        bool
 	localActivity       LocalActivity
+	dashboardConns      int
 	stay                bool
 	localControl        func(*bool) LocalStatus
 	localDashboard      func(context.Context, string) error

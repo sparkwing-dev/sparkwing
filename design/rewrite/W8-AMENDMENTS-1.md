@@ -1,5 +1,8 @@
 # W8 amendment integration audit
 
+The [dashboard activity continuation](W8-DASHBOARD-ACTIVITY.md) records the
+runtime's HTTP connection hold, current verification and remaining integrations.
+
 ## Continuation: acquired nodes and concrete HTTP composition
 
 The committed cancellation redesign passes both retained regressions. Its stop

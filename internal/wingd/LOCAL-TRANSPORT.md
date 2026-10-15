@@ -29,6 +29,13 @@ uses `APIDrainWindow` for graceful drain, closes remaining HTTP connections and
 joins handlers before the runtime closes its store. `TestLocalHTTP` and
 `FuzzLocalHTTPIdentity` cover this composition with in-memory connections.
 
+The runtime counts accepted dashboard connections until close, including
+keep-alive and hijacked connections. Repeated or concurrent closes release one
+hold. These counts join the shared controller's activity without replacing its
+run, queue or lease counts. API connections add no dashboard hold.
+`TestLocalRuntimeDashboardConnectionsHoldIdle` exercises the serving loop,
+status, idle timer and joined shutdown over in-memory connections.
+
 Windows pipes have a protected owner-only DACL, reject remote clients and use
 first-instance ownership. Clients check the pipe owner before sending the
 preamble and request identification-level impersonation. The server reads the

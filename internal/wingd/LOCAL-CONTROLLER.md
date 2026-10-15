@@ -47,6 +47,9 @@ does not open a second secrets store.
 
 The daemon accepts live controller counts through `SetLocalActivity`. Runs,
 queued triggers, held leases and dashboard connections prevent idle exit.
+The runtime counts its dashboard HTTP connections until they close, including
+idle keep-alive sockets and hijacked connections. Closing the last connection
+starts a fresh idle interval. Controller activity updates cannot erase that hold.
 Admission holders and waiting runs also remain active. `SetStay` pins the
 daemon. Health probes, repeated unchanged counts and idle API connections do
 not extend its idle deadline. The timeout comes from
@@ -76,8 +79,9 @@ the current schema.
 
 The controller composition supplies `LocalController` from the shared
 `pkg/controller` implementation. Its `Run` method reports all four activity
-counts, including dashboard connections, and joins its consumer and maintenance
-children before returning. Its API server consumes the kernel identity on
+counts for activity outside the runtime's own HTTP connections and joins its
+consumer and maintenance children before returning. The runtime adds its
+dashboard connection count. Its API server consumes the kernel identity on
 `APIConn`. Its dashboard server retains browser authentication. Local runs
 continue to execute in the CLI.
 

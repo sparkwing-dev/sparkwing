@@ -48,7 +48,7 @@ func (d *Daemon) beginIdleShutdown(idle time.Duration) bool {
 }
 
 func (d *Daemon) idleElapsedLocked() time.Duration {
-	if d.stay || hasLocalActivity(d.localActivity) || len(d.byRun) > 0 {
+	if d.stay || hasLocalActivity(d.localActivity) || d.dashboardConns > 0 || len(d.byRun) > 0 {
 		return 0
 	}
 	if len(d.reattachWait) > 0 {
@@ -59,6 +59,13 @@ func (d *Daemon) idleElapsedLocked() time.Duration {
 		return 0
 	}
 	return d.now().Sub(d.lastActivity)
+}
+
+func (d *Daemon) dashboardConnection(delta int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.dashboardConns += delta
+	d.touchLocked()
 }
 
 func hasLocalActivity(activity LocalActivity) bool {

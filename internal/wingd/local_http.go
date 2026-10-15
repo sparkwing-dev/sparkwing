@@ -32,12 +32,12 @@ func (s LocalHTTP) ServeAPI(ctx context.Context, listener net.Listener) error {
 	}
 	return serveLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
 		return context.WithValue(ctx, localPeerKey{}, connection.(APIConn).PeerIdentity())
-	})
+	}, nil)
 }
 
 // ServeDashboard retains the dashboard handler's browser authentication.
 func (s LocalHTTP) ServeDashboard(ctx context.Context, listener net.Listener) error {
-	return serveLocalHTTP(ctx, listener, s.Dashboard, nil)
+	return serveLocalHTTP(ctx, listener, s.Dashboard, nil, nil)
 }
 
 type localAPIListener struct{ net.Listener }
@@ -62,6 +62,7 @@ func (l localAPIListener) Accept() (net.Conn, error) {
 type localHTTPConnections struct {
 	net.Listener
 	hijacked *sync.Map
+	observe  func(int)
 }
 
 func (l localHTTPConnections) Accept() (net.Conn, error) {
@@ -69,17 +70,29 @@ func (l localHTTPConnections) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &localHTTPConn{Conn: connection, hijacked: l.hijacked}, nil
+	if l.observe != nil {
+		l.observe(1)
+	}
+	return &localHTTPConn{Conn: connection, hijacked: l.hijacked, observe: l.observe}, nil
 }
 
 type localHTTPConn struct {
 	net.Conn
 	hijacked *sync.Map
+	observe  func(int)
+	once     sync.Once
+	err      error
 }
 
 func (c *localHTTPConn) Close() error {
-	c.hijacked.Delete(c)
-	return c.Conn.Close()
+	c.once.Do(func() {
+		c.err = c.Conn.Close()
+		c.hijacked.Delete(c)
+		if c.observe != nil {
+			c.observe(-1)
+		}
+	})
+	return c.err
 }
 
 func (c *localHTTPConn) PeerIdentity() LocalPeerIdentity {
@@ -89,7 +102,7 @@ func (c *localHTTPConn) PeerIdentity() LocalPeerIdentity {
 	return LocalPeerIdentity{}
 }
 
-func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context) error {
+func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context, observe func(int)) error {
 	if listener == nil || handler == nil {
 		return errors.New("wingd: controller HTTP requires a listener and shared handler")
 	}
@@ -126,7 +139,7 @@ func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Han
 			shutdown <- nil
 		}
 	}()
-	err := server.Serve(localHTTPConnections{Listener: listener, hijacked: &hijacked})
+	err := server.Serve(localHTTPConnections{Listener: listener, hijacked: &hijacked, observe: observe})
 	close(served)
 	drainErr := <-shutdown
 	closeErr := server.Close()

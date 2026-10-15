@@ -29,6 +29,14 @@ not the frozen LocalRuntime operations. The sole implemented backend was the
 W8 fixture; all its callers are migrated. Store/queue/maintenance construction
 and shared policy handlers remain W1/W2 integration.
 
+W8's runtime now owns dashboard HTTP connection holds through close, including
+keep-alive and hijacked connections. Controller activity reports cover holds
+outside those connections. Status sums both owners, and closing the last
+dashboard connection restarts the existing idle interval. The real serving loop
+passes controlled-clock and race regressions with in-memory connections. See
+[the continuation report](../W8-DASHBOARD-ACTIVITY.md). This advances A1-40
+without supplying native or final store/controller composition evidence.
+
 The approved cancellation code is unchanged and both original regressions pass.
 New preparation and HTTP properties exercise fake foreign contracts and in-memory
 connections. Native cells remain blocked. See [the W8 audit](../W8-AMENDMENTS-1.md).

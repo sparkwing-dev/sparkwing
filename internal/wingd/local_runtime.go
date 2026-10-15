@@ -233,7 +233,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		workers.Go(func() {
 			defer ln.Close()
 			serve("dashboard", func() error {
-				return controller.HTTP().ServeDashboard(ctx, &readyListener{Listener: ln, ready: dashboardReady})
+				return serveLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, controller.HTTP().Dashboard, nil, d.dashboardConnection)
 			})
 		})
 		return nil
@@ -408,6 +408,7 @@ func (r *localRuntime) statusLocked(session *localRuntimeSession) LocalStatus {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	activity := d.localActivity
+	activity.DashboardConnections += d.dashboardConns
 	if !hasLocalActivity(activity) {
 		activity.IdleSince = d.lastActivity
 	}
