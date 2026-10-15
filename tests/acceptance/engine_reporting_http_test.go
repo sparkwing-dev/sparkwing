@@ -1,6 +1,8 @@
 package acceptance_test
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -8,12 +10,16 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -22,13 +28,20 @@ var reportRequests = []struct{ suffix, body string }{
 	{"summary", `{"markdown":"masked"}`},
 	{"steps/annotations", `{"step_id":"compile","message":"masked"}`},
 	{"steps/summary", `{"step_id":"compile","markdown":"masked"}`},
-	{"steps/start", `{"step_id":"compile"}`},
-	{"steps/finish", `{"step_id":"compile","status":"cancelled"}`},
-	{"steps/skip", `{"step_id":"compile"}`},
+	{"steps/start", `{"step_id":"compile","state":"running","source_attempt":2}`},
+	{"steps/finish", `{"step_id":"compile","state":"cancelled","source_attempt":2}`},
+	{"steps/skip", `{"step_id":"compile","state":"skipped","source_attempt":2}`},
 }
 
 func TestEngineStepRejectsMalformedReports(t *testing.T) {
 	for _, tc := range []struct{ operation, body string }{
+		{"start", `{"step_id":"compile","state":"running","source_attempt":0}`},
+		{"start", `{"step_id":"compile","state":"running","source_attempt":-1}`},
+		{"start", `{"step_id":"compile","state":"passed","source_attempt":2}`},
+		{"finish", `{"step_id":"compile","state":"running","source_attempt":2}`},
+		{"skip", `{"step_id":"compile","state":"passed","source_attempt":2}`},
+		{"finish", `{"step_id":"compile","state":"failed","source_attempt":2,"error":{}}`},
+		{"finish", `{"step_id":"compile","state":"failed","source_attempt":2,"error":"` + strings.Repeat("x", int(limits.ErrorBytes)+1) + `"}`},
 		{"start", `{}`},
 		{"start", `{"step_id":"compile","status":"running"}`},
 		{"start", `{"step_id":"compile","status":null}`},
@@ -104,7 +117,7 @@ func TestEngineStepReadsOwnerAndPublisherAttempts(t *testing.T) {
 				case "unstarted":
 					status, code = 409, apierr.IllegalTransition
 				}
-				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"compile"}`)
+				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/steps/start", `{"step_id":"compile","state":"running","source_attempt":2}`)
 				assertEngineError(t, w, status, code)
 				if f.writes != 0 {
 					t.Fatal("invalid attempt reached transaction")
@@ -164,8 +177,16 @@ func TestEngineReportingAuthorities(t *testing.T) {
 				case "cancelling":
 					b.snapshot.Binding.RunCancelled = true
 				}
-				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/"+operation.suffix, operation.body)
-				if w.Code != http.StatusNoContent || f.writes != 1 {
+				body := operation.body
+				if strings.Contains(body, "source_attempt") {
+					body = strings.ReplaceAll(body, `"source_attempt":2`, `"source_attempt":`+strconv.FormatInt(attempt, 10))
+				}
+				w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/"+operation.suffix, body)
+				wantStatus := http.StatusNoContent
+				if strings.Contains(body, "source_attempt") {
+					wantStatus = http.StatusOK
+				}
+				if w.Code != wantStatus || f.writes != 1 {
 					t.Fatalf("HTTP %d %s, writes %d", w.Code, w.Body.String(), f.writes)
 				}
 				actor := f.annotation.Actor
@@ -302,16 +323,16 @@ func TestEngineStepHTTP(t *testing.T) {
 	for _, operation := range []string{"start", "passed", "failed", "cancelled", "skip"} {
 		t.Run(operation, func(t *testing.T) {
 			b, f := newCredentialBoundary(), &engineTransactions{}
-			suffix, body, state := operation, `{"step_id":"compile"}`, "running"
+			suffix, body, state := operation, `{"step_id":"compile","state":"running","source_attempt":2}`, "running"
 			switch operation {
 			case "passed", "failed", "cancelled":
-				suffix, body, state = "finish", `{"step_id":"compile","status":"`+operation+`","error":{"code":"sdk_error","message":"masked failure"}}`, operation
+				suffix, body, state = "finish", `{"step_id":"compile","state":"`+operation+`","source_attempt":2,"error":"masked failure"}`, operation
 			case "skip":
-				state = "skipped"
+				state, body = "skipped", `{"step_id":"compile","state":"skipped","source_attempt":2}`
 			}
 			w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/steps/"+suffix, body)
 			s := f.step
-			if w.Code != http.StatusNoContent || f.writes != 1 || s.StepID != "compile" || s.State != state ||
+			if w.Code != http.StatusOK || f.writes != 1 || s.StepID != "compile" || s.State != state ||
 				s.Attempt != (runspec.AttemptIdentity{Team: "team", RunID: "run", NodeID: "job", Attempt: 2, Generation: 4}) ||
 				s.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority || s.Actor.Holder != "runner" || s.Actor.Generation != 4 ||
 				s.StartedAt != nil || s.FinishedAt != nil {
@@ -404,5 +425,74 @@ func TestEngineStepAnnotationHTTP(t *testing.T) {
 				t.Fatalf("HTTP %d %s, annotation %+v", w.Code, w.Body.String(), f.annotation)
 			}
 		})
+	}
+}
+
+func TestEngineTypedStepHTTP(t *testing.T) {
+	b, f := newCredentialBoundary(), &engineTransactions{}
+	h := expansionServer(t, b, f)
+	c, err := client.NewEngineClient(client.EngineOptions{URL: "http://controller.invalid", HTTP: &http.Client{Transport: reportTransport{h}}, Bearer: func(context.Context) (string, error) { return b.raw, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"running", "passed", "failed", "cancelled", "skipped"} {
+		input := controllerwire.StepReportRequest{StepID: "compile", State: state, SourceAttempt: 2, MaskedError: "masked"}
+		if err := c.RecordStep(t.Context(), "run", "job", input); err != nil {
+			t.Fatal(err)
+		}
+		if f.step.Attempt.Attempt != 2 || f.step.Actor.Generation != 4 || f.step.State != state || f.step.MaskedError != "masked" {
+			t.Fatalf("step=%+v", f.step)
+		}
+	}
+	if f.writes != 5 {
+		t.Fatalf("writes=%d", f.writes)
+	}
+}
+
+func TestEngineTypedStepAttemptProperty(t *testing.T) {
+	check := func(seed uint32, delayed bool) bool {
+		observed := int64(seed) + 1
+		for _, owner := range []bool{false, true} {
+			b := newCredentialBoundary()
+			if owner {
+				b = ownerBoundary()
+			}
+			if !owner {
+				b.snapshot.Authorities[0].Principal.Capability.Binding.Attempt = observed
+				b.snapshot.Binding.Current.Attempt = observed
+			}
+			current := observed
+			if delayed {
+				current++
+			}
+			if !owner {
+				b.snapshot.Authorities[0].Principal.Capability.Binding.Attempt = current
+				b.snapshot.Binding.Current.Attempt = current
+			}
+			f := &engineTransactions{node: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Generation: 7, Attempt: current}}
+			start := time.Date(2026, 10, 14, 12, 0, 0, int(seed%1000000000), time.UTC)
+			finish := start.Add(time.Nanosecond)
+			input := controllerwire.StepReportRequest{StepID: "compile", State: "passed", SourceAttempt: observed, StartedAt: &start, FinishedAt: &finish, MaskedError: "masked"}
+			body, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := engineHTTP(t, b, f, "/api/v1/runs/run/jobs/job/steps/finish", string(body))
+			if delayed {
+				if w.Code != 409 || f.writes != 0 {
+					t.Logf("delayed HTTP %d %s writes=%d", w.Code, w.Body, f.writes)
+					return false
+				}
+				continue
+			}
+			if w.Code != 200 || f.writes != 1 || f.step.Attempt.Attempt != observed || f.step.StartedAt == nil || !f.step.StartedAt.Equal(start) || f.step.FinishedAt == nil || !f.step.FinishedAt.Equal(finish) || f.step.Actor.Authority != b.snapshot.Authorities[0].Principal.Authority {
+				t.Logf("HTTP %d %s report=%+v", w.Code, w.Body, f.step)
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(check, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
 	}
 }

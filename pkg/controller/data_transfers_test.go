@@ -27,7 +27,7 @@ func TestDataStorageSignedFilesystemRoutes(t *testing.T) {
 		}
 	})
 	server := New(nil, nil).WithDataObjects(objects)
-	router := server.WithAuthenticator(NewAuthenticator(nil, time.Minute)).Handler()
+	router := server.Handler()
 	property := func(payload [32]byte, tenant uint16) bool {
 		team := fmt.Sprintf("tenant-%d", tenant)
 		digest := blob.Digest(fmt.Sprintf("%x", sha256.Sum256(payload[:])))

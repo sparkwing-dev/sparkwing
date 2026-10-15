@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"errors"
 	"html/template"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // safety: the flow cookie is what proves the browser GitHub returns is the one that started connecting, and it holds
@@ -36,7 +39,7 @@ func (f githubAppFlow) proof() oauthFlowProof {
 func (s *Server) readGitHubAppFlow(r *http.Request) (githubAppFlow, bool) {
 	var flow githubAppFlow
 	if !readFlowCookie(r, githubAppFlowCookieName, s.cookiesSecure(), &flow) ||
-		flow.State == "" || flow.Verifier == "" || !absoluteHTTPURL(flow.AuthorizeURL) {
+		len(r.CookiesNamed(cookieName(githubAppFlowCookieName, s.cookiesSecure()))) != 1 || flow.State == "" || flow.Verifier == "" || !absoluteHTTPURL(flow.AuthorizeURL) {
 		return githubAppFlow{}, false
 	}
 	return flow, true
@@ -46,22 +49,12 @@ func (s *Server) setGitHubAppFlow(w http.ResponseWriter, flow githubAppFlow) boo
 	return setFlowCookie(w, githubAppFlowCookieName, flow, s.cookiesSecure())
 }
 
-func (s *Server) connectingBrowser(w http.ResponseWriter, r *http.Request) (*browserSession, bool) {
-	sess, err := s.signedInBrowser(r.Context(), r)
-	if err == nil {
-		return sess, true
+func (s *Server) connectingBrowser(w http.ResponseWriter, r *http.Request) (githubBrowserProof, bool) {
+	proof, ok := r.Context().Value(githubBrowserProofKey{}).(githubBrowserProof)
+	if !ok {
+		writePolicyError(w, missingEndpointPolicy())
 	}
-	if refusalIsBackend(err) {
-		s.refuseBrowserSession(w, err, s.cookiesSecure())
-		return nil, false
-	}
-	renderFlowPage(w, http.StatusUnauthorized, flowPage{
-		Title:       "Sign in to connect GitHub",
-		Message:     "Connecting GitHub needs a signed-in team owner.",
-		ActionHref:  "/login?next=" + url.QueryEscape(githubAppSettingsPath),
-		ActionLabel: "Sign in",
-	})
-	return nil, false
+	return proof, ok
 }
 
 func (s *Server) handleGitHubAppConnect(existing bool) http.HandlerFunc {
@@ -74,7 +67,7 @@ func (s *Server) handleGitHubAppConnect(existing bool) http.HandlerFunc {
 			csrfError(w)
 			return
 		}
-		grant, err := s.githubAppConnectBegin(r.Context(), sess.principal, browserURL(r, githubAppCallbackPath))
+		grant, err := s.githubAppConnectBegin(r.Context(), sess.authorized, browserURL(r, githubAppCallbackPath))
 		if err != nil {
 			s.renderGitHubAppRefusal(w, err)
 			return
@@ -209,7 +202,7 @@ func (s *Server) handleGitHubAppAvailable(w http.ResponseWriter, r *http.Request
 		refuseGitHubAppFlow(w, http.StatusBadRequest, "This connection was not started in this browser. Start again.")
 		return
 	}
-	available, err := s.githubAppAvailable(r.Context(), sess.principal, flow.proof(), browserURL(r, githubAppCallbackPath))
+	available, err := s.githubAppAvailable(r.Context(), sess.authorized, flow.proof(), browserURL(r, githubAppCallbackPath))
 	if err != nil {
 		s.renderGitHubAppRefusal(w, err)
 		return
@@ -251,7 +244,7 @@ func (s *Server) handleGitHubAppSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clearFlowCookie(w, githubAppFlowCookieName, s.cookiesSecure())
-	bound, err := s.githubAppSelect(r.Context(), sess.principal, flow.proof(), flow.Authorization, id)
+	bound, err := s.githubAppSelect(r.Context(), sess.authorized, flow.proof(), flow.Authorization, id)
 	if err != nil {
 		s.renderGitHubAppRefusal(w, err)
 		return
@@ -272,7 +265,7 @@ func (s *Server) handleGitHubAppComplete(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	clearFlowCookie(w, githubAppFlowCookieName, s.cookiesSecure())
-	bound, err := s.githubAppConnectFinish(r.Context(), sess.principal, flow.proof(), flow.InstallationID,
+	bound, err := s.githubAppConnectFinish(r.Context(), sess.authorized, flow.proof(), flow.InstallationID,
 		browserURL(r, githubAppCallbackPath))
 	if err != nil {
 		s.renderGitHubAppRefusal(w, err)
@@ -297,6 +290,11 @@ func refuseGitHubAppFlow(w http.ResponseWriter, status int, message string) {
 func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 	page := flowPage{ActionHref: githubAppSettingsPath, ActionLabel: "Back to GitHub settings"}
 	refused, ok := refusalOf(err)
+	var failure *apierr.Error
+	if !ok && errors.As(err, &failure) {
+		refused = &flowRefusal{status: apierr.Status(failure.Code), message: failure.Message}
+		ok = true
+	}
 	if !ok {
 		s.logger.Error("github app connect", "error", err.Error())
 		page.Title = "GitHub could not be connected"

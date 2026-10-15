@@ -243,7 +243,8 @@ func (s *Server) handleSignUpStatus(w http.ResponseWriter, r *http.Request, _ ca
 	return nil
 }
 
-type signUpSetReq struct {
+// SignUpSettingsChange preserves omitted fields for one atomic settings transaction.
+type SignUpSettingsChange struct {
 	Mode                 *string `json:"mode"`
 	Reason               string  `json:"reason"`
 	HourlyLimit          *int    `json:"hourly_limit"`
@@ -253,13 +254,13 @@ type signUpSetReq struct {
 	FreeTeamMembers      *int    `json:"free_team_members"`
 }
 
-func (req signUpSetReq) limitsChanged() bool {
+func (req SignUpSettingsChange) limitsChanged() bool {
 	return req.HourlyLimit != nil || req.DailyLimit != nil || req.HourlyWarn != nil || req.GitHubMinAccountDays != nil ||
 		req.FreeTeamMembers != nil
 }
 
 func (s *Server) handleSetSignUp(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	var req signUpSetReq
+	var req SignUpSettingsChange
 	if err := decodeJSON(r, &req); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid signup settings"}
 	}
@@ -267,44 +268,17 @@ func (s *Server) handleSetSignUp(w http.ResponseWriter, r *http.Request, authori
 		return &apierr.Error{Code: apierr.BadRequest, Message: "name a mode or at least one limit to change"}
 	}
 	ctx, now := r.Context(), time.Now().UTC()
-	var mode store.SignUpMode
 	if req.Mode != nil {
-		m, err := store.ParseSignUpMode(*req.Mode)
-		if err != nil {
+		if _, err := store.ParseSignUpMode(*req.Mode); err != nil {
 			return &apierr.Error{Code: apierr.BadRequest, Message: "invalid signup mode"}
 		}
-		mode = m
 	}
-	if req.limitsChanged() {
-		g, err := s.operatorSettings.SignUpGate(ctx)
-		if err != nil {
-			return err
-		}
-		limits := g.Limits
-		for _, f := range []struct {
-			in  *int
-			out *int
-		}{
-			{req.HourlyLimit, &limits.HourlyLimit},
-			{req.DailyLimit, &limits.DailyLimit},
-			{req.HourlyWarn, &limits.HourlyWarn},
-			{req.GitHubMinAccountDays, &limits.GitHubMinAccountDays},
-			{req.FreeTeamMembers, &limits.FreeTeamMembers},
-		} {
-			if f.in != nil {
-				*f.out = *f.in
-			}
-		}
-		if _, err := s.operatorSettings.SetSignUpLimits(ctx, limits); err != nil {
-			return operatorSettingsError(err)
-		}
+	writer, err := s.settingsWriter()
+	if err != nil {
+		return err
 	}
-	actor := authorized.Principal.Capability.Subject.ID
-	if mode != "" {
-		if _, err := s.operatorSettings.SetSignUpMode(ctx, mode, req.Reason, actor, now); err != nil {
-			return operatorSettingsError(err)
-		}
-		s.logger.Info("signup.mode_set", "mode", string(mode), "by", actor, "reason", req.Reason)
+	if err := writer.WriteSignUpSettings(ctx, authorized, req); err != nil {
+		return operatorSettingsError(err)
 	}
 	out, err := s.signUpStatus(ctx, now)
 	if err != nil {
@@ -360,23 +334,28 @@ func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request, a
 	if len(req.AccountIDs) > maxWaitlistPage || req.Oldest > maxWaitlistPage {
 		return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("approve at most %d accounts at a time", maxWaitlistPage)}
 	}
-	ctx, now := r.Context(), time.Now().UTC()
+	if req.Oldest < 0 {
+		return invalidEngineBody("oldest must be positive")
+	}
+	key, err := controlIdempotencyKey(r)
+	if err != nil {
+		return err
+	}
+	ctx := r.Context()
 	actor := authorized.Principal.Capability.Subject.ID
-	var approved []store.Account
-	var err error
-	if req.Oldest > 0 {
-		approved, err = s.store.ApproveOldestWaitlisted(ctx, req.Oldest, actor, now)
-	} else {
-		approved, err = s.store.ApproveWaitlisted(ctx, req.AccountIDs, actor, now)
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
+	}
+	approved, err := writer.ConsoleApproveWaitlist(ctx, authorized, req.AccountIDs, req.Oldest, key)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	out := make([]approvedJSON, 0, len(approved))
 	for _, a := range approved {
 		s.logger.Info("signup.approved", "account", a.ID, "by", actor, "team", string(a.ActiveTeam))
 		s.notifyApproved(ctx, a)
 		out = append(out, approvedJSON{ID: a.ID, Email: a.Email, ActiveTeam: string(a.ActiveTeam)})
-	}
-	if err != nil {
-		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"approved": out})
 	return nil

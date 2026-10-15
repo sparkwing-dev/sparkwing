@@ -31,23 +31,23 @@ func TestEveryFrontendAPICallIsAControllerRoute(t *testing.T) {
 	if len(calls) < 80 {
 		t.Fatalf("found %d frontend API calls; the parser has lost track of the call sites", len(calls))
 	}
-	authed, public := New(nil, nil).routers()
+	public := New(nil, nil).routers()
 	for _, c := range calls {
 		key := c.method + " " + c.path
-		if !muxServes(authed, public, c.method, c.path) {
+		if !muxServes(public, c.method, c.path) {
 			t.Errorf("%s: the dashboard calls %s and the controller registers no such route", c.site, strings.TrimSpace(key))
 		}
 	}
 }
 
-func muxServes(authed, public *http.ServeMux, method, path string) bool {
+func muxServes(public *http.ServeMux, method, path string) bool {
 	methods := []string{method}
 	if method == "" {
 		methods = []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}
 	}
 	for _, m := range methods {
 		req := httptest.NewRequest(m, path, nil)
-		for _, mux := range []*http.ServeMux{public, authed} {
+		for _, mux := range []*http.ServeMux{public} {
 			if _, pattern := mux.Handler(req); pattern != "" && pattern != "/" {
 				return true
 			}

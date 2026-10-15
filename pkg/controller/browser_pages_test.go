@@ -3,6 +3,7 @@ package controller_test
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -65,7 +67,7 @@ func TestBrowserPagesNeedASessionWhenTheControllerAuthenticates(t *testing.T) {
 func TestBrowserPagesLeaveTheAPIsOwnRoutesToIt(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{Bundle: pageBundle})
 	rec := f.get("/api/v1/no-such-route", &http.Cookie{Name: "__Host-sw_session", Value: f.sessID})
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"unsupported"`) {
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"not_found"`) {
 		t.Fatalf("unknown API route = %d %s, want the API's 404", rec.Code, rec.Body)
 	}
 	post := httptest.NewRequest(http.MethodPost, dashOrigin+"/webhooks/github-app", strings.NewReader("{}"))
@@ -77,7 +79,7 @@ func TestBrowserPagesLeaveTheAPIsOwnRoutesToIt(t *testing.T) {
 	}
 }
 
-func TestBrowserPagesOnAnOpenControllerNeedNoSignIn(t *testing.T) {
+func TestBrowserPagesRequireSignInBeforeBootstrap(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -87,13 +89,13 @@ func TestBrowserPagesOnAnOpenControllerNeedNoSignIn(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, dashOrigin+"/", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "dashboard shell") {
-		t.Fatalf("open controller page = %d", rec.Code)
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/login?next=") {
+		t.Fatalf("unseeded controller page = %d", rec.Code)
 	}
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, dashOrigin+"/operator", nil))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("operator console on an open controller with no session = %d, want 403", rec.Code)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("operator page without a session = %d, want 303", rec.Code)
 	}
 }
 
@@ -109,19 +111,29 @@ func TestBrowserPagesWithoutABundleNameTheBuildStep(t *testing.T) {
 }
 
 func TestOperatorPageServesOnlyTheOperatorsSession(t *testing.T) {
-	f, operator, owner := operatorFixture(t)
-	page := func(auth string) int {
-		return f.browserSend("GET", auth, "/operator", nil).StatusCode
+	f := newBrowserFixture(t, &controller.Dashboard{Bundle: pageBundle})
+	session := &http.Cookie{Name: "__Host-sw_session", Value: f.sessID}
+	if rec := f.get("/operator", session); rec.Code != http.StatusForbidden {
+		t.Fatalf("unlisted account = %d", rec.Code)
 	}
-	if code := page(owner.auth); code != http.StatusForbidden {
-		t.Errorf("a team owner's /operator = %d, want 403", code)
+	f.srv.WithOperatorAccounts([]string{"alice"})
+	if rec := f.get("/operator", session); rec.Code != http.StatusOK {
+		t.Fatalf("listed account = %d %s", rec.Code, rec.Body)
 	}
-	if code := page(operator.auth); code == http.StatusForbidden || code == http.StatusSeeOther {
-		t.Errorf("the operator's /operator = %d, want the page", code)
+	principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
+	if err != nil {
+		t.Fatal(err)
 	}
-	admin := newBrowserFixture(t, &controller.Dashboard{Bundle: pageBundle})
-	if rec := admin.get("/operator", &http.Cookie{Name: "__Host-sw_session", Value: admin.sessID}); rec.Code != http.StatusForbidden {
-		t.Errorf("an admin password session's /operator = %d, want 403", rec.Code)
+	raw, _, err := f.st.CreateCapabilitySession(t.Context(), principal.Capability.Prefix, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.get("/operator", &http.Cookie{Name: "__Host-sw_session", Value: raw}); rec.Code != http.StatusForbidden {
+		t.Fatalf("capability session = %d", rec.Code)
+	}
+	f.srv.WithOperatorAccounts(nil)
+	if rec := f.get("/operator", session); rec.Code != http.StatusForbidden {
+		t.Fatalf("removed operator = %d", rec.Code)
 	}
 }
 
@@ -135,8 +147,10 @@ func TestBrowserLocalModeServesPagesWithoutSignIn(t *testing.T) {
 	}
 	login := httptest.NewRequest(http.MethodPost, dashOrigin+"/login", strings.NewReader("username=alice&password=correct-horse-battery"))
 	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if rec := f.serve(login); setCookie(rec, "__Host-sw_session") != nil || setCookie(rec, "sw_session") != nil {
-		t.Fatal("local mode signed a browser in")
+	for _, cookie := range f.serve(login).Result().Cookies() {
+		if cookie.Name == "__Host-sw_session" || cookie.Name == "sw_session" {
+			t.Fatal("local mode signed a browser in")
+		}
 	}
 }
 
@@ -214,15 +228,31 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 	t.Fatalf("stream ended before the late event: %v", scanner.Err())
 }
 
-// A laptop dashboard keeps node logs in the run directory, so deleting the run
-// removes that directory and leaves its neighbors; an id that is not a single
-// path segment is refused rather than resolved under the runs tree.
+type browserRunDeleter struct {
+	controller.TeamWriter
+	tenant *store.Tenant
+	seen   capability.Authorized
+}
+
+func (d *browserRunDeleter) Team() store.Team { return d.tenant.Team() }
+func (d *browserRunDeleter) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized) error {
+	d.seen = a
+	return nil
+}
+
 func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
 	p := paths.PathsAt(t.TempDir())
 	f := newBrowserFixture(t, &controller.Dashboard{Local: true, Paths: p})
 	ctx := context.Background()
-	for _, id := range []string{"r1", "r2", `a\b`} {
-		if err := f.st.CreateRun(ctx, store.Run{ID: id, Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {
+	tenant, err := f.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &browserRunDeleter{tenant: tenant}
+	f.srv.WithTeamWriter(func(context.Context, store.Team) (controller.TeamWriter, error) { return writer, nil })
+	f.h = f.srv.Handler()
+	for i, id := range []string{"r1", "r2", `a\b`} {
+		if _, err := f.st.DB().ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES ('default',?,?,'demo','success',?,'request',1,'github.com/acme/app','host','execute',?,'alice',1,2,'r30',30)`, id, i+1, []byte(`{}`), []byte(`[]`)); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.MkdirAll(filepath.Join(p.RunDir(id), "logs"), 0o755); err != nil {
@@ -237,6 +267,9 @@ func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
 	if code := del("r1"); code != http.StatusNoContent {
 		t.Fatalf("delete r1 = %d, want 204", code)
 	}
+	if writer.seen.Target.RunID != "r1" || writer.seen.Target.Team != string(store.DefaultTeam) || writer.seen.Principal.Capability.Subject.ID != "alice" {
+		t.Fatalf("writer authority = %+v", writer.seen)
+	}
 	if _, err := os.Stat(p.RunDir("r1")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("r1's directory after the delete: %v, want it gone", err)
 	}
@@ -249,7 +282,7 @@ func TestDeleteRunOnALocalDashboardRemovesTheRunDirectory(t *testing.T) {
 	if _, err := os.Stat(p.RunDir(`a\b`)); err != nil {
 		t.Fatalf("the refused id's directory: %v, want it left alone", err)
 	}
-	if _, err := f.st.GetRun(ctx, `a\b`); err != nil {
+	if _, err := tenant.ReadRun(ctx, `a\b`); err != nil {
 		t.Fatalf("the refused id's run row: %v, want it kept", err)
 	}
 }

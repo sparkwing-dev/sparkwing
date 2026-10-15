@@ -33,16 +33,23 @@ type PaymentConfig struct {
 	WebhookSecretFile string
 }
 
-// PaymentEventKind limits automated writes to outcomes of committed checkouts.
+// PaymentEventKind identifies a verified provider outcome.
 type PaymentEventKind string
 
 const (
 	PaymentCheckoutPaid    PaymentEventKind = "checkout_paid"
 	PaymentCheckoutExpired PaymentEventKind = "checkout_expired"
 	PaymentCheckoutFailed  PaymentEventKind = "checkout_failed"
+	PaymentCardSetup       PaymentEventKind = "card_setup"
+	PaymentCardPaid        PaymentEventKind = "card_paid"
+	PaymentCardFailed      PaymentEventKind = "card_failed"
+	PaymentRefund          PaymentEventKind = "refund"
+	PaymentWarningEvent    PaymentEventKind = "warning"
+	PaymentDisputeOpened   PaymentEventKind = "dispute_opened"
+	PaymentDisputeClosed   PaymentEventKind = "dispute_closed"
 )
 
-// PaymentEventPolicy maps authenticated provider events to checkout settlement outcomes.
+// PaymentEventPolicy maps provider types to verified settlement outcomes.
 type PaymentEventPolicy struct {
 	ProviderType string
 	Kind         PaymentEventKind
@@ -56,10 +63,19 @@ var PaymentEventPolicies = []PaymentEventPolicy{
 	{"checkout.session.async_payment_succeeded", PaymentCheckoutPaid, true},
 	{"checkout.session.async_payment_failed", PaymentCheckoutFailed, false},
 	{"checkout.session.expired", PaymentCheckoutExpired, false},
+	{"setup_intent.succeeded", PaymentCardSetup, false},
+	{"payment_intent.succeeded", PaymentCardPaid, false},
+	{"payment_intent.payment_failed", PaymentCardFailed, false},
+	{"refund.created", PaymentRefund, false},
+	{"refund.updated", PaymentRefund, false},
+	{"refund.failed", PaymentRefund, false},
+	{"radar.early_fraud_warning.created", PaymentWarningEvent, false},
+	{"radar.early_fraud_warning.updated", PaymentWarningEvent, false},
+	{"charge.dispute.created", PaymentDisputeOpened, false},
+	{"charge.dispute.closed", PaymentDisputeClosed, false},
 }
 
-// PaymentEvent carries verified provider facts, never a team or caller-selected credit amount.
-// CheckoutID is the provider session ID recorded on the committed checkout.
+// PaymentEvent carries provider facts whose team and ledger effect come from committed records.
 type PaymentEvent struct {
 	EventID     string
 	CheckoutID  string
@@ -68,6 +84,18 @@ type PaymentEvent struct {
 	AmountMinor int64
 	Mode        PaymentMode
 	Kind        PaymentEventKind
+	ObjectID    string
+	CustomerID  string
+	MethodID    string
+	ChargeID    string
+	Status      string
+	Reason      string
+	DeclineCode string
+	Fingerprint string
+	Brand       string
+	Last4       string
+	Created     int64
+	Actionable  bool
 }
 
 // VerifiedPaymentEvent can originate only from payment signature verification.
@@ -113,7 +141,7 @@ func NewPaymentAuthenticator(config PaymentConfig) (PaymentAuthenticator, error)
 	if !strings.HasPrefix(secret, "whsec_") || len(secret) == len("whsec_") {
 		return nil, errors.New("invalid payment webhook secret")
 	}
-	return &paymentAuthenticator{mode: config.Mode, secret: []byte(secret), now: time.Now}, nil
+	return &paymentAuthenticator{mode: config.Mode, secret: []byte(secret), now: time.Now, provider: newPaymentProvider(key)}, nil
 }
 
 func readPaymentSecret(path string) (string, error) {
@@ -134,9 +162,10 @@ func readPaymentSecret(path string) (string, error) {
 }
 
 type paymentAuthenticator struct {
-	mode   PaymentMode
-	secret []byte
-	now    func() time.Time
+	mode     PaymentMode
+	secret   []byte
+	now      func() time.Time
+	provider *paymentProvider
 }
 
 func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentation PaymentPresentation) (*VerifiedPaymentEvent, error) {
@@ -150,6 +179,7 @@ func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentat
 		ID       string `json:"id"`
 		Object   string `json:"object"`
 		Type     string `json:"type"`
+		Created  int64  `json:"created"`
 		LiveMode *bool  `json:"livemode"`
 		Data     struct {
 			Object json.RawMessage `json:"object"`
@@ -163,7 +193,10 @@ func (a *paymentAuthenticator) VerifyPaymentEvent(ctx context.Context, presentat
 	}
 	for _, policy := range PaymentEventPolicies {
 		if policy.ProviderType == event.Type {
-			return a.checkoutEvent(event.ID, event.Data.Object, policy)
+			if strings.HasPrefix(policy.ProviderType, "checkout.session.") {
+				return a.checkoutEvent(event.ID, event.Data.Object, policy)
+			}
+			return a.providerEvent(ctx, event.ID, event.Created, event.Data.Object, policy)
 		}
 	}
 	return nil, nil
@@ -219,14 +252,14 @@ func (a *paymentAuthenticator) validSignature(p PaymentPresentation) bool {
 
 func (a *paymentAuthenticator) checkoutEvent(id string, body []byte, policy PaymentEventPolicy) (*VerifiedPaymentEvent, error) {
 	var session struct {
-		ID            string          `json:"id"`
-		Object        string          `json:"object"`
-		Mode          string          `json:"mode"`
-		LiveMode      *bool           `json:"livemode"`
-		PaymentStatus string          `json:"payment_status"`
-		PaymentIntent json.RawMessage `json:"payment_intent"`
-		Currency      string          `json:"currency"`
-		Amount        *int64          `json:"amount_total"`
+		ID            string           `json:"id"`
+		Object        string           `json:"object"`
+		Mode          string           `json:"mode"`
+		LiveMode      *bool            `json:"livemode"`
+		PaymentStatus string           `json:"payment_status"`
+		PaymentIntent paymentReference `json:"payment_intent"`
+		Currency      string           `json:"currency"`
+		Amount        *int64           `json:"amount_total"`
 	}
 	if err := json.Unmarshal(body, &session); err != nil || session.ID == "" || session.Object != "checkout.session" || session.Mode != "payment" ||
 		session.LiveMode == nil || *session.LiveMode != (a.mode == PaymentLive) || session.Amount == nil || *session.Amount < 0 || !validCurrency(session.Currency) {
@@ -238,18 +271,7 @@ func (a *paymentAuthenticator) checkoutEvent(id string, body []byte, policy Paym
 	if policy.Kind != PaymentCheckoutPaid && session.PaymentStatus == "paid" {
 		return nil, invalidPaymentEvent()
 	}
-	var paymentID string
-	if string(session.PaymentIntent) != "null" && len(session.PaymentIntent) > 0 {
-		if err := json.Unmarshal(session.PaymentIntent, &paymentID); err != nil {
-			var expanded struct {
-				ID string `json:"id"`
-			}
-			if err := json.Unmarshal(session.PaymentIntent, &expanded); err != nil {
-				return nil, invalidPaymentEvent()
-			}
-			paymentID = expanded.ID
-		}
-	}
+	paymentID := string(session.PaymentIntent)
 	if policy.Kind == PaymentCheckoutPaid && (paymentID == "" || *session.Amount == 0) {
 		return nil, invalidPaymentEvent()
 	}

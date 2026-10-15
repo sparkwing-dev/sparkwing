@@ -10,8 +10,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -157,22 +158,17 @@ func (s *Server) resolveAutomationRepository(ctx context.Context, tenant *store.
 	return in, repo, nil
 }
 
-func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	role := store.RoleReader
-	if r.Method != http.MethodGet {
-		role = store.RoleOwner
-	}
-	p, tenant, ok := s.teamMember(w, r, role)
-	if !ok {
-		return
+	tenant, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, errors.New("invalid automation query"))
-		return
+		return githubAppRequestError(http.StatusBadRequest, errors.New("invalid automation query"))
 	}
 	queryKey := "repository"
 	if r.Method == http.MethodDelete {
@@ -180,45 +176,43 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 	}
 	for key, values := range query {
 		if key != queryKey || len(values) != 1 || (r.Method == http.MethodPut) {
-			writeError(w, http.StatusBadRequest, errors.New("invalid automation query"))
-			return
+			return githubAppRequestError(http.StatusBadRequest, errors.New("invalid automation query"))
 		}
 	}
 	if r.Method == http.MethodDelete {
 		id, err := strconv.ParseInt(r.URL.Query().Get("repository_id"), 10, 64)
 		if err != nil || id <= 0 {
-			writeError(w, http.StatusBadRequest, errors.New("repository_id must be a positive integer"))
-			return
+			return githubAppRequestError(http.StatusBadRequest, errors.New("repository_id must be a positive integer"))
 		}
-		if err := tenant.DeleteGitHubAppAutomation(r.Context(), id); err != nil {
-			s.writeInternalError(w, r, "revoke repository automation", err)
-			return
+		writer, err := s.githubAppWriter(r, a)
+		if err != nil {
+			return err
+		}
+		if err := writer.DeleteAuthorizedGitHubAutomation(r.Context(), a, id); err != nil {
+			return engineLookupError(err)
 		}
 		w.WriteHeader(http.StatusNoContent)
-		return
+		return nil
 	}
 	slug := r.URL.Query().Get("repository")
 	if r.Method == http.MethodPut {
 		var req struct {
 			Repository string `json:"repository"`
 		}
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
+		if err := decodeEngineRequest(r, &req); err != nil {
+			return githubAppRequestError(http.StatusBadRequest, err)
 		}
 		slug = req.Repository
 	} else if slug == "" {
 		if r.URL.RawQuery != "" {
-			writeError(w, http.StatusBadRequest, errors.New("repository must be owner/name"))
-			return
+			return githubAppRequestError(http.StatusBadRequest, errors.New("repository must be owner/name"))
 		}
 		list, err := tenant.GitHubAppAutomations(r.Context())
 		if err != nil {
-			s.writeInternalError(w, r, "list repository automation", err)
-			return
+			return engineLookupError(err)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"automation": list})
-		return
+		return nil
 	}
 	in, repo, err := s.resolveAutomationRepository(r.Context(), tenant, slug)
 	if err != nil {
@@ -230,26 +224,28 @@ func (s *Server) handleGitHubAppAutomation(w http.ResponseWriter, r *http.Reques
 			status = http.StatusNotFound
 			err = errors.New("no installation this team holds covers " + slug)
 		}
-		writeError(w, status, err)
-		return
+		return githubAppRequestError(status, err)
 	}
 	out, err := s.githubAppAutomationPreview(r.Context(), tenant, in, repo)
 	if err != nil {
-		s.writeInternalError(w, r, "discover repository automation", err)
-		return
+		return engineLookupError(err)
 	}
 	if r.Method == http.MethodPut {
 		if out.Status != "ready" {
 			writeJSON(w, http.StatusUnprocessableEntity, out)
-			return
+			return nil
 		}
-		if err := tenant.PutGitHubAppAutomation(r.Context(), store.GitHubAppAutomation{RepositoryID: repo.ID, Repository: repo.Slug(), InstallationID: in.InstallationID, EnabledBy: p.AccountID}, time.Now()); err != nil {
-			s.writeInternalError(w, r, "enable repository automation", err)
-			return
+		writer, err := s.githubAppWriter(r, a)
+		if err != nil {
+			return err
+		}
+		if err := writer.PutAuthorizedGitHubAutomation(r.Context(), a, store.GitHubAppAutomation{RepositoryID: repo.ID, Repository: repo.Slug(), InstallationID: in.InstallationID}); err != nil {
+			return engineLookupError(err)
 		}
 		out.Enabled = true
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 func automationSubscribes(decl githubAppAutomationPipeline, event, action string, intake githubAppIntake) bool {

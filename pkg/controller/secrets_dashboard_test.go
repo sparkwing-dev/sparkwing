@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -181,12 +180,12 @@ func TestSecrets_MaskedValuesReachOnlyTheOperatorBearer(t *testing.T) {
 	f := newTenancyFixture(t, openSQLiteStore(t))
 	now := time.Now().UTC()
 	ownerRaw, _, err := f.teamA.CreateToken(context.Background(), "a-owner", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead, controller.ScopeTeamAdmin}, 0, now)
+		[]string{"runs.read", "team.admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ownerToken := "Bearer " + ownerRaw
-	adminRaw, _, err := f.st.CreateToken("ops", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	adminRaw, _, err := f.st.CreateToken("ops", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatal(err)
 	}

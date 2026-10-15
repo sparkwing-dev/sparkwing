@@ -17,7 +17,7 @@ import (
 
 func (f dispatchRouteFixture) admin(t *testing.T) string {
 	t.Helper()
-	raw, _, err := f.st.CreateToken("admin-"+t.Name(), store.TokenKindService, []string{ScopeAdmin}, 0, time.Now())
+	raw, _, err := f.st.CreateToken("admin-"+t.Name(), store.TokenKindService, []string{"admin"}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

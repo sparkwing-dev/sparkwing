@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -48,9 +47,7 @@ func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := controller.New(st, nil).WithAuthenticator(
-		controller.NewAuthenticator(st, time.Minute),
-	)
+	srv := controller.New(st, nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil))
 	var parsed apierr.Envelope

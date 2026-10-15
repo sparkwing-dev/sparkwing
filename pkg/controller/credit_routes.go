@@ -56,6 +56,7 @@ func (s *Server) creditReader(ctx context.Context, team string) (CreditReader, e
 
 func (s *Server) creditEndpoints() []Endpoint {
 	return []Endpoint{
+		{Method: "GET", Pattern: "/api/v1/credits/settings", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreditsSettingsShow},
 		{Method: "GET", Pattern: "/api/v1/credits", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreditsShow},
 		{Method: "GET", Pattern: "/api/v1/credits/history", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreditsHistory},
 	}

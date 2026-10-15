@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -19,9 +23,10 @@ import (
 const testIdleWindow = 5 * time.Minute
 
 func namedClaimRequest(runner string) *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/nodes/claim",
-		strings.NewReader(`{"holder_id":"`+runner+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runners/claim", strings.NewReader(`{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`))
 	req.Header.Set("Content-Type", "application/json")
+	secret := sha256.Sum256([]byte("advice"))
+	req.Header.Set("Authorization", "Bearer "+capability.ControllerPrefix+base64.RawURLEncoding.EncodeToString(secret[:]))
 	req.Header.Set(store.RunnerIdentityHeader, runner)
 	return req
 }
@@ -37,7 +42,7 @@ func TestClaimPollAdvice_EnforcementRefusesAnEarlyPoll(t *testing.T) {
 
 	advised := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(advised, claimNodeRequest())
-	if advised.Code != http.StatusNoContent {
+	if advised.Code != http.StatusOK {
 		t.Fatalf("first claim: status=%d want 204", advised.Code)
 	}
 	if got := advised.Header().Get(store.ClaimPollAfterHeader); got != "5" {
@@ -63,7 +68,7 @@ func TestClaimPollAdvice_EnforcementIsOffUntilAskedFor(t *testing.T) {
 	for attempt := range 2 {
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, claimNodeRequest())
-		if rec.Code != http.StatusNoContent {
+		if rec.Code != http.StatusOK {
 			t.Fatalf("claim %d: status=%d want 204 on a controller that enforces nothing", attempt, rec.Code)
 		}
 	}
@@ -81,7 +86,7 @@ func TestClaimPollAdvice_EnforcementHoldsOffWhileTheSuggestionIsStillWidening(t 
 	for attempt := range 2 {
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, claimNodeRequest())
-		if rec.Code != http.StatusNoContent {
+		if rec.Code != http.StatusOK {
 			t.Fatalf("claim %d: status=%d, want 204 while the suggestion is still widening", attempt, rec.Code)
 		}
 	}
@@ -93,14 +98,14 @@ func TestClaimPollAdvice_WorkHandedOutLiftsTheRefusal(t *testing.T) {
 
 	first := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(first, claimNodeRequest())
-	if first.Code != http.StatusNoContent {
+	if first.Code != http.StatusOK {
 		t.Fatalf("first claim: status=%d want 204", first.Code)
 	}
 
 	srv.recordQueueActivity(time.Now())
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, claimNodeRequest())
-	if rec.Code != http.StatusNoContent {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 204: a runner was held off a queue that has since filled", rec.Code)
 	}
 }
@@ -115,7 +120,7 @@ func TestClaimPollAdvice_TwoRunnersOnOneHostAreBothAdmitted(t *testing.T) {
 	for _, runner := range []string{"runner:host-a:11", "runner:host-a:12"} {
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, namedClaimRequest(runner))
-		if rec.Code != http.StatusNoContent {
+		if rec.Code != http.StatusOK {
 			t.Errorf("%s: status=%d, want 204; two runners on one host are two runners", runner, rec.Code)
 		}
 	}
@@ -135,7 +140,7 @@ func TestClaimPollAdvice_AFloodOfRunnerNamesLeavesTheGateUp(t *testing.T) {
 
 	first := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(first, fromClient(namedClaimRequest("runner:real:1"), "192.0.2.1:9000"))
-	if first.Code != http.StatusNoContent {
+	if first.Code != http.StatusOK {
 		t.Fatalf("first claim: status=%d want 204", first.Code)
 	}
 

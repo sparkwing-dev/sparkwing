@@ -11,9 +11,9 @@ import (
 
 func TestCacheGrantRouteIsAbsent(t *testing.T) {
 	server := &Server{}
-	authed, public := server.routers()
+	public := server.routers()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run/cache-grant", nil)
-	for _, mux := range []*http.ServeMux{authed, public} {
+	for _, mux := range []*http.ServeMux{public} {
 		if _, pattern := mux.Handler(request); pattern != "" {
 			t.Errorf("removed cache grant route resolves to %s", pattern)
 		}
@@ -21,7 +21,7 @@ func TestCacheGrantRouteIsAbsent(t *testing.T) {
 }
 
 func TestServicesDoNotAnnounceRemovedDataRoutes(t *testing.T) {
-	server := &Server{dashboardURL: "https://controller.invalid", directUploads: &directUploadS3{}}
+	server := &Server{dashboardURL: "https://controller.invalid", s3Logs: &s3LogStorage{}}
 	response := httptest.NewRecorder()
 	if err := server.handleServices(response, httptest.NewRequest(http.MethodGet, "/api/v1/services", nil), capability.Authorized{}); err != nil {
 		t.Fatal(err)
