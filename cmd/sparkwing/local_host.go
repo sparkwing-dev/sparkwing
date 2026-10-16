@@ -16,6 +16,6 @@ func newLocalNativeServices(ctx context.Context, home string, owned *store.Store
 	}
 	return localcontroller.NativeServices(ctx, localcontroller.NativeConfig{
 		Home: home, Version: installedVersion(), Store: binding.Tenant, Parent: owned, Bindings: owned,
-		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: options,
+		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: options, Local: func(store.NodeRow) bool { return true },
 	})
 }

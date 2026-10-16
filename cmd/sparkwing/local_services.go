@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -92,7 +95,7 @@ func openLocalController(ctx context.Context, home string) (wingd.LocalControlle
 	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
 }
 
-func bindLocalController(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
+func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ localcontroller.Services, err error) {
 	keyring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
 	if err != nil {
 		return localcontroller.Services{}, err
@@ -108,12 +111,30 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (localc
 	}
 	b.Controller.RunnerPolicy = controller.SignedRunnerAdmission{Resolver: engines}
 	b.Controller.VersionPolicy = &controller.SignedEngineVersionPolicy{Resolver: engines}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return localcontroller.Services{}, err
+	}
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(b.Home, "data"), Endpoint: wingdclient.APIBaseURL, SigningKey: key})
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, objects.Close())
+		}
+	}()
 	claimant, err := localcontroller.NewClaimant(b.Store)
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, claimant.Close())
+		}
+	}()
 	b.Store.SetClaimProfileResolver(claimant)
-	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithSecretsCipher(cipher).
+	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithSecretsCipher(cipher).WithDataObjects(objects).
 		WithDashboard(controller.Dashboard{Local: true, Version: installedVersion(), Paths: paths.PathsAt(b.Home), Bundle: web.BundleFS()})
 	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(b.Home, "environments"))
 	if err != nil {
@@ -123,11 +144,13 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (localc
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
+	server.WithLocalSessions(paths.PathsAt(b.Home).SessionLedgerDir())
 	server.WithLocalSchedules(schedules, func(ctx context.Context, root, pipeline string, environment []string) (crons.Proof, error) {
 		return proveLocalSchedule(ctx, b.Home, root, pipeline, environment)
 	}, snapshots)
 	return localcontroller.Services{
-		State: state, HTTP: server.HTTP(), Close: claimant.Close,
+		State: state, HTTP: server.HTTP(), Close: func() error { return errors.Join(claimant.Close(), objects.Close()) },
+		Maintain: server.MaintainStorage,
 		Runner: runners.StoreRunnerConfig{
 			Bearer:          claimant.Bearer,
 			Loop:            runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},

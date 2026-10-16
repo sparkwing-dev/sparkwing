@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -499,4 +501,46 @@ func TestLocalRuntimeLoadsJevKeyUnderElection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLocalRuntimeReadinessDoesNotWaitForConsumerPreparation(t *testing.T) {
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	signal.Stop(interrupt)
+	synctest.Test(t, func(t *testing.T) {
+		preparing := make(chan struct{})
+		f := &runtimeControllerFixture{background: func(ctx context.Context, _ func(LocalActivity) error) error {
+			close(preparing)
+			<-ctx.Done()
+			return nil
+		}}
+		r := newRuntimeFixture(t, f)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1"}) }()
+		t.Cleanup(func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		})
+		<-preparing
+		ready := make(chan LocalStatus, 1)
+		go func() {
+			status, err := r.AwaitReady(ctx)
+			if err != nil {
+				t.Error(err)
+			}
+			ready <- status
+		}()
+		synctest.Wait()
+		select {
+		case status := <-ready:
+			if !status.Running {
+				t.Fatal("controller is not ready during consumer preparation")
+			}
+		default:
+			t.Fatal("controller readiness waits on consumer preparation")
+		}
+	})
 }

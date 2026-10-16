@@ -121,6 +121,36 @@ func (l *processLifecycle) Stop(ctx context.Context) error {
 	return l.LocalLifecycle.Stop(ctx)
 }
 
+func (l *processLifecycle) InstallController(ctx context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+	if err := l.lock(ctx); err != nil {
+		return wingd.LocalStatus{}, err
+	}
+	defer func() { <-l.gate }()
+	opts, err := l.options(opts)
+	if err != nil {
+		return wingd.LocalStatus{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, daemonStartupBudget(Options{Home: opts.Home, Version: opts.Version}))
+	defer cancel()
+	wait := newRetry("claim service handoff", 0)
+	for {
+		release, claimed, err := wingd.ClaimDaemonStart(opts.Home)
+		if err != nil {
+			return wingd.LocalStatus{}, err
+		}
+		if claimed {
+			defer release()
+			break
+		}
+		if err := wait.wait(ctx, nil); err != nil {
+			return wingd.LocalStatus{}, err
+		}
+	}
+	l.control.awaitManaged = true
+	defer func() { l.control.awaitManaged = false }()
+	return l.LocalLifecycle.InstallController(ctx, opts)
+}
+
 func ensureLocalProcess(ctx context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {
 	if opts.Standalone || !filepath.IsAbs(opts.Executable) || strings.TrimSpace(opts.Version) == "" {
 		return wingd.LocalStatus{}, errors.New("wingd/client: detached startup requires an absolute executable and version")
@@ -137,17 +167,7 @@ func ensureLocalProcess(ctx context.Context, opts wingd.LocalStartOptions) (wing
 	if err := cl.Close(); err != nil {
 		return wingd.LocalStatus{}, err
 	}
-	wait := newRetry("wait for local controller readiness", 0)
-	for {
-		status, err := QueryLocalController(ctx, opts.Home)
-		if err == nil && status.Running {
-			return status, nil
-		}
-		if err != nil && !errors.Is(err, ErrNoDaemon) {
-			return wingd.LocalStatus{}, err
-		}
-		if err := wait.wait(ctx, err); err != nil {
-			return wingd.LocalStatus{}, err
-		}
-	}
+	return awaitLocalReady(ctx, func(ctx context.Context) (wingd.LocalStatus, error) {
+		return QueryLocalController(ctx, opts.Home)
+	})
 }

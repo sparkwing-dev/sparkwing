@@ -18,6 +18,7 @@ import (
 type LocalHostClient struct {
 	transport *engineClient
 	run       string
+	node      string
 	mu        sync.Mutex
 	nodes     map[string]localNodeBearer
 	closed    bool
@@ -26,6 +27,7 @@ type LocalHostClient struct {
 type localNodeBearer struct {
 	raw        string
 	prefix     string
+	unit       string
 	generation int64
 }
 
@@ -41,11 +43,29 @@ func NewLocalHostClient(options EngineOptions, runID string) (*LocalHostClient, 
 	return &LocalHostClient{transport: transport, run: runID, nodes: make(map[string]localNodeBearer)}, nil
 }
 
+// NewNodeHostClient confines private state and authority reads to one awarded node.
+func NewNodeHostClient(options EngineOptions, runID, nodeID string) (*LocalHostClient, error) {
+	if nodeID == "" {
+		return nil, errors.New("node host requires its awarded node")
+	}
+	c, err := NewLocalHostClient(options, runID)
+	if err == nil {
+		c.node = nodeID
+	}
+	return c, err
+}
+
 func (c *LocalHostClient) request(ctx context.Context, method, suffix, node string, body, result any) error {
 	if err := c.live(); err != nil {
 		return err
 	}
 	pattern, path := "/api/v1/runs/{run}/local-host", "/api/v1/runs/"+url.PathEscape(c.run)+"/local-host"
+	if c.node != "" {
+		if node != "" && node != c.node {
+			return localHostClientRefusal()
+		}
+		node = c.node
+	}
 	if node != "" {
 		pattern, path = pattern+"/nodes/{job}", path+"/nodes/"+url.PathEscape(node)
 	}
@@ -94,7 +114,7 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref store.NodeRef) (stor
 // TransitionRun submits an edge while the server derives its actor and fence.
 func (c *LocalHostClient) TransitionRun(ctx context.Context, change store.RunTransition) (store.Applied, error) {
 	var result store.Applied
-	if change.RunID != c.run {
+	if c.node != "" || change.RunID != c.run {
 		return result, localHostClientRefusal()
 	}
 	body := localhostwire.LocalRunTransition{To: change.To, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
@@ -106,7 +126,7 @@ func (c *LocalHostClient) TransitionRun(ctx context.Context, change store.RunTra
 func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish store.FinishRunRequest) (store.Applied, error) {
 	var result store.Applied
 	change := finish.Transition
-	if change.RunID != c.run || finish.Unit != change.Actor.Owner {
+	if c.node != "" || change.RunID != c.run || finish.Unit != change.Actor.Owner {
 		return result, localHostClientRefusal()
 	}
 	body := localhostwire.LocalRunTransition{To: change.To, Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError, OwnerPolicy: change.OwnerPolicy}
@@ -121,7 +141,7 @@ func (c *LocalHostClient) TransitionNode(ctx context.Context, change store.NodeT
 		return result, localHostClientRefusal()
 	}
 	selected := c
-	if change.Actor.Kind == store.ActorHolder {
+	if change.Actor.Kind == store.ActorHolder && c.node == "" {
 		transport, award, err := c.nodeTransport(ctx, change.Ref)
 		if err != nil {
 			return result, err
@@ -177,17 +197,21 @@ func (c *LocalHostClient) Principal(ctx context.Context) (capability.Principal, 
 	if err != nil {
 		return capability.Principal{}, err
 	}
-	route, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/heartbeat")
+	pattern := "/api/v1/runs/{run}/heartbeat"
+	if c.node != "" {
+		pattern = "/api/v1/runs/{run}/jobs/{job}/heartbeat"
+	}
+	route, ok := capability.LookupRoute("POST", pattern)
 	if !ok {
 		return capability.Principal{}, errors.New("owner heartbeat policy is unavailable")
 	}
-	authenticated, err := capability.NewAuthenticator(c).Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: raw, Evidence: capability.RequestEvidence{Target: capability.Target{RunID: c.run}}}, route)
+	authenticated, err := capability.NewAuthenticator(c).Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: raw, Evidence: capability.RequestEvidence{Target: capability.Target{RunID: c.run, NodeID: c.node}}}, route)
 	return authenticated.Principal, err
 }
 
 // AdoptClaim retains a separately awarded node bearer after fresh ownership checks.
 func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.ReconciledNode) error {
-	if claim.Kind != store.Execute || claim.Claim == nil || len(claim.Bearer) == 0 || claim.Node.Ref.RunID != c.run || claim.Node.Ref.NodeID == "" {
+	if c.node != "" || claim.Kind != store.Execute || claim.Claim == nil || len(claim.Bearer) == 0 || claim.Node.Ref.RunID != c.run || claim.Node.Ref.NodeID == "" {
 		return localHostClientRefusal()
 	}
 	owner, err := c.Principal(ctx)
@@ -220,11 +244,17 @@ func (c *LocalHostClient) AdoptClaim(ctx context.Context, claim store.Reconciled
 	if c.closed {
 		return errors.New("local host client is closed")
 	}
-	c.nodes[row.Ref.NodeID] = localNodeBearer{raw: raw, prefix: row.CapabilityPrefix, generation: row.Generation}
+	c.nodes[row.Ref.NodeID] = localNodeBearer{raw: raw, prefix: row.CapabilityPrefix, generation: row.Generation, unit: principal.Capability.UnitID}
 	return nil
 }
 
 func (c *LocalHostClient) nodeTransport(ctx context.Context, ref store.NodeRef) (*engineClient, localNodeBearer, error) {
+	if c.node != "" {
+		if ref.RunID != c.run || ref.NodeID != c.node {
+			return nil, localNodeBearer{}, localHostClientRefusal()
+		}
+		return c.transport, localNodeBearer{}, c.live()
+	}
 	if ref.RunID != c.run || ref.NodeID == "" {
 		return nil, localNodeBearer{}, localHostClientRefusal()
 	}
@@ -245,6 +275,26 @@ func (c *LocalHostClient) nodeTransport(ctx context.Context, ref store.NodeRef) 
 	transport := *c.transport
 	transport.bearer = func(context.Context) (string, error) { return award.raw, c.live() }
 	return &transport, award, nil
+}
+
+// RenewNode renews the node award independently of its hosting owner.
+func (c *LocalHostClient) RenewNode(ctx context.Context, ref store.NodeRef, actor store.Actor, executing bool) (store.LeaseBeat, error) {
+	transport, award, err := c.nodeTransport(ctx, ref)
+	if err != nil {
+		return store.LeaseBeat{}, err
+	}
+	if c.node != "" {
+		principal, err := c.Principal(ctx)
+		if err != nil {
+			return store.LeaseBeat{}, err
+		}
+		award.prefix, award.generation, award.unit = principal.Capability.Prefix, principal.Capability.Binding.Generation, principal.Capability.UnitID
+	}
+	if award.unit == "" || actor.CapabilityPrefix != award.prefix || actor.Generation != award.generation {
+		return store.LeaseBeat{}, localHostClientRefusal()
+	}
+	response, err := transport.Renew(ctx, award.unit, controllerwire.RenewalRequest{Executing: executing})
+	return store.LeaseBeat{ExpiresAt: response.ExpiresAt, CancelRequested: response.CancelRequested, CancelReason: response.CancelReason, Watched: response.Watched, WatchedNodes: response.WatchedJobs}, err
 }
 
 // NodeController selects a retained current node bearer for execution reports and renewal.

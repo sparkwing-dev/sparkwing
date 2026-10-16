@@ -24,6 +24,7 @@ import (
 // RunnerOptions carries machine settings to the shared runtime composition.
 type RunnerOptions struct {
 	Config           userconfig.RunnerConfig
+	ConfigPath       string
 	Loop             runners.LoopConfig
 	Heartbeat, Lease time.Duration
 	WarmModules      []string
@@ -63,6 +64,15 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	options, err := runnerOptions(config, fs, version)
 	if err != nil {
 		return err
+	}
+	if command == "start" {
+		options.ConfigPath = textFlag(fs, "config")
+		if options.ConfigPath == "" {
+			options.ConfigPath, err = userconfig.Path()
+			if err != nil {
+				return err
+			}
+		}
 	}
 	if enabled(fs, "github-actions") {
 		if err := cli.authorizeActions(ctx, fs, &options); err != nil {

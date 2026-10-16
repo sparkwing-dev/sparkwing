@@ -29,7 +29,7 @@ func (s *Server) HTTP() wingd.LocalHTTP {
 			return capability.Subject{}
 		})
 		router := s.registeredRouters()
-		s.registerControllerEndpoints(router, s.localHostEndpoints())
+		s.registerControllerEndpoints(router, []Endpoint{{Method: "POST", Pattern: "/api/v1/local/doctor", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.localDoctor}})
 		router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			policy := s.routeProbe()
 			writeRouteMiss(w, allowedRouteMethods(policy, r, routeProbeMethods))

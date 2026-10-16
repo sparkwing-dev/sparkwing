@@ -8,12 +8,16 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -54,10 +58,17 @@ func nativeConfigFixture(t testing.TB) (NativeConfig, *nativeState) {
 		Request: runspec.SealedRequest{Request: runspec.Request{Team: string(store.DefaultTeam), Env: seal}},
 	}}}
 	return NativeConfig{
-		Home: home, Version: "v0.71.0", Store: state, Parent: authority, Bindings: authority,
+		Local: func(store.NodeRow) bool { return true }, Home: home, Version: "v0.71.0", Store: state, Parent: authority, Bindings: authority,
 		Principal: principal, Refresh: func(context.Context) (capability.Principal, error) { return principal, nil },
-		Renew:  func(context.Context, string, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil },
-		Source: source.Options{Engines: nativeEngine{}},
+		Renew:    func(context.Context, string, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil },
+		Source:   source.Options{Engines: nativeEngine{}, Base: procenv.Base{Local: true}},
+		Services: completeServiceFixture,
+		Storage: func(context.Context, capability.Principal) (nodehost.StorageBinding, error) {
+			return nodehost.StorageBinding{}, nil
+		},
+		Logs: func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error) {
+			return nil, errors.New("unused")
+		},
 	}, state
 }
 
@@ -73,12 +84,56 @@ func TestNativeServicesUsesSharedInterfacesAndCapturedEnvironment(t *testing.T) 
 			t.Error(err)
 		}
 	})
-	if services.Config.Store != state || !services.Config.Source.Base.Local || !reflect.DeepEqual(services.Config.Source.Base.Captured, []string{"RETAINED=registration"}) {
+	if services.Config.Store.(logHostStore).NativeHostStore != state || !services.Config.Source.Base.Local || !reflect.DeepEqual(services.Config.Source.Base.Captured, []string{"RETAINED=registration"}) {
 		t.Fatal("native composition replaced state or captured inputs")
 	}
 	owner, claimed, evaluator, err := nodehost.NewNativeHost(services.Config)
 	if err != nil || owner == nil || claimed == nil || evaluator == nil {
 		t.Fatalf("shared native hosts cannot use the supplied interfaces: %v", err)
+	}
+}
+
+type nativeStorageFixture struct {
+	blob.Store
+	blob.RecordStore
+}
+
+func TestNativeOwnerEvaluationUsesItsOwnBinderBeforeAnyWorkAward(t *testing.T) {
+	cfg, _ := nativeConfigFixture(t)
+	cfg.Principal.Capability.Unit = capability.UnitTrigger
+	cfg.Principal.Capability.Binding.Kind = capability.BindingTrigger
+	cfg.Principal.Capability.Binding.NodeID = ""
+	cfg.Refresh = func(context.Context) (capability.Principal, error) { return cfg.Principal, nil }
+	cfg.Storage = func(context.Context, capability.Principal) (nodehost.StorageBinding, error) {
+		data := &nativeStorageFixture{}
+		return nodehost.StorageBinding{Bytes: data, Records: data, Authority: blob.Authority{CapabilityRef: cfg.Principal.Capability.Prefix}}, nil
+	}
+	calls := 0
+	cfg.Evaluate = func(_ context.Context, input nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
+		calls++
+		return nodehost.ProcessGrant{Binding: nodeproto.ProcessBinding{RunID: input.Accepted.RunID, JobID: input.NodeID}, Revoke: func() error { return nil }}, nil
+	}
+	listener := &processListener{closed: make(chan struct{})}
+	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := services.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, generation := range []int64{0, 1, 19} {
+		grant, err := services.Config.Evaluation.Bind(t.Context(), nodehost.EvaluationInput{Accepted: nodehost.AcceptedRun{RunID: "run"}, NodeID: "source", Generation: generation})
+		if err != nil || grant.Binding.JobID != "source" {
+			t.Fatalf("owner evaluation required a node award: %+v %v", grant, err)
+		}
+		if err := grant.Revoke(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 3 {
+		t.Fatal("owner evaluation bypassed its binder")
 	}
 }
 

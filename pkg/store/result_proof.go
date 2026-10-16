@@ -23,7 +23,11 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor Ac
 	if ref.NodeID != "" {
 		expected = "/api/v1/runs/{run}/jobs/{job}/transition"
 	}
-	if proof.Pattern != expected && !(ref.NodeID == "" && proof.Pattern == "/api/v1/runs/{run}/plan") {
+	privatePattern := "/api/v1/runs/{run}/local-host/nodes/{job}/transition"
+	if ref.NodeID == "" {
+		privatePattern = "/api/v1/runs/{run}/local-host/finish"
+	}
+	if proof.Pattern != expected && proof.Pattern != privatePattern && !(ref.NodeID == "" && (proof.Pattern == "/api/v1/runs/{run}/plan" || proof.Pattern == "/api/v1/runs/{run}/local-host/transition")) {
 		return holderRefusal()
 	}
 	p, err := tx.ResolveAuthority(ctx, actor.Authority)

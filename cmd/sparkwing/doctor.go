@@ -19,7 +19,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 // safety: a stalled controller must leave doctor available as a recovery tool.
@@ -49,11 +52,12 @@ type doctorDependencies struct {
 	version string
 	local   func(context.Context) (dashboardServices, error)
 	machine func(context.Context) doctorReport
+	sweep   func(context.Context, dashboardServices, bool) ([]wingd.LocalDoctorFinding, error)
 }
 
 func runDoctor(args []string) error {
 	return runDoctorCommand(context.Background(), args, os.Stdout, doctorDependencies{
-		version: installedVersion(), local: resolveLocalServices, machine: inspectDoctorMachine,
+		version: installedVersion(), local: resolveLocalServices, machine: inspectDoctorMachine, sweep: sweepDoctorSessions,
 	})
 }
 
@@ -104,6 +108,11 @@ func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (d
 	}
 	// safety: lifecycle inspection must not acquire a second writing store or start an activity hold.
 	findings, err := services.lifecycle.Doctor(ctx, deps.version)
+	if err == nil && deps.sweep != nil {
+		var swept []wingd.LocalDoctorFinding
+		swept, err = deps.sweep(ctx, services, dryRun)
+		findings = append(findings, swept...)
+	}
 	for _, finding := range findings {
 		if strings.TrimSpace(finding.Code) == "" || strings.TrimSpace(finding.Message) == "" {
 			err = errors.Join(err, &apierr.Error{Code: apierr.ProtocolError, Message: "local controller returned a finding without a code or message"})
@@ -237,4 +246,21 @@ func inspectDoctorGoToolchain(ctx context.Context, dir string, env []string) *op
 		finding.Error = err.Error()
 	}
 	return finding
+}
+
+func sweepDoctorSessions(ctx context.Context, services dashboardServices, dryRun bool) ([]wingd.LocalDoctorFinding, error) {
+	status, err := services.lifecycle.EnsureStarted(ctx, services.options)
+	if err != nil {
+		return nil, err
+	}
+	if !status.Running {
+		return nil, errors.New("local controller did not become ready for the session sweep")
+	}
+	socket, err := wingd.APISocketPath(services.options.Home)
+	if err != nil {
+		return nil, err
+	}
+	transport := wingdclient.NewAPIClient(socket)
+	defer transport.CloseIdleConnections()
+	return client.SweepLocalSessions(ctx, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport}, dryRun)
 }

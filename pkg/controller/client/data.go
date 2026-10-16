@@ -3,19 +3,30 @@ package client
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-type dataClient struct{ transport *engineClient }
+type dataClient struct {
+	transport *engineClient
+	authority *blob.Authority
+}
+
+func (c *dataClient) checkAuthority(authority blob.Authority) error {
+	if c.authority != nil && !reflect.DeepEqual(authority, *c.authority) {
+		return localHostClientRefusal()
+	}
+	return nil
+}
 
 var (
 	_ blob.DataSigner  = (*dataClient)(nil)
@@ -23,138 +34,215 @@ var (
 )
 
 func (c *dataClient) Upload(ctx context.Context, input blob.UploadIntent) (blob.UploadTicket, error) {
+	if err := c.checkAuthority(input.Authority); err != nil {
+		return blob.UploadTicket{}, err
+	}
+	if c.authority != nil && input.Identity != c.authority.Upload.Value {
+		return blob.UploadTicket{}, localHostClientRefusal()
+	}
 	var result wire.DataUploadTicket
-	request := wire.DataUploadRequest{Authority: dataAuthority(input.Authority), Identity: dataIdentity(input.Identity), Digest: input.Digest, Size: input.Size}
-	err := c.post(ctx, "upload", rand.Text(), request, &result)
-	if err == nil && (result.ID == "" || result.Transfer.Digest != input.Digest || result.Transfer.Size != input.Size) {
-		err = dataProtocolError("upload ticket does not match the requested object")
+	body := struct {
+		Digest blob.Digest `json:"digest"`
+		Size   int64       `json:"size"`
+	}{input.Digest, input.Size}
+	err := c.post(ctx, "upload", rand.Text(), body, &result)
+	transfer := wire.DataSignedTransfer{URL: result.URL, Headers: result.Headers, ExpiresAt: result.ExpiresAt, Digest: result.SHA256, Size: result.Size}
+	if err == nil && (result.UploadID == "" || transfer.Digest != input.Digest || transfer.Size != input.Size) {
+		err = dataProtocolError("upload ticket differs from requested object")
 	}
 	if err == nil {
-		err = validateDataTransfer(result.Transfer)
+		err = validateDataTransfer(transfer)
 	}
 	if err != nil {
 		return blob.UploadTicket{}, err
 	}
-	return blob.UploadTicket{ID: result.ID, Transfer: blob.SignedTransfer(result.Transfer)}, nil
+	return blob.UploadTicket{ID: result.UploadID, Transfer: blob.SignedTransfer(transfer)}, nil
 }
 
 func (c *dataClient) Commit(ctx context.Context, input blob.CommitUpload) (blob.Receipt, error) {
-	var result wire.DataReceipt
+	if err := c.checkAuthority(input.Authority); err != nil {
+		return blob.Receipt{}, err
+	}
+	var result struct {
+		Digest    blob.Digest `json:"digest"`
+		CreatedAt time.Time   `json:"created_at"`
+	}
 	if !validSelector(input.TicketID) {
 		return blob.Receipt{}, &apierr.Error{Code: apierr.BadRequest, Message: "invalid upload ticket selector"}
 	}
-	err := c.post(ctx, "commit", "", wire.DataCommitRequest{Authority: dataAuthority(input.Authority), TicketID: input.TicketID}, &result)
-	return blob.Receipt{Identity: blobIdentity(result.Identity), Digest: result.Digest, CreatedAt: result.CreatedAt}, err
+	err := c.post(ctx, "commit", "", struct {
+		UploadID string `json:"upload_id"`
+	}{input.TicketID}, &result)
+	return blob.Receipt{Identity: input.Authority.Upload.Value, Digest: result.Digest, CreatedAt: result.CreatedAt}, err
 }
 
 func (c *dataClient) Download(ctx context.Context, input blob.GetRequest) (blob.SignedTransfer, error) {
-	var result wire.DataSignedTransfer
-	err := c.post(ctx, "download", "", wire.DataDownloadRequest{Authority: dataAuthority(input.Authority), Digest: input.Digest}, &result)
-	if err == nil && result.Digest != input.Digest {
-		err = dataProtocolError("download transfer does not match the requested object")
+	if err := c.checkAuthority(input.Authority); err != nil {
+		return blob.SignedTransfer{}, err
+	}
+	var result struct {
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+		SHA256  blob.Digest       `json:"sha256"`
+		Size    int64             `json:"size"`
+		Expires time.Time         `json:"expires"`
+	}
+	err := c.post(ctx, "download", "", struct {
+		Digest blob.Digest `json:"digest"`
+	}{input.Digest}, &result)
+	transfer := wire.DataSignedTransfer{URL: result.URL, Headers: result.Headers, Digest: result.SHA256, Size: result.Size, ExpiresAt: result.Expires}
+	if err == nil && result.SHA256 != input.Digest {
+		err = dataProtocolError("download differs from requested digest")
 	}
 	if err == nil {
-		err = validateDataTransfer(result)
+		err = validateDataTransfer(transfer)
 	}
 	if err != nil {
 		return blob.SignedTransfer{}, err
 	}
-	return blob.SignedTransfer(result), nil
+	return blob.SignedTransfer(transfer), nil
 }
 
 func (c *dataClient) HasMany(ctx context.Context, input blob.HasManyRequest) (blob.Presence, error) {
+	if err := c.checkAuthority(input.Authority); err != nil {
+		return blob.Presence{}, err
+	}
 	var result wire.DataPresence
-	err := c.withBudget(ctx, input.Budget, func(ctx context.Context) error {
-		return c.post(ctx, "has-many", "", wire.DataHasManyRequest{Authority: dataAuthority(input.Authority), Digests: input.Digests, Deadline: dataDeadline(input.Budget)}, &result)
-	})
+	body := struct {
+		Digests  []blob.Digest `json:"digests"`
+		Deadline *time.Time    `json:"deadline,omitempty"`
+	}{input.Digests, dataDeadline(input.Budget)}
+	if body.Digests == nil {
+		body.Digests = []blob.Digest{}
+	}
+	err := c.withBudget(ctx, input.Budget, func(ctx context.Context) error { return c.post(ctx, "has-many", "", body, &result) })
 	if err != nil {
 		return blob.Presence{}, err
 	}
-	requested := make(map[blob.Digest]bool, len(input.Digests))
+	requested := map[blob.Digest]bool{}
 	for _, digest := range input.Digests {
 		requested[digest] = true
 	}
 	for _, digest := range result.Present {
 		if !requested[digest] {
-			return blob.Presence{}, dataProtocolError("presence response includes an unrequested digest")
+			return blob.Presence{}, dataProtocolError("presence includes unrequested digest")
 		}
 	}
 	return blob.Presence(result), nil
 }
 
 func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) (blob.RecordLookupResult, error) {
-	var result wire.DataRecordLookupResult
-	key := dataRecordKey(input.Key)
-	err := c.lookup(ctx, "record", input.Budget, wire.DataLookupRequest{Authority: dataAuthority(input.Authority), Record: &key, VerifiedDefaultOnly: input.VerifiedDefaultOnly}, &result)
+	if err := c.checkAuthority(input.Authority); err != nil {
+		return blob.RecordLookupResult{}, err
+	}
+	var result struct {
+		Found   bool              `json:"found"`
+		Record  *wire.DataRecord  `json:"record,omitempty"`
+		Members []wire.DataMember `json:"members"`
+	}
+	key := input.Key
+	query := url.Values{"kind": {string(key.Kind)}, "name": {key.Name}, "ref": {key.Scope.Ref.CapabilityScope()}, "pipeline": {key.Scope.Pipeline}, "job": {key.Scope.Job}, "key": {key.Scope.Key}, "verified_default_only": {strconv.FormatBool(input.VerifiedDefaultOnly)}}
+	if !input.Budget.Deadline.IsZero() {
+		query.Set("deadline", input.Budget.Deadline.Format(time.RFC3339Nano))
+	}
+	err := c.withBudget(ctx, input.Budget, func(ctx context.Context) error {
+		return c.transport.request(ctx, "GET", "/api/v1/data/records", "/api/v1/data/records?"+query.Encode(), "", nil, &result)
+	})
 	if err != nil {
 		return blob.RecordLookupResult{}, err
 	}
-	return blob.RecordLookupResult{Found: result.Found, Record: blobRecord(result.Record), Members: blobMembers(result.Members), ReadSet: blobReadSet(result.ReadSet)}, nil
-}
-
-func (c *dataClient) LookupMemo(ctx context.Context, input blob.MemoLookup) (blob.MemoHit, error) {
-	var result wire.DataMemoHit
-	key := dataMemoKey(input.Key)
-	err := c.lookup(ctx, "memo", input.Budget, wire.DataLookupRequest{Authority: dataAuthority(input.Authority), Memo: &key}, &result)
-	if err != nil {
-		return blob.MemoHit{}, err
+	if !result.Found {
+		if result.Record != nil {
+			return blob.RecordLookupResult{}, dataProtocolError("missing record includes a payload")
+		}
+		return blob.RecordLookupResult{}, nil
 	}
-	return blobMemoHit(result), nil
-}
-
-func (c *dataClient) LookupDepcache(ctx context.Context, input blob.DepcacheLookup) (blob.DepcacheHit, error) {
-	var result wire.DataDepcacheHit
-	key := wire.DataDepcacheKey{Repo: input.Key.Repo, Ref: wire.DataRefScope(input.Key.Ref), Name: input.Key.Name, Key: input.Key.Key}
-	err := c.lookup(ctx, "depcache", input.Budget, wire.DataLookupRequest{Authority: dataAuthority(input.Authority), Depcache: &key}, &result)
-	if err != nil {
-		return blob.DepcacheHit{}, err
+	if result.Record == nil {
+		return blob.RecordLookupResult{}, dataProtocolError("record lookup has no payload")
 	}
-	return blob.DepcacheHit{Found: result.Found, Record: blobRecord(result.Record), Source: result.Source, ReadSet: blobReadSet(result.ReadSet)}, nil
+	record := decodeDataRecord(*result.Record, input.Key.Team)
+	if record.Key != input.Key {
+		return blob.RecordLookupResult{}, dataProtocolError("record lookup changed selected key")
+	}
+	members := make([]blob.Member, 0, len(result.Members))
+	manifest := record.ManifestDigest.Value
+	if record.Key.Kind == blob.KindManifest {
+		manifest = record.Digest
+	}
+	for _, member := range result.Members {
+		members = append(members, blob.Member{Team: key.Team, ManifestDigest: manifest, Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
+	}
+	return blob.RecordLookupResult{Found: true, Record: record, Members: members}, nil
 }
 
 func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRequest) (blob.Record, error) {
-	var result wire.DataRecord
-	commit := wire.DataRecordCommit{
-		Source: dataIdentity(input.Source), Authority: dataAuthority(input.Authority), Key: dataRecordKey(input.Key),
-		Digest: input.Digest, ManifestDigest: input.ManifestDigest, Members: dataMembers(input.Members), ExpiresAt: input.ExpiresAt,
-	}
-	err := c.post(ctx, "records", "", wire.DataRecordWriteRequest{Operation: "commit", Commit: &commit}, &result)
-	if err != nil {
+	if err := c.checkAuthority(input.Authority); err != nil {
 		return blob.Record{}, err
 	}
-	return blobRecord(result), nil
+	if c.authority != nil && input.Source != c.authority.Upload.Value {
+		return blob.Record{}, localHostClientRefusal()
+	}
+	body := struct {
+		Kind           blob.Kind         `json:"kind"`
+		Pipeline       string            `json:"pipeline"`
+		Job            string            `json:"job"`
+		Key            string            `json:"key"`
+		Name           string            `json:"name"`
+		Digest         blob.Digest       `json:"digest"`
+		ManifestDigest *blob.Digest      `json:"manifest_digest,omitempty"`
+		Members        []wire.DataMember `json:"members"`
+		ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
+	}{Kind: input.Key.Kind, Pipeline: input.Key.Scope.Pipeline, Job: input.Key.Scope.Job, Key: input.Key.Scope.Key, Name: input.Key.Name, Digest: input.Digest, Members: []wire.DataMember{}}
+	if input.ManifestDigest.Set {
+		body.ManifestDigest = &input.ManifestDigest.Value
+	}
+	if input.ExpiresAt.Set {
+		body.ExpiresAt = &input.ExpiresAt.Value
+	}
+	for _, member := range input.Members {
+		body.Members = append(body.Members, wire.DataMember{Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
+	}
+	var result wire.DataRecord
+	if err := c.post(ctx, "records", "", body, &result); err != nil {
+		return blob.Record{}, err
+	}
+	record := decodeDataRecord(result, input.Key.Team)
+	if record.Key != input.Key || record.Digest != input.Digest || record.ManifestDigest != input.ManifestDigest {
+		return blob.Record{}, dataProtocolError("record commit changed selected payload")
+	}
+	record.Source, record.Uploader, record.RefFacts = input.Authority.Upload.Value, input.Authority.Principal, input.Authority.Ref
+	return record, nil
 }
 
-func (c *dataClient) CopyMemo(ctx context.Context, input blob.CopyMemoRequest) (blob.MemoHit, error) {
-	var result wire.DataMemoHit
-	key := dataMemoKey(input.Lookup.Key)
-	copy := wire.DataMemoCopy{Lookup: wire.DataLookupRequest{Authority: dataAuthority(input.Lookup.Authority), Memo: &key, Deadline: dataDeadline(input.Lookup.Budget)}, Destination: input.Destination}
-	err := c.withBudget(ctx, input.Lookup.Budget, func(ctx context.Context) error {
-		return c.post(ctx, "records", "", wire.DataRecordWriteRequest{Operation: "copy_memo", CopyMemo: &copy}, &result)
-	})
-	if err != nil {
-		return blob.MemoHit{}, err
+func decodeDataRecord(r wire.DataRecord, team string) blob.Record {
+	ref, manual := strings.CutPrefix(r.Ref, "manual:")
+	record := blob.Record{Key: blob.RecordKey{Team: team, Kind: r.Kind, Name: r.Name, Scope: blob.Scope{Repo: r.Repo, Ref: blob.RefScope{Ref: ref, Verified: !manual}, Pipeline: r.Pipeline, Job: r.Job, Key: r.Key}}, Digest: r.Digest, Provenance: r.Provenance, CreatedAt: r.CreatedAt}
+	if r.ManifestDigest != nil {
+		record.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: *r.ManifestDigest}
 	}
-	return blobMemoHit(result), nil
+	if r.ExpiresAt != nil {
+		record.ExpiresAt = runspec.Optional[time.Time]{Set: true, Value: *r.ExpiresAt}
+	}
+	return record
+}
+
+func (c *dataClient) LookupMemo(context.Context, blob.MemoLookup) (blob.MemoHit, error) {
+	return blob.MemoHit{}, missingDataProof()
+}
+func (c *dataClient) LookupDepcache(context.Context, blob.DepcacheLookup) (blob.DepcacheHit, error) {
+	return blob.DepcacheHit{}, missingDataProof()
+}
+func (c *dataClient) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error) {
+	return blob.MemoHit{}, missingDataProof()
+}
+func missingDataProof() error {
+	return &apierr.Error{Code: apierr.PolicyMissing, Message: "controller cache lookup does not transport canonical read-set proof"}
 }
 
 func (c *dataClient) post(ctx context.Context, operation, key string, input, output any) error {
 	path := "/api/v1/data/" + operation
 	return c.transport.request(ctx, "POST", path, path, key, input, output)
 }
-
-func (c *dataClient) lookup(ctx context.Context, kind string, budget blob.Budget, input wire.DataLookupRequest, output any) error {
-	input.Deadline = dataDeadline(budget)
-	selector, err := json.Marshal(input)
-	if err != nil {
-		return fmt.Errorf("encode data lookup selector: %w", err)
-	}
-	query := url.Values{"lookup": {kind}, "selector": {string(selector)}}
-	return c.withBudget(ctx, budget, func(ctx context.Context) error {
-		return c.transport.request(ctx, "GET", "/api/v1/data/records", "/api/v1/data/records?"+query.Encode(), "", nil, output)
-	})
-}
-
 func (c *dataClient) withBudget(ctx context.Context, budget blob.Budget, call func(context.Context) error) error {
 	if budget.Deadline.IsZero() {
 		return call(ctx)
@@ -173,14 +261,12 @@ func (c *dataClient) withBudget(ctx context.Context, budget blob.Budget, call fu
 	}
 	return err
 }
-
 func dataDeadline(budget blob.Budget) *time.Time {
 	if budget.Deadline.IsZero() {
 		return nil
 	}
 	return &budget.Deadline
 }
-
 func validateDataTransfer(transfer wire.DataSignedTransfer) error {
 	u, err := url.Parse(transfer.URL)
 	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" || transfer.Size < 0 || transfer.ExpiresAt.IsZero() {
@@ -193,16 +279,11 @@ func validateDataTransfer(transfer wire.DataSignedTransfer) error {
 	}
 	return nil
 }
-
 func dataProtocolError(message string) error {
 	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
 }
 
-// NewDataClient returns the shared authenticated signing and record transports.
-// It uses EngineOptions' HTTP/api.sock transport and private bearer provider.
-// Authority and upload identity in interface arguments are selectors to compare;
-// the server derives both from current authentication and persisted state.
-// Object transfer clients receive signed headers only, never the controller bearer.
+// NewDataClient returns the authenticated byte and record transports.
 func NewDataClient(options EngineOptions) (blob.DataSigner, blob.RecordStore, error) {
 	c, err := newEngineClient(options)
 	if err != nil {

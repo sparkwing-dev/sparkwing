@@ -38,7 +38,7 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 	for name, args := range commands {
 		t.Run(name, func(t *testing.T) {
 			child := exec.CommandContext(t.Context(), os.Args[0], append([]string{"-test.run=^TestInstalledRunnerRuntimeComposition$", "--", name}, args...)...)
-			child.Env = append(os.Environ(), "SPARKWING_TEST_RUNNER_ENTRYPOINT=1")
+			child.Env = append(os.Environ(), "SPARKWING_TEST_RUNNER_ENTRYPOINT=1", "HOME="+directory, "SPARKWING_HOME="+filepath.Join(directory, "state"), "XDG_CACHE_HOME="+filepath.Join(directory, "cache"))
 			output, err := child.CombinedOutput()
 			t.Logf("entrypoint result: %s", output)
 			if err == nil {

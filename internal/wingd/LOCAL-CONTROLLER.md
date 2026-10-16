@@ -11,6 +11,15 @@ before returning. The runtime port must honor cancellation after cleanup.
 `StartDashboard` can promote an existing controller to stay mode and start its
 dashboard serving loop. `Stop` waits for the runtime's admission drain and
 shutdown.
+`InstallController` holds the same lifecycle gate through drain, managed-unit
+activation and successor readiness. It joins the previous owner before starting
+the service. The client holds the existing home startup claim through this
+transition, so another CLI cannot start an on-demand owner during the handoff.
+Installation requires an installed unit and a new running PID with the
+requested version and stay mode. Activation or readiness failure reports where
+the handoff stopped. It starts no fallback controller because the managed unit
+may already be active. These checks establish activation and successor identity,
+not the service manager's process ancestry.
 
 `NewLocalRuntime` implements the process lifetime behind `LocalRuntime`. It
 acquires the admission election before invoking `LocalRuntimeConfig.Open`.
@@ -69,13 +78,19 @@ checks current authority before allocating resources. Process HTTP uses the
 same joined serving lifecycle as the API and dashboard. Closing the host
 cancels requests, closes HTTP and hijacked connections, and joins handlers
 before closing process authority. Repeated close calls return the same cleanup
-error. Logs are masked before private
-JSONL writes. `StoreBinding.Refresh` reauthenticates the captured award through
-the shared C2 policy, including unit liveness, before each authority refresh.
-Owner policies, authorized byte/record
-clients, controller log projection and ephemeral-process binding validation
-remain integration points. Foreground CLI hosting also needs the shared host's
-remote state adapter. These gaps prevent a completed native local run.
+error. Logs use the shared segment sink, signed object uploads and transactional
+segment commits. Public log readers and the dashboard consume those same records.
+Node logs seal before terminal reports or retries; owner logs seal before atomic
+run completion. The private JSONL writer is removed.
+
+`WithClient` supplies process services and fresh byte/record bindings through the
+authenticated controller transport. Every node process retains its independent
+work award. Owner evaluation uses a separate binder and cannot fall back to a
+node claim. C2's owner/eval nodehost process-authority contract remains required
+before owner closures can execute. Cache lookup responses also need canonical
+read-set proof; those operations fail explicitly while that contract is missing.
+The native HTTP roundtrip test verifies output bytes and normal public log reads
+without opening sockets.
 
 The native local host binds W3's machine-admission port to the elected home
 with takeover and spawning disabled. W6 resolves the configured box identity
@@ -205,6 +220,9 @@ reconciliation and live activity observation. The CLI binder supplies the
 production state projection, shared API/dashboard handlers, peer claimant and
 native host configuration. `Open` constructs the shared queue from those inputs.
 `Run` joins the queue, activity observer and maintenance before returning.
+The maintenance loop runs the shared server's storage pass after readiness,
+on its first renewal tick and then at `StorageMaintenanceInterval`. It joins
+before the elected store and object backend close.
 The runtime adds its dashboard connection count. Its API server consumes the
 kernel identity on `APIConn`. Its dashboard server retains browser authentication.
 

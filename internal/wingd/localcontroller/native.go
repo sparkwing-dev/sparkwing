@@ -2,20 +2,16 @@ package localcontroller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -25,11 +21,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // NativeConfig binds one authenticated award to shared state and authority services.
 type NativeConfig struct {
+	Local     func(store.NodeRow) bool
 	Home      string
 	Version   string
 	Store     nodehost.NativeHostStore
@@ -39,6 +37,10 @@ type NativeConfig struct {
 	Refresh   func(context.Context) (capability.Principal, error)
 	Renew     func(context.Context, string, bool) (store.LeaseBeat, error)
 	Source    source.Options
+	Services  func(context.Context, capability.Principal, nodeproto.JobSpec) (nodehost.ProcessServices, error)
+	Storage   func(context.Context, capability.Principal) (nodehost.StorageBinding, error)
+	Logs      func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
+	Evaluate  func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error)
 }
 
 // NativeServices constructs the shared host services without opening a state store.
@@ -61,6 +63,22 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	if _, err := current(ctx); err != nil {
 		return runners.NativeServices{}, err
 	}
+	if cfg.Principal.Capability.Unit != capability.UnitNode && cfg.Local == nil {
+		return runners.NativeServices{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "owner hosting requires canonical placement eligibility"}
+	}
+	if cfg.Services == nil || cfg.Storage == nil || cfg.Logs == nil {
+		return runners.NativeServices{}, errors.New("local native host requires process services, byte/record storage and shared log publication")
+	}
+	var storage nodehost.StorageBinding
+	if cfg.Principal.Capability.Unit != capability.UnitNode {
+		storage, err = cfg.Storage(ctx, cfg.Principal)
+		if err != nil {
+			return runners.NativeServices{}, err
+		}
+		if storage.Bytes == nil || storage.Records == nil || storage.Authority.CapabilityRef != cfg.Principal.Capability.Prefix {
+			return runners.NativeServices{}, errors.New("local native host storage is incomplete or belongs to another award")
+		}
+	}
 	admission, err := localMachineAdmission(home, version)
 	if err != nil {
 		return runners.NativeServices{}, err
@@ -76,15 +94,18 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	if run.Run.ID != cfg.Principal.Capability.Binding.RunID || string(run.Run.Team) != cfg.Principal.Capability.Team || run.Run.Request.Request.Team != cfg.Principal.Capability.Team {
 		return runners.NativeServices{}, nodeClaimMismatch()
 	}
-	captured, err := snapshots.Load(ctx, run.Run.Request.Request.Env)
-	if err != nil {
-		return runners.NativeServices{}, err
+	var captured []string
+	if sourceOptions.Base.Local {
+		captured, err = snapshots.Load(ctx, run.Run.Request.Request.Env)
+		if err != nil {
+			return runners.NativeServices{}, err
+		}
 	}
 	masker := sourceOptions.Base.Masker
 	if masker == nil {
 		masker = secrets.NewMasker()
 	}
-	sourceOptions.Base.Local, sourceOptions.Base.Captured, sourceOptions.Base.Masker = true, captured, masker
+	sourceOptions.Base.Captured, sourceOptions.Base.Masker = captured, masker
 	if run.Run.Spec != nil {
 		sourceOptions.SDK = run.Run.Spec.Resolved.Engine.Pin.SDK
 	}
@@ -98,7 +119,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			err = errors.Join(err, closeResources())
 		}
 	}()
-	claims := &nodeClaims{auth: capability.NewAuthenticator(cfg.Parent), bindings: cfg.Bindings, masker: masker, current: current, readNode: cfg.Store.ReadNode}
+	claims := &nodeClaims{auth: capability.NewAuthenticator(cfg.Parent), bindings: cfg.Bindings, masker: masker, current: current, readNode: cfg.Store.ReadNode, services: cfg.Services}
 	masks := nodehost.NewMaskRegistry(masker)
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	listener, err := listen("tcp", "127.0.0.1:0")
@@ -106,10 +127,11 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		return runners.NativeServices{}, err
 	}
 	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
-	closeResources = closeHTTP
+	logs := &localLogs{current: current, claims: claims, readNode: cfg.Store.ReadNode, upload: cfg.Logs, masker: masker, run: run.Run.ID}
+	closeResources = func() error { return errors.Join(logs.close(context.WithoutCancel(ctx)), closeHTTP()) }
 	processes := &nodehost.NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://" + listener.Addr().String()}
 	claims.processes = processes
-	processes.Log = localHostLog(home, run.Run.ID, current, masker)
+	processes.Log = logs.write
 	delegate := func(ctx context.Context, node string, generation, attempt int64) (nodehost.ProcessGrant, error) {
 		grant, err := claims.delegate(ctx, node, generation, attempt)
 		if err == nil {
@@ -120,33 +142,45 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 
 	follower := nodehost.StateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	config := nodehost.NativeHostConfig{
-		Store: cfg.Store, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
+		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
 		Admission: admission,
-		Owner:     nodehost.OwnerHost{Renew: localOwnerRenew(current, cfg.Renew), Local: func(store.NodeRow) bool { return true }, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
+		Owner:     nodehost.OwnerHost{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},
-		Executor: nodehost.ExecutorDependencies{Bind: func(ctx context.Context, input nodehost.NodeInput) (nodehost.ProcessGrant, error) {
+		Executor: nodehost.ExecutorDependencies{BindStorage: func(ctx context.Context, input nodehost.NodeInput) (nodehost.StorageBinding, error) {
+			principal, err := claims.principal(ctx, input.NodeID, input.Generation, input.Attempt)
+			if err != nil {
+				return nodehost.StorageBinding{}, err
+			}
+			return cfg.Storage(ctx, principal)
+		}, Bind: func(ctx context.Context, input nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 			return delegate(ctx, input.NodeID, input.Generation, input.Attempt)
 		}},
 		Evaluation: nodehost.EvaluationDependencies{
 			Bind: func(ctx context.Context, input nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
-				row, err := cfg.Store.ReadNode(ctx, store.NodeRef{RunID: run.Run.ID, NodeID: input.NodeID})
-				if err != nil {
+				if input.Accepted.RunID != run.Run.ID || input.NodeID == "" || input.Generation < 0 {
+					return nodehost.ProcessGrant{}, nodeClaimMismatch()
+				}
+				if _, err := current(ctx); err != nil {
 					return nodehost.ProcessGrant{}, err
 				}
-				return delegate(ctx, input.NodeID, input.Generation, row.Attempt)
-			},
-			ReadOutput: func(context.Context, store.NodeRef, int64) (json.RawMessage, error) {
-				return nil, &apierr.Error{Code: apierr.PolicyMissing, Message: "local output reads require authorized byte and record bindings"}
+				if cfg.Evaluate == nil {
+					return nodehost.ProcessGrant{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "owner evaluation requires owner/eval process authority"}
+				}
+				grant, err := cfg.Evaluate(ctx, input)
+				if err == nil {
+					serve()
+				}
+				return grant, err
 			},
 		},
 	}
 	if capacity, ok := cfg.Store.(nodehost.CapacityStore); ok {
 		config.Capacity = &nodehost.StoreAdmission{Store: capacity, BoxID: admission.BoxID}
 	}
-	return runners.NativeServices{Config: config, Close: closeResources}, nil
+	return runners.NativeServices{Config: config, Storage: storage, Close: closeResources}, nil
 }
 
 func localProcessHTTP(ctx context.Context, listener net.Listener, handler http.Handler, release func() error) (func(), func() error) {
@@ -189,40 +223,4 @@ func localStateSubscription(ctx context.Context, _ string) (nodehost.StateSubscr
 		}
 	}()
 	return nodehost.StateSubscription{Changed: changed, Close: func() error { cancel(); <-done; return nil }}, nil
-}
-
-func localHostLog(home, run string, current func(context.Context) (capability.Principal, error), masker *secrets.Masker) func(context.Context, string, string, nodeproto.FrameLog) error {
-	var mu sync.Mutex
-	return func(ctx context.Context, runID, node string, frame nodeproto.FrameLog) (err error) {
-		if runID != run {
-			return errors.New("log run differs from the host award")
-		}
-		if _, err := current(ctx); err != nil {
-			return err
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		directory := filepath.Join(home, "run-logs")
-		if err := fssecure.EnsureDir(directory); err != nil {
-			return err
-		}
-		digest := sha256.Sum256([]byte(run))
-		file, err := fssecure.OpenFile(filepath.Join(directory, hex.EncodeToString(digest[:])+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
-		if err != nil {
-			return err
-		}
-		defer func() { err = errors.Join(err, file.Close()) }()
-		encoded, err := json.Marshal(struct {
-			Run, Job string
-			Frame    nodeproto.FrameLog
-		}{run, node, frame})
-		if err != nil {
-			return err
-		}
-		if masker == nil {
-			return errors.New("local logs require the shared masker")
-		}
-		_, err = file.Write(append(masker.MaskJSON(encoded), '\n'))
-		return err
-	}
 }

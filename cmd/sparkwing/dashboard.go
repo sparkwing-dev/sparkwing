@@ -126,11 +126,11 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 		if action == "install" {
 			options := services.options
 			options.Stay = true
-			err = services.units.InstallController(ctx, options)
+			status, err = services.lifecycle.InstallController(ctx, options)
 		} else {
 			err = services.units.UninstallController(ctx)
 		}
-		if err == nil {
+		if err == nil && action == "uninstall" {
 			status, err = services.lifecycle.Status(ctx)
 		}
 	default:

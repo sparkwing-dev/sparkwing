@@ -216,7 +216,7 @@ func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 	planner.Binding.Kind, planner.Binding.NodeID = capability.BindingRun, ""
 	planned, err := e.AcceptPlan(t.Context(), planner, body)
 	if err != nil || planned.PlanHash != "second-seal" || !planned.Replayed || f.plan.Seal.Request.Hash != "persisted-first-seal" ||
-		!f.plan.Seal.Now.IsZero() || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.Kind != store.ActorHolder || !reflect.DeepEqual(body.Declarations, f.plan.Seal.Declarations) {
+		!f.plan.Seal.Now.IsZero() || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.Kind != store.ActorRunHost || !reflect.DeepEqual(body.Declarations, f.plan.Seal.Declarations) {
 		t.Fatalf("plan = %+v, %+v, %v", planned, f.plan, err)
 	}
 	expanded, err := e.AcceptExpansion(t.Context(), a, controllerwire.ExpansionSubmission{SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[]}`)})
