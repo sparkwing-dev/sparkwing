@@ -399,7 +399,7 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 		return SignInResult{}, err
 	}
 	defer rollbackOrLog(tx)
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 
 	var res SignInResult
 	var accountID string
@@ -577,7 +577,7 @@ func scanAccount(row *sql.Row) (Account, error) {
 	}
 	a.EmailVerified = verified == 1
 	a.ActiveTeam = Team(active)
-	a.CreatedAt = time.Unix(created, 0).UTC()
+	a.CreatedAt = time.Unix(0, created).UTC()
 	a.Waitlisted = waitlisted != 0
 	return a, nil
 }
@@ -592,6 +592,22 @@ func (s *Store) Account(ctx context.Context, id string) (Account, error) {
 // one transaction, because a team with no owner is a team nobody can
 // administer.
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return TeamInfo{}, err
+	}
+	defer rollbackOrLog(tx)
+	out, err := createAccountTeamTx(ctx, tx, accountID, slug, displayName, now)
+	if err != nil {
+		return TeamInfo{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return TeamInfo{}, err
+	}
+	return out, nil
+}
+
+func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error) {
 	slug = NormalizeTeam(slug)
 	if err := ValidateSlug(string(slug)); err != nil {
 		return TeamInfo{}, err
@@ -603,11 +619,6 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 	if len(displayName) > maxDisplayNameLen {
 		return TeamInfo{}, fmt.Errorf("%w: a display name is at most %d characters", ErrInvalidInput, maxDisplayNameLen)
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return TeamInfo{}, err
-	}
-	defer rollbackOrLog(tx)
 	var created int
 	var waitlisted int64
 	if err := tx.QueryRowContext(ctx, `SELECT teams_created, COALESCE(waitlisted_at, 0) FROM accounts WHERE id = ?`+tx.forUpdate(),
@@ -629,10 +640,7 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 		return TeamInfo{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`,
-		string(slug), now.UTC().Unix(), accountID); err != nil {
-		return TeamInfo{}, err
-	}
-	if err := tx.Commit(); err != nil {
+		string(slug), now.UTC().UnixNano(), accountID); err != nil {
 		return TeamInfo{}, err
 	}
 	return TeamInfo{Slug: slug, DisplayName: displayName, CreatedBy: accountID}, nil
@@ -662,7 +670,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO memberships (team, account_id, role, created_at) VALUES (?, ?, ?, ?)`,
-		string(slug), accountID, string(RoleOwner), now.UTC().Unix()); err != nil {
+		string(slug), accountID, string(RoleOwner), now.UTC().UnixNano()); err != nil {
 		return fmt.Errorf("identity: add owner: %w", err)
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
@@ -773,18 +781,29 @@ type InvitationAcceptance struct {
 // admitted account could otherwise invite a farm of waitlisted ones into
 // team scopes while the gate holds them back.
 func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
-	var none InvitationAcceptance
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return none, err
+		return InvitationAcceptance{}, err
 	}
 	defer rollbackOrLog(tx)
-	at := now.UTC().Unix()
+	out, err := acceptAccountInvitationTx(ctx, tx, accountID, invitationID, now)
+	if err != nil {
+		return InvitationAcceptance{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return InvitationAcceptance{}, err
+	}
+	return out, nil
+}
+
+func acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
+	var none InvitationAcceptance
+	at := now.UTC().UnixNano()
 
 	var team, email, role string
 	var expires int64
 	var accepted, withdrawn sql.NullInt64
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT team, email, role, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
 		Scan(&team, &email, &role, &expires, &accepted, &withdrawn)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -848,7 +867,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 		}
 		out.Admitted = true
 	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 // safety: a team that has bought credits pays for what its members run, so
@@ -881,18 +900,6 @@ func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) err
 		}
 	}
 	return ErrTeamFull
-}
-
-// SetActiveTeam records team as the account's sticky team. The account must be
-// a member of it.
-func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error {
-	t := &Tenant{s: s, team: NormalizeTeam(team)}
-	if _, err := t.MemberRole(ctx, accountID); err != nil {
-		return err
-	}
-	_, err := s.exec(ctx, `UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`,
-		string(t.team), now.UTC().Unix(), accountID)
-	return err
 }
 
 // CreateAccountSession opens a session for a current team member.
@@ -970,26 +977,6 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 		return "", "", nil, err
 	}
 	return raw, csrf, &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}, nil
-}
-
-// SwitchSessionTeam moves an account's session from one team to another. It
-// names the team the session is leaving, so a session already moved by a
-// concurrent switch is reported rather than moved twice.
-func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error {
-	res, err := s.exec(ctx,
-		`UPDATE sessions SET team = ? WHERE hash = ? AND account_id = ? AND COALESCE(team,'') = ?
- AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?
- AND EXISTS (SELECT 1 FROM memberships WHERE team=? AND account_id=?)`,
-		string(to), sessionDigest(rawSession), accountID, string(from), s.now().UnixNano(), to, accountID)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n != 1 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 // MemberRole reads an account's role in t's team, or ErrNotMember.

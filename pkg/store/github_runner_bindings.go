@@ -121,9 +121,3 @@ func githubNamePart(s string) bool {
 
 // Slug is "owner/name".
 func (r GitHubRepo) Slug() string { return r.Owner + "/" + r.Name }
-
-// CanonicalURL is the repository's https URL, lowercased, because GitHub
-// resolves owner and name case-insensitively.
-func (r GitHubRepo) CanonicalURL() string {
-	return "https://github.com/" + strings.ToLower(r.Slug())
-}

@@ -64,7 +64,7 @@ func TestRolelessSessionsHaveNoTeamAuthorityProperty(t *testing.T) {
 		}
 		rewriteSchemaRefuses(t, s.db, `UPDATE sessions SET capability_prefix='forged' WHERE hash=?`, sessionDigest(raw))
 		rewriteSchemaRefuses(t, s.db, `UPDATE sessions SET account_id='' WHERE hash=?`, sessionDigest(raw))
-		if err := s.SwitchSessionTeam(t.Context(), raw, id, "", "a"); err != nil {
+		if err := s.SelectAccountTeam(t.Context(), teamAuthorization(t, s, Actor{Authority: principal.Authority}, "", "POST", "/api/v1/me/active-team"), "a"); err != nil {
 			t.Fatal(err)
 		}
 		got, err = s.LookupSession(t.Context(), raw)

@@ -185,7 +185,8 @@ func checkRolelessStoreSession(ctx context.Context, s *store.Store, team store.T
 	if principal.Capability.Team != "" || len(principal.Capability.Grants) != 0 {
 		return errors.New("roleless authentication gained team authority")
 	}
-	if err := s.SwitchSessionTeam(ctx, raw, member.Account.ID, "", team); !errors.Is(err, store.ErrNotFound) {
+	route, _ := capability.LookupRoute("POST", "/api/v1/me/active-team")
+	if err := s.SelectAccountTeam(ctx, capability.Authorized{Principal: principal, Access: route.Access[0]}, team); !errors.Is(err, store.ErrNotMember) {
 		return fmt.Errorf("roleless switch bypassed membership: %v", err)
 	}
 	expires := time.Now().Add(time.Minute)

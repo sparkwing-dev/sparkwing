@@ -1090,7 +1090,6 @@ type GitHubRepo struct {
 	Owner string
 	Name  string
 }
-func (r GitHubRepo) CanonicalURL() string
 func (r GitHubRepo) Slug() string
 type GitHubRunnerBinding struct {
 	Team Team
@@ -1179,7 +1178,6 @@ type InvitationAcceptance struct {
 	GateClosed *SignUpGate
 }
 const InvocationSecretArgsKey = "secret_args"
-func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
 const KeepTerminal ReconcileKind = "keep_terminal"
 type LastOwnerError struct {
@@ -1271,7 +1269,6 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 func (sample MetricSample) Marker() bool
-func (sample MetricSample) OneShot() bool
 func (sample MetricSample) ValidateResourceValues() error
 const MetricUnknown MetricKind = ""
 const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
@@ -2398,11 +2395,11 @@ type StorageUsage struct {
 }
 type Store struct {
 }
+func (s *Store) AcceptAccountInvitation(ctx context.Context, a capability.Authorized, id string) (InvitationAcceptance, error)
 func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
 func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error)
-func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error)
@@ -2421,6 +2418,7 @@ func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
 func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error)
+func (s *Store) CreateAccountTeam(ctx context.Context, a capability.Authorized, input TeamInfo) (TeamInfo, error)
 func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
@@ -2464,7 +2462,7 @@ func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRe
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
-func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error
+func (s *Store) SelectAccountTeam(ctx context.Context, a capability.Authorized, team Team) error
 func (s *Store) SetClaimProfileResolver(resolver ClaimProfileResolver)
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)
@@ -2481,10 +2479,10 @@ func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setB
 func (s *Store) SettlePayment(ctx context.Context, proof capability.VerifiedPaymentEvent) (PaymentSettlement, error)
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
-func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
+func (s *Store) UnlinkAccountIdentity(ctx context.Context, a capability.Authorized, provider string) (int64, error)
 func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
 type SummaryWrite struct {
@@ -2552,7 +2550,6 @@ func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingSta
 func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error)
 func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore
 func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error)
-func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (t *Tenant) ChargeDataDownload(ctx context.Context, authority blob.Authority, metadata blob.Blob, charge DownloadCharge) (DownloadCharged, error)
 func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
 func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error

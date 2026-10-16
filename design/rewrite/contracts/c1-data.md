@@ -1,5 +1,38 @@
 # C1 data contract
 
+## Account mutations and raw team-switch retirement
+
+`Store` implements C2's `AccountWriter`: `SelectAccountTeam`,
+`CreateAccountTeam`, `AcceptAccountInvitation` and `UnlinkAccountIdentity`.
+The account routes use the concrete adapter by default. Each transaction
+reloads the direct session by its committed hash, current ancestry, membership
+and account. Changed identity, selected team, issuance time, expired authority
+or capability ancestry refuses the write. Account-only sessions can select a
+team only after proving current membership.
+
+Selection commits the session team and account's active team together. Team
+creation and invitation acceptance share the existing transaction helpers and
+commit their session selection in the same transaction. Validation, limits,
+verified-email checks, one-use invitation state and business audit facts remain
+in those helpers. A failed session update rolls back membership, admission and
+team creation. Existing teams lock in lexical order before account and authority
+rows. Invitation lookup discovers its team before that lock sequence and returns
+no result until account authority has been rechecked.
+
+Account, membership and identity timestamps use nanoseconds. Account and
+identity readers, the waitlist projection and signup window counts use the same
+unit. Identity unlinking requires a direct session issued within ten minutes on
+the store clock. It retains the selected hashed session, ends the account's other
+sessions and preserves the last sign-in method and App installation bindings.
+The old raw methods remain only where fixture callers still need migration.
+`SetActiveTeam` and `SwitchSessionTeam` are removed. Their retained tests use
+`SelectAccountTeam`, including roleless selection and stale-team refusal.
+
+The unused `AccountIdentity`, `GitHubRepo.CanonicalURL`, `MetricSample.OneShot`,
+`IsBusyErr` and `Tenant.CacheExcludedCounts` APIs are removed. The latter's
+unused SQL and its fixture-only test are deleted. Profile folding retains its
+existing memoized-job exclusion tests.
+
 ## Raw run writer and unused liveness gauge removed
 
 `Tenant.CreateRun` is removed. Executable intake uses `AdmitRun` and its sealed

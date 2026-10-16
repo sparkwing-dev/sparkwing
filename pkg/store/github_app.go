@@ -395,19 +395,6 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 	return err
 }
 
-// AccountIdentity returns the subject of accountID's identity at provider,
-// such as the numeric GitHub user id, or ErrNotFound when the account has
-// none linked.
-func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error) {
-	var subject string
-	err := s.queryRow(ctx, `SELECT subject FROM identities WHERE account_id = ? AND provider = ?
-		ORDER BY created_at LIMIT 1`, accountID, provider).Scan(&subject)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return subject, err
-}
-
 // ConsumeGitHubAppConnectState records that the connect flow named by nonce
 // finished, and reports false when one already did. The record lives until
 // the state expires, so every replica and a restarted controller refuse a

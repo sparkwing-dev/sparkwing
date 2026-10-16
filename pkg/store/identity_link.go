@@ -51,7 +51,7 @@ func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Id
 			return nil, err
 		}
 		id.Linked = linked == 1
-		id.CreatedAt = time.Unix(created, 0).UTC()
+		id.CreatedAt = time.Unix(0, created).UTC()
 		out = append(out, id)
 	}
 	return out, rows.Err()
@@ -108,7 +108,7 @@ func (s *Store) linkIdentityOnce(ctx context.Context, accountID string, p SignIn
 	if sameProvider > 0 {
 		return Identity{}, ErrProviderAlreadyLinked
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO identities (provider, subject, account_id, email, email_verified, created_at, linked)
 		VALUES (?, ?, ?, ?, ?, ?, 1)`,
@@ -125,7 +125,7 @@ func (s *Store) linkIdentityOnce(ctx context.Context, accountID string, p SignIn
 	}
 	return Identity{
 		Provider: p.Provider, Subject: p.Subject, Email: p.Email, Linked: true,
-		CreatedAt: time.Unix(at, 0).UTC(),
+		CreatedAt: time.Unix(0, at).UTC(),
 	}, nil
 }
 
@@ -144,13 +144,24 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 		return Identity{}, 0, err
 	}
 	defer rollbackOrLog(tx)
+	id, ended, err := unlinkAccountIdentityTx(ctx, tx, accountID, provider, sessionDigest(keepSession), now)
+	if err != nil {
+		return Identity{}, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Identity{}, 0, err
+	}
+	return id, ended, nil
+}
+
+func unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, accountID, provider, keepHash string, now time.Time) (Identity, int64, error) {
 	if err := lockAccountTx(ctx, tx, accountID); err != nil {
 		return Identity{}, 0, err
 	}
 	var id Identity
 	var linked int
 	var created int64
-	err = tx.QueryRowContext(ctx, `SELECT provider, subject, email, linked, created_at FROM identities
+	err := tx.QueryRowContext(ctx, `SELECT provider, subject, email, linked, created_at FROM identities
 		WHERE account_id = ? AND provider = ? ORDER BY created_at LIMIT 1`, accountID, provider).
 		Scan(&id.Provider, &id.Subject, &id.Email, &linked, &created)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -159,7 +170,7 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 	if err != nil {
 		return Identity{}, 0, err
 	}
-	id.Linked, id.CreatedAt = linked == 1, time.Unix(created, 0).UTC()
+	id.Linked, id.CreatedAt = linked == 1, time.Unix(0, created).UTC()
 	var methods int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM identities WHERE account_id = ?`, accountID).Scan(&methods); err != nil {
@@ -168,7 +179,7 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 	if methods <= 1 {
 		return Identity{}, 0, ErrLastSignInMethod
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	for _, stmt := range []struct {
 		sql  string
 		args []any
@@ -185,7 +196,7 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 		}
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ?`,
-		accountID, sessionDigest(keepSession))
+		accountID, keepHash)
 	if err != nil {
 		return Identity{}, 0, err
 	}
@@ -193,7 +204,7 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 	if err != nil {
 		return Identity{}, 0, err
 	}
-	return id, ended, tx.Commit()
+	return id, ended, nil
 }
 
 func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {

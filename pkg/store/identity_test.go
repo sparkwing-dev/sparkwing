@@ -237,10 +237,19 @@ func TestIdentitySessionSwitchNamesTheTeamItLeaves(t *testing.T) {
 	if _, err := st.CreateTeam(ctx, a.Account.ID, "second", "Second", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SwitchSessionTeam(ctx, raw, a.Account.ID, "not-its-team", "second"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("switch from the wrong team = %v, want ErrNotFound", err)
+	digest := sha256.Sum256([]byte(raw))
+	principal, err := st.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := st.SwitchSessionTeam(ctx, raw, a.Account.ID, a.PersonalTeam, "second"); err != nil {
+	route, _ := capability.LookupRoute("POST", "/api/v1/me/active-team")
+	authorized := capability.Authorized{Principal: principal, Access: route.Access[0]}
+	authorized.Principal.Capability.Team = "not-its-team"
+	if err := st.SelectAccountTeam(ctx, authorized, "second"); err == nil {
+		t.Fatal("switch from the wrong team succeeded")
+	}
+	authorized.Principal = principal
+	if err := st.SelectAccountTeam(ctx, authorized, "second"); err != nil {
 		t.Fatal(err)
 	}
 	sess, err := st.LookupSession(t.Context(), raw)

@@ -45,9 +45,6 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 
-// OneShot reports whether this reading covers a completed command.
-func (sample MetricSample) OneShot() bool { return sample.Kind == MetricCommand }
-
 // Marker reports whether the sample only labels its node's measurement,
 // carrying no resource reading.
 func (sample MetricSample) Marker() bool {

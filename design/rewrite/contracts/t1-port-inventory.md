@@ -2668,3 +2668,23 @@ fallback reader. `TestSecretReadClaimScopePrecedenceProperty`,
 `TestSecretReadAuthorityAndSelectionProperty` and
 `TestSecretReadMemberScopesAndMaskedRefusal` retain authorized scope coverage.
 The encryption and tenant-key tests inspect exact rows with `GetSecretRow`.
+
+## W1 account transactions and raw team-switch ports
+
+The four raw session-switch fixture calls now use `SelectAccountTeam`.
+`TestIdentitySessionSwitchNamesTheTeamItLeaves`,
+`TestRolelessSessionsHaveNoTeamAuthorityProperty` and `TestStoreSessions`
+retain stale-team and membership refusal and roleless selection coverage.
+`TestAccountMutationsRequireTheSameLiveDirectSessionProperty` generates changed
+identity, team, route rule, revoked/expired sessions, lost membership and
+capability ancestry against all four final account writers. The other account
+transaction tests cover atomic session selection, rollback, recent-sign-in
+boundaries, last-method preservation, other-session revocation and one invitation
+winner across two sessions. `TestAccountMutationsHTTPUseCommittedStoreAdapter`
+checks all four concrete defaults through socket-free HTTP and asserts C2
+interface conformance. `TestAccountMutationsKeepNanosecondTimestamps` checks
+public account/identity times, raw membership/update/unlink facts and signup
+window cutoffs without losing subsecond precision. Existing raw account fixture methods still need caller migration.
+
+`TestCacheExcludedCounts_CountsCacheDominantRunsPerPipeline` retires with its
+unused API and SQL. The profile-folding suites retain memoized-job exclusion.

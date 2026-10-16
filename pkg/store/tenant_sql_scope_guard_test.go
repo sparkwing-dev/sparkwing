@@ -70,7 +70,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).SampleSealedSecrets": "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
-	"(*Store).UnlinkIdentity":      "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
+	"unlinkAccountIdentityTx":      "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
 	"(*Store).lookupSession":       "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
 	"(*Store).DeleteSession":       "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Store).mintCSRFKey":         "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
@@ -81,7 +81,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",
-	"(*Store).AcceptInvitation":        "finds an invitation by its id before the team is known; the accepting write then names that team",
+	"(*Store).AcceptAccountInvitation": "finds the invitation by its global id to lock its team before rechecking the account and committing the scoped acceptance",
+	"acceptAccountInvitationTx":        "finds an invitation by its id before the team is known; the accepting write then names that team",
 	"(*Store).deleteAccountTx": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
 	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
