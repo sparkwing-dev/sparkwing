@@ -58,9 +58,9 @@ func (s *Server) runControlEndpoints() []Endpoint {
 		engine = &EngineController{Store: s.store}
 	}
 	return []Endpoint{
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/resume", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleResumeDebugPause},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/debug-pauses", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleCreateDebugPause},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/approvals/{job}", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleResolveApproval},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/resume", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleResumeDebugPause},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/debug-pauses", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleCreateDebugPause},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/approvals/{job}", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleResolveApproval},
 	}
 }
 

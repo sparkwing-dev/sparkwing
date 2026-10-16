@@ -38,7 +38,7 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleRunDetail,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleRunDetail,
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}/snapshot", Authentication: capability.AuthCapability,
@@ -46,11 +46,11 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleJobs,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleJobs,
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleJob,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleJob,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/finish", Authentication: capability.AuthCapability,
@@ -58,11 +58,11 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/cancel", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleCancel,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleCancel,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/cancel", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleCancelJob,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleCancelJob,
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/failure", Authentication: capability.AuthCapability,
@@ -70,7 +70,7 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/retry", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleRetry,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleRetry,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/heartbeat", Authentication: capability.AuthCapability,

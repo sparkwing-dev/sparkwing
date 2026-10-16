@@ -65,7 +65,7 @@ func (a *ProcessAuthorities) Delegate(ctx context.Context, parent capability.Cre
 	if closed {
 		return capability.Issued{}, nil, processUnauthenticated()
 	}
-	if parent.Audience != capability.Controller || spec.Audience != capability.NodeHost || services == nil || services.RunID == "" || services.Job.ID == "" || services.RunID != spec.Binding.RunID || services.Job.ID != spec.Binding.NodeID || services.Masks == nil || services.Masks.masker == nil {
+	if parent.Audience != capability.Controller || spec.Audience != capability.NodeHost || services == nil || services.RunID == "" || services.Job.ID == "" || services.RunID != spec.Binding.RunID || services.Masks == nil || services.Masks.masker == nil {
 		return capability.Issued{}, nil, executorError(apierr.Forbidden, "process delegation requires its bound job and masker")
 	}
 	snapshot, err := a.deps.Parent.ReadAuthentication(ctx, parent, capability.RequestEvidence{})
@@ -81,6 +81,17 @@ func (a *ProcessAuthorities) Delegate(ctx context.Context, parent capability.Cre
 	}
 	if err != nil {
 		return capability.Issued{}, nil, err
+	}
+	if (principal.Capability.Unit == capability.UnitTrigger || principal.Capability.Unit == capability.UnitEval) && services.SourceBindings == nil {
+		return capability.Issued{}, nil, executorError(apierr.Forbidden, "evaluation delegation requires its source relations")
+	}
+	if spec.Binding.Kind == capability.BindingTrigger && principal.Capability.Unit == capability.UnitTrigger && spec.Binding.NodeID == "" {
+		target := capability.Target{Team: principal.Capability.Team, RunID: services.RunID, NodeID: services.Job.ID}
+		if err := a.deps.Bindings.CheckBinding(ctx, principal, capability.BindRunOfTrigger, target); err != nil {
+			return capability.Issued{}, nil, err
+		}
+	} else if services.Job.ID != spec.Binding.NodeID {
+		return capability.Issued{}, nil, processBindingDenied()
 	}
 	return a.issue(ctx, parent, spec, principal, snapshot.Now, services)
 }
@@ -224,6 +235,11 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 		return processBindingDenied()
 	}
 	switch rule {
+	case capability.BindRunOfTrigger:
+		if binding.Kind != capability.BindingTrigger || principal.Capability.Unit != capability.UnitTrigger || target.NodeID != "" && target.NodeID != service.Job.ID || target.CleanupID != "" && (service.Cleanups == nil || !service.Cleanups.contains(target.CleanupID)) {
+			return processBindingDenied()
+		}
+		target.NodeID = service.Job.ID
 	case capability.BindOwnNode:
 		if target.NodeID != "" && target.NodeID != binding.NodeID {
 			return processBindingDenied()
@@ -263,7 +279,13 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 	if rule == capability.BindOwnNode && target.NodeID == "" {
 		target.NodeID = binding.NodeID
 	}
-	return a.deps.Bindings.CheckBinding(ctx, snapshot.Authorities[1].Principal, rule, target)
+	parent := snapshot.Authorities[1].Principal
+	if service.SourceBindings != nil {
+		if err := service.SourceBindings.CheckBinding(ctx, parent, rule, target); err != nil {
+			return err
+		}
+	}
+	return a.deps.Bindings.CheckBinding(ctx, parent, rule, target)
 }
 
 func processBindingDenied() error {

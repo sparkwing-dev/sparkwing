@@ -171,7 +171,7 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 		presentation.Evidence.Target.Team = authenticated.Principal.Capability.Team
 	}
 	if endpoint.ResolveTarget != nil {
-		presentation.Evidence.Target, err = endpoint.ResolveTarget(authenticated.Principal, presentation.Evidence.Target)
+		presentation.Evidence.Target, err = endpoint.ResolveTarget(r.Context(), authenticated.Principal, presentation.Evidence.Target)
 		if err != nil {
 			return err
 		}

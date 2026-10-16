@@ -59,17 +59,15 @@ func bindingDeclaredReadTx(ctx context.Context, tx *storeTx, c capability.Capabi
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return err
 		}
-		if job.OnFailureOf == target.NodeID || slices.Contains(job.Needs, target.NodeID) || slices.Contains(job.NeedsIfPresent, target.NodeID) {
-			return nil
+		var output nodeproto.JobSpec
+		if err := json.Unmarshal(source.Spec, &output); err != nil {
+			return err
 		}
-		for _, group := range job.NeedsGenerated {
-			var generated nodeproto.JobSpec
-			if err := json.Unmarshal(source.Spec, &generated); err != nil {
-				return err
-			}
-			if slices.Contains(generated.Groups, group) {
-				return nil
-			}
+		if output.ID != target.NodeID {
+			return bindingRefusal()
+		}
+		if capability.ReadsJobOutput(job, output) {
+			return nil
 		}
 	}
 	return bindingRefusal()

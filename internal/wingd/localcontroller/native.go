@@ -181,10 +181,11 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 				if _, err := current(ctx); err != nil {
 					return nodehost.ProcessGrant{}, err
 				}
-				if cfg.Evaluate == nil {
-					return nodehost.ProcessGrant{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "owner evaluation requires owner/eval process authority"}
+				evaluate := cfg.Evaluate
+				if evaluate == nil {
+					evaluate = claims.evaluate
 				}
-				grant, err := cfg.Evaluate(ctx, input)
+				grant, err := evaluate(ctx, input)
 				if err == nil {
 					serve()
 				}

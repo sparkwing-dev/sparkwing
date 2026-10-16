@@ -2,6 +2,7 @@ package localcontroller
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net"
 	"os"
@@ -26,6 +27,11 @@ import (
 type nativeState struct {
 	nodehost.NativeHostStore
 	snapshot store.RunSnapshot
+	node     store.NodeRow
+}
+
+func (s *nativeState) ReadNode(ctx context.Context, _ store.NodeRef) (store.NodeRow, error) {
+	return s.node, context.Cause(ctx)
 }
 
 func (s *nativeState) ReadSnapshot(ctx context.Context, _ string) (store.RunSnapshot, error) {
@@ -297,4 +303,45 @@ func FuzzNativeBindingsRejectForeignScopeBeforeTransport(f *testing.F) {
 			t.Fatal("foreign state reached process service construction")
 		}
 	})
+}
+
+func TestNativeOwnerEvaluationHasProductionBinder(t *testing.T) {
+	cfg, state := nativeConfigFixture(t)
+	claims, authority, _, _ := localClaimsFixture(t)
+	principal, _ := claims.current(t.Context())
+	principal.Class = capability.CredentialBearer
+	principal.Capability.Audience = capability.Controller
+	principal.Capability.Unit, principal.Capability.UnitID = capability.UnitTrigger, "owner-unit"
+	principal.Capability.Purpose, principal.Capability.Issuance = capability.PurposeTrigger, capability.Award
+	principal.Capability.Grants = []capability.Grant{capability.DataRead, capability.NodeReport}
+	principal.Capability.Digest = sha256.Sum256([]byte("owner-token"))
+	authority.snapshot.Authorities[0].Principal = principal
+	authority.snapshot.Binding.Current = principal.Capability.Binding
+	cfg.Principal, cfg.Parent, cfg.Bindings = principal, authority, authority
+	cfg.Refresh = func(context.Context) (capability.Principal, error) { return principal, nil }
+	cfg.Storage = func(context.Context, capability.Principal) (nodehost.StorageBinding, error) {
+		data := &nativeStorageFixture{}
+		return nodehost.StorageBinding{Bytes: data, Records: data, Authority: blob.Authority{CapabilityRef: principal.Capability.Prefix}}, nil
+	}
+	state.node = store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Spec: []byte(`{"id":"job"}`), SpecHash: "source-hash"}
+	listener := &processListener{closed: make(chan struct{})}
+	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := services.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	grant, err := services.Config.Evaluation.Bind(t.Context(), nodehost.EvaluationInput{Accepted: nodehost.AcceptedRun{RunID: "run"}, NodeID: "job", SpecHash: "source-hash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.Binding.JobID != "job" || grant.Binding.Routes.Bearer == "" || grant.Revoke == nil {
+		t.Fatalf("incomplete owner process: %+v", grant)
+	}
+	if err := grant.Revoke(); err != nil {
+		t.Fatal(err)
+	}
 }

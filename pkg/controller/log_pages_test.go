@@ -54,6 +54,10 @@ func TestPersistedLogPageUsesCanonicalSubjectAndCursor(t *testing.T) {
 	if strings.Contains(page.NextCursor, "first") || strings.Contains(page.NextCursor, "second") {
 		t.Fatal("cursor retained log payload")
 	}
+	numeric, err := reader.ReadLogs(t.Context(), "1", controllerwire.LogQuery{Job: "job", NoEvents: true})
+	if err != nil || !reflect.DeepEqual(numeric, page) {
+		t.Fatalf("numeric logs changed canonical subject or cursor: %+v %v", numeric, err)
+	}
 }
 
 func TestPersistedLogPageSelectionsAndContinuation(t *testing.T) {

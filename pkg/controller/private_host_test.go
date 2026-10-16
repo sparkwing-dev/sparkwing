@@ -74,6 +74,14 @@ func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) 
 	if err != nil || started.Attempt != 1 {
 		t.Fatalf("start: %+v %#v", started, err)
 	}
+	debug, err := client.NewDebugReader(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}}, Bearer: func(context.Context) (string, error) { return string(claim.Bearer), nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := debug.ReadDebugJob(t.Context(), "1", "build")
+	if err != nil || current.Execution == nil || current.Execution.Kind != "runner" || current.Execution.Runner != owner.Capability.Subject.ID {
+		t.Fatalf("current persisted executor: %+v %v", current, err)
+	}
 	var ownerBefore, ownerAfter int64
 	if err := server.store.DB().QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers WHERE team='a' AND id='run'`).Scan(&ownerBefore); err != nil {
 		t.Fatal(err)

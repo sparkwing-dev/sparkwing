@@ -84,14 +84,15 @@ func (s *hostState) AcceptExpansion(ctx context.Context, expansion store.Expansi
 }
 
 type storeHostFixture struct {
-	Store    *store.Store
-	Tenant   *store.Tenant
-	State    *hostState
-	Actor    store.Actor
-	Control  store.Actor
-	Accepted AcceptedRun
-	Input    RunInput
-	Host     OwnerHost
+	OwnerBearer []byte
+	Store       *store.Store
+	Tenant      *store.Tenant
+	State       *hostState
+	Actor       store.Actor
+	Control     store.Actor
+	Accepted    AcceptedRun
+	Input       RunInput
+	Host        OwnerHost
 }
 
 func newStoreHostFixture(t *testing.T, plan nodeproto.PlanDoc) *storeHostFixture {
@@ -177,7 +178,7 @@ func newStoreOwnerFixture(t *testing.T, database *store.Store, request runspec.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &storeHostFixture{Store: database, Tenant: tenant, Actor: actor, Control: store.Actor{Kind: store.ActorOperator, Authority: authority, CapabilityPrefix: root}}
+	f := &storeHostFixture{OwnerBearer: claim.Bearer, Store: database, Tenant: tenant, Actor: actor, Control: store.Actor{Kind: store.ActorOperator, Authority: authority, CapabilityPrefix: root}}
 	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
 
 	f.State = &hostState{Tenant: tenant}

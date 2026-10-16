@@ -35,7 +35,7 @@ func (p *NativeProcesses) Delegate(ctx context.Context, parent capability.Creden
 		return ProcessGrant{Revoke: revoke}, err
 	}
 	return ProcessGrant{Binding: nodeproto.ProcessBinding{
-		RunID: spec.Binding.RunID, JobID: spec.Binding.NodeID,
+		RunID: spec.Binding.RunID, JobID: services.Job.ID,
 		Routes: nodeproto.ProcessRoutes{URL: strings.TrimRight(p.URL, "/"), Bearer: issued.Raw},
 	}, Revoke: revoke}, nil
 }
@@ -108,7 +108,7 @@ func (a *ProcessAuthorities) processServices(ctx context.Context, binding nodepr
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	entry := a.live[sha256.Sum256([]byte(binding.Routes.Bearer))]
-	if entry == nil || entry.principal.Capability.Binding.RunID != binding.RunID || entry.principal.Capability.Binding.NodeID != binding.JobID || entry.services == nil || entry.services.Cleanups == nil || entry.services.Masks == nil || entry.services.Masks.masker == nil || entry.services.lifetime.Err() != nil {
+	if entry == nil || entry.principal.Capability.Binding.RunID != binding.RunID || entry.services == nil || entry.services.Job.ID != binding.JobID || entry.services.Cleanups == nil || entry.services.Masks == nil || entry.services.Masks.masker == nil || entry.services.lifetime.Err() != nil {
 		return nil, processUnauthenticated()
 	}
 	return entry.services, nil

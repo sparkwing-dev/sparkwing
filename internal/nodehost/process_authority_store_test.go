@@ -43,7 +43,7 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = registry.Close() })
 	service := &ProcessServices{RunID: ref.RunID, Job: job, Masks: NewMaskRegistry(secrets.NewMasker())}
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, capability.DelegateSpec{Parent: parent.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport}, Binding: snapshot.Binding.Current, ExpiresAt: parent.Capability.ExpiresAt}, service)
+	issued, revoke, err := registry.Delegate(t.Context(), lookup, capability.DelegateSpec{Parent: parent.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport}, Binding: snapshot.Binding.Current, Repositories: parent.Capability.Repositories, ExpiresAt: parent.Capability.ExpiresAt}, service)
 	if err != nil {
 		t.Fatal(err)
 	}

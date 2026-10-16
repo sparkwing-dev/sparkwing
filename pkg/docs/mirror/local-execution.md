@@ -6,9 +6,12 @@ sealed inputs and matching SDK engine.
 
 The commands bind sealed intake to the shared controller, source, private
 environment, storage and host services. The CLI sends state operations over the
-authenticated private API. Owner evaluation still requires its separate process
-credential contract. Native execution evidence remains with the integration
-suite. See [rewrite integration](architecture.md).
+authenticated private API. Owner evaluation delegates a fresh SDK process from
+the live owner lease. It keeps the evaluated job separate from that lease and
+creates no work attempt. Each service call rechecks that job's persisted source
+fence and declared output edges. A separately awarded eval process uses its own
+eval lease.
+Native execution evidence remains with the integration suite. See [rewrite integration](architecture.md).
 
 The old `pkg/localws` server, trigger-consumer election and `RunHosted` entrypoint
 are removed with their state, admission, logging and child-dispatch backends.

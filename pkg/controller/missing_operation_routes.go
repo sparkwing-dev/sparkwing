@@ -2,10 +2,11 @@ package controller
 
 import (
 	"errors"
+	"net/http"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"net/http"
 )
 
 func (s *Server) missingOperationEndpoints() []Endpoint {
@@ -14,10 +15,10 @@ func (s *Server) missingOperationEndpoints() []Endpoint {
 		e = &EngineController{Store: s.store}
 	}
 	endpoints := []Endpoint{
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/debug-pause", Decode: e.runTarget, Handle: s.handleJobDebugPause},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/debug-pause", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobDebugPause},
 		{Method: "DELETE", Pattern: "/api/v1/runners/{runner}", Decode: authorityTarget, Handle: s.handleDeleteRunner},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/attempts", Decode: e.runTarget, Handle: s.handleJobAttempts},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps", Decode: e.runTarget, Handle: s.handleJobSteps},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/attempts", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobAttempts},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobSteps},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/activity", Decode: e.runTarget, Handle: s.handleJobActivity},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/claim", Decode: e.claimTarget, Handle: s.claimHandler(e)},
 	}

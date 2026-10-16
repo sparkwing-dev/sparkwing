@@ -58,6 +58,6 @@ func (s *Server) teamWriteEndpoints() []Endpoint {
 		{Method: "POST", Pattern: "/api/v1/team/invitations", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleInvite},
 		{Method: "DELETE", Pattern: "/api/v1/team/invitations/{invitation}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteInvitation},
 		{Method: "PUT", Pattern: "/api/v1/team/build-trust", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePutBuildTrust},
-		{Method: "DELETE", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleDeleteRun},
+		{Method: "DELETE", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleDeleteRun},
 	}
 }

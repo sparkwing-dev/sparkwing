@@ -44,18 +44,74 @@ func (s *EngineController) handleJobs(w http.ResponseWriter, r *http.Request, a 
 }
 
 func (s *EngineController) handleJob(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	tenant, err := s.runTransactions(r.Context(), a.Target.Team)
+	if s.Store == nil {
+		return missingEndpointPolicy()
+	}
+	tenant, err := s.Store.ForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {
 		return err
 	}
-	ref := store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}
-	row, err := tenant.ReadNode(r.Context(), ref)
+	view, err := tenant.ReadRunView(r.Context(), a.Target.RunID)
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if row.Ref != ref {
-		return errors.New("invalid persisted job")
+	result, err := debugJobResponse(a.Target, view)
+	if err != nil {
+		return err
 	}
-	writeJSON(w, http.StatusOK, snapshotJob(row))
+	writeJSON(w, http.StatusOK, result)
 	return nil
+}
+
+func debugJobResponse(target capability.Target, view store.RunView) (controllerwire.DebugJob, error) {
+	run := view.Snapshot.Run
+	if run.ID != target.RunID || string(run.Team) != target.Team || view.Snapshot.StoreNow.IsZero() {
+		return controllerwire.DebugJob{}, errors.New("invalid persisted debug run")
+	}
+	var selected *store.NodeRow
+	for i := range view.Snapshot.Nodes {
+		row := &view.Snapshot.Nodes[i]
+		if row.Ref.RunID != run.ID {
+			return controllerwire.DebugJob{}, errors.New("invalid persisted debug job")
+		}
+		if row.Ref.NodeID == target.NodeID {
+			if selected != nil {
+				return controllerwire.DebugJob{}, errors.New("duplicate persisted debug job")
+			}
+			selected = row
+		}
+	}
+	if selected == nil {
+		return controllerwire.DebugJob{}, engineLookupError(store.ErrNotFound)
+	}
+	result := controllerwire.DebugJob{RunID: run.ID, Number: run.Number, Job: snapshotJob(*selected)}
+	if selected.Status == store.StatusRunning && selected.LeaseExpiresAt != nil && selected.LeaseExpiresAt.After(view.Snapshot.StoreNow) {
+		found := false
+		for _, attempt := range view.Attempts {
+			id := attempt.Identity
+			if id.Team != target.Team || id.RunID != run.ID || id.NodeID != target.NodeID || id.Attempt != selected.Attempt || id.Generation != selected.Generation || attempt.FinishedAt != nil {
+				continue
+			}
+			if found || attempt.CapabilityPrefix != selected.CapabilityPrefix || attempt.Holder != selected.ClaimedBy {
+				return controllerwire.DebugJob{}, errors.New("invalid current debug attempt")
+			}
+			found = true
+			kind := attempt.ExecutorKind
+			if kind == "coordinator" && attempt.ExecutorLocation == "local" {
+				kind = "local"
+			} else if kind == "agent" {
+				kind = "runner"
+			}
+			if kind == "local" || kind == "runner" {
+				result.Execution = &controllerwire.DebugExecution{Kind: kind, Runner: attempt.ExecutorName}
+			}
+		}
+		if !found {
+			return controllerwire.DebugJob{}, errors.New("missing current debug attempt")
+		}
+	}
+	if err := result.Validate(target.RunID, target.NodeID); err != nil {
+		return controllerwire.DebugJob{}, err
+	}
+	return result, nil
 }

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 
@@ -62,7 +63,7 @@ func decodeDataTarget(r *http.Request) (capability.RequestEvidence, error) {
 	return capability.RequestEvidence{Target: capability.Target{Data: &target}}, err
 }
 
-func resolveDataTarget(p capability.Principal, target capability.Target) (capability.Target, error) {
+func resolveDataTarget(_ context.Context, p capability.Principal, target capability.Target) (capability.Target, error) {
 	if target.Data == nil || p.Capability.Data == nil {
 		return target, dataForbidden()
 	}

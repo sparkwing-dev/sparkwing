@@ -5,12 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -48,7 +49,7 @@ func TestEveryDataEndpointDecodesBinding(t *testing.T) {
 				t.Fatal("missing credential scope resolution")
 			}
 			p := capability.Principal{Capability: capability.Capability{Data: &capability.DataScope{RunID: "run", NodeID: "job", Attempt: 2, Generation: 3}}}
-			target, err := endpoint.ResolveTarget(p, evidence.Target)
+			target, err := endpoint.ResolveTarget(t.Context(), p, evidence.Target)
 			if err != nil || target.Data.RunID != "run" || target.Data.NodeID != "job" || target.Data.Attempt != 2 || target.Data.Generation != 3 {
 				t.Fatalf("scope=%+v error=%v", target.Data, err)
 			}
