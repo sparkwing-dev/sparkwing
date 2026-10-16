@@ -188,7 +188,11 @@ func FuzzPlanningDiagnosticsNeverExposeSecretArguments(f *testing.F) {
 						})
 						var err error
 						if stage == "describe" || stage == "help" {
-							_, err = sdkserve.DefaultOperations.Describe(t.Context())
+							var described nodeproto.DescribeDoc
+							described, err = sdkserve.DefaultOperations.Describe(t.Context())
+							if err == nil && len(described.Pipelines) == 1 && described.Pipelines[0].Error != nil {
+								err = described.Pipelines[0].Error
+							}
 						} else {
 							var built any
 							var doc nodeproto.PlanDoc

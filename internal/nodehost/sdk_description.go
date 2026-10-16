@@ -12,24 +12,35 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (PreparedPlanning, error) {
+func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (PreparedPlanning, bool, error) {
 	var doc nodeproto.DescribeDoc
 	if err := json.Unmarshal(raw, &doc); err != nil || doc.Pipelines == nil {
-		return PreparedPlanning{}, executorError(apierr.ProtocolError, "SDK describe requires a pipelines array")
+		return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe requires a pipelines array")
 	}
+	complete := true
 	seen := map[string]bool{}
 	var selected *nodeproto.PipelineDescription
 	for i := range doc.Pipelines {
 		pipeline := &doc.Pipelines[i]
-		if pipeline.Name == "" || seen[pipeline.Name] || pipeline.Args == nil {
-			return PreparedPlanning{}, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
+		if pipeline.Name == "" || seen[pipeline.Name] {
+			return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
 		}
 		seen[pipeline.Name] = true
+		if pipeline.Name == input.Run.Pipeline {
+			selected = pipeline
+		}
+		if pipeline.Error != nil {
+			complete = false
+			continue
+		}
+		if pipeline.Args == nil {
+			return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has invalid pipeline declarations")
+		}
 		args := map[string]bool{}
 		defaults := runspec.Resolved{Args: map[string]string{}}
 		for _, arg := range pipeline.Args {
 			if arg.Name == "" || args[arg.Name] {
-				return PreparedPlanning{}, executorError(apierr.ProtocolError, "SDK describe has ambiguous arguments")
+				return PreparedPlanning{}, false, executorError(apierr.ProtocolError, "SDK describe has ambiguous arguments")
 			}
 			args[arg.Name] = true
 			if arg.Secret && arg.Default != nil {
@@ -38,14 +49,14 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 			}
 		}
 		if err := p.Masks.initialize(runspec.SealedRequest{}, &defaults, nil, nil); err != nil {
-			return PreparedPlanning{}, err
-		}
-		if pipeline.Name == input.Run.Pipeline {
-			selected = pipeline
+			return PreparedPlanning{}, false, err
 		}
 	}
 	if selected == nil {
-		return PreparedPlanning{}, executorError(apierr.UnknownPipeline, "SDK describe does not declare the requested pipeline")
+		return PreparedPlanning{}, false, executorError(apierr.UnknownPipeline, "SDK describe does not declare the requested pipeline")
+	}
+	if selected.Error != nil {
+		return PreparedPlanning{Description: nodeproto.PipelineDescription{Name: selected.Name, Error: selected.Error}}, false, nil
 	}
 	prepared := PreparedPlanning{Description: *selected, Args: maps.Clone(input.Args), SecretArgs: append([]string{}, input.SecretArgs...)}
 	if prepared.Args == nil {
@@ -62,9 +73,9 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 		}
 	}
 	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, &runspec.Resolved{Args: prepared.Args, SecretArgs: prepared.SecretArgs}, nil, nil); err != nil {
-		return PreparedPlanning{}, err
+		return PreparedPlanning{}, false, err
 	}
-	return prepared, nil
+	return prepared, complete, nil
 }
 
 type planningSecrets struct {

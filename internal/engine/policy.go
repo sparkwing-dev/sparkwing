@@ -110,8 +110,14 @@ func (v VerifiedIndex) Policy() VersionIndex {
 // Development reports that the host build disabled release-policy enforcement.
 func (v VerifiedIndex) Development() bool { return v.development }
 
+// Offline reports local execution without a cached verified policy.
+func (v VerifiedIndex) Offline() bool { return v.offline }
+
 // Evaluate applies signed restrictions without treating age as a revocation.
 func Evaluate(index VerifiedIndex, version string, now time.Time) ([]Notice, error) {
+	if index.offline {
+		return nil, nil
+	}
 	return evaluate(index, version, now, UpgradeCommand)
 }
 

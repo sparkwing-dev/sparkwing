@@ -82,7 +82,9 @@ test("describe rejects shared argument names before publishing ambiguous flags",
       p.job("build", () => undefined).withArgs({ name: "arg", type: "string" });
     },
   });
-  await assert.rejects(describe(run), /duplicate argument/);
+  const doc = await describe(run);
+  assert.match(doc.pipelines[0]!.error?.message ?? "", /duplicate argument/);
+  assert.deepEqual(doc.pipelines[0]!.args, []);
 });
 
 test("describe failures are pipeline-attributed and cannot expose secret defaults", async () => {
@@ -113,15 +115,18 @@ test("describe failures are pipeline-attributed and cannot expose secret default
           throw new Error(message);
         },
       });
-      await assert.rejects(describe(run), (error: any) => {
-        assert.equal(error.code, "plan_failed");
-        assert.match(error.message, /describe pipeline "broken"/);
-        assert.match(error.message, /declaration refused/);
-        const serialized = JSON.stringify(error) + error.message;
-        assert.equal(serialized.includes(first), false);
-        assert.equal(serialized.includes(second), false);
-        return true;
-      });
+      const doc = await describe(run);
+      assert.equal(doc.pipelines[0]!.name, "a-valid");
+      assert.equal(doc.pipelines[0]!.error, undefined);
+      const error = doc.pipelines[1]!.error!;
+      assert.equal(error.code, "plan_failed");
+      assert.match(error.message, /describe pipeline "broken"/);
+      assert.match(error.message, /declaration refused/);
+      const serialized = JSON.stringify(error) + error.message;
+      assert.equal(serialized.includes(first), false);
+      assert.equal(serialized.includes(second), false);
+      assert.deepEqual(doc.pipelines[1]!.args, []);
+      assert.equal(doc.pipelines[1]!.secrets, undefined);
     }
   }
 });
@@ -140,9 +145,8 @@ test("describe diagnostics protect secrets discovered in other pipeline declarat
       throw new Error(secret);
     },
   });
-  await assert.rejects(describe(run), (error: Error) => {
-    assert.equal(error.message.includes(secret), false);
-    assert.match(error.message, /describe pipeline "b"/);
-    return true;
-  });
+  const doc = await describe(run);
+  const error = doc.pipelines[1]!.error!;
+  assert.equal(error.message.includes(secret), false);
+  assert.match(error.message, /describe pipeline "b"/);
 });

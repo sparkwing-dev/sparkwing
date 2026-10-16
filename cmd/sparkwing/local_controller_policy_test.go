@@ -107,6 +107,17 @@ func productionLocalPolicyClient(t *testing.T) client.EngineOptions {
 }
 
 func TestProductionLocalControllerAdmitsRun(t *testing.T) {
+	for _, version := range []string{"(devel)", "v1.2.3"} {
+		t.Run(version, func(t *testing.T) {
+			previous := Version
+			Version = version
+			t.Cleanup(func() { Version = previous })
+			testProductionLocalControllerAdmitsRun(t)
+		})
+	}
+}
+
+func testProductionLocalControllerAdmitsRun(t *testing.T) {
 	previous := http.DefaultClient
 	requests := 0
 	http.DefaultClient = &http.Client{Transport: queueHostTransport(func(*http.Request) (*http.Response, error) {
@@ -152,8 +163,15 @@ func TestProductionLocalControllerAdmitsRun(t *testing.T) {
 	if err != nil || len(page.Runs) != 1 || page.Runs[0].Status != string(store.RunSuccess) {
 		t.Fatalf("development run page: %+v: %v", page, err)
 	}
+	if Version == "v1.2.3" && (len(page.Runs[0].Notices) != 1 || page.Runs[0].Notices[0].Kind != enginepolicy.NoticePolicyUnavailable) {
+		t.Fatalf("offline policy warning missing from local status: %+v", page.Runs[0].Notices)
+	}
+	compatibility, err := engine.Compatibility(t.Context(), "v1.2.3")
+	if err != nil || compatibility.EngineRelease != "v1.2.3" {
+		t.Fatalf("offline local compatibility: %+v: %v", compatibility, err)
+	}
 	if requests != 0 {
-		t.Fatalf("development controller fetched policy %d times", requests)
+		t.Fatalf("local controller fetched policy %d times", requests)
 	}
 }
 

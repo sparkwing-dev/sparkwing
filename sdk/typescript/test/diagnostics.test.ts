@@ -73,6 +73,10 @@ test("planning diagnostics exclude secret arguments across scopes, encodings and
                 reply = await host.send({ id: "generate", op: "eval", closure: reply.result.jobs[0].closures.generate[0], input: null });
                 reply = reply.result;
               }
+              if (op === "describe") {
+                assert.equal(reply.ok, true, JSON.stringify(reply));
+                reply = reply.result.pipelines[0];
+              }
               assert.ok(reply.error, JSON.stringify(reply));
               assert.match(reply.error.message, /declaration refused/);
               for (const value of variants)
