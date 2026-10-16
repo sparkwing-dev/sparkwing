@@ -29,9 +29,8 @@ type SparkwingFlagDoc struct {
 	Argument string
 	// Desc is the one-line help text shown in --help output.
 	Desc string
-	// Group is the rendering bucket: currently a single "System"
-	// label. Per-pipeline help uses this to section the footer;
-	// `sparkwing run --help` uses it via FlagSpec.Group.
+	// Group is the section `sparkwing run --help` and the command index list
+	// the flag under.
 	Group string
 	// Hot marks flags an operator reaches for on most runs. Default
 	// --help and tab-completion menus filter to Hot=true entries to
