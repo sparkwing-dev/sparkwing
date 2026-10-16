@@ -79,18 +79,30 @@ func TestCreateRefWorktreeRefusesACommitWithNoProject(t *testing.T) {
 }
 
 func TestRemoveRefWorktreeClearsTreeAndRegistration(t *testing.T) {
-	repo := gitRepoWithProject(t, true)
-	p := paths.Paths{Root: t.TempDir()}
-	dir := buildWorktree(t, p, repo, "run-3")
+	cases := map[string]func(t *testing.T) string{
+		"checkout": func(t *testing.T) string { return gitRepoWithProject(t, true) },
+		"bare clone": func(t *testing.T) string {
+			bare := filepath.Join(t.TempDir(), "origin.git")
+			runGitFixture(t, t.TempDir(), "clone", "--bare", "--quiet", gitRepoWithProject(t, true), bare)
+			return bare
+		},
+	}
+	for name, origin := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := origin(t)
+			p := paths.Paths{Root: t.TempDir()}
+			dir := buildWorktree(t, p, repo, "run-3")
 
-	if err := RemoveRefWorktree(context.Background(), p, dir, nil); err != nil {
-		t.Fatalf("RemoveRefWorktree: %v", err)
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Error("worktree directory survived removal")
-	}
-	if worktreeRegistered(t, repo, dir) {
-		t.Error("registration survived removal, so the path cannot be reused")
+			if err := RemoveRefWorktree(context.Background(), p, dir, nil); err != nil {
+				t.Fatalf("RemoveRefWorktree: %v", err)
+			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Error("worktree directory survived removal")
+			}
+			if worktreeRegistered(t, repo, dir) {
+				t.Error("registration survived removal, so the path cannot be reused")
+			}
+		})
 	}
 }
 
@@ -125,6 +137,28 @@ func TestRemoveRefWorktreeDeletesTheTreeWhenTheOriginIsGone(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Error("the tree survived when git could not deregister it")
+	}
+}
+
+func TestRemoveRefWorktreeLeavesOtherRepositoriesWhenTheTreeHasNoGitFile(t *testing.T) {
+	bystander := gitRepoWithProject(t, true)
+	stale := filepath.Join(t.TempDir(), "stale")
+	runGitFixture(t, bystander, "worktree", "add", "--quiet", "--detach", stale)
+	if err := os.RemoveAll(stale); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(bystander)
+	p := paths.Paths{Root: t.TempDir()}
+	dir := p.RefWorktreeDir("run-5")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveRefWorktree(context.Background(), p, dir, nil); err != nil {
+		t.Fatalf("RemoveRefWorktree: %v", err)
+	}
+	if !worktreeRegistered(t, bystander, stale) {
+		t.Error("removing a tree with no .git file pruned the registrations of the repository the process runs in")
 	}
 }
 
