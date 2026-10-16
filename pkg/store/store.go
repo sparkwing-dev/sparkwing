@@ -1237,7 +1237,9 @@ type NodeStep struct {
 	RunID       string     `json:"run_id,omitempty"`
 	NodeID      string     `json:"node_id"`
 	StepID      string     `json:"step_id"`
+	Attempt     int64      `json:"attempt"`
 	Status      string     `json:"status"`
+	Error       string     `json:"error,omitempty"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 	Annotations []string   `json:"annotations,omitempty"`
@@ -1250,10 +1252,10 @@ type NodeStep struct {
 // ListNodeSteps returns persisted step observations for a tenant run.
 func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
 	rows, err := t.s.query(ctx, `
-SELECT node_id, step_id, status, started_at, finished_at, annotations_json, summary
+SELECT node_id, step_id, attempt, status, error, started_at, finished_at, annotations_json, summary
 FROM node_steps
 WHERE team = ? AND run_id = ?
-ORDER BY node_id, started_at`, string(t.team), runID)
+ORDER BY node_id, attempt, started_at, step_id`, string(t.team), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -1263,7 +1265,7 @@ ORDER BY node_id, started_at`, string(t.team), runID)
 		ns := &NodeStep{RunID: runID}
 		var started, finished sql.NullInt64
 		var annotations []byte
-		if err := rows.Scan(&ns.NodeID, &ns.StepID, &ns.Status, &started, &finished, &annotations, &ns.Summary); err != nil {
+		if err := rows.Scan(&ns.NodeID, &ns.StepID, &ns.Attempt, &ns.Status, &ns.Error, &started, &finished, &annotations, &ns.Summary); err != nil {
 			return nil, err
 		}
 		if started.Valid {

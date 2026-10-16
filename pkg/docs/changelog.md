@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **sdk:** Encode empty service collections as objects or arrays instead of null, so child pipelines without arguments pass host validation.
+- **cli:** Show every job's outcome and recorded failing steps and errors in `runs status`, including plain output.
+
 - **api:** Reject retry requests without a valid mode and idempotency key before creating a run.
 
 - **api (Breaking):** Return shared public run details for retry history, with redacted inputs and current lineage. Check each run against the caller's binding and omit raw invocation metadata. See [migration guide](docs/migrations/_unreleased.md#public-retry-history).

@@ -163,13 +163,9 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 	var text strings.Builder
 	if opts.format == "plain" {
 		fmt.Fprintln(&text, detail.Status)
-		for _, step := range detail.Steps {
-			fmt.Fprintf(&text, "%s/%s\n", step.JobID, step.ID)
-		}
-		_, err := io.WriteString(out, text.String())
-		return err
+	} else {
+		fmt.Fprintf(&text, "%s\t%s\t%s\n", detail.ID, detail.Inputs.Pipeline, detail.Status)
 	}
-	fmt.Fprintf(&text, "%s\t%s\t%s\n", detail.ID, detail.Inputs.Pipeline, detail.Status)
 	if detail.Engine != nil {
 		fmt.Fprintf(&text, "engine\t%s\n", detail.Engine.Version)
 	}
@@ -180,14 +176,14 @@ func writeRunDetail(out io.Writer, detail controllerwire.RunDetail, opts runStat
 		writeRunTimeline(&text, detail, opts.width)
 	} else {
 		if opts.format == "pretty" {
-			text.WriteString("JOB\tSTATUS\tOUTCOME\tATTEMPT\tGENERATION\n")
+			text.WriteString("JOB\tSTATUS\tOUTCOME\tATTEMPT\tGENERATION\tDETAIL\n")
 		}
 		for _, job := range detail.Jobs {
-			fmt.Fprintf(&text, "%s\t%s\t%s\t%d\t%d\n", job.ID, job.Status, job.Outcome, job.Attempt, job.Generation)
+			fmt.Fprintf(&text, "%s\t%s\t%s\t%d\t%d\t%s\n", job.ID, job.Status, job.Outcome, job.Attempt, job.Generation, job.StatusDetail)
 		}
 	}
 	for _, step := range detail.Steps {
-		fmt.Fprintf(&text, "%s/%s\t%s\t%s\tattempt=%d\n", step.JobID, step.ID, step.Status, step.Outcome, step.Attempt)
+		fmt.Fprintf(&text, "%s/%s\t%s\t%s\tattempt=%d\t%s\n", step.JobID, step.ID, step.Status, step.Outcome, step.Attempt, step.Reason)
 	}
 	_, err := io.WriteString(out, text.String())
 	return err

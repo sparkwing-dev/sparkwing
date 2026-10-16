@@ -369,10 +369,7 @@ func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request, aut
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if steps == nil {
-		steps = []*store.NodeStep{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
+	writeJSON(w, http.StatusOK, publicRunSteps(steps))
 	return nil
 }
 

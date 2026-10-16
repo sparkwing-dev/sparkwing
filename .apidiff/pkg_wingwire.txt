@@ -1,7 +1,7 @@
 # pkg/wingwire
 
 type AdmissionRequest struct {
-	RunID string
+	RunID HolderRef
 
 	OwnerRunID string
 
@@ -255,6 +255,8 @@ type Holder struct {
 
 	Origin Origin
 }
+type HolderRef string
+func (ref HolderRef) RunID() RunID
 type HostResources struct {
 	Cores float64
 
@@ -296,12 +298,12 @@ type Message interface {
 }
 type MessageType string
 const MinProtocolMajor = 1
-func NodeHostParticipant(runID, nodeID string) string
-func NodeSemaphoreParticipant(runID, nodeID string) string
+func NodeHostParticipant(runID, nodeID string) HolderRef
+func NodeSemaphoreParticipant(runID, nodeID string) HolderRef
 type Origin string
 const OriginController Origin = "controller"
 const OriginLocal Origin = "local"
-func PlanSemaphoresParticipant(runID string) string
+func PlanSemaphoresParticipant(runID string) HolderRef
 type Policy string
 const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
@@ -385,6 +387,7 @@ type ResourceState struct {
 
 	Available float64
 }
+type RunID string
 type RunnerHeadroom struct {
 	Name        string
 	Cores       float64

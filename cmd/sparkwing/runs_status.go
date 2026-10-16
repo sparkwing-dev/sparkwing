@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"time"
 
@@ -96,12 +97,20 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 		if detail.ID == "" || detail.Status == "" || previous != nil && previous.ID != detail.ID {
 			return exitError(3, invalidObservation("run observation is missing its identity or changed runs"))
 		}
-		if opts.steps && opts.view != "receipt" {
+		failedJobs := opts.view == "summary" && slices.ContainsFunc(detail.Jobs, func(job controllerwire.JobDetail) bool {
+			return job.Outcome == "failed" || job.Status == "failed"
+		})
+		if (opts.steps || failedJobs) && opts.view != "receipt" {
 			steps, err := reader.ReadSteps(ctx, detail.ID)
 			if err != nil {
 				return exitError(3, err)
 			}
 			detail.Steps = steps.Steps
+			if !opts.steps {
+				detail.Steps = slices.DeleteFunc(slices.Clone(detail.Steps), func(step controllerwire.StepDetail) bool {
+					return step.Outcome != "failed" && step.Status != "failed"
+				})
+			}
 		}
 		if previous == nil || opts.view == "tree" || !reflect.DeepEqual(detail, *previous) {
 			if err := renderObservedRun(ctx, reader, out, detail, opts); err != nil {

@@ -290,6 +290,10 @@ error object in its `error` member.
 | POST | `/node/v1/summary` | `{markdown, step?}` | `{}` |
 <!-- node-routes:end -->
 
+Service request fields cannot be null. SDK encoders send empty objects and
+arrays for required collections, including child `args: {}` and cleanup
+`argv: []`. Optional fields may be omitted. The host rejects null fields.
+
 Secret responses require both a string value and a boolean masking
 classification, including empty values and false. Output responses require an
 `output` member, which can be JSON null. OIDC tokens and cleanup IDs must be

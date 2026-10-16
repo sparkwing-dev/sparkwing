@@ -57,7 +57,15 @@ export class NodeRoutes implements HostServices {
         authorization: `Bearer ${this.#bearer}`,
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined
+        ? {}
+        : {
+            body: JSON.stringify(body, (_key, value: unknown) => {
+              if (value === null || (typeof value === "number" && !Number.isFinite(value)))
+                throw failure("invalid_args", "service request fields cannot be null");
+              return value;
+            }),
+          }),
     });
     const text = await response.text();
     if (response.status === 204 && response.ok) return {};

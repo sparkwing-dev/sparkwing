@@ -45,7 +45,7 @@ func (s *routeServices) call(ctx context.Context, method, path string, body, out
 	if u.Scheme != "http" || ip == nil || !ip.IsLoopback() || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("node-host URL must be a loopback HTTP origin")
 	}
-	raw, err := json.Marshal(body)
+	raw, err := EncodeServiceRequest(body)
 	if err != nil {
 		return err
 	}

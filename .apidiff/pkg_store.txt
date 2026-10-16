@@ -1142,6 +1142,7 @@ type IntakeRequest struct {
 	CapabilityPrefix   string
 	VerifiedDeliveryID string
 }
+func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, team Team) (ComputeLimits, bool, error)
 type Invitation struct {
 	ID              string
 	Team            Team
@@ -1418,7 +1419,9 @@ type NodeStep struct {
 	RunID       string
 	NodeID      string
 	StepID      string
+	Attempt     int64
 	Status      string
+	Error       string
 	StartedAt   *time.Time
 	FinishedAt  *time.Time
 	Annotations []string
@@ -1763,6 +1766,7 @@ type RepoDispatch string
 const RepoDispatchController RepoDispatch = "controller"
 const RepoDispatchTrigger RepoDispatch = "trigger"
 func RepoKey(owner, name string) string
+func RequestPlacement(request runspec.Request) nodeproto.Placement
 type RetentionRequest struct {
 	Lease SingletonLease
 	Limit int

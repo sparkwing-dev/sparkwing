@@ -368,11 +368,11 @@ Read one run's status, attempts, notices and selected view
 
 Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.
 
-Views: summary, timeline, receipt, errors, tree. --steps includes recorded steps. Receipts retain the controller's hashes and settled cost.
+Views: summary, timeline, receipt, errors, tree. Summary includes recorded failing steps and errors for failed jobs. --steps includes all recorded steps. Receipts retain the controller's hashes and settled cost.
 
 --follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, and 3 means the observation is incomplete. --exit-zero suppresses terminal failure only.
 
-JSON preserves run details and notices. Plain prints the status, failed job IDs for errors, run IDs for tree, or the receipt hash. --steps adds job/step IDs in plain status and tree output.
+JSON preserves run details and notices. Plain summary prints the run status, every job's status and outcome, and failure details. Errors prints failed job IDs, tree prints run IDs, and receipt prints the receipt hash. --steps adds recorded steps to summary and tree output.
 
 ### Flags
 

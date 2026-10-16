@@ -109,13 +109,13 @@ func (c *dataClient) Upload(ctx context.Context, input blob.UploadIntent) (blob.
 func (c *engineClient) AcceptExpansion(ctx context.Context, run, job string, input controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (c *engineClient) AcceptPlan(ctx context.Context, run string, input controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
 func (c *engineClient) AllowPool(ctx context.Context, pool string, input controllerwire.PoolRuleWrite) (controllerwire.PoolRuleResult, error)
-func (c *engineClient) AppendAnnotation(ctx context.Context, run, job string, input controllerwire.AnnotationWrite) (controllerwire.Applied, error)
+func (c *engineClient) AppendAnnotation(ctx context.Context, run, job string, input controllerwire.AnnotationWrite) error
 func (c *engineClient) Cancel(ctx context.Context, run string, input controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (c *engineClient) CancelJob(ctx context.Context, run, job string, input controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (c *engineClient) Claim(ctx context.Context, input controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 func (c *engineClient) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error)
 func (c *engineClient) CreateRun(ctx context.Context, input controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
-func (c *engineClient) DeleteRun(ctx context.Context, run string) (controllerwire.RunDeletion, error)
+func (c *engineClient) DeleteRun(ctx context.Context, run string) error
 func (c *engineClient) DeleteSchedule(ctx context.Context, name string) (controllerwire.ScheduleDeletion, error)
 func (c *engineClient) DeleteSchedulesForRepo(ctx context.Context, repo string) (controllerwire.ScheduleRepoDeletion, error)
 func (c *engineClient) DeleteSecret(ctx context.Context, selector controllerwire.SecretSelector) (controllerwire.SecretDeletion, error)

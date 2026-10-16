@@ -189,7 +189,7 @@ type Endpoint struct {
 	Pattern        string
 	Authentication capability.Authentication
 	Decode         func(*http.Request) (capability.RequestEvidence, error)
-	ResolveTarget  func(capability.Principal, capability.Target) (capability.Target, error)
+	ResolveTarget  func(context.Context, capability.Principal, capability.Target) (capability.Target, error)
 	Verify         func(*http.Request) error
 	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }
@@ -475,6 +475,7 @@ func (s *Server) MultiTeam() bool
 func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Registrations() []string
+func (s *Server) ResolveIntake(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error)
 func (s *Server) ScheduleLauncher() crons.Launcher
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
@@ -573,8 +574,10 @@ type SignedEngineVersionPolicy struct {
 }
 func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error)
 func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) ([]engine.Notice, error)
-type SignedRunnerAdmission struct{ Resolver *engine.Resolver }
-func (p SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error
+type SignedRunnerAdmission struct {
+	Resolver *engine.Resolver
+}
+func (p *SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error
 type SizingReader interface {
 	GetPipelineProfile(context.Context, string, string) (*store.PipelineProfile, error)
 }
