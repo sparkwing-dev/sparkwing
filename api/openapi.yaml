@@ -1323,6 +1323,14 @@ components:
         - expansion
       type: object
       x-sparkwing-go-type: controllerwire.JobDetail
+    internal.controllerwire.JobOutput:
+      additionalProperties: true
+      properties:
+        output: {}
+      required:
+        - output
+      type: object
+      x-sparkwing-go-type: controllerwire.JobOutput
     internal.controllerwire.JobResult:
       additionalProperties: true
       properties:
@@ -1836,6 +1844,83 @@ components:
         - limits
       type: object
       x-sparkwing-go-type: controllerwire.OperatorLimitsWrite
+    internal.controllerwire.OperatorRefund:
+      additionalProperties: true
+      properties:
+        amount_cents:
+          type: integer
+        payment_id:
+          type: string
+        reason:
+          type: string
+        refund_id:
+          type: string
+      required:
+        - payment_id
+        - refund_id
+        - amount_cents
+        - reason
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorRefund
+    internal.controllerwire.OperatorRefundRecorded:
+      additionalProperties: true
+      properties:
+        balance_micro:
+          type: integer
+        created:
+          type: boolean
+        grant_id:
+          type: string
+        paid_micro:
+          type: integer
+        reversed_micro:
+          type: integer
+        team:
+          type: string
+      required:
+        - team
+        - paid_micro
+        - reversed_micro
+        - balance_micro
+        - created
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorRefundRecorded
+    internal.controllerwire.OperatorTeamCreate:
+      additionalProperties: true
+      properties:
+        display_name:
+          type: string
+        slug:
+          type: string
+      required:
+        - slug
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorTeamCreate
+    internal.controllerwire.OperatorTeamCreated:
+      additionalProperties: true
+      properties:
+        account_id:
+          type: string
+        capability:
+          type: string
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        prefix:
+          type: string
+        team:
+          type: string
+      required:
+        - team
+        - account_id
+        - capability
+        - prefix
+        - grants
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorTeamCreated
     internal.controllerwire.OperatorUsage:
       additionalProperties: true
       properties:
@@ -7195,6 +7280,45 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.OperatorTeamCreate'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorTeamCreated'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Create a team and its first administrator
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/operator/teams
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: deployment_admin
+            grants:
+              - operator.tokens
+            binding: none
+            liveness: credential
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: never
   /api/v1/operator/teams/{team}:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -7330,7 +7454,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/operator/teams/{team}/refunds:
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: team
@@ -7342,14 +7465,26 @@ paths:
           name: Idempotency-Key
           schema:
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.OperatorRefund'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorRefundRecorded'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/operator/teams/{team}/refunds
+      summary: Record a completed provider refund
       x-sparkwing-policy:
         method: POST
         path: /api/v1/operator/teams/{team}/refunds
@@ -7363,7 +7498,6 @@ paths:
             binding: none
             liveness: credential
         retry: idempotency_key
-      x-sparkwing-wire: undocumented
   /api/v1/operator/teams/{team}/trust:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -9193,7 +9327,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/children/{child}/jobs/{job}/output:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -9211,13 +9344,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.JobOutput'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/children/{child}/jobs/{job}/output
+      summary: Read an authorized child output
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/children/{child}/jobs/{job}/output
@@ -9231,7 +9370,6 @@ paths:
             binding: childOfBoundNode
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/claim:
     post:
       parameters:
@@ -9850,42 +9988,6 @@ paths:
             binding: runOfTrigger
             liveness: sensitive
         retry: never
-  /api/v1/runs/{run}/jobs/{job}/claim/input:
-    post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - in: path
-          name: run
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: job
-          required: true
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: POST /api/v1/runs/{run}/jobs/{job}/claim/input
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/runs/{run}/jobs/{job}/claim/input
-        audience: controller
-        owner: run
-        authentication: capability
-        access:
-          - credential: awarded_or_delegated_claim
-            grants:
-              - data.read
-            binding: ownNode
-            liveness: sensitive
-        retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/debug-pause:
     get:
       parameters:
@@ -10486,7 +10588,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/output:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -10499,13 +10600,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.JobOutput'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/jobs/{job}/output
+      summary: Read an authorized committed job output
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/jobs/{job}/output
@@ -10534,7 +10641,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/reconcile:
     post:
       parameters:

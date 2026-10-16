@@ -2875,6 +2875,46 @@ The implemented declarations now live in capability/authentication_types.go,
 capability/management.go and controller/policy.go, engine.go and data.go. Their
 former *_contract.go files are deleted. W9's client declarations are unchanged.
 
+## Output reads and retired claim input
+
+`GET /api/v1/runs/{run}/jobs/{job}/output` returns `JobOutput` with verified
+JSON bytes selected by `Tenant.ReadJobOutput`. The store reloads the complete
+live authority chain, membership, binding and selected record in one snapshot.
+Member reads require current runs.read. Claims require the declared dependency,
+recovery, generated-group, expansion-source or pipeline-reference relation in
+C1. Request hints cannot select a different relation. Child output uses the
+same record reader after checking its creating-job relation. Missing, expired,
+corrupt and unreadable records fail. Neither route returns a signed legacy
+output grant.
+
+C1 retired ResolveClaimInput and its wire types. The stale controller
+`POST /api/v1/runs/{run}/jobs/{job}/claim/input` policy is removed with them.
+The local node-credential probe now uses the existing
+`GET /api/v1/runs/{run}/local-host/nodes/{job}/data-authority` policy. It retains
+only data.read, ownNode and sensitive liveness. No transport alias remains.
+
+## Console refund records
+
+`POST /api/v1/operator/teams/{team}/refunds` records a completed provider refund.
+It accepts `OperatorRefund` with payment_id, refund_id, positive amount_cents
+and reason, plus an Idempotency-Key header. It requires a configured direct
+operator-console session and CSRF. It makes no provider request.
+
+`ConsoleWriter.ConsoleRefund` is implemented by `store.Console`. The committing
+transaction rechecks the direct session and configured account, resolves the
+payment's current-mode persisted paid grant and refuses a different path team.
+The existing reversePaymentTx owns prior reversals and the paid-total bound.
+Its reference is `refund:<mode>:<refund_id>`, shared with verified provider
+settlement, so later delivery cannot debit the same refund twice.
+
+The existing business_events table retains operator.refund_recorded with the
+operator, reason, normalized request digest and result. Its subject hashes the
+operator and request key, scoped by path team. Exact replay returns the receipt.
+Changed request or mode conflicts. Authority is rechecked even on replay.
+The ledger reversal, its existing audit and the request receipt commit together.
+OperatorRefundRecorded returns team, optional grant_id, paid_micro,
+reversed_micro, balance_micro and created. No schema change is needed.
+
 <!-- design:end -->
 
 ## Signing implementation ownership

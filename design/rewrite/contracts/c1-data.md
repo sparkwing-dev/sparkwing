@@ -3072,6 +3072,20 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 route. Legacy claim selection shares one private metering query until those
 claim APIs are retired.
 
+## Operator refund and output read integration
+
+Tenant.ReadJobOutput and ReadChildOutput share one current-authority snapshot
+and committed output-record selector. The controller verifies the selected
+physical bytes through its configured blob store. The obsolete claim-input
+policy is removed with the retired C1 reader.
+
+Console.ConsoleRefund accepts capability.Authorized, controllerwire.OperatorRefund
+and the request key, returning CreditReversal. It runs through consoleWrite,
+resolves the persisted paid grant before any reversal and checks its team
+against the path. Its reference matches verified refund settlement. A receipt
+in business_events retains the normalized request digest and result. The
+existing ledger lock serializes reads, replay, reversal and receipt commit.
+
 <!-- design:end -->
 
 ## Job insertion and reporting hard cuts

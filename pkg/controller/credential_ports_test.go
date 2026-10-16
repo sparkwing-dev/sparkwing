@@ -242,7 +242,7 @@ func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
 		for _, auth := range []struct {
 			raw    string
 			status int
-		}{{own, http.StatusOK}, {foreign, http.StatusForbidden}} {
+		}{{own, http.StatusOK}, {foreign, http.StatusNotFound}} {
 			r := httptest.NewRequest(http.MethodGet, spelling.String()+"?team=a&holder="+hex.EncodeToString(hint), nil)
 			r.Header.Set("Authorization", "Bearer "+auth.raw)
 			r.Header.Set("X-Sparkwing-Team", "a")
@@ -252,9 +252,9 @@ func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
 				t.Logf("%s: %d %s want %d", spelling.String(), w.Code, w.Body, auth.status)
 				return false
 			}
-			if auth.status == http.StatusForbidden {
+			if auth.status == http.StatusNotFound {
 				var failure apierr.Envelope
-				if json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != apierr.Forbidden {
+				if json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != apierr.NotFound {
 					return false
 				}
 			}

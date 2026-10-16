@@ -97,6 +97,11 @@ func wireOperations() map[string]wireOperation {
 		"POST /node/v1/annotations":                            operation("Write a masked annotation", nodeproto.AnnotationRequest{}, nodeproto.ServiceAcknowledged{}),
 		"POST /node/v1/summary":                                operation("Write a masked summary", nodeproto.SummaryRequest{}, nodeproto.ServiceAcknowledged{}),
 	}
+	result["POST /api/v1/operator/teams"] = operation("Create a team and its first administrator", wire.OperatorTeamCreate{}, wire.OperatorTeamCreated{})
+	result["POST /api/v1/operator/teams/{team}/refunds"] = operation("Record a completed provider refund", wire.OperatorRefund{}, wire.OperatorRefundRecorded{})
+	result["GET /api/v1/runs/{run}/jobs/{job}/output"] = operation("Read an authorized committed job output", nil, wire.JobOutput{})
+	result["GET /api/v1/runs/{run}/children/{child}/jobs/{job}/output"] = operation("Read an authorized child output", nil, wire.JobOutput{})
+
 	for _, path := range []string{"/api/v1/runners/claim", "/api/v1/launcher/claim", "/api/v1/runs/{run}/claim", "/api/v1/runs/{run}/jobs/{job}/claim"} {
 		result["POST "+path] = operation("Claim work without automatic replay", wire.ClaimRequest{}, wire.ClaimResponse{})
 	}

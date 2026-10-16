@@ -125,3 +125,21 @@ type OperatorTeamCreated struct {
 	Prefix     string             `json:"prefix"`
 	Grants     []capability.Grant `json:"grants"`
 }
+
+// OperatorRefund records a completed provider refund against its persisted payer.
+type OperatorRefund struct {
+	PaymentID   string `json:"payment_id"`
+	RefundID    string `json:"refund_id"`
+	AmountCents int64  `json:"amount_cents"`
+	Reason      string `json:"reason"`
+}
+
+// OperatorRefundRecorded reports the committed ledger reversal.
+type OperatorRefundRecorded struct {
+	Team          string `json:"team"`
+	GrantID       string `json:"grant_id,omitempty"`
+	PaidMicro     int64  `json:"paid_micro"`
+	ReversedMicro int64  `json:"reversed_micro"`
+	BalanceMicro  int64  `json:"balance_micro"`
+	Created       bool   `json:"created"`
+}

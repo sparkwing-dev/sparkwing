@@ -2626,3 +2626,8 @@ request retains its reservation because delivery may have succeeded.
 Controller startup persists `--payment-mode` through the operator billing owner,
 so the verifier and new reservations use the same mode without a separate
 settings-row seed.
+
+The legacy claim-input operation is removed with its retired input-resolution
+API. Executors use committed result records through `/data`, and local node
+credential checks use the own-job data-authority route. Job and child output
+reads return verified JSON values through the shared capability policy.

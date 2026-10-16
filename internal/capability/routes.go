@@ -57,7 +57,6 @@ var Routes = []RoutePolicy{
 	route("GET", "/api/v1/runs/{run}/jobs/{job}/output", OwnerRun, RetrySafe, claim(DataRead, BindReadSet, LiveSensitive), claim(DataRead, BindReadSet, LiveExpansion), claim(RefsRead, BindReadSet, LiveSensitive), member(RunsRead)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/transition", OwnerRun, RetryExactBody, claim(NodeResult, BindOwnNode, LiveResult), claim(NodeResult, BindRunOfTrigger, LiveResult), publisher()),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/claim", OwnerRun, RetryNever, claim(NodesClaim, BindRunOfTrigger, LiveSensitive)),
-	route("POST", "/api/v1/runs/{run}/jobs/{job}/claim/input", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/heartbeat", OwnerRun, RetrySafe, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/expansion", OwnerRun, RetryExactBody, claim(ExpansionSubmit, BindExpansion, LiveExpansion), claim(ExpansionSubmit, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/logs", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),

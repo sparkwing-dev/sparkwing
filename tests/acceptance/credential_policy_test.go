@@ -122,24 +122,29 @@ func policyFixture(credential, binding, audience string, grants []capability.Gra
 	}}
 	target := capability.Target{Team: "team", RunID: "run", NodeID: "job", BodyRunID: "run", Pipeline: "build", ClaimID: "claim", SlotRunID: "run", SlotNodeID: "job", SlotGeneration: 2}
 	switch credential {
-	case "awarded_or_delegated_claim", "eval_unit", "here_award", "nodehost_process":
+	case "awarded_or_delegated_claim", "eval_unit", "here_award", "nodehost_process", "owner_process", "pod_bootstrap":
 		p.Capability.Subject.Kind = capability.SubjectMachine
 		p.Capability.Issuance, p.Capability.Unit, p.Capability.UnitID, p.Capability.Purpose, p.Capability.Delivery = capability.Award, capability.UnitNode, "claim", capability.PurposeWork, capability.DeliveryDirect
 		p.Capability.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Generation: 2, Holder: "holder", Attempt: 1}
 		if binding == "runOfTrigger" {
 			p.Capability.Unit, p.Capability.Purpose = capability.UnitTrigger, capability.PurposeTrigger
 			p.Capability.Binding.Kind, p.Capability.Binding.NodeID = capability.BindingTrigger, ""
+			p.Capability.Binding.Attempt = 0
 		}
 		if binding == "planOwner" {
 			p.Capability.Unit, p.Capability.Purpose = capability.UnitPlan, capability.PurposePlan
 			p.Capability.Binding.Kind, p.Capability.Binding.NodeID = capability.BindingRun, ""
+			p.Capability.Binding.Attempt = 0
 		}
 		if credential == "here_award" {
 			p.Capability.Purpose = capability.PurposeHere
 			p.Capability.Binding.Reservation = "here:run"
 			p.Capability.Binding.Generation, p.Capability.Binding.Holder = 0, ""
 		}
-		if binding == "expansion" || credential == "eval_unit" {
+		if credential == "pod_bootstrap" {
+			p.Capability.Delivery = capability.DeliveryBootstrap
+		}
+		if binding == "expansion" || binding == "sourceReport" || credential == "eval_unit" || credential == "owner_process" && binding != "runOfTrigger" && binding != "planOwner" {
 			p.Capability.Unit, p.Capability.Purpose = capability.UnitEval, capability.PurposeEval
 			p.Capability.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: "claim", Generation: 3, Holder: "eval-holder"}
 			target.Unit, target.UnitID, target.UnitGeneration, target.UnitHolder, target.UnitSourceNodeID, target.UnitSourceGeneration = capability.UnitEval, "claim", 3, "eval-holder", "job", 2
@@ -151,6 +156,7 @@ func policyFixture(credential, binding, audience string, grants []capability.Gra
 		p.Capability.Subject.Kind = capability.SubjectService
 	case "deployment_admin":
 		p.Capability.Subject.Kind = capability.SubjectOperator
+		p.Capability.Team = ""
 	case "operator_console_session":
 		p.Class, p.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
 	case "local_run_publisher":

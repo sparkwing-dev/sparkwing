@@ -11,7 +11,7 @@ import (
 func TestRoutePolicyDoesNotRetainRemovedSurface(t *testing.T) {
 	for _, route := range capability.Routes {
 		key := route.Method + " " + route.Path
-		for _, removed := range []string{"/triggers", "/api/v1/nodes", "/api/v1/runs/{run}/nodes", "/api/v1/runs/{run}/children/{child}/nodes", "/gitcache", "/cache-grant", "/bounce", "/dispatches", "/auto-retry", "/usage-metrics", "/operator/cache"} {
+		for _, removed := range []string{"/triggers", "/api/v1/nodes", "/api/v1/runs/{run}/nodes", "/api/v1/runs/{run}/children/{child}/nodes", "/gitcache", "/cache-grant", "/bounce", "/dispatches", "/auto-retry", "/usage-metrics", "/operator/cache", "/claim/input"} {
 			if strings.Contains(route.Path, removed) && !strings.Contains(route.Path, "/github-app/triggers") {
 				t.Errorf("removed surface in target table: %s", key)
 			}
@@ -81,9 +81,9 @@ func TestPrivilegedRouteBoundaries(t *testing.T) {
 			}
 		}
 	}
-	input, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/claim/input")
+	input, ok := capability.LookupRoute("GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority")
 	if !ok || len(input.Access) != 1 || input.Access[0].Binding != capability.BindOwnNode {
-		t.Fatal("claim input does not enforce its path job")
+		t.Fatal("job data authority does not enforce its path job")
 	}
 	plan, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/plan")
 	if !ok {

@@ -24,9 +24,9 @@ func TestLocalNodeAuthorityW8SurvivesStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := initial.Authorities[0].Principal
-	route, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/claim/input")
+	route, ok := capability.LookupRoute("GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority")
 	if !ok {
-		t.Fatal("missing input route")
+		t.Fatal("missing node data-authority route")
 	}
 	auth := capability.NewAuthenticator(s)
 	if _, err := auth.Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: unit.Capability}, route); err != nil {

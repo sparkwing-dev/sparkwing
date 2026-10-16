@@ -306,3 +306,18 @@ An applicable Go SDK replacement uses the installed CLI's engine and emits an
 executable's digest in `manifest_digest`, rather than a signed release manifest.
 
 <!-- design:end -->
+
+## Job output and refund records
+
+`GET /api/v1/runs/{run}/jobs/{job}/output` returns `{"output": VALUE}` from the
+job's committed output record. Members need `runs.read`. Execution credentials
+need a current declared read relation. The child output path uses the creating
+job's child relation. Missing or corrupt bytes fail the read.
+
+`POST /api/v1/operator/teams/{team}/refunds` records a refund already completed
+at the payment provider. A configured operator-console session and CSRF are
+required. Send `payment_id`, `refund_id`, positive `amount_cents` and `reason`,
+and retain one `Idempotency-Key` for retries. The payment must belong to the
+path team. The response includes `team`, optional `grant_id`, `paid_micro`,
+`reversed_micro`, `balance_micro` and `created`. The audit names the operator.
+A later webhook for the same refund cannot debit the ledger again.

@@ -9,6 +9,16 @@ import (
 
 // ReadChildOutput selects the child's committed output under its creating job's live authority.
 func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error) {
+	return t.readOutput(ctx, supplied, true)
+}
+
+// ReadJobOutput selects a committed output under current membership or the declared read relation.
+func (t *Tenant) ReadJobOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error) {
+	return t.readOutput(ctx, supplied, false)
+}
+
+func (t *Tenant) readOutput(ctx context.Context, supplied capability.Authorized, child bool) (blob.Blob, error) {
+	supplied.Target.Pipeline = ""
 	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return blob.Blob{}, err
@@ -26,7 +36,11 @@ func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Author
 	for _, node := range chain {
 		snapshot.Authorities = append(snapshot.Authorities, capability.AuthorityState{Principal: node.principal, MembershipValid: true})
 	}
-	route, _ := capability.LookupRoute("GET", "/api/v1/runs/{run}/children/{child}/jobs/{job}/output")
+	path, run := "/api/v1/runs/{run}/jobs/{job}/output", supplied.Target.RunID
+	if child {
+		path, run = "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", supplied.Target.ChildRunID
+	}
+	route, _ := capability.LookupRoute("GET", path)
 	auth, err := capability.AuthenticateSnapshot(snapshot, route, capability.RequestEvidence{Target: supplied.Target})
 	if err != nil {
 		return blob.Blob{}, err
@@ -38,7 +52,7 @@ func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Author
 	if err != nil {
 		return blob.Blob{}, err
 	}
-	row, err := readNodeTx(ctx, tx, t.team, NodeRef{RunID: a.Target.ChildRunID, NodeID: a.Target.NodeID})
+	row, err := readNodeTx(ctx, tx, t.team, NodeRef{RunID: run, NodeID: a.Target.NodeID})
 	if err != nil {
 		return blob.Blob{}, err
 	}

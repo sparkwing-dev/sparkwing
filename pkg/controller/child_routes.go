@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -15,11 +14,20 @@ func (s *Server) childEndpoints(e *EngineController) []Endpoint {
 	return []Endpoint{
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/children", Authentication: capability.AuthCapability, Decode: e.childIntakeTarget, Handle: s.handleIntake(e)},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}", Authentication: capability.AuthCapability, Decode: e.childTarget, Handle: e.handleChild},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: e.runTarget, Handle: s.handleJobOutput},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: e.childTarget, Handle: s.handleChildOutput},
 	}
 }
 
 func (s *Server) handleChildOutput(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	return s.handleOutput(w, r, a, true)
+}
+
+func (s *Server) handleJobOutput(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	return s.handleOutput(w, r, a, false)
+}
+
+func (s *Server) handleOutput(w http.ResponseWriter, r *http.Request, a capability.Authorized, child bool) error {
 	if s.store == nil || s.dataController == nil {
 		return missingEndpointPolicy()
 	}
@@ -33,7 +41,11 @@ func (s *Server) handleChildOutput(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return engineLookupError(err)
 	}
-	object, err := tenant.ReadChildOutput(r.Context(), a)
+	read := tenant.ReadJobOutput
+	if child {
+		read = tenant.ReadChildOutput
+	}
+	object, err := read(r.Context(), a)
 	if err != nil {
 		return dataRouteError(err)
 	}
@@ -41,9 +53,7 @@ func (s *Server) handleChildOutput(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return dataRouteError(err)
 	}
-	writeJSON(w, http.StatusOK, struct {
-		Output json.RawMessage `json:"output"`
-	}{output})
+	writeJSON(w, http.StatusOK, controllerwire.JobOutput{Output: output})
 	return nil
 }
 

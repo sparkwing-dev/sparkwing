@@ -17,9 +17,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -151,6 +153,7 @@ func TestRunAndAwaitChildOutputThroughLocalController(t *testing.T) {
 		}
 		childID = child.RunID
 		finishChildOutput(t, e.Store, handler, httpClient, child.RunID)
+		childOutputSQL(t, e.Store, `UPDATE runs SET status='success',finished_at=? WHERE team='a' AND id=?`, time.Now().UnixNano(), child.RunID)
 	}
 	sdkContext := sdkserve.DefaultOperations.Context(ctx, nodeproto.RunContext{RunID: "run"}, nodeproto.RunnerIdentity{}, childAwaitServices{process: services})
 	got, err := sparkwing.RunAndAwait[childWeather, sparkwing.NoInputs](sdkContext, "weather-report", "stamp")
@@ -262,7 +265,15 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 	if err != nil || result.Outcome != "success" {
 		t.Fatalf("child stamp: %+v: %v", result, err)
 	}
-	record, err := (blob.OutputData{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority, Identity: storage.Authority.Upload.Value, Pipeline: "weather-report"}).Put(t.Context(), result.Output)
+	tenant, err := st.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := tenant.ReadSnapshot(t.Context(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := (blob.OutputData{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority, Identity: storage.Authority.Upload.Value, Pipeline: snapshot.Run.Request.Request.Pipeline}).Put(t.Context(), result.Output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +282,115 @@ func finishChildOutput(t *testing.T, st *store.Store, handler http.Handler, http
 		t.Fatal(err)
 	}
 	controller.EngineClaimHTTP(t, handler, raw, "POST", path, string(body), 200)
-	if _, err := st.DB().ExecContext(t.Context(), `UPDATE runs SET status='success',finished_at=? WHERE team='a' AND id=?`, time.Now().UnixNano(), run); err != nil {
+}
+
+func TestJobOutputThroughNativeClientAndCurrentReadSet(t *testing.T) {
+	e, _, root := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawLicense, licenseKey := multiTeamLicense(t)
+	handler := controller.New(e.Store, nil).WithLicense(license.Resolve(rawLicense, licenseKey, time.Now(), nil)).WithSecretsCipher(cipher).WithEngineController(e).WithDataObjects(objects).HTTP().API
+	claim := controller.EngineClaimHTTP(t, handler, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"available_cores":1}`, 200)
+	var award struct {
+		Claim struct {
+			Capability string `json:"capability"`
+		} `json:"claim"`
+	}
+	if err := json.Unmarshal(claim.Body.Bytes(), &award); err != nil {
+		t.Fatal(err)
+	}
+	raw := award.Claim.Capability
+	controller.EngineClaimHTTP(t, handler, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	httpClient := &http.Client{Transport: childOutputTransport{handler: handler}}
+	finishChildOutput(t, e.Store, handler, httpClient, "run")
+	childOutputSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","deps":["stamp"]}`))
+	options := client.EngineOptions{URL: "http://local", HTTP: httpClient, Bearer: func(context.Context) (string, error) { return raw, nil }}
+	host, err := client.NewNodeHostClient(options, "run", "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := host.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	principal, err := host.Principal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := host.ProcessClient(t.Context(), principal, "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := process.Output(t.Context(), "run", "stamp")
+	if err != nil || string(output) != `{"weather":"clear","degrees":72}` {
+		t.Fatalf("output = %s: %v", output, err)
+	}
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a", RunID: "run", NodeID: "stamp"}}
+	property := func(noise []byte, dimension uint8) bool {
+		changed := a
+		foreign := fmt.Sprintf("foreign-%x", sha256.Sum256(noise))
+		switch dimension % 7 {
+		case 0:
+			changed.Target.Team = foreign
+		case 1:
+			changed.Target.NodeID = foreign
+		case 2:
+			changed.Target.RunID = foreign
+		case 3:
+			childOutputSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job"}`))
+			defer childOutputSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job","deps":["stamp"]}`))
+		case 4:
+			childOutputSQL(t, e.Store, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, principal.Capability.Prefix)
+			defer childOutputSQL(t, e.Store, `UPDATE capabilities SET revoked_at=NULL WHERE prefix=?`, principal.Capability.Prefix)
+		case 5:
+			childOutputSQL(t, e.Store, `UPDATE runs SET cancel_requested_at=1 WHERE team='a' AND id='run'`)
+			defer childOutputSQL(t, e.Store, `UPDATE runs SET cancel_requested_at=NULL WHERE team='a' AND id='run'`)
+		case 6:
+			childOutputSQL(t, e.Store, `UPDATE nodes SET generation=generation+1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+			defer childOutputSQL(t, e.Store, `UPDATE nodes SET generation=generation-1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+		}
+		got, err := tenant.ReadJobOutput(t.Context(), changed)
+		return err != nil && got == (blob.Blob{})
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
+	}
+	childOutputSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('output-reader','output-reader@example.test',1,1)`)
+	childOutputSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','output-reader','reader',1)`)
+	session, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "output-reader"}, "a", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "http://local/api/v1/runs/run/jobs/stamp/output", nil)
+		r.Header.Set("Authorization", "Session "+session)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	if w := request(); w.Code != 200 {
+		t.Fatalf("member read = %d %s", w.Code, w.Body)
+	}
+	childOutputSQL(t, e.Store, `DELETE FROM memberships WHERE team='a' AND account_id='output-reader'`)
+	if w := request(); w.Code != 401 {
+		t.Fatalf("removed member read = %d %s", w.Code, w.Body)
+	}
+	controller.EngineClaimHTTP(t, handler, raw, "GET", "/api/v1/runs/run/jobs/job/output", "", 403)
+	controller.EngineClaimHTTP(t, handler, root, "GET", "/api/v1/runs/run/jobs/stamp/output", "", 403)
 }
