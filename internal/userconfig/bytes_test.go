@@ -33,3 +33,25 @@ func TestParseByteSize(t *testing.T) {
 		}
 	}
 }
+
+func TestByteBoundDisablesOnlyForExplicitZero(t *testing.T) {
+	for _, raw := range []string{"0", "0B", "0.0KiB", "0e-999B"} {
+		if got, err := ParseByteSize(raw); err != nil || got != 0 {
+			t.Errorf("explicit zero %q = %d, %v", raw, got, err)
+		}
+	}
+	for _, raw := range []string{"0.5B", "0.0001KiB", "1e-999B", "0x1p-999B"} {
+		if got, err := ParseByteSize(raw); err == nil {
+			t.Errorf("positive bound %q became %d without an error", raw, got)
+		}
+	}
+	for _, raw := range []string{"9223372036854775807B", "9223372036854775807.1B"} {
+		got, err := ParseByteSize(raw)
+		if raw == "9223372036854775807B" && (err != nil || got != 9223372036854775807) {
+			t.Errorf("representable bound = %d, %v", got, err)
+		}
+		if raw != "9223372036854775807B" && err == nil {
+			t.Error("bound above int64 maximum accepted")
+		}
+	}
+}

@@ -16,7 +16,8 @@ var (
 	scheduleName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
 
-func validateConfig(cfg Config) error {
+// Validate validates typed checkout declarations for seal-point consumers.
+func Validate(cfg Config) error {
 	if cfg.Defaults != nil {
 		if err := validateGuards("defaults.guards", cfg.Defaults.Guards); err != nil {
 			return err

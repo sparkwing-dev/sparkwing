@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -16,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -156,13 +158,20 @@ func scheduleString(value *string) string {
 	return ""
 }
 
-func readScheduleRepository(ctx context.Context, root string, follow bool) (controllerwire.ScheduleRepoRequest, error) {
-	var result controllerwire.ScheduleRepoRequest
-	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: os.Environ()}, procenv.Runtime{})
+func readScheduleRepository(ctx context.Context, root string, follow bool) (result controllerwire.ScheduleRepoRequest, resultErr error) {
+	masker := secrets.NewMasker()
+	diagnostics := &installDiagnostics{out: os.Stderr, stream: masker.Stream()}
+	defer func() {
+		resultErr = errors.Join(resultErr, diagnostics.close())
+		if resultErr != nil {
+			resultErr = &maskedCLIError{err: resultErr, masker: masker}
+		}
+	}()
+	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{})
 	if err != nil {
 		return result, err
 	}
-	checkout := triggerCheckout{directory: root, environment: environment}
+	checkout := triggerCheckout{directory: root, environment: environment, diagnostics: diagnostics}
 	remote, err := checkout.read(ctx, "remote", "get-url", "origin")
 	if err != nil {
 		return result, err

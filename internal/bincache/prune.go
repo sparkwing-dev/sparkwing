@@ -11,12 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 const (
-	DefaultMaxCacheBytes   int64 = 2 << 30
-	DefaultMaxCacheEntries       = 20
+	DefaultMaxCacheBytes   int64 = limits.LocalBinaryCacheBytes
+	DefaultMaxCacheEntries       = limits.LocalBinaryCacheEntries
 )
 
 var (

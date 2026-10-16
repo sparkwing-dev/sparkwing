@@ -18,7 +18,8 @@ import (
 // Filename is the project configuration file inside .sparkwing.
 const Filename = "sparkwing.yaml"
 
-func parse(raw []byte) (*Config, error) {
+// Parse validates checkout declarations and preserves explicit empty values.
+func Parse(raw []byte) (*Config, error) {
 	var cfg Config
 	doc, err := userconfig.DecodeYAML(Filename, raw, &cfg)
 	if err != nil {
@@ -30,7 +31,8 @@ func parse(raw []byte) (*Config, error) {
 	return &cfg, nil
 }
 
-func load(path string) (*Config, error) {
+// Load returns nil when the project file is absent.
+func Load(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -45,7 +47,8 @@ func load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-func discover(startDir string) (string, *Config, error) {
+// Discover searches upward for checkout declarations without reading machine settings.
+func Discover(startDir string) (string, *Config, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", nil, err
@@ -85,12 +88,7 @@ func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error) {
 	return &sparks.Manifest{Libraries: libs}, nil
 }
 
-// WriteSparksSection rewrites the top-level sparks: section of the
-// sparkwing.yaml at path to libs, preserving every other section
-// (including comments and key order). It creates the file when absent
-// and removes the section when libs is empty. This is a surgical
-// yaml.Node edit -- it never re-marshals the unrelated sections, so a
-// `sparkwing sparks add` can't perturb pipeline/runner/source config.
+// WriteSparksSection replaces the sparks section, preserving other sections, comments and key order.
 func WriteSparksSection(path string, libs []sparks.Library) error {
 	doc, root, err := loadDocument(path)
 	if err != nil {

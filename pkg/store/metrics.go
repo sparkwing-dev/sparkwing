@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // MaxNodeMetricSamples bounds one node's stored resource samples: at the
 // sampler's two-second tick, about five and a half hours of a node.
-const MaxNodeMetricSamples = 10_000
+const MaxNodeMetricSamples = limits.MaxMetricSamples
 
 // MaxNodeMetricMarkers is how many marker samples a node may hold past
 // [MaxNodeMetricSamples], so a measurement that filled the cap can still be
@@ -17,7 +19,7 @@ const MaxNodeMetricSamples = 10_000
 const MaxNodeMetricMarkers = 8
 
 // ErrNodeMetricLimit refuses a sample past [MaxNodeMetricSamples].
-var ErrNodeMetricLimit = errors.New("store: a node holds at most 10000 metric samples")
+var ErrNodeMetricLimit = fmt.Errorf("store: a node holds at most %d metric samples", limits.MaxMetricSamples)
 
 // EventKindMetricsStopped records that a node's sampler stopped at
 // [MaxNodeMetricSamples], so its resource charts end there.

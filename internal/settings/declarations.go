@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -161,9 +160,7 @@ func validateLayer(value runspec.CheckoutLayer, source Source, file string) erro
 	if source == ProjectDefaults && value.Profile.Set {
 		return fmt.Errorf("profile is not permitted in project defaults")
 	}
-	if !reflect.DeepEqual(value.Resources, runspec.Setting[runspec.Resources]{}) || !reflect.DeepEqual(value.Priority, runspec.Setting[int]{}) || !reflect.DeepEqual(value.ClaimWait, runspec.Setting[time.Duration]{}) || !reflect.DeepEqual(value.AdmissionClass, runspec.Setting[string]{}) || !reflect.DeepEqual(value.Checkout, runspec.Setting[runspec.CheckoutPolicy]{}) || !reflect.DeepEqual(value.JobDefaults, runspec.JobExecutionSettings{}) {
-		return fmt.Errorf("checkout layer contains fields reserved for pipeline code")
-	}
+
 	defaults := projectconfig.Defaults{}
 	if value.Guards.Set {
 		defaults.Guards = &projectconfig.Guards{When: value.Guards.Value.When, Unless: value.Guards.Value.Unless}

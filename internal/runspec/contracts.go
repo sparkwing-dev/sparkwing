@@ -256,17 +256,11 @@ type GuardDeclarations struct {
 // C4's source table still decides which fields each layer may set. Unsupported fields
 // are refused rather than promoted to a higher-precedence source through their Origin.
 type CheckoutLayer struct {
-	Args           Setting[map[string]Setting[string]] `json:"args"`
-	Guards         Setting[GuardDeclarations]          `json:"guards"`
-	Requires       Setting[[]string]                   `json:"requires"`
-	Prefers        Setting[[]string]                   `json:"prefers"`
-	Profile        Setting[string]                     `json:"profile"`
-	Resources      Setting[Resources]                  `json:"resources"`
-	Priority       Setting[int]                        `json:"priority"`
-	ClaimWait      Setting[time.Duration]              `json:"claim_wait"`
-	AdmissionClass Setting[string]                     `json:"admission_class"`
-	Checkout       Setting[CheckoutPolicy]             `json:"checkout"`
-	JobDefaults    JobExecutionSettings                `json:"job_defaults"`
+	Args     Setting[map[string]Setting[string]] `json:"args"`
+	Guards   Setting[GuardDeclarations]          `json:"guards"`
+	Requires Setting[[]string]                   `json:"requires"`
+	Prefers  Setting[[]string]                   `json:"prefers"`
+	Profile  Setting[string]                     `json:"profile"`
 }
 
 // CheckoutDeclarations preserves both checkout layers before any precedence merge.

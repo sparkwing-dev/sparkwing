@@ -3,6 +3,7 @@ package settings
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -12,98 +13,113 @@ func planInputs(in PlanInputs) (Inputs, error) {
 	if err := ValidateCheckoutDeclarations(in.Declarations); err != nil {
 		return Inputs{}, err
 	}
-	code, err := planValues(in.Plan)
+	code, err := planOptions(in.Plan)
 	if err != nil {
 		return Inputs{}, err
 	}
 	ctx := in.Context
 	ctx.Submitter = true
 	ctx.Origin = in.Request.Request.Origin
-	return Inputs{Sealed: unprojectOptions(in.Request.Request.Options), Pipeline: unprojectLayer(in.Declarations.Pipeline), Defaults: unprojectLayer(in.Declarations.Defaults), Code: code, Operator: unprojectCeilings(in.Request.Ceilings), Context: ctx}, nil
+	return Inputs{Sealed: Values{Options: in.Request.Request.Options}, Pipeline: Values{Options: layerOptions(in.Declarations.Pipeline)}, Defaults: Values{Options: layerOptions(in.Declarations.Defaults)}, Code: Values{Options: code}, ceilings: &in.Request.Ceilings, Context: ctx}, nil
 }
 
-func resolveRun(in Inputs) (runspec.Options, error) {
-	out := in.Sealed
+func resolveRun(in Inputs, out runspec.Options) (runspec.Options, error) {
 	var err error
-	if err = resolveValue(in, "priority", Priority, &out.Priority, out.Origins); err != nil {
+	if err = resolveSetting(in, Priority, &out.Priority); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveValue(in, "admission_class", AdmissionClass, &out.AdmissionClass, out.Origins); err != nil {
+	if err = resolveSetting(in, AdmissionClass, &out.AdmissionClass); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveValue(in, "claim_wait", ClaimWait, &out.ClaimWait, out.Origins); err != nil {
+	if err = resolveSetting(in, ClaimWait, &out.ClaimWait); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveValue(in, "profile", Profile, &out.Profile, out.Origins); err != nil {
+	if err = resolveSetting(in, Profile, &out.Profile); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveList(in, "requires", Requires, &out.Requires, out.Origins); err != nil {
+	if err = resolveSetting(in, Requires, &out.Requires); err != nil {
 		return runspec.Options{}, err
 	}
-	if err = resolveList(in, "prefers", Prefers, &out.Prefers, out.Origins); err != nil {
+	if err = resolveSetting(in, Prefers, &out.Prefers); err != nil {
 		return runspec.Options{}, err
 	}
-	resources, origins, origin, err := resourceLimits(in)
+	out.Resources, err = resourceSetting(in)
 	if err != nil {
-		return runspec.Options{}, err
+		return out, err
 	}
-	if resources.Cores != nil || resources.MemoryBytes != nil {
-		out.Resources = &resources
-		mergeOrigins(out.Origins, origins)
-		out.Origins["resources"] = origin
+	out.Checkout, err = checkoutSetting(in)
+	return out, err
+}
+
+func layerOptions(layer runspec.CheckoutLayer) runspec.Options {
+	return runspec.Options{Requires: layer.Requires, Prefers: layer.Prefers, Profile: layer.Profile}
+}
+
+func codeValue[T any](value *T, key string) runspec.Setting[T] {
+	if value == nil {
+		return runspec.Setting[T]{}
 	}
-	policy, origins, origin, err := checkout(in)
-	if err != nil {
-		return runspec.Options{}, err
+	return declaration(*value, runspec.SettingOrigin{Layer: runspec.LayerCode, Key: key})
+}
+
+func codeDuration(value *int64, key string) (runspec.Setting[time.Duration], error) {
+	duration, err := milliseconds(value, key)
+	return codeValue(duration, key), err
+}
+
+func planOptions(plan nodeproto.PlanDoc) (runspec.Options, error) {
+	out := runspec.Options{Priority: codeValue(plan.Priority, "priority"), AdmissionClass: codeValue(plan.AdmissionClass, "admission_class")}
+	if plan.Source != nil {
+		out.Checkout = sourceSetting(*plan.Source, Origin{Source: Code, Key: "source"})
 	}
-	out.Checkout = &policy
-	mergeOrigins(out.Origins, origins)
-	out.Origins["source"] = origin
-	return ProjectRequest(out)
+	if plan.Resources != nil {
+		out.Resources = declaration(runspec.Resources{Cores: codeValue(plan.Resources.Cores, "resources.cores"), MemoryBytes: codeValue(plan.Resources.MemoryBytes, "resources.memory_bytes")}, runspec.SettingOrigin{Layer: runspec.LayerCode, Key: "resources"})
+	}
+	var err error
+	out.ClaimWait, err = codeDuration(plan.ClaimWaitMS, "claim_wait")
+	return out, err
 }
 
 func jobInputs(base Inputs, job nodeproto.JobSpec) (Inputs, error) {
 	in := base
-	in.Code.Origins = map[string]Origin{}
+	code := &in.Code.Options
+	prefix := "jobs." + job.ID + "."
 	var err error
-	if in.Code.JobTimeout, err = milliseconds(job.TimeoutMS, "job.timeout"); err != nil {
+	if code.JobDefaults.Timeout, err = codeDuration(job.TimeoutMS, prefix+"job.timeout"); err != nil {
 		return in, err
 	}
-	if in.Code.NoProgressTimeout, err = milliseconds(job.NoProgressTimeoutMS, "job.no_progress_timeout"); err != nil {
+	if code.JobDefaults.NoProgressTimeout, err = codeDuration(job.NoProgressTimeoutMS, prefix+"job.no_progress_timeout"); err != nil {
 		return in, err
 	}
 	if job.Retry != nil {
-		in.Code.Retry = pointer(job.Retry.Attempts)
-		if in.Code.RetryBackoff, err = milliseconds(job.Retry.BackoffMS, "job.retry_backoff"); err != nil {
+		code.JobDefaults.Retry = codeValue(&job.Retry.Attempts, prefix+"job.retry")
+		if code.JobDefaults.RetryBackoff, err = codeDuration(job.Retry.BackoffMS, prefix+"job.retry_backoff"); err != nil {
 			return in, err
 		}
 	}
 	if job.Memo != nil {
-		if in.Code.MemoTTL, err = milliseconds(job.Memo.TTLMS, "job.memo_ttl"); err != nil {
+		if code.JobDefaults.MemoTTL, err = codeDuration(job.Memo.TTLMS, prefix+"job.memo_ttl"); err != nil {
 			return in, err
 		}
 	}
 	if job.Approval != nil {
-		if in.Code.ApprovalWait, err = milliseconds(job.Approval.TimeoutMS, "approval.wait"); err != nil {
+		if code.JobDefaults.ApprovalWait, err = codeDuration(job.Approval.TimeoutMS, prefix+"approval.wait"); err != nil {
 			return in, err
 		}
 	}
 	if job.Resources != nil {
-		resources := Resources{}
-		if in.Code.Resources != nil {
-			resources = *in.Code.Resources
-		}
+		code.Resources.Set = true
+		code.Resources.Origin = runspec.SettingOrigin{Layer: runspec.LayerCode, Key: prefix + "resources"}
 		if job.Resources.Cores != nil {
-			resources.Cores = job.Resources.Cores
+			code.Resources.Value.Cores = codeValue(job.Resources.Cores, prefix+"resources.cores")
 		}
 		if job.Resources.MemoryBytes != nil {
-			resources.MemoryBytes = job.Resources.MemoryBytes
+			code.Resources.Value.MemoryBytes = codeValue(job.Resources.MemoryBytes, prefix+"resources.memory_bytes")
 		}
-		in.Code.Resources = &resources
 	}
-	in.Code.Prefers = job.Prefers
-	for _, key := range []string{"job.timeout", "job.no_progress_timeout", "job.retry", "job.retry_backoff", "job.memo_ttl", "approval.wait", "resources", "prefers"} {
-		in.Code.Origins[key] = Origin{Source: Code, Key: "jobs." + job.ID + "." + key}
+	code.Prefers = runspec.Setting[[]string]{}
+	if job.Prefers != nil {
+		code.Prefers = codeValue(&job.Prefers, prefix+"prefers")
 	}
 	return in, nil
 }
@@ -113,64 +129,55 @@ func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspe
 	if err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
-	out := Values{Origins: map[string]Origin{}}
-	if in.Code.JobTimeout != nil || in.Sealed.JobTimeout != nil {
-		if err = resolveValue(in, "job.timeout", JobTimeout, &out.JobTimeout, out.Origins); err != nil {
+	out := runspec.Options{}
+	if in.options(Code).JobDefaults.Timeout.Set || in.options(Run).JobDefaults.Timeout.Set {
+		if err = resolveSetting(in, JobTimeout, &out.JobDefaults.Timeout); err != nil {
 			return runspec.JobExecutionSettings{}, err
 		}
 	}
-	if err = resolveValue(in, "job.no_progress_timeout", NoProgressTimeout, &out.NoProgressTimeout, out.Origins); err != nil {
+	if err = resolveSetting(in, NoProgressTimeout, &out.JobDefaults.NoProgressTimeout); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
-	if err = resolveValue(in, "job.retry", Retry, &out.Retry, out.Origins); err != nil {
+	if err = resolveSetting(in, Retry, &out.JobDefaults.Retry); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
-	if err = resolveValue(in, "job.retry_backoff", RetryBackoff, &out.RetryBackoff, out.Origins); err != nil {
+	if err = resolveSetting(in, RetryBackoff, &out.JobDefaults.RetryBackoff); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
 	if job.Memo != nil {
-		if err = resolveValue(in, "job.memo_ttl", MemoTTL, &out.MemoTTL, out.Origins); err != nil {
+		if err = resolveSetting(in, MemoTTL, &out.JobDefaults.MemoTTL); err != nil {
 			return runspec.JobExecutionSettings{}, err
 		}
 	}
 	if job.Approval != nil {
-		if err = resolveValue(in, "approval.wait", ApprovalWait, &out.ApprovalWait, out.Origins); err != nil {
+		if err = resolveSetting(in, ApprovalWait, &out.JobDefaults.ApprovalWait); err != nil {
 			return runspec.JobExecutionSettings{}, err
 		}
 	}
-	resources, origins, origin, err := resourceLimits(in)
+	out.Resources, err = resourceSetting(in)
 	if err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
-	if resources.Cores != nil || resources.MemoryBytes != nil {
-		out.Resources = &resources
-		mergeOrigins(out.Origins, origins)
-		out.Origins["resources"] = origin
-	}
-	out.Requires = slices.Clone(run.Requires.Value)
+	out.Requires = run.Requires
+	out.Requires.Value = slices.Clone(run.Requires.Value)
 	for _, requirement := range job.Requires {
-		if !slices.Contains(out.Requires, requirement) {
-			out.Requires = append(out.Requires, requirement)
+		if !slices.Contains(out.Requires.Value, requirement) {
+			out.Requires.Value = append(out.Requires.Value, requirement)
 		}
 	}
-	if out.Requires == nil {
-		out.Requires = []string{}
+	if out.Requires.Value == nil {
+		out.Requires.Value = []string{}
 	}
-	out.Origins["requires"] = fromOrigin(run.Requires.Origin)
-	if err = validNames("requires", out.Requires, out.Origins["requires"]); err != nil {
+	if err = validNames("requires", out.Requires.Value, fromOrigin(out.Requires.Origin)); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
-	if err = resolveList(in, "prefers", Prefers, &out.Prefers, out.Origins); err != nil {
+	if err = resolveSetting(in, Prefers, &out.Prefers); err != nil {
 		return runspec.JobExecutionSettings{}, err
 	}
-	projected, err := ProjectRequest(out)
-	if err != nil {
-		return runspec.JobExecutionSettings{}, err
-	}
-	result := projected.JobDefaults
-	result.Requires = projected.Requires
-	result.Prefers = projected.Prefers
-	result.Resources = projected.Resources
+	result := out.JobDefaults
+	result.Requires = out.Requires
+	result.Prefers = out.Prefers
+	result.Resources = out.Resources
 	result.Concurrency, err = ResolveConcurrency(job.Concurrency)
 	return result, err
 }
@@ -185,7 +192,7 @@ func ResolvePlan(in PlanInputs) (runspec.ExecutionSettings, error) {
 	if err != nil {
 		return runspec.ExecutionSettings{}, err
 	}
-	options, err := resolveRun(inputs)
+	options, err := resolveRun(inputs, cloneOptions(in.Request.Request.Options))
 	if err != nil {
 		return runspec.ExecutionSettings{}, err
 	}
@@ -227,22 +234,16 @@ func resolveJobs(in Inputs, jobs []nodeproto.JobSpec, options runspec.Options) (
 // C1 persists these winners alongside each declaration/hash.
 func ResolveExpansion(in ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
 	plan := in.Plan
-	accepted := unprojectOptions(in.Spec.Resolved.Settings.Options)
-	plan.Priority = accepted.Priority
-	plan.AdmissionClass = accepted.AdmissionClass
-	plan.Source = accepted.Checkout
-	plan.Resources = nil
-	if accepted.Resources != nil {
-		plan.Resources = &nodeproto.ResourceSpec{Cores: accepted.Resources.Cores, MemoryBytes: accepted.Resources.MemoryBytes}
-	}
-	plan.ClaimWaitMS = nil
-	if accepted.ClaimWait != nil {
-		plan.ClaimWaitMS = pointer(accepted.ClaimWait.Milliseconds())
-	}
 	inputs, err := planInputs(PlanInputs{Request: in.Spec.Request, Declarations: in.Spec.Declarations, Plan: plan, Context: in.Context})
 	if err != nil {
 		return nil, err
 	}
+	accepted := in.Spec.Resolved.Settings.Options
+	inputs.Code.Priority = accepted.Priority
+	inputs.Code.AdmissionClass = accepted.AdmissionClass
+	inputs.Code.Checkout = accepted.Checkout
+	inputs.Code.Resources = accepted.Resources
+	inputs.Code.ClaimWait = accepted.ClaimWait
 	jobs, err := resolveJobs(inputs, plan.Jobs, in.Spec.Resolved.Settings.Options)
 	if err != nil {
 		return nil, err

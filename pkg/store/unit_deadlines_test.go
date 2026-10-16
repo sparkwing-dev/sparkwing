@@ -64,11 +64,12 @@ func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
 
 func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchController)
-	request.Seal.Declarations.Pipeline.ClaimWait.Optional = runspec.Optional[time.Duration]{Set: true, Value: time.Minute}
-	request.Seal.Resolved.Settings.Options.ClaimWait = request.Seal.Declarations.Pipeline.ClaimWait
+	request.Seal.Plan = []byte(`{"claim_wait_ms":60000,"jobs":[{"id":"job"}]}`)
+	request.Seal.Resolved.Settings.Options.ClaimWait = runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Minute}, Origin: runspec.SettingOrigin{Layer: runspec.LayerCode, Key: "claim_wait"}}
 	tenant.s.intake = fakeIntakeContracts{resolve: func(input settings.PlanInputs) (runspec.ExecutionSettings, error) {
 		resolved, err := (fakeIntakeContracts{}).ResolvePlan(input)
-		resolved.Options.ClaimWait = input.Declarations.Pipeline.ClaimWait
+		resolved.Options.ClaimWait = request.Seal.Resolved.Settings.Options.ClaimWait
+		resolved.Options.ClaimWait.Value = time.Duration(*input.Plan.ClaimWaitMS) * time.Millisecond
 		return resolved, err
 	}}
 	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {

@@ -79,6 +79,13 @@ func TestSemanticErrorsRetainLocations(t *testing.T) {
 	}
 }
 
+func TestSemanticErrorsLocatePresentMergeSource(t *testing.T) {
+	_, err := Decode("machine.yaml", []byte("runner:\n  <<:\n    - {}\n    - max_concurrent: 0\n"))
+	if err == nil || !strings.Contains(err.Error(), "runner.max_concurrent") || !strings.Contains(err.Error(), "line 4") {
+		t.Fatalf("merge error must name the field's defining source: %v", err)
+	}
+}
+
 func TestConfigAliasesAndMergesRemainStrict(t *testing.T) {
 	raw := []byte("profiles:\n  prod: &base\n    controller: {url: https://example.com}\n  lab: {<<: *base}\n")
 	cfg, err := Decode("machine.yaml", raw)

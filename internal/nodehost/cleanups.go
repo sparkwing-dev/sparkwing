@@ -102,17 +102,6 @@ func runCleanup(ctx context.Context, c cleanup, dir string, env []string, log io
 	return errors.New("registered cleanup command failed")
 }
 
-// safety: never nil, since a nil Env hands a cleanup the host's environment.
-func nodeEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, "SPARKWING_NODE_TOKEN=") {
-			out = append(out, kv)
-		}
-	}
-	return out
-}
-
 // safety: the node's PATH picks the program, not the host's; relative entries
 // are skipped so the host's working directory never decides it.
 func lookPathIn(name string, env []string) (string, error) {

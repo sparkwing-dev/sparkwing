@@ -53,7 +53,7 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	if err := decodeScheduleDeclaration(snapshot.Run.Plan, &plan); err != nil {
 		return result, err
 	}
-	validation := nodeproto.ValidationContext{Placement: planPlacement(snapshot.Run), Secrets: secrets, Expansion: true, SourceJob: request.Source.NodeID, ExistingConcurrency: plan.Concurrency}
+	validation := nodeproto.ValidationContext{Placement: RequestPlacement(snapshot.Run.Request.Request), Secrets: secrets, Expansion: true, SourceJob: request.Source.NodeID, ExistingConcurrency: plan.Concurrency}
 	for _, node := range snapshot.Nodes {
 		if priorJobs[node.Ref.NodeID] {
 			continue
@@ -95,7 +95,7 @@ func acceptedExpansionNodes(snapshot RunSnapshot, plan nodeproto.PlanDoc) ([]Nod
 }
 
 func insertExpansionTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, snapshot RunSnapshot, accepted expansionAcceptance) ([]NodeRow, error) {
-	executionSettings, err := tx.store.planServices().ResolveExpansion(settings.ExpansionInputs{Spec: *snapshot.Run.Spec, Plan: accepted.plan, Context: settings.Context{Local: planPlacement(snapshot.Run) == nodeproto.PlacementLocal, ControllerOwned: snapshot.Run.Dispatch == string(runspec.DispatchController)}})
+	executionSettings, err := tx.store.planServices().ResolveExpansion(settings.ExpansionInputs{Spec: *snapshot.Run.Spec, Plan: accepted.plan, Context: settings.Context{Local: RequestPlacement(snapshot.Run.Request.Request) == nodeproto.PlacementLocal, ControllerOwned: snapshot.Run.Dispatch == string(runspec.DispatchController)}})
 	if err != nil {
 		return nil, err
 	}

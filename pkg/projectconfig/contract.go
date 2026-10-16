@@ -81,21 +81,3 @@ type Spark struct {
 	Source  string `yaml:"source" json:"source"`
 	Version string `yaml:"version" json:"version"`
 }
-
-// Parse refuses unknown keys, duplicate keys, null values, multiple documents,
-// malformed enums and duplicate pipeline or schedule names. Errors name the
-// key and line without echoing values. Empty lists and maps remain explicit.
-func Parse(raw []byte) (*Config, error) { return parse(raw) }
-
-// Load preserves absence as nil; invalid or unreadable files fail with their path.
-func Load(path string) (*Config, error) { return load(path) }
-
-// Discover searches from a checkout for its project file without reading machine
-// connections or resolving run settings before the checkout has been acquired.
-func Discover(startDir string) (path string, cfg *Config, err error) {
-	return discover(startDir)
-}
-
-// Validate is shared by file parsing and server-side seal-point validation.
-// Profiles is an unknown project key; there is no fallback to project credentials.
-func Validate(cfg Config) error { return validateConfig(cfg) }

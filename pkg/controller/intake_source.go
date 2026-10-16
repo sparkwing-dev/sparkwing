@@ -22,22 +22,9 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 		}
 		return invalidEngineBody("source.location.remote_url is required to resolve repository identity")
 	}
-	parsedRemote := remote
-	if !strings.Contains(parsedRemote, "://") {
-		if host, path, found := strings.Cut(parsedRemote, ":"); found {
-			parsedRemote = "ssh://" + host + "/" + path
-		}
-	}
-	parsed, err := url.Parse(parsedRemote)
-	if err != nil || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" ||
-		parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "ssh" && parsed.Scheme != "git" {
-		return invalidEngineBody("source remote must be a credential-free repository URL")
-	}
-	if parsed.User != nil {
-		_, password := parsed.User.Password()
-		if parsed.Scheme != "ssh" || password {
-			return invalidEngineBody("source remote must not contain credentials")
-		}
+	parsed, err := parseIntakeRemote(remote)
+	if err != nil {
+		return err
 	}
 	input := runspec.RepoInput{RemoteURL: remote, Display: request.Git.Repository.Display}
 	if strings.EqualFold(parsed.Hostname(), "github.com") {
@@ -82,4 +69,25 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		return repo.ID, nil
 	}
 	return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity resolver is unavailable"}
+}
+
+func parseIntakeRemote(remote string) (*url.URL, error) {
+	parsedRemote := remote
+	if !strings.Contains(parsedRemote, "://") {
+		if host, path, found := strings.Cut(parsedRemote, ":"); found {
+			parsedRemote = "ssh://" + host + "/" + path
+		}
+	}
+	parsed, err := url.Parse(parsedRemote)
+	if err != nil || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "ssh" && parsed.Scheme != "git" {
+		return nil, invalidEngineBody("source remote must be a credential-free repository URL")
+	}
+	if parsed.User != nil {
+		_, password := parsed.User.Password()
+		if parsed.Scheme != "ssh" || password {
+			return nil, invalidEngineBody("source remote must not contain credentials")
+		}
+	}
+	return parsed, nil
 }

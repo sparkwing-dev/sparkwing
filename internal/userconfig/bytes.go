@@ -3,6 +3,7 @@ package userconfig
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -33,14 +34,19 @@ func ParseByteSize(raw string) (int64, error) {
 			continue
 		}
 		num := strings.TrimSpace(upper[:len(upper)-len(u.suffix)])
-		n, err := strconv.ParseFloat(num, 64)
+		_, err := strconv.ParseFloat(num, 64)
 		if err != nil {
 			return 0, fmt.Errorf("parse size %q: %w", raw, err)
 		}
-		if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n*float64(u.mult) >= math.MaxInt64 {
-			return 0, fmt.Errorf("parse size %q: negative", raw)
+		n, ok := new(big.Rat).SetString(num)
+		if !ok {
+			return 0, fmt.Errorf("parse size %q: invalid number", raw)
 		}
-		return int64(n * float64(u.mult)), nil
+		n.Mul(n, new(big.Rat).SetInt64(u.mult))
+		if n.Sign() < 0 || (n.Sign() > 0 && n.Cmp(big.NewRat(1, 1)) < 0) || n.Cmp(new(big.Rat).SetInt64(math.MaxInt64)) > 0 {
+			return 0, fmt.Errorf("parse size %q: outside byte range", raw)
+		}
+		return new(big.Int).Quo(n.Num(), n.Denom()).Int64(), nil
 	}
 	n, err := strconv.ParseInt(upper, 10, 64)
 	if err != nil {

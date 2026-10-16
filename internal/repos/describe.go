@@ -3,6 +3,7 @@ package repos
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,9 +14,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
-	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // SessionTimeout bounds one conversation with a pipeline binary, from start
@@ -67,10 +69,20 @@ func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (nod
 // Converse starts the pipeline entry in dir with --sw-node-protocol and hands
 // talk a [Session] on it. A process that has not finished within
 // [SessionTimeout] is killed with every process it started.
-func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk func(*Session) error) error {
+func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk func(*Session) error) (result error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, SessionTimeout,
 		fmt.Errorf("%s: no reply within %s: %w", entry[len(entry)-1], SessionTimeout, context.DeadlineExceeded))
 	defer cancel()
+	masker := secrets.NewMasker()
+	defer func() {
+		if result != nil {
+			result = maskedSessionError{error: result, masker: masker}
+		}
+	}()
+	environment, err := procenv.Build(procenv.Plan, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{Runner: procenv.RunnerInfo{Name: "describe", Type: "local"}})
+	if err != nil {
+		return err
+	}
 	reqR, reqW, err := os.Pipe()
 	if err != nil {
 		return err
@@ -86,9 +98,7 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 	var stderr bytes.Buffer
 	cmd := entry.Exec()
 	cmd.Dir, cmd.Stderr = dir, &stderr
-	// safety: no engine credential or node route reaches pipeline code; a CLI run inside a node would otherwise pass
-	// on that node's route URL, and an SDK process holding it without its bearer refuses to start.
-	cmd.Env = engineenv.Strip(os.Environ())
+	cmd.Env = environment
 	// safety: a grandchild holding stderr must not hold Wait past the kill.
 	cmd.WaitDelay = 100 * time.Millisecond
 	tree, err := startTree(cmd, reqR, frameW)
@@ -131,9 +141,37 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 	case ctx.Err() != nil:
 		return context.Cause(ctx)
 	case s.broken != nil:
-		return sessionFailure(s.broken, waitErr, stderr.String())
+		return sessionFailure(s.broken, waitErr, masker.Mask(stderr.String()))
 	}
 	return talkErr
+}
+
+type maskedSessionError struct {
+	error
+	masker *secrets.Masker
+}
+
+func (e maskedSessionError) Error() string { return e.masker.Mask(e.error.Error()) }
+func (e maskedSessionError) Unwrap() error { return e.error }
+
+func (e maskedSessionError) As(target any) bool {
+	result, ok := target.(**apierr.Error)
+	if !ok {
+		return false
+	}
+	var original *apierr.Error
+	if !errors.As(e.error, &original) {
+		return false
+	}
+	body, err := json.Marshal(original)
+	if err == nil {
+		if masked, err := apierr.DecodeInner(e.masker.MaskJSON(body)); err == nil {
+			*result = masked
+			return true
+		}
+	}
+	*result = &apierr.Error{Code: apierr.Internal, Message: "pipeline process failed"}
+	return true
 }
 
 func exchange(requests *nodeproto.Writer, r *nodeproto.Reader, req nodeproto.Request) (nodeproto.Reply, error) {

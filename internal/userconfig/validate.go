@@ -11,7 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-func decodeConfig(path string, raw []byte) (Config, error) {
+// Decode validates the complete machine schema without filling defaults.
+func Decode(path string, raw []byte) (Config, error) {
 	var cfg Config
 	doc, err := DecodeYAML(path, raw, &cfg)
 	if err != nil {
@@ -23,7 +24,8 @@ func decodeConfig(path string, raw []byte) (Config, error) {
 	return cfg, nil
 }
 
-func validateConfig(cfg Config) error {
+// ValidateConfig validates typed machine settings without echoing credentials.
+func ValidateConfig(cfg Config) error {
 	for name, p := range cfg.Profiles {
 		if strings.TrimSpace(name) == "" {
 			return Invalid("profiles", "profile name must not be empty")

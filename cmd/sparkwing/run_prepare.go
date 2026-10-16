@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -70,30 +69,25 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 	}
 	inputs.Flags = localRunSettingFlags(flags)
 	if flags.outputOrigin.Source == settings.Env {
-		inputs.Environment.Output = &flags.outputFormat
-		inputs.Environment.Origins = maps.Clone(inputs.Environment.Origins)
-		if inputs.Environment.Origins == nil {
-			inputs.Environment.Origins = map[string]settings.Origin{}
-		}
-		inputs.Environment.Origins["output"] = flags.outputOrigin
+		inputs.Environment.Output.Set, inputs.Environment.Output.Value = true, flags.outputFormat
+		inputs.Environment.Output.Origin = runspec.SettingOrigin{Layer: runspec.LayerEnv, File: flags.outputOrigin.File, Key: flags.outputOrigin.Key, Line: flags.outputOrigin.Line}
 	}
 	if input.machine.Run != nil {
-		inputs.Machine.CacheFrom = input.machine.Run.CacheFrom
-		inputs.Machine.SubmitEnvAllow = input.machine.Run.SubmitEnvAllow
+		inputs.Machine.CacheFrom = runspec.Setting[string]{}
+		if input.machine.Run.CacheFrom != nil {
+			inputs.Machine.CacheFrom.Set, inputs.Machine.CacheFrom.Value = true, *input.machine.Run.CacheFrom
+			inputs.Machine.CacheFrom.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: input.machineFile, Key: "cache_from"}
+		}
+		inputs.Machine.SubmitEnvAllow.Set, inputs.Machine.SubmitEnvAllow.Value = input.machine.Run.SubmitEnvAllow != nil, input.machine.Run.SubmitEnvAllow
+		inputs.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: input.machineFile, Key: "run.submit_env_allow"}
 	}
 	if input.machine.Debug != nil && input.machine.Debug.PauseTimeout != nil {
 		duration, err := time.ParseDuration(*input.machine.Debug.PauseTimeout)
 		if err != nil {
 			return controllerwire.CreateRunRequest{}, fmt.Errorf("debug.pause_timeout: expected a positive duration")
 		}
-		inputs.Machine.PauseTimeout = &duration
-	}
-	inputs.Machine.Origins = maps.Clone(inputs.Machine.Origins)
-	if inputs.Machine.Origins == nil {
-		inputs.Machine.Origins = map[string]settings.Origin{}
-	}
-	for _, key := range []string{"cache_from", "run.submit_env_allow", "debug.pause_timeout"} {
-		inputs.Machine.Origins[key] = settings.Origin{Source: settings.Machine, File: input.machineFile, Key: key}
+		inputs.Machine.PauseTimeout.Set, inputs.Machine.PauseTimeout.Value = true, duration
+		inputs.Machine.PauseTimeout.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: input.machineFile, Key: "debug.pause_timeout"}
 	}
 	options, err := settings.ResolveRequest(inputs)
 	if err != nil {
@@ -124,52 +118,52 @@ func localRunSettingFlags(flags runFlags) settings.Values {
 	}
 	values := settings.Values{}
 	if has("sw-only", flags.only != "") {
-		values.Only = &flags.only
+		values.Only.Set, values.Only.Value = true, flags.only
 	}
 	if has("sw-stop-at", flags.stopAt != "") {
-		values.StopAt = &flags.stopAt
+		values.StopAt.Set, values.StopAt.Value = true, flags.stopAt
 	}
 	if has("sw-start-at", flags.startAt != "") {
-		values.StartAt = &flags.startAt
+		values.StartAt.Set, values.StartAt.Value = true, flags.startAt
 	}
 	if has("publish", flags.publish != "") {
-		values.Publish = &flags.publish
+		values.Publish.Set, values.Publish.Value = true, flags.publish
 	}
 	if has("sw-cache-from", flags.cacheFrom != "") {
-		values.CacheFrom = &flags.cacheFrom
+		values.CacheFrom.Set, values.CacheFrom.Value = true, flags.cacheFrom
 	}
 	if has("sw-workers", flags.workers != 0) {
-		values.Workers = &flags.workers
+		values.Workers.Set, values.Workers.Value = true, flags.workers
 	}
 	if has("sw-no-memo", flags.noCache) {
-		values.NoMemo = &flags.noCache
+		values.NoMemo.Set, values.NoMemo.Value = true, flags.noCache
 	}
 	if has("sw-dry-run", flags.dryRun) {
-		values.DryRun = &flags.dryRun
+		values.DryRun.Set, values.DryRun.Value = true, flags.dryRun
 	}
 	if flags.outputOrigin.Source == settings.Flag || flags.invocation.Command.Path == "" && flags.outputFormat != "" {
-		values.Output = &flags.outputFormat
-		values.Origins = map[string]settings.Origin{"output": flags.outputOrigin}
+		values.Output.Set, values.Output.Value = true, flags.outputFormat
+		values.Output.Origin = runspec.SettingOrigin{Layer: runspec.Layer(flags.outputOrigin.Source), File: flags.outputOrigin.File, Key: flags.outputOrigin.Key, Line: flags.outputOrigin.Line}
 	}
 	if has("sw-priority", flags.prioritySet || flags.priority != "") {
 		priority, _ := strconv.Atoi(flags.priority)
-		values.Priority = &priority
+		values.Priority.Set, values.Priority.Value = true, priority
 	}
 	if has("sw-allow-risk", flags.allow != nil) {
-		values.AllowRisk = flags.allow
+		values.AllowRisk.Set, values.AllowRisk.Value = true, flags.allow
 	}
-	pause := settings.PauseSelection{}
+	pause := runspec.PauseSelection{}
 	if has("sw-pause-before", flags.pauseBefore != nil) {
-		pause.Before = flags.pauseBefore
+		pause.Before.Set, pause.Before.Value = true, flags.pauseBefore
 	}
 	if has("sw-pause-after", flags.pauseAfter != nil) {
-		pause.After = flags.pauseAfter
+		pause.After.Set, pause.After.Value = true, flags.pauseAfter
 	}
-	if has("sw-pause-on-failure", flags.pauseOnFailure != nil) {
-		pause.OnFailure = flags.pauseOnFailure
+	if has("sw-pause-on-failure", flags.pauseOnFailure != nil) && flags.pauseOnFailure != nil {
+		pause.OnFailure.Set, pause.OnFailure.Value = true, *flags.pauseOnFailure
 	}
-	if pause.Before != nil || pause.After != nil || pause.OnFailure != nil {
-		values.Pause = &pause
+	if pause.Before.Set || pause.After.Set || pause.OnFailure.Set {
+		values.Pause.Set, values.Pause.Value = true, pause
 	}
 	return values
 }

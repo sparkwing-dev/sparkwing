@@ -247,7 +247,7 @@ func fieldLine(n *yaml.Node, prefix, key string) int {
 			}
 		}
 	}
-	return n.Line
+	return 0
 }
 
 // YAMLField returns a mapping field with YAML alias and merge precedence applied.

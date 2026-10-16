@@ -180,6 +180,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	if st != nil {
 		srv.credentialIssuer = st
 		st.SetConsolePolicy(srv.consoleAuthority)
+		st.SetIntakePolicy(srv)
 	}
 	srv.authorization = srv.storeRouteAuthorization()
 	srv.recordQueueActivity(time.Now())

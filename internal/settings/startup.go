@@ -5,9 +5,12 @@ import (
 	"maps"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -243,11 +246,11 @@ func RepoLocation(in Inputs) (string, Origin, error) {
 	if fallback == "" && len(in.Context.FallbackPaths) > 0 {
 		fallback = in.Context.FallbackPaths[0]
 	}
-	value, origin, err := pick(in, "repo_location", func(v Values) *string { return v.RepoLocation }, fallback)
+	value, origin, err := pickRun(in, "repo_location", func(v runspec.Options) runspec.Setting[string] { return v.RepoLocation }, fallback)
 	if err != nil {
 		return value, origin, err
 	}
-	if in.Context.Submitter && in.Context.ParentCheckout != "" && in.Flags.RepoLocation == nil && in.Sealed.RepoLocation == nil {
+	if in.Context.Submitter && in.Context.ParentCheckout != "" && !in.options(Flag).RepoLocation.Set && !in.options(Run).RepoLocation.Set {
 		value = in.Context.ParentCheckout
 		origin = Origin{Source: Run, Key: "repo_location"}
 	}
@@ -258,29 +261,50 @@ func RepoLocation(in Inputs) (string, Origin, error) {
 }
 
 // PauseTargets retains explicit empty and false controls independently.
-func PauseTargets(in Inputs) (PauseSelection, Origin, error) {
-	value, _, origin, err := pauseTargets(in)
-	return value, origin, err
+func PauseTargets(in Inputs) (runspec.PauseSelection, Origin, error) {
+	setting, err := pauseSetting(in)
+	return setting.Value, fromOrigin(setting.Origin), err
 }
 
-func pauseTargets(in Inputs) (PauseSelection, map[string]Origin, Origin, error) {
-	if !in.Context.Submitter && in.Sealed.Pause == nil {
-		origin := Origin{Source: Run, Key: "debug.pause"}
-		return PauseSelection{}, nil, origin, invalid("debug.pause", origin, "sealed setting is absent")
+func pauseSetting(in Inputs) (runspec.Setting[runspec.PauseSelection], error) {
+	if !in.Context.Submitter && !in.options(Run).Pause.Set {
+		return runspec.Setting[runspec.PauseSelection]{}, invalid("debug.pause", Origin{Source: Run, Key: "debug.pause"}, "sealed setting is absent")
 	}
-	defaults := PauseSelection{Before: []string{}, After: []string{}, OnFailure: pointer(false)}
-	value, origin, origins := compound(in, "debug.pause", func(v Values) *PauseSelection { return v.Pause }, defaults)
+	origin := runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "debug.pause"}
+	out := runspec.PauseSelection{Before: declaration([]string{}, runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "debug.pause.before"}), After: declaration([]string{}, runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "debug.pause.after"}), OnFailure: declaration(false, runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "debug.pause.on_failure"})}
+	order := sources(in, "debug.pause")
+	for i := len(order) - 1; i >= 0; i-- {
+		setting := in.options(order[i]).Pause
+		if !setting.Set {
+			continue
+		}
+		origin = runOrigin(setting.Origin, order[i], "debug.pause")
+		if setting.Value.Before.Set {
+			out.Before = setting.Value.Before
+			out.Before.Origin = nestedRunOrigin(out.Before.Origin, setting.Origin, order[i], "debug.pause.before")
+			out.Before.Value = slices.Clone(out.Before.Value)
+		}
+		if setting.Value.After.Set {
+			out.After = setting.Value.After
+			out.After.Origin = nestedRunOrigin(out.After.Origin, setting.Origin, order[i], "debug.pause.after")
+			out.After.Value = slices.Clone(out.After.Value)
+		}
+		if setting.Value.OnFailure.Set {
+			out.OnFailure = setting.Value.OnFailure
+			out.OnFailure.Origin = nestedRunOrigin(out.OnFailure.Origin, setting.Origin, order[i], "debug.pause.on_failure")
+		}
+	}
 	for _, part := range []struct {
-		name   string
-		values []string
-	}{{"before", value.Before}, {"after", value.After}} {
-		from := origin
-		if selected, ok := origins["debug.pause."+part.name]; ok {
-			from = selected
+		key     string
+		setting runspec.Setting[[]string]
+	}{{"before", out.Before}, {"after", out.After}} {
+		from := fromOrigin(part.setting.Origin)
+		if from.Source == "" {
+			return runspec.Setting[runspec.PauseSelection]{}, invalid("debug.pause."+part.key, from, "unknown setting origin")
 		}
-		if err := validNames("debug.pause."+part.name, part.values, from); err != nil {
-			return PauseSelection{}, nil, from, err
+		if err := validNames("debug.pause."+part.key, part.setting.Value, from); err != nil {
+			return runspec.Setting[runspec.PauseSelection]{}, err
 		}
 	}
-	return value, origins, origin, nil
+	return declaration(out, origin), nil
 }

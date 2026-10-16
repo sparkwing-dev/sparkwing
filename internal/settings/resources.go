@@ -6,73 +6,68 @@ import (
 	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func dimension[T any](in Inputs, key string, field func(Values) *T) (*T, Origin) {
+func dimension[T any](in Inputs, key string, field func(runspec.Resources) runspec.Setting[T]) runspec.Setting[T] {
 	for _, source := range sources(in, "resources") {
-		values := sourceValues(in, source)
-		if value := field(values); value != nil {
-			origin := originFor(values, source, key)
-			if _, ok := values.Origins[key]; !ok {
-				origin = originFor(values, source, "resources")
-				origin.Key = key
-			}
-			return pointer(*value), origin
+		resources := in.options(source).Resources
+		if value := field(resources.Value); resources.Set && value.Set {
+			value.Origin = nestedRunOrigin(value.Origin, resources.Origin, source, key)
+			return value
 		}
 	}
-	return nil, Origin{Source: Default, Key: key}
+	return runspec.Setting[T]{}
 }
 
-func resourceLimits(in Inputs) (Resources, map[string]Origin, Origin, error) {
-	cores, coreOrigin := dimension(in, "resources.cores", func(v Values) *float64 {
-		if v.Resources == nil {
-			return nil
-		}
-		return v.Resources.Cores
-	})
-	memory, memoryOrigin := dimension(in, "resources.memory_bytes", func(v Values) *int64 {
-		if v.Resources == nil {
-			return nil
-		}
-		return v.Resources.MemoryBytes
-	})
-	out := Resources{Cores: cores, MemoryBytes: memory}
-	origins := map[string]Origin{"resources.cores": coreOrigin, "resources.memory_bytes": memoryOrigin}
-	origin := coreOrigin
-	if cores == nil {
-		origin = memoryOrigin
+func resourceSetting(in Inputs) (runspec.Setting[runspec.Resources], error) {
+	cores := dimension(in, "resources.cores", func(v runspec.Resources) runspec.Setting[float64] { return v.Cores })
+	memory := dimension(in, "resources.memory_bytes", func(v runspec.Resources) runspec.Setting[int64] { return v.MemoryBytes })
+	if !cores.Set && !memory.Set {
+		return runspec.Setting[runspec.Resources]{}, nil
 	}
-	op := OperatorValues{}
+	origin := cores.Origin
+	if !cores.Set {
+		origin = memory.Origin
+	}
+	out := declaration(runspec.Resources{Cores: cores, MemoryBytes: memory}, origin)
+	op := runspec.Ceilings{}
 	if in.Context.Submitter {
 		var err error
-		op, err = ControllerCeilings(in.Operator)
+		op, err = operatorCeilings(in)
 		if err != nil {
-			return out, origins, origin, err
+			return out, err
 		}
 	}
-	if cores != nil {
-		if *cores <= 0 || math.IsNaN(*cores) || math.IsInf(*cores, 0) {
-			return out, origins, origin, invalid("resources.cores", coreOrigin, "must be positive and finite")
+	if cores.Set {
+		from := fromOrigin(cores.Origin)
+		if from.Source == "" || cores.Value <= 0 || math.IsNaN(cores.Value) || math.IsInf(cores.Value, 0) {
+			return out, invalid("resources.cores", from, "must be positive and finite with a known origin")
 		}
-		if op.MaxCores != nil && *cores > *op.MaxCores {
-			return out, origins, origin, above("resources.cores", coreOrigin, *cores, *op.MaxCores, op.Origins["operator.max_cores"])
-		}
-	}
-	if memory != nil {
-		if *memory <= 0 {
-			return out, origins, origin, invalid("resources.memory_bytes", memoryOrigin, "must be positive")
-		}
-		if op.MaxMemoryBytes != nil && *memory > *op.MaxMemoryBytes {
-			return out, origins, origin, above("resources.memory_bytes", memoryOrigin, *memory, *op.MaxMemoryBytes, op.Origins["operator.max_memory_bytes"])
+		if ceiling := op.Resources.Value.Cores; op.Resources.Set && ceiling.Set && cores.Value > ceiling.Value {
+			return out, above("resources.cores", from, cores.Value, ceiling.Value, fromOrigin(ceiling.Origin))
 		}
 	}
-	return out, origins, origin, nil
+	if memory.Set {
+		from := fromOrigin(memory.Origin)
+		if from.Source == "" || memory.Value <= 0 {
+			return out, invalid("resources.memory_bytes", from, "must be positive with a known origin")
+		}
+		if ceiling := op.Resources.Value.MemoryBytes; op.Resources.Set && ceiling.Set && memory.Value > ceiling.Value {
+			return out, above("resources.memory_bytes", from, memory.Value, ceiling.Value, fromOrigin(ceiling.Origin))
+		}
+	}
+	return out, nil
 }
 
 // ResourceLimits merges native dimensions and refuses each excess independently.
-func ResourceLimits(in Inputs) (Resources, Origin, error) {
-	value, _, origin, err := resourceLimits(in)
-	return value, origin, err
+func ResourceLimits(in Inputs) (runspec.Resources, Origin, error) {
+	setting, err := resourceSetting(in)
+	origin := fromOrigin(setting.Origin)
+	if !setting.Set {
+		origin = Origin{Source: Default, Key: "resources.cores"}
+	}
+	return setting.Value, origin, err
 }
 
 func clonePointer[T any](value *T) *T {
@@ -99,74 +94,85 @@ func validateSource(source nodeproto.SourceSpec, complete bool) error {
 	return nil
 }
 
-func sourceField[T any](in Inputs, key string, field func(nodeproto.SourceSpec) *T, fallback T) (*T, Origin) {
+func sourceField[T any](in Inputs, key string, field func(nodeproto.SourceSpec) *T, fallback T) (*T, runspec.SettingOrigin) {
 	for _, source := range sources(in, "source") {
-		values := sourceValues(in, source)
-		if values.Checkout == nil {
-			continue
-		}
-		if value := field(*values.Checkout); value != nil {
-			origin := originFor(values, source, "source."+key)
-			if _, ok := values.Origins["source."+key]; !ok {
-				origin = originFor(values, source, "source")
+		setting := in.options(source).Checkout
+		if value := field(setting.Value.Policy); setting.Set && value != nil {
+			origin, ok := setting.Value.Origins[key]
+			if !ok {
+				origin = setting.Origin
 				origin.Key = "source." + key
 			}
-			return pointer(*value), origin
+			return pointer(*value), runOrigin(origin, source, "source."+key)
 		}
 	}
-	return pointer(fallback), Origin{Source: Default, Key: "source." + key}
+	return pointer(fallback), runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "source." + key}
 }
 
-func checkout(in Inputs) (nodeproto.SourceSpec, map[string]Origin, Origin, error) {
+func checkoutSetting(in Inputs) (runspec.Setting[runspec.CheckoutPolicy], error) {
 	if !in.Context.Submitter {
-		if in.Sealed.Checkout == nil || validateSource(*in.Sealed.Checkout, true) != nil {
-			return nodeproto.SourceSpec{}, nil, Origin{Source: Run, Key: "source"}, invalid("source", Origin{Source: Run, Key: "source"}, "sealed checkout policy is absent or incomplete")
+		sealed := in.options(Run).Checkout
+		if !sealed.Set || validateSource(sealed.Value.Policy, true) != nil {
+			return runspec.Setting[runspec.CheckoutPolicy]{}, invalid("source", Origin{Source: Run, Key: "source"}, "sealed checkout policy is absent or incomplete")
 		}
 	}
-	out := nodeproto.SourceSpec{}
-	origins := map[string]Origin{}
-	out.FullHistory, origins["source.full_history"] = sourceField(in, "full_history", func(v nodeproto.SourceSpec) *bool { return v.FullHistory }, false)
-	out.Depth, origins["source.depth"] = sourceField(in, "depth", func(v nodeproto.SourceSpec) *int { return v.Depth }, 1)
-	out.Tags, origins["source.tags"] = sourceField(in, "tags", func(v nodeproto.SourceSpec) *bool { return v.Tags }, false)
-	out.Submodules, origins["source.submodules"] = sourceField(in, "submodules", func(v nodeproto.SourceSpec) *bool { return v.Submodules }, false)
-	out.LFS, origins["source.lfs"] = sourceField(in, "lfs", func(v nodeproto.SourceSpec) *bool { return v.LFS }, false)
-	origin := Origin{Source: Default, Key: "source"}
+	out := runspec.CheckoutPolicy{Origins: map[string]runspec.SettingOrigin{}}
+	out.Policy.FullHistory, out.Origins["full_history"] = sourceField(in, "full_history", func(v nodeproto.SourceSpec) *bool { return v.FullHistory }, false)
+	out.Policy.Depth, out.Origins["depth"] = sourceField(in, "depth", func(v nodeproto.SourceSpec) *int { return v.Depth }, 1)
+	out.Policy.Tags, out.Origins["tags"] = sourceField(in, "tags", func(v nodeproto.SourceSpec) *bool { return v.Tags }, false)
+	out.Policy.Submodules, out.Origins["submodules"] = sourceField(in, "submodules", func(v nodeproto.SourceSpec) *bool { return v.Submodules }, false)
+	out.Policy.LFS, out.Origins["lfs"] = sourceField(in, "lfs", func(v nodeproto.SourceSpec) *bool { return v.LFS }, false)
+	origin := runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "source"}
 	for _, source := range sources(in, "source") {
-		if v := sourceValues(in, source); v.Checkout != nil {
-			origin = originFor(v, source, "source")
+		if setting := in.options(source).Checkout; setting.Set {
+			origin = runOrigin(setting.Origin, source, "source")
 			break
 		}
 	}
-	if *out.FullHistory && origins["source.depth"].Source == Default {
-		out.Depth = pointer(0)
-		origins["source.depth"] = origins["source.full_history"]
+	if *out.Policy.FullHistory && out.Origins["depth"].Layer == runspec.LayerDefault {
+		out.Policy.Depth = pointer(0)
+		out.Origins["depth"] = out.Origins["full_history"]
 	}
-	if *out.Depth == 0 && origins["source.full_history"].Source == Default {
-		out.FullHistory = pointer(true)
-		origins["source.full_history"] = origins["source.depth"]
+	if *out.Policy.Depth == 0 && out.Origins["full_history"].Layer == runspec.LayerDefault {
+		out.Policy.FullHistory = pointer(true)
+		out.Origins["full_history"] = out.Origins["depth"]
 	}
-	if err := validateSource(out, true); err != nil {
-		return out, origins, origin, invalid("source", origin, err.Error())
+	result := declaration(out, origin)
+	if err := validateSource(out.Policy, true); err != nil {
+		return result, invalid("source", fromOrigin(origin), err.Error())
 	}
-	op := OperatorValues{}
+	for _, fieldOrigin := range out.Origins {
+		if fromOrigin(fieldOrigin).Source == "" {
+			return result, invalid("source", fromOrigin(origin), "unknown setting origin")
+		}
+	}
 	if in.Context.Submitter {
-		var err error
-		op, err = ControllerCeilings(in.Operator)
+		op, err := operatorCeilings(in)
 		if err != nil {
-			return out, origins, origin, err
+			return result, err
 		}
-	}
-	if op.AllowedSources != nil {
-		allowed := false
-		for _, policy := range op.AllowedSources {
-			if reflect.DeepEqual(out, policy) {
-				allowed = true
-				break
+		if op.AllowedSources.Set {
+			for _, policy := range op.AllowedSources.Value {
+				if reflect.DeepEqual(out.Policy, policy) {
+					return result, nil
+				}
 			}
-		}
-		if !allowed {
-			return out, origins, origin, invalid("source", origin, "checkout policy is not permitted by operator")
+			return result, invalid("source", fromOrigin(origin), "checkout policy is not permitted by operator")
 		}
 	}
-	return out, origins, origin, nil
+	return result, nil
+}
+
+func sourceSetting(source nodeproto.SourceSpec, origin Origin) runspec.Setting[runspec.CheckoutPolicy] {
+	out := runspec.CheckoutPolicy{Policy: cloneSource(source), Origins: map[string]runspec.SettingOrigin{}}
+	projected := runspec.SettingOrigin{Layer: OriginLayers[origin.Source], File: origin.File, Key: origin.Key, Line: origin.Line}
+	fields := map[string]bool{"full_history": source.FullHistory != nil, "depth": source.Depth != nil, "tags": source.Tags != nil, "submodules": source.Submodules != nil, "lfs": source.LFS != nil}
+	for field, present := range fields {
+		if present {
+			child := projected
+			child.Key = "source." + field
+			out.Origins[field] = child
+		}
+	}
+	return declaration(out, projected)
 }

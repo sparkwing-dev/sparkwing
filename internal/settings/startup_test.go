@@ -5,16 +5,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func TestParentCheckoutPrecedesMachineLocation(t *testing.T) {
-	in := Inputs{Context: Context{Submitter: true, ParentCheckout: "/parent"}, Machine: Values{RepoLocation: ptr("/registered")}}
+	in := Inputs{Context: Context{Submitter: true, ParentCheckout: "/parent"}, Machine: Values{Options: runspec.Options{RepoLocation: present("/registered")}}}
 	value, origin, err := RepoLocation(in)
 	if err != nil || value != "/parent" || origin.Source != Run {
 		t.Fatalf("%q %+v %v", value, origin, err)
 	}
-	in.Flags.RepoLocation = ptr("/submitted")
+	in.Flags.RepoLocation = present("/submitted")
 	value, _, err = RepoLocation(in)
 	if err != nil || value != "/submitted" {
 		t.Fatalf("%q %v", value, err)
@@ -75,13 +76,13 @@ func TestConnectionAndCheckoutFacts(t *testing.T) {
 	if err != nil || path != "/parent" {
 		t.Fatal(path, err)
 	}
-	in.Flags.RepoLocation = pointer("/submitted")
+	in.Flags.RepoLocation = present("/submitted")
 	path, _, err = RepoLocation(in)
 	if err != nil || path != "/submitted" {
 		t.Fatal(path, err)
 	}
 	in.Context.Submitter = false
-	in.Sealed.RepoLocation = pointer("/sealed")
+	in.Sealed.RepoLocation = present("/sealed")
 	path, _, err = RepoLocation(in)
 	if err != nil || path != "/sealed" {
 		t.Fatal(path, err)
@@ -103,9 +104,9 @@ func TestConnectionAndCheckoutFacts(t *testing.T) {
 }
 
 func TestPausePerFieldAndRunnerRenewals(t *testing.T) {
-	in := Inputs{Context: Context{Submitter: true}, Flags: Values{Pause: &PauseSelection{Before: []string{}, OnFailure: pointer(false)}}, Sealed: Values{Pause: &PauseSelection{Before: []string{"old"}, After: []string{"after"}, OnFailure: pointer(true)}}}
+	in := Inputs{Context: Context{Submitter: true}, Flags: Values{Options: runspec.Options{Pause: present(runspec.PauseSelection{Before: present([]string{}), OnFailure: present(false)})}}, Sealed: Values{Options: runspec.Options{Pause: present(runspec.PauseSelection{Before: present([]string{"old"}), After: present([]string{"after"}), OnFailure: present(true)})}}}
 	pause, _, err := PauseTargets(in)
-	if err != nil || len(pause.Before) != 0 || len(pause.After) != 1 || *pause.OnFailure {
+	if err != nil || len(pause.Before.Value) != 0 || len(pause.After.Value) != 1 || pause.OnFailure.Value {
 		t.Fatal(pause, err)
 	}
 	in.Flags.RunnerPreferences = &userconfig.RunnerConfig{Lease: pointer("1m"), Heartbeat: pointer("30s")}
@@ -158,13 +159,15 @@ func TestStartupSourcePairs(t *testing.T) {
 			return *v.HolderPrefix, o, nil
 		}},
 		{"connection", func(v *Values, s string) { v.Connection = &userconfig.Connection{URL: s} }, func(in Inputs) (string, Origin, error) { v, o, e := ControllerConnection(in); return v.URL, o, e }},
-		{"repo_location", func(v *Values, s string) { v.RepoLocation = pointer(s) }, RepoLocation},
-		{"debug.pause", func(v *Values, s string) { v.Pause = &PauseSelection{Before: []string{s}} }, func(in Inputs) (string, Origin, error) {
+		{"repo_location", func(v *Values, s string) { v.RepoLocation = present(s) }, RepoLocation},
+		{"debug.pause", func(v *Values, s string) {
+			v.Pause = present(runspec.PauseSelection{Before: present([]string{s})})
+		}, func(in Inputs) (string, Origin, error) {
 			v, o, e := PauseTargets(in)
 			if e != nil {
 				return "", o, e
 			}
-			return v.Before[0], o, nil
+			return v.Before.Value[0], o, nil
 		}},
 	}
 	for _, tc := range tests {
@@ -269,9 +272,11 @@ func TestCompoundErrorsRetainLeafOrigin(t *testing.T) {
 }
 
 func TestPausePreservesEachOrigin(t *testing.T) {
-	in := Inputs{Context: Context{Submitter: true}, Flags: Values{Pause: &PauseSelection{Before: []string{"before"}}}, Sealed: Values{Pause: &PauseSelection{OnFailure: pointer(false)}, Origins: map[string]Origin{"debug.pause.on_failure": {Source: Env, File: "captured", Key: "debug.pause.on_failure", Line: 5}}}}
-	_, origins, _, err := pauseTargets(in)
-	if err != nil || origins["debug.pause.before"].Source != Flag || origins["debug.pause.after"].Source != Default || origins["debug.pause.on_failure"].Source != Env || origins["debug.pause.on_failure"].Line != 5 {
+	in := Inputs{Context: Context{Submitter: true}, Flags: Values{Options: runspec.Options{Pause: present(runspec.PauseSelection{Before: present([]string{"before"})})}}, Sealed: Values{Options: runspec.Options{Pause: present(runspec.PauseSelection{OnFailure: present(false)})}}}
+	in.Sealed.Pause.Value.OnFailure.Origin = runspec.SettingOrigin{Layer: runspec.LayerEnv, File: "captured", Key: "debug.pause.on_failure", Line: 5}
+	setting, err := pauseSetting(in)
+	origins := setting.Value
+	if err != nil || fromOrigin(origins.Before.Origin).Source != Flag || fromOrigin(origins.After.Origin).Source != Default || fromOrigin(origins.OnFailure.Origin).Source != Env || origins.OnFailure.Origin.Line != 5 {
 		t.Fatalf("origins lost: %+v %v", origins, err)
 	}
 }

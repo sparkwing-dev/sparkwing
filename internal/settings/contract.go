@@ -69,69 +69,24 @@ type Rule struct {
 	Validation string
 }
 
-// Resources uses native units so hosts cannot disagree through unit conversion.
-type Resources struct {
-	Cores       *float64 `json:"cores,omitempty"`
-	MemoryBytes *int64   `json:"memory_bytes,omitempty"`
-}
-
-// PauseSelection is sealed request data instead of inherited debug env.
-type PauseSelection struct {
-	Before    []string `json:"before,omitempty"`
-	After     []string `json:"after,omitempty"`
-	OnFailure *bool    `json:"on_failure,omitempty"`
-}
-
-// Values retains presence until acceptance. Nil is unset; explicit zero and
-// empty collections remain values. Origins is keyed by the keys in Table.
-// This is a settings projection, not an independently sealed run specification.
+// Values combines native run preferences with parent-only startup inputs.
 type Values struct {
+	runspec.Options
 	ConfigPath        *string
 	Home              *string
-	Profile           *string
 	Args              map[string]string
 	Guards            *projectconfig.Guards
-	Requires          []string
-	Prefers           []string
-	Workers           *int
-	Output            *string
-	AdmissionClass    *string
-	Priority          *int
 	Admission         *userconfig.AdmissionConfig
 	Toolchain         *string
-	PauseTimeout      *time.Duration
 	BoxID             *string
 	Cache             *userconfig.CacheConfig
 	SecretsKey        *KeyInput
 	CatchUp           *time.Duration
 	RunnerPreferences *userconfig.RunnerConfig
-	RunnerSelection   *runspec.RunnerSelection
-	StartAt           *string
-	StopAt            *string
-	Only              *string
-	DryRun            *bool
-	NoMemo            *bool
-	AllowRisk         []string
-	OwnerExecution    *time.Duration
-	JobTimeout        *time.Duration
-	NoProgressTimeout *time.Duration
-	RetryBackoff      *time.Duration
-	ApprovalWait      *time.Duration
-	Retry             *int
-	MemoTTL           *time.Duration
-	ClaimWait         *time.Duration
 	Retention         *RetentionValues
 	IdlePoll          *time.Duration
 	Connection        *userconfig.Connection
-	RepoLocation      *string
-	Pause             *PauseSelection
-	Debug             *bool
-	Publish           *string
-	CacheFrom         *string
-	Resources         *Resources
-	Checkout          *nodeproto.SourceSpec
 	TokenTTL          *time.Duration
-	SubmitEnvAllow    []string
 	Origins           map[string]Origin
 }
 
@@ -216,6 +171,7 @@ type Context struct {
 // Non-submitters require the sealed projection and never consult local preferences
 // for accepted settings. Machine and env values are captured at intake once.
 type Inputs struct {
+	ceilings    *runspec.Ceilings
 	Flags       Values
 	Environment Values
 	Sealed      Values
@@ -263,47 +219,4 @@ var OriginLayers = map[Source]runspec.Layer{
 	Code: runspec.LayerCode, Machine: runspec.LayerMachine, Default: runspec.LayerDefault,
 	TeamDB: runspec.LayerOperatorTeam, GlobalDB: runspec.LayerOperatorGlobal,
 	LimitsProfile: runspec.LayerOperatorProfile,
-}
-
-// ProjectionField names a complete request-field mapping without reimplementing precedence.
-type ProjectionField struct {
-	ValueField  string
-	OptionField string
-	OriginKey   string
-}
-
-// RequestProjection excludes startup inputs and separately resolved args/guards/schedules.
-// Nested resource, pause and checkout origins use the key plus their field name.
-var RequestProjection = []ProjectionField{
-	{"RunnerSelection", "Runner", "runner"},
-	{"Resources", "Resources", "resources"},
-	{"Priority", "Priority", "priority"},
-	{"AdmissionClass", "AdmissionClass", "admission_class"},
-	{"ClaimWait", "ClaimWait", "claim_wait"},
-	{"OwnerExecution", "OwnerExecutionTimeout", "owner_execution"},
-	{"Checkout", "Checkout", "source"},
-	{"Requires", "Requires", "requires"},
-	{"Prefers", "Prefers", "prefers"},
-	{"StartAt", "StartAt", "start_at"},
-	{"StopAt", "StopAt", "stop_at"},
-	{"Only", "Only", "only"},
-	{"DryRun", "DryRun", "dry_run"},
-	{"NoMemo", "NoMemo", "no_memo"},
-	{"AllowRisk", "AllowRisk", "allow_risk"},
-	{"Workers", "Workers", "workers"},
-	{"Output", "Output", "output"},
-	{"Pause", "Pause", "debug.pause"},
-	{"PauseTimeout", "PauseTimeout", "debug.pause_timeout"},
-	{"Debug", "Debug", "debug"},
-	{"Publish", "Publish", "publish"},
-	{"CacheFrom", "CacheFrom", "cache_from"},
-	{"SubmitEnvAllow", "SubmitEnvAllow", "run.submit_env_allow"},
-	{"RepoLocation", "RepoLocation", "repo_location"},
-	{"Profile", "Profile", "profile"},
-	{"JobTimeout", "JobDefaults.Timeout", "job.timeout"},
-	{"NoProgressTimeout", "JobDefaults.NoProgressTimeout", "job.no_progress_timeout"},
-	{"ApprovalWait", "JobDefaults.ApprovalWait", "approval.wait"},
-	{"Retry", "JobDefaults.Retry", "job.retry"},
-	{"RetryBackoff", "JobDefaults.RetryBackoff", "job.retry_backoff"},
-	{"MemoTTL", "JobDefaults.MemoTTL", "job.memo_ttl"},
 }

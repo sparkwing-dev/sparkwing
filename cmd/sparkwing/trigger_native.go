@@ -72,13 +72,13 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (controllerwi
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	input := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: settings.Values{Profile: &flags.profile}}
+	input := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: settings.Values{Options: runspec.Options{Profile: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: flags.profile}}}}}
 	if flags.runner != "" {
 		selection := runspec.RunnerSelection{Kind: runspec.RunnerName, Value: flags.runner}
 		if label, ok := strings.CutPrefix(flags.runner, "label="); ok {
 			selection.Kind, selection.Value = runspec.RunnerLabel, label
 		}
-		input.Flags.RunnerSelection = &selection
+		input.Flags.Runner.Set, input.Flags.Runner.Value = true, selection
 	}
 	return prepareTriggerRequest(triggerRequestInput{source: selected, settings: input, described: described, args: flags.passthrough, env: map[string]string{}})
 }

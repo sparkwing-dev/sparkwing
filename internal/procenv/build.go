@@ -64,7 +64,7 @@ func validName(name string) bool { return name != "" && !strings.ContainsAny(nam
 // Build applies the process policy before execution. Local input comes only from Captured;
 // remote input comes from Ambient and the explicit allow list. Masker must be supplied when
 // accepted remote values or embedded proxy credentials require registration.
-// Build excludes credential-class values from both local snapshots and remote inputs under Policies.
+// Build excludes credential-class values from both local snapshots and remote inputs at every boundary.
 // This includes tool-owned credentials in a local snapshot. Plan never receives job Startup;
 // Attempt and Eval receive it before process start. The SDK adds Body only after plan succeeds.
 // Cleanup and StepTool use AttemptEnv exactly. Remote allow-list values of at least twelve characters
@@ -215,9 +215,7 @@ func composeRuntime(env map[string]string, k Kind, rt Runtime) {
 	put("SPARKWING_COMMIT", rt.Commit)
 	put("SPARKWING_REPO", rt.Repo)
 	put("SPARKWING_TRIGGER_SOURCE", rt.TriggerSource)
-	if rt.GateIndex != nil {
-		put("SPARKWING_GATE_INDEX", strconv.Itoa(*rt.GateIndex))
-	}
+	put("SPARKWING_GATE_INDEX", rt.GateIndex)
 }
 
 func registerMasks(masker *secrets.Masker, name, value string, remote bool) error {
@@ -225,35 +223,30 @@ func registerMasks(masker *secrets.Masker, name, value string, remote bool) erro
 	if remote && len(value) >= limits.OperatorEnvMaskMinLength {
 		values = append(values, value)
 	}
-	addresses := proxyAddresses(name, value)
-	if len(addresses) > 0 {
-		addresses = append([]string{value}, addresses...)
-	}
-	for i, address := range addresses {
-		if strings.Contains(value, "@") && address != "direct" && address != "off" {
-			values = append(values, address)
-		}
-		_, authority, hasScheme := strings.Cut(address, "://")
-		if !hasScheme {
-			authority = strings.TrimPrefix(address, "//")
-		}
-		at := strings.LastIndex(authority, "@")
-		if at < 0 {
+	for _, address := range proxyAddresses(name, value) {
+		if address == "direct" || address == "off" {
 			continue
 		}
-		userinfo, host := authority[:at], authority[at+1:]
-		if i > 0 {
-			if _, err := url.Parse("http://" + host); err != nil {
-				return fmt.Errorf("invalid proxy URL in %q", name)
-			}
+		endpoint := address
+		if !strings.Contains(endpoint, "://") {
+			endpoint = "http://" + strings.TrimPrefix(endpoint, "//")
 		}
-		username, password, _ := strings.Cut(userinfo, ":")
-		for _, raw := range []string{userinfo, username, password} {
-			decoded, err := url.PathUnescape(raw)
-			if err != nil {
-				return fmt.Errorf("invalid proxy URL in %q", name)
-			}
-			values = append(values, raw, decoded)
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			return fmt.Errorf("invalid proxy URL in %q", name)
+		}
+		if parsed.User == nil {
+			continue
+		}
+		password, _ := parsed.User.Password()
+		values = append(values, value, address, parsed.User.String(), parsed.User.Username(), password)
+		_, authority, _ := strings.Cut(endpoint, "://")
+		if end := strings.IndexAny(authority, "/?#"); end >= 0 {
+			authority = authority[:end]
+		}
+		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+			username, password, _ := strings.Cut(authority[:at], ":")
+			values = append(values, authority[:at], username, password)
 		}
 	}
 	for _, value := range values {

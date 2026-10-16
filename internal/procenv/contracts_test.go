@@ -2,24 +2,6 @@ package procenv
 
 import "testing"
 
-func TestPolicyCoversEveryProcessKind(t *testing.T) {
-	seen := map[Kind]bool{}
-	for _, row := range Policies() {
-		if seen[row.Kind] {
-			t.Fatalf("duplicate process policy %d", row.Kind)
-		}
-		seen[row.Kind] = true
-		if row.User == "" || row.Runtime == "" || row.Protocol == "" || row.Credential == "" || row.Diagnostic == "" || row.Tool == "" {
-			t.Errorf("incomplete process policy: %+v", row)
-		}
-	}
-	for kind := CLI; kind <= HostChild; kind++ {
-		if !seen[kind] {
-			t.Errorf("missing process policy %d", kind)
-		}
-	}
-}
-
 func TestRegistryClassifiesCredentialAndRuntimeBoundaries(t *testing.T) {
 	seen := map[string]Var{}
 	for _, row := range Registry {
