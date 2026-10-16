@@ -57,6 +57,12 @@ contract also apply to `api.sock`. A transport retries only operations the
 registered route marks safe to replay. A lost one-time award is never replayed
 automatically.
 
+Run and job log reads return tagged JSON pages to the CLI. Each output record
+names its persisted attempt or owner unit. Resume cursors retain the selection
+and progress for each subject. An idle follow poll returns no repeated output.
+Completion requires terminal state and final persisted segments. A cursor never
+replaces the store's authorization check for those segments.
+
 ### Who hosts the daemon
 
 The local controller is wingd. These commands inspect or hold its lifecycle:
