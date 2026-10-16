@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -49,9 +50,28 @@ func checkProcessBinding(parent, child nodeproto.ProcessBinding) error {
 	return nil
 }
 
-func (s *executorSession) call(ctx context.Context, request nodeproto.Request, result any) error {
+func (s *executorSession) call(ctx context.Context, request nodeproto.Request, result any, kind string) error {
 	if err := context.Cause(ctx); err != nil {
 		return err
+	}
+	validDestination := false
+	switch request.Op {
+	case nodeproto.OpHello:
+		_, validDestination = result.(*nodeproto.HelloResult)
+	case nodeproto.OpPlan, nodeproto.OpDescribe:
+		_, validDestination = result.(*json.RawMessage)
+	case nodeproto.OpEval:
+		_, validDestination = result.(*nodeproto.EvalResult)
+	case nodeproto.OpRunStep:
+		_, validDestination = result.(*nodeproto.RunResult)
+	case nodeproto.OpCancel:
+		_, validDestination = result.(*json.RawMessage)
+	}
+	if request.Op == nodeproto.OpEval && !slices.Contains([]string{"skip_if", "memo_key", "before_run", "after_run", "verify", "generate"}, kind) {
+		return executorError(apierr.ProtocolError, "SDK eval requires an accepted closure kind")
+	}
+	if !validDestination {
+		return executorError(apierr.ProtocolError, "SDK result destination does not match the operation")
 	}
 	request.ID = strconv.FormatInt(s.sequence.Add(1), 10)
 	if request.Op == nodeproto.OpRunStep {
@@ -61,14 +81,19 @@ func (s *executorSession) call(ctx context.Context, request nodeproto.Request, r
 	if err != nil {
 		return err
 	}
-	if reply.ID != request.ID || reply.OK != (reply.Error == nil) || reply.OK == (len(reply.Result) == 0) || reply.Error != nil && len(reply.Result) != 0 {
-		return executorError(apierr.ProtocolError, "SDK returned an invalid reply")
+	if reply.ID != request.ID {
+		return executorError(apierr.ProtocolError, "SDK returned an invalid reply ID")
 	}
-	if reply.Error != nil {
-		return reply.Error
+	if err = reply.Decode(result); err != nil {
+		if errors.Is(err, nodeproto.ErrMalformed) {
+			return executorError(apierr.ProtocolError, "SDK reply has an invalid result")
+		}
+		return err
 	}
-	if err = json.Unmarshal(reply.Result, result); err != nil {
-		return executorError(apierr.ProtocolError, "SDK reply has an invalid result")
+	if request.Op == nodeproto.OpEval {
+		if err := result.(*nodeproto.EvalResult).ValidateValue(kind); err != nil {
+			return executorError(apierr.ProtocolError, "SDK closure returned an invalid value")
+		}
 	}
 	return nil
 }
@@ -79,7 +104,7 @@ func (h *sdkCode) hello(ctx context.Context, session *executorSession, input Nod
 
 func sdkHello(ctx context.Context, session *executorSession, identity engine.Identity, runner nodeproto.RunnerIdentity, binding *nodeproto.ProcessBinding) error {
 	var hello nodeproto.HelloResult
-	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello)
+	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello, "")
 	if err != nil {
 		return err
 	}
@@ -101,7 +126,7 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 	if entrypoint == "" {
 		entrypoint = spec.Request.Request.Pipeline
 	}
-	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: entrypoint, Args: args, Run: &run}, &raw)
+	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: entrypoint, Args: args, Run: &run}, &raw, "")
 	if err != nil {
 		return err
 	}
@@ -142,16 +167,16 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 	return executorError(apierr.PlanDrift, "SDK did not reconstruct the accepted job")
 }
 
-func (h *sdkCode) eval(ctx context.Context, session *executorSession, input NodeInput, closure string, payload json.RawMessage, settled []string) (json.RawMessage, error) {
+func (h *sdkCode) eval(ctx context.Context, session *executorSession, input NodeInput, closure, kind string, payload json.RawMessage, settled []string) (json.RawMessage, error) {
 	var result nodeproto.EvalResult
 	request := nodeproto.Request{Op: nodeproto.OpEval, Closure: closure, Input: payload}
 	if settled != nil {
 		request.Attempt, request.Settled = int(input.Attempt), settled
 	}
-	if err := session.call(ctx, request, &result); err != nil {
+	if err := session.call(ctx, request, &result, kind); err != nil {
 		return nil, err
 	}
-	return evalValue(result, "")
+	return evalValue(result, kind)
 }
 
 func executorRunContext(spec runspec.Spec) nodeproto.RunContext {

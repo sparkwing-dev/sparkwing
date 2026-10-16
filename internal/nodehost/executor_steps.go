@@ -31,7 +31,7 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 		},
 		cancel: func(ctx context.Context, id string) error {
 			var reply json.RawMessage
-			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpCancel, Job: input.NodeID, Step: id}, &reply)
+			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpCancel, Job: input.NodeID, Step: id}, &reply, "")
 		},
 		failFast: func(ctx context.Context, trigger string, cancelled []string, latency time.Duration) error {
 			return h.diagnostic(ctx, input, "info", "work_fail_fast", "", trigger, map[string]any{
@@ -60,7 +60,7 @@ func settledSteps(steps []nodeproto.StepSpec, finished map[string]bool) []string
 
 func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, step nodeproto.StepSpec, settled []string) (json.RawMessage, string, string, error) {
 	for _, closure := range step.Closures.SkipIf {
-		raw, err := h.eval(ctx, session, input, closure, nil, settled)
+		raw, err := h.eval(ctx, session, input, closure, "skip_if", nil, settled)
 		if err != nil {
 			return nil, "", "", err
 		}
@@ -83,7 +83,7 @@ func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input
 		}
 	}
 	var result nodeproto.RunResult
-	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: input.NodeID, Step: step.ID, Attempt: int(input.Attempt), Settled: settled}, &result); err != nil {
+	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: input.NodeID, Step: step.ID, Attempt: int(input.Attempt), Settled: settled}, &result, ""); err != nil {
 		return nil, "", "", err
 	}
 	if err := executorResultFailure(result); err != nil {

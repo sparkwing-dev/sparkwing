@@ -22,6 +22,7 @@ import (
 type SDKEnvironment struct {
 	Base      procenv.Base
 	Store     EvaluationStore
+	Masks     *MaskRegistry
 	Snapshots CapturedEnvironmentLoader
 	Build     func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
 	Split     func([]procenv.Assignment) (procenv.JobEnv, error)
@@ -124,6 +125,9 @@ func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runsp
 	base, err := capturedBase(ctx, e.Base, e.Snapshots, seal)
 	if err != nil {
 		return nil, err
+	}
+	if e.Masks != nil {
+		build = e.Masks.environment(build)
 	}
 	env, err := build(kind, base, runtime)
 	if err != nil {

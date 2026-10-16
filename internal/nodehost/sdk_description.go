@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
@@ -25,14 +26,19 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 		}
 		seen[pipeline.Name] = true
 		args := map[string]bool{}
+		defaults := runspec.Resolved{Args: map[string]string{}}
 		for _, arg := range pipeline.Args {
 			if arg.Name == "" || args[arg.Name] {
 				return PreparedPlanning{}, executorError(apierr.ProtocolError, "SDK describe has ambiguous arguments")
 			}
 			args[arg.Name] = true
 			if arg.Secret && arg.Default != nil {
-				p.Masker.Register(*arg.Default)
+				defaults.Args[arg.Name] = *arg.Default
+				defaults.SecretArgs = append(defaults.SecretArgs, arg.Name)
 			}
+		}
+		if err := p.Masks.initialize(runspec.SealedRequest{}, &defaults, nil, nil); err != nil {
+			return PreparedPlanning{}, err
 		}
 		if pipeline.Name == input.Entrypoint {
 			selected = pipeline
@@ -53,8 +59,10 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 			if !slices.Contains(prepared.SecretArgs, arg.Name) {
 				prepared.SecretArgs = append(prepared.SecretArgs, arg.Name)
 			}
-			p.Masker.Register(prepared.Args[arg.Name])
 		}
+	}
+	if err := p.Masks.initialize(runspec.SealedRequest{Request: runspec.Request{RequestedArgs: input.Args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: input.SecretArgs}}}, &runspec.Resolved{Args: prepared.Args, SecretArgs: prepared.SecretArgs}, nil, nil); err != nil {
+		return PreparedPlanning{}, err
 	}
 	return prepared, nil
 }

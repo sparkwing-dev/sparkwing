@@ -90,13 +90,21 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 		return out, errors.New("checkout planning requires an acquired entry and sealed request")
 	}
 	request := input.Request.Request
-	for _, name := range request.SecretArgs.Value {
-		p.Masker.Register(request.RequestedArgs[name])
+	if p.Masks == nil {
+		p.Masks = NewMaskRegistry(p.Masker)
 	}
+	if err := p.Masks.initialize(input.Request, nil, nil, nil); err != nil {
+		return out, err
+	}
+	p.assemblePlanCache(&input.Planning, request)
 	input.Planning.Inputs.Team = request.Team
 	input.Planning.Inputs.Repository = request.Git.Repository.Key
 	input.Planning.Inputs.Entrypoint = request.Source.Entrypoint
 	hash := (PlanningFunctions{Hash: p.CanonicalHash}).defaults().Hash
+	input.Planning.Inputs.CheckoutDigest, err = hash(request.Options.Checkout)
+	if err != nil {
+		return out, err
+	}
 	input.Planning.Inputs.ProjectDigest, err = hash(struct {
 		File string
 		Body []byte
@@ -122,7 +130,7 @@ func (p SDKPlanner) PrepareCheckout(ctx context.Context, input CheckoutPlanningI
 	}
 	resolved := runspec.Resolved{Engine: input.Entry.Engine.Identity, Env: request.Env, Entrypoint: entrypoint, Settings: runspec.ExecutionSettings{Options: request.Options}}
 	resolveDefaultBranch(&resolved, request.Git, input.Entry.DefaultBranch)
-	process := PlanningProcessInput{Entry: input.Entry, Entrypoint: entrypoint, Runner: input.Runner, Args: args, SecretArgs: request.SecretArgs.Value, Environment: request.Env, Run: executorRunContext(runspec.Spec{Request: input.Request, Resolved: resolved})}
+	process := PlanningProcessInput{Debug: request.Options.Debug.Value, Entry: input.Entry, Entrypoint: entrypoint, Runner: input.Runner, Args: args, SecretArgs: request.SecretArgs.Value, Environment: request.Env, Run: executorRunContext(runspec.Spec{Request: input.Request, Resolved: resolved})}
 	prepared, err := p.Prepare(ctx, process, input.Planning)
 	if err != nil {
 		return out, err

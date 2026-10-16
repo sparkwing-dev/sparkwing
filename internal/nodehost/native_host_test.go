@@ -64,10 +64,24 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 	return config, input, state, claimed
 }
 
+func persistNativeAcceptance(t *testing.T, state *acquiredClaimStore, accepted AcceptedRun) {
+	t.Helper()
+	var spec runspec.Spec
+	if err := json.Unmarshal(accepted.Spec, &spec); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(accepted.Plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.run.ID, state.run.Request, state.run.Spec, state.run.PlanHash, state.run.Plan = accepted.RunID, spec.Request, &spec, accepted.PlanHash, raw
+}
+
 func TestNativeHostDefaultExpansionUsesSharedEvaluator(t *testing.T) {
 	config, _, state, _ := nativeHostFixture(t)
 	input, evaluationState, _, _ := evaluationFixture(t)
 	state.executorStore = evaluationState
+	persistNativeAcceptance(t, state, input.Accepted)
 	var spec runspec.Spec
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 		t.Fatal(err)
@@ -91,6 +105,7 @@ func TestNativeHostOpensApprovalThroughOwnerTransition(t *testing.T) {
 		job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
 	})
 	state.executorStore = policyState
+	persistNativeAcceptance(t, state, input.Accepted)
 	config.Owner.Local = func(store.NodeRow) bool {
 		t.Fatal("approval entered compute admission")
 		return false
@@ -115,6 +130,7 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 				}
 			})
 			state.executorStore = policyState
+			persistNativeAcceptance(t, state, input.Accepted)
 			if mode == "local" {
 				config.Owner.Local = func(store.NodeRow) bool { return true }
 			}
@@ -158,6 +174,7 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 		job.Closures.SkipIf = []string{"guard"}
 	})
 	state.executorStore = policyState
+	persistNativeAcceptance(t, state, input.Accepted)
 	refused := errors.New("evaluation delegation refused")
 	config.Evaluation.Bind = func(context.Context, EvaluationInput) (ProcessGrant, error) {
 		return ProcessGrant{}, refused
@@ -183,6 +200,7 @@ func TestNativeHostSkipPolicyJoinsEvaluationBeforeTransition(t *testing.T) {
 	config, _, state, _ := nativeHostFixture(t)
 	input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
 	state.executorStore = policyState
+	persistNativeAcceptance(t, state, input.Accepted)
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

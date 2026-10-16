@@ -57,9 +57,9 @@ func TestGitHubAppUnbindDropsTheTeamsSubscriptions(t *testing.T) {
 	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), store.GitHubAppTrigger{
 		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "build", Push: true,
-	}, now); err != nil {
+	}); err != nil {
 		t.Fatalf("put trigger: %v", err)
 	}
 	if subs, err := acme.GitHubAppTriggersFor(ctx, 7, 701); err != nil || len(subs) != 1 || !subs[0].Push {
@@ -72,9 +72,9 @@ func TestGitHubAppUnbindDropsTheTeamsSubscriptions(t *testing.T) {
 	if subs, err := acme.GitHubAppTriggers(ctx); err != nil || len(subs) != 0 {
 		t.Fatalf("subscriptions after unbind = %+v, %v; want none", subs, err)
 	}
-	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), store.GitHubAppTrigger{
 		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "build", Push: true,
-	}, now); !errors.Is(err, store.ErrNotFound) {
+	}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("subscribing through an unbound installation = %v, want ErrNotFound", err)
 	}
 }
@@ -88,7 +88,7 @@ func TestGitHubAppTagSubscriptionRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "release", Tags: []string{"v*"}}
-	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), tr); err != nil {
 		t.Fatal(err)
 	}
 	subs, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
@@ -96,7 +96,7 @@ func TestGitHubAppTagSubscriptionRoundTrip(t *testing.T) {
 		t.Fatalf("tag-only subscription = %+v, %v", subs, err)
 	}
 	tr.Tags, tr.Push = nil, true
-	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), tr); err != nil {
 		t.Fatal(err)
 	}
 	subs, err = acme.GitHubAppTriggers(ctx)
@@ -118,7 +118,7 @@ func TestGitHubAppSubscriptionBranchesRoundTrip(t *testing.T) {
 		Pipeline: "deploy", Push: true, PullRequest: true,
 		Branches: []string{"main", "release/*"}, BaseBranches: []string{"main"},
 	}
-	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), tr); err != nil {
 		t.Fatal(err)
 	}
 	for _, list := range []func(context.Context) ([]store.GitHubAppTrigger, error){
@@ -133,7 +133,7 @@ func TestGitHubAppSubscriptionBranchesRoundTrip(t *testing.T) {
 		}
 	}
 	tr.Branches, tr.BaseBranches = nil, nil
-	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), tr); err != nil {
 		t.Fatal(err)
 	}
 	got, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
@@ -151,7 +151,7 @@ func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "base", Push: true}
-	if _, err := acme.PutGitHubAppTrigger(ctx, base, now); err != nil {
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), base); err != nil {
 		t.Fatal(err)
 	}
 	opt := store.GitHubAppTrigger{
@@ -159,7 +159,7 @@ func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
 		PullRequestClosed: true, PullRequestLabeled: true, PullRequestLabels: []string{"ship"}, PullRequestReadyForReview: true,
 		ReleasePublished: true, ReleasePrereleased: true, BranchCreate: true, BranchDelete: true,
 	}
-	if _, err := acme.PutGitHubAppTrigger(ctx, opt, now); err != nil {
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), opt); err != nil {
 		t.Fatal(err)
 	}
 	subs, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
@@ -174,10 +174,10 @@ func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
 		!got.PullRequestReadyForReview || !got.ReleasePublished || !got.ReleasePrereleased || !got.BranchCreate || !got.BranchDelete {
 		t.Fatalf("new event options = %+v", got)
 	}
-	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{
+	if _, err := acme.PutAuthorizedGitHubTrigger(ctx, githubAppAuthorization(t, st, acme), store.GitHubAppTrigger{
 		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7,
 		Pipeline: "bad", PullRequestLabeled: true,
-	}, now); !errors.Is(err, store.ErrInvalidInput) {
+	}); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("empty label filter = %v", err)
 	}
 }
@@ -244,11 +244,11 @@ func TestGitHubAppRepositoryKeysSurviveRenamesProperty(t *testing.T) {
 				}
 				for _, repository := range []string{"acme/widgets", "renamed/widgets"} {
 					tr := store.GitHubAppTrigger{RepositoryID: ids[j], Repository: repository, InstallationID: installation.InstallationID, Pipeline: "ci", Push: true}
-					if _, err := target.PutGitHubAppTrigger(t.Context(), tr, now); err != nil {
+					if _, err := target.PutAuthorizedGitHubTrigger(t.Context(), githubAppAuthorization(t, st, target), tr); err != nil {
 						t.Fatal(err)
 					}
-					a := store.GitHubAppAutomation{RepositoryID: ids[j], Repository: repository, InstallationID: installation.InstallationID, EnabledBy: "account"}
-					if err := target.PutGitHubAppAutomation(t.Context(), a, now); err != nil {
+					a := store.GitHubAppAutomation{RepositoryID: ids[j], Repository: repository, InstallationID: installation.InstallationID, EnabledBy: "github-admin"}
+					if err := target.PutAuthorizedGitHubAutomation(t.Context(), githubAppAuthorization(t, st, target), a); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -265,7 +265,7 @@ func TestGitHubAppRepositoryKeysSurviveRenamesProperty(t *testing.T) {
 					}
 				}
 				rows, err := target.GitHubAppTriggers(t.Context())
-				if err != nil || len(rows) != 1 || !rows[0].CreatedAt.Equal(now) {
+				if err != nil || len(rows) != 1 || rows[0].CreatedAt.Before(now) {
 					t.Fatalf("subscription timestamp lost nanoseconds: %+v, %v", rows, err)
 				}
 			}

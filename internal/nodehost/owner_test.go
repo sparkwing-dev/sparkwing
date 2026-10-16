@@ -203,7 +203,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 		},
 		Prepare: func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
 			f.record("prepare")
-			return OwnerPlanning{Planning: PlanningInput{Validation: nodeproto.ValidationContext{Secrets: planCacheSecretMatcher{}}}, Functions: PlanningFunctions{
+			return OwnerPlanning{Planning: PlanningInput{Disabled: true, Validation: nodeproto.ValidationContext{Secrets: planCacheSecretMatcher{}}}, Functions: PlanningFunctions{
 				Plan: func(context.Context) (json.RawMessage, error) {
 					f.record("plan")
 					return json.RawMessage(`{"jobs":[]}`), nil

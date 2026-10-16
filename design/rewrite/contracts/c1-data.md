@@ -489,13 +489,16 @@ own their retained responsibilities. Seeded startup bootstrap uses the gated
 
 ## Launcher award snapshots
 
-`Store.ReadLauncherAwards` rechecks launcher ancestry and reads current awards,
+`Store.ReadLauncherAwards(ctx, authority, reservations)` validates each observed
+reservation fence against its original bootstrap award, then reads current awards,
 seals, job settings and parent expiry in one snapshot. Root ancestry and the
 service subject determine ownership across teams. The snapshot excludes ended
 leases, cancelled or terminal work, replaced generations and completed evals.
 Eval liveness checks both its source generation and the current controller lease.
 Exchange replaces the stored credential without changing the award fence.
 
+Root ancestry and service subject must match even after the original award expires
+or is exchanged. An unknown or foreign reservation refuses the entire snapshot.
 The controller's default `LauncherSyncReader` uses this snapshot. It validates
 unique Job and award observations, retains exact matching fences and returns
 only the observed namespace/name/UID for cleanup. A sync response describes the
@@ -2913,3 +2916,25 @@ and omit input hashes for unknown classification and supplied secret args.
 GitHub commit reporting shares the sealed trigger scanner and filters by the
 tenant, numeric repository key and exact SHA. It no longer reads removed
 trigger repository columns or issues one read per result.
+
+
+## GitHub App administration transactions
+
+Tenant implements C2 GitHubAppWriter. All six mutations serialize on the team
+and recheck live authority, ancestry, membership and the selected team.admin
+access before commit. Subscription and automation writes lock and require the
+tenant's unsuspended installation. Actor and nanosecond timestamps derive from
+the transaction. Automation retries retain the existing consent generation.
+Revocation followed by a new grant receives a new store-clock generation.
+
+Extra repository slugs and positive provider-verified numeric IDs commit in one
+transaction. Nonempty lists require an active installation for that repository
+owner. Missing IDs, foreign owners and failed inserts roll back replacement.
+Clearing a list remains possible after unbinding or suspension.
+
+The raw Tenant UnbindGitHubAppInstallation, PutGitHubAppTrigger,
+DeleteGitHubAppTrigger, PutGitHubAppAutomation, DeleteGitHubAppAutomation,
+SetGitHubAppExtraRepos and SetGitHubAppExtraRepoIDs are removed. Trusted provider
+uninstall still uses Operator and its existing transaction helper. Automatic
+schedule/App run admission still needs the committing origin contract described
+in the earlier intake handoff.

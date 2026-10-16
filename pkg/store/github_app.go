@@ -165,21 +165,6 @@ func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInsta
 	return out, rows.Err()
 }
 
-// UnbindGitHubAppInstallation removes t's binding of installation and the
-// subscriptions that relied on it. An installation t does not hold is
-// ErrNotFound.
-func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.unbindGitHubAppInstallationTx(ctx, tx, installation); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // GitHubAppInstallationTeam answers the team installation is bound to, or
 // ErrNotFound. A webhook delivery and a repository's installation name no
 // team, so this read is how either finds one.
@@ -205,7 +190,9 @@ func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation
 	if err != nil {
 		return "", err
 	}
-	return in.Team, t.UnbindGitHubAppInstallation(ctx, installation)
+	return in.Team, o.s.inTx(ctx, func(tx *storeTx) error {
+		return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
+	})
 }
 
 // SetGitHubAppInstallationSuspended records GitHub's suspension of
@@ -276,9 +263,7 @@ func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, erro
 	return out, rows.Err()
 }
 
-// PutGitHubAppTrigger writes tr for t, replacing the subscription of the
-// same repository and pipeline. The installation must be one t holds.
-func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error) {
+func (t *Tenant) putGitHubAppTriggerTx(ctx context.Context, tx *storeTx, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error) {
 	repo, ok := ParseGitHubRepo(tr.Repository)
 	if !ok || tr.RepositoryID <= 0 || strings.TrimSpace(tr.Pipeline) == "" ||
 		(!tr.Push && len(tr.Tags) == 0 && !tr.PullRequest && !tr.PullRequestClosed && !tr.PullRequestLabeled && !tr.PullRequestReadyForReview &&
@@ -312,7 +297,7 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 	if err != nil {
 		return GitHubAppTrigger{}, err
 	}
-	if _, err := t.GitHubAppInstallation(ctx, tr.InstallationID); err != nil {
+	if err := t.liveGitHubInstallationTx(ctx, tx, tr.InstallationID); err != nil {
 		return GitHubAppTrigger{}, err
 	}
 	tr.Team, tr.Repository, tr.CreatedAt = t.team, repo.Slug(), now.UTC()
@@ -337,7 +322,7 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 	if err != nil {
 		return GitHubAppTrigger{}, fmt.Errorf("encode pull request base branches: %w", err)
 	}
-	_, err = t.s.exec(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO github_app_triggers (team, repo_key, `+githubAppTriggerCols+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (team, repository_id, pipeline) DO UPDATE SET
@@ -370,20 +355,6 @@ func validateGitHubBranchPatterns(field string, patterns []string) error {
 		if _, err := path.Match(pattern, ""); err != nil {
 			return fmt.Errorf("%w: invalid %s pattern %q: %w", ErrInvalidInput, field, pattern, err)
 		}
-	}
-	return nil
-}
-
-// DeleteGitHubAppTrigger removes t's subscription of pipeline to repository,
-// or answers ErrNotFound.
-func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error {
-	res, err := t.s.exec(ctx, `DELETE FROM github_app_triggers WHERE team = ? AND repository_id = ? AND pipeline = ?`,
-		string(t.team), repositoryID, pipeline)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return ErrNotFound
 	}
 	return nil
 }

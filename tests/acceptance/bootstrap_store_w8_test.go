@@ -24,6 +24,12 @@ import (
 
 func storedCloudClaimantW8(t *testing.T) (*controller.EngineController, capability.Issued) {
 	t.Helper()
+	expiry := time.Now().UTC().Add(time.Hour)
+	return storedCloudClaimantExpiryW8(t, &expiry)
+}
+
+func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*controller.EngineController, capability.Issued) {
+	t.Helper()
 	server, machine := newStoredRunnerW8(t, capability.UnitNode)
 	claimant, err := storedRunnerClientW8(t.Context(), server, machine.Raw)
 	if err != nil {
@@ -33,14 +39,20 @@ func storedCloudClaimantW8(t *testing.T) (*controller.EngineController, capabili
 	if err != nil || owner.Claim == nil {
 		t.Fatalf("run owner acquisition: present=%v error=%v", owner.Claim != nil, err)
 	}
-	operator, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "runner-store-fixture", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "cloud-operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
+	var prefix string
+	if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator' AND parent_id IS NULL`).Scan(&prefix); err != nil {
+		t.Fatal(err)
+	}
+	parent := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+	root, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &parent, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: expiry})
+	if err != nil {
+		t.Fatalf("provision launcher: %v", err)
+	}
+	tenant, err := server.Store.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expiry := time.Now().UTC().Add(time.Hour)
-	parent := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
-	root, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "runner-store-fixture", Authority: &parent, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: &expiry})
-	if err != nil {
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "cloud-fixture", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
 	execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{

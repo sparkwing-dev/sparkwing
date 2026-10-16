@@ -1,5 +1,3 @@
-//go:build rewrite_integration
-
 package launcher
 
 import (

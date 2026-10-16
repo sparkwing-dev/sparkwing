@@ -1,5 +1,19 @@
 # Migrating to the next release
 
+## Authorized GitHub App configuration and launcher reservations
+
+Tenant's raw `UnbindGitHubAppInstallation`, `PutGitHubAppTrigger`,
+`DeleteGitHubAppTrigger`, `PutGitHubAppAutomation`, `DeleteGitHubAppAutomation`,
+`SetGitHubAppExtraRepos` and `SetGitHubAppExtraRepoIDs` are removed.
+Use the six authority-bearing methods in `GitHubAppWriter`. Tenant supplies the
+production adapter. Supply slugs and verified numeric IDs together when setting
+extra repositories. Actors and timestamps come from the store transaction.
+
+`Store.ReadLauncherAwards` now takes the observed reservation fences as its
+third argument. Pass nil for a snapshot with no reservations. Unknown or foreign
+bootstrap fences refuse the snapshot. The controller returns exact reservation
+identities for cleanup after the original award ends, including after exchange.
+
 ## Authorized team mutations
 
 `Tenant.Rename`, `RequestDeletion`, `CreateInvitation`, `DeleteInvitation`,

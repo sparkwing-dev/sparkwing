@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Replace raw GitHub App configuration writes with transactions that recheck current administration and installation ownership. Extra repository names and numeric IDs commit together. Launcher reservation cleanup proves the original bootstrap award's ownership after expiry or exchange. See [migration guide](docs/migrations/_unreleased.md#authorized-github-app-configuration-and-launcher-reservations).
+
 - **store (Breaking):** Replace raw team rename, deletion, invitation, build-trust and run-deletion APIs with transactions that recheck current authority and membership. Invitation retries preserve the first result and reject changed requests. See [migration guide](docs/migrations/_unreleased.md#authorized-team-mutations).
 
 - **store (Breaking):** Remove raw job creation and queue publication APIs and the legacy invocation redactors. Plan and expansion acceptance enforce job-count guards atomically. Reports and receipts use sealed display inputs, and GitHub commit reports follow numeric repository identity through renames. See [migration guide](docs/migrations/_unreleased.md#job-creation-queue-publication-and-sealed-display).

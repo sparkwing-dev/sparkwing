@@ -34,6 +34,26 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 	if err != nil {
 		return PlanDoc{}, err
 	}
+	checkSecret := func(value, path string) error {
+		if context.Secrets.ContainsSecret(value) {
+			return &apierr.Error{Code: apierr.SecretInIdentifier, Message: fmt.Sprintf("registered secret in identifier at %s", path), Details: map[string]any{"field": path}}
+		}
+		return nil
+	}
+	if err := VisitPlanIdentifiers(plan, checkSecret); err != nil {
+		return PlanDoc{}, err
+	}
+	if err := visitConcurrencyIdentifiers(context.ExistingConcurrency, "existing_concurrency", checkSecret); err != nil {
+		return PlanDoc{}, err
+	}
+	for i, job := range context.ExistingJobs {
+		if err := visitRegisteredJobIdentifiers(job, fmt.Sprintf("existing_jobs[%d]", i), checkSecret); err != nil {
+			return PlanDoc{}, err
+		}
+		if err := visitConcurrencyIdentifiers(job.Concurrency, fmt.Sprintf("existing_jobs[%d].concurrency", i), checkSecret); err != nil {
+			return PlanDoc{}, err
+		}
+	}
 	if plan.Jobs == nil {
 		return PlanDoc{}, planInvalid("plan.jobs", "jobs array is required")
 	}
@@ -126,9 +146,7 @@ func (v *planValidator) identifier(value, path string) error {
 	if value == "" {
 		return planInvalid(path, "identifier is empty")
 	}
-	if v.context.Secrets.ContainsSecret(value) {
-		return &apierr.Error{Code: apierr.SecretInIdentifier, Message: fmt.Sprintf("registered secret in identifier at %s", path), Details: map[string]any{"field": path}}
-	}
+
 	return nil
 }
 

@@ -93,7 +93,7 @@ func (p *executorProcess) Request(ctx context.Context, r nodeproto.Request) (nod
 	if value == nil {
 		switch r.Op {
 		case nodeproto.OpHello:
-			value = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.0.0"}}
+			value = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.0.0"}, Features: []string{}}
 		case nodeproto.OpPlan:
 			value = p.plan
 		case nodeproto.OpRunStep:
@@ -101,6 +101,11 @@ func (p *executorProcess) Request(ctx context.Context, r nodeproto.Request) (nod
 				p.onRun(ctx)
 			}
 			value = p.result
+			if p.result.Outcome == "failed" && p.result.Error == nil {
+				failure := p.result
+				failure.Error = &apierr.Error{Code: apierr.SDKError, Message: "body failed"}
+				value = failure
+			}
 		case nodeproto.OpEval:
 			value = nodeproto.EvalResult{Value: json.RawMessage("null")}
 		default:

@@ -2550,3 +2550,23 @@ selection and retention remain covered by W1b's current record tests.
 The broader legacy deletion fixtures still need final run/trigger seeding and
 checkout amounts. Their pre-mutation failures are recorded in W1's session 57
 report. No native placement acceptance cell is enabled by these ports.
+
+
+## W1 GitHub App administration and reservation continuation
+
+`TestGitHubAppMutationsRequireCurrentAdministrationProperty` covers all six
+committing mutations over direct/delegated authority, foreign tenants, lost
+membership, downgrade, revoked ancestry, wrong grants and replay modes.
+`TestGitHubAppMutationsCommitActorTimeAndConsentGeneration` ports the old
+`TestGitHubAppAutomationAdmissionChecksConsentGeneration` fence through the
+current consent transaction. It also checks store time and derived actors.
+`TestGitHubAppMutationRefusalsRollBack` covers incomplete identities, foreign
+owners/installations, suspension, actor forgery, late authority loss and insert
+failure. The extra-repository tests now use one names-and-IDs write. The
+name-only intermediate state is retired.
+
+`TestLauncherReservationOwnershipProperty` extends snapshot fencing to original
+bootstrap evidence across expiry, exchange, replacement and delegated launcher
+presentations. `TestStoreLauncherReservationW8` and
+`FuzzStoreLauncherReservationFenceW8` run the actual store/controller/launcher
+path with a fake Kubernetes boundary. They add no native Kubernetes claim.

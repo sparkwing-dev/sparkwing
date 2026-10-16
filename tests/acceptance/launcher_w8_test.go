@@ -28,7 +28,7 @@ func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJob
 	if b.wrongTeam {
 		team = "other-team"
 	}
-	return launcher.CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: team, JobName: name, ReservationID: "reservation"}, launcher.CloudNetworkEvidence{Namespace: "cloud", NodeUID: "uid", PolicyRevision: "revision", DefaultDenyEgressEnforced: !b.missingNetwork, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
+	return launcher.CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: team, JobName: name, ReservationID: "reservation", Award: binding.LeaseRef()}, launcher.CloudNetworkEvidence{Namespace: "cloud", NodeUID: "uid", PolicyRevision: "revision", DefaultDenyEgressEnforced: !b.missingNetwork, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
 }
 
 func (b *cloudBoundaryFake) Release(context.Context, launcher.CloudNodeReservation) error {

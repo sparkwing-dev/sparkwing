@@ -403,6 +403,15 @@ isolation. Scratch is fixed at 20 GiB. Bootstrap is an owner-only Secret file,
 source init uses it, and run-node exchanges it once for an in-memory capability.
 No launcher root credential is passed to a Job. Teardown releases the node only
 after all containers stop, and deletes the bootstrap Secret on every path.
+Nodes retain their reservation's award LeaseRef. CloudJobBinding.LeaseRef owns
+the award-fence projection, including the eval unit's lease generation. Both Job
+construction and restart reconstruction require the reservation award to equal
+the binding. Reservation-only reconciliation
+uses C3's exact award, NodeUID and ReservationID retirement reference, with no
+Job reference. Expired unit ownership cannot retain vacant capacity. Only the
+reservation's own award under the launcher's ancestry can authorize retirement,
+after Job absence and container vacancy are established. Optional ancestor expiry
+constrains execution when present and adds no deadline when absent.
 
 ## Acceptance obligations
 

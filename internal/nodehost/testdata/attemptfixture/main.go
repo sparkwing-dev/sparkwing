@@ -46,7 +46,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 	if in.Refuse {
 		return fmt.Errorf("plan refused %s", in.Pass)
 	}
-	build := sparkwing.Job(plan, "build", &buildJob{in: in}).Env("FIXTURE_ENV", "from-plan").Env("SPARKWING_RUNNER_LABELS", "local,gpu")
+	build := sparkwing.Job(plan, "build", &buildJob{in: in}).Env("FIXTURE_ENV", "from-plan")
 	if in.Counter != "" {
 		data, _ := os.ReadFile(in.Counter)
 		n, _ := strconv.Atoi(string(data))
@@ -235,13 +235,12 @@ func addHooks(plan *sparkwing.Plan, marker string) {
 }
 
 type buildOutput struct {
-	Env  string `json:"env"`
-	Run  string `json:"run"`
-	Leak string `json:"leak"`
-	Gate string `json:"gate"`
-	PG   string `json:"pg"`
-	AWS  string `json:"aws"`
-	// Labels is what the node saw in SPARKWING_RUNNER_LABELS, which the plan sets to local,gpu.
+	Env    string `json:"env"`
+	Run    string `json:"run"`
+	Leak   string `json:"leak"`
+	Gate   string `json:"gate"`
+	PG     string `json:"pg"`
+	AWS    string `json:"aws"`
 	Labels string `json:"labels"`
 }
 
@@ -266,7 +265,7 @@ func (j *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 				return buildOutput{}, err
 			}
 		}
-		return buildOutput{Env: os.Getenv("FIXTURE_ENV"), Run: os.Getenv("SPARKWING_RUN_ID"), Leak: os.Getenv("SPARKWING_AGENT_TOKEN"), Gate: os.Getenv("SPARKWING_GATE_INDEX"), PG: os.Getenv("SPARKWING_TEST_PG_URL"), AWS: os.Getenv("AWS_SECRET_ACCESS_KEY"), Labels: os.Getenv("SPARKWING_RUNNER_LABELS")}, nil
+		return buildOutput{Env: os.Getenv("FIXTURE_ENV"), Run: os.Getenv("SPARKWING_RUN_ID"), Leak: os.Getenv("SPARKWING_AGENT_TOKEN"), Gate: os.Getenv("SPARKWING_GATE_INDEX"), PG: os.Getenv("SPARKWING_TEST_PG_URL"), AWS: os.Getenv("AWS_SECRET_ACCESS_KEY"), Labels: strings.Join(sparkwing.Runner(ctx).Labels, ",")}, nil
 	}), nil
 }
 

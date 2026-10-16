@@ -20,6 +20,8 @@ type GitHubAppWriter interface {
 	SetAuthorizedGitHubExtraRepos(context.Context, capability.Authorized, string, []string, map[string]int64) ([]string, error)
 }
 
+var _ GitHubAppWriter = (*store.Tenant)(nil)
+
 // WithGitHubAppWriter supplies tenant App transactions before Handler is constructed.
 func (s *Server) WithGitHubAppWriter(resolve func(context.Context, store.Team) (GitHubAppWriter, error)) *Server {
 	s.resolveGitHubAppWriter = resolve

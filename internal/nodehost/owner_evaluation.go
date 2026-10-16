@@ -57,6 +57,7 @@ type EvaluationDependencies struct {
 	Validation    nodeproto.ValidationContext
 	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
 	Mask          func(string) string
+	Masks         *MaskRegistry
 }
 
 // OwnerEvaluator reconstructs accepted code and evaluates owner closures. It
@@ -86,7 +87,11 @@ func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
 // Expand evaluates every declared generator from the source's recorded output
 // in one reconstructed SDK process. Failed evaluation returns only a masked
 // failure; cancellation and stale input leave the barrier to the live owner.
-func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (json.RawMessage, *store.ExpansionFailure, error) {
+func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (body json.RawMessage, failure *store.ExpansionFailure, err error) {
+	defer func() { err = maskHostError(err, h.deps.Mask) }()
+	if err := h.deps.Masks.initializeSeal(input.Accepted); err != nil {
+		return nil, nil, err
+	}
 	if err := context.Cause(ctx); err != nil {
 		return nil, nil, err
 	}
@@ -106,7 +111,6 @@ func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (jso
 	if err == nil && !json.Valid(output) {
 		err = executorError(apierr.ProtocolError, "generator source output is missing or invalid JSON")
 	}
-	var body json.RawMessage
 	if err == nil {
 		body, err = h.expand(bounded, input, spec, job, output)
 	}
@@ -131,6 +135,9 @@ func (h *OwnerEvaluator) accepted(ctx context.Context, input EvaluationInput) (r
 	var spec runspec.Spec
 	var row store.NodeRow
 	var job nodeproto.JobSpec
+	if err := h.deps.Masks.initializeAccepted(ctx, h.Store, input.Accepted); err != nil {
+		return spec, row, job, err
+	}
 	if input.Accepted.RunID == "" || input.NodeID == "" || input.SpecHash == "" || input.Entry == nil {
 		return spec, row, job, errors.New("evaluation requires accepted source and job identity")
 	}

@@ -58,7 +58,7 @@ func (c *storedRunnerW8) Finish(ctx context.Context, run string, body controller
 type runnerStorePolicyW8 struct{}
 
 func (runnerStorePolicyW8) AuthorizeProvision(_ context.Context, _ capability.AuthorityResolver, spec capability.ProvisionSpec) error {
-	if spec.RegistrationID != "runner-store-fixture" {
+	if spec.RegistrationID != "runner-store-fixture" && spec.RegistrationID != "runner:default:runner" && spec.RegistrationID != "service:"+spec.Subject.ID {
 		return errors.New("unregistered fixture origin")
 	}
 	return nil
@@ -96,16 +96,17 @@ func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) 
 	s.SetClaimProfileResolver(runnerStorePolicyW8{})
 	operator, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "runner-store-fixture", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("fixture bootstrap: %v", err)
 	}
 	parent := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
-	root, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, RegistrationID: "runner-store-fixture", Authority: &parent, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}})
+	root, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, RegistrationID: "runner:default:runner", Repositories: []string{"github.com/team/repo"}, Authority: &parent, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("fixture machine: %v", err)
 	}
 	unit := runnerAuthorityAwardW8(capability.UnitNode)
 	unit.Request.Request.Team = string(store.DefaultTeam)
 	unit.Request.Request.Git.Repository.Key = "gh:1"
+	unit.Request.Request.Git.Repository.Display = "https://github.com/team/repo"
 	unit.Request.Request.Git.SHA = strings.Repeat("a", 40)
 	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo.git", PipelineDir: ".sparkwing"}
 	unit.Request.Hash = "request"
@@ -128,8 +129,8 @@ func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) 
 		query string
 		args  []any
 	}{
-		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,spec_json,spec_hash,sealed_at,plan_json,plan_hash)
-VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','host','execute',?,'fixture',?,'r30',30,?,'spec',?,?,'plan')`, []any{store.DefaultTeam, request, now.UnixNano(), []byte(`[]`), now.UnixNano(), spec, now.UnixNano(), plan}},
+		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days,spec_json,spec_hash,sealed_at,plan_json,plan_hash)
+VALUES (?,'run',1,'fixture','running',?,'request',?,'gh:1','https://github.com/team/repo','host','execute',?,'fixture',?,'r30',30,?,'spec',?,?,'plan')`, []any{store.DefaultTeam, request, now.UnixNano(), []byte(`[]`), now.UnixNano(), spec, now.UnixNano(), plan}},
 		{`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES (?,'run','trigger',?,?,?,?,?)`, []any{store.DefaultTeam, now.UnixNano(), now.UnixNano(), now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`)}},
 	} {
 		if _, err := s.DB().ExecContext(t.Context(), statement.query, statement.args...); err != nil {

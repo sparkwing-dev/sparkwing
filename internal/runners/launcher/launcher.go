@@ -27,11 +27,12 @@ type CloudControl interface {
 
 // CloudJobObservation retains the identities needed to reconcile after launcher restart.
 type CloudJobObservation struct {
-	Binding      CloudJobBinding
-	JobNamespace string
-	JobName      string
-	JobUID       string
-	NodeUID      string
+	Binding       CloudJobBinding
+	JobNamespace  string
+	JobName       string
+	JobUID        string
+	NodeUID       string
+	ReservationID string
 }
 
 // CloudJobState carries the controller's teardown decision for one immutable award.

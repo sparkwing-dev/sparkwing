@@ -83,7 +83,7 @@ func TestNativeProcessesKeepIndependentCleanupLedgers(t *testing.T) {
 		}
 		return refused
 	}
-	config, err := processes.configuration(t.Context(), first.Binding, first.Revoke, ExecutorActivity{})
+	config, err := processes.configuration(t.Context(), first.Binding, first.Revoke, ExecutorActivity{}, AcceptedRun{Spec: []byte(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestNativeProcessChildAwaitPausesItsAttemptIdleBudget(t *testing.T) {
 		}
 		ctx, activity, stop := executorProgressContext(t.Context(), time.Second)
 		defer stop()
-		if _, err := processes.configuration(ctx, grant.Binding, grant.Revoke, activity); err != nil {
+		if _, err := processes.configuration(ctx, grant.Binding, grant.Revoke, activity, AcceptedRun{Spec: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 		bound, err := processes.Authorities.processServices(ctx, grant.Binding)

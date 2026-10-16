@@ -33,6 +33,7 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 		response.Awards[i].Capability = ""
 	}
 	response.Remove = append([]controllerwire.LauncherJobRef{}, response.Remove...)
+	response.RemoveReservations = append([]controllerwire.LauncherReservationRef{}, response.RemoveReservations...)
 	return response, nil
 }
 
@@ -42,7 +43,13 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 	if err := validateLauncherObservations(observed); err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
-	awards, err := s.store.ReadLauncherAwards(ctx, ref)
+	var reservations []capability.LeaseRef
+	for _, observation := range observed {
+		if observation.ReservationID != "" {
+			reservations = append(reservations, observation.Award)
+		}
+	}
+	awards, err := s.store.ReadLauncherAwards(ctx, ref, reservations)
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
@@ -51,11 +58,15 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 		fence := capability.LeaseRef{Kind: award.Claim.Kind, ID: award.Capability.UnitID, Holder: award.Claim.Award.Holder, Generation: award.Claim.Award.Generation}
 		current[fence] = award
 	}
-	response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []controllerwire.LauncherJobRef{}}
+	response := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []controllerwire.LauncherJobRef{}, RemoveReservations: []controllerwire.LauncherReservationRef{}}
 	for _, observation := range observed {
 		award, found := current[observation.Award]
 		if !found {
-			response.Remove = append(response.Remove, observation.Job)
+			if observation.ReservationID != "" {
+				response.RemoveReservations = append(response.RemoveReservations, controllerwire.LauncherReservationRef{Award: observation.Award, NodeUID: observation.NodeUID, ReservationID: observation.ReservationID})
+			} else {
+				response.Remove = append(response.Remove, observation.Job)
+			}
 			continue
 		}
 		unit := engineReconciledClaim(award.Capability, store.ReconciledNode{Node: award.Node, Claim: &award.Claim.Award}, award.Run)
@@ -78,10 +89,13 @@ func validateLauncherObservations(observed []controllerwire.LauncherObservation)
 			return err
 		}
 		job := [2]string{observation.Job.Namespace, observation.Job.Name}
-		if jobs[job] || units[observation.Award] {
+		if observation.ReservationID == "" && jobs[job] || units[observation.Award] {
 			return invalidEngineBody("launcher observations must name unique Jobs and awards")
 		}
-		jobs[job], units[observation.Award] = true, true
+		if observation.ReservationID == "" {
+			jobs[job] = true
+		}
+		units[observation.Award] = true
 	}
 	return nil
 }

@@ -51,7 +51,7 @@ func (h *OwnerEvaluator) SkipIf(ctx context.Context, input EvaluationInput) (Ski
 				return err
 			}
 			defer cancel()
-			value, evalErr := h.eval(bounded, session, code, id, nil, nil)
+			value, evalErr := h.eval(bounded, session, code, id, "skip_if", nil, nil)
 			if ctx.Err() == nil && errors.Is(context.Cause(bounded), context.DeadlineExceeded) {
 				result.TimedOut = append(result.TimedOut, i)
 				return nil
@@ -112,7 +112,7 @@ func (h *OwnerEvaluator) MemoKey(ctx context.Context, input EvaluationInput) (st
 			return err
 		}
 		defer cancel()
-		value, err := h.eval(bounded, session, code, job.Closures.MemoKey, nil, nil)
+		value, err := h.eval(bounded, session, code, job.Closures.MemoKey, "memo_key", nil, nil)
 		if err != nil {
 			return err
 		}
@@ -136,14 +136,14 @@ func (h *OwnerEvaluator) MemoKey(ctx context.Context, input EvaluationInput) (st
 func (h *OwnerEvaluator) policyError(ctx context.Context, err error) error {
 	cause := context.Cause(ctx)
 	if err == nil {
-		return cause
+		return maskHostError(cause, h.deps.Mask)
 	}
 	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
 		code = structured.Code
 	}
-	return errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Mask(err.Error()))})
+	return maskHostError(errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Mask(err.Error()))}), h.deps.Mask)
 }
 
 func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, row store.NodeRow, log func(context.Context, string, string, nodeproto.FrameLog) error) (OwnerLayerResult, error) {

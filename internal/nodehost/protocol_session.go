@@ -36,6 +36,7 @@ type ProtocolSessionConfig struct {
 	Revoke          func() error
 	RunCleanups     func(context.Context, CleanupScope) error
 	Activity        ExecutorActivity
+	Debug           bool
 	ParseFrame      func([]byte) (nodeproto.Frame, error)
 	ValidateRequest func(nodeproto.Request) error
 	cleanupEnv      []string
@@ -50,6 +51,11 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 	if input.Entry == nil {
 		return nil, cfg.failedStartup(errors.New("SDK process requires a source entry"))
 	}
+	debug, err := acceptedDebug(input.Accepted)
+	if err != nil {
+		return nil, cfg.failedStartup(err)
+	}
+	cfg.Debug = debug
 	cfg.Command, cfg.Directory, cfg.Activity = input.Entry.Command, input.Entry.Directory, activity
 	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
 	if err != nil {
@@ -68,6 +74,11 @@ func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input Eval
 	if input.Entry == nil {
 		return nil, cfg.failedStartup(errors.New("SDK evaluation requires a source entry"))
 	}
+	debug, err := acceptedDebug(input.Accepted)
+	if err != nil {
+		return nil, cfg.failedStartup(err)
+	}
+	cfg.Debug = debug
 	cfg.Command, cfg.Directory = input.Entry.Command, input.Entry.Directory
 	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Eval, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
 	if err != nil {
@@ -84,6 +95,7 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 	if input.Entry == nil || log == nil {
 		return nil, cfg.failedStartup(errors.New("SDK planning requires a source entry and log sink"))
 	}
+	cfg.Debug = input.Debug
 	cfg.Command, cfg.Directory, cfg.Log = input.Entry.Command, input.Entry.Directory, log
 	if err := context.Cause(ctx); err != nil {
 		return nil, cfg.failedStartup(err)
@@ -462,7 +474,7 @@ func (s *ProtocolSession) emitProtocolLog(log nodeproto.FrameLog) {
 	if s.cfg.Activity.Progress != nil {
 		s.cfg.Activity.Progress()
 	}
-	if s.cfg.Log == nil {
+	if s.cfg.Log == nil || log.Level == "debug" && !s.cfg.Debug {
 		return
 	}
 	s.logMu.Lock()

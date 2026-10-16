@@ -192,7 +192,15 @@ before or after exchange also prevents dispatch. The unit host receives the comp
 exchanged claim and owns renewal, source acquisition and execution.
 Job construction, source initialization and bootstrap execution share one award
 deadline calculation. It uses `limits.JobDeadline`, constrained by an optional
-parent capability expiry. A service root without expiry does not add a deadline.
+parent capability expiry. A service root without expiry does not add a deadline, including at node reservation.
+The node stores the reservation's award fence and binding. Job construction
+and restart reconstruction require that same award to match the Job binding. Sync submits reservations
+without a Job through the same controller transport. The store proves the original
+award belongs to that launcher and checks current unit authority. A stale decision
+carries the exact award LeaseRef, NodeUID and ReservationID. The launcher verifies
+all three, proves Job absence again, and requires container vacancy and matching
+node ownership before release. Parent credential lifetime cannot keep an expired
+unit's vacant reservation or authorize release of another award's reservation.
 The resulting Cloud execution deadline must remain bounded. Exchange and host dispatch run under that deadline and any earlier caller
 deadline. Expired awards fail before transport construction. Expiry during
 exchange prevents dispatch, and expiry during hosting cancels and joins the host.
@@ -214,6 +222,15 @@ Preparation supplies the source entry, storage, delegated routes
 and generator replay. `NodeHost` owns policy checks at each process start.
 
 <!-- design:begin -->
+
+`TestStoreLauncherReservationW8` drives the real store, controller handlers,
+shared client, launcher and KubernetesBoundary with an unexpiring service root.
+It checks live reservation retention, expired-unit cleanup, Job absence,
+container vacancy and cleanup replay. `FuzzStoreLauncherReservationFenceW8`
+checks fabricated fences, foreign launchers, newer generations and cancellation.
+`FuzzControllerReservationRetirementMatchesObservation` checks exact cleanup
+correlation for plan, eval and work observations. FuzzJobAndReservationShareAward
+checks that a changed Job binding cannot release another award's reservation.
 
 `TestStoreLauncherW8` constructs the launcher against the typed HTTP client,
 controller handlers, SQLite issuance and persisted cleanup reader. It publishes

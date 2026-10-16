@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -53,8 +54,11 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	if config.Executor.Bind == nil || config.Evaluation.Bind == nil {
 		return nil, nil, nil, errors.New("native host requires fresh execution and evaluation delegation")
 	}
+	config.Source.Base.Masker = config.Masks.masker
+	config.Source.BuildEnvironment = config.Masks.environment(config.Source.BuildEnvironment)
 	processes := config.Processes
 	processes.Masks = config.Masks
+	processes.Session.Environments.Masks = config.Masks
 	processes.Session.Environments.Store = config.Store
 	processes.Session.Environments.Base = config.Source.Base
 	processes.Session.Environments.Snapshots = config.Snapshots
@@ -70,6 +74,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 			return processes.Log(ctx, input.Accepted.RunID, input.NodeID, frame)
 		}
 	}
+	execution.Masks = config.Masks
 	execution.Store, execution.Mask = config.Store, config.Masks.masker.Mask
 	execution.Start, execution.EnsureEngine = processes.Start, config.Source.Engines.Ensure
 	execution.Validation, execution.ValidatePlan, execution.CanonicalHash = validation, functions.Validate, functions.Hash
@@ -78,6 +83,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		return nil, nil, nil, err
 	}
 	evaluation := config.Evaluation
+	evaluation.Masks = config.Masks
 	evaluation.Store, evaluation.Mask = config.Store, config.Masks.masker.Mask
 	evaluation.Start, evaluation.EnsureEngine = processes.StartEvaluation, config.Source.Engines.Ensure
 	evaluation.Validation, evaluation.ValidatePlan, evaluation.CanonicalHash = validation, functions.Validate, functions.Hash
@@ -86,6 +92,11 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		return nil, nil, nil, err
 	}
 	planner := config.Planner
+	planner.Masks = config.Masks
+	planner.Environment = processes.Session.Environments.planning
+	if planner.CacheDirectory == "" && config.Source.Workspace != "" {
+		planner.CacheDirectory = filepath.Join(config.Source.Workspace, "plan-cache")
+	}
 	planner.Start, planner.EnsureEngine = processes.StartPlanning, config.Source.Engines.Ensure
 	planner.Masker, planner.ValidatePlan, planner.CanonicalHash = config.Masks.masker, functions.Validate, functions.Hash
 	owner := config.Owner
@@ -140,7 +151,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	claimed := &ClaimedNodeHost{
 		Store: config.Store, Lease: config.Lease, Source: config.Source, Snapshots: config.Snapshots,
-		Executor: executor, Mask: config.Masks.masker.Mask,
+		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks,
 	}
 	if err := RegisterProcessServices(config.Router, processes.Authorities.Resolve); err != nil {
 		return nil, nil, nil, err

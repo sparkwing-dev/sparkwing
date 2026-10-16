@@ -55,13 +55,12 @@ func (t *Tenant) checkGitHubAppAutomationTx(ctx context.Context, tx *storeTx, gr
 	return nil
 }
 
-// PutGitHubAppAutomation records consent only for an installation the team holds.
-func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomation, now time.Time) error {
+func (t *Tenant) putGitHubAppAutomationTx(ctx context.Context, tx *storeTx, a GitHubAppAutomation) error {
 	repo, ok := ParseGitHubRepo(a.Repository)
 	if !ok || a.RepositoryID <= 0 || a.InstallationID <= 0 || a.EnabledBy == "" {
 		return fmt.Errorf("%w: automation needs a repository, installation and granting account", ErrInvalidInput)
 	}
-	_, err := t.s.exec(ctx, `INSERT INTO github_app_automation
+	result, err := tx.ExecContext(ctx, `INSERT INTO github_app_automation
 	    (team, repo_key, repository_id, repository, installation_id, enabled_by, enabled_at)
 	    SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS
 	    (SELECT 1 FROM github_app_installations WHERE team = ? AND installation_id = ? AND suspended = 0)
@@ -70,12 +69,11 @@ func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomati
 	    enabled_by = excluded.enabled_by,
 	    enabled_at = CASE WHEN github_app_automation.installation_id = excluded.installation_id
 	        THEN github_app_automation.enabled_at ELSE excluded.enabled_at END`,
-		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, now.UnixNano(), string(t.team), a.InstallationID)
+		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, tx.now().UnixNano(), string(t.team), a.InstallationID)
 	if err != nil {
 		return err
 	}
-	_, err = t.GitHubAppAutomation(ctx, a.InstallationID, a.RepositoryID)
-	return err
+	return credentialRowChanged(result, nil)
 }
 
 // GitHubAppAutomation reads live consent for one repository and installation.
@@ -111,12 +109,6 @@ func (t *Tenant) GitHubAppAutomations(ctx context.Context) (_ []GitHubAppAutomat
 		out = append(out, a)
 	}
 	return out, rows.Err()
-}
-
-// DeleteGitHubAppAutomation revokes a team's grant without affecting manual subscriptions.
-func (t *Tenant) DeleteGitHubAppAutomation(ctx context.Context, repository int64) error {
-	_, err := t.s.exec(ctx, `DELETE FROM github_app_automation WHERE team = ? AND repository_id = ?`, string(t.team), repository)
-	return err
 }
 
 // WithdrawGitHubAppAutomation removes consent only through its bound installation.

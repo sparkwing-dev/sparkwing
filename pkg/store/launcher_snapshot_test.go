@@ -49,7 +49,7 @@ func TestLauncherSnapshotRetainsCurrentAwardThroughExchange(t *testing.T) {
 			s, demand, claim, _ := launcherSnapshotFixture(t, kind)
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
 			for exchange := range 2 {
-				awards, err := s.ReadLauncherAwards(t.Context(), ref)
+				awards, err := s.ReadLauncherAwards(t.Context(), ref, nil)
 				if err != nil || len(awards) != 1 {
 					t.Fatalf("awards=%+v, %v", awards, err)
 				}
@@ -120,7 +120,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 				if _, err := s.db.ExecContext(t.Context(), query, args...); err != nil {
 					t.Fatal(err)
 				}
-				awards, err := s.ReadLauncherAwards(t.Context(), ref)
+				awards, err := s.ReadLauncherAwards(t.Context(), ref, nil)
 				rewriteSchemaExec(t, s.db, `UPDATE runs SET status='running',finished_at=NULL,cancel_requested_at=NULL WHERE id='run'`)
 				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=? WHERE id='run'`, now.Add(time.Hour).UnixNano())
 				status := "claimed"
@@ -147,7 +147,7 @@ func TestLauncherSnapshotFencingProperty(t *testing.T) {
 			if err := quick.Check(check, &quick.Config{MaxCount: 100}); err != nil {
 				t.Fatal(err)
 			}
-			awards, err := s.ReadLauncherAwards(t.Context(), ref)
+			awards, err := s.ReadLauncherAwards(t.Context(), ref, nil)
 			if err != nil || len(awards) != 1 {
 				t.Fatalf("property damaged live award: %+v, %v", awards, err)
 			}
@@ -162,23 +162,23 @@ func TestLauncherSnapshotAuthority(t *testing.T) {
 	other.Subject.ID = "launcher"
 	other.Grants = []capability.Grant{capability.ClaimsLaunch}
 	authorityPersist(t, s, other)
-	awards, err := s.ReadLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: other.Prefix})
+	awards, err := s.ReadLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: other.Prefix}, nil)
 	if err != nil || len(awards) != 0 {
 		t.Fatalf("foreign awards=%+v, %v", awards, err)
 	}
 	for _, ref := range []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: "runner"}, {Kind: capability.AuthoritySession, ID: "missing"}, {}} {
-		if rows, err := s.ReadLauncherAwards(t.Context(), ref); err == nil || rows != nil {
+		if rows, err := s.ReadLauncherAwards(t.Context(), ref, nil); err == nil || rows != nil {
 			t.Fatalf("invalid authority returned awards: %+v, %v", rows, err)
 		}
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=? WHERE prefix=?`, now.UnixNano(), ref.ID)
-	if rows, err := s.ReadLauncherAwards(t.Context(), ref); err == nil || rows != nil {
+	if rows, err := s.ReadLauncherAwards(t.Context(), ref, nil); err == nil || rows != nil {
 		t.Fatal("revoked launcher retained snapshot authority")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	rows, err := s.ReadLauncherAwards(ctx, ref)
+	rows, err := s.ReadLauncherAwards(ctx, ref, nil)
 	if err == nil || rows != nil {
 		t.Fatal("cancelled read exposed a partial snapshot")
 	}
@@ -193,12 +193,12 @@ func TestLauncherSnapshotDelegationRetainsRootOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}
-	awards, err := s.ReadLauncherAwards(t.Context(), ref)
+	awards, err := s.ReadLauncherAwards(t.Context(), ref, nil)
 	if err != nil || len(awards) != 1 || *awards[0].Capability.Parent != root {
 		t.Fatalf("delegated launcher lost root-owned award: %+v, %v", awards, err)
 	}
 	rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, root.ID)
-	if rows, err := s.ReadLauncherAwards(t.Context(), ref); err == nil || rows != nil {
+	if rows, err := s.ReadLauncherAwards(t.Context(), ref, nil); err == nil || rows != nil {
 		t.Fatal("revoked ancestor retained delegated snapshot authority")
 	}
 }
@@ -208,9 +208,84 @@ func TestLauncherSnapshotDiscardsStorageAndIntegrityFailures(t *testing.T) {
 		t.Run(query, func(t *testing.T) {
 			s, demand, _, _ := launcherSnapshotFixture(t, capability.UnitNode)
 			rewriteSchemaExec(t, s.db, query)
-			if rows, err := s.ReadLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}); err == nil || rows != nil {
+			if rows, err := s.ReadLauncherAwards(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}, nil); err == nil || rows != nil {
 				t.Fatalf("storage failure returned a snapshot: %+v, %v", rows, err)
 			}
 		})
+	}
+}
+
+func TestLauncherReservationOwnershipProperty(t *testing.T) {
+	check := func(kindIndex, mode uint8, offset uint16, delegated bool) bool {
+		kind := []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kindIndex%3]
+		s, demand, claim, now := launcherSnapshotFixture(t, kind)
+		defer s.Close()
+		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix}
+		if delegated {
+			expires := now.Add(time.Hour)
+			issued, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: ref, Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: &expires})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref.ID = issued.Capability.Prefix
+		}
+		fence := capability.LeaseRef{Kind: kind, ID: claim.RunID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+		var id string
+		if err := s.db.QueryRowContext(t.Context(), `SELECT unit_id FROM capabilities WHERE prefix=?`, claim.Award.CapabilityPrefix).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		fence.ID = id
+		original := fence
+		live, refused := true, false
+		switch mode % 11 {
+		case 1:
+			*now = claim.Award.LeaseExpiresAt.Add(time.Nanosecond)
+			live = false
+		case 2:
+			if _, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix}); err != nil {
+				t.Fatal(err)
+			}
+		case 3:
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=? WHERE id='run'`, now.UnixNano())
+			live = false
+		case 4:
+			table := map[capability.UnitKind]string{capability.UnitPlan: "triggers", capability.UnitEval: "eval_units", capability.UnitNode: "nodes"}[kind]
+			rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET generation=generation+1`)
+			live = false
+		case 5:
+			fence.Holder += "-foreign"
+			refused = true
+		case 6:
+			fence.Generation += int64(offset) + 1
+			refused = true
+		case 7:
+			fence.ID += "-foreign"
+			refused = true
+		case 8:
+			fence.Kind = capability.UnitTrigger
+			refused = true
+		case 9:
+			rewriteSchemaExec(t, s.db, `UPDATE capabilities SET parent_id='foreign' WHERE prefix=?`, claim.Award.CapabilityPrefix)
+			refused = true
+		case 10:
+			rewriteSchemaExec(t, s.db, `UPDATE capabilities SET subject_id='foreign' WHERE prefix=?`, claim.Award.CapabilityPrefix)
+			refused = true
+		}
+		reservations := []capability.LeaseRef{fence}
+		if refused {
+			reservations = append([]capability.LeaseRef{original}, reservations...)
+		}
+		awards, err := s.ReadLauncherAwards(t.Context(), ref, reservations)
+		if refused {
+			return err != nil && awards == nil
+		}
+		if err != nil || len(awards) != boolInt(live) {
+			t.Logf("kind=%s mode=%d delegated=%v awards=%+v err=%v", kind, mode%11, delegated, awards, err)
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(check, &quick.Config{MaxCount: 90}); err != nil {
+		t.Fatal(err)
 	}
 }

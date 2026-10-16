@@ -14,10 +14,8 @@ func evalValue(result nodeproto.EvalResult, kind string) (json.RawMessage, error
 	if !json.Valid(result.Value) {
 		return nil, executorError(apierr.ProtocolError, "SDK closure returned invalid JSON")
 	}
-	if kind != "" {
-		if err := result.ValidateValue(kind); err != nil {
-			return nil, executorError(apierr.ProtocolError, "SDK closure returned an invalid value")
-		}
+	if err := result.ValidateValue(kind); err != nil {
+		return nil, executorError(apierr.ProtocolError, "SDK closure returned an invalid value")
 	}
 	return result.Value, nil
 }

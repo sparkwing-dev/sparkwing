@@ -19,12 +19,14 @@ func TestGitHubAppExtraReposAreAPerSourceListOfTheTeams(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	now := time.Now()
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
 
 	if got, err := acme.GitHubAppExtraRepos(ctx, "acme/app"); err != nil || len(got) != 0 {
 		t.Fatalf("before any list = %v, %v; want none", got, err)
 	}
-	got, err := acme.SetGitHubAppExtraRepos(ctx, "Acme/App", []string{"acme/proto", "Acme/Lib", "acme/lib", "acme/app"}, "owner", now)
+	got, err := acme.SetAuthorizedGitHubExtraRepos(ctx, githubAppAuthorization(t, st, acme), "Acme/App", []string{"acme/proto", "Acme/Lib", "acme/lib", "acme/app"}, githubExtraIDs([]string{"acme/proto", "Acme/Lib", "acme/lib", "acme/app"}))
 	if want := []string{"acme/lib", "acme/proto"}; err != nil || !slices.Equal(got, want) {
 		t.Fatalf("set = %v, %v; want %v, folded, sorted and without the source", got, err, want)
 	}
@@ -41,20 +43,20 @@ func TestGitHubAppExtraReposAreAPerSourceListOfTheTeams(t *testing.T) {
 	if err != nil || len(all) != 1 || len(all["acme/app"]) != 2 {
 		t.Fatalf("all = %v, %v", all, err)
 	}
-	if _, err := acme.SetGitHubAppExtraRepos(ctx, "acme/app", []string{"evil/secrets"}, "owner", now); !errors.Is(err, store.ErrInvalidInput) {
+	if _, err := acme.SetAuthorizedGitHubExtraRepos(ctx, githubAppAuthorization(t, st, acme), "acme/app", []string{"evil/secrets"}, githubExtraIDs([]string{"evil/secrets"})); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("a repository of another owner = %v, want ErrInvalidInput", err)
 	}
 	var eleven []string
 	for i := range store.MaxGitHubAppExtraRepos + 1 {
 		eleven = append(eleven, "acme/lib"+strconv.Itoa(i))
 	}
-	if _, err := acme.SetGitHubAppExtraRepos(ctx, "acme/app", eleven, "owner", now); !errors.Is(err, store.ErrInvalidInput) {
+	if _, err := acme.SetAuthorizedGitHubExtraRepos(ctx, githubAppAuthorization(t, st, acme), "acme/app", eleven, githubExtraIDs(eleven)); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("%d repositories = %v, want ErrInvalidInput", len(eleven), err)
 	}
-	if _, err := acme.SetGitHubAppExtraRepos(ctx, "acme/app", eleven[:store.MaxGitHubAppExtraRepos], "owner", now); err != nil {
+	if _, err := acme.SetAuthorizedGitHubExtraRepos(ctx, githubAppAuthorization(t, st, acme), "acme/app", eleven[:store.MaxGitHubAppExtraRepos], githubExtraIDs(eleven[:store.MaxGitHubAppExtraRepos])); err != nil {
 		t.Fatalf("control: exactly %d repositories = %v", store.MaxGitHubAppExtraRepos, err)
 	}
-	if _, err := acme.SetGitHubAppExtraRepos(ctx, "acme/app", nil, "owner", now); err != nil {
+	if _, err := acme.SetAuthorizedGitHubExtraRepos(ctx, githubAppAuthorization(t, st, acme), "acme/app", nil, githubExtraIDs(nil)); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := acme.GitHubAppExtraRepos(ctx, "acme/app"); err != nil || len(got) != 0 {

@@ -59,7 +59,7 @@ func newExpansionSDK(plan nodeproto.PlanDoc, mode string) *scriptedSDK {
 		var result any
 		switch in.Op {
 		case nodeproto.OpHello:
-			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.0.0"}}
+			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "v1.0.0"}, Features: []string{}}
 		case nodeproto.OpPlan:
 			result = p.plan
 		case nodeproto.OpEval:
@@ -128,6 +128,9 @@ func newExecutionSDK(plan nodeproto.PlanDoc, input NodeInput, mode string, trace
 				outcome = "failed"
 			}
 			result = nodeproto.RunResult{Outcome: outcome}
+			if outcome == "failed" {
+				result = nodeproto.RunResult{Outcome: outcome, Error: &apierr.Error{Code: apierr.SDKError, Message: "body failed"}}
+			}
 			if mode == "output_refused" {
 				result = nodeproto.RunResult{Outcome: outcome, Output: json.RawMessage(`{"value":7}`)}
 			}

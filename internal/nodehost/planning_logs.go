@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,6 +19,7 @@ type planningLogs struct {
 	masker  *secrets.Masker
 	sink    func(context.Context, nodeproto.FrameLog) error
 	known   bool
+	debug   bool
 	buffer  []nodeproto.FrameLog
 	bytes   int
 	dropped int
@@ -27,6 +27,9 @@ type planningLogs struct {
 }
 
 func (l *planningLogs) write(ctx context.Context, record nodeproto.FrameLog) error {
+	if record.Level == "debug" && !l.debug {
+		return nil
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.err != nil {
@@ -82,20 +85,7 @@ func (l *planningLogs) emit(ctx context.Context, record nodeproto.FrameLog) erro
 			l.err = executorError(apierr.ProtocolError, "SDK log attributes contain invalid JSON")
 			return l.err
 		}
-		// safety: normalize escaped keys too; the common masker otherwise traverses only values.
-		decoder := json.NewDecoder(bytes.NewReader(record.Attrs))
-		decoder.UseNumber()
-		var attrs any
-		if err := decoder.Decode(&attrs); err != nil {
-			l.err = executorError(apierr.ProtocolError, "SDK log attributes cannot be decoded")
-			return l.err
-		}
-		normalized, err := json.Marshal(attrs)
-		if err != nil {
-			l.err = executorError(apierr.ProtocolError, "SDK log attributes cannot be encoded")
-			return l.err
-		}
-		record.Attrs = []byte(l.masker.Mask(string(l.masker.MaskJSON(normalized))))
+		record.Attrs = l.masker.MaskJSON(record.Attrs)
 		if !json.Valid(record.Attrs) {
 			record.Attrs = json.RawMessage(`null`)
 		}
