@@ -119,9 +119,8 @@ func (p Paths) StandaloneStateDB() string {
 	return filepath.Join(p.StandaloneDir(), "state.db")
 }
 
-// StandaloneSchemaDir is where a build before the store baseline kept a
-// standalone store the shared one refused, one directory per schema version.
-// Nothing writes there now; [Paths.StandaloneStores] still lists what is left.
+// StandaloneSchemaDir holds, per schema version, a standalone store an older
+// build wrote when the shared one refused it; [Paths.StandaloneStores] lists them.
 func (p Paths) StandaloneSchemaDir(version int) string {
 	return filepath.Join(p.StandaloneDir(), fmt.Sprintf("schema-%d", version))
 }

@@ -232,6 +232,9 @@ unlock.
 - **controller:** The team boundary reads each authenticated route's tenant resource from one route table and refuses a route the table does not list
   Every route is declared by what its path names: none, run, trigger, secret, cron, member, invitation, token, pipeline, concurrency key, git credential, GitHub binding, or for operator routes a row of any team. A run or trigger of another team answers `404` as before, a name keyed inside a team needs the caller's team to resolve (`403 no_team` otherwise), and a route that names any team's row must demand `admin`, the operator's session or a service scope. A route missing from the table answers `500`, and a test fails until it is listed. [Security](docs/security.md#team-boundary-route-table) states which names bound anything inside a team: repository and git ref for cache writes, and a secret's pipeline or shared scope for what a claim reads.
 
+### Docs
+- **sdk:** The `SparkwingFlagDoc` doc comment says which help surfaces read a flag's `Group`, and no longer recounts how the flag list came to be
+
 
 ## [v0.67.0] - 2026-10-12
 ### Added
