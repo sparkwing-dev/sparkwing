@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -125,6 +126,16 @@ func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
 }
 
 func TestMain(m *testing.M) {
+	if os.Getenv("SPARKWING_TEST_DAEMON_ENTRYPOINT") == "1" {
+		if err := flag.Set("test.run", "^$"); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	if len(os.Args) > 1 && os.Args[1] == "wingd" {
+		main()
+		return
+	}
 	code := m.Run()
 	if err := os.RemoveAll(submitCLIDir); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -137,4 +148,16 @@ func TestMain(m *testing.M) {
 		}
 	}
 	os.Exit(code)
+}
+
+func TestDetachedHostEntrypointDoesNotRunPipelineFixtures(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "wingd", "run", "--help")
+	cmd.Env = append(os.Environ(), "SPARKWING_TEST_DAEMON_ENTRYPOINT=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("daemon entrypoint: %v: %s", err, output)
+	}
+	if !strings.Contains(string(output), "wingd run") || strings.Contains(string(output), "PASS") {
+		t.Fatalf("daemon reentered the test suite: %s", output)
+	}
 }

@@ -7,6 +7,12 @@ type credentialRouteExpectation struct {
 
 func credentialRouteExpectations() []credentialRouteExpectation {
 	return []credentialRouteExpectation{
+		{"GET", "/api/v1/runs/{run}/local-host/data-authority", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|runOfTrigger|sensitive"}},
+		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|ownNode|sensitive"}},
+		{"POST", "/api/v1/local/doctor", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
+		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}/snapshot", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|ownNode|reporting"}},
+		{"POST", "/api/v1/runs/{run}/local-host/nodes/{job}/authentication", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|ownNode|reporting"}},
+		{"POST", "/api/v1/runs/{run}/local-host/nodes/{job}/binding", "controller", "run", "capability", []string{"awarded_or_delegated_claim|data.read|ownNode|reporting"}},
 		{"GET", "/api/v1/runs/{run}/local-host/snapshot", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting"}},
 		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting", "awarded_or_delegated_claim|data.read|ownNode|reporting"}},
 		{"POST", "/api/v1/runs/{run}/local-host/transition", "controller", "run", "capability", []string{"awarded_or_delegated_claim|runs.state|runOfTrigger|result"}},

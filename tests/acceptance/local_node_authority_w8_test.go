@@ -75,3 +75,52 @@ func TestStoreHostingW8RefreshesNodeAwardAfterStart(t *testing.T) {
 		t.Fatalf("refreshed=%v closed=%v: %v", refreshed, closed, err)
 	}
 }
+
+func FuzzEmbeddedServiceBearerW9KeepsAwardAndLifetime(f *testing.F) {
+	f.Add("forged", false)
+	f.Add("", true)
+	f.Fuzz(func(t *testing.T, replacement string, owner bool) {
+		kind := capability.UnitNode
+		if owner {
+			kind = capability.UnitTrigger
+		}
+		s, unit := nativeStoreAwardW8(t, kind)
+		raw := unit.Capability
+		finished := errors.New("services bound")
+		ctx, cancelHost := context.WithCancel(t.Context())
+		defer cancelHost()
+		var retained func(context.Context) (string, error)
+		finalized := false
+		host := runners.StoreHosting{Store: s, Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+			retained = binding.Bearer
+			if retained == nil {
+				t.Fatal("embedded services have no awarded credential transport")
+			}
+			unit.Capability = replacement
+			actual, err := retained(ctx)
+			if err != nil || actual != raw || sha256.Sum256([]byte(actual)) != binding.Principal.Capability.Digest {
+				t.Fatal("embedded services received a substituted award")
+			}
+			cancelled, cancelOperation := context.WithCancel(ctx)
+			cancelOperation()
+			if actual, err := retained(cancelled); actual != "" || !errors.Is(err, context.Canceled) {
+				t.Fatal("cancelled service operation retained usable authority")
+			}
+			cancelHost()
+			return runners.NativeServices{Close: func() error {
+				actual, err := retained(context.WithoutCancel(ctx))
+				if actual != raw || err != nil {
+					t.Fatal("cancelled hosting scope lost authority before joined log cleanup")
+				}
+				finalized = true
+				return nil
+			}}, finished
+		}}
+		if err := host.Host(ctx, unit); !errors.Is(err, finished) || !finalized {
+			t.Fatal(err)
+		}
+		if actual, err := retained(t.Context()); actual != "" || !errors.Is(err, context.Canceled) {
+			t.Fatal("service authority outlived its hosting scope")
+		}
+	})
+}

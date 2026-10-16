@@ -192,7 +192,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	if !strings.Contains(text, "b saw from-a after 2 checks") {
 		t.Fatalf("native body lost its dependency output or group settlement: %s", text)
 	}
-	if processes.computing(f.Input.RunID) || len(authorities.live) != 0 {
+	if processes.Computing(f.Input.RunID) || len(authorities.live) != 0 {
 		t.Fatal("native host returned with active compute or delegated authority")
 	}
 	wantLeases := 1

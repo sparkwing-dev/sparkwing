@@ -19,7 +19,9 @@ import (
 func TestReviewProductionExecutionBindings(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("SPARKWING_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	offlineStopDaemon(t, home)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Run("local run", func(t *testing.T) {
 		err := runLocalCommand(t.Context(), "ci", runFlags{}, nil, io.Discard,
@@ -40,6 +42,12 @@ func TestReviewProductionExecutionBindings(t *testing.T) {
 			done <- err
 			cancel(err)
 		}()
+		t.Cleanup(func() {
+			cancel(context.Canceled)
+			if err := services.runtime.Drain(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+				t.Error(err)
+			}
+		})
 		status, err := services.runtime.AwaitReady(ctx)
 		cancel(context.Canceled)
 		joined := <-done
@@ -62,6 +70,7 @@ func TestReviewPublicDoctorSweepsAndWarnsForPrunedRun(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SPARKWING_HOME", p.Root)
+	offlineStopDaemon(t, p.Root)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	st, err := teststore.Open(p.StateDB())
 	if err != nil {

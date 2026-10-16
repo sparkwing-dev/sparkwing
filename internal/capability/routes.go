@@ -2,6 +2,12 @@ package capability
 
 // Routes is the authorization table for controller and node-host operations, including external proofs.
 var Routes = []RoutePolicy{
+	route("GET", "/api/v1/runs/{run}/local-host/data-authority", OwnerRun, RetrySafe, claim(DataRead, BindRunOfTrigger, LiveSensitive)),
+	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveSensitive)),
+	route("POST", "/api/v1/local/doctor", OwnerTeam, RetryNever, member(RunsControl)),
+	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}/snapshot", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting)),
+	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/authentication", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting)),
+	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/binding", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting)),
 	route("GET", "/api/v1/runs/{run}/local-host/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting)),
 	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting), claim(DataRead, BindOwnNode, LiveReporting)),
 	route("POST", "/api/v1/runs/{run}/local-host/transition", OwnerRun, RetryExactBody, claim(RunsState, BindRunOfTrigger, LiveResult)),

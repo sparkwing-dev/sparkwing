@@ -9,9 +9,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -148,6 +150,52 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 	if err != nil || row.State != store.RunFailed {
 		t.Fatalf("reopened orphan: %+v: %v", row, err)
 	}
+}
+
+func TestCompositionMaintainsStorageAfterReadinessWhileOwningStore(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		maintained := make(chan time.Time, 1)
+		var ready atomic.Bool
+		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
+			services := serviceFixture(b)
+			services.Maintain = func(ctx context.Context) {
+				if !ready.Load() {
+					t.Error("storage scan ran before readiness")
+				}
+				if err := b.Store.DB().PingContext(ctx); err != nil {
+					t.Error("storage maintenance lost the elected store:", err)
+				}
+				select {
+				case maintained <- time.Now():
+				case <-ctx.Done():
+				}
+			}
+			return services, nil
+		})
+		if _, err := c.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Ready(); err != nil {
+			t.Fatal(err)
+		}
+		ready.Store(true)
+		ctx, cancel := context.WithCancel(t.Context())
+		joined := make(chan error, 1)
+		go func() { joined <- c.Run(ctx, func(wingd.LocalActivity) error { return nil }) }()
+		t.Cleanup(func() {
+			cancel()
+			if err := <-joined; err != nil && !errors.Is(err, context.Canceled) {
+				t.Error(err)
+			}
+		})
+		first, second := <-maintained, <-maintained
+		if second.Sub(first) != controller.StorageMaintenanceInterval {
+			t.Errorf("storage scan interval %s, expected %s", second.Sub(first), controller.StorageMaintenanceInterval)
+		}
+		if err := c.Close(); err == nil {
+			t.Error("elected store closed while maintenance worker was running")
+		}
+	})
 }
 
 func TestCompositionCleansPartialBindings(t *testing.T) {

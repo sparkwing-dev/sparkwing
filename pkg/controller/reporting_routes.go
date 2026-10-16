@@ -42,6 +42,12 @@ func (s *Server) reportingEndpoints() []Endpoint {
 	}
 	for i := range endpoints {
 		endpoints[i].Authentication = capability.AuthCapability
+		switch endpoints[i].Pattern {
+		case "/api/v1/runs/grep":
+			endpoints[i].Handle = s.pagedLogSearch(endpoints[i].Handle)
+		case "/api/v1/runs/{run}/logs", "/api/v1/runs/{run}/logs/search", "/api/v1/runs/{run}/jobs/{job}/logs":
+			endpoints[i].Handle = s.pagedLogRead(endpoints[i].Handle)
+		}
 	}
 	return endpoints
 }

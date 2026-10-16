@@ -1,189 +1,220 @@
-# W9 local integrator handoff
+# W9 continuation: local integration and runner transport
 
-The 17:15 integration checkpoint is reached. The production probes for local
-foreground run, controller startup and schedules now reach concrete owners and
-fail on sandbox socket syscalls. The persisted-peer claimant probe passes.
-The lead must run the command probes natively. Native execution still has the
-contract and owner gaps listed below.
+The next continuation fixes background queue service binding and log finalization.
+See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.
 
-Base: `444cab1ac`. No Git write, Sparkwing candidate execution, installer,
-pipeline, deployment or release ran. The only Sparkwing executable invocation
-was the required read-only `info --for-agent`.
+Base: `9129db2e9`. Priorities (1)-(3) are implemented. Native execution remains
+with the lead. The area remains CONTINUE because the additional owner/eval and
+launcher assignments need the contracts listed below.
 
 ## Implemented
 
-- Verified local peers authenticate through a persisted default-team root. The
-  shared issuer mints it once and ordinary delegation issues queue authority.
-  Reopen retains its reference. Revocation ends descendant authentication,
-  relation checks and further delegation without replacing the root. Peer
-  intake and named/queued claim authorization use the shared relation checks.
-- The CLI foreground binder constructs W8's `NativeServices` and W3's native
-  host over authenticated private transport. It opens no state store. A shared
-  award validator compares the award with persisted authority. Named local
-  claims report available CPU. Captured environment loading, process delegation,
-  lease renewal and cleanup use the existing owners.
-- Seven local-only host endpoints supply private snapshots, node reads,
-  transitions, authentication, relation checks and atomic run/unit completion.
-  Mutations derive actors, fences and runner metadata from server facts. The
-  ordinary transition endpoint accepts only run start. Typed policy refusal
-  survives atomic completion. Holder observations and step reports work while
-  draining cancellation. Adopted node bearers stay private and authorize node
-  reports independently from the run owner.
-- Local schedule registration transports explicit replace/upsert mode, selected
-  declarations, project configuration, native environment bytes and proof/follow
-  choice. Existing private snapshots retain environment values. A private
-  per-schedule registration file associates their seal with the project and
-  checkout. Pin/unpin, tick, local pause/override and deletion reach the elected
-  service. Registration, evaluation and pin/unpin/delete share the existing
-  schedule lock. Proofs use verified source acquisition under the captured
-  controller home. Acquisition cleanup follows pin copying and propagates errors,
-  including when a later proof fails.
-- The controller probe now starts the real runtime and joins its workers. The
-  local-run probe exercises foreground mode. API inventory, OpenAPI, schedule
-  source docs and embedded mirrors are refreshed. Three acceptance fixtures now
-  check the complete trigger owner reference, whose Name is empty, rather than
-  treating the trigger unit ID as a controller singleton lease name.
+- The daemon startup timeout was a probe entrypoint defect. Detached startup
+  selects `os.Executable()`, which selected the test executable and reran its
+  fixture compilation instead of serving `wingd run`. TestMain now dispatches
+  that exact subprocess entrypoint through the real CLI. A separate regression
+  starts no pipeline fixtures. An overlay removing the fix fails in 48 ms with
+  `daemon reentered the test suite: PASS`. The real local runtime also passes a
+  controlled test that keeps consumer preparation blocked while its API becomes
+  ready. No startup deadline was increased.
+- Public doctor starts/reuses the elected controller and invokes its private,
+  authenticated session sweep. Successful cleanup with a missing run produces
+  `unrecorded_step_outcome` and exits successfully. Dry-run preserves ledger
+  entries. Findings survive another cleanup's failure, and that failure still
+  fails the public command. Requests cannot substitute headers or bearer text
+  for a verified OS peer. Concurrent sweeps share one controller lock.
+- The native command probes register daemon shutdown in `t.Cleanup`. The
+  in-process probe also cancels and joins its runtime on every exit. Native
+  daemon shutdown waits for the socket and election lock to be released after
+  worker and child cleanup.
+- Service installation is a lifecycle transition. Both lifecycle gates and the
+  existing interprocess startup claim cover old-owner drain/join, native unit
+  activation, and successor readiness. The result verifies a new PID, installed
+  unit, version and stay mode. Failures return an error without a competing
+  fallback owner. OS service-manager ancestry still needs native verification.
+- The elected controller supplies the shared filesystem object backend, signed
+  transfers, records and log readers. Failed construction closes both backend
+  and claimant. Shared storage maintenance runs in the existing worker after
+  readiness, first at lease renewal and then at its existing hourly cadence.
+- Native process services use authenticated controller callbacks and canonical
+  byte/record authority. Node attempts refresh their independent storage and
+  process bindings. The private JSONL log writer is gone. Shared logseg sinks
+  commit segments and final manifests before report/retry/finish ends their
+  writer's authority. Actual HTTP tests cover output upload, record commit,
+  lookup, verified download and a public persisted-log read.
+- Owner evaluation has its own binder and never asks nodeClaims for a work
+  award. A fake contract binder proves evaluation can start before a work
+  award. The production owner/eval credential contract remains unavailable.
+- The shipped runner now composes start, warm, fetch-source and run-node factories with
+  shared runtime owners, signed engine selection, credential/source transport,
+  installation hooks and private execution state. Host-state glue moved from
+  the CLI into nodehost.RemoteHostStore. Private execution endpoints now serve
+  authenticated hosted controllers as well as api.sock. Doctor remains local.
+  Independent node renewal uses the retained node bearer and unit ID.
+- Committing result-proof validation accepts the exact private transition and
+  finish routes while retaining its actor, body digest and claim fences. Real
+  hosted HTTP probes now exercise node start/step/result, owner completion,
+  cancellation drain, scoped snapshots/authentication and node renewal.
+- Peer intake already used the shared local relation and committing authority
+  gate. A new real HTTP-to-SQLite property checks 32 generated peer identities,
+  actor forgery, replay, foreign teams and revocation before commit/replay.
+- The Data client and schema mappings now use the server's actual byte and
+  record DTOs. Incompatible authority selectors and union scaffolding were
+  removed. The SDK guide states the accepted cross-host runtime-mask residual.
 
-## Invariants and evidence
+## Contract changes and real integrations still needed
 
-Verified peer roots remain tenant scoped and revocation closes their ancestry.
-Generated forged-selector tests check that invalid peer lookup never persists
-an authority, and actual intake/claim authorization refuses foreign teams.
+1. **C2/W3 owner/eval process identity.** CredentialNodeProcess requires a node
+   binding with a positive attempt. ProcessAuthorities/NativeProcesses also tie
+   the service job ID to that node binding. An owner/eval lease has a different
+   lifetime and must retain its own fence. Supply a supported owner/eval process
+   binding and source-job relation. NativeConfig.Evaluate is separate and
+   returns policy_missing without that adapter. No node attempt was invented.
+2. **W8 Cloud launcher boundary.** There is no production implementation of the
+   KubernetesBoundary network-enforcement probes and reservation-scoped cleanup.
+   Launch remains unbound. The rewrite_integration installed-runner regression
+   must remain red for launch until W8 supplies this boundary. Cloud plan/eval
+   dispatch also needs the shared Hosting implementation for those unit kinds.
+3. **C3/C1 placement eligibility.** Environment locality does not decide whether
+   a row executes on its owner. The awarded RunnerIdentity lacks trusted
+   location, pools and the canonical profile needed by match.Evaluate. Remote
+   owner hosting needs a server-owned eligibility decision/profile. Do not
+   reconstruct authority from runner labels.
+4. **C2/W7 canonical cache and cross-run output transport.** Current public
+   record/cache responses omit canonical source/uploader/ref and read-set proof.
+   The adapter refuses to fabricate these proofs. Same-run output is bound to
+   canonical storage. Latest-result and child-result reads still need an
+   authorized cross-run record selector, and cross-repository/branch children
+   need the shared source resolver. No removed output route was reintroduced.
+5. **Paged log wire.** Public node log reads return bytes. W9's LogReader expects
+   tagged LogPage records and cursor/finalization facts. Raw public reads now
+   prove persisted local logs, but the structured CLI reader still needs that
+   server contract. Do not infer subjects or completion from rendered text.
+6. **Bootstrap/source integration.** Cloud source-init checkout consumption,
+   unaccepted TypeScript SDK selection, native platform/process replacement and
+   actual Docker/Kubernetes execution remain integration work.
+7. Earlier unresolved integrations still apply: foreground first-claim
+   reservation versus the background queue, W1's scheduled sealed intake,
+   TypeScript pinning of the full executable dependency closure, and the named
+   here/debug/publication/cache/native acceptance boundaries in earlier reports.
+   Materialized result copying and terminal replay have since landed in their
+   owners; they are not repeated as open contracts here.
 
-Private host operations remain within the authenticated run and its separately
-awarded nodes. Real SQLite awards pass through the actual HTTP handlers and
-client using a socket-free RoundTripper. Tests cover node start/step/result,
-foreign digest/class/audience probes, hosted-route absence, cancellation drain,
-atomic normal/policy finish and terminal-transition bypass refusal. The
-foreign-authority fuzz property passed 3,485 executions.
+The native rerun should select TestReviewProductionExecutionBindings,
+TestReviewPublicDoctorSweepsAndWarnsForPrunedRun and
+TestLocalClaimantW8UsesPersistedPeerAuthority. Keep a release-version stamp and
+isolated HOME/config/state. Also rerun TestInstalledRunnerRuntimeComposition;
+launch is expected to remain red until its deployment boundary is implemented.
 
-Schedule selection must match the supplied project before host capture.
-Registration tests verify replacement/upsert boundaries and preservation after
-proof failure. Real SQLite HTTP tests use a fake compiler and snapshot owner to
-exercise registration, pin/unpin, dry tick, pause, override and delete. A
-channel-driven overlap test verifies that pin/unpin/delete cannot read stale
-captured inputs during registration. Environment transport preserves arbitrary
-native bytes. Its fuzz property passed 2,400 executions.
+## Verification and scope
 
-All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false,
-GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and at most -p 4. Go scratch stayed under
-/tmp/sw-astra-W9.
+No Git write, candidate installation, operational Sparkwing run, pipeline,
+deployment or release ran. The only installed Sparkwing invocation was the
+required read-only info. All Go commands used GOWORK=off,
+GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache and at most four workers. Scratch
+stayed under /tmp/sw-astra-W9 and is removed after checks join. The shared cache
+is retained.
 
-- Whole-repository `go build -p 4 ./...` passes.
-- Vet passes for cmd/sparkwing, controller, controller/client, store, crons,
-  runners, localhostwire and controllerwire.
-- Full short client, controllerwire, clisurface and localcontroller suites pass.
-- Focused CLI host/local-run/owner/schedule tests pass. Peer/authentication/
-  authority store tests pass. Focused private-host and local-schedule service,
-  HTTP and wire tests pass. The controller's Engine/LocalHost/LocalSchedule
-  selection also passes.
-- `tests/acceptance -run '^TestSurface|^TestEngine'` passes. No native cell was
-  unskipped and no archived test was newly ported.
-- API reference/OpenAPI/doc drift checks pass. The controller and client API
-  snapshots are regenerated. Commentcheck is clean across
-  2,274 files. `git diff --check` passes.
-- Tagged `TestLocalClaimantW8UsesPersistedPeerAuthority` passes.
-- Tagged local run and schedules install fail at `dial unix ... d.sock:
-  connect: operation not permitted`. Controller startup reaches elected store
-  reconciliation and workers, then fails at Unix listener setup and the version
-  policy worker's DNS socket. Both are sandbox syscall refusals. Public doctor's
-  real probe also remains blocked at its daemon socket.
+Whole-repository go build passes. Vet passes for every changed package and
+its direct dependents, including store. Full short suites pass for cluster,
+controllerwire, clisurface, runner services, localcontroller and controller/client.
+Full apispec and doccheck suites pass after API/OpenAPI and mirror regeneration.
+Focused public doctor/entrypoint, private hosted execution, peer-intake and
+storage/log tests pass. The W9 surface/engine acceptance selection passes.
+Lifecycle/service and doctor/peer race selections pass. The tagged CLI and
+runner suites compile; native command assertions were not executed here.
 
-Production probes for the lead:
+The doctor request-identity fuzz ran 5,518 executions. The shared native log
+masking/authority fuzz ran 8,314. Commentcheck is clean across 2,335 files and
+git diff --check passes. The before-fix startup overlay fails exactly as the
+regression requires. Independent review found the partial doctor-warning loss;
+that finding is fixed and the expanded real HTTP matrix passes review.
 
-```sh
-GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache GOMAXPROCS=4 \
-  go test -p 4 -tags rewrite_integration ./cmd/sparkwing ./internal/wingd/localcontroller \
-  -run '^TestReview(ProductionExecutionBindings|PublicDoctorSweepsAndWarnsForPrunedRun)$|^TestLocalClaimantW8UsesPersistedPeerAuthority$' -count=1
-```
+Broader checks retain explicit failures outside this continuation's fixes:
+TestEngineBootstrapExchangeReturnsOriginalUnitOnce has a launcher fixture with
+an empty repository scope and fails claim admission. The serving-inventory test
+still names four absent controller registrations (job output, child job output,
+operator refunds and claim input); its hosted-only enumeration also cannot count
+the local-only doctor operation. The declaration table includes the new routes
+and passes independently. No server grant was weakened to satisfy a fixture.
+Sleepcheck against main reports internal/source/checkout_test.go:141 and
+tests/acceptance/session_flow_http_test.go:102. Neither file changed here.
 
-Native test builds need the release-version stamp used by the signed runner
-policy. The local-run probe reads `installedVersion()` instead of a fixture
-version. Source builds with an unknown version cannot establish runner policy.
+Two whole production files were deleted: cmd/sparkwing/host_state.go (114 lines,
+replaced by the shared state adapter) and pkg/controller/client/data_values.go
+(93 lines of obsolete conversion). The private JSONL writer removed another
+35 lines. Incompatible Data wire scaffolding and private-format tests were also
+removed. The following production counts include untracked Go source and exclude
+tests, testdata, acceptance and contract-declaration paths.
 
-## Real integration points left open
 
-1. **DESIGN: foreground reservation.** After intake, the background local queue
-   can claim the trigger before the CLI's named claim. The sealed request has
-   no foreground/detached discriminator. Excluding all local origins breaks
-   detached runs. A new boolean alone can strand an intake when the CLI exits
-   before claiming, and retries retain the immutable original request. The lead
-   needs one persisted reservation/first-claim contract, including expiry, CLI
-   loss and retry behavior. Reuse the existing here/claim-by machinery if its
-   semantics fit. No new reservation policy or schema was invented here.
-2. **W1/W2 terminal wire replay.** The first node report commits. Repeating it
-   returns unauthenticated because store authentication does not populate
-   `BindingState.Result` for `LiveResult`. The client retains terminal actor
-   identity so it does not block the eventual shared fix. Successful terminal
-   wire replay remains unproved.
-3. **W1 scheduled sealed intake.** `Server.ScheduleLauncher()` exposes the
-   existing shared cron launcher. That launcher still uses legacy intake and
-   assumes a clone URL. W1 must consume `crons.ReadLocalRegistration(ctx, home,
-   scheduleID)`, load its environment seal through `FileEnvironmentSnapshots`,
-   and join the selected checkout/pin to the single sealed intake. No alternate
-   scheduled intake was added.
-4. **W3/W8 pin representation.** `crons.Proof` and the stored pin represent one
-   executable. TypeScript acquisition returns a command and its dependency
-   closure. The current representation cannot pin that closure or deliver it
-   through scheduled intake. Following without proof remains expressible. This
-   does not establish native TypeScript pinning.
-5. **W3/W7/W8 native services.** Output/data bindings, process service relations,
-   controller log projection and remaining owner policies retain W8's recorded
-   gaps. The shared native constructors remain their owners. Native source,
-   engine, admission, runtime and teardown evidence stays with the lead/T1.
+This continuation: all touched areas +1,785 / -582, net +1,203; W9-owned paths +803 / -488, net +315. W9 versus main: +16,835 / -23,797, net -6,962, within its -2,900 budget.
 
-The preceding W9 work and deletions remain in W9-LEGACY-CUT-FILES.md and
-W9-CLIENT-CUT-FILES.md. A1-03/08/09/13-18/22/38/55 transports and replay/fence
-components, A1-41 managed-home wiring, A1-43 engine notices, A1-51 generated
-schemas and A1-52 release packaging remain implemented at their recorded
-boundaries. This continuation adds the local A1-40/49/50 composition. Initial
-here reason/environment retention, authorized bundle/publication, debug resume,
-remote cache/native hosting and native platform acceptance retain their named
-owner integration dependencies. No prior native claim is upgraded to passed.
+Friction: native sockets and platform services are unavailable in this sandbox.
+The installed Overwing reports it trails its source. Foreign owner/eval, launcher,
+placement, cache-proof and log-page contracts limit end-to-end completion. No
+error string was changed merely to turn the installed-runner probe green.
 
-## Shared files and mechanisms
+The lead-owned handoffs and amendment files were read and left unchanged.
+Shared production edits are limited to capability route entries, controller
+registration and private projections, store result-proof route matching,
+wingd lifecycle/controller maintenance, shared nodehost state, cluster runtime
+composition, runner service registration and localhostwire DTOs. W9 source,
+client, CLI, API schema and documentation paths contain the other changes.
+Acceptance fixtures changed only the owner actor kind and the required
+remove_reservations response field. No archived test was newly ported and no
+native acceptance cell was marked passed.
 
-Foreign production edits are limited to:
+Shared Go files (including their tests):
 
-- `pkg/store/authentication_contract.go`, `authority_binding.go` and
-  `authority_issue.go` for persisted peer authority and shared relation checks.
-- `internal/capability/routes.go` for the local route policies.
-- `pkg/controller/local_http.go`, `engine_intake.go`, `server.go`, `crons.go`,
-  `schedule_routes.go`, plus new `private_host.go` and `schedules_local.go` for
-  local handlers, service attachment and trigger lease identity.
-- `internal/runners/store_host.go` exports the existing award validator so the
-  CLI and store-host composition use one rule.
-- `internal/crons/arm.go` and new `local.go` reuse the schedule service and lock.
-- New `internal/localhostwire/private_host.go` carries the store-shaped private
-  DTOs because store already imports controllerwire and adding them there would
-  introduce an import cycle.
+- `internal/apispec/wire.go`
+- `internal/capability/routes.go`
+- `internal/cluster/main.go`
+- `internal/cluster/production_installation.go`
+- `internal/cluster/production_restart_unix.go`
+- `internal/cluster/production_restart_windows.go`
+- `internal/cluster/production_runtime.go`
+- `internal/cluster/production_runtime_integration_test.go`
+- `internal/cluster/runner_cli.go`
+- `internal/localhostwire/doctor.go`
+- `internal/localhostwire/private_host.go`
+- `internal/nodehost/native_host.go`
+- `internal/nodehost/native_processes.go`
+- `internal/nodehost/native_store_test.go`
+- `internal/nodehost/remote_host_store.go`
+- `internal/runners/service/refresh.go`
+- `internal/runners/service/refresh_test.go`
+- `internal/wingd/client/local_install_test.go`
+- `internal/wingd/client/local_lifecycle.go`
+- `internal/wingd/client/local_process.go`
+- `internal/wingd/lifecycle.go`
+- `internal/wingd/local_lifecycle.go`
+- `internal/wingd/local_runtime_test.go`
+- `internal/wingd/localcontroller/claims.go`
+- `internal/wingd/localcontroller/claims_test.go`
+- `internal/wingd/localcontroller/controller.go`
+- `internal/wingd/localcontroller/controller_test.go`
+- `internal/wingd/localcontroller/native.go`
+- `internal/wingd/localcontroller/native_client.go`
+- `internal/wingd/localcontroller/native_config_test.go`
+- `internal/wingd/localcontroller/native_logs.go`
+- `internal/wingd/localcontroller/native_logs_test.go`
+- `internal/wingd/localcontroller/native_service_fixture_test.go`
+- `internal/wingd/localcontroller/native_test.go`
+- `pkg/controller/credential_route_expectations_test.go`
+- `pkg/controller/local_doctor.go`
+- `pkg/controller/local_doctor_test.go`
+- `pkg/controller/local_http.go`
+- `pkg/controller/native_host_storage_test.go`
+- `pkg/controller/peer_intake_native_test.go`
+- `pkg/controller/private_host.go`
+- `pkg/controller/private_host_data.go`
+- `pkg/controller/private_host_test.go`
+- `pkg/controller/private_node_host_test.go`
+- `pkg/controller/private_node_renewal_test.go`
+- `pkg/controller/server.go`
+- `pkg/store/result_proof.go`
+- `tests/acceptance/engine_transactions_test.go`
+- `tests/acceptance/launcher_sync_contract_test.go`
 
-Shared tests changed in controller route expectations and the three acceptance
-fixtures named above. Generated controller/client `.apidiff` snapshots also
-changed. All cmd/sparkwing, controller/client and controllerwire
-edits are in W9's area. Only W9's c3 contract was amended. Lead-owned handoffs
-and amendments were read and left untouched.
-
-Mechanisms added are the persisted peer bootstrap through the shared mint
-helper, authenticated private transport/finish adapter, and schedule registration
-association through existing private snapshot storage. Each replaces a named
-missing boundary. No dependency, environment variable, background worker,
-compatibility path or separate intake was added. Independent review accepted
-these mechanisms and the reuse of the existing schedule lock. It found the
-foreground reservation and terminal replay gaps above.
-
-No whole production file was deleted in this continuation. The old foreground
-binding refusal, unbound schedule callbacks and duplicate local registration
-struct are removed. With the lead's production exclusions, this session adds
-1,375 and removes 58 Go lines across all areas, net +1,317. W9-owned paths add
-599 and remove 23, net +576. W9 versus main is +16,485 / -23,764, net -7,279,
-within its -2,900 budget. These counts include untracked source files and exclude
-tests, testdata, acceptance and contract declaration paths.
-
-Friction: native sockets are forbidden, Overwing reports an outdated installed
-binary, and shared Go cache entries vanished during one check before a rebuild
-succeeded. The cache was retained. Worker scratch is removed after all checks
-and workers join. Shared Git config has no local identity or core.worktree
-override.
-
-STATUS: COMPLETE
+STATUS: CONTINUE

@@ -29,7 +29,7 @@ func localClaimsFixture(t testing.TB) (*nodeClaims, *nativeAuthentication, store
 	}}
 	state := &nativeAuthentication{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: true}}, Binding: capability.BindingState{Current: p.Capability.Binding, LeaseExpiresAt: now.Add(time.Minute)}}}
 	lost := false
-	claims := &nodeClaims{auth: capability.NewAuthenticator(state), bindings: state, masker: secrets.NewMasker(), current: func(ctx context.Context) (capability.Principal, error) {
+	claims := &nodeClaims{services: completeServiceFixture, auth: capability.NewAuthenticator(state), bindings: state, masker: secrets.NewMasker(), current: func(ctx context.Context) (capability.Principal, error) {
 		if lost {
 			return capability.Principal{}, errors.New("owner lost")
 		}

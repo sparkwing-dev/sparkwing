@@ -82,7 +82,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `update` | Self-update the machine CLI and refresh managed units |
 | `upgrade` | Upgrade and verify a repository's pinned SDK with its matching engine |
 | `dashboard` | Local controller lifecycle and UI: start / stop / status / logs / install / uninstall |
-| `doctor` | Inspect local controller findings, project toolchains, hooks and competing installs |
+| `doctor` | Sweep stray local step sessions and inspect controller findings, project toolchains, hooks and competing installs |
 | `profiles` | Private machine controller connections and credential files |
 | `operator` | Deployment operational limits, object storage and service credentials |
 | `tokens` | Team credential metadata, issuance, rotation and revocation |

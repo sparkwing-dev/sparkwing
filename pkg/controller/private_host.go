@@ -15,6 +15,11 @@ import (
 func (s *Server) localHostEndpoints() []Endpoint {
 	engine := &EngineController{Store: s.store}
 	return []Endpoint{
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/data-authority", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostDataAuthority},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostDataAuthority},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/snapshot", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localNodeSnapshot},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/authentication", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostAuthentication},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/binding", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostBinding},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/snapshot", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostSnapshot},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostNode},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/transition", Authentication: capability.AuthCapability, Decode: engine.runResultTarget, Handle: s.localHostRunTransition},
@@ -23,6 +28,25 @@ func (s *Server) localHostEndpoints() []Endpoint {
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/authentication", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostAuthentication},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/binding", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostBinding},
 	}
+}
+
+func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
+	if err != nil {
+		return err
+	}
+	snapshot, err := tenant.ReadSnapshot(r.Context(), a.Target.RunID)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	for _, node := range snapshot.Nodes {
+		if node.Ref.NodeID == a.Target.NodeID {
+			snapshot.Nodes = []store.NodeRow{node}
+			writeJSON(w, http.StatusOK, snapshot)
+			return nil
+		}
+	}
+	return engineLookupError(store.ErrNotFound)
 }
 
 func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -186,6 +210,12 @@ func (s *Server) localHostBinding(w http.ResponseWriter, r *http.Request, a capa
 }
 
 func localHostTarget(a capability.Authorized, target capability.Target) (capability.Target, error) {
+	if a.Principal.Capability.Unit == capability.UnitNode {
+		if target.NodeID != "" && target.NodeID != a.Target.NodeID {
+			return capability.Target{}, localHostRefusal()
+		}
+		target.NodeID = a.Target.NodeID
+	}
 	if target.Team != "" && target.Team != a.Target.Team || target.RunID != "" && target.RunID != a.Target.RunID {
 		return capability.Target{}, localHostRefusal()
 	}
@@ -198,7 +228,7 @@ func (s *Server) localHostAuthority(ctx context.Context, a capability.Authorized
 	if ref == owner.Authority || digest != ([32]byte{}) && digest == owner.Capability.Digest {
 		return owner, nil
 	}
-	if ref.Kind != "" && ref.Kind != capability.AuthorityCapability {
+	if owner.Capability.Unit != capability.UnitTrigger || ref.Kind != "" && ref.Kind != capability.AuthorityCapability {
 		return capability.Principal{}, localHostRefusal()
 	}
 	tenant, err := s.store.ForTeam(ctx, store.Team(a.Target.Team))

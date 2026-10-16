@@ -46,13 +46,13 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		return hereHostSession{}, err
 	}
 	var host *nodehost.OwnerHost
-	state, err := newCLIHostState(controller, private, award.UnitID, func() bool {
+	state, err := nodehost.NewRemoteHostStore(controller, private, award.UnitID, func() bool {
 		return host != nil && host.Computing != nil && host.Computing(award.RunID)
 	})
 	if err != nil {
 		return hereHostSession{}, err
 	}
-	state.finish = private.FinishRunAndUnit
+	state.Finish = private.FinishRunAndUnit
 	source, err := localSourceOptions(home, nil, secrets.NewMasker())
 	if err != nil {
 		return hereHostSession{}, err
@@ -61,13 +61,13 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	if !ok {
 		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
-	services, err := localcontroller.NativeServices(ctx, localcontroller.NativeConfig{
+	services, err := localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
 		Home: home, Version: installedVersion(), Store: state, Parent: private, Bindings: private,
-		Principal: principal, Refresh: refresh, Source: source,
+		Principal: principal, Refresh: refresh, Source: source, Local: func(store.NodeRow) bool { return true },
 		Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 			return state.RenewOwner(ctx, store.Actor{}, computing)
 		},
-	})
+	}, private))
 	if err != nil {
 		return hereHostSession{}, err
 	}

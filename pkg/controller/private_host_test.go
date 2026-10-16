@@ -41,7 +41,7 @@ func localHostFixture(t *testing.T) (*Server, *client.LocalHostClient, *store.Te
 		t.Fatal(err)
 	}
 	server := New(engine.Store, nil)
-	host, err := client.NewLocalHostClient(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.HTTP().API}}, Bearer: func(context.Context) (string, error) { return string(award.Bearer), nil }}, "run")
+	host, err := client.NewLocalHostClient(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}}, Bearer: func(context.Context) (string, error) { return string(award.Bearer), nil }}, "run")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,22 @@ func TestLocalHostPrivateTransportUsesPersistedOwnerAndNodeAwards(t *testing.T) 
 	nodeActor := store.Actor{Kind: store.ActorHolder, CapabilityPrefix: claim.Node.CapabilityPrefix, Generation: claim.Node.Generation}
 	started, err := host.TransitionNode(t.Context(), store.NodeTransition{Ref: claim.Node.Ref, Actor: nodeActor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(int64(0))})
 	if err != nil || started.Attempt != 1 {
-		t.Fatalf("start: %+v %v", started, err)
+		t.Fatalf("start: %+v %#v", started, err)
+	}
+	var ownerBefore, ownerAfter int64
+	if err := server.store.DB().QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers WHERE team='a' AND id='run'`).Scan(&ownerBefore); err != nil {
+		t.Fatal(err)
+	}
+	beat, err := host.RenewNode(t.Context(), claim.Node.Ref, nodeActor, true)
+	if err != nil || beat.ExpiresAt.IsZero() {
+		t.Fatalf("independent node renewal: %+v %v", beat, err)
+	}
+	if err := server.store.DB().QueryRowContext(t.Context(), `SELECT lease_expires_at FROM triggers WHERE team='a' AND id='run'`).Scan(&ownerAfter); err != nil {
+		t.Fatal(err)
+	}
+	renewed, err := tenant.ReadNode(t.Context(), claim.Node.Ref)
+	if err != nil || renewed.LeaseExpiresAt == nil || !renewed.LeaseExpiresAt.Equal(beat.ExpiresAt) || ownerAfter != ownerBefore {
+		t.Fatalf("node renewal changed owner lease: before=%d after=%d node=%+v error=%v", ownerBefore, ownerAfter, renewed, err)
 	}
 	node, err := host.NodeController(t.Context(), claim.Node.Ref)
 	if err != nil {
@@ -186,7 +201,7 @@ func TestLocalHostPrivateTransportDrainsCancelledOwner(t *testing.T) {
 	}
 }
 
-func TestLocalHostPrivateTransportRejectsForeignCredentialProbesAndHostedAccess(t *testing.T) {
+func TestLocalHostPrivateTransportRejectsForeignCredentialProbesAndUnauthenticatedAccess(t *testing.T) {
 	server, host, _, owner := localHostFixture(t)
 	for _, lookup := range []capability.CredentialLookup{
 		{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: sha256.Sum256([]byte("foreign"))},
@@ -204,7 +219,7 @@ func TestLocalHostPrivateTransportRejectsForeignCredentialProbesAndHostedAccess(
 	}
 	w := httptest.NewRecorder()
 	server.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/runs/run/local-host/snapshot", nil))
-	if w.Code != http.StatusNotFound {
+	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("hosted private route status=%d body=%s", w.Code, w.Body.String())
 	}
 	if err := host.Close(); err != nil {

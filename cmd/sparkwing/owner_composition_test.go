@@ -125,7 +125,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 							return controllerwire.Applied{}, err
 						},
 					}
-					adapter, err := newCLIHostState(transport, state, award.UnitID, func() bool { return false })
+					adapter, err := nodehost.NewRemoteHostStore(transport, state, award.UnitID, func() bool { return false })
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -641,94 +641,27 @@ components:
         - replayed
       type: object
       x-sparkwing-go-type: controllerwire.CreateRunResponse
-    internal.controllerwire.DataAuthoritySelector:
-      additionalProperties: true
-      properties:
-        attempt:
-          anyOf:
-            - $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
-            - type: "null"
-        capability_ref:
-          type: string
-        principal:
-          type: string
-        repo:
-          type: string
-        upload:
-          anyOf:
-            - $ref: '#/components/schemas/internal.controllerwire.DataUploadIdentity'
-            - type: "null"
-      required:
-        - capability_ref
-        - principal
-        - repo
-      type: object
-      x-sparkwing-go-type: controllerwire.DataAuthoritySelector
     internal.controllerwire.DataCommitRequest:
       additionalProperties: true
       properties:
-        authority:
-          $ref: '#/components/schemas/internal.controllerwire.DataAuthoritySelector'
-        ticket_id:
+        upload_id:
           type: string
       required:
-        - authority
-        - ticket_id
+        - upload_id
       type: object
       x-sparkwing-go-type: controllerwire.DataCommitRequest
-    internal.controllerwire.DataDepcacheHit:
-      additionalProperties: true
-      properties:
-        found:
-          type: boolean
-        read_set:
-          $ref: '#/components/schemas/internal.controllerwire.DataReadSet'
-        record:
-          $ref: '#/components/schemas/internal.controllerwire.DataRecord'
-        source:
-          type: string
-      required:
-        - found
-        - record
-        - source
-        - read_set
-      type: object
-      x-sparkwing-go-type: controllerwire.DataDepcacheHit
-    internal.controllerwire.DataDepcacheKey:
-      additionalProperties: true
-      properties:
-        key:
-          type: string
-        name:
-          type: string
-        ref:
-          $ref: '#/components/schemas/internal.controllerwire.DataRefScope'
-        repo:
-          type: string
-      required:
-        - repo
-        - ref
-        - name
-        - key
-      type: object
-      x-sparkwing-go-type: controllerwire.DataDepcacheKey
     internal.controllerwire.DataDownloadRequest:
       additionalProperties: true
       properties:
-        authority:
-          $ref: '#/components/schemas/internal.controllerwire.DataAuthoritySelector'
         digest:
           type: string
       required:
-        - authority
         - digest
       type: object
       x-sparkwing-go-type: controllerwire.DataDownloadRequest
     internal.controllerwire.DataHasManyRequest:
       additionalProperties: true
       properties:
-        authority:
-          $ref: '#/components/schemas/internal.controllerwire.DataAuthoritySelector'
         deadline:
           anyOf:
             - format: date-time
@@ -741,45 +674,13 @@ components:
               type: array
             - type: "null"
       required:
-        - authority
         - digests
       type: object
       x-sparkwing-go-type: controllerwire.DataHasManyRequest
-    internal.controllerwire.DataLookupRequest:
-      additionalProperties: true
-      properties:
-        authority:
-          $ref: '#/components/schemas/internal.controllerwire.DataAuthoritySelector'
-        deadline:
-          anyOf:
-            - format: date-time
-              type: string
-            - type: "null"
-        depcache:
-          anyOf:
-            - $ref: '#/components/schemas/internal.controllerwire.DataDepcacheKey'
-            - type: "null"
-        memo:
-          anyOf:
-            - $ref: '#/components/schemas/internal.controllerwire.DataMemoKey'
-            - type: "null"
-        record:
-          anyOf:
-            - $ref: '#/components/schemas/internal.controllerwire.DataRecordKey'
-            - type: "null"
-        verified_default_only:
-          type: boolean
-      required:
-        - authority
-        - verified_default_only
-      type: object
-      x-sparkwing-go-type: controllerwire.DataLookupRequest
     internal.controllerwire.DataMember:
       additionalProperties: true
       properties:
         digest:
-          type: string
-        manifest_digest:
           type: string
         mode:
           type: integer
@@ -787,75 +688,13 @@ components:
           type: string
         size:
           type: integer
-        team:
-          type: string
       required:
-        - team
-        - manifest_digest
         - digest
         - path
         - size
         - mode
       type: object
       x-sparkwing-go-type: controllerwire.DataMember
-    internal.controllerwire.DataMemoCopy:
-      additionalProperties: true
-      properties:
-        destination:
-          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
-        lookup:
-          $ref: '#/components/schemas/internal.controllerwire.DataLookupRequest'
-      required:
-        - lookup
-        - destination
-      type: object
-      x-sparkwing-go-type: controllerwire.DataMemoCopy
-    internal.controllerwire.DataMemoHit:
-      additionalProperties: true
-      properties:
-        found:
-          type: boolean
-        manifest:
-          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.Digest.'
-        members:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.controllerwire.DataMember'
-              type: array
-            - type: "null"
-        output:
-          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.Digest.'
-        read_set:
-          $ref: '#/components/schemas/internal.controllerwire.DataReadSet'
-      required:
-        - found
-        - output
-        - manifest
-        - members
-        - read_set
-      type: object
-      x-sparkwing-go-type: controllerwire.DataMemoHit
-    internal.controllerwire.DataMemoKey:
-      additionalProperties: true
-      properties:
-        hash:
-          type: string
-        job:
-          type: string
-        pipeline:
-          type: string
-        ref:
-          $ref: '#/components/schemas/internal.controllerwire.DataRefScope'
-        repo:
-          type: string
-      required:
-        - repo
-        - ref
-        - pipeline
-        - job
-        - hash
-      type: object
-      x-sparkwing-go-type: controllerwire.DataMemoKey
     internal.controllerwire.DataPresence:
       additionalProperties: true
       properties:
@@ -869,43 +708,6 @@ components:
         - present
       type: object
       x-sparkwing-go-type: controllerwire.DataPresence
-    internal.controllerwire.DataReadEdge:
-      additionalProperties: true
-      properties:
-        digest:
-          type: string
-        kind:
-          type: string
-        reader:
-          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
-        record:
-          $ref: '#/components/schemas/internal.controllerwire.DataRecordKey'
-        source:
-          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
-      required:
-        - kind
-        - reader
-        - source
-        - record
-        - digest
-      type: object
-      x-sparkwing-go-type: controllerwire.DataReadEdge
-    internal.controllerwire.DataReadSet:
-      additionalProperties: true
-      properties:
-        edges:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.controllerwire.DataReadEdge'
-              type: array
-            - type: "null"
-        reader:
-          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
-      required:
-        - reader
-        - edges
-      type: object
-      x-sparkwing-go-type: controllerwire.DataReadSet
     internal.controllerwire.DataReceipt:
       additionalProperties: true
       properties:
@@ -914,10 +716,7 @@ components:
           type: string
         digest:
           type: string
-        identity:
-          $ref: '#/components/schemas/internal.controllerwire.DataUploadIdentity'
       required:
-        - identity
         - digest
         - created_at
       type: object
@@ -931,83 +730,43 @@ components:
         digest:
           type: string
         expires_at:
-          $ref: '#/components/schemas/internal.runspec.Optional.time.Time.'
-        key:
-          $ref: '#/components/schemas/internal.controllerwire.DataRecordKey'
-        manifest_digest:
-          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.Digest.'
-        pinned:
-          type: boolean
-        provenance:
-          type: string
-        ref_facts:
-          $ref: '#/components/schemas/internal.controllerwire.DataRefFacts'
-        source:
-          $ref: '#/components/schemas/internal.controllerwire.DataUploadIdentity'
-        uploader:
-          type: string
-      required:
-        - key
-        - digest
-        - manifest_digest
-        - uploader
-        - source
-        - provenance
-        - ref_facts
-        - created_at
-        - expires_at
-        - pinned
-      type: object
-      x-sparkwing-go-type: controllerwire.DataRecord
-    internal.controllerwire.DataRecordCommit:
-      additionalProperties: true
-      properties:
-        authority:
-          $ref: '#/components/schemas/internal.controllerwire.DataAuthoritySelector'
-        digest:
-          type: string
-        expires_at:
-          $ref: '#/components/schemas/internal.runspec.Optional.time.Time.'
-        key:
-          $ref: '#/components/schemas/internal.controllerwire.DataRecordKey'
-        manifest_digest:
-          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.Digest.'
-        members:
           anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.controllerwire.DataMember'
-              type: array
+            - format: date-time
+              type: string
             - type: "null"
-        source:
-          $ref: '#/components/schemas/internal.controllerwire.DataUploadIdentity'
-      required:
-        - source
-        - authority
-        - key
-        - digest
-        - manifest_digest
-        - members
-        - expires_at
-      type: object
-      x-sparkwing-go-type: controllerwire.DataRecordCommit
-    internal.controllerwire.DataRecordKey:
-      additionalProperties: true
-      properties:
+        job:
+          type: string
+        key:
+          type: string
         kind:
           type: string
+        manifest_digest:
+          anyOf:
+            - type: string
+            - type: "null"
         name:
           type: string
-        scope:
-          $ref: '#/components/schemas/internal.controllerwire.DataScope'
-        team:
+        pipeline:
+          type: string
+        provenance:
+          type: string
+        ref:
+          type: string
+        repo:
           type: string
       required:
-        - team
         - kind
-        - scope
+        - repo
+        - ref
+        - pipeline
+        - job
+        - key
         - name
+        - digest
+        - provenance
+        - created_at
       type: object
-      x-sparkwing-go-type: controllerwire.DataRecordKey
+      x-sparkwing-go-type: controllerwire.DataRecord
     internal.controllerwire.DataRecordLookupResult:
       additionalProperties: true
       properties:
@@ -1019,96 +778,96 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.DataMember'
               type: array
             - type: "null"
-        read_set:
-          $ref: '#/components/schemas/internal.controllerwire.DataReadSet'
         record:
-          $ref: '#/components/schemas/internal.controllerwire.DataRecord'
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.DataRecord'
+            - type: "null"
       required:
         - found
-        - record
         - members
-        - read_set
       type: object
       x-sparkwing-go-type: controllerwire.DataRecordLookupResult
     internal.controllerwire.DataRecordWriteRequest:
       additionalProperties: true
       properties:
-        commit:
+        digest:
+          type: string
+        expires_at:
           anyOf:
-            - $ref: '#/components/schemas/internal.controllerwire.DataRecordCommit'
+            - format: date-time
+              type: string
             - type: "null"
-        copy_memo:
-          anyOf:
-            - $ref: '#/components/schemas/internal.controllerwire.DataMemoCopy'
-            - type: "null"
-        operation:
-          type: string
-      required:
-        - operation
-      type: object
-      x-sparkwing-go-type: controllerwire.DataRecordWriteRequest
-    internal.controllerwire.DataRefFacts:
-      additionalProperties: true
-      properties:
-        app_delivery_key:
-          type: string
-        default_branch:
-          type: string
-        default_branch_verified:
-          type: boolean
-        pull_request_base:
-          $ref: '#/components/schemas/internal.runspec.Optional.string.'
-        scope:
-          $ref: '#/components/schemas/internal.controllerwire.DataRefScope'
-        sha:
-          type: string
-      required:
-        - scope
-        - default_branch
-        - default_branch_verified
-        - app_delivery_key
-        - sha
-        - pull_request_base
-      type: object
-      x-sparkwing-go-type: controllerwire.DataRefFacts
-    internal.controllerwire.DataRefScope:
-      additionalProperties: true
-      properties:
-        ref:
-          type: string
-        verified:
-          type: boolean
-      required:
-        - ref
-        - verified
-      type: object
-      x-sparkwing-go-type: controllerwire.DataRefScope
-    internal.controllerwire.DataScope:
-      additionalProperties: true
-      properties:
         job:
           type: string
         key:
           type: string
+        kind:
+          type: string
+        manifest_digest:
+          anyOf:
+            - type: string
+            - type: "null"
+        members:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.DataMember'
+              type: array
+            - type: "null"
+        name:
+          type: string
         pipeline:
           type: string
-        ref:
-          $ref: '#/components/schemas/internal.controllerwire.DataRefScope'
-        repo:
-          type: string
       required:
-        - repo
-        - ref
+        - kind
         - pipeline
         - job
         - key
+        - name
+        - digest
+        - members
       type: object
-      x-sparkwing-go-type: controllerwire.DataScope
+      x-sparkwing-go-type: controllerwire.DataRecordWriteRequest
     internal.controllerwire.DataSignedTransfer:
+      additionalProperties: true
+      properties:
+        expires:
+          format: date-time
+          type: string
+        headers:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
+        sha256:
+          type: string
+        size:
+          type: integer
+        url:
+          type: string
+      required:
+        - url
+        - headers
+        - expires
+        - sha256
+        - size
+      type: object
+      x-sparkwing-go-type: controllerwire.DataSignedTransfer
+    internal.controllerwire.DataUploadRequest:
       additionalProperties: true
       properties:
         digest:
           type: string
+        size:
+          type: integer
+      required:
+        - digest
+        - size
+      type: object
+      x-sparkwing-go-type: controllerwire.DataUploadRequest
+    internal.controllerwire.DataUploadTicket:
+      additionalProperties: true
+      properties:
         expires_at:
           format: date-time
           type: string
@@ -1118,93 +877,23 @@ components:
                 type: string
               type: object
             - type: "null"
+        sha256:
+          type: string
         size:
           type: integer
+        upload_id:
+          type: string
         url:
           type: string
       required:
+        - upload_id
         - url
         - headers
         - expires_at
-        - digest
+        - sha256
         - size
-      type: object
-      x-sparkwing-go-type: controllerwire.DataSignedTransfer
-    internal.controllerwire.DataUploadIdentity:
-      additionalProperties: true
-      properties:
-        attempt:
-          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.AttemptIdentity.'
-        capability_ref:
-          type: string
-        kind:
-          type: string
-        principal:
-          type: string
-        run_id:
-          type: string
-        team:
-          type: string
-        unit:
-          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.controllerwire.DataUploadUnit.'
-      required:
-        - kind
-        - team
-        - run_id
-        - principal
-        - capability_ref
-        - attempt
-        - unit
-      type: object
-      x-sparkwing-go-type: controllerwire.DataUploadIdentity
-    internal.controllerwire.DataUploadRequest:
-      additionalProperties: true
-      properties:
-        authority:
-          $ref: '#/components/schemas/internal.controllerwire.DataAuthoritySelector'
-        digest:
-          type: string
-        identity:
-          $ref: '#/components/schemas/internal.controllerwire.DataUploadIdentity'
-        size:
-          type: integer
-      required:
-        - authority
-        - identity
-        - digest
-        - size
-      type: object
-      x-sparkwing-go-type: controllerwire.DataUploadRequest
-    internal.controllerwire.DataUploadTicket:
-      additionalProperties: true
-      properties:
-        id:
-          type: string
-        transfer:
-          $ref: '#/components/schemas/internal.controllerwire.DataSignedTransfer'
-      required:
-        - id
-        - transfer
       type: object
       x-sparkwing-go-type: controllerwire.DataUploadTicket
-    internal.controllerwire.DataUploadUnit:
-      additionalProperties: true
-      properties:
-        generation:
-          type: integer
-        id:
-          type: string
-        kind:
-          type: string
-        source:
-          $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.AttemptIdentity.'
-      required:
-        - kind
-        - id
-        - generation
-        - source
-      type: object
-      x-sparkwing-go-type: controllerwire.DataUploadUnit
     internal.controllerwire.DebugExecution:
       additionalProperties: true
       properties:
@@ -4661,30 +4350,6 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[[]string]
-    internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.Digest.:
-      additionalProperties: true
-      properties:
-        set:
-          type: boolean
-        value:
-          type: string
-      required:
-        - set
-        - value
-      type: object
-      x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/blob.Digest]
-    internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.controllerwire.DataUploadUnit.:
-      additionalProperties: true
-      properties:
-        set:
-          type: boolean
-        value:
-          $ref: '#/components/schemas/internal.controllerwire.DataUploadUnit'
-      required:
-        - set
-        - value
-      type: object
-      x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/controllerwire.DataUploadUnit]
     internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.Actor.:
       additionalProperties: true
       properties:
@@ -4709,18 +4374,6 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/runspec.AppFacts]
-    internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.AttemptIdentity.:
-      additionalProperties: true
-      properties:
-        set:
-          type: boolean
-        value:
-          $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
-      required:
-        - set
-        - value
-      type: object
-      x-sparkwing-go-type: runspec.Optional[github.com/sparkwing-dev/sparkwing/internal/runspec.AttemptIdentity]
     internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.:
       additionalProperties: true
       properties:
@@ -4745,19 +4398,6 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[string]
-    internal.runspec.Optional.time.Time.:
-      additionalProperties: true
-      properties:
-        set:
-          type: boolean
-        value:
-          format: date-time
-          type: string
-      required:
-        - set
-        - value
-      type: object
-      x-sparkwing-go-type: runspec.Optional[time.Time]
     internal.runspec.Options:
       additionalProperties: true
       properties:
@@ -6595,34 +6235,52 @@ paths:
   /api/v1/data/records:
     get:
       parameters:
-        - content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.DataLookupRequest'
-          in: query
-          name: selector
-          required: true
         - in: query
-          name: lookup
+          name: kind
           schema:
             type: string
+        - in: query
+          name: name
+          schema:
+            type: string
+        - in: query
+          name: ref
+          schema:
+            type: string
+        - in: query
+          name: pipeline
+          schema:
+            type: string
+        - in: query
+          name: job
+          schema:
+            type: string
+        - in: query
+          name: key
+          schema:
+            type: string
+        - in: query
+          name: deadline
+          schema:
+            type: string
+        - in: query
+          name: verified_default_only
+          schema:
+            type: boolean
       responses:
         2XX:
           content:
             application/json:
               schema:
-                anyOf:
-                  - $ref: '#/components/schemas/internal.controllerwire.DataRecordLookupResult'
-                  - $ref: '#/components/schemas/internal.controllerwire.DataMemoHit'
-                  - $ref: '#/components/schemas/internal.controllerwire.DataDepcacheHit'
-          description: Response selected by the request operation.
+                $ref: '#/components/schemas/internal.controllerwire.DataRecordLookupResult'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Look up authorized records, memo or dependency cache
+      summary: Look up an authorized record
       x-sparkwing-policy:
         method: GET
         path: /api/v1/data/records
@@ -6658,17 +6316,15 @@ paths:
           content:
             application/json:
               schema:
-                anyOf:
-                  - $ref: '#/components/schemas/internal.controllerwire.DataRecord'
-                  - $ref: '#/components/schemas/internal.controllerwire.DataMemoHit'
-          description: Response selected by the request operation.
+                $ref: '#/components/schemas/internal.controllerwire.DataRecord'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Commit a record or copy an authorized memo result
+      summary: Commit a record
       x-sparkwing-policy:
         method: POST
         path: /api/v1/data/records
@@ -6884,6 +6540,31 @@ paths:
             binding: claimSelection
             liveness: credential
         retry: safe
+  /api/v1/local/doctor:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/local/doctor
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/local/doctor
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.control
+            binding: none
+            liveness: credential
+        retry: never
+      x-sparkwing-wire: undocumented
   /api/v1/log-segments/{key}:
     put:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -11465,6 +11146,37 @@ paths:
             liveness: reporting
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/data-authority:
+    get:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: GET /api/v1/runs/{run}/local-host/data-authority
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/runs/{run}/local-host/data-authority
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: runOfTrigger
+            liveness: sensitive
+        retry: safe
+      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/finish:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -11530,6 +11242,150 @@ paths:
               - trigger.host
             binding: runOfTrigger
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: ownNode
+            liveness: reporting
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/nodes/{job}/authentication:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: job
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/runs/{run}/local-host/nodes/{job}/authentication
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/nodes/{job}/authentication
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: ownNode
+            liveness: reporting
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/nodes/{job}/binding:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: job
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/runs/{run}/local-host/nodes/{job}/binding
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/nodes/{job}/binding
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: ownNode
+            liveness: reporting
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/nodes/{job}/data-authority:
+    get:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: job
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: GET /api/v1/runs/{run}/local-host/nodes/{job}/data-authority
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/runs/{run}/local-host/nodes/{job}/data-authority
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: ownNode
+            liveness: sensitive
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/nodes/{job}/snapshot:
+    get:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: job
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/runs/{run}/local-host/nodes/{job}/snapshot
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
           - credential: awarded_or_delegated_claim
             grants:
               - data.read

@@ -165,6 +165,10 @@ func (l *localLifecycle) Stop(ctx context.Context) error {
 		return err
 	}
 	defer func() { <-l.gate }()
+	return l.stop(ctx)
+}
+
+func (l *localLifecycle) stop(ctx context.Context) error {
 	if l.runtime == nil {
 		return errors.New("wingd: local controller runtime is required")
 	}
@@ -184,6 +188,46 @@ func (l *localLifecycle) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (l *localLifecycle) InstallController(ctx context.Context, opts LocalStartOptions) (LocalStatus, error) {
+	if err := l.lock(ctx); err != nil {
+		return LocalStatus{}, err
+	}
+	defer func() { <-l.gate }()
+	if l.runtime == nil || l.units == nil {
+		return LocalStatus{}, errors.New("wingd: service installation requires the local runtime and managed units")
+	}
+	home, err := HomeDir(opts.Home)
+	if err != nil {
+		return LocalStatus{}, err
+	}
+	if l.home != "" && home != l.home || !filepath.IsAbs(opts.Executable) || opts.Version == "" || opts.Standalone || opts.DashboardAddress != "" {
+		return LocalStatus{}, errors.New("wingd: service installation requires the bound home, executable and version")
+	}
+	l.home, opts.Home, opts.Stay = home, home, true
+	previous, err := l.runtime.Status(ctx)
+	if err != nil {
+		return LocalStatus{}, err
+	}
+	if err := l.stop(ctx); err != nil {
+		return LocalStatus{}, fmt.Errorf("wingd: drain previous controller before service installation: %w", err)
+	}
+	if err := l.units.InstallController(ctx, opts); err != nil {
+		return LocalStatus{}, fmt.Errorf("wingd: service installation failed after draining the previous controller: %w", err)
+	}
+	ready, err := l.runtime.AwaitReady(ctx)
+	if err != nil {
+		return LocalStatus{}, fmt.Errorf("wingd: service installed but its successor did not become ready: %w", err)
+	}
+	status, err := l.Status(ctx)
+	if err != nil {
+		return LocalStatus{}, fmt.Errorf("wingd: verify installed controller: %w", err)
+	}
+	if !status.Running || !status.Stay || !status.Installed || status.Version != opts.Version || status.PID <= 0 || status.PID != ready.PID || status.PID == previous.PID {
+		return LocalStatus{}, errors.New("wingd: service installed but a new ready controller with the installed version and stay mode was not verified")
+	}
+	return status, nil
 }
 
 func (l *localLifecycle) Status(ctx context.Context) (LocalStatus, error) {

@@ -67,6 +67,9 @@ func validateGitSHA(sha string) error {
 }
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	if r.Header.Get("Accept") == "application/json" {
+		return s.handleRunPage(w, r, authorized)
+	}
 	filter, parseErr := store.ParseRunFilterValidated(r.URL.Query())
 	if parseErr != nil {
 		return invalidEngineBody(parseErr.Error())

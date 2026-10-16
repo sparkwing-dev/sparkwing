@@ -51,6 +51,36 @@ func inspect(ctx context.Context, h Host) (State, string, error) {
 	return state, body, nil
 }
 
+// RefreshRegistration reloads a matching installed registration without restarting its process.
+func RefreshRegistration(ctx context.Context, h Host) error {
+	state, err := Inspect(ctx, h)
+	if err != nil {
+		return err
+	}
+	if state.Foreign {
+		return foreignError(state.Path)
+	}
+	if state.Mismatch {
+		return errors.New(state.Detail)
+	}
+	if !state.Installed {
+		return nil
+	}
+	if state.Binary != h.Binary {
+		return errors.New("runner registration points to another executable")
+	}
+	if err := requireHost(h); err != nil {
+		return err
+	}
+	if _, _, err := h.registration(ctx, state.Path); err != nil {
+		return err
+	}
+	if h.GOOS == "linux" {
+		return runCommand(ctx, h, "systemctl", "--user", "daemon-reload")
+	}
+	return context.Cause(ctx)
+}
+
 // Refresh updates a matching registration and restarts it if active, from outside the service.
 func Refresh(ctx context.Context, h Host) (State, error) {
 	state, body, err := inspect(ctx, h)

@@ -247,9 +247,6 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		close(dashboardReady)
 	}
 	workers.Go(func() {
-		serve("controller workers", func() error { return controller.Run(ctx, d.SetLocalActivity) })
-	})
-	workers.Go(func() {
 		select {
 		case <-d.quit:
 			session.cancel()
@@ -270,6 +267,9 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	r.mu.Lock()
 	if ctx.Err() == nil {
 		session.ready = true
+		workers.Go(func() {
+			serve("controller workers", func() error { return controller.Run(ctx, d.SetLocalActivity) })
+		})
 		r.changed()
 	}
 	r.mu.Unlock()

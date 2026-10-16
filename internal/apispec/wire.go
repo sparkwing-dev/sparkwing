@@ -119,17 +119,8 @@ func wireOperations() map[string]wireOperation {
 		}{}, client.RotatedToken{})
 	}
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", client.EnrollRunnerRequest{}, client.CreatedToken{})
-	result["GET /api/v1/data/records"] = wireOperation{
-		summary:    "Look up authorized records, memo or dependency cache",
-		parameters: []any{query("lookup", "string")},
-		selector:   reflect.TypeFor[wire.DataLookupRequest](),
-		variants:   []reflect.Type{reflect.TypeFor[wire.DataRecordLookupResult](), reflect.TypeFor[wire.DataMemoHit](), reflect.TypeFor[wire.DataDepcacheHit]()},
-	}
-	result["POST /api/v1/data/records"] = wireOperation{
-		summary:  "Commit a record or copy an authorized memo result",
-		request:  reflect.TypeFor[wire.DataRecordWriteRequest](),
-		variants: []reflect.Type{reflect.TypeFor[wire.DataRecord](), reflect.TypeFor[wire.DataMemoHit]()},
-	}
+	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
+	result["POST /api/v1/data/records"] = operation("Commit a record", wire.DataRecordWriteRequest{}, wire.DataRecord{})
 	addReadParameters(result)
 	return result
 }

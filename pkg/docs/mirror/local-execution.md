@@ -4,12 +4,11 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
-The command adapters use sealed intake and the shared host interfaces. The CLI
-no longer opens the runs database or starts a separate trigger consumer. Native
-local controller, source, private environment, storage and host factories remain
-unbound in this rewrite checkout, so execution refuses before intake where those
-bindings are required. The command's presence in help is not native execution
-evidence. See [rewrite integration](architecture.md).
+The commands bind sealed intake to the shared controller, source, private
+environment, storage and host services. The CLI sends state operations over the
+authenticated private API. Owner evaluation still requires its separate process
+credential contract. Native execution evidence remains with the integration
+suite. See [rewrite integration](architecture.md).
 
 The old `pkg/localws` server, trigger-consumer election and `RunHosted` entrypoint
 are removed with their state, admission, logging and child-dispatch backends.
@@ -38,10 +37,9 @@ An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
 file. Publication still needs its authorized result/log publisher. A missing
 publisher fails before intake. It cannot change a completed local verdict.
 
-Local schedule registration, pins, timer installation and `__tick` now use
-controller/lifecycle adapters. Their remaining request and factory contracts must
-be connected before local schedules can run. Timers carry their absolute state
-home into resolution. The old CLI schedule writer is removed.
+Local schedule registration, pins, timer installation and `__tick` use the
+controller and lifecycle services. Timers carry their absolute state home into
+resolution. Scheduled execution still needs the scheduler's sealed-intake binding.
 
 ## Local execution
 
@@ -50,11 +48,31 @@ browser dashboard. It starts on demand. The CLI hosts a foreground run and
 sends state operations through the controller API. SDK processes declare and
 execute work through protocol v2. They do not open the controller's database.
 
+Startup reconciles orphaned work and starts the private API before consumers.
+Readiness does not wait for pipeline compilation or source preparation.
+
 The controller is the only writer of the shared store. Reads, cancellation,
 retry and doctor use its API too. The controller's route policy and wire
 contract also apply to `api.sock`. A transport retries only operations the
 registered route marks safe to replay. A lost one-time award is never replayed
 automatically.
+
+Run listing uses the same public details as single-run status. Filters apply
+before the page limit. Continuation cursors retain the filters and the initial
+run-number boundary, so runs created between pages do not displace older runs.
+Each page checks current authorization and reads signed engine policy notices.
+
+Run and job log reads return tagged JSON pages to the CLI. Each output record
+names its persisted attempt or owner unit. Resume cursors retain the selection
+and progress for each subject. An idle follow poll returns no repeated output.
+Completion requires terminal state and final persisted segments. A cursor never
+replaces the store's authorization check for those segments.
+
+Cross-run log search uses the same persisted subjects and authorization. Run
+filters apply before the run limit. A page can contain no matches and still
+carry a continuation cursor. The cursor keeps the initial run-number boundary
+and any unfinished subject, so later runs cannot displace older candidates.
+`--max-matches` limits each subject. Zero returns all matches across pages.
 
 ### Who hosts the daemon
 
@@ -71,7 +89,8 @@ Daemon status, stop and restart use the shared local lifecycle. JSON reports
 `state`, `version`, `pid`, `stay`, `installed` and the four activity counts.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
-These adapters require the native local-services binding described above.
+Doctor also sweeps stray step sessions through the controller. A successful
+cleanup whose run was pruned reports an unrecorded-outcome warning and succeeds.
 
 Restart preserves a stopped controller. An answering controller on the exact
 installed version stays running unless `--force` is selected. Replacement waits
@@ -84,6 +103,9 @@ it alive. Health checks alone do not. `--stay` keeps it up until stopped.
 Linux and macOS support an installed login service through `dashboard install`.
 Windows supports stay mode. Machine updates refresh managed controller and
 schedule units together. See [local dashboard](native-mode.md).
+
+Installation drains and joins the existing owner before activating the managed
+service, then waits for the successor to acquire the same home and become ready.
 
 ### Running with no daemon available
 
@@ -159,6 +181,10 @@ installation, describe, planning or execution. Each machine fetches that release
 once from GitHub Releases and verifies it. Pipeline binaries are built and
 cached on the executing machine. Local execution does not fetch prebuilt
 pipeline binaries from a controller. See [repository upgrades](cli-upgrade.md).
+
+Before a local run is accepted, foreground and queued hosts select Go or
+TypeScript from the sealed checkout's pipeline directory. A malformed manifest
+fails setup. Accepted runs retain the SDK identity in their sealed engine.
 
 ## Remote execution
 
@@ -262,6 +288,10 @@ Local and remote controllers enforce the same route policy. Team authority,
 repository access, job bindings and claim liveness come from authenticated server
 facts. A management credential cannot substitute for the current execution
 holder. Public run details are redacted projections, not executable inputs.
+
+An awarded host retains its selected controller transport for private execution
+state, source credentials and storage. These controller API calls use the award's capability.
+The runner's reusable claim credential stays with the claim loop.
 
 ### The laptop boundary
 

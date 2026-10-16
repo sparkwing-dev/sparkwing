@@ -351,3 +351,28 @@ func TestInspectRefusesMalformedManagedRegistration(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshRegistrationPreservesRunningProcess(t *testing.T) {
+	exec := &fakeExec{}
+	host := linuxHost(t, exec)
+	state, err := Install(t.Context(), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(state.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec.calls = nil
+	if err := RefreshRegistration(t.Context(), host); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(state.Path)
+	if err != nil || !slices.Equal(before, after) {
+		t.Fatal("registration changed during in-process replacement")
+	}
+	joined := strings.Join(exec.calls, " ")
+	if !strings.Contains(joined, "daemon-reload") || strings.Contains(joined, "restart") || strings.Contains(joined, "stop") {
+		t.Fatalf("running process lifecycle changed: %s", joined)
+	}
+}
