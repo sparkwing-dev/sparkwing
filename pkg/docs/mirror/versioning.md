@@ -87,6 +87,8 @@ sparkwing upgrade --version v1.2.3
 The selected verified engine installs the staged SDK through `InstallSDK`.
 `cache warm` uses the same selected-engine installer. The hidden SDK-install
 command delegates to the engine package, which owns Go builds and `npm ci`.
+Each installation makes one helper attempt with a ten-minute deadline. Failure
+stops the install, reports the cause, and kills and reaps its helper process tree.
 Verification then compiles Go packages or type-checks TypeScript and runs list,
 describe and plan through that engine, including hidden pipelines. It never runs
 job bodies. Install and check environments pass through the shared environment

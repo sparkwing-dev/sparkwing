@@ -11,13 +11,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	strictjson "sigs.k8s.io/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+)
+
+const (
+	sdkInstallAttempts = 1
+	sdkInstallTimeout  = 10 * time.Minute
 )
 
 // SDKInstallRequest gives the verified matching engine its acquired source and filtered install base.
@@ -107,7 +112,7 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 	command.Dir, command.Env, command.Stdin = dir, environment, bytes.NewReader(body)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
-	err = gotoolchain.Run(ctx, command)
+	err = runSDKInstaller(ctx, command, sdkInstallTimeout)
 	diagnostic := masker.Mask(stderr.String())
 	if err != nil {
 		return SDKCommand{}, errors.Join(ctx.Err(), fmt.Errorf("selected engine SDK installation: %w: %s", err, strings.TrimSpace(diagnostic)))
@@ -145,6 +150,15 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ 
 	}
 	result.ownedDirectory = ownedDirectory
 	return result, nil
+}
+
+func runSDKInstaller(ctx context.Context, command *exec.Cmd, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := runSDKInstallProcess(ctx, command); err != nil {
+		return fmt.Errorf("SDK install failed after %d attempt (deadline %s): %w", sdkInstallAttempts, timeout, errors.Join(ctx.Err(), err))
+	}
+	return nil
 }
 
 // PipelineDirectory resolves the acquired pipeline without escaping its checkout.
