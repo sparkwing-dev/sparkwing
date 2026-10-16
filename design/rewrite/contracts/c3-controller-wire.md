@@ -457,8 +457,16 @@ run approval routes.
 
 `Annotation` retains level, message, file, line, column and end line. Public job
 and step details carry optional annotation arrays. `AnnotationWrite` optionally
-selects a step and posts to the existing job or job-step annotation route. Reads
-contain masked text. The existing C2 table has no run-scoped annotation write or
+selects a step and posts to the existing job or job-step annotation route.
+Annotation and summary routes resolve numeric run selectors within the current
+credential's team before checking the awarded job binding. Reads
+contain masked text. `RunReview.AppendAnnotation` returns only an error and
+requires an empty HTTP 204 acknowledgement. The CLI emits the selected run, job
+and optional step after success. It has no transition or replay receipt to print.
+Native process reports use the same annotation transport and retain every source
+location field. C1/C2 must persist column and end line before those fields can
+complete the controller path.
+The existing C2 table has no run-scoped annotation write or
 ordinary-member annotation grant. Those are W2 contract gaps, not approved
 feature restrictions. W9 adds no route or grant to bypass them.
 

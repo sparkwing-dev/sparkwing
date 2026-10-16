@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **cli (Breaking):** Accept committed annotation writes through the shared client and team-local numeric run selectors for annotations and summaries. `RunReview.AppendAnnotation` returns only an error, and `runs annotations add` drops its unsupported `applied` result. See [migration guide](docs/migrations/_unreleased.md#job-reporting).
+
 - **api:** Accept the controller's verified default-ref selection in shared record reads while preserving the other record selectors. Malformed record-query escaping returns `bad_request`.
 
 - **api (Breaking):** Run-receipt steps use `job_id`, matching the shared client. Receipt responses omit invocation metadata and local store locations.

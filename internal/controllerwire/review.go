@@ -58,5 +58,5 @@ type RunReview interface {
 	ReadSteps(context.Context, string) (RunSteps, error)
 	ListApprovals(context.Context, string) (Approvals, error)
 	ResolveApproval(context.Context, string, string, ApprovalDecision) (ApprovalResult, error)
-	AppendAnnotation(context.Context, string, string, AnnotationWrite) (Applied, error)
+	AppendAnnotation(context.Context, string, string, AnnotationWrite) error
 }

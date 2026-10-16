@@ -36,34 +36,24 @@ func (c *LocalHostClient) ProcessClient(ctx context.Context, principal capabilit
 	return &NativeProcessClient{transport: transport, run: c.run, job: job, request: snapshot.Run.Request.Request}, nil
 }
 
-func (c *NativeProcessClient) report(ctx context.Context, suffix, step string, body any) error {
-	if step != "" {
-		suffix = "/steps" + suffix
-	}
-	return c.transport.request(ctx, "POST", "/api/v1/runs/{run}/jobs/{job}"+suffix, "/api/v1/runs/"+url.PathEscape(c.run)+"/jobs/"+url.PathEscape(c.job)+suffix, "", body, nil)
-}
-
 // Annotation commits a masked annotation through the common reporting transaction.
 func (c *NativeProcessClient) Annotation(ctx context.Context, input nodeproto.AnnotationRequest) error {
-	var line *int
-	if input.Line != 0 {
-		line = &input.Line
-	}
-	return c.report(ctx, "/annotations", input.Step, struct {
-		Step    string `json:"step_id,omitempty"`
-		Level   string `json:"level"`
-		Message string `json:"message"`
-		File    string `json:"file,omitempty"`
-		Line    *int   `json:"line,omitempty"`
-	}{input.Step, input.Level, input.Message, input.File, line})
+	return c.transport.AppendAnnotation(ctx, c.run, c.job, controllerwire.AnnotationWrite{
+		Annotation: controllerwire.Annotation{Level: input.Level, Message: input.Message, File: input.File, Line: input.Line, Column: input.Column, EndLine: input.EndLine},
+		StepID:     input.Step,
+	})
 }
 
 // Summary commits a masked summary through the common reporting transaction.
 func (c *NativeProcessClient) Summary(ctx context.Context, input nodeproto.SummaryRequest) error {
-	return c.report(ctx, "/summary", input.Step, struct {
+	suffix := "/summary"
+	if input.Step != "" {
+		suffix = "/steps" + suffix
+	}
+	return c.transport.request(ctx, "POST", "/api/v1/runs/{run}/jobs/{job}"+suffix, "/api/v1/runs/"+url.PathEscape(c.run)+"/jobs/"+url.PathEscape(c.job)+suffix, "", struct {
 		Step     string `json:"step_id,omitempty"`
 		Markdown string `json:"markdown"`
-	}{input.Step, input.Markdown})
+	}{input.Step, input.Markdown}, nil)
 }
 
 // Secret reads a declared secret under the live parent award.

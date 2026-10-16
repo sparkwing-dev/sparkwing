@@ -90,19 +90,19 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/annotations", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleAnnotation,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleAnnotation,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/annotations", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleAnnotation,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleAnnotation,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/summary", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleSummary,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleSummary,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/summary", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleSummary,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleSummary,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/start", Authentication: capability.AuthCapability,

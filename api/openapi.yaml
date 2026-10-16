@@ -9679,12 +9679,8 @@ paths:
               $ref: '#/components/schemas/internal.controllerwire.AnnotationWrite'
         required: true
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.Applied'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -10686,12 +10682,8 @@ paths:
               $ref: '#/components/schemas/internal.controllerwire.AnnotationWrite'
         required: true
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.Applied'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:

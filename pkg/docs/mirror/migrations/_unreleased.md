@@ -1205,7 +1205,15 @@ Reports require an awarded job or trigger capability with `node.report`, or
 the run's local publication authority. Caller-supplied holder and generation
 headers grant no authority. Step finish accepts `passed`, `failed` and
 `cancelled`, plus an optional inner error with a code and masked message.
-Annotations and summaries accept at most 128 KiB of masked text.
+Annotations and summaries accept at most 128 KiB of masked text. Their job
+and step routes accept a stable run ID or its number within the authenticated
+team. Selecting a number preserves the awarded job and holder fences.
+
+`RunReview.AppendAnnotation` returns only an error after the controller's empty
+HTTP 204 acknowledgement. It has no `Applied` result. The JSON output of
+`runs annotations add` contains `run_id`, `job_id` and optional `step_id`.
+The former `applied` field is removed because annotation writes do not return
+transition or replay facts.
 
 ## Unit recovery requires the elected reaper lease
 
