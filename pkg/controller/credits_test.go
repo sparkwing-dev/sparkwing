@@ -460,7 +460,7 @@ func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	if !strings.Contains(string(body), controller.UnpricedCPUClassCode) {
 		t.Fatalf("the refusal carries no code: %s", body)
 	}
-	node, err := f.store.GetNode(ctx, "run-huge", "build")
+	node, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetNode(ctx, "run-huge", "build")
 	if err != nil {
 		t.Fatalf("get node: %v", err)
 	}
@@ -677,7 +677,7 @@ func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
 	if status != http.StatusNoContent {
 		t.Fatalf("warm claim = %d: %s", status, body)
 	}
-	node, err := f.store.GetNode(ctx, "run-big", "build")
+	node, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetNode(ctx, "run-big", "build")
 	if err != nil {
 		t.Fatalf("get node: %v", err)
 	}

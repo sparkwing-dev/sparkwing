@@ -256,7 +256,7 @@ func TestAppendEventOnceCollapsesRepeats(t *testing.T) {
 	if wrote {
 		t.Fatal("the second append must collapse into the first")
 	}
-	events, err := s.ListEventsAfter(ctx, "run-once", 0, 10)
+	events, err := teststore.ForTeam(t, s, store.DefaultTeam).ListEventsAfter(ctx, "run-once", 0, 10)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}

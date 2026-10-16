@@ -55,7 +55,7 @@ func TestCreateNode_LiveRunStillAcceptsNodes(t *testing.T) {
 	if status, message := postNode(t, srv.URL, "run-live", "node-a"); status != http.StatusCreated {
 		t.Fatalf("status = %d (%s), want %d", status, message, http.StatusCreated)
 	}
-	if _, err := st.GetNode(ctx, "run-live", "node-a"); err != nil {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(ctx, "run-live", "node-a"); err != nil {
 		t.Fatalf("GetNode: %v", err)
 	}
 }
@@ -117,7 +117,7 @@ func TestCreateNode_StrangerTokenLearnsNothingAboutTheRun(t *testing.T) {
 			t.Errorf("answer to a stranger carries %q: %q", leaked, body["error"])
 		}
 	}
-	if _, err := st.GetNode(ctx, "victim", "n1"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(ctx, "victim", "n1"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("stranger's node was written: %v", err)
 	}
 }

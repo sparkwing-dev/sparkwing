@@ -33,7 +33,7 @@ func TestPostgresOpenAndMigrate(t *testing.T) {
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	got, err := st.GetRun(ctx, r.ID)
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, r.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}

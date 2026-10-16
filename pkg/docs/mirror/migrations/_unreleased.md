@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Explicit tenant reporting readers
+
+`Store.GetRun`, `GetNode`, `ListNodes`, `ListEventsAfter` and
+`GetActiveDebugPause` are removed. Select the tenant with `ForTeam` and use its
+reporting readers. Cross-team `ListRuns` and `GetLatestRun` move from `Store` to
+`Operator`. The dashboard backend takes one tenant at construction and uses it
+for run, job and event reads. It has no default-team fallback or separate run
+scope.
+
+`Tenant.GetSecretForPipeline` is removed. Secret releases use `ReadSecret`
+with current authority, declared names, pipeline/shared precedence and pool
+restrictions. Trusted exact-row inspection still uses `GetSecretRow`.
+
 ## Authorized GitHub App configuration and launcher reservations
 
 Tenant's raw `UnbindGitHubAppInstallation`, `PutGitHubAppTrigger`,

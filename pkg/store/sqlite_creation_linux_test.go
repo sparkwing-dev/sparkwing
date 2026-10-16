@@ -55,7 +55,7 @@ func TestOpenSQLiteWithoutHardLinks(t *testing.T) {
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(t.Context(), store.Run{ID: "no-links", Pipeline: "sample", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.GetRun(t.Context(), "no-links"); err != nil {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(t.Context(), "no-links"); err != nil {
 		t.Fatal(err)
 	}
 }

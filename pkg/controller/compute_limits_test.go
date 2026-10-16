@@ -41,7 +41,7 @@ func seedRunNodeFor(t *testing.T, f creditsFixture, principal, runID, nodeID str
 
 func computeLimitEvents(t *testing.T, f creditsFixture, runID string) []store.Event {
 	t.Helper()
-	events, err := f.store.ListEventsAfter(context.Background(), runID, 0, 100)
+	events, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListEventsAfter(context.Background(), runID, 0, 100)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestComputeLimits_NodeCreationRefusedPastThePerRunCap(t *testing.T) {
 	if got := len(computeLimitEvents(t, f, "run-fan")); got != 1 {
 		t.Fatalf("compute_limit_blocked events = %d, want 1", got)
 	}
-	nodes, err := f.store.ListNodes(ctx, "run-fan")
+	nodes, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListNodes(ctx, "run-fan")
 	if err != nil {
 		t.Fatalf("list nodes: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("the second trigger = %d, want 429: %s", status, second)
 	}
-	runs, err := f.store.ListRuns(ctx, store.RunFilter{Limit: 10})
+	runs, err := f.store.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("a retry past the cap = %d, want 429: %s", status, body)
 	}
-	runs, err := f.store.ListRuns(ctx, store.RunFilter{Limit: 10})
+	runs, err := f.store.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}

@@ -98,9 +98,9 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 		map[string]string{"name": "TOKEN", "value": "supersecret", "pipeline": "deploy-api"})
 	resp.Body.Close()
 
-	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForPipeline("TOKEN", "deploy-api")
+	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("TOKEN", "deploy-api")
 	if err != nil {
-		t.Fatalf("GetSecretForPipeline: %v", err)
+		t.Fatalf("GetSecretRow: %v", err)
 	}
 	if !strings.HasPrefix(row.Value, secrets.BoundPrefix) {
 		t.Fatalf("stored envelope = %q, want a %s prefix", row.Value, secrets.BoundPrefix)

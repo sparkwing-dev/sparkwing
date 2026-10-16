@@ -740,11 +740,6 @@ const runColumns = `runs.id,runs.number,runs.pipeline,runs.status,runs.trigger_s
  COALESCE((SELECT retry.id FROM runs retry WHERE retry.team=runs.team AND retry.retry_of=runs.id ORDER BY retry.created_at DESC,retry.id DESC LIMIT 1),''),
  runs.lineage_json,runs.replay_of_run_id,runs.replay_of_node_id,runs.annotation_count,runs.top_annotation,runs.annotations_json,runs.admission,` + runAttentionColumn
 
-// GetRun fetches a single default-team run by ID.
-func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
-	return s.defaultTenant().GetRun(ctx, runID)
-}
-
 // RunFilter narrows ListRuns results; zero value matches everything.
 type RunFilter struct {
 	Pipelines      []string
@@ -806,8 +801,8 @@ func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 // by f. The cursor clause depends on that order.
 //
 // Scope: this reads every team. Tenant callers use [Tenant.ListRuns].
-func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
-	return s.listRuns(ctx, allTeams(), f)
+func (o *Operator) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
+	return o.s.listRuns(ctx, allTeams(), f)
 }
 
 func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ []*Run, err error) {
@@ -978,8 +973,8 @@ func prefixUpperBound(prefix string) (string, bool) {
 
 // GetLatestRun returns the newest run for pipeline matching statuses
 // within maxAge. ErrNotFound on miss.
-func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
-	return s.getLatestRun(ctx, allTeams(), pipeline, statuses, maxAge)
+func (o *Operator) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+	return o.s.getLatestRun(ctx, allTeams(), pipeline, statuses, maxAge)
 }
 
 // GetLatestRun returns t's newest run for pipeline matching statuses within
@@ -1134,15 +1129,7 @@ type GeneratedNode struct {
 	Spec json.RawMessage `json:"spec"`
 }
 
-// ListNodes returns the nodes for a run in insertion order, which the
-// nodes.seq column records because no physical row order survives an
-// update on Postgres. Rows a pre-v29 Postgres store wrote carry no
-// sequence and fall back to node id.
-func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
-	return s.defaultTenant().ListNodes(ctx, runID)
-}
-
-// ListNodes is [Store.ListNodes] confined to t's team.
+// ListNodes returns this tenant's jobs in insertion order.
 func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	rows, err := t.s.query(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
@@ -1176,12 +1163,7 @@ func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	return out, nil
 }
 
-// GetNode fetches a single node row; ErrNotFound when missing.
-func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
-	return s.defaultTenant().GetNode(ctx, runID, nodeID)
-}
-
-// GetNode is [Store.GetNode] confined to t's team.
+// GetNode returns this tenant's job or ErrNotFound.
 func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
 	row := t.s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
@@ -1332,13 +1314,7 @@ type Event struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-// ListEventsAfter returns events with seq > afterSeq, ascending.
-// Pass 0 for full backlog; empty slice when there's nothing new.
-func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error) {
-	return s.defaultTenant().ListEventsAfter(ctx, runID, afterSeq, limit)
-}
-
-// ListEventsAfter is [Store.ListEventsAfter] confined to t's team.
+// ListEventsAfter returns this tenant's run events after the supplied sequence.
 func (t *Tenant) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error) {
 	if limit <= 0 {
 		limit = 500
@@ -1463,11 +1439,6 @@ type DebugPause struct {
 	ReleasedAt  *time.Time `json:"released_at,omitempty"`
 	ReleasedBy  string     `json:"released_by,omitempty"`
 	ReleaseKind string     `json:"release_kind,omitempty"`
-}
-
-// GetActiveDebugPause returns the open pause for a node of the default team, if any.
-func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error) {
-	return s.defaultTenant().GetActiveDebugPause(ctx, runID, nodeID)
 }
 
 // GetActiveDebugPause returns the open pause for a node of one of t's runs, if any.

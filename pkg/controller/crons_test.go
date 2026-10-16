@@ -158,7 +158,7 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	if trigger.IdempotencyKey == "" {
 		t.Error("a scheduled launch carries no idempotency key")
 	}
-	run, err := f.store.GetRun(ctx, launched.RunID)
+	run, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetRun(ctx, launched.RunID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}

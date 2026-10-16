@@ -19,7 +19,10 @@ func TestAMissingLookupNamesWhatItLookedFor(t *testing.T) {
 		call func() error
 		want []string
 	}{
-		"GetRun": {func() error { _, err := s.GetRun(ctx, "run-absent"); return err }, []string{"run", "run-absent"}},
+		"GetRun": {func() error {
+			_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRun(ctx, "run-absent")
+			return err
+		}, []string{"run", "run-absent"}},
 		"GetTrigger": {func() error {
 			_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, "trig-absent")
 			return err

@@ -42,7 +42,7 @@ func TestControllerFixturesKeepCredentialsAndRunsSeparate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := secondStore.GetRun(t.Context(), "fixture-run"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, secondStore, store.DefaultTeam).GetRun(t.Context(), "fixture-run"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("fresh fixture found another fixture's run: %v", err)
 	}
 	if err := teststore.ForTeam(t, secondStore, store.DefaultTeam).CreateRun(t.Context(), store.Run{
@@ -50,7 +50,7 @@ func TestControllerFixturesKeepCredentialsAndRunsSeparate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	row, err := firstStore.GetRun(t.Context(), "fixture-run")
+	row, err := teststore.ForTeam(t, firstStore, store.DefaultTeam).GetRun(t.Context(), "fixture-run")
 	if err != nil || row.Pipeline != "first" {
 		t.Fatalf("another fixture changed the original run: %+v, %v", row, err)
 	}

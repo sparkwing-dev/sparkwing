@@ -334,7 +334,7 @@ func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 		}
 	}
 	b := &fakeBackend{
-		listRuns:    func(f store.RunFilter) ([]*store.Run, error) { return st.ListRuns(ctx, f) },
+		listRuns:    func(f store.RunFilter) ([]*store.Run, error) { return st.AsOperator().ListRuns(ctx, f) },
 		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "hello"}}, nil },
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte("{\"msg\":\"needle\"}\n"), nil },
 	}
@@ -434,7 +434,7 @@ func TestRunsGrep_PagesOlderRunsByCursorWithExclusionsAppliedBeforeTheLimit(t *t
 		}
 	}
 	b := &fakeBackend{
-		listRuns:    func(f store.RunFilter) ([]*store.Run, error) { return st.ListRuns(ctx, f) },
+		listRuns:    func(f store.RunFilter) ([]*store.Run, error) { return st.AsOperator().ListRuns(ctx, f) },
 		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "n"}}, nil },
 		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte("{\"msg\":\"needle\"}\n"), nil },
 	}

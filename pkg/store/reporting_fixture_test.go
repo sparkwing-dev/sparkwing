@@ -117,3 +117,5 @@ func (t *Tenant) TestOnlySeedTriggerWithRun(ctx context.Context, v Trigger, r Ru
 	}
 	return t.TestOnlySeedTrigger(ctx, v)
 }
+
+func (s *Store) defaultTenant() *Tenant { return &Tenant{s: s, team: DefaultTeam} }

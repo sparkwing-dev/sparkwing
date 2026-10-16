@@ -17,7 +17,7 @@ func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc, clas
 		if err != nil {
 			return engineLookupError(err)
 		}
-		b := backend.NewStoreBackend(s.store, s.dashboardLogs(tenant, engineActor(a))).Scoped(tenant)
+		b := backend.NewStoreBackend(tenant, s.dashboardLogs(tenant, engineActor(a)))
 		r.SetPathValue("id", a.Target.RunID)
 		r.SetPathValue("node", a.Target.NodeID)
 		handler := read(b)

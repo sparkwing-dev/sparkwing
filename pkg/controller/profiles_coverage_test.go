@@ -53,7 +53,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				}
 			}
 			if mode == "cached" {
-				n, err := st.GetNode(t.Context(), "r", "c")
+				n, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(t.Context(), "r", "c")
 				if err != nil || n.Outcome != "cached" {
 					t.Fatalf("cache fixture=%+v, %v", n, err)
 				}

@@ -18,12 +18,11 @@ func TestScanRun_UndefinedStartedAtReadsBackUnset(t *testing.T) {
 	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: "unstarted", Pipeline: "demo", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.GetRun(ctx, "unstarted")
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRun(ctx, "unstarted")
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
 	if !got.StartedAt.IsZero() {
 		t.Fatalf("StartedAt = %s, want the zero time", got.StartedAt)
 	}
-
 }

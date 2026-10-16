@@ -285,7 +285,7 @@ func TestClaimIsRefusedAboveTheLargestPricedClass(t *testing.T) {
 	if !errors.Is(err, store.ErrUnpricedCPUClass) {
 		t.Fatalf("claim of a 96-core node = %v, want ErrUnpricedCPUClass", err)
 	}
-	node, err := s.GetNode(ctx, "run-huge", "build")
+	node, err := teststore.ForTeam(t, s, store.DefaultTeam).GetNode(ctx, "run-huge", "build")
 	if err != nil {
 		t.Fatalf("get node: %v", err)
 	}

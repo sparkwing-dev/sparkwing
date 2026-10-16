@@ -112,7 +112,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	if trigger.IdempotencyKey == "" {
 		t.Error("the launch carried no idempotency key")
 	}
-	run, err := st.GetRun(ctx, trigger.ID)
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, trigger.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}

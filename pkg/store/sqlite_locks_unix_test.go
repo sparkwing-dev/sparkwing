@@ -88,7 +88,7 @@ func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
 					t.Fatalf("live SQLite file replaced: %s", name)
 				}
 			}
-			if _, err := reader.GetRun(t.Context(), "other-process"); err != nil {
+			if _, err := teststore.ForTeam(t, reader, store.DefaultTeam).GetRun(t.Context(), "other-process"); err != nil {
 				t.Fatalf("existing reader: %v", err)
 			}
 		})

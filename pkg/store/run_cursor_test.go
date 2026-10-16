@@ -37,7 +37,7 @@ func TestListRuns_CursorWalksRunsSharingAnInstantExactlyOnce(t *testing.T) {
 	var filter store.RunFilter
 	filter.Limit = 5
 	for page := 0; page < runs+2; page++ {
-		got, err := st.ListRuns(ctx, filter)
+		got, err := st.AsOperator().ListRuns(ctx, filter)
 		if err != nil {
 			t.Fatalf("ListRuns: %v", err)
 		}
@@ -121,12 +121,12 @@ func TestListRuns_CursorResumesAfterARunAtTheEpoch(t *testing.T) {
 		}
 	}
 
-	first, err := st.ListRuns(ctx, store.RunFilter{Limit: 2})
+	first, err := st.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
 	last := first[len(first)-1]
-	next, err := st.ListRuns(ctx, store.RunFilter{
+	next, err := st.AsOperator().ListRuns(ctx, store.RunFilter{
 		Limit: 2, AfterStartedAt: last.StartedAt.UnixNano(), AfterID: last.ID,
 	})
 	if err != nil {
@@ -171,7 +171,7 @@ func TestListRuns_CursorWalksPastNeverStartedRuns(t *testing.T) {
 	var filter store.RunFilter
 	filter.Limit = 2
 	for range started + queued + 2 {
-		page, err := st.ListRuns(ctx, filter)
+		page, err := st.AsOperator().ListRuns(ctx, filter)
 		if err != nil {
 			t.Fatalf("ListRuns: %v", err)
 		}

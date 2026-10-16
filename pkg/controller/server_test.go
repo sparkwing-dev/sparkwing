@@ -190,7 +190,7 @@ func TestController_RunLifecycle(t *testing.T) {
 		map[string]any{"status": "success"},
 		http.StatusNoContent)
 
-	got, err := st.GetRun(context.Background(), "run-ctrl-1")
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), "run-ctrl-1")
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestController_RunLifecycle(t *testing.T) {
 		t.Errorf("plan snapshot mismatch:\n got %s\nwant %s", got.PlanSnapshot, snapshot)
 	}
 
-	nodes, err := st.ListNodes(context.Background(), "run-ctrl-1")
+	nodes, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodes(context.Background(), "run-ctrl-1")
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)
 	}

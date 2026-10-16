@@ -48,7 +48,7 @@ func checkAppendedSeqs(t *testing.T, st *store.Store, runID string, landed int) 
 	if landed != seqAppendsExpected {
 		t.Fatalf("appends that landed = %d, want %d", landed, seqAppendsExpected)
 	}
-	events, err := st.ListEventsAfter(context.Background(), runID, 0, seqAppendsExpected+1)
+	events, err := teststore.ForTeam(t, st, store.DefaultTeam).ListEventsAfter(context.Background(), runID, 0, seqAppendsExpected+1)
 	if err != nil {
 		t.Fatalf("ListEventsAfter: %v", err)
 	}

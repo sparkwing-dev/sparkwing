@@ -32,7 +32,7 @@ func TestListRunsFiltersGitIdentityBeforeLimit(t *testing.T) {
 		}
 	}
 
-	runs, err := st.ListRuns(ctx, store.RunFilter{
+	runs, err := st.AsOperator().ListRuns(ctx, store.RunFilter{
 		GitSHAPrefixes: []string{"abc123"},
 		GitBranches:    []string{"topic"},
 		RepoURLs:       []string{"https://example.com/acme/app.git"},
@@ -65,7 +65,7 @@ func TestListRunsRejectsNonHexGitSHAPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if _, err := st.ListRuns(context.Background(), store.RunFilter{GitSHAPrefixes: []string{"not-a-sha"}}); err == nil {
+	if _, err := st.AsOperator().ListRuns(context.Background(), store.RunFilter{GitSHAPrefixes: []string{"not-a-sha"}}); err == nil {
 		t.Fatal("ListRuns accepted a non-hex git SHA prefix")
 	}
 }
@@ -113,7 +113,7 @@ func TestListRunsClampsLimitToOneRowAboveTheCap(t *testing.T) {
 		}
 	}
 
-	runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 1 << 40})
+	runs, err := st.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 1 << 40})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestListEventsAfterClampsLimitToTheCap(t *testing.T) {
 		}
 	}
 
-	events, err := st.ListEventsAfter(ctx, "run-1", 0, 1<<40)
+	events, err := teststore.ForTeam(t, st, store.DefaultTeam).ListEventsAfter(ctx, "run-1", 0, 1<<40)
 	if err != nil {
 		t.Fatalf("ListEventsAfter: %v", err)
 	}

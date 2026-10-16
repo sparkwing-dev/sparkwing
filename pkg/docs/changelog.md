@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove default-team reporting readers and require one tenant for dashboard run, job and event reads. Cross-team run queries move to Operator. Remove the raw secret fallback reader. See [migration guide](docs/migrations/_unreleased.md#explicit-tenant-reporting-readers).
+
 - **store:** Runner lists, queue headroom and runner metrics use the tenant's committed inventory. Claim renewals update liveness without replacing the last capacity observation.
 
 - **store (Breaking):** Enforce hourly admission guards in sealed intake and remove the unused oldest-ready principal lookup. Debug pauses and approval decisions commit with current authority, masked text and private replay receipts. See [migration guide](docs/migrations/_unreleased.md#sealed-intake-rate-guards-and-run-control).

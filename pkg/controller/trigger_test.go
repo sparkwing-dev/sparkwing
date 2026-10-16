@@ -215,7 +215,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 		t.Fatal("empty run_id")
 	}
 
-	run, err := st.GetRun(context.Background(), body.RunID)
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatalf("GetRun(%s): %v", body.RunID, err)
 	}
@@ -231,7 +231,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	if run.CreatedAt.IsZero() {
 		t.Error("CreatedAt is zero")
 	}
-	runs, err := st.ListRuns(context.Background(), store.RunFilter{Limit: 10})
+	runs, err := st.AsOperator().ListRuns(context.Background(), store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 		t.Fatalf("CreateRun running upsert: %v", err)
 	}
 
-	got, err := st.GetRun(ctx, "run-pending-1")
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, "run-pending-1")
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
@@ -716,7 +716,7 @@ func TestTriggerRecordsTheRunFlagsOnTheRunRow(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	run, err := st.GetRun(context.Background(), body.RunID)
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}

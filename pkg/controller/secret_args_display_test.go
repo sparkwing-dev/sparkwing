@@ -153,7 +153,7 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 		got, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST /api/v1/runs status = %d, want 400: %s", resp.StatusCode, got)
 	}
-	if _, err := st.GetRun(context.Background(), "old-writer"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), "old-writer"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("GetRun error = %v, want ErrNotFound", err)
 	}
 }
@@ -189,7 +189,7 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	src, err := st.GetRun(ctx, "run-1")
+	src, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 	if src.RetriedAs == "" {
 		t.Fatal("retry did not record RetriedAs")
 	}
-	retried, err := st.GetRun(ctx, src.RetriedAs)
+	retried, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, src.RetriedAs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -96,7 +96,7 @@ func TestOpenWritesTheStatDatabaseWhenPathHasURIMetacharacters(t *testing.T) {
 				t.Fatalf("reopen: %v", err)
 			}
 			defer func() { _ = reopened.Close() }()
-			run, err := reopened.GetRun(t.Context(), "run-1")
+			run, err := reopened.defaultTenant().GetRun(t.Context(), "run-1")
 			if err != nil {
 				t.Fatalf("GetRun: %v", err)
 			}

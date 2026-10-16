@@ -62,7 +62,7 @@ func TestSetNodeAttentionHoldsOneNodeLockAtATime(t *testing.T) {
 	if blocked == 0 {
 		t.Fatal("the sweep never waited on run-y's lock")
 	}
-	if run, err := s.GetRun(ctx, "run-x"); err != nil || run.NeedsAttention != "x" {
+	if run, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRun(ctx, "run-x"); err != nil || run.NeedsAttention != "x" {
 		t.Fatalf("run-x = %+v, %v; its reason is not committed while run-y's lock is held, so the sweep holds both", run, err)
 	}
 	if err := holder.Rollback(); err != nil {
@@ -71,7 +71,7 @@ func TestSetNodeAttentionHoldsOneNodeLockAtATime(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if run, err := s.GetRun(ctx, "run-y"); err != nil || run.NeedsAttention != "y" {
+	if run, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRun(ctx, "run-y"); err != nil || run.NeedsAttention != "y" {
 		t.Fatalf("run-y = %+v, %v; want its reason once the lock is released", run, err)
 	}
 }

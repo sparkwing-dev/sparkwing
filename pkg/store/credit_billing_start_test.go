@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func billingFrom(t *testing.T, s *store.Store, runID, nodeID string) int64 {
@@ -38,7 +39,7 @@ func dispatchedClaim(t *testing.T, s *store.Store, claimant store.ClaimIdentity,
 	if err != nil {
 		t.Fatalf("dispatched claim: %v", err)
 	}
-	n, err := s.GetNode(context.Background(), runID, "build")
+	n, err := teststore.ForTeam(t, s, store.DefaultTeam).GetNode(context.Background(), runID, "build")
 	if err != nil {
 		t.Fatal(err)
 	}

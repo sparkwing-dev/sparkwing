@@ -85,7 +85,7 @@ func TestOpenTightensExistingSQLiteFiles(t *testing.T) {
 			t.Errorf("%s mode = %04o after reopening, want 0600", name, got)
 		}
 	}
-	if _, err := second.GetRun(t.Context(), "run-before"); err != nil {
+	if _, err := teststore.ForTeam(t, second, store.DefaultTeam).GetRun(t.Context(), "run-before"); err != nil {
 		t.Fatalf("reopened store lost its run: %v", err)
 	}
 }

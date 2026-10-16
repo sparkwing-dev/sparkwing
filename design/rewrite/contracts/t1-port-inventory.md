@@ -2636,3 +2636,21 @@ check immutable placement identity and separation from machine registrations.
 Observation-write failures prove award and renewal rollback. Corrupt observations
 return no partial snapshot. These are component and SQLite proofs. They do not
 claim a native placement cell or missing concurrency/queue-depth ingestion.
+
+## Explicit tenant reporting reader cut
+
+`TestStoreBackendTenantReadsProperty` generates 24 tenants and checks that the
+same backend returns only their run, jobs and events. It also refuses rows from
+the default team and checks the reverse direction. The original backend fails
+on the first nondefault job listing. The retained backend round-trip fixture now
+uses the current schema. Existing reader callers use Tenant explicitly, while
+cross-team query tests select Operator. Billing test files receive only reader
+caller substitutions.
+
+The two source-scanning default-team twin guards are deleted because the
+production twins and their backend fallback are removed. The compiler now
+rejects those calls. `TestSecrets_PipelineScopeResolution` retires with the raw
+fallback reader. `TestSecretReadClaimScopePrecedenceProperty`,
+`TestSecretReadAuthorityAndSelectionProperty` and
+`TestSecretReadMemberScopesAndMaskedRefusal` retain authorized scope coverage.
+The encryption and tenant-key tests inspect exact rows with `GetSecretRow`.

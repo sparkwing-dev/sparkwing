@@ -297,7 +297,7 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 		t.Fatal("empty id in response")
 	}
 
-	run, err := st.GetRun(ctx, newID)
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, newID)
 	if err != nil {
 		t.Fatalf("GetRun(%s): %v", newID, err)
 	}

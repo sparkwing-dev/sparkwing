@@ -129,7 +129,6 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 	if _, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(store.DefaultTeam), Repositories: []string{"example.com/acme/repo"}, RegistrationID: "runner:default:runner-1", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner-1"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}}); err != nil {
 		t.Fatalf("enroll runner: %v", err)
 	}
-
 }
 
 func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) installFingerprint {
@@ -143,13 +142,13 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 	}
 	f.Schema = schema
 
-	runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 100})
+	runs, err := st.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 100})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
 	for _, r := range runs {
 		f.Runs = append(f.Runs, fmt.Sprintf("%s/%s/%s/%s", r.ID, r.Pipeline, r.Status, r.GitSHA))
-		nodes, err := st.ListNodes(ctx, r.ID)
+		nodes, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodes(ctx, r.ID)
 		if err != nil {
 			t.Fatalf("list nodes for %s: %v", r.ID, err)
 		}

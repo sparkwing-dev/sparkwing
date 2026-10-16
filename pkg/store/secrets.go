@@ -56,21 +56,6 @@ func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error) {
 	return t.readSecret(name, pipeline)
 }
 
-// GetSecretForPipeline returns t's row named for pipeline, falling back
-// to t's unscoped row when the pipeline has none of its own.
-func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error) {
-	if name == "" {
-		return nil, errors.New("secrets: name required")
-	}
-	if pipeline != "" {
-		sec, err := t.readSecret(name, pipeline)
-		if err == nil || !errors.Is(err, ErrNotFound) {
-			return sec, err
-		}
-	}
-	return t.readSecret(name, "")
-}
-
 func (t *Tenant) readSecret(name, pipeline string) (*Secret, error) {
 	row := t.s.queryRowNoCtx(`
         SELECT name, value, principal, pipeline, masked, shared, created_at, updated_at

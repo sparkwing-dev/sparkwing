@@ -34,9 +34,9 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 		tn   *store.Tenant
 		want string
 	}{{alpha, "alpha-ci"}, {beta, "beta-ci"}} {
-		got, err := c.tn.GetSecretForPipeline("DEPLOY_KEY", "ci")
+		got, err := c.tn.GetSecretRow("DEPLOY_KEY", "ci")
 		if err != nil {
-			t.Fatalf("%s GetSecretForPipeline: %v", c.tn.Team(), err)
+			t.Fatalf("%s GetSecretRow: %v", c.tn.Team(), err)
 		}
 		if got.Value != c.want {
 			t.Errorf("%s reads DEPLOY_KEY = %q, want %q", c.tn.Team(), got.Value, c.want)
@@ -146,9 +146,13 @@ func TestConcurrencyKeyIsUniquePerTeam(t *testing.T) {
 	alpha := tenantFor(t, st, "alpha")
 	beta := tenantFor(t, st, "beta")
 	seedConcurrencyRun(t, alpha, "a1")
- if err:=teststore.SeedNode(st,ctx,store.Node{RunID:"a1",NodeID:"n1",Status:"pending"});err!=nil{t.Fatal(err)}
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: "a1", NodeID: "n1", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
 	seedConcurrencyRun(t, beta, "b1")
- if err:=teststore.SeedNode(st,ctx,store.Node{RunID:"b1",NodeID:"n1",Status:"pending"});err!=nil{t.Fatal(err)}
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: "b1", NodeID: "n1", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, c := range []struct {
 		tn    *store.Tenant
