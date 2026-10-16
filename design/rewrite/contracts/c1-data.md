@@ -1613,9 +1613,10 @@ future claim and opens no compute reservation at generation zero.
 
 Queued matching checks funding before ranking eligible work and repeats the
 reservation under the ledger lock when awarding. An unfunded team cannot block
-funded matches. Renewal starts Cloud job billing without consuming an execution
-attempt. Owner Executing reports current compute. False closes an interval and
-true resumes it with a fresh key. Application retries keep their reservation
+funded matches. Renewal starts Cloud job, plan and eval billing regardless of
+reported activity, without consuming a job execution attempt. Customer-runner
+owner Executing reports current compute: false closes an interval and true
+resumes it with a fresh key. Application retries keep their reservation
 and open another interval. Reaping settles at the persisted lease lapse.
 The eval lease and billing generation come from persisted expansion authority.
 C2's production calculator and W3's current-activity reporting remain integration
@@ -3147,8 +3148,9 @@ active compute usage read that ledger.
 Non-final metered checkpoints check headroom after charging and stamp the team's
 existing exhaustion time. Renewal delivers cancellation at the grace boundary.
 `DefaultCreditGraceSeconds` is the single ten-minute placeholder pending Korey's
-policy decision. Restored headroom clears exhaustion. The plan/eval executing
-flag behavior remains unchanged pending M4.
+policy decision. Restored headroom clears exhaustion. Cloud plan and eval
+intervals open on the first renewal and remain open regardless of the holder's
+executing flag, as Cloud job intervals do.
 
 Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because leased expiry still needs the digest to

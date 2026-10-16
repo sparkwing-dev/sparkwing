@@ -355,7 +355,7 @@ func TestMeteredUnitIssuanceCannotOutliveClaimAuthorityProperty(t *testing.T) {
 	}
 }
 
-func TestMeteredUnitOwnerWaitsDoNotAccrueCompute(t *testing.T) {
+func TestMeteredUnitOwnerWaitBillingFollowsPlacement(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, kind == capability.UnitPlan)
@@ -379,12 +379,12 @@ func TestMeteredUnitOwnerWaitsDoNotAccrueCompute(t *testing.T) {
 					t.Fatalf("owner finish: %+v, %v", applied, err)
 				}
 			}
-			want := int64(40)
-			if kind == capability.UnitTrigger {
-				want = 120
+			intervals := 2
+			if kind == capability.UnitPlan {
+				intervals = 1
 			}
-			unitBillingTotal(t, s, want, true)
-			rewriteSchemaCount(t, s.db, "billable_intervals", 2)
+			unitBillingTotal(t, s, 120, true)
+			rewriteSchemaCount(t, s.db, "billable_intervals", intervals)
 		})
 	}
 }
