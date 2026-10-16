@@ -184,7 +184,7 @@ func TestHostStepPersistence(t *testing.T) {
 			case "step_failed":
 				want[1] = map[string]string{"body": "failed", "blocked": "cancelled", "cleanup": "passed"}
 			case "step_write_refused":
-				want[1]["body"] = "running"
+				want[1]["body"] = "failed"
 			}
 			if !reflect.DeepEqual(states, want) {
 				t.Fatalf("persisted step states=%v, want=%v", states, want)
