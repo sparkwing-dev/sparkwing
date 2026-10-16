@@ -61,6 +61,15 @@ func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runI
 	if c.Team != string(team) || c.Binding.RunID != runID || c.Binding.Holder != ref.Holder || c.Binding.Generation != ref.Generation || c.Prefix != actor.CapabilityPrefix {
 		return holderRefusal()
 	}
+	if c.Unit == capability.UnitPlan {
+		var sealed bool
+		if err := tx.QueryRowContext(ctx, `SELECT spec_json IS NOT NULL FROM runs WHERE team=? AND id=?`, team, runID).Scan(&sealed); err != nil {
+			return err
+		}
+		if sealed || c.Binding.Kind != capability.BindingRun || !slices.Contains(c.Grants, capability.NodeResult) {
+			return holderRefusal()
+		}
+	}
 	var holder, prefix, status string
 	var generation int64
 	var until sql.NullInt64

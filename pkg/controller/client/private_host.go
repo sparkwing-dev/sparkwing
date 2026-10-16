@@ -213,10 +213,7 @@ func (c *LocalHostClient) Principal(ctx context.Context) (capability.Principal, 
 	if err != nil {
 		return capability.Principal{}, err
 	}
-	pattern := "/api/v1/runs/{run}/heartbeat"
-	if c.node != "" {
-		pattern = "/api/v1/runs/{run}/jobs/{job}/heartbeat"
-	}
+	pattern := "/api/v1/claims/{claim}/heartbeat"
 	route, ok := capability.LookupRoute("POST", pattern)
 	if !ok {
 		return capability.Principal{}, errors.New("owner heartbeat policy is unavailable")

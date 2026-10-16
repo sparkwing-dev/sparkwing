@@ -153,7 +153,7 @@ func (t *Tenant) writeAnnotation(ctx context.Context, annotation AnnotationWrite
 		return err
 	}
 	defer rollbackOrLog(tx)
-	row, err := checkResultWriterTx(ctx, tx, t.team, annotation.Ref, annotation.Actor)
+	row, err := checkMetadataWriterTx(ctx, tx, t.team, annotation.Ref, annotation.Actor, annotation.StepID)
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (t *Tenant) writeSummary(ctx context.Context, summary SummaryWrite) error {
 		return err
 	}
 	defer rollbackOrLog(tx)
-	row, err := checkResultWriterTx(ctx, tx, t.team, summary.Ref, summary.Actor)
+	row, err := checkMetadataWriterTx(ctx, tx, t.team, summary.Ref, summary.Actor, summary.StepID)
 	if err != nil {
 		return err
 	}

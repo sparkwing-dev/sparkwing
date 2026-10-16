@@ -161,7 +161,7 @@ func validateAward(a CloudJobAward) error {
 			return errors.New("plan award requires a run binding without a job or expansion source")
 		}
 	case CloudEval:
-		if b.NodeID == "" || b.SourceNodeID != b.NodeID || b.SourceGeneration <= 0 {
+		if b.NodeID == "" || b.SourceNodeID != b.NodeID || b.SourceGeneration < 0 {
 			return errors.New("eval award requires its source generation")
 		}
 	case CloudWork:

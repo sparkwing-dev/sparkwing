@@ -236,8 +236,8 @@ checks that a changed Job binding cannot release another award's reservation.
 controller handlers, SQLite issuance and persisted cleanup reader. It publishes
 and activates a Job, exchanges its bootstrap, retains the Job through a running
 attempt, and retires it after committed completion. Kubernetes and the Cloud
-boundary remain fixtures. Deployment network probes and node cleanup still need
-native bindings. `FuzzStoreLauncherAuthorityW8` checks
+boundary remain fixtures in that test. `NewProductionBoundary` supplies live
+Kubernetes canaries and reservation-scoped cleanup for the installed launcher. `FuzzStoreLauncherAuthorityW8` checks
 changed, narrowed and revoked credentials, route selection and provider failure
 across claims and synchronization. Refusals leave work unclaimed. Other
 components retain their fake controller boundaries. Deployed egress, node
@@ -256,3 +256,64 @@ its SDK after exchange. Plan/eval host composition remains open. Component
 exchange tests do not establish a working pod entrypoint.
 
 <!-- design:end -->
+
+## Production boundary
+
+The installed launcher loads the standard Kubernetes client configuration and
+composes its award transport with `NewProductionBoundary`. The launcher account
+can create, read and delete probe Pods, and list, create and delete NetworkPolicies
+in the jobs namespace. It retains create/delete-only Secret access.
+
+Before work starts, the boundary requires a default-deny egress policy selecting
+the exact Job labels. It inventories declared DaemonSet ports and observed
+kubelet endpoints. A temporary listener Pod has an explicit ingress allow rule. A separate witness
+Pod must connect through a rule allowing only that listener before a denied
+connection can establish egress enforcement. A separate root,
+privileged canary uses the workload's labels. It checks controller connectivity,
+then denies the listener and observed cluster API, DaemonSet TCP and kubelet
+endpoints. It repeats the cluster endpoint checks from the node network namespace
+with `nsenter`. DNS ports remain available. Declared UDP ports are inventoried,
+while UDP denial needs protocol-specific native checks.
+
+Canary results require unchanged admitted commands, images, labels, reservation
+and node UID. Both listener readiness and a successful measurement Pod are
+required. Policy and endpoint snapshots must match after canary cleanup. Probe
+Pods inherit the award deadline. Failures preserve the reservation until cleanup
+can finish. A new launcher can remove only probe Pod and policy instances bound
+to that exact reservation, using Kubernetes UID preconditions. No launcher
+credential or service-account token enters a canary.
+
+The known required destination is the controller. Source, blob and provider
+origins depend on deployment and still need native verification. The checks do
+not exhaust every network destination or every node escape. Pod-level policy
+alone cannot authorize a deployment where the escaped node network still reaches
+control-plane services. Native enforcement, UDP services, image execution,
+DinD shutdown and kubelet reclamation remain cluster acceptance requirements.
+
+All authored workload state uses container writable layers and emptyDir storage.
+Release waits for all non-DaemonSet Pods to disappear, then removes
+reservation-owned probe state before permitting reuse. Kubernetes owns the
+associated ephemeral-state reclamation. Privileged pipeline code can change
+arbitrary host state under the accepted threat model. That state requires node
+reprovisioning and is outside reservation-scoped Kubernetes cleanup.
+
+## Preparation leases
+
+Boundary probes, image startup and source checkout can take longer than a unit's
+three-minute lease. The launcher keeps unexchanged awards alive using the existing
+sync route's `preparing` fences and `prepared` acknowledgements. Its root credential
+owns those requests. The bootstrap still grants only source read and one exchange.
+
+`LaunchOne` checks preparation authority before reserving a node, then runs the
+shared lease keeper through activation. Renewal also reconciles existing Jobs,
+so a slow new reservation does not stop another Job's source checkout heartbeat.
+Every return cancels and joins that keeper. Normal reconciliation keeps persisted
+Jobs alive until exchange. Exchanged claims receive no launcher renewal because
+the executing host owns their lease.
+
+Preparation retains the existing award deadline, capacity and Cloud billing rules.
+Shared financial functions open and checkpoint the held Cloud interval without
+marking the unit running. Existing credit grace still applies. At grace expiry,
+accounting commits and the original bootstrap lease ends, permitting cleanup and
+refusing exchange. Finished, cancelled or expired own awards do not prevent
+reconciliation of other live Jobs.

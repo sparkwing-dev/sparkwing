@@ -121,6 +121,12 @@ func TestProductionRunnerNodeReachesNativeHost(t *testing.T) {
 	testProductionNativeBinding(t, capability.UnitNode)
 }
 
+func TestProductionCloudPlanAndEvalReachNativeHost(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval} {
+		t.Run(string(kind), func(t *testing.T) { testProductionNativeBinding(t, kind) })
+	}
+}
+
 func testProductionNativeBinding(t *testing.T, kind capability.UnitKind) {
 	t.Helper()
 	hosting, unit := productionNativeAward(t, kind)
@@ -163,6 +169,15 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		purpose, grants = capability.PurposeWork, []capability.Grant{capability.NodeReport, capability.DataRead}
 		prefix += "/nodes/job"
 	}
+	if kind == capability.UnitPlan {
+		binding.Kind = capability.BindingRun
+		purpose, grants = capability.PurposePlan, []capability.Grant{capability.NodeReport, capability.NodeResult, capability.DataRead}
+	}
+	if kind == capability.UnitEval {
+		binding.Kind, binding.NodeID = capability.BindingNode, "job"
+		binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: "unit", Holder: "eval-holder", Generation: 7}
+		purpose, grants = capability.PurposeEval, []capability.Grant{capability.ExpansionSubmit, capability.DataRead}
+	}
 	principal := capability.Principal{Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Capability: capability.Capability{
 		Prefix: "owner", Digest: sha256.Sum256([]byte(raw)), Team: "team", Audience: capability.Controller,
 		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Issuance: capability.Award,
@@ -175,10 +190,13 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/project", PipelineDir: ".sparkwing"}},
 	}}
 	unit := controllerwire.ClaimedUnit{Unit: kind, UnitID: "unit", Purpose: purpose, Delivery: capability.DeliveryDirect, RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: raw, Request: request, LeaseExpiresAt: now.Add(time.Hour), Runner: nodeproto.RunnerIdentity{Name: "runner", Type: "runner", Labels: []string{}}}
-	if kind == capability.UnitNode {
+	if kind == capability.UnitNode || kind == capability.UnitEval {
 		unit.Engine = &engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
 		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: *unit.Engine}}, Plan: json.RawMessage(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
 		unit.Execution = &runspec.JobExecutionSettings{}
+	}
+	if kind == capability.UnitEval {
+		unit.SourceGeneration = binding.Generation
 	}
 	connection := client.EngineOptions{URL: "http://controller.invalid", Bearer: fixedBearer(raw), HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer "+raw {
@@ -187,10 +205,17 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		var response any
 		switch r.Method + " " + r.URL.Path {
 		case "POST " + prefix + "/authentication":
-			response = localhostwire.LocalAuthentication{Snapshot: capability.AuthenticationSnapshot{
+			snapshot := capability.AuthenticationSnapshot{
 				Now: now, Authorities: []capability.AuthorityState{{Principal: principal, MembershipValid: true}},
 				Binding: capability.BindingState{Current: binding, LeaseExpiresAt: now.Add(time.Hour)},
-			}, Digests: [][32]byte{principal.Capability.Digest}}
+			}
+			if kind == capability.UnitEval {
+				until := now.Add(time.Hour)
+				finished := now.Add(-time.Minute)
+				snapshot.Binding.FinishedAt = &finished
+				snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *binding.Expansion, ExpiresAt: until, ControllerLeaseExpiresAt: &until}
+			}
+			response = localhostwire.LocalAuthentication{Snapshot: snapshot, Digests: [][32]byte{principal.Capability.Digest}}
 		case "GET " + prefix + "/data-authority":
 			response = localhostwire.LocalDataAuthority{Authority: blob.Authority{CapabilityRef: "owner", Principal: "runner", Repo: "gh:42"}}
 		case "GET " + prefix + "/snapshot":
@@ -213,7 +238,12 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 }
 
 func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
-	return store.NodeRow{Ref: store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Status: store.StatusPending, Generation: unit.Binding.Generation, ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
+	row := store.NodeRow{Ref: store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Status: store.StatusPending, Generation: unit.Binding.Generation, ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
+	if unit.Unit == capability.UnitEval {
+		row.Status, row.Outcome, row.Expansion = store.StatusDone, store.NodeSuccess, store.ExpansionExpected
+		row.ClaimedBy, row.CapabilityPrefix = "", ""
+	}
+	return row
 }
 
 func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
@@ -296,6 +326,10 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 	if os.Getenv("SPARKWING_TEST_RUNNER_ENTRYPOINT") == "1" {
 		http.DefaultTransport = productionTransport(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Host == "kubernetes.example" {
+				fmt.Fprintln(os.Stderr, productionHTTPBoundary+": "+r.Method+" "+r.URL.Host+r.URL.Path)
+				os.Exit(3)
+			}
 			return nil, fmt.Errorf("%s: %s %s%s", productionHTTPBoundary, r.Method, r.URL.Host, r.URL.Path)
 		})
 		for i, arg := range os.Args {
@@ -317,6 +351,10 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory := t.TempDir()
+	kubeconfig := filepath.Join(directory, "kubeconfig")
+	if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\ncurrent-context: test\ncontexts:\n- name: test\n  context:\n    cluster: kube\nclusters:\n- name: kube\n  cluster:\n    server: https://kubernetes.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	credentials := runnerCredentials(t)
 	config := filepath.Join(directory, "config.yaml")
 	if err := os.WriteFile(config, []byte("runner:\n  controller: https://controller.example\n  repos: [github.com/team/*]\n  credentials_dir: "+credentials+"\n"), 0o600); err != nil {
@@ -339,7 +377,7 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 	for name, args := range commands {
 		t.Run(name, func(t *testing.T) {
 			child := exec.CommandContext(t.Context(), os.Args[0], append([]string{"-test.run=^TestInstalledRunnerRuntimeComposition$", "--", name}, args...)...)
-			child.Env = append(os.Environ(), "SPARKWING_TEST_RUNNER_ENTRYPOINT=1", "HOME="+directory, "SPARKWING_HOME="+filepath.Join(directory, "state"), "XDG_CACHE_HOME="+filepath.Join(directory, "cache"))
+			child.Env = append(os.Environ(), "SPARKWING_TEST_RUNNER_ENTRYPOINT=1", "HOME="+directory, "SPARKWING_HOME="+filepath.Join(directory, "state"), "XDG_CACHE_HOME="+filepath.Join(directory, "cache"), "KUBECONFIG="+kubeconfig)
 			output, err := child.CombinedOutput()
 			t.Logf("entrypoint result: %s", output)
 			if err == nil {

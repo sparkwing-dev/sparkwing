@@ -43,7 +43,7 @@ type LogUnit struct {
 // LogSubject is shared by signing, segment commits, live pushes and reads.
 // JobAttempt requires Attempt only, matching Team and RunID. OwnerUnit requires
 // Unit only; eval requires Source and trigger/plan forbid it. Generations and
-// attempt ordinals are positive. No synthetic job or sentinel attempt is valid.
+// attempt ordinals are positive; a materialized eval source can be generation zero.
 type LogSubject struct {
 	Kind    LogSubjectKind           `json:"kind"`
 	Team    string                   `json:"team"`
@@ -72,7 +72,7 @@ func (subject LogSubject) Validate() error {
 				return nil
 			}
 		case LogEval:
-			if s := subject.Unit.Source; s != nil && s.NodeID != "" && s.Generation > 0 {
+			if s := subject.Unit.Source; s != nil && s.NodeID != "" && s.Generation >= 0 {
 				return nil
 			}
 		}

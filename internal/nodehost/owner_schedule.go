@@ -437,18 +437,7 @@ func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted Accepte
 	if err != nil {
 		return err
 	}
-	commit := func() error {
-		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: actor, Body: body, Failure: failure})
-		return err
-	}
-	if h.Masks != nil && failure == nil {
-		var proposal nodeproto.PlanDoc
-		if err := json.Unmarshal(body, &proposal); err != nil {
-			return err
-		}
-		return h.Masks.Accept(proposal, commit)
-	}
-	return commit()
+	return h.commitExpansion(ctx, row, actor, body, failure)
 }
 
 func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.ScheduleDecision) (RunCompletion, error) {

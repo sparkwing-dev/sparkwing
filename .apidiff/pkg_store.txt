@@ -1409,6 +1409,7 @@ type NodeRow struct {
 	SpecHash              string
 	OutputRecord          *blob.RecordKey
 	ManifestRecord        *blob.RecordKey
+	OwnerExecution        *OwnerExecution
 }
 const NodeRunning NodeState = "running"
 const NodeSkipped NodeState = "skipped"
@@ -1537,8 +1538,18 @@ type OutputRef struct {
 	Size   int64
 	SHA256 string
 }
+func OwnerCanExecute(owner capability.Principal) func(NodeRow) bool
 const OwnerController OwnerLeaseKind = "controller"
 const OwnerEval OwnerLeaseKind = "eval"
+type OwnerExecution struct {
+	Owner          capability.AuthorityRef
+	Team           Team
+	Generation     int64
+	Node           NodeRef
+	NodeGeneration int64
+	SpecHash       string
+	Allowed        bool
+}
 type OwnerLeaseKind string
 type OwnerLeaseRef struct {
 	Kind             OwnerLeaseKind
@@ -2435,6 +2446,7 @@ func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) 
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
+func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error)
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)

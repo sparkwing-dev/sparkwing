@@ -139,3 +139,13 @@ func TestFollowReconciliationMaterializeMissNeverAwardsExecution(t *testing.T) {
 		t.Fatal("execution reconcile silently returned dispatch")
 	}
 }
+
+func TestFollowReconciliationAcceptsReadyPlacementDispatch(t *testing.T) {
+	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	ready := time.Unix(60, 0)
+	f := &reconciliationFixture{results: []store.ReconciledNode{{Kind: store.Dispatch, Node: store.NodeRow{Ref: ref, Status: store.StatusPending, ReadyAt: &ready}}}}
+	got, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref}, nil)
+	if err != nil || got.Kind != store.Dispatch {
+		t.Fatalf("placement dispatch: %s %v", got.Kind, err)
+	}
+}

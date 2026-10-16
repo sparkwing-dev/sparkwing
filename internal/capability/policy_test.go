@@ -24,8 +24,12 @@ func TestPrivateNodeHostRoutesRequireBoundClaimAuthority(t *testing.T) {
 		method string
 		suffix string
 	}{
-		{"GET", ""}, {"GET", "/snapshot"}, {"GET", "/data-authority"},
-		{"POST", "/authentication"}, {"POST", "/binding"}, {"POST", "/transition"},
+		{"GET", ""},
+		{"GET", "/snapshot"},
+		{"GET", "/data-authority"},
+		{"POST", "/authentication"},
+		{"POST", "/binding"},
+		{"POST", "/transition"},
 	} {
 		path := "/api/v1/runs/{run}/local-host/nodes/{job}" + operation.suffix
 		route, ok := capability.LookupRoute(operation.method, path)
@@ -33,8 +37,16 @@ func TestPrivateNodeHostRoutesRequireBoundClaimAuthority(t *testing.T) {
 			t.Fatalf("missing private claim policy: %s %s", operation.method, path)
 		}
 		for _, access := range route.Access {
+			read := operation.method == "GET" || operation.suffix == "/authentication" || operation.suffix == "/binding"
+			if access.Credential == capability.CredentialEval {
+				if !read || access.Binding != capability.BindRun || access.Liveness != capability.LiveExpansion || !slices.Equal(access.Grants, []capability.Grant{capability.ExpansionSubmit}) {
+					t.Errorf("private eval route exceeds its read boundary: %s %+v", path, access)
+				}
+				continue
+			}
+			plan := read && access.Binding == capability.BindPlanOwner && slices.Equal(access.Grants, []capability.Grant{capability.DataRead})
 			if access.Credential != capability.CredentialClaim || len(access.Grants) == 0 ||
-				access.Binding != capability.BindOwnNode && access.Binding != capability.BindRunOfTrigger ||
+				access.Binding != capability.BindOwnNode && access.Binding != capability.BindRunOfTrigger && !plan ||
 				access.Liveness != capability.LiveSensitive && access.Liveness != capability.LiveReporting && access.Liveness != capability.LiveResult {
 				t.Errorf("private host route lacks a live claim fence: %s %+v", path, access)
 			}

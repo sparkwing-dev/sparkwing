@@ -40,6 +40,28 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	}()
 	checkout := spec.LocalCheckout
 	client := gitClient{env: gitEnvironment(environment), bundleTransport: options.BundleTransport}
+	if options.PreparedCheckout != "" {
+		if spec.LocalCheckout != "" || !filepath.IsAbs(options.PreparedCheckout) || spec.SHA == "" {
+			return entry, errors.New("prepared source requires an absolute checkout and sealed remote commit")
+		}
+		checkout = options.PreparedCheckout
+		remote, err := client.run(ctx, checkout, "", "remote", "get-url", "origin")
+		if err != nil {
+			return entry, err
+		}
+		actual, err := sourceurl.CaseIdentity(remote)
+		expected, expectedErr := sourceurl.CaseIdentity(spec.RemoteURL)
+		if err != nil || expectedErr != nil || actual != expected {
+			return entry, errors.New("prepared source origin differs from the sealed remote")
+		}
+		changes, err := client.run(ctx, checkout, "", "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
+		if err != nil {
+			return entry, err
+		}
+		if changes != "" {
+			return entry, errors.New("prepared source differs from its sealed checkout")
+		}
+	}
 	if checkout == "" {
 		if !filepath.IsAbs(options.Workspace) {
 			return entry, errors.New("remote source requires an absolute host workspace")
@@ -71,6 +93,11 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 				return entry, err
 			}
 		}
+		if entry.DefaultBranch != "" {
+			if _, err := client.run(ctx, checkout, "", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+entry.DefaultBranch); err != nil {
+				return entry, err
+			}
+		}
 	}
 	actual, err := client.run(ctx, checkout, "", "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
@@ -80,7 +107,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		return entry, errors.New("source checkout HEAD differs from the sealed commit")
 	}
 	entry.SHA = actual
-	if entry.DefaultBranch == "" && spec.LocalCheckout != "" {
+	if entry.DefaultBranch == "" && (spec.LocalCheckout != "" || options.PreparedCheckout != "") {
 		branch, err := client.run(ctx, checkout, "", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
 		if err == nil {
 			entry.DefaultBranch = strings.TrimPrefix(branch, "refs/remotes/origin/")

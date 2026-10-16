@@ -5,12 +5,22 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+type localOwnerState struct {
+	*store.Tenant
+	owner capability.AuthorityRef
+}
+
+func (s localOwnerState) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
+	return s.Tenant.ReadOwnerSnapshot(ctx, s.owner, run)
+}
 
 func newLocalNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions) (_ runners.NativeServices, err error) {
 	options.Bearer = binding.Bearer
@@ -33,13 +43,18 @@ func newLocalNativeServices(ctx context.Context, home string, owned *store.Store
 	if err != nil {
 		return runners.NativeServices{}, err
 	}
+	var state nodehost.NativeHostStore = binding.Tenant
+	if binding.Principal.Capability.Unit == capability.UnitTrigger {
+		state = localOwnerState{Tenant: binding.Tenant, owner: binding.Principal.Authority}
+	}
 	services, err := localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
-		Home: home, Version: installedVersion(), Store: binding.Tenant, Parent: owned, Bindings: owned,
-		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: source, Local: func(store.NodeRow) bool { return true },
+		Home: home, Version: installedVersion(), Store: state, Parent: owned, Bindings: owned,
+		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: source, Local: store.OwnerCanExecute(binding.Principal),
 	}, private))
 	if err != nil {
 		return runners.NativeServices{}, err
 	}
+	services.Config.Owner.Delegator = owned
 	closeServices := services.Close
 	services.Close = func() error { return errors.Join(closeServices(), private.Close()) }
 	adopt := services.Config.Owner.AdoptClaim

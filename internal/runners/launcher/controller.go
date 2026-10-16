@@ -95,7 +95,7 @@ func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryP
 		return CloudJobBinding{}, err
 	}
 	fence := unit.Binding
-	if unit.Delivery != delivery || unit.UnitID == "" || fence.Generation <= 0 || fence.Attempt < 0 {
+	if unit.Delivery != delivery || unit.UnitID == "" || fence.Generation < 0 || unit.Unit != capability.UnitEval && fence.Generation == 0 || fence.Attempt < 0 {
 		return CloudJobBinding{}, errors.New("controller returned an invalid Cloud award binding")
 	}
 	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: fence.Holder, Generation: fence.Generation, Attempt: fence.Attempt, OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: deadlineValue(unit.ParentCapabilityExpiry)}
@@ -110,7 +110,7 @@ func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryP
 			return CloudJobBinding{}, errors.New("controller returned an invalid Cloud job binding")
 		}
 		if unit.Unit == capability.UnitEval {
-			if unit.Purpose != capability.PurposeEval || unit.SourceGeneration <= 0 || unit.SourceGeneration != fence.Generation {
+			if unit.Purpose != capability.PurposeEval || unit.SourceGeneration < 0 || unit.SourceGeneration != fence.Generation {
 				return CloudJobBinding{}, errors.New("controller returned an invalid Cloud eval source")
 			}
 			lease := fence.Expansion
@@ -178,6 +178,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		byJob[observation.JobName], byAward[observed.Award] = i, i
 		jobs[i] = observed.Job
 		request.Observed = append(request.Observed, observed)
+		request.Preparing = append(request.Preparing, observed.Award)
 	}
 	if len(observations) == 0 {
 		return nil, nil

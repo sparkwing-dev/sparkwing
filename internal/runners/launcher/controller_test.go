@@ -116,6 +116,29 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 	}
 }
 
+func TestMemoizedSourceGenerationZeroReachesCloudJob(t *testing.T) {
+	unit := wireAward(capability.UnitEval)
+	unit.Binding.Generation, unit.SourceGeneration = 0, 0
+	control, err := NewControllerControl(launcherWireFake{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+		return controllerwire.ClaimResponse{Claim: &unit}, nil
+	}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitEval}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	award, err := control.Claim(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if award.Binding.Generation != 3 || award.Binding.SourceGeneration != 0 {
+		t.Fatalf("lease replaced memoized source: %+v", award.Binding)
+	}
+	cfg := productionBoundaryConfig()
+	cfg.CPUCeiling, cfg.MemoryCeiling = 2, 2<<30
+	if _, err := BuildJob(t.Context(), time.Now(), cfg, *award, &boundaryFake{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
 	for kind := uint8(0); kind < 3; kind++ {
 		for mutation := uint8(0); mutation < 5; mutation++ {

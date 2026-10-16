@@ -145,6 +145,7 @@ type NodeRow struct {
 	SpecHash              string
 	OutputRecord          *blob.RecordKey
 	ManifestRecord        *blob.RecordKey
+	OwnerExecution        *OwnerExecution `json:",omitempty"`
 }
 
 // NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal.

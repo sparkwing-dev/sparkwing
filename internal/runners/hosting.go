@@ -69,6 +69,13 @@ func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(c
 		return claimed.Execute(ctx, inputs.node)
 	}
 	inputs.run.Storage = services.Storage
+	if captured.Unit == capability.UnitPlan {
+		_, err = owner.Plan(ctx, inputs.run)
+		return err
+	}
+	if captured.Unit == capability.UnitEval {
+		return owner.Evaluate(ctx, inputs.run, captured.JobID, captured.SourceGeneration, *captured.Binding.Expansion)
+	}
 	_, err = owner.Run(ctx, inputs.run)
 	return err
 }
@@ -142,10 +149,11 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 		return errors.New("runner hosting requires a directly usable award")
 	}
 	binding := unit.Binding
-	if binding.Holder == "" || binding.Generation <= 0 {
+	if unit.Unit != capability.UnitEval && (binding.Holder == "" || binding.Generation <= 0) {
 		return errors.New("runner award has an invalid run or claim fence")
 	}
-	if unit.Unit == capability.UnitNode {
+	switch unit.Unit {
+	case capability.UnitNode:
 		if unit.Purpose != capability.PurposeWork || binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
 			return errors.New("runner award has an invalid job or attempt binding")
 		}
@@ -155,8 +163,19 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 		if unit.Runner.Name == "" || unit.Runner.Type == "" {
 			return errors.New("runner award is missing its granted runner identity")
 		}
-	} else if (unit.Purpose != capability.PurposeTrigger && unit.Purpose != capability.PurposeHere) || binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {
-		return errors.New("runner award has an invalid trigger binding")
+	case capability.UnitTrigger:
+		if (unit.Purpose != capability.PurposeTrigger && unit.Purpose != capability.PurposeHere) || binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {
+			return errors.New("runner award has an invalid trigger binding")
+		}
+	case capability.UnitPlan:
+		if unit.Purpose != capability.PurposePlan || binding.Kind != capability.BindingRun || unit.JobID != "" || binding.NodeID != "" || binding.Expansion != nil || binding.Attempt != 0 {
+			return errors.New("runner award has an invalid plan binding")
+		}
+	case capability.UnitEval:
+		fence := binding.Expansion
+		if unit.Purpose != capability.PurposeEval || binding.Kind != capability.BindingNode || unit.JobID == "" || unit.JobID != binding.NodeID || unit.SourceGeneration < 0 || unit.SourceGeneration != binding.Generation || fence == nil || fence.Kind != capability.UnitEval || fence.ID != unit.UnitID || fence.Holder == "" || fence.Generation <= 0 || unit.Accepted == nil || unit.Engine == nil || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
+			return errors.New("runner award has an invalid source or eval lease binding")
+		}
 	}
 	if unit.LeaseExpiresAt.IsZero() {
 		return errors.New("runner award is missing its lease expiry")

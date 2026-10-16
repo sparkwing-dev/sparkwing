@@ -31,6 +31,25 @@ type localLogs struct {
 type logHostStore struct {
 	nodehost.NativeHostStore
 	logs *localLogs
+	unit capability.UnitKind
+}
+
+func (s logHostStore) AcceptPlan(ctx context.Context, request store.PlanAcceptance) (store.AcceptedPlan, error) {
+	if s.unit == capability.UnitPlan {
+		if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
+			return store.AcceptedPlan{}, err
+		}
+	}
+	return s.NativeHostStore.AcceptPlan(ctx, request)
+}
+
+func (s logHostStore) AcceptExpansion(ctx context.Context, request store.ExpansionSubmission) (store.AcceptedExpansion, error) {
+	if s.unit == capability.UnitEval {
+		if err := s.logs.close(context.WithoutCancel(ctx)); err != nil {
+			return store.AcceptedExpansion{}, err
+		}
+	}
+	return s.NativeHostStore.AcceptExpansion(ctx, request)
 }
 
 func (s logHostStore) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {

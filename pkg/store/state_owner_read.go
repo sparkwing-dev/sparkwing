@@ -20,22 +20,40 @@ func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.Aut
 		return RunSnapshot{}, err
 	}
 	c := p.Capability
-	if c.Team != string(t.team) || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.TriggerHost) {
+	rule, grant := capability.BindRunOfTrigger, capability.TriggerHost
+	switch c.Unit {
+	case capability.UnitPlan:
+		rule, grant = capability.BindPlanOwner, capability.DataRead
+	case capability.UnitEval:
+		rule, grant = capability.BindSourceReport, capability.DataRead
+	}
+	if c.Team != string(t.team) || c.Audience != capability.Controller || !slices.Contains(c.Grants, grant) {
 		return RunSnapshot{}, bindingRefusal()
 	}
-	if err := checkRelationTx(ctx, tx, p, capability.BindRunOfTrigger, capability.Target{RunID: runID}); err != nil {
+	if err := checkRelationTx(ctx, tx, p, rule, capability.Target{RunID: runID}); err != nil {
 		return RunSnapshot{}, err
 	}
 	state, err := authenticationBindingTx(ctx, tx, c)
 	if err != nil {
 		return RunSnapshot{}, err
 	}
-	if state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(tx.now()) {
+	if c.Unit != capability.UnitEval && (state.FinishedAt != nil || state.Current.Holder != c.Binding.Holder || state.Current.Generation != c.Binding.Generation || !state.LeaseExpiresAt.After(tx.now())) {
 		return RunSnapshot{}, bindingRefusal()
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, t.team, runID)
 	if err != nil {
 		return RunSnapshot{}, err
+	}
+	for i := range snapshot.Nodes {
+		node := &snapshot.Nodes[i]
+		if c.Unit != capability.UnitTrigger {
+			continue
+		}
+		allowed, err := ownerExecutionEligibleTx(ctx, tx, p, node.Ref)
+		if err != nil {
+			return RunSnapshot{}, err
+		}
+		node.OwnerExecution = &OwnerExecution{Owner: authority, Team: t.team, Generation: c.Binding.Generation, Node: node.Ref, NodeGeneration: node.Generation, SpecHash: node.SpecHash, Allowed: allowed}
 	}
 	if err := tx.Commit(); err != nil {
 		return RunSnapshot{}, err

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
@@ -147,6 +148,21 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 	row, err := readRunTx(ctx, tx, team, change.RunID)
 	if err != nil {
 		return Applied{}, err
+	}
+	if change.Actor.Kind == ActorRunHost {
+		principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
+		if err != nil {
+			return Applied{}, err
+		}
+		if principal.Capability.Unit == capability.UnitPlan {
+			if row.Spec != nil || change.Cause != RunFinish || change.To != RunFailed && change.To != RunCancelled || change.OwnerPolicy != nil {
+				return Applied{}, holderRefusal()
+			}
+			change.Reason, change.MaskedError = string(apierr.PlanFailed), "run preparation failed"
+			if change.To == RunCancelled {
+				change.Reason, change.MaskedError = string(apierr.ReasonCancelled), "cancellation requested"
+			}
+		}
 	}
 	if err := validateResultProofTx(ctx, tx, team, change.Actor, NodeRef{RunID: change.RunID}, 0); err != nil {
 		return Applied{}, err

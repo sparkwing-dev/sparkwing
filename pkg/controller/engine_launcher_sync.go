@@ -17,6 +17,9 @@ type LauncherSyncReader interface {
 var _ LauncherSyncReader = storeLauncherSync{}
 
 func (s *EngineController) syncLauncher(ctx context.Context, a capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+	if err := validateLauncherObservations(body.Observed); err != nil {
+		return controllerwire.LauncherSyncResponse{}, err
+	}
 	reader := s.Launcher
 	if reader == nil && s.Store != nil {
 		reader = storeLauncherSync{s.Store}
@@ -24,10 +27,22 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	if reader == nil {
 		return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
 	}
+	var prepared []capability.LeaseRef
+	if len(body.Preparing) > 0 {
+		if s.Store == nil {
+			return controllerwire.LauncherSyncResponse{}, missingEndpointPolicy()
+		}
+		var err error
+		prepared, err = s.Store.RenewLauncherPreparation(ctx, a.Principal.Authority, slices.Clone(body.Preparing))
+		if err != nil {
+			return controllerwire.LauncherSyncResponse{}, err
+		}
+	}
 	response, err := reader.ReadLauncherSync(ctx, a.Principal.Authority, slices.Clone(body.Observed))
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err
 	}
+	response.Prepared = slices.Clone(prepared)
 	response.Awards = append([]controllerwire.ClaimedUnit{}, response.Awards...)
 	for i := range response.Awards {
 		response.Awards[i].Capability = ""

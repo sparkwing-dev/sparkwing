@@ -181,6 +181,9 @@ func nativePlanBody(t *testing.T, e *EngineController, tenant *store.Tenant, a c
 
 func TestNativeControllerPlanReplayAfterOwnerHandoff(t *testing.T) {
 	e, tenant := engineRuntimeStore(t)
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "plan-replay", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller' WHERE team='a' AND id='run'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan' WHERE team='a' AND id='run'`)
 	engineSQL(t, e.Store, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,1)`, time.Now().Add(time.Hour).UnixNano())

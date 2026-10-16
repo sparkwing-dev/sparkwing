@@ -117,6 +117,16 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 		if row.Ref != (store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != unit.Binding.Generation || row.Attempt != unit.Binding.Attempt || !reflect.DeepEqual(row.Execution, *unit.Execution) {
 			return storeInputs{}, awardMismatch()
 		}
+	} else if unit.Unit == capability.UnitEval {
+		binding := principal.Capability.Binding
+		row, err := state.ReadNode(ctx, store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID})
+		if err != nil {
+			return storeInputs{}, err
+		}
+		if row.Generation != unit.SourceGeneration || row.Ref != (store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized || row.Expansion != store.ExpansionExpected {
+			return storeInputs{}, awardMismatch()
+		}
+		input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: binding.Generation}
 	} else {
 		binding := principal.Capability.Binding
 		owner := snapshot.Run.Owner
@@ -135,15 +145,12 @@ func (h StoreHosting) authenticate(ctx context.Context, unit controllerwire.Clai
 	if err := context.Cause(ctx); err != nil {
 		return capability.Principal{}, err
 	}
-	pattern := "/api/v1/runs/{run}/heartbeat"
-	if unit.Unit == capability.UnitNode {
-		pattern = "/api/v1/runs/{run}/jobs/{job}/heartbeat"
-	}
+	pattern := "/api/v1/claims/{claim}/heartbeat"
 	route, ok := capability.LookupRoute("POST", pattern)
 	if !ok {
 		return capability.Principal{}, errors.New("store hosting renewal policy is unavailable")
 	}
-	target := capability.Target{Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID}
+	target := capability.Target{Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, ClaimID: unit.UnitID}
 	authenticated, err := capability.NewAuthenticator(h.Store).Authenticate(ctx, capability.Presentation{
 		Raw: unit.Capability, Class: capability.CredentialBearer, Evidence: capability.RequestEvidence{Target: target},
 	}, route)

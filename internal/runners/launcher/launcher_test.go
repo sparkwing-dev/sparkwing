@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 )
 
@@ -346,4 +347,8 @@ func TestBuildJobRoundsFractionalCPUUpToKubernetesPrecision(t *testing.T) {
 			t.Fatalf("CPU %g=%dm, want %dm", test.cpu, got, test.milli)
 		}
 	}
+}
+
+func (c *controlFake) Prepare(ctx context.Context, _ []capability.LeaseRef) error {
+	return context.Cause(ctx)
 }

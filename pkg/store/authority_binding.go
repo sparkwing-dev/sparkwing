@@ -114,6 +114,8 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 		return bindingMachineTx(ctx, tx, c, target)
 	case capability.BindExpansion:
 		return bindingExpansionTx(ctx, tx, c, target)
+	case capability.BindSourceReport:
+		return bindingSourceReportTx(ctx, tx, c, target)
 	case capability.BindReadSet, capability.BindData:
 		if target.Data != nil {
 			var checker capability.DataAccessChecker = tx

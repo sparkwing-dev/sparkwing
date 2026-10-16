@@ -202,6 +202,19 @@ func TestRemoteReconciliationPreservesNonexecutingResults(t *testing.T) {
 	}
 }
 
+func TestRemoteReconciliationDispatchesAfterPlacementChanges(t *testing.T) {
+	job := executionWireFixture()
+	job.ClaimedBy, job.CapabilityPrefix = "", ""
+	job.LeaseExpiresAt = nil
+	now := time.Now()
+	job.ReadyAt = &now
+	wire := &ownerOperationWire{reconcile: controllerwire.ReconcileResponse{Kind: string(store.Dispatch), Job: job}}
+	result, err := (&RemoteOwnerStore{Controller: wire}).ReconcileNode(t.Context(), store.ReconcileRequest{Ref: store.NodeRef{RunID: "run", NodeID: "job"}})
+	if err != nil || result.Kind != store.Dispatch || result.Claim != nil || len(result.Bearer) != 0 {
+		t.Fatalf("placement change aborted dispatch: %+v %v", result, err)
+	}
+}
+
 func TestRemoteExpansionReplayRetainsCurrentJobStateAndEmptyBody(t *testing.T) {
 	job := executionWireFixture()
 	job.Status, job.Outcome = "done", "success"

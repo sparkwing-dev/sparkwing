@@ -148,6 +148,13 @@ func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSub
 // AcceptExpansion submits success or structured failure through C1's single
 // expansion transaction and returns only its persisted topology and replay result.
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error) {
+	if authorized.Principal.Capability.Unit == capability.UnitTrigger && authorized.Binding.Kind == capability.BindingTrigger {
+		var err error
+		authorized, err = s.sourceExpansionAuthorization(ctx, authorized, body.SourceGeneration)
+		if err != nil {
+			return controllerwire.ExpansionAccepted{}, err
+		}
+	}
 	request, err := ExpansionForStore(authorized, body)
 	if err != nil {
 		return controllerwire.ExpansionAccepted{}, err

@@ -167,18 +167,14 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, r
 	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.now()); err != nil {
 		return UnitClaim{}, err
 	}
-	if tx.store.claimProfiles == nil {
-		return UnitClaim{}, authorityError(apierr.Unavailable, "self-claim host profile is unavailable")
-	}
 	p, err := tx.ResolveAuthority(ctx, actor.Authority)
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	profile, available, err := tx.store.claimProfiles.ResolveClaimProfile(ctx, p)
+	demand, err := ownerClaimDemandTx(ctx, tx, p)
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	demand := UnitDemand{CapabilityPrefix: actor.CapabilityPrefix, Labels: profile.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: available}
 	claim, err := claimUnitTx(ctx, tx, demand, UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID})
 	if err != nil {
 		return UnitClaim{}, err

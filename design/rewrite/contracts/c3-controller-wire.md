@@ -863,6 +863,12 @@ claim prefix. The local host checks the persisted owner relation before adopting
 the store-issued node award. Each job process delegates from that node award.
 Owner evaluation retains its separate owner or eval authority.
 
+Runner composition adds a private `OwnerExecution` decision to trigger snapshot
+nodes. It binds the authenticated owner generation and node declaration hash.
+The controller applies the same preference policy as reconciliation. The native
+host uses `store.OwnerCanExecute(principal)` for its synchronous local decision.
+Plan and eval snapshots use their own lease relations and omit this decision.
+
 `client.NewLocalHostClient` implements private state reads, transitions,
 authentication and relational binding checks without opening the store. The
 controller derives mutation actors and fences from the authenticated bearer.
@@ -891,3 +897,26 @@ place. Failed event recording produces `unrecorded_step_outcome` findings;
 it does not fail a successful sweep. Partial cleanup findings accompany a
 canonical failure when another cleanup fails. The operation is never replayed by the
 client and is absent from the hosted controller.
+
+## W9 launcher preparation transport
+
+`LauncherSyncRequest.Preparing` is an optional `[]LeaseRef` serialized as
+`preparing`. `LauncherSyncResponse.Prepared` is an optional `[]LeaseRef`
+serialized as `prepared`. Each acknowledgement names an exact still-unexchanged
+bootstrap lease renewed by the authenticated launcher root. Observed Jobs and
+reservations keep their existing decision correlation. Ended own awards remain
+eligible for cleanup decisions when they receive no preparation acknowledgement.
+
+`CloudControl.Prepare` is required. `ControllerControl.Prepare` sends the fences
+without inventing a Kubernetes observation and requires an exact acknowledgement
+for each. Missing acknowledgements return typed `lock_held`. Existing bootstrap
+and exchanged claim grants do not change. The normal sync adapter carries the
+observed fences as preparation requests, keeping source init alive until exchange.
+
+`LaunchOne` obtains its first acknowledgement immediately after claiming, before
+boundary probes. A shared lease keeper then renews at lease/3 through Job and
+Secret publication and final activation. Each later beat also reconciles existing
+Jobs so one slow publication cannot strand another Job's source init. Its context
+is passed to the blocking operations and the keeper is cancelled and joined on
+every return. The normal launcher loop owns preparation after activation until
+bootstrap exchange transfers lease ownership to the executing host.

@@ -112,11 +112,13 @@ type LauncherObservation struct {
 
 // LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.
 type LauncherSyncRequest struct {
-	Observed []LauncherObservation `json:"observed"`
+	Observed  []LauncherObservation `json:"observed"`
+	Preparing []capability.LeaseRef `json:"preparing,omitempty"`
 }
 
 // LauncherSyncResponse carries immutable execution inputs and cleanup identities without bearers.
 type LauncherSyncResponse struct {
+	Prepared           []capability.LeaseRef    `json:"prepared,omitempty"`
 	Awards             []ClaimedUnit            `json:"awards"`
 	Remove             []LauncherJobRef         `json:"remove"`
 	RemoveReservations []LauncherReservationRef `json:"remove_reservations"`

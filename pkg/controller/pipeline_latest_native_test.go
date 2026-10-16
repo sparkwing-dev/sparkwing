@@ -46,3 +46,13 @@ func TestPipelineLatestHTTPUsesNativeDeclaredJobReference(t *testing.T) {
 	engineSQL(t, e.Store, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'`, []byte(`{"id":"job"}`))
 	engineClaimHTTP(t, handler, award.Claim.Capability, "GET", "/api/v1/pipelines/producer/latest", "", 403)
 }
+
+func TestOwnerEvaluationLatestUsesDeclaredReferenceBeforeWorkAward(t *testing.T) {
+	engine, _ := engineRuntimeStore(t)
+	owner := engineRuntimeClaim(t, engine, capability.UnitTrigger)
+	raw := nativeClaimPresentation(t, engine, owner)
+	engineSQL(t, engine.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{"id":"job","pipeline_refs":[{"pipeline":"producer","job":"output"}]}`), []byte(`{}`))
+	server := New(engine.Store, nil)
+	engineClaimHTTP(t, server.Handler(), raw, "GET", "/api/v1/pipelines/producer/latest", "", 404)
+	engineClaimHTTP(t, server.Handler(), raw, "GET", "/api/v1/pipelines/undeclared/latest", "", 403)
+}

@@ -28,10 +28,11 @@ const (
 // Both callbacks are required deployment integrations, with no manifest-only or no-op fallback.
 // Clear must be idempotent and confined to this reservation's state, including concurrent calls.
 type KubernetesBoundary struct {
-	Kube      kubernetes.Interface
-	Namespace string
-	Probe     func(context.Context, CloudNodeReservation) (CloudNetworkEvidence, error)
-	Clear     func(context.Context, CloudNodeReservation) error
+	Kube       kubernetes.Interface
+	Namespace  string
+	Probe      func(context.Context, CloudNodeReservation) (CloudNetworkEvidence, error)
+	Clear      func(context.Context, CloudNodeReservation) error
+	StopProbes func(context.Context, CloudNodeReservation) error
 }
 
 func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBinding, job string) (CloudNodeReservation, CloudNetworkEvidence, error) {
@@ -136,6 +137,11 @@ func (b *KubernetesBoundary) Release(ctx context.Context, reservation CloudNodeR
 	}
 	if held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
 		return errors.New("Cloud reservation changed before teardown")
+	}
+	if b.StopProbes != nil {
+		if err = b.StopProbes(ctx, reservation); err != nil {
+			return err
+		}
 	}
 	if err = b.vacant(ctx, node.Name); err != nil {
 		if errors.Is(err, ErrNoDedicatedNode) {

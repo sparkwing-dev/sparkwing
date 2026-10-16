@@ -40,7 +40,7 @@ func FollowReconciliation(ctx context.Context, reconciler Reconciler, request st
 			}
 			return result, nil
 		case store.Dispatch:
-			if !request.MaterializeOnly || result.Claim != nil || len(result.Bearer) != 0 || result.Node.Status != store.StatusPending || result.Node.Outcome != "" || result.Node.ClaimedBy != "" {
+			if !request.MaterializeOnly && result.Node.ReadyAt == nil || result.Claim != nil || len(result.Bearer) != 0 || result.Node.Status != store.StatusPending || result.Node.Outcome != "" || result.Node.ClaimedBy != "" {
 				return store.ReconciledNode{}, errors.New("reconciliation returned an invalid dispatch miss")
 			}
 			return result, nil

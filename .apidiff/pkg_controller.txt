@@ -196,6 +196,7 @@ type Endpoint struct {
 type EngineController struct {
 	Store             *store.Store
 	RunnerPolicy      RunnerAdmissionPolicy
+	LocalRunnerPolicy RunnerAdmissionPolicy
 	VersionPolicy     *SignedEngineVersionPolicy
 	Units             UnitRenewer
 	Launcher          LauncherSyncReader
@@ -572,6 +573,7 @@ type SignUpSettingsChange struct {
 type SignedEngineVersionPolicy struct {
 	Resolver *engine.Resolver
 }
+func (p SignedEngineVersionPolicy) CheckRunner(ctx context.Context, version string) error
 func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error)
 func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) ([]engine.Notice, error)
 type SignedRunnerAdmission struct {
