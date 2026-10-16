@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -72,8 +73,8 @@ func (c triggerCheckout) read(ctx context.Context, args ...string) (string, erro
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", c.directory}, args...)...)
-	cmd.Env = c.environment
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.hooksPath=" + os.DevNull, "-c", "credential.helper=", "-C", c.directory}, args...)...)
+	cmd.Env = append(append([]string{}, c.environment...), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_LFS_SKIP_SMUDGE=1", "GIT_TERMINAL_PROMPT=0")
 	cmd.Stderr = c.diagnostics
 	out, err := cmd.Output()
 	if err != nil {

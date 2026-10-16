@@ -189,6 +189,8 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"POST", "/api/v1/claims/{claim}/log-segments", "controller", "run", "capability", []string{"awarded_or_delegated_claim|log.tail|ownClaim|logTail", "eval_unit|expansion.submit|ownEval|expansion"}},
 		{"POST", "/api/v1/claims/{claim}/log-manifest", "controller", "run", "capability", []string{"awarded_or_delegated_claim|log.tail|ownClaim|logTail", "eval_unit|expansion.submit|ownEval|expansion"}},
 		{"POST", "/api/v1/data/download", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.read|data|sensitive", "awarded_or_delegated_claim|data.read|data|expansion", "repo_cache_reader|data.read|data|credential"}},
+		{"POST", "/api/v1/data/source", "controller", "team", "capability", []string{"unbound_member_or_local|runs.write|none|credential"}},
+		{"POST", "/api/v1/data/source/{upload}/commit", "controller", "team", "capability", []string{"unbound_member_or_local|runs.write|none|credential"}},
 		{"POST", "/api/v1/data/upload", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.write|data|sensitive", "local_run_publisher|data.write|data|credential"}},
 		{"POST", "/api/v1/data/commit", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.write|data|sensitive", "local_run_publisher|data.write|data|credential"}},
 		{"POST", "/api/v1/data/records", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.write|data|sensitive", "local_run_publisher|data.write|data|credential"}},

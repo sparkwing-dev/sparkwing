@@ -108,8 +108,9 @@ before saving a profile.
 A profile with a `controller:` block points commands at that controller
 over HTTP; the nested `token:` authenticates. `sparkwing pipeline trigger
 <pipeline> --profile prod` submits the selected committed source.
-`--working-tree` currently refuses before intake because production source-bundle
-staging is not wired yet. Register or edit
+Add `--working-tree` to submit an immutable snapshot of tracked and unignored
+untracked files through the controller's shared object store. The run seals its
+bundle digest, and awarded workers read only that source bundle. Register or edit
 profiles with `sparkwing profiles`. See
 [Self-hosting](self-hosting.md) for the supported local and controller
 deployment paths.

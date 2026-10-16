@@ -69,3 +69,19 @@ func TestGitHubLookupNeverForwardsOrPrintsCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNativeWorkingTreeReachesProductionLookup(t *testing.T) {
+	repo, _ := triggerPreparationRepo(t)
+	t.Chdir(repo)
+	t.Setenv("SPARKWING_CONFIG", repo+"/config.yaml")
+	calls := 0
+	profileHTTPFixture(t, func(r *http.Request) (int, string) {
+		calls++
+		return 404, `{"message":"missing"}`
+	})
+	_, err := prepareNativeTrigger(t.Context(), triggerFlags{pipeline: "deploy-prod", profile: "prod", workingTree: true})
+	var failure *apierr.Error
+	if calls != 1 || !errors.As(err, &failure) || failure.Code != apierr.NotFound {
+		t.Fatalf("working-tree preparation: calls=%d error=%v", calls, err)
+	}
+}

@@ -429,9 +429,11 @@ after the team. Run the second inside a checkout whose commit is pushed: the
 run records the checkout's `origin` repository and commit, and a team runner
 fetches that commit. Private GitHub identity lookup accepts `GH_TOKEN` or
 `GITHUB_TOKEN` with repository read access. The controller credential needs
-`runs.write`. The current rewrite still refuses `--working-tree` before intake
-because its production source-bundle staging binding is not wired yet. Use
-committed source until that binding is complete.
+`runs.write`. Add `--working-tree` to capture tracked and unignored untracked
+files into an immutable Git snapshot, upload it through shared storage, and seal
+its digest into the run. The original checkout and index stay untouched.
+Private GitHub repositories also require the controller's GitHub App or a
+configured team HTTPS source credential; the CLI's environment token stays local.
 
 Runs started by a push come with the Sparkwing GitHub App.
 

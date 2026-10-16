@@ -18,6 +18,7 @@ type BlobDeleter interface {
 const reachableBlobsSQL = `WITH RECURSIVE reachable(team,digest) AS (
 SELECT team,digest FROM blob_records
 UNION SELECT team,manifest_digest FROM blob_records WHERE manifest_digest IS NOT NULL
+UNION SELECT team,digest FROM source_uploads
 UNION SELECT team,digest FROM blob_receipts
 UNION SELECT team,digest FROM uploads WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL
 UNION SELECT m.team,m.member_digest FROM blob_members m JOIN reachable r ON r.team=m.team AND r.digest=m.manifest_digest

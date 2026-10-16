@@ -126,6 +126,7 @@ type EdgeKind string
 
 const (
 	EdgeOwnUpload         EdgeKind = "own_upload"
+	EdgeSealedSource      EdgeKind = "sealed_source"
 	EdgeDependency        EdgeKind = "dependency"
 	EdgeDeclaredReference EdgeKind = "declared_reference"
 	EdgeMemoHit           EdgeKind = "memo_hit"
@@ -133,7 +134,7 @@ const (
 )
 
 // EdgeKinds is complete so authorization tests cannot silently omit an edge.
-var EdgeKinds = []EdgeKind{EdgeOwnUpload, EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope}
+var EdgeKinds = []EdgeKind{EdgeSealedSource, EdgeOwnUpload, EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope}
 
 // safety: ReadEdge records a server-derived ancestry or scoped-cache entitlement.
 type ReadEdge struct {
@@ -481,6 +482,7 @@ const (
 	UploadJob         UploadIdentityKind = "job"
 	UploadOwnerUnit   UploadIdentityKind = "owner_unit"
 	UploadPublication UploadIdentityKind = "publication"
+	UploadSubmission  UploadIdentityKind = "submission"
 )
 
 // safety: UploadUnitKind keeps owner uploads bound to the live awarded unit's fence.

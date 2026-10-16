@@ -582,6 +582,16 @@ does not grant access to team runs. Set `SPARKWING_CONFIG` as well as
 `SPARKWING_HOME` when saving profiles in an isolated CLI home. See
 [Self-hosting](self-hosting.md#first-shared-deployment) for commands.
 
+Working-tree submission uses `POST /api/v1/data/source` and
+`POST /api/v1/data/source/{upload}/commit` under the submitter's `runs.write`
+authority. Each step rechecks current team and repository authority. Signed
+transfers carry only object-specific headers. Intake consumes one committed
+upload matching its submitter, repository, both source revisions and digest.
+It creates a source-only read edge for the awarded run; a member credential
+does not gain arbitrary data downloads. Uploaded source has local provenance
+and cannot assert GitHub App trust.
+
+
 Licensed self-hosted controllers refuse deployment-admin bearers. Hosted
 controllers select Cloud eligibility through the `cloud` or `cloud-free`
 deployment profile. Console sessions retain their separate account gate.

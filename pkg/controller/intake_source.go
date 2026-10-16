@@ -8,7 +8,16 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+type (
+	verifiedIntakeSourceKey struct{}
+	verifiedIntakeSource    struct {
+		location   runspec.SourceLocation
+		repository runspec.Repository
+	}
 )
 
 func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *runspec.Request) error {
@@ -26,7 +35,11 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 	if err != nil {
 		return err
 	}
-	input := runspec.RepoInput{RemoteURL: remote, Display: request.Git.Repository.Display}
+	display, err := sourceurl.Identity(remote)
+	if err != nil {
+		return invalidEngineBody("source repository identity is invalid")
+	}
+	input := runspec.RepoInput{RemoteURL: remote, Display: display}
 	if strings.EqualFold(parsed.Hostname(), "github.com") {
 		slug := strings.TrimSuffix(strings.Trim(parsed.Path, "/"), ".git")
 		repo, valid := store.ParseGitHubRepo(slug)
@@ -68,7 +81,27 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		}
 		return repo.ID, nil
 	}
-	return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity resolver is unavailable"}
+	tenant, err := s.store.ForTeam(ctx, store.Team(team))
+	if err != nil {
+		return 0, engineLookupError(err)
+	}
+	credential, err := tenant.GitCredentialForHost(ctx, "github.com")
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return 0, engineLookupError(err)
+	}
+	token := ""
+	if err == nil && credential.Kind == store.GitCredentialHTTPS && credential.ConfirmedAt != nil {
+		cipher, ok := s.secretsCipher.(BoundCipher)
+		if !ok {
+			return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub identity lookup requires the configured source credential cipher"}
+		}
+		token, err = openSecret(cipher, gitCredentialBinding(credential.Team, credential.Host), credential.Secret)
+		if err != nil || token == "" {
+			return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity credential could not be opened"}
+		}
+		s.masker.Register(token)
+	}
+	return sourceurl.GitHubRepositoryID(ctx, "https://github.com/"+slug, token)
 }
 
 func parseIntakeRemote(remote string) (*url.URL, error) {

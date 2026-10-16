@@ -64,6 +64,22 @@ sparkwing pipeline trigger build --profile team
 remaining unable to call team routes. `tokens create --type member` issues a
 member credential. Runners enroll through `runners add`.
 
+Use `sparkwing pipeline trigger build --profile team --working-tree` to submit
+uncommitted changes. The CLI captures an immutable Git snapshot and commits its
+bytes through the controller's shared object store before creating the run.
+The run binds the bundle digest to the same team, repository and selected
+revisions. Workers acquire it with their awarded authority; it grants no App
+trust or verified-branch cache authority. Committed bundles awaiting intake expire
+after 24 hours; pending transfers follow signed-ticket expiry, and submitted
+source follows run retention.
+
+For GitHub, the CLI resolves numeric repository identity with `GH_TOKEN` or
+`GITHUB_TOKEN` when needed. The controller verifies identity independently:
+through its GitHub App, a configured team HTTPS source credential, or GitHub's
+public API for public repositories. The CLI never forwards its environment
+token to the controller.
+
+
 When isolating the CLI with `SPARKWING_HOME`, also set `SPARKWING_CONFIG` to a
 private config path before `profiles add`. The home selects runtime state.
 It does not relocate the machine config, and the write guard refuses an
@@ -369,6 +385,9 @@ relation sizes, including indexes.
 Quotas belong to registered teams. Token principal labels do not select a
 quota. `default_tier` supplies limits only when a team has no explicit row.
 An empty default leaves those teams unlimited. A zero write limit is unbounded.
+
+Source uploads reserve monthly capacity before a run exists. Intake applies
+the committed unique-byte charge to the run and its per-run limits.
 
 Blob upload tickets reserve pending capacity against monthly bytes and per-run
 bytes and objects. Commit counts each new blob once. An authorized duplicate

@@ -3335,3 +3335,40 @@ expired lease or renew the SDK's exchanged claim. Property coverage is
 `FuzzLauncherPreparationKeepsExactUnexchangedFence` and
 `FuzzLauncherPreparationBillingAndGrace`. Fake-clock tests cover plan/eval/node
 renewal through exchange and mixed live/ended preparation requests.
+
+## Integrated working-tree source uploads
+
+`source_uploads` is a tenant table. Its primary key is `(team,id)`; it stores
+`authority_kind`, `authority_id`, `repo_key`, `repo_display`, `execution_sha`,
+`pipeline_sha`, `digest`, `size`, `expires_at`, `committed_at`, `bound_run_id`,
+`period`, `replica_id` and `charged_objects`. `bound_run_id` references the
+retained run with cascading deletion. An expiry index selects
+tickets. Pending tickets are not blob receipts and create no synthetic run.
+
+`Tenant.ReserveSourceUpload`, `ReadSourceUpload`, `CommitSourceUpload` and
+`AbortSourceUpload` resolve current submission authority in their transactions.
+An unbound controller member/local credential needs `runs.write` and repository
+authority. Scope carries the server-verified display as well as the stable key.
+Reserve uses shared monthly quota holds; commit requires backend-verified
+bytes and uses the shared blob insert and unique-byte accounting. Committed
+charges retain their period, replica and unique-object count. Replays spend
+nothing. Signing failure aborts its hold.
+
+Intake binds one committed, unconsumed upload owned by its exact tagged
+requester to the same repository, execution revision, pipeline revision and
+digest. It atomically enforces run quota, records the actual committed charge
+in run usage, and inserts a local `source_bundle` row in `blob_records` with
+`source_kind=submission`, no verified ref and the originating run's provenance.
+Retries copy that retained source edge while preserving original provenance.
+A source digest in caller JSON without this proof is forbidden.
+
+Unbound committed uploads retain the existing 24-hour source window, measured
+from commit. `Operator.ExpireSourceUploads` holds the maintenance lease, deletes
+staging bytes before releasing pending quota and removing expired unbound
+tickets. Failed deletion retains the ticket for retry. Bound source records
+follow run retention after their temporary upload tickets expire.
+
+The source-upload schema advances the hard-cut rewrite baseline to version 4.
+Version 3 stores are refused by the existing baseline check; no migration or
+compatibility path is added. Native QA must use a fresh version-4 development
+store. This is a schema change within the assigned integration slice.

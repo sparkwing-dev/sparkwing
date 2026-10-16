@@ -1,106 +1,149 @@
 # W9 native CLI QA follow-up
 
-Items 1, 2 and 4-10 are handled. Item 3 remains unfinished. This report does not
-close the working-tree submission slice or claim native deployment acceptance.
-No operator onboarding route was built. No Git writes were performed.
+Lead QA items 1-10 are complete. This continuation finishes working-tree source
+submission and closes the production GitHub intake gaps found while following
+that path. Items 1 and 4-10 remain implemented from the preceding commit.
+No operator onboarding route, runtime deployment, release or Git write ran.
 
-## Completed
+## Implementation
 
-| Item | Result and evidence |
-| --- | --- |
-| 1 | The controller emits `controllerwire.Runners` and `RunnerDetail`, including structured run/job IDs, label arrays and the shared headroom shape. Deleted `Agent` and `AgentHeadroom`. `TestRunnerInventoryRealClient` exercises the real controller route with the actual reader. `TestRunnerInventoryHTTPUsesStoreSnapshot` now also reaches that reader from real SQLite. It exposed an unknown location observation, which the reader now accepts without inventing a placement. No production Go `agents` JSON field remains. |
-| 2 | `prepareNativeTrigger` supplies a production GitHub repository API resolver. It requires a positive numeric ID, uses captured `GH_TOKEN` or `GITHUB_TOKEN` for private repositories, refuses redirects and never prints provider bodies. `TestNativeTriggerUsesProductionGitHubLookup` reaches the lookup through native preparation. `TestGitHubLookupSuppliesCanonicalID` carries the actual API adapter through source preparation. `TestGitHubLookupNeverForwardsOrPrintsCredentials` generates 100 credential inputs. |
-| 4 | `tokens create --type` accepts only `member`. Runner listing, rotation and revocation remain available. Enrollment stays under `runners add`. The parser regression and generated token documentation cover the cut. |
-| 5 | Profile probes retain wrapped canonical controller errors. Configuration fields, invalid controller URLs and the isolated-config write guard use `bad_request`. Operator ceilings use `limit_exceeded`; cancellation/deadlines retain their canonical codes. Tests cover 401/403 codes and details through profile connection and JSON rendering, real malformed config through profiles, and operator ceiling errors. |
-| 6 | Profile authentication uses `/api/v1/auth/whoami`, through new `client.CheckIdentity`. Real controller tests accept member, machine and deployment credentials while the deployment credential still receives 403 for team runs. Existing profile probe fixtures now use the identity route. |
-| 7 | Controller `help`, `--help` and `-h` return before opening credentials/state. Unexpected positionals print flags and fail before startup. The regression checks the actual `run` entrypoint and an untouched runtime home. |
-| 8 | This branch's AGENTS.md and info already both use `--search`. Added `TestAgentSearchExamplesMatchTheRegistry` to compare both documents and parse their command/docs examples through the real registry. The installed CLI has older discovery text and was not treated as this branch's source of truth. |
-| 9 | Removed the unauthenticated legacy admin mint from `bin/k8s-e2e.sh`. The provisioning step now fails with `PENDING operator onboarding`, identifying the missing team plus first team-admin route. `bash -n` passes. |
-| 10 | Updated self-hosting, auth bootstrap, getting-started, deployment-modes and credentials. They distinguish deployment bootstrap from team authority, state pending onboarding, use identity probing, and require explicit `SPARKWING_CONFIG` alongside isolated `SPARKWING_HOME` for profile writes. Working-tree submission is marked unfinished rather than advertised as operational. Updated embedded mirrors and token help. The setup-doc regression reads the embedded pages; mirror drift passes. |
-
-The credential invariant tested here is: a captured GitHub credential is sent
-only to the selected GitHub API request and never appears in lookup diagnostics.
-Profile identity success grants no additional team authority. Existing runner
-tenant property tests remain green.
-
-## Item 3: remaining implementation
-
-`prepareNativeTrigger` still refuses working-tree bundles. Snapshot capture and
-its tests already exist, but no production pre-intake storage binding exists.
-This is owned end to end by W9 under the integration assignment, not handed off
-as a blocker for another worker.
-
-The inspected constraints are:
-
-- C1/C2 storage accepts job, owner-unit or publication upload identities, each
-  tied to a persisted run. `blob_receipts.run_id` references `runs`.
-- `ResolveBlobAuthority` requires persisted data scope and resolves its run.
-  A requesting member's `runs.write` credential is not an execution/data grant.
-- A snapshot must upload before executable intake can award the run. Creating
-  a synthetic publication run would change the meaning of publication and add
-  an extra visible run.
-- Current binary/source-bundle read edges require the exact uploader identity.
-  Upload alone therefore cannot make a pre-intake bundle readable by a later
-  awarded owner. Signed source URLs also have to work on the supported
-  filesystem transport, not just HTTPS S3.
-
-The remaining change must provide a persisted pre-intake source-upload binding
-with transactional member/repository authorization, shared upload reservation,
-verified commit/accounting and retention. Intake must bind its committed digest
-to the sealed repository/source revision. A later claim may read only that
-sealed digest, with current ancestry and tenant checks. It must carry no App
-trust. Exercise forged repository/digest/tenant and revoked authority with a
-property test, then carry a real snapshot through the controller, shared object
-backend, intake and awarded source acquisition. This needs minimal C1/C2/C3/C4
-contract amendments under the existing integration authority. No placeholder
-route, fake publication run or authority bypass was added in this session.
-
-## Contract changes made
-
-- `c3-controller-wire.md`: shared runners response, unknown location observation,
-  identity probe, member-only token creation and production numeric-ID lookup.
-- `c4-surface-config.md`: token creation cut, profile/error semantics, controller
-  argument handling and isolated profile configuration.
-- No lead-owned handoffs or amendments file was changed. No foreign store or
-  capability signature was changed. Item 3's contract work remains to be done.
+- `pipeline trigger --working-tree` captures the existing immutable Git snapshot,
+  resolves its captured pipeline configuration, inspects a private checkout with
+  the selected engine, commits the bundle through shared storage, and submits
+  the resulting digest through sealed intake. A pinned pipeline revision is
+  included in the bundle too. The user's checkout and index stay untouched.
+- Committed triggers also inspect a clean private checkout. Git inspection uses
+  the shared environment projection and disables inherited config, hooks and
+  credential helpers. Scratch closes on failure and success.
+- The two `/api/v1/data/source` operations authenticate an unbound member/local
+  submitter with `runs.write`. Transactional tickets bind its exact tagged
+  authority, team, server-verified repository identity and both source revisions.
+  Backend verification precedes unique-byte accounting. Signing failure releases
+  its hold; post-commit staging cleanup survives request cancellation.
+- Intake consumes one matching committed upload, enforces run quota and records
+  the committed charge in run usage. Deduplicated bytes cost zero. It creates
+  a local `source_bundle` record with no App or verified-ref trust. Retries keep
+  original provenance. The `sealed_source` read edge exposes only the awarded
+  run's sealed digest through ordinary live data authority.
+- Leased expiry deletes staged bytes before releasing tickets and quota. Upload
+  tickets expire; retained source records follow run retention. The expiry
+  query is indexed and locks selected rows.
+- Awarded source acquisition supports the same configured HTTP/HTTPS signed
+  endpoints as other shared objects. It checks out a bundled commit without
+  fetching its synthetic SHA from origin or releasing an unnecessary Git
+  credential. Missing pinned revisions and requested Git features still use
+  credentialed fetches.
+- CLI and controller share the production numeric GitHub ID lookup. Controllers
+  use their configured App, confirmed team HTTPS source credential, or public
+  API for public repositories. CLI environment tokens are never forwarded to
+  the controller. Caller display names grant no repository authority. A private
+  intake context proof carries verified identity into the transaction without
+  opening a second SQLite connection there.
+- Updated setup/auth/deployment documentation, API reference/OpenAPI and embedded
+  mirrors. Isolated profile writes still require both `SPARKWING_HOME` and
+  `SPARKWING_CONFIG`. The Kubernetes provisioning step remains explicitly
+  `PENDING operator onboarding`, as assigned.
 
 ## Verification
 
-All checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`,
-`GOCACHE=/tmp/sw-gocache` and private scratch under `/tmp/sw-astra-W9`.
-`go test` used at most four package workers.
+The invariant is: an execution reads only the committed source digest sealed
+for its authorized submitter, team, repository and selected revisions; source
+submission creates no verified-ref or App trust.
 
-- Repository-wide `go build -p 4 ./...`: pass.
-- Focused tests across CLI, controller, client, registry, acceptance and embedded
-  docs: pass. This includes all `TestSurface*` component contracts, runner
-  HTTP/SQLite/client tests, profile probe/config tests and GitHub regressions.
-- `go vet -p 4` for controller, client, both changed commands, registry and docs:
-  pass.
-- `go run ./internal/commentcheck -base main .`: clean across 2,614 files.
-- `bash -n bin/k8s-e2e.sh` and `git diff --check`: pass.
-- Setup documentation and embedded mirror drift: pass.
+Passing evidence:
 
-No archived tests were newly ported. No native Kubernetes or full pipeline
-acceptance was rerun. The lead still owns native QA and whole-repository gates.
-Earlier W9 handoff work remains as recorded in its preceding reports.
+- Real client -> controller router -> SQLite reservation -> filesystem signed
+  PUT -> verified commit -> intake -> actual owner award -> signed download ->
+  native Git bundle acquisition (`TestSourceSnapshotRealClientStorageAndIntake`).
+- Properties cover forged revisions/digests/repositories, changed or missing
+  intake proofs, forged display names under repository name scopes, and ambient
+  Git identity overrides. The existing GitHub secret/redirect property passes.
+- Real public and configured-private GitHub intake tests, one-use submission,
+  replay and deduplicated run accounting; signing failure quota rollback;
+  membership removal between PUT and commit followed by physical staging expiry;
+  deterministic expiry/quota tests; captured dirty/untracked source, pinned
+  revision inclusion and committed inspection checkout tests.
+- Whole-repository `go build -p 4 ./...`; focused vet; focused CLI/controller/store,
+  schema, API/docs and `TestSurface*` acceptance selections.
+- Full source, blob, sourceurl, capability, controller client, controllerwire and
+  clisurface package suites.
+- `commentcheck -base main`: clean across 2,622 files; generated API docs and
+  embedded mirror drift; shell syntax; `git diff --check`.
 
-## Files, deletion and budget
+All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`,
+`GOCACHE=/tmp/sw-gocache`, private scratch and at most four package workers.
+No archived test was newly ported. The live-describe fixture now emits the v2
+invoked pipeline name; it no longer returns the registered symbol as the name.
+No native deployment acceptance cell was newly marked passed.
 
-W9-owned production Go: session +147/-18, net +129. Cumulative W9 delta versus
-main is -6,713, within the -2,900 budget. Across this session's production Go in
-all areas: +168/-48, net +120. Deletions include the two obsolete runner DTOs and
-the old runs-based profile authentication call. The legacy unauthenticated
-Kubernetes token-mint recipe is also removed.
+The separate full credential-route inventory selection still fails on inherited
+local-host/node-process alternative drift and four serving registrations (doctor,
+refunds, job output and claim input). These were already failing before the
+source binding; the new source routes have explicit matching expectations.
+No claim of a green whole-repository test suite is made.
 
-Shared implementation/test files outside W9:
-`pkg/controller/agents.go`, `pkg/controller/runner_inventory_test.go`,
-`cmd/sparkwing-controller/main.go`, `cmd/sparkwing-controller/argument_test.go`,
-and `bin/k8s-e2e.sh`. Embedded copies under `pkg/docs/mirror` mirror source docs.
-No removed API left a caller unmigrated; the repository build passes.
+## Contract changes made
 
-Friction: the installed CLI differs from the rewrite; docs have an embedded
-mirror that must be synchronized; the actual store can report an unknown runner
-location. Working-tree storage requires more than CLI wiring, as detailed above.
-Scratch is removed at the end of the session. The shared build cache is retained.
+C1 adds tenant `source_uploads`, its transactional lifecycle, committed-charge
+accounting, source record binding, retry provenance and leased expiry. C2 adds
+the two member submission routes and the sealed-source read edge. C3 adds the
+shared source request and production upload/receipt flow. C4 records immutable
+CLI capture and inspection. The corresponding contract files contain these
+amendments. No lead-owned amendments or handoffs file was edited.
 
-STATUS: CONTINUE
+The rewrite baseline advances from **3 to 4**. The existing hard-cut policy
+refuses older stores and upgrades none. Native QA needs a fresh development
+store; no operational state was opened or changed here.
+
+Mechanisms added: a persisted pre-intake ticket and a source-only read edge.
+A normal job/owner upload needs a persisted run, while manufacturing a
+publication run would create false visible work. The private intake proof avoids
+provider/DB lookup inside the admission transaction and is absent from the wire
+and seal. These mechanisms are within the assigned integration slice; the lead
+reviews the recorded contract changes. Independent review found no remaining
+concrete blocker after the fixes, including its Simplify assessment.
+
+## Deletions, budget and shared paths
+
+Deleted the refusal guards and unused `SourceKeyDigest`; moved the GitHub adapter
+into the shared implementation. No removed API had a remaining caller. Existing
+`validUploadKey` callers remain intact. Production Go this continuation:
+**+837/-126, net +711** across all touched areas; W9-owned **+208/-71, net +137**.
+Cumulative W9 versus main: **+17,242/-23,818, net -6,576**, within its -2,900 budget.
+
+Shared Go paths outside W9 ownership:
+
+- `internal/apispec/wire.go`
+- `internal/blob/authority.go`, `internal/blob/types.go`
+- `internal/capability/routes.go`
+- `internal/source/bundle.go`, `internal/source/checkout.go`
+- `internal/sourceurl/github.go`
+- `pkg/controller/credential_route_expectations_test.go`
+- `pkg/controller/data_storage.go`, `pkg/controller/engine_routes.go`
+- `pkg/controller/intake_policy.go`, `pkg/controller/intake_source.go` and its test
+- `pkg/controller/server.go`, `pkg/controller/source_upload.go` and its test
+- `pkg/store/blob_accounting.go`, `pkg/store/blob_gc.go`
+- `pkg/store/blob_persistence.go`, `pkg/store/blob_read_authority.go`
+- `pkg/store/direct_upload.go`, `pkg/store/intake_runtime.go`
+- `pkg/store/schema.go`, `pkg/store/source_upload.go` and its test
+- `pkg/store/store.go`
+
+Also changed shared `pkg/store/schema.sql`, generated `api/openapi.yaml` and
+`pkg/docs/mirror/`. Source docs and the four owning contract files are updated.
+
+## Integration points and friction
+
+The lead retains installed CLI/selected-engine execution, native network/S3,
+PostgreSQL and full pipeline QA. Component evidence uses real SQLite, filesystem
+objects, native Git and socket-free HTTP delivery; only the matching-profile
+resource facts use the existing test contract fake. Earlier Cloud/launcher and
+other broader rewrite handoffs remain in their owning reports; this report
+closes the ten native CLI QA assignments, not those separate slices.
+
+Operator onboarding remains pending Korey's decision. No substitute provisioning
+route was built. The installed discovery CLI differs from this branch; the
+repository registry and tested info examples are authoritative. Overwing reports
+source lag. No local Git identity/worktree overrides appeared. Agent scratch is
+removed after checks join, and the shared Go cache is retained.
+
+STATUS: COMPLETE

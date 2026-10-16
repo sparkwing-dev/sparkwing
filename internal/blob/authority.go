@@ -93,6 +93,9 @@ func AuthorizeEdge(r EdgeRequest) error {
 			return nil
 		}
 		key := edge.Record
+		if a.Upload.Set && edge.Kind == EdgeSealedSource && r.TargetKind == KindSourceBundle && key.Kind == KindSourceBundle && key.Team == a.Upload.Value.Team && key.Scope.Repo == a.Repo {
+			return nil
+		}
 		if a.Upload.Set && a.Upload.Value.Kind == UploadOwnerUnit && edge.Kind == EdgeDependency && (key.Kind == KindOutput || key.Kind == KindManifest) && key.Team == a.Upload.Value.Team && key.Scope.Repo == a.Repo && cacheReadKind(r.TargetKind) {
 			return nil
 		}

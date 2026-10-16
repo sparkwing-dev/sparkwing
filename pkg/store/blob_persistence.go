@@ -41,23 +41,9 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 		}
 		return receipt.Value, nil
 	}
-	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, intent.Digest, intent.Size, tx.now().UnixNano())
+	objects, err := commitBlobBytesTx(ctx, tx, team, blob.Blob{Digest: intent.Digest, Size: intent.Size}, quotas[0].amount)
 	if err != nil {
 		return blob.Receipt{}, err
-	}
-	objects, err := inserted.RowsAffected()
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	if quotas[0].amount < intent.Size*objects {
-		return blob.Receipt{}, authorityError(apierr.Conflict, "upload exceeds its reservation")
-	}
-	var size int64
-	if err := tx.QueryRowContext(ctx, "SELECT size FROM blobs WHERE team=? AND digest=?", team, intent.Digest).Scan(&size); err != nil {
-		return blob.Receipt{}, err
-	}
-	if size != intent.Size {
-		return blob.Receipt{}, blob.ErrIntegrity
 	}
 	receipt, err := insertBlobReceiptTx(ctx, tx, auth.source, intent.Digest)
 	if err != nil {
@@ -292,3 +278,28 @@ func requireBlobTx(ctx context.Context, tx *storeTx, team Team, digest blob.Dige
 
 func blobIsCache(kind blob.Kind) bool         { return kind == blob.KindMemo || kind == blob.KindDepcache }
 func blobLocalRepo(repo runspec.RepoKey) bool { return strings.HasPrefix(string(repo), "local:") }
+
+func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.Blob, reserved int64) (int64, error) {
+	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, object.Digest, object.Size, tx.now().UnixNano())
+	if err != nil {
+		return 0, err
+	}
+	objects, err := inserted.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if reserved < object.Size*objects {
+		return 0, authorityError(apierr.Conflict, "upload exceeds its reservation")
+	}
+	var size int64
+	if err := tx.QueryRowContext(ctx, "SELECT size FROM blobs WHERE team=? AND digest=?", team, object.Digest).Scan(&size); err != nil {
+		return 0, err
+	}
+	if size != object.Size {
+		return 0, blob.ErrIntegrity
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", team, object.Digest); err != nil {
+		return 0, err
+	}
+	return objects, nil
+}

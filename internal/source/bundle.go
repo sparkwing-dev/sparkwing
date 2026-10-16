@@ -26,8 +26,8 @@ func seedBundle(ctx context.Context, client *gitClient, checkout, digest string,
 		return fmt.Errorf("authorize source bundle: %w", err)
 	}
 	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
-		return errors.New("source bundle requires an authorized HTTPS URL")
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil {
+		return errors.New("source bundle requires an authorized HTTP(S) URL")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
 	if err != nil {

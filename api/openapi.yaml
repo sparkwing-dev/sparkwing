@@ -3288,6 +3288,24 @@ components:
         - truncated
       type: object
       x-sparkwing-go-type: controllerwire.SizingPage
+    internal.controllerwire.SourceUploadRequest:
+      additionalProperties: true
+      properties:
+        digest:
+          type: string
+        git:
+          $ref: '#/components/schemas/internal.runspec.Git'
+        size:
+          type: integer
+        source:
+          $ref: '#/components/schemas/internal.runspec.Source'
+      required:
+        - git
+        - source
+        - digest
+        - size
+      type: object
+      x-sparkwing-go-type: controllerwire.SourceUploadRequest
     internal.controllerwire.StepDetail:
       additionalProperties: true
       properties:
@@ -6329,6 +6347,85 @@ paths:
             binding: data
             liveness: credential
         retry: exact_body
+  /api/v1/data/source:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.SourceUploadRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DataUploadTicket'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Reserve a source snapshot upload
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/data/source
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.write
+            binding: none
+            liveness: credential
+        retry: never
+  /api/v1/data/source/{upload}/commit:
+    post:
+      parameters:
+        - in: path
+          name: upload
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              properties: {}
+              required: []
+              type: object
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DataReceipt'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Commit a verified source snapshot
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/data/source/{upload}/commit
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.write
+            binding: none
+            liveness: credential
+        retry: never
   /api/v1/data/upload:
     post:
       parameters:
