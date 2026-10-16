@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+- **cache:** Two worktrees of one commit share a pipeline binary cache key; a linked worktree's `.git` file, which names the worktree's own path, no longer enters the key
+
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.
 
