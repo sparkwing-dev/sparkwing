@@ -167,6 +167,7 @@ unlock.
   The write failed with a 400 and left only a `state_write_failed` warning in the node's log. Each is now stored up to 128 KiB, its start kept, with a note of how many bytes were elided.
 - **store:** An agent-loss retry keeps its source trigger's actor and pull request
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
+- **orchestrator:** Removing a `--sw-ref` worktree made from a bare clone also removes its git registration, so a later worktree can take the path
 
 ### Removed
 - **pipeline binary (Breaking):** The pipeline binary answers only `--sw-node-protocol`; any other invocation exits 2 naming `sparkwing run`

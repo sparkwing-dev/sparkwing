@@ -92,11 +92,10 @@ func withinRefWorktrees(p Paths, dir string) bool {
 
 func refWorktreeOrigin(dir string) string {
 	gitDir := gitDirPointer(filepath.Join(dir, ".git"), dir)
-	marker := string(filepath.Separator) + ".git" + string(filepath.Separator) + "worktrees" + string(filepath.Separator)
-	if i := strings.Index(gitDir, marker); i >= 0 {
-		return gitDir[:i]
+	if filepath.Base(filepath.Dir(gitDir)) != "worktrees" {
+		return ""
 	}
-	return ""
+	return filepath.Dir(filepath.Dir(gitDir))
 }
 
 // SweepRefWorktrees reclaims worktrees whose triggers have finished, or whose
