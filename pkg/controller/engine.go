@@ -12,6 +12,7 @@ import (
 type EngineController struct {
 	Store             *store.Store
 	RunnerPolicy      RunnerAdmissionPolicy
+	LocalRunnerPolicy RunnerAdmissionPolicy
 	VersionPolicy     *SignedEngineVersionPolicy
 	Units             UnitRenewer
 	Launcher          LauncherSyncReader

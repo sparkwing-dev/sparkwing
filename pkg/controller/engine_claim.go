@@ -57,7 +57,11 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
-	if err := s.RunnerPolicy.CheckRunner(ctx, body.RunnerVersion); err != nil {
+	policy := s.RunnerPolicy
+	if principal.Capability.Subject.Kind == capability.SubjectLocal && s.LocalRunnerPolicy != nil {
+		policy = s.LocalRunnerPolicy
+	}
+	if err := policy.CheckRunner(ctx, body.RunnerVersion); err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
 	profile, _, err := s.Store.ReadClaimProfile(ctx, principal.Authority)

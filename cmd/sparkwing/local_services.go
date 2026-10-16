@@ -111,7 +111,12 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 		return localcontroller.Services{}, err
 	}
 	b.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: engines}
+	engines, err = engine.NewResolver(engine.Config{BuildVersion: installedVersion(), CacheDirectory: filepath.Join(b.Home, "engines"), LocalOnly: true})
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
 	b.Controller.VersionPolicy = &controller.SignedEngineVersionPolicy{Resolver: engines}
+	b.Controller.LocalRunnerPolicy = b.Controller.VersionPolicy
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return localcontroller.Services{}, err

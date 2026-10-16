@@ -114,14 +114,21 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 			return err
 		}
 		var err error
-		prepared, err = p.describe(raw, input)
+		var complete bool
+		prepared, complete, err = p.describe(raw, input)
 		if err != nil {
 			return err
+		}
+		if !complete {
+			return nil
 		}
 		return logs.release(ctx)
 	})
 	if err != nil {
 		return PreparedPlanning{}, p.planningError(ctx, err, logs.known)
+	}
+	if prepared.Description.Error != nil {
+		return PreparedPlanning{}, p.planningError(ctx, prepared.Description.Error, true)
 	}
 	input.Args = maps.Clone(prepared.Args)
 	if p.Environment != nil && !planning.Disabled {

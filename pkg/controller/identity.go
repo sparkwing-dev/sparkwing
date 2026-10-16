@@ -121,9 +121,21 @@ type capabilitiesClaims struct {
 	Profile    bool `json:"profile"`
 }
 
-// safety: unauthenticated, because a signed-out browser draws the sign-in page from it; it reports only
-// whether teams exist, which providers to offer and which claim fields this controller reads.
-func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
+// safety: public discovery exposes features and engine support without tenant data.
+func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	if versions, present := r.URL.Query()["engine_version"]; present {
+		engine := s.engineController
+		if engine == nil {
+			engine = &EngineController{}
+		}
+		result, err := engine.Compatibility(r.Context(), versions[0])
+		if err != nil {
+			writePolicyError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	var resp capabilitiesResp
 	if d := s.dashboard; d != nil && d.Capabilities.Mode != "" {
 		storage := d.Capabilities.Storage

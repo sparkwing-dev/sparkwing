@@ -211,8 +211,8 @@ func TestProductionLocalQueueAdvertisesUsableCapacity(t *testing.T) {
 		services, err := bindLocalController(ctx, binding)
 		if err == nil {
 			policy, ok := binding.Controller.RunnerPolicy.(*controller.SignedRunnerAdmission)
-			if !ok || policy.Resolver == nil || policy.Resolver != binding.Controller.VersionPolicy.Resolver {
-				t.Fatal("local runner policy lost the CLI build identity")
+			if !ok || policy.Resolver == nil || policy.Resolver == binding.Controller.VersionPolicy.Resolver || binding.Controller.LocalRunnerPolicy != binding.Controller.VersionPolicy {
+				t.Fatal("local and controller runner policy bindings are incomplete")
 			}
 		}
 		runner = services.Runner

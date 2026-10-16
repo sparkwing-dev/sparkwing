@@ -64,6 +64,9 @@ func findPipelineSchema(schemas []nodeproto.PipelineDescription, pipelineName st
 	names := make([]string, 0, len(schemas))
 	for _, s := range schemas {
 		if s.Name == pipelineName {
+			if s.Error != nil {
+				return nodeproto.PipelineDescription{}, s.Error
+			}
 			return s, nil
 		}
 		names = append(names, s.Name)

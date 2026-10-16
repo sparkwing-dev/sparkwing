@@ -201,9 +201,16 @@ unverified bytes. An index with an older `published_at`, or different body bytes
 at the same timestamp, cannot replace the cached policy. Identical replay is
 allowed. On refresh failure, fallback adopts any newer verified policy another
 process has saved in the machine cache. An older in-memory copy cannot bypass
-that policy's revocations or minimum. Without any verified copy, a failed fetch
-or verification returns `unavailable` with connectivity/retry guidance before
-execution. First use has only the fetched signature as freshness evidence.
+that policy's revocations or minimum. For controller runners, a failed fetch or verification without any verified
+copy returns `unavailable` with connectivity/retry guidance before execution. First use has only the fetched signature as freshness evidence.
+
+Decision 113: host-owned `Config.LocalOnly` reads the last verified policy without
+network refresh. No cached policy yields `NoticePolicyUnavailable` and permits
+local execution. Cached restrictions and executable verification still apply.
+`EvaluateRunner` refuses a missing policy even if it came from a local resolver.
+The local controller selects its local policy only for a persisted local subject.
+Machine and service claims keep the strict runner policy. Compatibility and run
+status remain available without policy metadata for local execution.
 
 An active individual revocation returns `version_revoked`. A release below an
 effective minimum returns `version_unsupported`. Both include the signed reason
@@ -313,6 +320,7 @@ release resolver and need an explicit development workflow during implementation
 | [`SignedIndex`](../../../internal/engine/engine.go) | keeps the exact bytes and detached signature for verification and persistent fallback. |
 | [`VerifiedIndex`](../../../internal/engine/engine.go) | is obtainable only by checking the shared releaseauth trust roots. |
 | [`VerifyIndex`](../../../internal/engine/policy.go) | checks releaseauth.PublicKeys signatures, unique version identities, required fields, recognized format and restriction dates/reasons before decoding a usable policy. |
+| [`Offline`](../../../internal/engine/policy.go) | reports local execution without a cached verified policy. |
 | [`Policy`](../../../internal/engine/policy.go) | returns a copy for diagnostics and policy evaluation; callers cannot mutate verified state. |
 | [`IndexResult`](../../../internal/engine/engine.go) | reports fallback explicitly so output and the dashboard can show the same notice. |
 | [`Index`](../../../internal/engine/index.go) | fetches only VersionIndexURL and its detached signature after the short refresh interval. |
@@ -342,7 +350,8 @@ The constants `GoSDK`, `TypeScriptSDK`, `GoModule`, `TypeScriptPackage`,
 `UpgradeCommand` define the pin vocabulary and fixed publication origins.
 `VersionIndexFormat` defines the signed schema version.
 `NoticeSupportEnding`, `NoticeSupportEnded`, `NoticeEnforcement` and
-`NoticeIndexFallback` define the complete warning kinds.
+`NoticeIndexFallback`, `NoticePinDisabled` and `NoticePolicyUnavailable` define
+the warning kinds.
 
 `releaseasset.NamesForVersion` returns the retained closed release matrix.
 `Target.NameForVersion` names a target within that matrix. `VerifyForVersion`

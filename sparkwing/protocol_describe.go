@@ -18,7 +18,11 @@ func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error
 		reg, _ := lookup(name)
 		description, err := describePipeline(ctx, reg)
 		if err != nil {
-			return nodeproto.DescribeDoc{}, err
+			var failure *apierr.Error
+			if !errors.As(err, &failure) {
+				return nodeproto.DescribeDoc{}, err
+			}
+			description = nodeproto.PipelineDescription{Name: name, Args: []nodeproto.ArgumentDescription{}, Error: failure}
 		}
 		doc.Pipelines = append(doc.Pipelines, description)
 	}

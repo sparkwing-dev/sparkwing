@@ -140,16 +140,30 @@ func TestProtocolDescribeReportsDiscoveryFailures(t *testing.T) {
 					return nil
 				}}
 			})
-			_, err := (sdkOperations{}).Describe(t.Context())
-			if err == nil || !strings.Contains(err.Error(), "broken") {
-				t.Fatalf("discovery failure returned success or lost pipeline attribution: %v", err)
+			Register[NoInputs]("healthy", func() Pipeline[NoInputs] {
+				return protocolDiscoveryPipeline[NoInputs]{declare: func(*Plan, NoInputs) error { return nil }}
+			})
+			doc, err := (sdkOperations{}).Describe(t.Context())
+			if err != nil || len(doc.Pipelines) != 2 {
+				t.Fatalf("one pipeline failure blocked discovery: %+v: %v", doc, err)
 			}
-			var failure *apierr.Error
-			if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed {
-				t.Errorf("discovery failure = %v, want plan_failed", err)
+			raw, err := json.Marshal(doc.Pipelines[0])
+			if err != nil {
+				t.Fatal(err)
 			}
-			if kind != "argument-collision" && !strings.Contains(err.Error(), cause.Error()) {
-				t.Errorf("discovery lost its failure message: %v", err)
+			var broken struct {
+				Error   *apierr.Error                 `json:"error"`
+				Secrets []nodeproto.SecretDeclaration `json:"secrets"`
+			}
+			if err := json.Unmarshal(raw, &broken); err != nil {
+				t.Fatal(err)
+			}
+			failure := broken.Error
+			if failure == nil || failure.Code != apierr.PlanFailed || !strings.Contains(failure.Message, "broken") || len(broken.Secrets) != 0 {
+				t.Fatalf("discovery published incomplete declarations or lost cause: %s", raw)
+			}
+			if kind != "argument-collision" && !strings.Contains(failure.Message, cause.Error()) {
+				t.Errorf("discovery lost its failure message: %v", failure)
 			}
 		})
 	}
@@ -259,6 +273,60 @@ func FuzzProtocolDescribeMasksSecretDefaults(f *testing.F) {
 			}
 			if strings.Contains(serialized, first) || strings.Contains(serialized, second) {
 				t.Fatalf("%s exposed a declared secret default: %s", kind, serialized)
+			}
+		}
+	})
+}
+
+type isolatedSecretPipeline struct{ stage, cause string }
+
+func (p isolatedSecretPipeline) Secrets() any {
+	if p.stage == "secrets" {
+		panic(p.cause)
+	}
+	return &struct {
+		Token string `sw:"PIPELINE_TOKEN"`
+	}{}
+}
+
+func (p isolatedSecretPipeline) Plan(context.Context, *Plan, NoInputs, RunContext) error {
+	if p.stage == "plan" {
+		return errors.New(p.cause)
+	}
+	return nil
+}
+
+func FuzzDescribePublishesOnlyCompletePipelineSecrets(f *testing.F) {
+	f.Add("deployment setting missing", false)
+	f.Add("error\x00\n秘密", true)
+	f.Fuzz(func(t *testing.T, cause string, first bool) {
+		for _, stage := range []string{"factory", "secrets", "plan"} {
+			isolateProtocolDiscoveryRegistry(t)
+			broken := "z-broken"
+			if first {
+				broken = "a-broken"
+			}
+			instances := 0
+			Register[NoInputs](broken, func() Pipeline[NoInputs] {
+				instances++
+				if stage == "factory" && instances > 1 {
+					panic(cause)
+				}
+				return isolatedSecretPipeline{stage: stage, cause: cause}
+			})
+			Register[NoInputs]("healthy", func() Pipeline[NoInputs] { return isolatedSecretPipeline{} })
+			doc, err := (sdkOperations{}).Describe(t.Context())
+			if err != nil || len(doc.Pipelines) != 2 {
+				t.Fatalf("pipeline failure blocked describe: %+v: %v", doc, err)
+			}
+			for _, entry := range doc.Pipelines {
+				if entry.Name == broken {
+					if entry.Error == nil || entry.Error.Code != apierr.PlanFailed || len(entry.Args) != 0 || len(entry.Secrets) != 0 {
+						t.Fatalf("failed pipeline published partial declarations: %+v", entry)
+					}
+				} else if entry.Error != nil || len(entry.Secrets) != 1 || entry.Secrets[0].Name != "PIPELINE_TOKEN" {
+					t.Fatalf("healthy pipeline lost its declarations: %+v", entry)
+				}
 			}
 		}
 	})

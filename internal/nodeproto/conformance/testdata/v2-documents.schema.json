@@ -213,6 +213,29 @@
       ],
       "type": "object"
     },
+    "Error": {
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
     "JobSpec": {
       "additionalProperties": false,
       "properties": {
@@ -368,6 +391,9 @@
             "$ref": "#/$defs/EnvironmentDescription"
           },
           "type": "array"
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
         },
         "examples": {
           "items": {

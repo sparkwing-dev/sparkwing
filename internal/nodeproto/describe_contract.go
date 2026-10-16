@@ -1,5 +1,7 @@
 package nodeproto
 
+import "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
 // DescribeDoc is the sole source of secret declarations; plan JSON may never repeat them.
 type DescribeDoc struct {
 	Pipelines []PipelineDescription `json:"pipelines"`
@@ -8,6 +10,7 @@ type DescribeDoc struct {
 // PipelineDescription supports both SDKs without linking engine registration or YAML code.
 type PipelineDescription struct {
 	Name        string                   `json:"name"`
+	Error       *apierr.Error            `json:"error,omitempty"`
 	Short       string                   `json:"short,omitempty"`
 	Help        string                   `json:"help,omitempty"`
 	Examples    []UsageExample           `json:"examples,omitempty"`

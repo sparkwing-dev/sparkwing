@@ -74,6 +74,7 @@ type Config struct {
 	Mode           toolchain.Mode
 	HTTPClient     *http.Client
 	BuildVersion   string
+	LocalOnly      bool
 }
 
 // Resolver owns the version-index cache and verified executable cache for one machine.
@@ -125,6 +126,7 @@ type VerifiedIndex struct {
 	signed      SignedIndex
 	verifiedAt  time.Time
 	development bool
+	offline     bool
 }
 
 // IndexResult reports fallback explicitly so output and the dashboard can show the same notice.
@@ -138,11 +140,12 @@ type IndexResult struct {
 type NoticeKind string
 
 const (
-	NoticeSupportEnding NoticeKind = "support_ending"
-	NoticeSupportEnded  NoticeKind = "support_ended"
-	NoticeEnforcement   NoticeKind = "version_enforcement"
-	NoticeIndexFallback NoticeKind = "version_index_fallback"
-	NoticePinDisabled   NoticeKind = "engine_pin_disabled"
+	NoticeSupportEnding     NoticeKind = "support_ending"
+	NoticeSupportEnded      NoticeKind = "support_ended"
+	NoticeEnforcement       NoticeKind = "version_enforcement"
+	NoticeIndexFallback     NoticeKind = "version_index_fallback"
+	NoticePinDisabled       NoticeKind = "engine_pin_disabled"
+	NoticePolicyUnavailable NoticeKind = "version_policy_unavailable"
 )
 
 // Notice carries actionable policy text without turning a warning into an implicit revocation.

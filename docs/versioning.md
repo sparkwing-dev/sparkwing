@@ -53,7 +53,7 @@ The machine caches verified engines under its user cache directory in
 `sparkwing/engines`. A partial or corrupt recoverable entry is a miss.
 `SPARKWING_TOOLCHAIN=auto` may fetch a missing verified release.
 `SPARKWING_TOOLCHAIN=local` requires the exact verified cached release. Current
-policy is checked before every execution, including cache hits. Pipeline binaries
+Available policy is checked before every execution, including cache hits. Pipeline binaries
 are compiled and cached locally rather than downloaded from a controller.
 
 ## Support and security policy
@@ -67,15 +67,17 @@ The signed index at `https://sparkwing.dev/versions.json` records the latest
 release, minimum version, individual revocations and per-release support windows.
 Its detached signature is `versions.json.sig`. Clients verify the exact bytes,
 refuse rollback and retain the last verified copy when refresh fails. There is
-no fallback-age cutoff. First use without any verified copy fails with an
-unavailable error and connectivity guidance.
+no fallback-age cutoff. Local-only execution reads cached policy without any
+network refresh. Without a verified cached policy it proceeds with a warning.
+Cached restrictions still apply, and executable signatures and exact pins remain
+required. Controller runners fail closed when no verified policy is available.
 
 A development build skips signed version-policy checks and logs once per
 resolver that the checks are off. This applies to run admission, run pages,
 compatibility queries, engine selection and runner updates. A development build
 needs an explicit `--version` when upgrading a repository because it does not
-fetch the latest-version index. Released builds retain signed policy checks,
-regardless of the version reported by a runner or selected by a pipeline.
+fetch the latest-version index. Released controller runners retain signed policy checks, regardless of the
+version reported by a runner or selected by a pipeline.
 
 Warnings appear in run output and the dashboard before enforcement, with signed
 reason and fix guidance. A revoked or unsupported release fails loudly and names
