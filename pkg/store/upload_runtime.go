@@ -49,6 +49,12 @@ func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservatio
 	if err := advisoryLockTx(ctx, tx, "upload:"+request.ID); err != nil {
 		return UploadReservation{}, err
 	}
+	if err := advisoryLockTx(ctx, tx, "blob:"+string(t.team)+":"+string(request.Intent.Digest)); err != nil {
+		return UploadReservation{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", t.team, request.Intent.Digest); err != nil {
+		return UploadReservation{}, err
+	}
 	prior, err := readBlobUploadTx(ctx, tx, t.team, request.ID)
 	if err == nil {
 		if prior.Identity != a.source || prior.Blob.Digest != request.Intent.Digest || prior.Blob.Size != request.Intent.Size || !prior.ExpiresAt.Equal(request.ExpiresAt) || prior.RefFacts.Scope != a.authority.Ref.Scope {
@@ -199,7 +205,7 @@ func (t *Tenant) AbortBlobUpload(ctx context.Context, authority blob.Authority, 
 	if u.CommittedAt != nil {
 		return tx.Commit()
 	}
-	if err := releaseBlobUploadQuotaTx(ctx, tx, t.team, id); err != nil {
+	if err := abandonBlobUploadTx(ctx, tx, t.team, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -287,6 +293,39 @@ func blobUploadColumns(source blob.UploadIdentity) (node, attempt, generation, u
 	return node, attempt, generation, unitKind, unitID, unitGeneration, unitSource, err
 }
 
+func abandonBlobUploadTx(ctx context.Context, tx *storeTx, team Team, id string) error {
+	if err := advisoryLockTx(ctx, tx, "upload:"+id); err != nil {
+		return err
+	}
+	u, err := readBlobUploadTx(ctx, tx, team, id)
+	if err != nil {
+		return err
+	}
+	if u.CommittedAt != nil {
+		return nil
+	}
+	if err := advisoryLockTx(ctx, tx, "blob:"+string(team)+":"+string(u.Blob.Digest)); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, "UPDATE uploads SET abandoned_at=? WHERE team=? AND id=? AND abandoned_at IS NULL", tx.now().UnixNano(), team, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 0 {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, u.Blob.Size, tx.now().UnixNano()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES (?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, u.Blob.Digest, tx.now().UnixNano()); err != nil {
+			return err
+		}
+	}
+	return releaseBlobUploadQuotaTx(ctx, tx, team, id)
+}
+
 func releaseBlobUploadQuotaTx(ctx context.Context, tx *storeTx, team Team, id string) error {
 	return releaseBlobUploadQuotasTx(ctx, tx, team, blobUploadQuotaID(id))
 }
@@ -329,10 +368,9 @@ func releaseBlobQuotaReservationTx(ctx context.Context, tx *storeTx, team Team, 
 }
 
 func releaseExpiredBlobUploadQuotasTx(ctx context.Context, tx *storeTx, limit int) error {
-	rows, err := tx.QueryContext(ctx, `SELECT q.team,q.id FROM quota_reservations q
-WHERE q.quota='storage' AND q.id LIKE 'upload:%' AND q.expires_at<=?
-AND (q.state='held' OR EXISTS (SELECT 1 FROM quota_reservations child WHERE child.team=q.team AND child.id IN ('run-bytes:' || q.id,'run-objects:' || q.id) AND child.state='held'))
-ORDER BY q.team,q.id LIMIT ?`, tx.now().UnixNano(), limit)
+	rows, err := tx.QueryContext(ctx, `SELECT team,id FROM uploads
+WHERE store='blob' AND committed_at=0 AND abandoned_at IS NULL AND expires_at<=?
+ORDER BY team,id LIMIT ?`, tx.now().UnixNano(), limit)
 	if err != nil {
 		return err
 	}
@@ -352,7 +390,7 @@ ORDER BY q.team,q.id LIMIT ?`, tx.now().UnixNano(), limit)
 		return err
 	}
 	for _, r := range reservations {
-		if err := releaseBlobUploadQuotasTx(ctx, tx, r.team, r.id); err != nil {
+		if err := abandonBlobUploadTx(ctx, tx, r.team, r.id); err != nil {
 			return err
 		}
 	}

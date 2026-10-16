@@ -125,11 +125,7 @@ CREATE TABLE nodes (
     max_rss_bytes BIGINT NOT NULL DEFAULT 0,
     process_wall_nanos BIGINT NOT NULL DEFAULT 0,
     cpu_nanos BIGINT NOT NULL DEFAULT 0,
-    credit_charged_through BIGINT NOT NULL DEFAULT 0,
-    credit_exhausted_anchor BIGINT NOT NULL DEFAULT 0,
-    credit_cpu_class BIGINT NOT NULL DEFAULT 0,
     team TEXT NOT NULL REFERENCES teams(name),
-    credit_billing_from BIGINT NOT NULL DEFAULT 0,
     optional BIGINT NOT NULL DEFAULT 0,
     retry_budget BIGINT NOT NULL DEFAULT 0,
     retry_backoff_ms BIGINT NOT NULL DEFAULT 0,
@@ -208,10 +204,6 @@ CREATE TABLE triggers (
     webhook_delivery TEXT NOT NULL DEFAULT '',
     webhook_replay_key TEXT NOT NULL DEFAULT '',
     github_check_run_id BIGINT NOT NULL DEFAULT 0,
-    credit_reserved_at BIGINT NOT NULL DEFAULT 0,
-    credit_reservation_id TEXT NOT NULL DEFAULT '',
-    credit_paid_seconds BIGINT NOT NULL DEFAULT 0,
-    credit_paid_amount_micro BIGINT NOT NULL DEFAULT 0,
     UNIQUE(team,id),
     FOREIGN KEY(team,id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
@@ -826,6 +818,7 @@ CREATE TABLE uploads (
     provenance TEXT NOT NULL CHECK(provenance IN ('cloud','local')),
     expires_at BIGINT NOT NULL,
     committed_at BIGINT NOT NULL DEFAULT 0,
+    abandoned_at BIGINT,
     uploader_kind TEXT NOT NULL CHECK(uploader_kind IN ('job','owner_unit','publication')),
     unit_kind TEXT CHECK(unit_kind IN ('trigger','plan','eval')),
     unit_id TEXT,
@@ -839,8 +832,6 @@ CREATE TABLE uploads (
     capability_prefix TEXT NOT NULL,
     repo_key TEXT NOT NULL,
     ref_scope TEXT NOT NULL,
-    FOREIGN KEY(team,run_id,node_id) REFERENCES nodes(team,run_id,node_id) ON DELETE CASCADE,
-    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
     CHECK(
         (uploader_kind = 'job' AND node_id IS NOT NULL AND attempt IS NOT NULL AND generation IS NOT NULL AND unit_kind IS NULL AND unit_id IS NULL AND unit_generation IS NULL)
         OR (uploader_kind = 'owner_unit' AND node_id IS NULL AND attempt IS NULL AND generation IS NULL AND unit_kind IS NOT NULL AND unit_id IS NOT NULL AND unit_generation IS NOT NULL)
@@ -1331,6 +1322,10 @@ CREATE TABLE billing_awards (
     PRIMARY KEY(team,reservation_id)
 );
 
+CREATE UNIQUE INDEX idx_billing_awards_capability ON billing_awards(team,capability_prefix);
+
+CREATE UNIQUE INDEX idx_billing_awards_unit_generation ON billing_awards(team,run_id,node_id,unit_kind,generation);
+
 CREATE TABLE billable_intervals (
     team TEXT NOT NULL REFERENCES teams(name),
     id TEXT NOT NULL PRIMARY KEY,
@@ -1392,13 +1387,11 @@ CREATE INDEX idx_node_metrics_ts ON node_metrics(team,ts);
 
 CREATE INDEX idx_nodes_outstanding ON nodes(team,status, ready_at, claimed_by) WHERE status != 'done';
 
-CREATE INDEX idx_nodes_credit_window ON nodes(team,credit_charged_through) WHERE credit_charged_through != 0;
 
 CREATE INDEX idx_credit_grants_kind_amount ON credit_grants(team,kind, amount_micro);
 
 CREATE INDEX idx_credit_charges_kind_amount ON credit_charges(team,kind, amount_micro, seconds);
 
-CREATE INDEX idx_nodes_credit_principal ON nodes(team,claim_principal, credit_charged_through);
 
 CREATE INDEX idx_runs_created ON runs(team,created_at);
 

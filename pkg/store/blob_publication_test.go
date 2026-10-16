@@ -30,6 +30,10 @@ func TestBlobPublicationRequiresTerminalImportedAttempt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		var existingBlobs int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM blobs").Scan(&existingBlobs); err != nil {
+			t.Fatal(err)
+		}
 		rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET finished_at=NULL,outcome='' WHERE team='a' AND run_id='run'")
 		allowed := false
 		for _, check := range []struct {
@@ -59,7 +63,7 @@ func TestBlobPublicationRequiresTerminalImportedAttempt(t *testing.T) {
 		if allowed {
 			return false
 		}
-		rewriteSchemaCount(t, s.db, "blobs", 0)
+		rewriteSchemaCount(t, s.db, "blobs", existingBlobs)
 		rewriteSchemaCount(t, s.db, "blob_receipts", 0)
 		rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET finished_at=2,outcome='success' WHERE team='a' AND run_id='run'")
 		if err := tenant.AbortBlobUpload(t.Context(), input, ticket.ID); err != nil {

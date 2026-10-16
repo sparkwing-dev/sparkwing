@@ -141,7 +141,36 @@ func accountUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 		calculate = capability.SettleBilling
 	}
 	_, err = accountBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, through, final, calculate)
+	if err != nil || final || !a.provenance.Metered {
+		return err
+	}
+	room, err := headroomTx(ctx, tx, team, tx.now())
+	if err != nil {
+		return err
+	}
+	if room > 0 {
+		return clearTeamCreditExhaustedTx(ctx, tx, team, tx.now().UnixNano())
+	}
+	_, err = stampTeamCreditExhaustedTx(ctx, tx, team, tx.now().UnixNano())
 	return err
+}
+
+func applyBillingCancellationTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64, beat *LeaseBeat) error {
+	if beat.CancelRequested {
+		return nil
+	}
+	a, err := unitBillingAwardTx(ctx, tx, team, unit, generation)
+	if err != nil || a == nil || !a.provenance.Metered {
+		return err
+	}
+	exhausted, err := teamCreditExhaustedAtTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	if exhausted != 0 && !tx.now().Before(time.Unix(0, exhausted).Add(time.Duration(DefaultCreditGraceSeconds)*time.Second)) {
+		beat.CancelRequested, beat.CancelReason = true, EventKindCreditsExhausted
+	}
+	return nil
 }
 
 func transitionNodeBillingTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {

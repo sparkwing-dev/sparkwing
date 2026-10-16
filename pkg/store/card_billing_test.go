@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -515,38 +513,6 @@ func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 		Fingerprint: "fp_1",
 	}, now); err != nil || created {
 		t.Fatalf("a payment by the warned card = %v, %v; want refused", created, err)
-	}
-}
-
-// A refund debits the card that paid the reservation it refunds, even once
-// the team has moved to another card.
-func TestARefundDebitsTheCardThatPaid(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	acme := teamHandle(t, s, "acme")
-	trustWithCard(t, acme, now)
-	claimant := meteredTeamClaimant(t, acme, "agent:cloud")
-	readyTeamNode(t, s, acme, "run-card", "build")
-	if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-card", NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if err := acme.TestOnlySaveCard(ctx, store.Card{Customer: "cus_1", PaymentMethod: "pm_2", Fingerprint: "fp_2"}, "billing", now); err != nil {
-		t.Fatal(err)
-	}
-	res, err := s.FinalizeNodeCredits(ctx, "run-card", "build", claimant.TokenPrefix, time.Now().Add(15*time.Minute))
-	if err != nil || res.Charge == nil || res.Charge.Kind != store.CreditChargeRefund {
-		t.Fatalf("finalize = %+v, %v; want the reservation refunded", res, err)
-	}
-	var old, replacement int64
-	for fp, into := range map[string]*int64{"fp_1": &old, "fp_2": &replacement} {
-		if err := s.DB().QueryRow(storetest.Rebind(s, `SELECT COALESCE(SUM(amount_micro), 0) FROM card_spend_days
-		    WHERE fingerprint = ?`), fp).Scan(into); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if old != 0 || replacement != 0 {
-		t.Fatalf("buckets after the refund: first card %d, replacement %d; want the refund netted on the first", old, replacement)
 	}
 }
 

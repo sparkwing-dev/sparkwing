@@ -365,9 +365,11 @@ provider verification. `SettlePayment` is the public verified-event boundary.
 Its expanded event contract is implemented against the schema contract below.
 Console hold and release operations keep their authenticated tenant handles.
 
-`Store.SetTokenMetered` is removed. Legacy metering reads share one query until
-the legacy claim APIs are retired. The final runner-metering route belongs to
-C2 and operates on enrolled root capabilities.
+`Store.SetTokenMetered`, `Store.TokenMetered` and `Store.FinalizeNodeCredits`
+are removed. Awards and billable intervals own reservation, checkpoint and final
+settlement. Nodes and triggers carry no legacy credit-window columns. Node price
+and active compute usage project the immutable award ledger. Runner metering
+operates on enrolled root capabilities.
 
 
 Materialized results persist their exact output and manifest keys on the node.
@@ -463,3 +465,25 @@ transaction. Exact replay adds no charge or event. Transition timestamps come
 from the store clock, so a caller cannot supply a stale cancellation timestamp.
 This result path does not implement renewal-time exhaustion or grace policy.
 The unused raw `Store.AccountEmail` read is also removed.
+
+Upload reservation takes the digest lock and clears its tombstone. Pending tickets
+protect that tenant's digest until commit or abandonment. Abort and leased expiry
+register possible copied bytes as a tombstoned blob before releasing quota. The
+nullable `uploads.abandoned_at` records that handoff once, including tickets whose
+expired quota was released by another admission. GC tolerates absent object bytes.
+Abandonment creates no receipt or successful-upload usage. Live tickets, receipts
+and record graphs still protect a shared digest.
+
+Every non-final metered checkpoint checks headroom after charging. Exhaustion
+records the team's existing timestamp. Renewals request `credits_exhausted`
+cancellation at `DefaultCreditGraceSeconds`. Its ten-minute value is a placeholder
+pending Korey's grace decision. Restored headroom clears the timestamp. M4's
+plan/eval execution-start rule remains unchanged.
+
+The schema enforces one billing award per capability and per unit generation.
+Card settlement scopes both updates to the attempt's team and requires one row
+from each. Every new job attempt clears its job summary and annotations.
+
+Upload tickets retain their run and job identifiers without cascading foreign
+keys. They survive run deletion because leased expiry still needs the digest to
+collect possible copied bytes and release every quota dimension.

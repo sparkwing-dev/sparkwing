@@ -142,5 +142,8 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err := accountUnitBillingTx(ctx, tx, team, unit, actor.Generation, tx.now(), false); err != nil {
 		return err
 	}
+	if err := applyBillingCancellationTx(ctx, tx, team, unit, actor.Generation, beat); err != nil {
+		return err
+	}
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 }

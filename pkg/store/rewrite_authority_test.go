@@ -93,9 +93,9 @@ func TestRewriteSchemaBillingClassifications(t *testing.T) {
 	for _, mapping := range capability.UnitBillingMappings {
 		key := string(mapping.Operational)
 		rewriteSchemaExec(t, db, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro)
-VALUES ('a',?,'cap','retained-run',1,'a',1,'cloud','at_start',?,?,1,10)`, key, mapping.Operational, mapping.Billing)
+VALUES ('a',?,?,'retained-run',1,'a',1,'cloud','at_start',?,?,1,10)`, key, key, mapping.Operational, mapping.Billing)
 		rewriteSchemaExec(t, db, `INSERT INTO billable_intervals(team,id,run_id,generation,capability_prefix,reservation_id,payer_team,metered,executor_class,unit_kind,billing_unit,billing_start,started_at,charged_through)
-VALUES ('a',?,'retained-run',1,'cap',?,'a',1,'cloud',?,?,'at_start',1,2)`, key, key, mapping.Operational, mapping.Billing)
+VALUES ('a',?,'retained-run',1,?,?,'a',1,'cloud',?,?,'at_start',1,2)`, key, key, key, mapping.Operational, mapping.Billing)
 		for _, table := range []string{"billing_awards", "billable_intervals"} {
 			var got string
 			if err := db.QueryRow("SELECT billing_unit FROM "+table+" WHERE reservation_id = ?", key).Scan(&got); err != nil {

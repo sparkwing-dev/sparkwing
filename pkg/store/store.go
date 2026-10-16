@@ -1177,7 +1177,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 const nodeSelectColumns = `run_id,node_id,status,outcome,deps_json,error,started_at,finished_at,
  ready_at,claimed_by,lease_expires_at,needs_labels,prefers_labels,requested_cores,requested_memory_bytes,requested_slots,
  offer_started_at,status_detail,last_heartbeat,failure_reason,exit_code,annotations_json,summary,cpu_nanos,max_rss_bytes,process_wall_nanos,
- generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,credit_cpu_class,spec_hash,generated_json`
+ generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,COALESCE((SELECT c.cpu_class FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id AND a.unit_kind='node' AND a.generation=nodes.generation),0),spec_hash,generated_json`
 
 func scanNodeRow(rs rowScanner, n *Node) error {
 	var deps, labels, prefers, annotations, generated []byte
