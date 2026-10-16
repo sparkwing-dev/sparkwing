@@ -35,7 +35,8 @@ process-tree cleanup. The Windows host clears inheritance on its protocol-handle
 copies after a successful or failed launch.
 
 Every process receives `hello` first. Its runner is the identity granted by the
-host, including the actual runner name, type and labels. Execution processes also
+host, including the actual runner name, type and labels. Labels are a required
+array, including `[]` when empty; `null` is rejected. Execution processes also
 receive a binding to one run and job, with a loopback route URL and a delegated
 bearer. Discovery and initial planning omit that binding. The SDK keeps the
 binding in memory. Credentials and protocol handles travel through the private

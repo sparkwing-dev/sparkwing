@@ -25,7 +25,7 @@ func engineReuseSource(source store.MaterializeSource) controllerwire.ReuseSourc
 }
 
 func engineReconciledClaim(c capability.Capability, result store.ReconciledNode, run store.RunRow) *controllerwire.ClaimedUnit {
-	claim := &controllerwire.ClaimedUnit{Unit: c.Unit, Purpose: c.Purpose, Delivery: c.Delivery, UnitID: c.UnitID, RunID: result.Node.Ref.RunID, JobID: result.Node.Ref.NodeID, Binding: c.Binding, Capability: string(result.Bearer), Request: run.Request, Execution: &result.Node.Execution, LeaseExpiresAt: result.Claim.LeaseExpiresAt, OwnerDeadline: c.Binding.Deadline, Runner: nodeproto.RunnerIdentity{Name: result.Claim.Holder}}
+	claim := &controllerwire.ClaimedUnit{Unit: c.Unit, Purpose: c.Purpose, Delivery: c.Delivery, UnitID: c.UnitID, RunID: result.Node.Ref.RunID, JobID: result.Node.Ref.NodeID, Binding: c.Binding, Capability: string(result.Bearer), Request: run.Request, Execution: &result.Node.Execution, LeaseExpiresAt: result.Claim.LeaseExpiresAt, OwnerDeadline: c.Binding.Deadline, Runner: nodeproto.RunnerIdentity{Name: result.Claim.Holder, Labels: []string{}}}
 	if c.Billing != nil {
 		claim.Runner.Type = c.Billing.ExecutorClass
 	}
