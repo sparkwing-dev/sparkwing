@@ -2823,3 +2823,10 @@ Pending collection and Held standing both refuse queued admissions while the
 running holder renews and completes. This proof uses the real verifier, collection
 binding, store ledger and claim handlers. Only the external payment transport is
 faked. The retired credit-limit field is removed from the old billing fixture.
+
+The same controller proof releases the first decline hold, replays its signed
+event, then declines a new retry. The released event stays released and the
+new attempt restores Held without stopping the running job.
+`TestBillingModelEveryDeclinedAttemptHoldsUntilReleasedProperty` generates retry
+counts and duplicate deliveries against real settlement and operator release.
+Each distinct decline holds the team. Replays preserve a released hold.

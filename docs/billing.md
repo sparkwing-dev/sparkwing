@@ -28,6 +28,9 @@ and payment history remain available after the balance is spent. Holds prevent
 new Cloud admissions even when the balance is positive.
 An open dispute holds the team. A lost dispute retains Held standing until an
 operator releases its hold. A won or closed warning dispute releases its hold.
+Each declined collection attempt creates a separate hold. Releasing an earlier
+hold does not exempt a later declined retry. Replaying the earlier decline
+leaves its released hold unchanged. Successful collection clears decline holds.
 
 While a collection is pending, new Cloud work waits and running work finishes.
 Admissions include resources already awarded and reserved for jobs that have

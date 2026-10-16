@@ -352,7 +352,7 @@ func failCardAttemptTx(ctx context.Context, tx *storeTx, attemptID, paymentInten
 		return "", false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)
-	    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (dispute_id) DO NOTHING`, "decline-"+chargeID, name, paymentIntent,
+	    VALUES (?, ?, ?, ?, ?, ?)`, "decline-"+attemptID, name, paymentIntent,
 		"card charge declined: "+declineCode, FreezeCauseDecline, nowNS); err != nil {
 		return "", false, err
 	}

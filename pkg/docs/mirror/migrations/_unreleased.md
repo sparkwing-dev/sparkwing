@@ -2604,3 +2604,7 @@ Launcher queue selection passes over teams whose standing capacity is full and
 jobs larger than that standing permits. Named oversized claims still refuse
 with the standing named. A lost payment dispute retains the team's hold until
 an operator releases it. Winning a dispute releases that dispute's hold.
+
+Decline holds identify the collection attempt. A declined retry creates its own
+hold after an operator releases an earlier one. Replayed declines preserve the
+release. Successful collection clears the team's decline holds together.

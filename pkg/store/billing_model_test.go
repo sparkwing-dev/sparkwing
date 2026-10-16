@@ -179,14 +179,80 @@ func TestBillingModelDeclineHoldsAndSuccessfulChargeAdvancesLadder(t *testing.T)
 	if err := s.AsOperator().RecordAttemptIntent(t.Context(), retry.AttemptID, "retry", retry.Customer, now); err != nil {
 		t.Fatal(err)
 	}
+	failed := providerPaymentEvent(now, capability.PaymentCardFailed)
+	failed.ObjectID, failed.PaymentID, failed.EventID = "retry", "retry", "retry-declined"
+	failed.CustomerID, failed.AmountMinor, failed.Status = retry.Customer, retry.AmountCents, "requires_payment_method"
+	if _, err := s.settlePaymentFacts(t.Context(), failed); err != nil {
+		t.Fatal(err)
+	}
+	if holds, err := tenant.CreditFreeze(t.Context()); err != nil || len(holds.Disputes) != 2 {
+		t.Fatalf("distinct attempts did not retain independent holds: %+v: %v", holds, err)
+	}
+	now = now.Add(4 * 24 * time.Hour)
+	retry = cardCollectionDue(t, s, now)
+	if err := s.AsOperator().RecordAttemptIntent(t.Context(), retry.AttemptID, "recovered", retry.Customer, now); err != nil {
+		t.Fatal(err)
+	}
 	paid := providerPaymentEvent(now, capability.PaymentCardPaid)
-	paid.ObjectID, paid.PaymentID, paid.CustomerID, paid.AmountMinor = "retry", "retry", retry.Customer, retry.AmountCents
+	paid.ObjectID, paid.PaymentID, paid.CustomerID, paid.AmountMinor = "recovered", "recovered", retry.Customer, retry.AmountCents
 	if _, err := s.settlePaymentFacts(t.Context(), paid); err != nil {
 		t.Fatal(err)
 	}
 	st, err := tenant.SpendStanding(t.Context(), now)
 	if err != nil || st.RungMicro != 2000*MicroCreditsPerCent || st.Billing.Tier != "Established" {
 		t.Fatalf("successful first collection=%+v: %v", st, err)
+	}
+}
+
+func TestBillingModelEveryDeclinedAttemptHoldsUntilReleasedProperty(t *testing.T) {
+	property := func(seed uint8) bool {
+		s, tenant, now := providerPaymentFixture(t)
+		rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust=''`)
+		event := providerCollectionEvent(t, s, now, capability.PaymentCardFailed)
+		for attempt := range 2 + int(seed%3) {
+			if attempt > 0 {
+				now = now.Add(8 * 24 * time.Hour)
+				work := cardCollectionDue(t, s, now)
+				payment := fmt.Sprintf("retry-payment-%d", attempt)
+				if err := s.AsOperator().RecordAttemptIntent(t.Context(), work.AttemptID, payment, work.Customer, now); err != nil {
+					t.Fatal(err)
+				}
+				event = providerPaymentEvent(now, capability.PaymentCardFailed)
+				event.EventID, event.ObjectID, event.PaymentID = payment, payment, payment
+				event.AmountMinor, event.CustomerID, event.Status = work.AmountCents, work.Customer, "requires_payment_method"
+			}
+			for range 1 + int(seed%3) {
+				if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+					t.Fatal(err)
+				}
+				standing, err := tenant.BillingStanding(t.Context(), now)
+				if err != nil || standing.Tier != "Held" {
+					t.Logf("attempt %d standing=%+v: %v", attempt, standing, err)
+					return false
+				}
+			}
+			holds, err := tenant.CreditFreeze(t.Context())
+			if err != nil || len(holds.Disputes) != 1 {
+				t.Fatalf("decline holds=%+v: %v", holds, err)
+			}
+			if released, err := tenant.ReleaseCreditFreezes(t.Context(), holds.Disputes[0], "operator", "reviewed", now); err != nil || released != 1 {
+				t.Fatalf("release=%d: %v", released, err)
+			}
+			for range 1 + int(seed%3) {
+				if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+					t.Fatal(err)
+				}
+				standing, err := tenant.BillingStanding(t.Context(), now)
+				if err != nil || standing.Tier == "Held" {
+					t.Logf("released attempt %d replay changed standing=%+v: %v", attempt, standing, err)
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(1123))}); err != nil {
+		t.Fatal(err)
 	}
 }
 

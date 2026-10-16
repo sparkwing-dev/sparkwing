@@ -20,6 +20,8 @@ type BillingWriter interface {
 	SetAuthorizedSpendBudget(context.Context, capability.Authorized, int64) error
 }
 
+var _ BillingWriter = (*store.Tenant)(nil)
+
 // WithBillingWriter supplies tenant billing transactions before Handler is constructed.
 func (s *Server) WithBillingWriter(resolve func(context.Context, store.Team) (BillingWriter, error)) *Server {
 	s.resolveBillingWriter = resolve
@@ -37,7 +39,7 @@ func (s *Server) billingWriter(r *http.Request, a capability.Authorized) (Billin
 	} else if s.store != nil {
 		var tenant *store.Tenant
 		tenant, err = s.reportingTenant(r, a)
-		writer, _ = any(tenant).(BillingWriter)
+		writer = tenant
 	}
 	if err != nil {
 		return nil, engineLookupError(err)

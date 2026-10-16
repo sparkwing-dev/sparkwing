@@ -66,49 +66,53 @@ func (o *Operator) RecordAttemptIntent(ctx context.Context, attemptID, paymentIn
 		if err := lockCreditLedgerTx(ctx, tx); err != nil {
 			return err
 		}
-		mode, err := paymentModeTx(ctx, tx)
-		if err != nil {
-			return err
-		}
-		var team Team
-		var charge, bound string
-		if err := tx.QueryRowContext(ctx, `SELECT a.team,a.charge_id,a.payment_intent
+		return recordAttemptIntentTx(ctx, tx, attemptID, paymentIntent, customer, now)
+	})
+}
+
+func recordAttemptIntentTx(ctx context.Context, tx *storeTx, attemptID, paymentIntent, customer string, now time.Time) error {
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	var team Team
+	var charge, bound string
+	if err := tx.QueryRowContext(ctx, `SELECT a.team,a.charge_id,a.payment_intent
 FROM card_attempts a JOIN card_charges c ON c.id=a.charge_id AND c.team=a.team
 WHERE a.id=? AND a.status=?`+tx.forUpdate(), attemptID, CardAttemptLive).Scan(&team, &charge, &bound); err != nil {
+		return err
+	}
+	if bound != "" && bound != paymentIntent {
+		return authorityError(apierr.Conflict, "collection attempt names another payment")
+	}
+	var checkouts int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM credit_checkouts WHERE payment_mode=? AND payment_id=?", mode, paymentIntent).Scan(&checkouts); err != nil {
+		return err
+	}
+	if checkouts != 0 {
+		return authorityError(apierr.Conflict, "payment already belongs to a checkout")
+	}
+	var associated int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND team=? AND kind='collection' AND currency='usd' AND attempt_id=? AND charge_id=? AND customer_id=?`, mode, paymentIntent, team, attemptID, charge, customer).Scan(&associated)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if associated == 0 {
+		if bound != "" {
+			return authorityError(apierr.Conflict, "collection has no matching provider association")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id,currency,attempt_id,charge_id) VALUES (?,?,'collection',?,?,'usd',?,?)`, mode, paymentIntent, team, customer, attemptID, charge); err != nil {
 			return err
 		}
-		if bound != "" && bound != paymentIntent {
-			return authorityError(apierr.Conflict, "collection attempt names another payment")
-		}
-		var checkouts int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM credit_checkouts WHERE payment_mode=? AND payment_id=?", mode, paymentIntent).Scan(&checkouts); err != nil {
-			return err
-		}
-		if checkouts != 0 {
-			return authorityError(apierr.Conflict, "payment already belongs to a checkout")
-		}
-		var associated int
-		err = tx.QueryRowContext(ctx, `SELECT 1 FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND team=? AND kind='collection' AND currency='usd' AND attempt_id=? AND charge_id=? AND customer_id=?`, mode, paymentIntent, team, attemptID, charge, customer).Scan(&associated)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if associated == 0 {
-			if bound != "" {
-				return authorityError(apierr.Conflict, "collection has no matching provider association")
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id,currency,attempt_id,charge_id) VALUES (?,?,'collection',?,?,'usd',?,?)`, mode, paymentIntent, team, customer, attemptID, charge); err != nil {
-				return err
-			}
-		}
-		if bound == paymentIntent {
-			return nil
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE card_attempts SET payment_intent=?,updated_at=? WHERE team=? AND id=? AND status=? AND payment_intent=''`, paymentIntent, now.UnixNano(), team, attemptID, CardAttemptLive)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(result, "collection payment binding")
-	})
+	}
+	if bound == paymentIntent {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE card_attempts SET payment_intent=?,updated_at=? WHERE team=? AND id=? AND status=? AND payment_intent=''`, paymentIntent, now.UnixNano(), team, attemptID, CardAttemptLive)
+	if err != nil {
+		return err
+	}
+	return requireOneRow(result, "collection payment binding")
 }
 
 // SettleCardPayment settles a provider payment against its persisted card attempt.

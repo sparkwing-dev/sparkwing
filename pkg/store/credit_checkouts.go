@@ -10,23 +10,24 @@ import (
 
 // OpenCreditCheckout reserves a prepaid checkout before opening its provider session.
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error) {
+	var id string
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return err
+		}
+		var e error
+		id, e = t.openCreditCheckoutTx(ctx, tx, amountMicro, now, hold)
+		return e
+	})
+	return id, err
+}
+
+func (t *Tenant) openCreditCheckoutTx(ctx context.Context, tx *storeTx, amountMicro int64, now time.Time, hold time.Duration) (string, error) {
 	if amountMicro < MinCardChargeCents*MicroCreditsPerCent || amountMicro > MaxCreditGrantMicro || amountMicro%MicroCreditsPerCent != 0 || hold <= 0 {
 		return "", errors.New("credits: checkout requires whole positive USD cents and a positive hold")
 	}
 	id, err := newCreditID("checkout")
 	if err != nil {
-		return "", err
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	// safety: deletion takes the team row lock before it records itself, so
-	// taking it here orders a checkout wholly before or after a deletion
-	// request; after one, the payment would outlive the team. The ledger
-	// comes first, in the order lockTeamRunRowTx documents.
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return "", err
 	}
 	mode, err := paymentModeTx(ctx, tx)
@@ -56,7 +57,7 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 	}); err != nil {
 		return "", err
 	}
-	return id, tx.Commit()
+	return id, nil
 }
 
 // AttachCreditCheckout names the payment session a checkout opened and the

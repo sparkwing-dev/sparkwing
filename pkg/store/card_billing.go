@@ -243,10 +243,14 @@ var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already 
 
 // SetSpendBudget sets the owner's budget, which stops Cloud usage when the team's 30-day spend reaches it.
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error { return setSpendBudgetTx(ctx, tx, t.team, cents) })
+}
+
+func setSpendBudgetTx(ctx context.Context, tx *storeTx, team Team, cents int64) error {
 	if cents < 0 || cents > MaxCreditGrantMicro/MicroCreditsPerCent {
 		return fmt.Errorf("%w: a budget is between $0 and $%d", ErrInvalidInput, MaxCreditGrantMicro/MicroCreditsPerCent/100)
 	}
-	_, err := t.s.exec(ctx, `UPDATE teams SET billing_budget_cents = ? WHERE name = ?`, cents, string(t.team))
+	_, err := tx.ExecContext(ctx, `UPDATE teams SET billing_budget_cents = ? WHERE name = ?`, cents, string(team))
 	return err
 }
 
@@ -433,14 +437,19 @@ var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for paym
 
 // StartRecoveryAttempt opens a "pay now" attempt on t's open charge, for a Checkout the owner pays by hand.
 func (t *Tenant) StartRecoveryAttempt(ctx context.Context, now time.Time) (_ CardChargeWork, err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return CardChargeWork{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return CardChargeWork{}, err
-	}
+	var w CardChargeWork
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return err
+		}
+		var e error
+		w, e = t.startRecoveryAttemptTx(ctx, tx, now)
+		return e
+	})
+	return w, err
+}
+
+func (t *Tenant) startRecoveryAttemptTx(ctx context.Context, tx *storeTx, now time.Time) (CardChargeWork, error) {
 	charge, err := openCardChargeTx(ctx, tx, t.team)
 	if err != nil {
 		return CardChargeWork{}, err
@@ -464,7 +473,7 @@ func (t *Tenant) StartRecoveryAttempt(ctx context.Context, now time.Time) (_ Car
 	if w.AttemptID, err = insertCardAttemptTx(ctx, tx, t.team, charge.ID, CardAttemptRecovery, now.UnixNano()); err != nil {
 		return CardChargeWork{}, err
 	}
-	return w, tx.Commit()
+	return w, nil
 }
 
 // CardPayment is a succeeded Stripe payment of a card charge.

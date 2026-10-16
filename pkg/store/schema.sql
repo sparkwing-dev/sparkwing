@@ -694,6 +694,17 @@ CREATE TABLE payment_events (
 
 CREATE INDEX idx_payment_events_object ON payment_events(payment_mode,object_id);
 
+CREATE TABLE billing_pages (
+    id TEXT NOT NULL PRIMARY KEY,
+    team TEXT NOT NULL REFERENCES teams(name),
+    account_id TEXT NOT NULL REFERENCES accounts(id),
+    request_key TEXT NOT NULL CHECK(request_key <> ''),
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    page_json BLOB NOT NULL,
+    failed_at BIGINT,
+    UNIQUE(team,account_id,request_key)
+);
+
 CREATE TABLE payment_correlations (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     provider_id TEXT NOT NULL CHECK(provider_id <> ''),

@@ -223,17 +223,39 @@ func TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish(t
 	if calls != 2 {
 		t.Fatalf("provider calls=%d; want creation then confirmation", calls)
 	}
-	for _, phase := range []string{"pending", "held"} {
-		if phase == "held" {
+	for _, phase := range []string{"pending", "held", "released", "retry-held"} {
+		wantTier, wantFailures := "New", int64(0)
+		switch phase {
+		case "held":
 			for range 2 {
 				webhook("collection-declined", "payment_intent.payment_failed", `{"id":"collection-payment","object":"payment_intent","livemode":false,"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
 			}
+			wantTier, wantFailures = "Held", 1
+		case "released":
+			holds, err := tenant.CreditFreeze(t.Context())
+			if err != nil || len(holds.Disputes) != 1 {
+				t.Fatalf("decline holds=%+v: %v", holds, err)
+			}
+			if released, err := tenant.ReleaseCreditFreezes(t.Context(), holds.Disputes[0], "operator", "reviewed", time.Now()); err != nil || released != 1 {
+				t.Fatalf("release=%d: %v", released, err)
+			}
+			webhook("collection-declined", "payment_intent.payment_failed", `{"id":"collection-payment","object":"payment_intent","livemode":false,"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
+			wantFailures = 1
+		case "retry-held":
+			dueAt := time.Now().Add(25 * time.Hour)
+			work, _, err := e.Store.AsOperator().DueCardCharges(t.Context(), dueAt)
+			if err != nil || len(work) != 1 {
+				t.Fatalf("retry collection=%+v: %v", work, err)
+			}
+			if err := e.Store.AsOperator().RecordAttemptIntent(t.Context(), work[0].AttemptID, "retry-payment", work[0].Customer, dueAt); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				webhook("retry-declined", "payment_intent.payment_failed", `{"id":"retry-payment","object":"payment_intent","livemode":false,"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
+			}
+			wantTier, wantFailures = "Held", 2
 		}
 		standing, err := tenant.SpendStanding(t.Context(), time.Now())
-		wantTier, wantFailures := "New", int64(0)
-		if phase == "held" {
-			wantTier, wantFailures = "Held", 1
-		}
 		if err != nil || standing.OpenCharge == nil || standing.OpenCharge.Failures != wantFailures || standing.Billing.Tier != wantTier {
 			t.Fatalf("%s standing=%+v: %v", phase, standing, err)
 		}
@@ -264,9 +286,9 @@ func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler
 		t.Fatal(err)
 	}
 	h := New(e.Store, nil).WithEngineController(e).WithPayments(verifier, e.Store).Handler()
+	now := time.Now().Unix()
 	webhook := func(id, kind, object string) {
 		t.Helper()
-		now := time.Now().Unix()
 		body := fmt.Sprintf(`{"id":%q,"object":"event","type":%q,"created":%d,"livemode":false,"data":{"object":%s}}`, id, kind, now, object)
 		mac := hmac.New(sha256.New, []byte("whsec_fixture"))
 		if _, err := fmt.Fprintf(mac, "%d.%s", now, body); err != nil {

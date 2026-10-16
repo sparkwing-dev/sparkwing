@@ -83,6 +83,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "approvals", Owner: SchemaTenant},
 	{Name: "billable_intervals", Owner: SchemaTenant},
 	{Name: "billing_awards", Owner: SchemaTenant},
+	{Name: "billing_pages", Owner: SchemaTenant},
 	{Name: "blob_members", Owner: SchemaTenant},
 	{Name: "blob_receipts", Owner: SchemaTenant},
 	{Name: "blob_records", Owner: SchemaTenant},
