@@ -1,8 +1,9 @@
 # W9 runner composition recheck
 
-Base `d7fdf7c2f`, environment `1087`. Runner composition remains incomplete.
-This session changes only this report. The previous session's implementation
-and its four contract requests remain unchanged in this checkout.
+Base `fccd5ac4f`, environment `1087`. Runner composition remains incomplete.
+The 2026-10-16 continuation changes only this report. No dependency implementation
+has arrived since the preceding W9 session. All four contract requests below
+remain open. The requested native self-hosted pipeline is not ready to run.
 
 The existing `rewrite_integration` tests ran before any edit:
 
@@ -16,6 +17,7 @@ The existing `rewrite_integration` tests ran before any edit:
 | `TestInstalledRunnerRuntimeComposition`, start/warm/fetch-source/run-node | Reach their expected production HTTP operations. |
 | Installed launch | Fails with `launcher runtime is unavailable`. |
 | `TestReviewOwnerEvaluationReportsBeforeWorkAward`, annotation/summary | Both return HTTP 409 with `holder_rights`, where the test requires 204. |
+| Public numeric selectors, debug/resume selectors and numeric/team-isolation property seeds | Pass against the persisted controller. This work remains complete. |
 
 ## Contract changes needed
 
@@ -49,19 +51,28 @@ The existing `rewrite_integration` tests ran before any edit:
    handling behind `UnitHost`. Accepting the kinds in the validator alone
    would dispatch them to the wrong host.
 
-The swarm brief requires stopping a piece that needs a foreign contract change.
+The swarm brief says: "If it changes another area's contract, stop that piece
+and put it under 'Contract changes needed' in your report."
 The existing BootstrapRuntime, source/host binding and evaluation tests already
 exercise declared interfaces with fakes. Those component adapters pass. No new
 parallel abstraction or placeholder factory was added.
+
+Resume when the integration branch supplies those four boundaries. Re-run the
+existing probes before changing W9's composition. In particular, the self-hosted
+trigger path needs the first boundary before it can reach the socket refusal.
+Changing the fake snapshot or passing `Local: func(...) bool { return true }`
+would bypass the missing placement decision and cannot satisfy that probe.
 
 ## Verification and scope
 
 Whole-repository build and focused vet passed. Focused tests passed in
 controller, cluster and localcontroller, including public numeric selectors,
-debug/resume selectors and team-isolation seeds, committed prune acknowledgement,
-BootstrapRuntime fence/cleanup, private transport selection, awarded-credential
-property seeds and owner-evaluation source-edge property seeds. Numeric selector
-work remains complete. No new acceptance cell or archived test port is claimed.
+debug/resume selectors and team-isolation seeds, BootstrapRuntime fence/cleanup,
+private transport selection, awarded-credential property seeds and
+owner-evaluation source-edge property seeds. The integration probes in the table
+remain red or socket-skipped as stated. No acceptance cell was newly unskipped.
+No archived test was ported and no new test was needed because the existing
+probes already reproduce each unfinished integration point.
 
 Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`,
 `GOCACHE=/tmp/sw-gocache`, `GOTMPDIR=/tmp/sw-astra-W9/gotmp`,
