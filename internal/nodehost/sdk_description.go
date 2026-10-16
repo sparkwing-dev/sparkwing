@@ -40,7 +40,7 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 		if err := p.Masks.initialize(runspec.SealedRequest{}, &defaults, nil, nil); err != nil {
 			return PreparedPlanning{}, err
 		}
-		if pipeline.Name == input.Entrypoint {
+		if pipeline.Name == input.Run.Pipeline {
 			selected = pipeline
 		}
 	}

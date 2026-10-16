@@ -24,21 +24,22 @@ var logLevels = map[string]bool{"debug": true, "info": true, "warn": true, "erro
 // ProcessServices supplies one live process's accepted declaration and record writers.
 // Writers recheck Authorized in their transaction. Every sink uses Masks' shared masker.
 type ProcessServices struct {
-	lifetime   context.Context
-	activity   *nativeProcessActivity
-	RunID      string
-	Job        nodeproto.JobSpec
-	Masks      *MaskRegistry
-	Annotation func(context.Context, capability.Authorized, nodeproto.AnnotationRequest) error
-	Summary    func(context.Context, capability.Authorized, nodeproto.SummaryRequest) error
-	Secrets    []string
-	Secret     func(context.Context, capability.Authorized, string) (string, bool, error)
-	Output     func(context.Context, capability.Authorized, string) (json.RawMessage, error)
-	Latest     func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error)
-	OIDC       func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error)
-	StartChild func(context.Context, capability.Authorized, ChildRequest) (string, error)
-	AwaitChild func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error)
-	Cleanups   *ProcessCleanups
+	lifetime       context.Context
+	activity       *nativeProcessActivity
+	SourceBindings capability.BindingChecker
+	RunID          string
+	Job            nodeproto.JobSpec
+	Masks          *MaskRegistry
+	Annotation     func(context.Context, capability.Authorized, nodeproto.AnnotationRequest) error
+	Summary        func(context.Context, capability.Authorized, nodeproto.SummaryRequest) error
+	Secrets        []string
+	Secret         func(context.Context, capability.Authorized, string) (string, bool, error)
+	Output         func(context.Context, capability.Authorized, string) (json.RawMessage, error)
+	Latest         func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessOutput, error)
+	OIDC           func(context.Context, capability.Authorized, string) (ProcessOIDCToken, error)
+	StartChild     func(context.Context, capability.Authorized, ChildRequest) (string, error)
+	AwaitChild     func(context.Context, capability.Authorized, string, string, time.Duration) (ProcessChildResult, error)
+	Cleanups       *ProcessCleanups
 }
 
 // ProcessEndpointRegistrar is implemented by the common policy router.
@@ -82,7 +83,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 				}
 				return executorError(code, "resolve process service failed")
 			}
-			if service == nil || service.Masks == nil || service.Masks.masker == nil || service.RunID != auth.Binding.RunID || service.Job.ID != auth.Binding.NodeID || service.RunID == "" || service.Job.ID == "" {
+			if service == nil || service.Masks == nil || service.Masks.masker == nil || service.RunID != auth.Binding.RunID || auth.Binding.Kind != capability.BindingTrigger && service.Job.ID != auth.Binding.NodeID || service.RunID == "" || service.Job.ID == "" {
 				return executorError(apierr.SpecDrift, "service binding differs from its live process")
 			}
 			if service.lifetime != nil {
@@ -130,7 +131,7 @@ func processServiceError(err error, mask func(string) string) error {
 	return maskHostError(err, mask)
 }
 
-func processServiceTarget(principal capability.Principal, target capability.Target) (capability.Target, error) {
+func processServiceTarget(_ context.Context, principal capability.Principal, target capability.Target) (capability.Target, error) {
 	bound := principal.Capability.Binding
 	if target.Team == "" {
 		target.Team = principal.Capability.Team

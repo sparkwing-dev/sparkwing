@@ -1,5 +1,9 @@
 # W9 continuation: local integration and runner transport
 
+Latest continuation: [W9-INTEGRATION-RECHECK.md](W9-INTEGRATION-RECHECK.md)
+reproduces the owner metadata, committed retry selection and production launch
+blockers against the unchanged contracts. Build and focused checks pass.
+
 The next continuation fixes background queue service binding and log finalization.
 See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.
 

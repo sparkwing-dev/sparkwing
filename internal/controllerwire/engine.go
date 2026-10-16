@@ -221,18 +221,19 @@ type ReconcileResponse struct {
 // ExecutionJob carries private persisted state for a live owner or awarded executor.
 type ExecutionJob struct {
 	JobDetail
-	OutputRecord       *blob.RecordKey              `json:"output_record,omitempty"`
-	ManifestRecord     *blob.RecordKey              `json:"manifest_record,omitempty"`
-	Spec               json.RawMessage              `json:"spec"`
-	SpecHash           string                       `json:"spec_hash"`
-	Execution          runspec.JobExecutionSettings `json:"execution"`
-	ClaimedBy          string                       `json:"claimed_by,omitempty"`
-	CapabilityPrefix   string                       `json:"capability_prefix,omitempty"`
-	ReadyAt            *time.Time                   `json:"ready_at,omitempty"`
-	LeaseExpiresAt     *time.Time                   `json:"lease_expires_at,omitempty"`
-	ApplicationRetries int                          `json:"application_retries"`
-	Disruptions        int                          `json:"disruptions"`
-	ExpansionDigest    string                       `json:"expansion_digest,omitempty"`
+	OutputRecord          *blob.RecordKey              `json:"output_record,omitempty"`
+	ManifestRecord        *blob.RecordKey              `json:"manifest_record,omitempty"`
+	Spec                  json.RawMessage              `json:"spec"`
+	SpecHash              string                       `json:"spec_hash"`
+	Execution             runspec.JobExecutionSettings `json:"execution"`
+	ClaimedBy             string                       `json:"claimed_by,omitempty"`
+	CapabilityPrefix      string                       `json:"capability_prefix,omitempty"`
+	OwnerCapabilityPrefix string                       `json:"owner_capability_prefix,omitempty"`
+	ReadyAt               *time.Time                   `json:"ready_at,omitempty"`
+	LeaseExpiresAt        *time.Time                   `json:"lease_expires_at,omitempty"`
+	ApplicationRetries    int                          `json:"application_retries"`
+	Disruptions           int                          `json:"disruptions"`
+	ExpansionDigest       string                       `json:"expansion_digest,omitempty"`
 }
 
 // AcceptedExpansion retains exact accepted declarations for reconstruction, including empty groups.

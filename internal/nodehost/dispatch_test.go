@@ -183,7 +183,7 @@ func TestDispatchRetainsLocalSemaphoresUntilRemoteCompletion(t *testing.T) {
 				for _, id := range []string{"build", "test"} {
 					select {
 					case request := <-d.admitted:
-						if request.RunID == f.Input.RunID {
+						if string(request.RunID) == f.Input.RunID {
 							request = <-d.admitted
 						}
 						if request.RunID != wingwire.NodeSemaphoreParticipant(f.Input.RunID, id) {
@@ -266,7 +266,7 @@ func TestDispatchAdmissionEvictionDrainsTheRemoteHolder(t *testing.T) {
 	}
 	_, input := claimRemote(t, f, "build")
 	d.mu.Lock()
-	held := d.leases[wingwire.NodeSemaphoreParticipant(f.Input.RunID, "build")]
+	held := d.leases[string(wingwire.NodeSemaphoreParticipant(f.Input.RunID, "build"))]
 	d.mu.Unlock()
 	held.evict <- wingwire.Evicted{Key: "db", SupersededBy: "newer"}
 	for {

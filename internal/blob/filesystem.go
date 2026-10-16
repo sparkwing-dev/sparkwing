@@ -147,6 +147,7 @@ func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			put = f.putLog
 		}
 		if err := put(r, object); err != nil {
+			apierr.NoteResponseError(w, err)
 			code := apierr.Internal
 			if errors.Is(err, ErrIntegrity) {
 				code = apierr.BadRequest

@@ -150,6 +150,14 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 	if err != nil || row.Outcome != store.NodeSuccess {
 		t.Fatalf("row=%+v error=%v", row, err)
 	}
+	optional, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "maybe"})
+	if err != nil || optional.Status != store.StatusDone || optional.Outcome != store.NodeFailed {
+		t.Fatalf("optional row=%+v error=%v", optional, err)
+	}
+	run, err := f.Tenant.ReadRun(ctx, f.Accepted.RunID)
+	if err != nil || run.State != store.RunSuccess {
+		t.Fatalf("run=%+v error=%v", run, err)
+	}
 }
 
 func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {

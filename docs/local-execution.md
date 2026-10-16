@@ -4,11 +4,28 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
+Intake and hosts derive plan placement from the sealed request. Local runs,
+local triggered runs, runner-hosted runs, launcher runs, `--runner here` and
+GitHub Actions use the same capability table for initial plans and expansions.
+
+If the pipeline's `go.mod` replaces the Go SDK, Sparkwing uses the installed CLI's
+engine and warns that engine pinning is off for that run. The shared installer
+builds the replacement locally.
+
 The commands bind sealed intake to the shared controller, source, private
 environment, storage and host services. The CLI sends state operations over the
-authenticated private API. Owner evaluation still requires its separate process
-credential contract. Native execution evidence remains with the integration
-suite. See [rewrite integration](architecture.md).
+authenticated private API. Owner evaluation delegates a fresh SDK process from
+the live owner lease. It keeps the evaluated job separate from that lease and
+creates no work attempt. Each service call rechecks that job's persisted source
+fence and declared output edges. A separately awarded eval process uses its own
+eval lease.
+
+The controller claims each executable local job through the shared claim matcher.
+Each job process receives a fresh credential from its own store-issued node award.
+The private API preserves the owner and node claim identities so the host can
+check their relation before starting the process.
+
+Native execution evidence remains with the integration suite. See [rewrite integration](architecture.md).
 
 The old `pkg/localws` server, trigger-consumer election and `RunHosted` entrypoint
 are removed with their state, admission, logging and child-dispatch backends.
@@ -50,6 +67,10 @@ execute work through protocol v2. They do not open the controller's database.
 
 Startup reconciles orphaned work and starts the private API before consumers.
 Readiness does not wait for pipeline compilation or source preparation.
+The CLI starts or waits for the controller immediately before submitting a run,
+after source preparation. Other local API commands, doctor and schedule timers
+use the same startup operation. A startup failure reports why the local
+controller could not start before any request is submitted.
 
 The controller is the only writer of the shared store. Reads, cancellation,
 retry and doctor use its API too. The controller's route policy and wire
@@ -186,6 +207,10 @@ Before a local run is accepted, foreground and queued hosts select Go or
 TypeScript from the sealed checkout's pipeline directory. A malformed manifest
 fails setup. Accepted runs retain the SDK identity in their sealed engine.
 
+SDK describe, plan, eval and attempt processes run from the acquired checkout
+root. If describe fails before secret declarations are known, the diagnostic
+names the error code and withholds the details because they may contain secrets.
+
 ## Remote execution
 
 ```bash
@@ -292,6 +317,13 @@ holder. Public run details are redacted projections, not executable inputs.
 An awarded host retains its selected controller transport for private execution
 state, source credentials and storage. These controller API calls use the award's capability.
 The runner's reusable claim credential stays with the claim loop.
+
+The controller logs each HTTP server failure once with its request ID and masked
+cause. Match the response’s `X-Request-Id` to the controller log to investigate a
+generic client error.
+Unmatched routes log the method and sanitized path with the 404 response.
+The path excludes query parameters and masks registered secrets and credential
+selectors.
 
 ### The laptop boundary
 

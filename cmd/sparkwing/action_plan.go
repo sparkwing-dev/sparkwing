@@ -177,7 +177,7 @@ func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pip
 				}
 			}
 		}
-		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: identity.Entrypoint, Args: resolvedArgs, Run: &nodeproto.RunContext{RunID: runID, Pipeline: pipeline}}
+		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: identity.Name, Args: resolvedArgs, Run: &nodeproto.RunContext{RunID: runID, Pipeline: pipeline}}
 		var raw json.RawMessage
 		if err := s.Call(req, &raw); err != nil {
 			return err

@@ -34,15 +34,8 @@ func (WindowsVerify) Examples() []sparkwing.Example {
 }
 
 func (p *WindowsVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	return p.planForPlatform(plan, rc.Pipeline, runtime.GOOS)
-}
-
-func (p *WindowsVerify) planForPlatform(plan *sparkwing.Plan, pipeline, goos string) error {
-	if goos != "windows" {
-		return fmt.Errorf("windows-verify requires native Windows; host is %s", goos)
-	}
 	plan.Resources(sparkwing.Cores(4))
-	sparkwing.Job(plan, pipeline, p).Timeout(20 * time.Minute)
+	sparkwing.Job(plan, rc.Pipeline, p).Requires("os=windows").Timeout(20 * time.Minute)
 	return nil
 }
 

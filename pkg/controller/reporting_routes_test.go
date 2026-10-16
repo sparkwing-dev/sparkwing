@@ -76,6 +76,9 @@ func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 				case 3:
 					if strings.Contains(endpoint.Pattern, "{run}") {
 						p.Capability.Team, status, code = "b", 403, apierr.Forbidden
+						if endpoint.ResolveTarget != nil {
+							status, code = 404, apierr.NotFound
+						}
 					} else {
 						p.Capability.RevokedAt = &now
 					}

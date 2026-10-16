@@ -139,7 +139,7 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 	}
 	token, expires, err := s.oidc.issuer.Mint(claims, facts.Now, ceiling)
 	if err != nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "OIDC issuance unavailable"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "OIDC issuance unavailable"}, err)
 	}
 	writeJSON(w, http.StatusOK, OIDCTokenResponse{Token: token, ExpiresAt: expires.UTC()})
 	return nil

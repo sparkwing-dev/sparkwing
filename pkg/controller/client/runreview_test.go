@@ -24,11 +24,11 @@ func TestRunReviewRoutesAndAuthority(t *testing.T) {
 		{"resolve", "POST", "/api/v1/runs/412/approvals/deploy%2Fprod", `{"resolution":"approved","comment":"safe"}`, `{"approval":{"run_id":"r1","job_id":"deploy/prod","requested_at":"2026-10-14T10:00:00Z","resolved_at":"2026-10-14T10:01:00Z","message":"ship?","timeout_ms":0,"on_timeout":"fail","resolution":"approved","approver":"authenticated-user","comment":"safe"},"replayed":true}`, func(c controllerwire.RunReview) (any, error) {
 			return c.ResolveApproval(t.Context(), "412", "deploy/prod", controllerwire.ApprovalDecision{Resolution: "approved", Comment: "safe", IdempotencyKey: "stable-key"})
 		}},
-		{"annotate", "POST", "/api/v1/runs/412/jobs/build/annotations", `{"level":"info","message":"note"}`, `{"replayed":false,"cancel_requested":false,"state_seq":2,"generation":1,"attempt":1}`, func(c controllerwire.RunReview) (any, error) {
-			return c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{Annotation: controllerwire.Annotation{Level: "info", Message: "note"}})
+		{"annotate", "POST", "/api/v1/runs/412/jobs/build/annotations", `{"level":"info","message":"note"}`, ``, func(c controllerwire.RunReview) (any, error) {
+			return nil, c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{Annotation: controllerwire.Annotation{Level: "info", Message: "note"}})
 		}},
-		{"step", "POST", "/api/v1/runs/412/jobs/build/steps/annotations", `{"level":"warn","message":"note","file":"source.go","line":7,"column":3,"end_line":8,"step_id":"compile"}`, `{"replayed":false,"cancel_requested":false,"state_seq":2,"generation":1,"attempt":1}`, func(c controllerwire.RunReview) (any, error) {
-			return c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{StepID: "compile", Annotation: controllerwire.Annotation{Level: "warn", Message: "note", File: "source.go", Line: 7, Column: 3, EndLine: 8}})
+		{"step", "POST", "/api/v1/runs/412/jobs/build/steps/annotations", `{"level":"warn","message":"note","file":"source.go","line":7,"column":3,"end_line":8,"step_id":"compile"}`, ``, func(c controllerwire.RunReview) (any, error) {
+			return nil, c.AppendAnnotation(t.Context(), "412", "build", controllerwire.AnnotationWrite{StepID: "compile", Annotation: controllerwire.Annotation{Level: "warn", Message: "note", File: "source.go", Line: 7, Column: 3, EndLine: 8}})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -46,7 +46,11 @@ func TestRunReviewRoutesAndAuthority(t *testing.T) {
 				if strings.Contains(string(body), "approver") {
 					t.Fatal("client selected approver")
 				}
-				return engineResponse(200, tc.response), nil
+				status := http.StatusOK
+				if tc.response == "" {
+					status = http.StatusNoContent
+				}
+				return engineResponse(status, tc.response), nil
 			})}})
 			if err != nil {
 				t.Fatal(err)
@@ -69,8 +73,8 @@ func TestRunReviewValidatesBeforeTransport(t *testing.T) {
 			t.Fatalf("accepted %+v", input)
 		}
 	}
-	for _, input := range []controllerwire.AnnotationWrite{{Annotation: controllerwire.Annotation{Level: "", Message: "x"}}, {Annotation: controllerwire.Annotation{Level: "info"}}, {StepID: "..", Annotation: controllerwire.Annotation{Level: "info", Message: "x"}}} {
-		if _, err := c.AppendAnnotation(t.Context(), "r", "j", input); err == nil {
+	for _, input := range []controllerwire.AnnotationWrite{{Annotation: controllerwire.Annotation{Level: "", Message: "x"}}, {StepID: "..", Annotation: controllerwire.Annotation{Level: "info", Message: "x"}}} {
+		if err := c.AppendAnnotation(t.Context(), "r", "j", input); err == nil {
 			t.Fatalf("accepted %+v", input)
 		}
 	}
@@ -83,7 +87,7 @@ func TestRunReviewPreservesForbiddenAndRejectsUnresolvedSuccess(t *testing.T) {
 	failure := testEngine(t, func(*http.Request) (*http.Response, error) {
 		return engineResponse(403, `{"error":{"code":"forbidden","message":"reporting credential required","hint":"use an authorized credential"}}`), nil
 	})
-	_, err := failure.AppendAnnotation(t.Context(), "r", "j", controllerwire.AnnotationWrite{Annotation: controllerwire.Annotation{Level: "info", Message: "x"}})
+	err := failure.AppendAnnotation(t.Context(), "r", "j", controllerwire.AnnotationWrite{Annotation: controllerwire.Annotation{Level: "info", Message: "x"}})
 	var api *apierr.Error
 	if !errors.As(err, &api) || api.Code != apierr.Forbidden || api.Hint != "use an authorized credential" {
 		t.Fatalf("lost authorization failure: %v", err)

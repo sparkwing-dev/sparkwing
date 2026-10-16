@@ -3,17 +3,18 @@
 A repository's SDK pin selects its engine. The Go SDK, TypeScript SDK and engine
 release together. Spark libraries use their own module versions.
 
-The matching-engine policy is the frozen execution contract. Native release
-resolution, signed-index verification, cache and upgrade staging still need their
-engine-owner implementation. CLI fixtures establish command composition and
-reporting, not a verified release download or a complete native upgrade.
-
 ## Versioning per repo
 
 Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
 TypeScript pipelines pin `@sparkwing/sdk` through their manifest and native
 lockfile. A version range alone cannot select an exact engine. Go `vX.Y.Z` and
 TypeScript `X.Y.Z` identify engine `vX.Y.Z`, including any prerelease suffix.
+
+A Go SDK `replace` directive that applies to the required version disables engine
+pinning for that run. Sparkwing warns and uses the installed CLI's engine to build
+and run the replacement. It records the replacement and installed executable's
+digest in the accepted identity. Resume requires that same executable. Removing
+the replacement restores release pinning and signed-release verification.
 
 Pin inspection reads regular manifest and lock files without running repository
 code. It refuses linked or special files. Go module inspection retains its
@@ -69,6 +70,13 @@ refuse rollback and retain the last verified copy when refresh fails. There is
 no fallback-age cutoff. First use without any verified copy fails with an
 unavailable error and connectivity guidance.
 
+A development build skips signed version-policy checks and logs once per
+resolver that the checks are off. This applies to run admission, run pages,
+compatibility queries, engine selection and runner updates. A development build
+needs an explicit `--version` when upgrading a repository because it does not
+fetch the latest-version index. Released builds retain signed policy checks,
+regardless of the version reported by a runner or selected by a pipeline.
+
 Warnings appear in run output and the dashboard before enforcement, with signed
 reason and fix guidance. A revoked or unsupported release fails loudly and names
 `sparkwing upgrade`. The CLI renders the same notice data as run status.
@@ -86,6 +94,8 @@ sparkwing upgrade --version v1.2.3
 The selected verified engine installs the staged SDK through `InstallSDK`.
 `cache warm` uses the same selected-engine installer. The hidden SDK-install
 command delegates to the engine package, which owns Go builds and `npm ci`.
+Each installation makes one helper attempt with a ten-minute deadline. Failure
+stops the install, reports the cause, and kills and reaps its helper process tree.
 Verification then compiles Go packages or type-checks TypeScript and runs list,
 describe and plan through that engine, including hidden pipelines. It never runs
 job bodies. Install and check environments pass through the shared environment

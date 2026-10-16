@@ -1,32 +1,23 @@
 package jobs
 
 import (
-	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 func runReleaseStateCheck(t *testing.T, repo, name string) error {
 	t.Helper()
-	previous := sparkwing.CurrentRuntime().WorkDir
-	sparkwing.SetWorkDir(repo)
-	defer sparkwing.SetWorkDir(previous)
-	w := sparkwing.NewWork()
-	if _, err := (&releaseCutChecksJob{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
-	if w.StepByID(name) == nil {
+	t.Chdir(repo)
+	host, plan, doc := prepareWork(t, &releaseCutChecksJob{})
+	if findStep(doc, name) == nil {
 		t.Fatalf("release class has no %s check", name)
 	}
-	for _, step := range w.Steps() {
-		if step.ID() != name && step.ID() != budgetStepID {
-			step.SkipIf(func(context.Context) bool { return true })
-		}
-	}
-	_, err := sparkwing.RunWork(t.Context(), w)
+	_, err := host.RunStep(t.Context(), plan, "job", name)
 	return err
 }
 
@@ -90,8 +81,7 @@ func TestReleasePreparationRefusesMissingNotesBeforeCommit(t *testing.T) {
 			repo := seedReleaseRepo(t)
 			writeFile(t, filepath.Join(repo, "CHANGELOG.md"), tc.body)
 			before := gitRun(t, repo, "rev-parse", "HEAD")
-			ctx := context.WithValue(t.Context(), sparkwing.RuntimePlumbing.Keys.JSONRefResolver,
-				func(id string) ([]byte, bool) { return []byte(`"v0.2.0"`), id == "version" })
+			ctx := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"version": json.RawMessage(`"v0.2.0"`)}}).Context(t.Context())
 			job := prepareChangelogJob{RepoDir: repo, Version: sparkwing.Ref[string]{JobID: "version"}}
 			err := job.run(ctx)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {

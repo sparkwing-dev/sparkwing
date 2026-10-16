@@ -21,7 +21,7 @@ func (lifecycleIdleProcSampler) CPUUsage(int) (wingd.ProcUsage, bool) {
 
 func semReqCancel(runID, key string, cancelTimeoutMS int64) wingwire.AdmissionRequest {
 	return wingwire.AdmissionRequest{
-		RunID:          runID,
+		RunID:          wingwire.HolderRef(runID),
 		SemaphoresOnly: true,
 		Semaphores: []wingwire.SemaphoreClaim{{
 			Name: key, Capacity: 1, Cost: 1,

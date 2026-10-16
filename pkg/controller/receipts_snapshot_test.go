@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
@@ -30,6 +32,17 @@ func FuzzReceiptSnapshotPrivateInputsHaveNoHash(f *testing.F) {
 		got := receipt.BuildReceipt(run, nodes, 0, "")
 		if got.Identity.InputsHash != "" {
 			t.Fatal("receipt published a hash of private inputs")
+		}
+		raw, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["invocation"] != nil || fields["store"] != nil || bytes.Contains(raw, []byte(`"node_id"`)) {
+			t.Fatalf("receipt exposed fields outside the shared projection: %s", raw)
 		}
 	})
 }

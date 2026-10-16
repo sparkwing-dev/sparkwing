@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -20,7 +21,7 @@ type Endpoint struct {
 	Pattern        string
 	Authentication capability.Authentication
 	Decode         func(*http.Request) (capability.RequestEvidence, error)
-	ResolveTarget  func(capability.Principal, capability.Target) (capability.Target, error)
+	ResolveTarget  func(context.Context, capability.Principal, capability.Target) (capability.Target, error)
 	Verify         func(*http.Request) error
 	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }

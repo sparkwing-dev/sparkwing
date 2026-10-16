@@ -11,30 +11,28 @@ import (
 )
 
 func TestTemplateVerifyPlanUsesMeasuredResourcesAndBoundsFanout(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	if err := (TemplateVerify{}).Plan(context.Background(), plan, TemplateVerifyArgs{}, sparkwing.RunContext{}); err != nil {
-		t.Fatal(err)
-	}
-	if hints := plan.ResourceHints(); hints != nil {
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (TemplateVerify{}).Plan(context.Background(), plan, TemplateVerifyArgs{}, sparkwing.RunContext{})
+	})
+	if hints := plan.Resources; hints != nil {
 		t.Fatalf("resource pin = %#v, want measured admission", hints)
 	}
 
 	count := 0
-	for _, node := range plan.Nodes() {
-		if hints := node.ResourceHints(); hints != nil {
-			t.Fatalf("%s resource pin = %#v, want measured admission", node.ID(), hints)
+	for _, node := range plan.Jobs {
+		if hints := node.Resources; hints != nil {
+			t.Fatalf("%s resource pin = %#v, want measured admission", node.ID, hints)
 		}
-		if !strings.HasPrefix(node.ID(), "verify-") {
+		if !strings.HasPrefix(node.ID, "verify-") {
 			continue
 		}
 		count++
-		group := node.ConcurrencyGroupRef()
-		if group == nil {
-			t.Fatalf("%s has no fanout bound", node.ID())
+		if len(node.Concurrency) != 1 {
+			t.Fatalf("%s has no fanout bound", node.ID)
 		}
-		limit := group.Limit()
-		if group.Name() != "template-verify" || limit.Scope != sparkwing.ScopeRun || limit.OnLimit != sparkwing.Queue || limit.Capacity != 4 {
-			t.Fatalf("%s concurrency = %q %+v", node.ID(), group.Name(), limit)
+		limit := node.Concurrency[0]
+		if limit.Group != "template-verify" || limit.Scope != sparkwing.ScopeRun || limit.OnLimit != sparkwing.Queue || limit.Capacity != 4 {
+			t.Fatalf("%s concurrency = %q %+v", node.ID, limit.Group, limit)
 		}
 	}
 	if count != len(verifyTemplates) {
@@ -44,13 +42,12 @@ func TestTemplateVerifyPlanUsesMeasuredResourcesAndBoundsFanout(t *testing.T) {
 
 func TestTemplateVerifyPlanShapeIsIndependentOfProofReuse(t *testing.T) {
 	nodeIDs := func(in TemplateVerifyArgs) []string {
-		plan := sparkwing.NewPlan()
-		if err := (TemplateVerify{}).Plan(context.Background(), plan, in, sparkwing.RunContext{}); err != nil {
-			t.Fatal(err)
-		}
+		plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+			return (TemplateVerify{}).Plan(context.Background(), plan, in, sparkwing.RunContext{})
+		})
 		var ids []string
-		for _, node := range plan.Nodes() {
-			ids = append(ids, node.ID())
+		for _, node := range plan.Jobs {
+			ids = append(ids, node.ID)
 		}
 		sort.Strings(ids)
 		return ids

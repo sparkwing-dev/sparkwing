@@ -22,10 +22,12 @@ type RunnerAdmissionPolicy interface {
 }
 
 // SignedRunnerAdmission uses the engine owner's verified index and runner policy.
-type SignedRunnerAdmission struct{ Resolver *engine.Resolver }
+type SignedRunnerAdmission struct {
+	Resolver *engine.Resolver
+}
 
-// CheckRunner applies the verified runner policy at the time of a new claim.
-func (p SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error {
+// CheckRunner applies runner release policy for configured release builds.
+func (p *SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error {
 	if p.Resolver == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "runner version policy is unavailable"}
 	}

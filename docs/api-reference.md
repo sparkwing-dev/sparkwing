@@ -258,16 +258,16 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/github/app/available` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
 | `POST` | `/github/app/select` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
 | `GET` | `/metrics` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
-| `GET` | `/node/v1/secrets/{name}` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `secrets.release` / `declaredSecret` / `process` |
-| `GET` | `/node/v1/jobs/{job}/output` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `data.read` / `readSet` / `process` |
-| `GET` | `/node/v1/pipelines/{name}/latest` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `refs.read` / `readSet` / `process` |
-| `POST` | `/node/v1/oidc-token` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `oidc.mint` / `ownNode` / `process` |
-| `POST` | `/node/v1/masks` | `nodehost` | `nodehost` | `capability` | `exact_body` | `nodehost_process` / `node.report` / `ownNode` / `process` |
-| `POST` | `/node/v1/annotations` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownNode` / `process` |
-| `POST` | `/node/v1/summary` | `nodehost` | `nodehost` | `capability` | `exact_body` | `nodehost_process` / `node.report` / `ownNode` / `process` |
-| `POST` | `/node/v1/children` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `children.start` / `bodyNamesRun` / `process` |
-| `GET` | `/node/v1/children/{run}/await` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `children.start` / `childOfBoundNode` / `process` |
-| `POST` | `/node/v1/cleanups` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownCleanup` / `process` |
-| `DELETE` | `/node/v1/cleanups/{cleanup}` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownCleanup` / `process` |
+| `GET` | `/node/v1/secrets/{name}` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `secrets.release` / `declaredSecret` / `process`<br>`owner_process` / `secrets.release` / `declaredSecret` / `process` |
+| `GET` | `/node/v1/jobs/{job}/output` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `data.read` / `readSet` / `process`<br>`owner_process` / `data.read` / `readSet` / `process` |
+| `GET` | `/node/v1/pipelines/{name}/latest` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `refs.read` / `readSet` / `process`<br>`owner_process` / `refs.read` / `readSet` / `process` |
+| `POST` | `/node/v1/oidc-token` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `oidc.mint` / `ownNode` / `process`<br>`owner_process` / `oidc.mint` / `runOfTrigger` / `process` |
+| `POST` | `/node/v1/masks` | `nodehost` | `nodehost` | `capability` | `exact_body` | `nodehost_process` / `node.report` / `ownNode` / `process`<br>`owner_process` / `node.report` / `runOfTrigger` / `process` |
+| `POST` | `/node/v1/annotations` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownNode` / `process`<br>`owner_process` / `node.report` / `runOfTrigger` / `process` |
+| `POST` | `/node/v1/summary` | `nodehost` | `nodehost` | `capability` | `exact_body` | `nodehost_process` / `node.report` / `ownNode` / `process`<br>`owner_process` / `node.report` / `runOfTrigger` / `process` |
+| `POST` | `/node/v1/children` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `children.start` / `bodyNamesRun` / `process`<br>`owner_process` / `children.start` / `bodyNamesRun` / `process` |
+| `GET` | `/node/v1/children/{run}/await` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `children.start` / `childOfBoundNode` / `process`<br>`owner_process` / `children.start` / `childOfBoundNode` / `process` |
+| `POST` | `/node/v1/cleanups` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownCleanup` / `process`<br>`owner_process` / `node.report` / `runOfTrigger` / `process` |
+| `DELETE` | `/node/v1/cleanups/{cleanup}` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownCleanup` / `process`<br>`owner_process` / `node.report` / `runOfTrigger` / `process` |
 
 <!-- design:end -->

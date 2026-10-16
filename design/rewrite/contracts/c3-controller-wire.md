@@ -122,13 +122,13 @@ without changing the checkout. `Git.SHA` retains that execution commit.
 `Source.Ref` retains the pipeline commit selected by the configured source or
 explicit pipeline revision. Both selections resolve to exact commits. A configured
 source pin and explicit pipeline revision must agree. `Source.Entrypoint` retains
-the execution configuration's SDK entrypoint, while
-the invoked alias supplies `Request.Pipeline`. GitHub repository identity requires
+the execution configuration's Go type identity, while
+the registered name supplies `Request.Pipeline`. GitHub repository identity requires
 a resolved positive numeric ID. Typed repository identity and origin HEAD supply
 no App trust or authority. Clone URLs cannot carry credentials.
 
-Request preparation selects that entrypoint's argument schema, preserves its
-secret classification, uses C4 request resolution and hashes the caller's captured
+Request preparation selects the registered pipeline name's argument schema,
+preserves its secret classification, uses C4 request resolution and hashes the caller's captured
 environment through `EnvironmentDigest`. Environment values stay with the private
 capture owner. Validation diagnostics mask supplied argument tokens through the
 shared CLI sanitizer. Supplied idempotency keys survive preparation and intake.
@@ -186,6 +186,12 @@ or ref evidence is accepted in a request.
 | POST `/api/v1/data/has-many` | `digests`, optional `deadline` | `present` |
 | GET `/api/v1/data/records` | flattened `kind`, `name`, `ref`, `pipeline`, `job`, `key`, `deadline`, `verified_default_only` query selectors | `found`, optional flat `record`, `members` |
 | POST `/api/v1/data/records` | flat logical record selectors, digest, optional manifest/expiry, members | flat canonical record |
+
+Record handlers and the client use the shared DataRecordWriteRequest,
+DataRecordLookupResult, DataRecord and DataMember DTOs. A verified-default lookup
+accepts the server-selected nonempty verified ref while checking every other
+record selector against the request. An ordinary lookup requires an exact ref
+match. Invalid query escaping returns `bad_request` before storage access.
 
 The private local-host `data-authority` endpoints return C1's canonical live
 storage projection under the independently authenticated owner or node award.
@@ -366,13 +372,23 @@ for CLI status views. `ReadRun` retains one `RunDetail` for local and remote
 connections. Its optional `steps` field carries `StepDetail` values when a client
 requests step history. No execution seal or raw store row enters these views.
 
-The W9 observation types complete three existing C2 GET routes:
+The W9 observation types complete these existing C2 GET routes:
 
 | Route | Request | Response |
 | --- | --- | --- |
 | `/api/v1/runs` | positive `limit`, opaque `cursor`, optional exact `parent_run_id` | `RunPage` with `runs`, `next_cursor`, `truncated` |
 | `/api/v1/runs/{run}/steps` | stable ID or team number | `RunSteps` with `steps` |
 | `/api/v1/runs/{run}/receipt` | stable ID or team number | `Receipt` |
+| `/api/v1/runs/{run}/attempts` | stable ID or team number | complete `RunPage` of public retry history, oldest first |
+
+Retry history uses the same `RunDetail` projection as run status. It includes
+the root, siblings and descendants within the authenticated team. Every returned
+run must pass the caller's binding. A denied or invalid member fails the complete
+response. The page has no cursor and is not truncated. Current retry lineage
+comes from each execution row, while its inputs retain the original request and
+spec seals. Raw reporting rows and invocation metadata never enter this response.
+Equal creation timestamps sort by run number. Traversal detects cycles by
+visited identity and imposes no retry-chain depth limit.
 
 Pages contain public run details. A truncated page supplies a new nonempty
 cursor. A final page has an empty cursor. The parent filter selects direct
@@ -417,12 +433,16 @@ not repeat inputs, jobs, attempts or log subjects. A `kind: page` record carries
 metadata to stderr. Pipeline totals consume every matching page. Failure groups
 use job IDs or job/step IDs and count distinct runs in the selected page.
 
-`RunPruner.DeleteRun` uses `DELETE /api/v1/runs/{run}` and returns `RunDeletion`
-with canonical `run_id` and `deleted`. False means already absent. Retention pins
-must fail with a structured error rather than report a successful no-op. The
-server owns deletion authorization and financial retention. Age-based CLI prune
+`RunPruner.DeleteRun` uses `DELETE /api/v1/runs/{run}` and returns only an error.
+Success requires the server's empty HTTP 204 acknowledgement after deletion and
+log cleanup. The client reports the selected run without guessing whether a row
+was removed or already absent. The server owns deletion authorization, retention
+and financial records. Age-based CLI prune
 collects all terminal runs strictly before its cutoff before deleting any row,
 so deletion cannot invalidate selection cursors. A failed selection deletes none.
+Cancel, retry and prune preserve the supplied stable IDs and numeric selectors
+through flags and stdin. The CLI never prepends a run ID prefix or resolves a
+number outside the authenticated controller.
 
 `LogReader` reads `/runs/{run}/logs`, `/runs/{run}/jobs/{job}/logs`,
 `/runs/{run}/logs/search` and `/runs/grep` under `/api/v1`. `LogQuery` carries
@@ -451,8 +471,16 @@ run approval routes.
 
 `Annotation` retains level, message, file, line, column and end line. Public job
 and step details carry optional annotation arrays. `AnnotationWrite` optionally
-selects a step and posts to the existing job or job-step annotation route. Reads
-contain masked text. The existing C2 table has no run-scoped annotation write or
+selects a step and posts to the existing job or job-step annotation route.
+Annotation and summary routes resolve numeric run selectors within the current
+credential's team before checking the awarded job binding. Reads
+contain masked text. `RunReview.AppendAnnotation` returns only an error and
+requires an empty HTTP 204 acknowledgement. The CLI emits the selected run, job
+and optional step after success. It has no transition or replay receipt to print.
+Native process reports use the same annotation transport and retain every source
+location field. C1/C2 must persist column and end line before those fields can
+complete the controller path.
+The existing C2 table has no run-scoped annotation write or
 ordinary-member annotation grant. Those are W2 contract gaps, not approved
 feature restrictions. W9 adds no route or grant to bypass them.
 
@@ -829,6 +857,11 @@ Only awarded owner or node credentials can use these routes. Reads remain
 available while a current holder drains cancellation. Node credentials use
 node-scoped snapshot, authentication and binding endpoints. Their snapshots
 contain only the awarded node.
+
+Private reconciliation also preserves `owner_capability_prefix` beside the node
+claim prefix. The local host checks the persisted owner relation before adopting
+the store-issued node award. Each job process delegates from that node award.
+Owner evaluation retains its separate owner or eval authority.
 
 `client.NewLocalHostClient` implements private state reads, transitions,
 authentication and relational binding checks without opening the store. The

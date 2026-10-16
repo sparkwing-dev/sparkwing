@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -99,5 +100,21 @@ func TestLocalControllerOptionsRefusesUncertainOrOtherOwner(t *testing.T) {
 		})
 	if err == nil {
 		t.Fatal("another state home was accepted")
+	}
+}
+
+func TestLocalControllerOptionsNamesStartupFailure(t *testing.T) {
+	home := t.TempDir()
+	failure := errors.New("executable refused")
+	_, _, err := localControllerOptions(t.Context(), home,
+		func(context.Context, string) (wingd.LocalStatus, error) {
+			return wingd.LocalStatus{}, wingdclient.ErrNoDaemon
+		}, func(context.Context) (dashboardServices, error) {
+			return dashboardServices{options: wingd.LocalStartOptions{Home: home}, lifecycle: controllerStartLifecycle{start: func(context.Context, wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+				return wingd.LocalStatus{}, failure
+			}}}, nil
+		})
+	if !errors.Is(err, failure) || !strings.Contains(err.Error(), "cannot start local controller") {
+		t.Fatalf("startup diagnostic: %v", err)
 	}
 }

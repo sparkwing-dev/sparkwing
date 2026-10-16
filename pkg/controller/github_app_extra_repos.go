@@ -95,8 +95,7 @@ func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Req
 func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo store.GitHubRepo, extras []string) (map[string]int64, int, error) {
 	inst, found, err := s.teamInstallationFor(ctx, t, repo)
 	if err != nil {
-		s.logger.Warn("github app extra repos lookup", "repository", repo.Slug(), "err", err.Error())
-		return nil, http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation")
+		return nil, http.StatusBadGateway, fmt.Errorf("GitHub installation lookup: %w", err)
 	}
 	if !found {
 		return nil, http.StatusNotFound, errors.New("no installation this team holds covers " + repo.Slug())
@@ -108,8 +107,7 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 		}
 		xinst, covered, err := s.teamInstallationFor(ctx, t, x)
 		if err != nil {
-			s.logger.Warn("github app extra repos lookup", "repository", x.Slug(), "err", err.Error())
-			return nil, http.StatusBadGateway, errors.New("GitHub could not be reached to find the installation of " + x.Slug())
+			return nil, http.StatusBadGateway, fmt.Errorf("GitHub installation lookup for %s: %w", x.Slug(), err)
 		}
 		if !covered || xinst.InstallationID != inst.InstallationID {
 			return nil, http.StatusBadRequest, errors.New("the installation covering " + repo.Slug() + " does not cover " + x.Slug())
@@ -118,7 +116,7 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 	listed, err := s.githubApp.client.InstallationRepositories(ctx, inst.InstallationID)
 	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
 	if err != nil && !truncated {
-		return nil, http.StatusBadGateway, errors.New("GitHub could not be reached to list the installation's repositories")
+		return nil, http.StatusBadGateway, fmt.Errorf("GitHub installation repositories: %w", err)
 	}
 	ids := map[string]int64{}
 	for _, raw := range extras {

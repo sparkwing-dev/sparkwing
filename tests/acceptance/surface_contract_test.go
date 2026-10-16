@@ -59,7 +59,7 @@ func TestSurfaceRunQueryAndPruneTransport(t *testing.T) {
 		calls := 0
 		c, err := client.NewRunPruner(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
 			calls++
-			body := `{"runs":[],"next_cursor":"","truncated":false}`
+			status, body := http.StatusOK, `{"runs":[],"next_cursor":"","truncated":false}`
 			switch req.Method {
 			case "GET":
 				q := req.URL.Query()
@@ -70,11 +70,11 @@ func TestSurfaceRunQueryAndPruneTransport(t *testing.T) {
 				if req.URL.Path != "/api/v1/runs/412" {
 					t.Fatalf("delete selector: %s", req.URL)
 				}
-				body = `{"run_id":"r1","deleted":true}`
+				status, body = http.StatusNoContent, ""
 			default:
 				t.Fatalf("unexpected method: %s", req.Method)
 			}
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})}})
 		if err != nil {
 			t.Fatal(err)
@@ -83,9 +83,8 @@ func TestSurfaceRunQueryAndPruneTransport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		deleted, err := c.DeleteRun(t.Context(), "412")
-		if err != nil || deleted.RunID != "r1" || !deleted.Deleted || calls != 2 {
-			t.Fatalf("deletion: %+v calls=%d err=%v", deleted, calls, err)
+		if err := c.DeleteRun(t.Context(), "412"); err != nil || calls != 2 {
+			t.Fatalf("deletion: calls=%d err=%v", calls, err)
 		}
 	}
 }

@@ -289,17 +289,17 @@ func emptyMessage(t MessageType) (Message, error) {
 
 // NodeHostParticipant is the [AdmissionRequest].RunID of the lease a node of
 // runID takes for its own host capacity, with any concurrency group it joins.
-func NodeHostParticipant(runID, nodeID string) string {
-	return runID + "/node-host/" + base64.RawURLEncoding.EncodeToString([]byte(nodeID))
+func NodeHostParticipant(runID, nodeID string) HolderRef {
+	return HolderRef(runID + "/node-host/" + base64.RawURLEncoding.EncodeToString([]byte(nodeID)))
 }
 
 // NodeSemaphoreParticipant is the [AdmissionRequest].RunID of the lease a
 // node takes for its concurrency group alone, when its run's lease already
 // holds the host.
-func NodeSemaphoreParticipant(runID, nodeID string) string {
-	return runID + "/node-semaphore/" + base64.RawURLEncoding.EncodeToString([]byte(nodeID))
+func NodeSemaphoreParticipant(runID, nodeID string) HolderRef {
+	return HolderRef(runID + "/node-semaphore/" + base64.RawURLEncoding.EncodeToString([]byte(nodeID)))
 }
 
 // PlanSemaphoresParticipant is the [AdmissionRequest].RunID of the lease an
 // attached run takes for the plan concurrency groups its parent does not hold.
-func PlanSemaphoresParticipant(runID string) string { return runID + "/plan" }
+func PlanSemaphoresParticipant(runID string) HolderRef { return HolderRef(runID + "/plan") }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -31,7 +32,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	authState := "enabled"
 
 	if err := s.store.DB().PingContext(r.Context()); err != nil {
-		s.logger.Error("controller health database check failed", "err", err)
+		apierr.NoteResponseError(w, fmt.Errorf("controller health database check: %w", err))
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"status":   "degraded",
 			"auth":     authState,
@@ -348,13 +349,14 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	}
 	message := err.Error()
 	if status >= http.StatusInternalServerError {
+		apierr.NoteResponseError(w, err)
 		message = "internal server error"
 	}
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
 func (s *Server) writeInternalError(w http.ResponseWriter, r *http.Request, operation string, err error) {
-	s.logger.Error(operation, append(requestLogAttrs(r), "err", err)...)
+	err = fmt.Errorf("%s: %w", operation, err)
 	writeError(w, http.StatusInternalServerError, err)
 }
 
@@ -368,10 +370,7 @@ func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request, aut
 	if err != nil {
 		return engineLookupError(err)
 	}
-	if steps == nil {
-		steps = []*store.NodeStep{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
+	writeJSON(w, http.StatusOK, publicRunSteps(steps))
 	return nil
 }
 

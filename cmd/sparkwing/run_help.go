@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -71,7 +72,9 @@ func runSelectedHelp(dir, pipeline string, flags runFlags, selectEngine func(str
 	}
 	schema, err := boundPipelineSchema(described.Pipelines, identity)
 	if err == nil {
-		printPipelineHelp(os.Stdout, schema)
+		var text bytes.Buffer
+		printPipelineHelp(&text, schema)
+		err = writeHelpText(cmdRun, os.Stdout, flags.outputFormat, text.String())
 	}
 	return run.finish(err)
 }

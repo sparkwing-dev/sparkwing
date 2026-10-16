@@ -2,6 +2,10 @@
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
 
+Run receipts use the same response on HTTP and the local API socket. Each step
+identifies its job with `job_id`. Receipts omit raw invocation metadata and local
+store locations.
+
 Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
 
 Schedule reads and writes use `/api/v1/schedules`. Repository replacement uses
@@ -120,6 +124,9 @@ plan together. Retry retains the original request, source authority, SHA and
 accepted seals, with the retrier recorded separately. It never rewrites the
 original seal's identity to match the new run ID.
 
+Retry requires `mode=failed|all` and a nonempty `idempotency_key` in the request
+body. The server rejects a missing or unknown selection before creating a run.
+
 Direct store consumers use `Store.ClaimUnit` for launcher and runner awards.
 `Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
 and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by
@@ -163,6 +170,23 @@ Recovery reads that same persisted failure. An outcome or reason cannot replace
 its stage. The error-only result field is removed.
 
 ## Run detail
+
+`GET /api/v1/runs/{run}/attempts` returns the complete retry history as a
+`RunPage`, oldest first, with no cursor or truncation. Stable IDs and team-local
+numbers select the same history. Each entry uses the shared public `RunDetail`
+projection, including redacted inputs and current `inputs.lineage`. Invocation
+metadata, execution seals, environment digests and checkout paths are omitted.
+Every returned run must pass the caller's binding. A denied or invalid member
+fails the response before any history is sent.
+Equal creation timestamps sort by run number. Long chains are complete, and
+cycles cannot repeat entries or prevent traversal from finishing.
+
+`RunPruner.DeleteRun` uses the authorized `DELETE /api/v1/runs/{run}` route.
+It succeeds after an empty HTTP 204 acknowledgement, including log cleanup.
+The client returns only an error. Prune output identifies the selected run and
+any structured failure. It does not report a removed-row count or replay state.
+Cancel, retry and prune preserve numeric run selectors and stable IDs from flags
+or stdin. The authenticated controller resolves them within the current team.
 
 `GET /api/v1/runs/{run}` returns the shared run status object with `inputs`,
 `jobs`, `attempts`, `logs` and `notices`. Job and attempt status excludes raw
@@ -275,5 +299,10 @@ months after its release. Older engines continue until a signed security
 revocation or minimum-version policy takes effect. Additive fields and codes
 remain readable. Each selected engine owns its matching node protocol.
 See [Versioning](versioning.md).
+
+An applicable Go SDK replacement uses the installed CLI's engine and emits an
+`engine_pin_disabled` notice. The pin retains the declared SDK version and the
+`replacement` module selector. The accepted identity records the installed
+executable's digest in `manifest_digest`, rather than a signed release manifest.
 
 <!-- design:end -->

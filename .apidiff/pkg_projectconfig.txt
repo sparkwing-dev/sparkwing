@@ -12,7 +12,7 @@ type Defaults struct {
 	Requires []string
 	Prefers  []string
 }
-func Discover(startDir string) (path string, cfg *Config, err error)
+func Discover(startDir string) (string, *Config, error)
 type Events struct {
 	Push        *PushEvent
 	PullRequest *PullRequestEvent

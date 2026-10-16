@@ -220,7 +220,13 @@ func matchesLookup(p Principal, key CredentialLookup) bool {
 func liveAccess(p Principal, state BindingState, evidence RequestEvidence, class Liveness, now time.Time) (LiveAccess, bool) {
 	c, b := p.Capability, p.Capability.Binding
 	if c.Audience == NodeHost {
-		return LiveAccess{}, state.ProcessAlive && !state.RunCancelled && !state.RunFinished && sameFence(b, state.Current)
+		if !state.ProcessAlive || state.RunCancelled || state.RunFinished {
+			return LiveAccess{}, false
+		}
+		if c.Unit == UnitEval {
+			return LiveAccess{}, expansionLive(b, state, now)
+		}
+		return LiveAccess{}, state.FinishedAt == nil && now.Before(state.LeaseExpiresAt) && sameFence(b, state.Current)
 	}
 	if !isClaim(p) {
 		return LiveAccess{}, c.Unit == "" && (b.Kind == BindingNone || b.Kind == BindingPush || b.Kind == BindingRun)

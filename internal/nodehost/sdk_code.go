@@ -108,7 +108,7 @@ func sdkHello(ctx context.Context, session *executorSession, identity engine.Ide
 	if err != nil {
 		return err
 	}
-	if hello.Protocol != nodeproto.Version || hello.SDK.Language != string(identity.Pin.SDK) || strings.TrimPrefix(hello.SDK.Version, "v") != strings.TrimPrefix(identity.Pin.Version, "v") {
+	if hello.Protocol != nodeproto.Version || hello.SDK.Language != string(identity.Pin.SDK) || identity.Pin.Replacement == "" && strings.TrimPrefix(hello.SDK.Version, "v") != strings.TrimPrefix(identity.Pin.Version, "v") {
 		return executorError(apierr.ProtocolMismatch, "SDK hello does not match the sealed engine and SDK pin")
 	}
 	return nil
@@ -122,11 +122,7 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 		args = map[string]string{}
 	}
 	var raw json.RawMessage
-	entrypoint := spec.Resolved.Entrypoint
-	if entrypoint == "" {
-		entrypoint = spec.Request.Request.Pipeline
-	}
-	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: entrypoint, Args: args, Run: &run}, &raw, "")
+	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: spec.Request.Request.Pipeline, Args: args, Run: &run}, &raw, "")
 	if err != nil {
 		return err
 	}

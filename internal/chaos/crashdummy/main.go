@@ -83,9 +83,9 @@ func runDaemon(args []string) {
 
 type finalizeStore func(string)
 
-func (finalizeStore) IsRunTerminal(string) (bool, error) { return false, nil }
-func (finalizeStore) Ready() error                       { return nil }
-func (f finalizeStore) FinalizeRun(runID string)         { f(runID) }
+func (finalizeStore) IsRunTerminal(wingwire.RunID) (bool, error) { return false, nil }
+func (finalizeStore) Ready() error                               { return nil }
+func (f finalizeStore) FinalizeRun(runID string)                 { f(runID) }
 func (f finalizeStore) FinalizeCancelledRuns(runIDs []string, _ string) error {
 	for _, runID := range runIDs {
 		f(runID)
@@ -219,10 +219,10 @@ func (h *holder) run() {
 
 func (h *holder) request() wingwire.AdmissionRequest {
 	if h.hf.parentToken != "" {
-		return wingwire.AdmissionRequest{RunID: h.hf.run, ParentLeaseToken: h.hf.parentToken}
+		return wingwire.AdmissionRequest{RunID: wingwire.HolderRef(h.hf.run), ParentLeaseToken: h.hf.parentToken}
 	}
 	req := wingwire.AdmissionRequest{
-		RunID:     h.hf.run,
+		RunID:     wingwire.HolderRef(h.hf.run),
 		Resources: wingwire.HostResources{Cores: h.hf.cores, MemoryBytes: int64(h.hf.memMB) << 20},
 	}
 	for _, s := range h.hf.sems {

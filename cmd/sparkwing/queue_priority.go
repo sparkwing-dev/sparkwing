@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -61,12 +60,14 @@ func parseQueuePriority(set string) (priority int, mode string, err error) {
 }
 
 func applyQueuePriority(ctx context.Context, home, runID string, priority int, mode string) (queuePriorityResult, error) {
+	if _, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
+		return resolveLocalServicesAt(ctx, home)
+	}); err != nil {
+		return queuePriorityResult{}, err
+	}
 	opts := wingdclient.Options{Home: home, Version: installedVersion(), NoTakeover: true}
 	opts.Spawn = func(string, string) error { return wingdclient.ErrNoDaemon }
 	cl, err := wingdclient.EnsureDaemon(ctx, opts)
-	if errors.Is(err, wingdclient.ErrNoDaemon) {
-		return queuePriorityResult{RunID: runID}, nil
-	}
 	if err != nil {
 		return queuePriorityResult{}, err
 	}

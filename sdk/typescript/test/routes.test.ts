@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NodeRoutes } from "../src/routes.ts";
 
+test("service encoder refuses null fields before sending any request", async () => {
+  let sent = false;
+  const routes = new NodeRoutes({ url: "http://127.0.0.1:12345", bearer: "pipe-only" }, async () => {
+    sent = true;
+    return new Response("{}");
+  });
+  const signal = new AbortController().signal;
+  await assert.rejects(routes.cleanup(JSON.parse('{"argv":null,"description":""}'), signal), /fields cannot be null/);
+  await assert.rejects(routes.annotate(JSON.parse('{"message":"","file":null}'), signal), /fields cannot be null/);
+  await assert.rejects(routes.annotate({ message: "", line: NaN }, signal), /fields cannot be null/);
+  assert.equal(sent, false);
+});
+
 test("bound routes carry hello credentials only in Authorization and reject redirects", async () => {
   const requests: [string, RequestInit][] = [];
   const routes = new NodeRoutes({ url: "http://127.0.0.1:12345", bearer: "pipe-only" }, async (url, options) => {

@@ -338,7 +338,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				PinnedProfile:       p.Profile,
 				Triggers:            summarizeTriggerList(p.On),
 			}
-			if dp, ok := describeByName[p.Entrypoint]; ok {
+			if dp, ok := describeByName[p.Name]; ok {
 				a.describe(dp)
 			}
 			out = append(out, a)

@@ -35,7 +35,7 @@ func runUpgrade(args []string) error {
 			if err != nil {
 				return nil, err
 			}
-			return engine.NewResolver(engine.Config{Mode: mode})
+			return engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode})
 		},
 		verifier: &upgradeVerifier{environment: os.Environ(), buildEnv: procenv.Build, exec: executeUpgradeCheck},
 		out:      os.Stdout, terminal: color.IsInteractiveStdout(),

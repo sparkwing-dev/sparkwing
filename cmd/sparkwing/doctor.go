@@ -249,12 +249,10 @@ func inspectDoctorGoToolchain(ctx context.Context, dir string, env []string) *op
 }
 
 func sweepDoctorSessions(ctx context.Context, services dashboardServices, dryRun bool) ([]wingd.LocalDoctorFinding, error) {
-	status, err := services.lifecycle.EnsureStarted(ctx, services.options)
-	if err != nil {
+	if _, err := ensureLocalController(ctx, services.options.Home, func(context.Context) (dashboardServices, error) {
+		return services, nil
+	}); err != nil {
 		return nil, err
-	}
-	if !status.Running {
-		return nil, errors.New("local controller did not become ready for the session sweep")
 	}
 	socket, err := wingd.APISocketPath(services.options.Home)
 	if err != nil {

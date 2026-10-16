@@ -802,7 +802,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if req.OwnerRunID != "" {
 		data["requested_owner_run_id"] = req.OwnerRunID
 	}
-	d.recordJournal("request", &conn{runID: req.RunID, displayRunID: req.DisplayRunID, pipeline: req.Pipeline, repo: req.Repo, pid: req.PID}, data)
+	d.recordJournal("request", &conn{runID: string(req.RunID), displayRunID: req.DisplayRunID, pipeline: req.Pipeline, repo: req.Repo, pid: req.PID}, data)
 	if !validCostSource(req.CostSource) {
 		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
 			"admission request invalid: unrecognized cost source %q; pin resources explicitly with plan.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n)), or upgrade this box's sparkwing so its daemon knows the source",
@@ -810,21 +810,21 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		return
 	}
 	d.mu.Lock()
-	cancelled := d.runCancelledLocked(req.RunID)
+	cancelled := d.runCancelledLocked(string(req.RunID))
 	d.mu.Unlock()
 	if !cancelled && d.cfg.Runs != nil {
 		var err error
-		cancelled, err = d.cfg.Runs.IsRunTerminal(req.RunID)
+		cancelled, err = d.cfg.Runs.IsRunTerminal(req.RunID.RunID())
 		if err != nil {
-			d.cfg.logf("admission: terminal check for %s: %v", req.RunID, err)
-			d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "terminal check failed", "error": err.Error()})
-			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "terminal-check", Policy: wingwire.PolicyFail, Reason: d.terminalCheckReason(err)})
+			d.cfg.logf("admission: terminal check for %s: %v", string(req.RunID), err)
+			d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "terminal check failed", "error": err.Error()})
+			_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "terminal-check", Policy: wingwire.PolicyFail, Reason: d.terminalCheckReason(err)})
 			return
 		}
 	}
 	if cancelled {
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "run terminal or cancelled"})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "run terminal or cancelled"})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "cancelled", Policy: wingwire.PolicyFail})
 		return
 	}
 	if req.ParentLeaseToken != "" || req.ParentNodeID != "" {
@@ -836,16 +836,16 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	jevBypass := d.jevReservationBypass(req, requested)
 
 	d.mu.Lock()
-	if d.runCancelledLocked(req.RunID) {
+	if d.runCancelledLocked(string(req.RunID)) {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "run cancelled"})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "run cancelled"})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "cancelled", Policy: wingwire.PolicyFail})
 		return
 	}
 	if d.draining {
 		d.mu.Unlock()
 		d.recordJournal("rejected", c, map[string]any{"reason": "draining"})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "draining", Policy: wingwire.Policy("draining")})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "draining", Policy: wingwire.Policy("draining")})
 		return
 	}
 	if req.SemaphoresOnly {
@@ -857,18 +857,18 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	// safety: an operator re-rank outranks the priority the plan carried, and
 	// requestIdentityMatches compares the connection's, so both sides of a
 	// reconnect have to see the same resolved rank.
-	req.Priority = d.ledger.EffectivePriority(req.RunID, req.OwnerRunID, req.Priority)
+	req.Priority = d.ledger.EffectivePriority(string(req.RunID), req.OwnerRunID, req.Priority)
 	ledgerCharge := charged
 	if d.cfg.admissionPolicy().Mode == admission.ModeOff {
 		ledgerCharge = wingwire.HostResources{}
 	}
-	ar := requestFromWireWithMetadata(req.RunID, req.OwnerRunID, ledgerCharge, req.Semaphores, req.CostSource, req.Priority, req.Class, req.ExpectedP99MS)
+	ar := requestFromWireWithMetadata(string(req.RunID), req.OwnerRunID, ledgerCharge, req.Semaphores, req.CostSource, req.Priority, req.Class, req.ExpectedP99MS)
 	ar.BurstCores = d.cfg.admissionPolicy().interactiveBurstEligible(req, ledgerCharge)
 	if jevBypass {
 		ar.ReservationBypassBudgetMS = d.cfg.admissionPolicy().Jev.maxBackfill().Milliseconds()
 	}
-	c.runID = req.RunID
-	c.journalRunID = req.RunID
+	c.runID = string(req.RunID)
+	c.journalRunID = string(req.RunID)
 	c.ownerRunID = req.OwnerRunID
 	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
@@ -890,14 +890,14 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.requestResources = requested
 	c.requestSemaphores = cloneSemaphoreClaims(req.Semaphores)
 	c.semaphoresOnly = req.SemaphoresOnly
-	if existing := d.byRun[req.RunID]; existing != nil && existing != c {
+	if existing := d.byRun[string(req.RunID)]; existing != nil && existing != c {
 		switch existing.role {
 		case roleWaiter:
 			if !requestIdentityMatches(existing, req, c.finalizable) ||
 				existing.queueTimeoutMS != tightestQueueTimeoutMS(req.Semaphores) ||
-				!queuedRequestPresent(d.ledger.Snapshot(), req.RunID) {
+				!queuedRequestPresent(d.ledger.Snapshot(), string(req.RunID)) {
 				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
 				return
 			}
 			c.role = roleWaiter
@@ -908,24 +908,24 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			existing.runID = ""
 			existing.members = nil
 			existing.finalizable = false
-			d.byRun[req.RunID] = c
+			d.byRun[string(req.RunID)] = c
 			events, err := d.ledger.ReplaceWaiter(ar)
 			if err != nil {
 				existing.role = roleWaiter
-				existing.runID = req.RunID
+				existing.runID = string(req.RunID)
 				existing.finalizable = c.finalizable
-				d.byRun[req.RunID] = existing
+				d.byRun[string(req.RunID)] = existing
 				c.role = roleNone
 				c.runID = ""
 				c.finalizable = false
 				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: submitErrorKey(err), Policy: wingwire.PolicyFail})
+				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: submitErrorKey(err), Policy: wingwire.PolicyFail})
 				return
 			}
 			deliveries := d.routeLocked(events)
 			snap := d.ledger.Snapshot()
 			if c.role == roleWaiter {
-				if queued := d.queuedDeliveryLockedFromSnapshot(c, snap, req.RunID); queued != nil {
+				if queued := d.queuedDeliveryLockedFromSnapshot(c, snap, string(req.RunID)); queued != nil {
 					deliveries = append(deliveries, *queued)
 				}
 			}
@@ -937,21 +937,21 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		case roleHolder:
 			if len(existing.members) != 1 {
 				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
 				return
 			}
 			snap := d.ledger.Snapshot()
 			if !requestMetadataMatches(existing, req, c.finalizable) ||
-				!grantedRequestPresent(snap, existing.leaseID, req.RunID) {
+				!grantedRequestPresent(snap, existing.leaseID, string(req.RunID)) {
 				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
 				return
 			}
 			leaseID := existing.leaseID
 			lease, ok := d.ledger.LeaseByID(leaseID)
 			if !ok {
 				d.mu.Unlock()
-				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
 				return
 			}
 			c.role = roleHolder
@@ -983,7 +983,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			d.mu.Unlock()
 			existing.close()
 			grant := &wingwire.Grant{
-				RunID:      req.RunID,
+				RunID:      string(req.RunID),
 				LeaseToken: lease.Token,
 				Resources:  c.resources,
 				Semaphores: leaseSemaphores(snap, leaseID),
@@ -996,14 +996,14 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			return
 		default:
 			d.mu.Unlock()
-			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+			_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "duplicate", Policy: wingwire.PolicyFail})
 			return
 		}
 	}
-	d.byRun[req.RunID] = c
+	d.byRun[string(req.RunID)] = c
 	dec, events, err := d.ledger.Submit(ar)
 	if err != nil {
-		delete(d.byRun, req.RunID)
+		delete(d.byRun, string(req.RunID))
 		d.mu.Unlock()
 		key := submitErrorKey(err)
 		d.recordJournal("rejected", c, map[string]any{"reason": key, "error": err.Error()})
@@ -1011,32 +1011,32 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			d.rejectInvalid(c, req, rejectCauseRequest, "admission request invalid: "+err.Error())
 			return
 		}
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: key, Policy: wingwire.PolicyFail, Reason: refusalReason(err)})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: key, Policy: wingwire.PolicyFail, Reason: refusalReason(err)})
 		return
 	}
 	switch dec.Kind {
 	case admission.DecisionQueued:
 		if req.NonBlocking {
-			events = append(events, d.ledger.CancelWaiter(req.RunID)...)
-			delete(d.byRun, req.RunID)
+			events = append(events, d.ledger.CancelWaiter(string(req.RunID))...)
+			delete(d.byRun, string(req.RunID))
 			deliveries := d.routeLocked(events)
 			d.touchLocked()
 			d.mu.Unlock()
 			d.recordJournal("denied", c, map[string]any{"reason": "capacity", "nonblocking": true})
 			d.flush(deliveries)
-			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "capacity", Policy: wingwire.PolicyFail, Reason: "capacity is not immediately available"})
+			_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "capacity", Policy: wingwire.PolicyFail, Reason: "capacity is not immediately available"})
 			return
 		}
 		c.role = roleWaiter
 	case admission.DecisionFailed, admission.DecisionSkipped:
-		delete(d.byRun, req.RunID)
+		delete(d.byRun, string(req.RunID))
 		policy := wingwire.PolicyFail
 		if dec.Kind == admission.DecisionSkipped {
 			policy = wingwire.PolicySkip
 		}
 		d.mu.Unlock()
 		d.recordJournal("denied", c, map[string]any{"reason": dec.Key, "decision": dec.Kind})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: dec.Key, Policy: policy})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: dec.Key, Policy: policy})
 		return
 	}
 	deliveries := d.routeLocked(events)
@@ -1044,7 +1044,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	d.mu.Unlock()
 	d.flush(deliveries)
 	if len(dec.Evicted) > 0 {
-		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
+		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", string(req.RunID), len(dec.Evicted))
 		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
 	}
 }
@@ -1219,24 +1219,24 @@ func (d *Daemon) runCancelledLocked(runID string) bool {
 }
 
 func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
-	d.recordJournal("child_attach_request", &conn{runID: req.RunID}, map[string]any{"requested_parent": req.ParentRunID})
+	d.recordJournal("child_attach_request", &conn{runID: string(req.RunID)}, map[string]any{"requested_parent": req.ParentRunID})
 	d.mu.Lock()
-	if _, pending := d.cancelPending[req.RunID]; pending {
+	if _, pending := d.cancelPending[string(req.RunID)]; pending {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "child cancellation pending"})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "child cancellation pending"})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "cancelled", Policy: wingwire.PolicyFail})
 		return
 	}
-	if d.runCancelledLocked(req.RunID) {
+	if d.runCancelledLocked(string(req.RunID)) {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "child cancelled"})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "child cancelled"})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "cancelled", Policy: wingwire.PolicyFail})
 		return
 	}
 	if d.draining {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "daemon draining"})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "draining", Policy: wingwire.Policy("draining")})
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "daemon draining"})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "draining", Policy: wingwire.Policy("draining")})
 		return
 	}
 	var leaseID admission.LeaseID
@@ -1250,12 +1250,12 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	if err != nil {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent lease missing", "requested_parent": req.ParentRunID, "requested_parent_node": req.ParentNodeID})
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "parent lease missing", "requested_parent": req.ParentRunID, "requested_parent_node": req.ParentNodeID})
 		reason := ""
 		if req.ParentNodeID != "" {
 			reason = err.Error()
 		}
-		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail, Reason: reason}); err != nil {
+		if err := c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "parent", Policy: wingwire.PolicyFail, Reason: reason}); err != nil {
 			c.close()
 		}
 		return
@@ -1267,8 +1267,8 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	resolvedParent, err := d.ledger.ResolveParent(leaseID, parentRunID)
 	if err != nil {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent resolution failed", "error": err.Error(), "requested_parent": req.ParentRunID, "parent_run_id": parentRunID})
-		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail}); err != nil {
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "parent resolution failed", "error": err.Error(), "requested_parent": req.ParentRunID, "parent_run_id": parentRunID})
+		if err := c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "parent", Policy: wingwire.PolicyFail}); err != nil {
 			c.close()
 		}
 		return
@@ -1296,26 +1296,26 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	if blocked {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": blockedReason, "parent_run_id": blockedAncestor, "requested_parent": req.ParentRunID, "resolved_parent": resolvedParent})
-		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail}); err != nil {
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": blockedReason, "parent_run_id": blockedAncestor, "requested_parent": req.ParentRunID, "resolved_parent": resolvedParent})
+		if err := c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "cancelled", Policy: wingwire.PolicyFail}); err != nil {
 			c.close()
 		}
 		return
 	}
-	if err := d.ledger.Attach(leaseID, req.RunID, resolvedParent); err != nil {
+	if err := d.ledger.Attach(leaseID, string(req.RunID), resolvedParent); err != nil {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent attach failed", "error": err.Error()})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail})
+		d.recordJournal("rejected", &conn{runID: string(req.RunID)}, map[string]any{"reason": "parent attach failed", "error": err.Error()})
+		_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "parent", Policy: wingwire.PolicyFail})
 		return
 	}
 	// safety: the child runs inside what its ancestors hold, so when any lease it joined or was handed groups
 	// from ends or is evicted, the child is told to end too, before another run takes a group it runs under.
-	if err := d.ledger.Depend(req.RunID, append(holders, leaseID)); err != nil {
-		d.cfg.logf("child attach: record %s's ancestors: %v", req.RunID, err)
+	if err := d.ledger.Depend(string(req.RunID), append(holders, leaseID)); err != nil {
+		d.cfg.logf("child attach: record %s's ancestors: %v", string(req.RunID), err)
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
-	c.runID = req.RunID
-	c.journalRunID = req.RunID
+	c.runID = string(req.RunID)
+	c.journalRunID = string(req.RunID)
 	c.ownerRunID = d.validatedOwnerRunIDLocked(req.OwnerRunID, req.OwnerLeaseToken)
 	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
@@ -1323,19 +1323,19 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.pid = req.PID
 	c.role = roleHolder
 	c.leaseID = leaseID
-	c.members = []string{req.RunID}
+	c.members = []string{string(req.RunID)}
 	c.startAt = d.now()
 	c.finalizable = true
 	c.resources = d.leaseCharge[leaseID]
 	c.origin = req.Origin
-	d.byRun[req.RunID] = c
-	d.leaseMembers[leaseID] = append(d.leaseMembers[leaseID], req.RunID)
+	d.byRun[string(req.RunID)] = c
+	d.leaseMembers[leaseID] = append(d.leaseMembers[leaseID], string(req.RunID))
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.recordJournal("child_attach", c, map[string]any{"requested_parent": req.ParentRunID, "resolved_parent": resolvedParent})
 	d.mu.Unlock()
 	if resolvedParent != req.ParentRunID {
-		d.cfg.logf("child attach: run=%s requested_parent=%q resolved_parent=%q", req.RunID, req.ParentRunID, resolvedParent)
+		d.cfg.logf("child attach: run=%s requested_parent=%q resolved_parent=%q", string(req.RunID), req.ParentRunID, resolvedParent)
 	}
 	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
@@ -1343,7 +1343,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	held = append(held, leaseSemaphores(snap, leaseID)...)
 	slices.Sort(held)
 	_ = c.send(&wingwire.Grant{
-		RunID:      req.RunID,
+		RunID:      string(req.RunID),
 		LeaseToken: lease.Token,
 		Resources:  c.resources,
 		Semaphores: slices.Compact(held),
@@ -1365,7 +1365,7 @@ func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.Le
 			memberOf[m] = le
 		}
 	}
-	nodeHost, hasNodeHost := byRequest[wingwire.NodeHostParticipant(runID, nodeID)]
+	nodeHost, hasNodeHost := byRequest[string(wingwire.NodeHostParticipant(runID, nodeID))]
 	runLease, hasRun := memberOf[runID]
 	var target admission.LeaseState
 	switch {
@@ -1390,9 +1390,9 @@ func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.Le
 		}
 	}
 	hold(nodeHost)
-	hold(byRequest[wingwire.NodeSemaphoreParticipant(runID, nodeID)])
+	hold(byRequest[string(wingwire.NodeSemaphoreParticipant(runID, nodeID))])
 	hold(memberOf[runID])
-	hold(byRequest[wingwire.PlanSemaphoresParticipant(runID)])
+	hold(byRequest[string(wingwire.PlanSemaphoresParticipant(runID))])
 	for _, le := range snap.Leases {
 		if slices.Contains(le.Dependents, runID) {
 			hold(le)
@@ -1442,7 +1442,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		if d.cfg.Runs == nil {
 			continue
 		}
-		terminal, checkErr := d.cfg.Runs.IsRunTerminal(member)
+		terminal, checkErr := d.cfg.Runs.IsRunTerminal(wingwire.HolderRef(member).RunID())
 		if checkErr != nil {
 			d.cfg.logf("reattach: terminal check for %s: %v", member, checkErr)
 			d.recordJournal("reattach_refused", &conn{runID: member}, map[string]any{"reason": "terminal check failed", "error": checkErr.Error()})
@@ -1909,10 +1909,10 @@ func (d *Daemon) rejectInvalid(c *conn, req *wingwire.AdmissionRequest, cause, r
 	// safety: the window is recorded before the refusal is sent, because a
 	// caller that has its answer can query the window immediately and a
 	// rejection it already saw must not be missing from it.
-	d.recordWindow(d.now(), admissionEvent{Kind: eventRejection, Key: cause}, &conn{runID: req.RunID, displayRunID: req.DisplayRunID, pipeline: req.Pipeline, repo: req.Repo, pid: req.PID}, map[string]any{"reason": reason})
-	_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "invalid", Policy: wingwire.PolicyFail, Reason: reason})
+	d.recordWindow(d.now(), admissionEvent{Kind: eventRejection, Key: cause}, &conn{runID: string(req.RunID), displayRunID: req.DisplayRunID, pipeline: req.Pipeline, repo: req.Repo, pid: req.PID}, map[string]any{"reason": reason})
+	_ = c.send(&wingwire.Evicted{RunID: string(req.RunID), Key: "invalid", Policy: wingwire.PolicyFail, Reason: reason})
 	d.cfg.logf("conn %d rejected run %s: %s [cost_source=%q cores=%.2f memory_bytes=%d semaphores=%d]",
-		c.id, req.RunID, reason, req.CostSource, req.Resources.Cores, req.Resources.MemoryBytes, len(req.Semaphores))
+		c.id, string(req.RunID), reason, req.CostSource, req.Resources.Cores, req.Resources.MemoryBytes, len(req.Semaphores))
 }
 
 func refusalReason(err error) string {

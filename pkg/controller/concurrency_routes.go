@@ -72,7 +72,7 @@ func concurrencyDecoder(operation string) func(*http.Request) (capability.Reques
 	return func(r *http.Request) (capability.RequestEvidence, error) { return concurrencyTarget(r, operation) }
 }
 
-func resolveConcurrencyTarget(p capability.Principal, target capability.Target) (capability.Target, error) {
+func resolveConcurrencyTarget(_ context.Context, p capability.Principal, target capability.Target) (capability.Target, error) {
 	if target.SlotRunID == "" {
 		target.SlotRunID, target.SlotNodeID = p.Capability.Binding.RunID, p.Capability.Binding.NodeID
 	}

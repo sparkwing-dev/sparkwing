@@ -38,7 +38,7 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleRunDetail,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleRunDetail,
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}/snapshot", Authentication: capability.AuthCapability,
@@ -46,11 +46,11 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleJobs,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleJobs,
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleJob,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleJob,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/finish", Authentication: capability.AuthCapability,
@@ -58,11 +58,11 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/cancel", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleCancel,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleCancel,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/cancel", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleCancelJob,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleCancelJob,
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/failure", Authentication: capability.AuthCapability,
@@ -70,7 +70,7 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/retry", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleRetry,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleRetry,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/heartbeat", Authentication: capability.AuthCapability,
@@ -90,19 +90,19 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/annotations", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleAnnotation,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleAnnotation,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/annotations", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleAnnotation,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleAnnotation,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/summary", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleSummary,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleSummary,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/summary", Authentication: capability.AuthCapability,
-			Decode: engine.runTarget, Handle: engine.handleSummary,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleSummary,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/start", Authentication: capability.AuthCapability,
@@ -272,7 +272,7 @@ func engineLookupError(err error) error {
 	if errors.As(err, &sqlErr) {
 		switch sqlErr.SQLState() {
 		case "40001", "40P01", "55P03":
-			return &apierr.Error{Code: apierr.Unavailable, Message: "transaction is temporarily unavailable", Details: map[string]any{"retry_after_ms": 1000}}
+			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "transaction is temporarily unavailable", Details: map[string]any{"retry_after_ms": 1000}}, err)
 		}
 	}
 	var transition *store.ErrIllegalTransition

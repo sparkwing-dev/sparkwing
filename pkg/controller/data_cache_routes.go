@@ -11,20 +11,21 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type dataMemoResponse struct {
-	Found    bool             `json:"found"`
-	Output   *blob.Digest     `json:"output,omitempty"`
-	Manifest *blob.Digest     `json:"manifest,omitempty"`
-	Members  []dataMemberJSON `json:"members"`
+	Found    bool                        `json:"found"`
+	Output   *blob.Digest                `json:"output,omitempty"`
+	Manifest *blob.Digest                `json:"manifest,omitempty"`
+	Members  []controllerwire.DataMember `json:"members"`
 }
 
 type dataDepcacheResponse struct {
-	Found  bool               `json:"found"`
-	Record *dataRecordJSON    `json:"record,omitempty"`
-	Source blob.RestoreSource `json:"source,omitempty"`
+	Found  bool                       `json:"found"`
+	Record *controllerwire.DataRecord `json:"record,omitempty"`
+	Source blob.RestoreSource         `json:"source,omitempty"`
 }
 
 func decodeCacheRequest(r *http.Request, required ...string) (map[string]string, blob.Budget, error) {
@@ -94,7 +95,7 @@ func (s *Server) handleDataMemo(w http.ResponseWriter, r *http.Request, a capabi
 	if err != nil {
 		return dataRouteError(err)
 	}
-	response := dataMemoResponse{Found: hit.Found, Members: []dataMemberJSON{}}
+	response := dataMemoResponse{Found: hit.Found, Members: []controllerwire.DataMember{}}
 	if hit.Found {
 		if hit.Output.Set {
 			response.Output = &hit.Output.Value
@@ -103,7 +104,7 @@ func (s *Server) handleDataMemo(w http.ResponseWriter, r *http.Request, a capabi
 			response.Manifest = &hit.Manifest.Value
 		}
 		for _, member := range hit.Members {
-			response.Members = append(response.Members, dataMemberJSON{Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
+			response.Members = append(response.Members, controllerwire.DataMember{Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
 		}
 	}
 	writeJSON(w, http.StatusOK, response)

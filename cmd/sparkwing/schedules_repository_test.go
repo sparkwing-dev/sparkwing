@@ -62,7 +62,7 @@ func (f scheduleLifecycleFixture) EnsureStarted(_ context.Context, _ wingd.Local
 	if f.before != nil {
 		f.before()
 	}
-	return wingd.LocalStatus{Running: true}, nil
+	return wingd.LocalStatus{Running: true, PID: 17, Version: "test"}, nil
 }
 
 type scheduleUnitsFixture struct {

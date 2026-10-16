@@ -6,16 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // Index refreshes signed policy and retains verified fallback without an age cutoff.
 func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error) {
+	if err := ctx.Err(); err != nil {
+		return IndexResult{}, err
+	}
+	if r.config.BuildVersion != "" && !buildinfo.IsReleaseVersion(r.config.BuildVersion) {
+		r.notice.Do(func() { slog.Info("version policy checks are off for a development build") })
+		return IndexResult{Index: VerifiedIndex{development: true}}, nil
+	}
 	r.indexMu.Lock()
 	defer r.indexMu.Unlock()
 	if err := ctx.Err(); err != nil {

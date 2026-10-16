@@ -99,7 +99,6 @@ func TestControllerIntakeRefusesUnsafeAcquisitionLocations(t *testing.T) {
 	}, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal("credential-bearing acquisition URL admitted")
 	}
-
 }
 
 func TestControllerIntakePublishesCapturedLocalHistory(t *testing.T) {
@@ -147,5 +146,4 @@ func TestControllerIntakePublishesCapturedLocalHistory(t *testing.T) {
 	if err != nil || accepted.Owner != nil || accepted.Spec.Resolved.Settings.Jobs["historical"].Timeout.Value != 12*time.Hour {
 		t.Fatalf("historical plan gained remote execution bounds: %v", err)
 	}
-
 }

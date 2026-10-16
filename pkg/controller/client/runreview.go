@@ -53,15 +53,13 @@ func (c *engineClient) ResolveApproval(ctx context.Context, run, job string, inp
 	return result, err
 }
 
-func (c *engineClient) AppendAnnotation(ctx context.Context, run, job string, input controllerwire.AnnotationWrite) (controllerwire.Applied, error) {
-	var result controllerwire.Applied
-	if !validSelector(run) || !validSelector(job) || input.StepID != "" && !validSelector(input.StepID) || input.Level == "" || input.Message == "" {
-		return result, &apierr.Error{Code: apierr.BadRequest, Message: "annotation requires valid run and job selectors, level and message"}
+func (c *engineClient) AppendAnnotation(ctx context.Context, run, job string, input controllerwire.AnnotationWrite) error {
+	if !validSelector(run) || !validSelector(job) || input.StepID != "" && !validSelector(input.StepID) || input.Level == "" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "annotation requires valid run and job selectors and a level"}
 	}
 	suffix := "/annotations"
 	if input.StepID != "" {
 		suffix = "/steps/annotations"
 	}
-	err := c.request(ctx, "POST", "/api/v1/runs/{run}/jobs/{job}"+suffix, "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+suffix, "", input, &result)
-	return result, err
+	return c.request(ctx, "POST", "/api/v1/runs/{run}/jobs/{job}"+suffix, "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+suffix, "", input, nil)
 }

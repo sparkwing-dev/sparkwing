@@ -1082,6 +1082,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.blob.RecordKey'
             - type: "null"
+        owner_capability_prefix:
+          type: string
         ready_at:
           anyOf:
             - format: date-time
@@ -2382,18 +2384,6 @@ components:
         - record
       type: object
       x-sparkwing-go-type: controllerwire.ReuseSource
-    internal.controllerwire.RunDeletion:
-      additionalProperties: true
-      properties:
-        deleted:
-          type: boolean
-        run_id:
-          type: string
-      required:
-        - run_id
-        - deleted
-      type: object
-      x-sparkwing-go-type: controllerwire.RunDeletion
     internal.controllerwire.RunDetail:
       additionalProperties: true
       properties:
@@ -3458,6 +3448,8 @@ components:
           type: string
         manifest:
           type: string
+        replacement:
+          type: string
         sdk:
           type: string
         version:
@@ -4033,40 +4025,22 @@ components:
     internal.runspec.CheckoutLayer:
       additionalProperties: true
       properties:
-        admission_class:
-          $ref: '#/components/schemas/internal.runspec.Setting.string.'
         args:
           $ref: '#/components/schemas/internal.runspec.Setting.map.string.github.com.sparkwing-dev.sparkwing.internal.runspec.Setting.string..'
-        checkout:
-          $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.CheckoutPolicy.'
-        claim_wait:
-          $ref: '#/components/schemas/internal.runspec.Setting.time.Duration.'
         guards:
           $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.GuardDeclarations.'
-        job_defaults:
-          $ref: '#/components/schemas/internal.runspec.JobExecutionSettings'
         prefers:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
-        priority:
-          $ref: '#/components/schemas/internal.runspec.Setting.int.'
         profile:
           $ref: '#/components/schemas/internal.runspec.Setting.string.'
         requires:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
-        resources:
-          $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
       required:
         - args
         - guards
         - requires
         - prefers
         - profile
-        - resources
-        - priority
-        - claim_wait
-        - admission_class
-        - checkout
-        - job_defaults
       type: object
       x-sparkwing-go-type: runspec.CheckoutLayer
     internal.runspec.CheckoutPolicy:
@@ -8840,12 +8814,8 @@ paths:
           schema:
             type: string
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.RunDeletion'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -9053,7 +9023,6 @@ paths:
         retry: idempotency_key
   /api/v1/runs/{run}/attempts:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -9061,13 +9030,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.RunPage'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/attempts
+      summary: Read public retry history
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/attempts
@@ -9091,7 +9066,6 @@ paths:
             binding: run
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/cancel:
     post:
       parameters:
@@ -9679,12 +9653,8 @@ paths:
               $ref: '#/components/schemas/internal.controllerwire.AnnotationWrite'
         required: true
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.Applied'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -10686,12 +10656,8 @@ paths:
               $ref: '#/components/schemas/internal.controllerwire.AnnotationWrite'
         required: true
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.Applied'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -14351,6 +14317,11 @@ paths:
               - node.report
             binding: ownNode
             liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
+            liveness: process
         retry: never
   /node/v1/children:
     post:
@@ -14371,6 +14342,11 @@ paths:
         authentication: capability
         access:
           - credential: nodehost_process
+            grants:
+              - children.start
+            binding: bodyNamesRun
+            liveness: process
+          - credential: owner_process
             grants:
               - children.start
             binding: bodyNamesRun
@@ -14406,6 +14382,11 @@ paths:
               - children.start
             binding: childOfBoundNode
             liveness: process
+          - credential: owner_process
+            grants:
+              - children.start
+            binding: childOfBoundNode
+            liveness: process
         retry: safe
       x-sparkwing-wire: undocumented
   /node/v1/cleanups:
@@ -14430,6 +14411,11 @@ paths:
             grants:
               - node.report
             binding: ownCleanup
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
             liveness: process
         retry: never
       x-sparkwing-wire: undocumented
@@ -14462,6 +14448,11 @@ paths:
               - node.report
             binding: ownCleanup
             liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
+            liveness: process
         retry: never
       x-sparkwing-wire: undocumented
   /node/v1/jobs/{job}/output:
@@ -14489,6 +14480,11 @@ paths:
         authentication: capability
         access:
           - credential: nodehost_process
+            grants:
+              - data.read
+            binding: readSet
+            liveness: process
+          - credential: owner_process
             grants:
               - data.read
             binding: readSet
@@ -14529,6 +14525,11 @@ paths:
               - node.report
             binding: ownNode
             liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
+            liveness: process
         retry: exact_body
   /node/v1/oidc-token:
     post:
@@ -14552,6 +14553,11 @@ paths:
             grants:
               - oidc.mint
             binding: ownNode
+            liveness: process
+          - credential: owner_process
+            grants:
+              - oidc.mint
+            binding: runOfTrigger
             liveness: process
         retry: never
       x-sparkwing-wire: undocumented
@@ -14584,6 +14590,11 @@ paths:
               - refs.read
             binding: readSet
             liveness: process
+          - credential: owner_process
+            grants:
+              - refs.read
+            binding: readSet
+            liveness: process
         retry: safe
       x-sparkwing-wire: undocumented
   /node/v1/secrets/{name}:
@@ -14611,6 +14622,11 @@ paths:
         authentication: capability
         access:
           - credential: nodehost_process
+            grants:
+              - secrets.release
+            binding: declaredSecret
+            liveness: process
+          - credential: owner_process
             grants:
               - secrets.release
             binding: declaredSecret
@@ -14650,6 +14666,11 @@ paths:
             grants:
               - node.report
             binding: ownNode
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
             liveness: process
         retry: exact_body
   /webhooks/github-app:

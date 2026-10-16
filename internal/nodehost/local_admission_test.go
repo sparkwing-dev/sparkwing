@@ -78,7 +78,7 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 		t.Fatalf("leases=%d/%d/%d", live, granted, released)
 	}
 	for _, req := range d.requests()[1:] {
-		if !strings.HasPrefix(req.RunID, testRunID+"/node-host/") || req.OwnerRunID != testRunID || req.OwnerLeaseToken != "lease-"+testRunID || !req.SubLease || req.SemaphoresOnly || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{Cores: 2, MemoryBytes: 1 << 30}) {
+		if !strings.HasPrefix(string(req.RunID), testRunID+"/node-host/") || req.OwnerRunID != testRunID || req.OwnerLeaseToken != "lease-"+testRunID || !req.SubLease || req.SemaphoresOnly || req.Priority != 5 || req.Class != "batch" || req.Pipeline != "p" || req.Resources != (wingwire.HostResources{Cores: 2, MemoryBytes: 1 << 30}) {
 			t.Fatalf("request=%+v", req)
 		}
 	}
@@ -102,7 +102,7 @@ func TestAdmissionPriorityAndClassPrecedence(t *testing.T) {
 			t.Fatalf("sealed winners lost: %+v", req)
 		}
 	}
-	if reqs := d.requests(); len(reqs) != 2 || reqs[1].RunID != want {
+	if reqs := d.requests(); len(reqs) != 2 || string(reqs[1].RunID) != want {
 		t.Fatalf("requests=%+v", reqs)
 	}
 }
@@ -125,7 +125,7 @@ func TestAdmissionRunHoldingTheHostTakesOnlySemaphores(t *testing.T) {
 		t.Fatal(err)
 	}
 	reqs := d.requests()
-	if len(reqs) != 2 || !reqs[1].SemaphoresOnly || !strings.HasPrefix(reqs[1].RunID, testRunID+"/node-semaphore/") || len(reqs[1].Semaphores) != 1 || reqs[1].Semaphores[0].Name != scopedConcurrencyKey("db", "run", testRunID, "") || reqs[1].Resources != (wingwire.HostResources{}) {
+	if len(reqs) != 2 || !reqs[1].SemaphoresOnly || !strings.HasPrefix(string(reqs[1].RunID), testRunID+"/node-semaphore/") || len(reqs[1].Semaphores) != 1 || reqs[1].Semaphores[0].Name != scopedConcurrencyKey("db", "run", testRunID, "") || reqs[1].Resources != (wingwire.HostResources{}) {
 		t.Fatalf("requests=%+v", reqs)
 	}
 }
@@ -242,7 +242,7 @@ func TestAdmissionHostLeaseIsWatchedWhileTheNodeRuns(t *testing.T) {
 	_, err := admission.Run(localAdmissionContext(t), accepted, func(ctx context.Context) (RunCompletion, error) {
 		return RunCompletion{}, admission.Node(ctx, accepted, localAdmissionRow("a"), func(ctx context.Context) error {
 			d.mu.Lock()
-			held = d.leases[wingwire.NodeHostParticipant(testRunID, "a")]
+			held = d.leases[string(wingwire.NodeHostParticipant(testRunID, "a"))]
 			d.mu.Unlock()
 			select {
 			case held.probes <- "probe":
@@ -303,7 +303,7 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 				}
 				process.(*executorProcess).onRun = func(ctx context.Context) {
 					d.mu.Lock()
-					held := d.leases[wingwire.NodeHostParticipant(in.Accepted.RunID, in.NodeID)]
+					held := d.leases[string(wingwire.NodeHostParticipant(in.Accepted.RunID, in.NodeID))]
 					d.mu.Unlock()
 					switch mode {
 					case "evicted":

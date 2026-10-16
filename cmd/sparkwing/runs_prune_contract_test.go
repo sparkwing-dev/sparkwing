@@ -20,10 +20,11 @@ type pruneController struct {
 	failure error
 }
 
-func (c *pruneController) DeleteRun(_ context.Context, id string) (controllerwire.RunDeletion, error) {
+func (c *pruneController) DeleteRun(_ context.Context, id string) error {
 	c.deletes = append(c.deletes, id)
-	return controllerwire.RunDeletion{RunID: id, Deleted: true}, c.failure
+	return c.failure
 }
+
 func pruneInvocation(t *testing.T, args ...string) clisurface.Invocation {
 	t.Helper()
 	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "prune"}, args...))
@@ -97,5 +98,21 @@ func TestRunPruneDryRunAndStructuredFailure(t *testing.T) {
 	err = pruneObservedRuns(t.Context(), pruneInvocation(t, "--run", "42", "-o", "json"), c, nil, &out, time.Now())
 	if !errors.Is(err, failure) || !strings.Contains(out.String(), `"code":"conflict"`) || !strings.Contains(out.String(), `"hint":"publish a newer success first"`) {
 		t.Fatalf("refusal lost: %v %s", err, &out)
+	}
+}
+
+func TestRunPruneReportsOnlyAcknowledgedSelection(t *testing.T) {
+	for _, format := range []string{"json", "plain", "pretty"} {
+		t.Run(format, func(t *testing.T) {
+			var out bytes.Buffer
+			err := pruneObservedRuns(t.Context(), pruneInvocation(t, "--run", "42", "-o", format), &pruneController{}, nil, &out, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]string{"json": "{\"run_id\":\"42\"}\n", "plain": "42\n", "pretty": "42: pruned\n"}[format]
+			if out.String() != want {
+				t.Fatalf("prune output: %q want %q", out.String(), want)
+			}
+		})
 	}
 }

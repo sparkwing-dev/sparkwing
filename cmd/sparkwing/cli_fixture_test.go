@@ -132,9 +132,12 @@ func TestMain(m *testing.M) {
 			os.Exit(2)
 		}
 	}
-	if len(os.Args) > 1 && os.Args[1] == "wingd" {
-		main()
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "wingd", "__sdk-install", "__host-trigger", "__tick", "__complete":
+			main()
+			return
+		}
 	}
 	code := m.Run()
 	if err := os.RemoveAll(submitCLIDir); err != nil {
@@ -151,13 +154,17 @@ func TestMain(m *testing.M) {
 }
 
 func TestDetachedHostEntrypointDoesNotRunPipelineFixtures(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "wingd", "run", "--help")
-	cmd.Env = append(os.Environ(), "SPARKWING_TEST_DAEMON_ENTRYPOINT=1")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("daemon entrypoint: %v: %s", err, output)
-	}
-	if !strings.Contains(string(output), "wingd run") || strings.Contains(string(output), "PASS") {
-		t.Fatalf("daemon reentered the test suite: %s", output)
+	for _, args := range [][]string{{"wingd", "run"}, {"__sdk-install"}, {"__host-trigger"}, {"__tick"}, {"__complete"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), os.Args[0], append(args, "--help")...)
+			cmd.Env = append(os.Environ(), "SPARKWING_TEST_DAEMON_ENTRYPOINT=1")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("helper entrypoint: %v: %s", err, output)
+			}
+			if !strings.Contains(string(output), strings.Join(args, " ")) || strings.Contains(string(output), "PASS") {
+				t.Fatalf("helper reentered the test suite: %s", output)
+			}
+		})
 	}
 }

@@ -15,6 +15,44 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+func TestUnmatchedRouteLogsSanitizedPathProperty(t *testing.T) {
+	s := New(nil, nil)
+	var logs bytes.Buffer
+	s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	handler := s.HTTP().API
+	property := func(input []byte, write bool) bool {
+		secret := "private-" + hex.EncodeToString(input)
+		s.masker.Register(secret)
+		method, message := "GET", "http"
+		if write {
+			method, message = "POST", "audit"
+		}
+		for _, tc := range []struct{ path, want string }{
+			{"/api/v1/runs/run-1/jobs/stamp/missing", "/api/v1/runs/run-1/jobs/stamp/missing"},
+			{"/api/v1/secrets/" + secret + "/missing", "/api/v1/secrets/%5Bredacted%5D/missing"},
+			{"/missing/" + secret + "/%0A%0D", "/missing/%2A%2A%2A/%0A%0D"},
+			{"/api/v1/tokens/" + url.PathEscape("unregistered-"+string(input)) + "/missing", "/api/v1/tokens/%5Bredacted%5D/missing"},
+			{"/missing/swk_" + hex.EncodeToString(input) + "opaque", "/missing/%5Bredacted%5D"},
+			{"/missing/swn_" + hex.EncodeToString(input) + "opaque", "/missing/%5Bredacted%5D"},
+		} {
+			logs.Reset()
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(method, tc.path+"?token="+secret, nil)
+			r.Header.Set("Authorization", "Bearer "+secret)
+			handler.ServeHTTP(w, r)
+			records := auditLines(t, &logs, message)
+			if w.Code != 404 || len(records) != 1 || records[0]["path"] != tc.want || records[0]["method"] != method || records[0]["route"] != "other" || strings.Contains(logs.String(), secret) || strings.Contains(logs.String(), "?token") {
+				t.Log(records, w.Code)
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAuditPolicyNeverLogsSecretPathsOrCredentialsProperty(t *testing.T) {
 	f := newScheduleHTTPFixture(t)
 	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.TeamAdmin}

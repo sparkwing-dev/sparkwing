@@ -57,6 +57,7 @@ func (f *daemonLifecycleFake) EnsureStarted(_ context.Context, options wingd.Loc
 		return *f.started, nil
 	}
 	f.status.Running, f.status.Version, f.status.Stay = true, options.Version, options.Stay
+	f.status.PID = 17
 	return f.status, nil
 }
 

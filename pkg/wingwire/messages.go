@@ -151,7 +151,7 @@ type SemaphoreClaim struct {
 // followed by a [Grant], or an [Evicted] terminal event, per the
 // policies.
 type AdmissionRequest struct {
-	RunID string `json:"run_id"`
+	RunID HolderRef `json:"run_id"`
 	// OwnerRunID is the real run that owns an internal participant. Empty
 	// means the participant is the run.
 	OwnerRunID string `json:"owner_run_id,omitempty"`

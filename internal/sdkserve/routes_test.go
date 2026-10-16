@@ -205,6 +205,28 @@ func TestHostRoutesPreserveExplicitEmptyValues(t *testing.T) {
 	}
 }
 
+func TestHostRoutesEncodeNilCollectionsAsEmpty(t *testing.T) {
+	submit := fakeRoutes(t, "POST", "/node/v1/children", `{"pipeline":"weather-report","job":"stamp","args":{}}`, `{"run_id":"child"}`)
+	await := fakeRoutes(t, "GET", "/node/v1/children/child/await?job=stamp&wait_ms=60000", `null`, `{"status":"success","output":{}}`)
+	transport := submit.transport
+	calls := 0
+	submit.transport = routeTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return transport.RoundTrip(r)
+		}
+		return await.transport.RoundTrip(r)
+	})
+	request := ChildRequest{Pipeline: "weather-report", Job: "stamp"}
+	if _, err := submit.RunPipeline(t.Context(), request); err != nil || calls != 2 || request.Args != nil {
+		t.Fatalf("child request = %+v, calls = %d, error = %v", request, calls, err)
+	}
+	cleanup := fakeRoutes(t, "POST", "/node/v1/cleanups", `{"argv":[],"description":""}`, `{"id":"cleanup"}`)
+	if _, err := cleanup.RegisterCleanup(t.Context(), nil, ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMaskUsesAcknowledgedBoundRoute(t *testing.T) {
 	s := fakeRoutes(t, "POST", "/node/v1/masks", `{"value":"sensitive"}`, `{}`)
 	if err := s.Mask(t.Context(), "sensitive"); err != nil {

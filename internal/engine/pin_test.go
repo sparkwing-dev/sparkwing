@@ -14,7 +14,8 @@ func TestReadPinRequiresExactRelease(t *testing.T) {
 		{"older exact", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.10.2\n", "v0.10.2", false},
 		{"prerelease", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.10.2-rc.1\n", "v0.10.2-rc.1", false},
 		{"missing", "module fixture\n", "", true},
-		{"replacement", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.10.2\nreplace github.com/sparkwing-dev/sparkwing => ../sdk\n", "", true},
+		{"replacement", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.10.2\nreplace github.com/sparkwing-dev/sparkwing => ../sdk\n", "v0.10.2", false},
+		{"replacement pseudo", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.0.0-20261014120000-abcdefabcdef\nreplace github.com/sparkwing-dev/sparkwing => ../sdk\n", "v0.0.0-20261014120000-abcdefabcdef", false},
 		{"pseudo", "module fixture\nrequire github.com/sparkwing-dev/sparkwing v0.0.0-20261014120000-abcdefabcdef\n", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,9 +53,34 @@ func TestReadTypeScriptPinRejectsConflictAndRangeWithoutLock(t *testing.T) {
 	}
 }
 
+func TestReadPinSelectsOnlyApplicableSDKReplacement(t *testing.T) {
+	for _, tc := range []struct{ directive, replacement string }{
+		{"replace " + GoModule + " v0.10.2 => ../sdk", "../sdk"},
+		{"replace " + GoModule + " v0.10.3 => ../sdk", ""},
+		{"replace example.com/other => ../sdk", ""},
+		{"replace " + GoModule + " => example.com/sdk v0.11.0", "example.com/sdk@v0.11.0"},
+		{"replace " + GoModule + " => ../all\nreplace " + GoModule + " v0.10.2 => ../exact", "../exact"},
+		{"replace " + GoModule + " v0.10.2 => ../exact\nreplace " + GoModule + " => ../all", "../exact"},
+	} {
+		t.Run(tc.directive, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFixture(t, dir, "go.mod", []byte("module fixture\nrequire "+GoModule+" v0.10.2\n"+tc.directive+"\n"))
+			pin, err := ReadPin(dir, GoSDK)
+			if err != nil || pin.Replacement != tc.replacement {
+				t.Fatalf("replacement=%q want=%q: %v", pin.Replacement, tc.replacement, err)
+			}
+		})
+	}
+	dir := t.TempDir()
+	writeFixture(t, dir, "go.mod", []byte("module fixture\nreplace "+GoModule+" => ../sdk\n"))
+	if _, err := ReadPin(dir, GoSDK); err == nil {
+		t.Fatal("replacement without SDK requirement was accepted")
+	}
+}
+
 func writeFixture(t *testing.T, dir, path string, body []byte) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, path), body, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, path), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -64,11 +90,21 @@ func TestNpmRangesKeepZeroMajorAndPrereleaseBoundaries(t *testing.T) {
 		rangeSpec, version string
 		want               bool
 	}{
-		{"^0.0.1", "0.0.1", true}, {"^0.0.1", "0.0.2", false}, {"^0.1.0", "0.2.0", false},
-		{"^1.2.3", "1.9.0", true}, {"^1.2.3", "2.0.0", false}, {"~1.2.3", "1.3.0", false},
-		{"^1.2.3", "1.3.0-rc.1", false}, {"^1.2.3-rc.1", "1.2.3-rc.2", true}, {"^1.2.3-rc.1", "1.3.0-rc.2", false},
-		{">=1.2.3 <2", "1.5.0", true}, {">=1.2.3 <2", "2.0.0", false}, {"1.2.x || >=2.0.0", "2.1.0", true},
-		{"1.2 - 2.3", "2.3.9", true}, {"1.2 - 2.3", "2.4.0", false}, {"^0.0", "0.0.9", true},
+		{"^0.0.1", "0.0.1", true},
+		{"^0.0.1", "0.0.2", false},
+		{"^0.1.0", "0.2.0", false},
+		{"^1.2.3", "1.9.0", true},
+		{"^1.2.3", "2.0.0", false},
+		{"~1.2.3", "1.3.0", false},
+		{"^1.2.3", "1.3.0-rc.1", false},
+		{"^1.2.3-rc.1", "1.2.3-rc.2", true},
+		{"^1.2.3-rc.1", "1.3.0-rc.2", false},
+		{">=1.2.3 <2", "1.5.0", true},
+		{">=1.2.3 <2", "2.0.0", false},
+		{"1.2.x || >=2.0.0", "2.1.0", true},
+		{"1.2 - 2.3", "2.3.9", true},
+		{"1.2 - 2.3", "2.4.0", false},
+		{"^0.0", "0.0.9", true},
 	} {
 		t.Run(tc.rangeSpec+"_"+tc.version, func(t *testing.T) {
 			if got := npmSatisfies(tc.rangeSpec, tc.version); got != tc.want {

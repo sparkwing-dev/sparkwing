@@ -116,7 +116,7 @@ func dispatchRunWithEngine(args []string, selectEngine func(string, func()) erro
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
-	helpRequested := slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")
+	helpRequested := flags.invocation.Help() || slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")
 	if !helpRequested {
 		if err := validateLocalRunFlags(flags); err != nil {
 			return err
@@ -215,7 +215,8 @@ func runSparkwing(args []string) (result error) {
 	if err != nil {
 		return err
 	}
-	if inv.Help() || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
+	pipelineHelp := inv.Command.Path == "sparkwing run" && inv.Pipeline != ""
+	if inv.Help() && !pipelineHelp || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
 	if checkout := inv.Value("checkout"); checkout != "" {
@@ -244,7 +245,7 @@ func invocationArgs(inv clisurface.Invocation) []string {
 		args = append(args, inv.Pipeline)
 	}
 	for _, f := range append(clisurface.GlobalFlags(), inv.Command.Flags...) {
-		if f.Name == "checkout" || f.Name == "help" || f.Name == "help-all" {
+		if f.Name == "checkout" {
 			continue
 		}
 		for _, value := range inv.Flags[f.Name] {
@@ -396,13 +397,6 @@ func resolveTTYAwareOutput(outputFormat, cmdPath string) (string, error) {
 
 func isTerminalRunStatus(s string) bool {
 	return s == "success" || s == "failed" || s == "cancelled"
-}
-
-func normalizeRunID(id string) string {
-	if id == "" || strings.HasPrefix(id, "run-") {
-		return id
-	}
-	return "run-" + id
 }
 
 func statusExitCode(status string) error {

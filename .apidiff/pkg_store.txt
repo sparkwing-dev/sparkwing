@@ -748,7 +748,7 @@ const DefaultCreditGraceSeconds = 10 * 60
 const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 18_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
-var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
+func DefaultEventLimits() EventLimits
 const DefaultFreeAllowanceBytes int64 = 1 << 30
 const DefaultFreeTeamMembers = 10
 const DefaultFreeTeamSlots = 200
@@ -759,7 +759,7 @@ const DefaultSignUpHourlyLimit = 50
 const DefaultSignUpHourlyWarn = 20
 func DefaultSignUpLimits() SignUpLimits
 const DefaultTeam Team = "default"
-const DefaultTeamCloudNodes = 100
+const DefaultTeamCloudNodes = limits.TeamCloudJobs
 const DefaultWarmCPUClassCores = 2
 const DeletedUserLabel = "deleted user"
 type DesiredRunEffect struct {
@@ -875,7 +875,7 @@ var ErrLastSignInMethod = errors.New("store: an account keeps at least one sign-
 var ErrLockHeld = errors.New("held by another holder")
 var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
 var ErrNoTeam = errors.New("store: team is required")
-var ErrNodeMetricLimit = errors.New("store: a node holds at most 10000 metric samples")
+var ErrNodeMetricLimit = fmt.Errorf("store: a node holds at most %d metric samples", limits.MaxMetricSamples)
 var ErrNotFound = errors.New("not found")
 var ErrNotMember = errors.New("store: not a member of this team")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
@@ -1142,6 +1142,7 @@ type IntakeRequest struct {
 	CapabilityPrefix   string
 	VerifiedDeliveryID string
 }
+func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, team Team) (ComputeLimits, bool, error)
 type Invitation struct {
 	ID              string
 	Team            Team
@@ -1213,7 +1214,7 @@ const MaxGitHubRunnerCredentials = 20
 const MaxInvitationEmailsPerDay = 5
 const MaxInvitationsPerDay = 100
 const MaxNodeMetricMarkers = 8
-const MaxNodeMetricSamples = 10_000
+const MaxNodeMetricSamples = limits.MaxMetricSamples
 const MaxOpenInvitations = 50
 const MaxPlanBytes = 4 << 20
 const MaxPurchaseLimitCents = MaxTeamBalanceMicro / MicroCreditsPerCent
@@ -1418,7 +1419,9 @@ type NodeStep struct {
 	RunID       string
 	NodeID      string
 	StepID      string
+	Attempt     int64
 	Status      string
+	Error       string
 	StartedAt   *time.Time
 	FinishedAt  *time.Time
 	Annotations []string
@@ -1763,6 +1766,7 @@ type RepoDispatch string
 const RepoDispatchController RepoDispatch = "controller"
 const RepoDispatchTrigger RepoDispatch = "trigger"
 func RepoKey(owner, name string) string
+func RequestPlacement(request runspec.Request) nodeproto.Placement
 type RetentionRequest struct {
 	Lease SingletonLease
 	Limit int
@@ -2622,6 +2626,7 @@ func (t *Tenant) PutAuthorizedGitHubAutomation(ctx context.Context, a capability
 func (t *Tenant) PutAuthorizedGitHubTrigger(ctx context.Context, a capability.Authorized, row GitHubAppTrigger) (GitHubAppTrigger, error)
 func (t *Tenant) ReadBlob(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error)
 func (t *Tenant) ReadCapability(ctx context.Context, a capability.Authorized) (capability.Metadata, error)
+func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error)
 func (t *Tenant) ReadDataBlob(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error)
 func (t *Tenant) ReadFailure(ctx context.Context, source NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error)
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error)

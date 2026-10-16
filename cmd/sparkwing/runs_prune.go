@@ -57,10 +57,9 @@ func runRunsPrune(ctx context.Context, args []string) error {
 }
 
 type pruneRecord struct {
-	RunID  string                      `json:"run_id"`
-	DryRun bool                        `json:"dry_run,omitempty"`
-	Result *controllerwire.RunDeletion `json:"result,omitempty"`
-	Error  *apierr.Error               `json:"error,omitempty"`
+	RunID  string        `json:"run_id"`
+	DryRun bool          `json:"dry_run,omitempty"`
+	Error  *apierr.Error `json:"error,omitempty"`
 }
 
 func pruneObservedRuns(ctx context.Context, inv clisurface.Invocation, c controllerwire.RunPruner, input io.Reader, out io.Writer, now time.Time) error {
@@ -98,14 +97,11 @@ func pruneObservedRuns(ctx context.Context, inv clisurface.Invocation, c control
 		}
 		record := pruneRecord{RunID: id, DryRun: inv.Bool("dry-run")}
 		if !record.DryRun {
-			result, err := c.DeleteRun(ctx, id)
-			if err != nil {
+			if err := c.DeleteRun(ctx, id); err != nil {
 				failures = append(failures, fmt.Errorf("prune %s: %w", id, err))
 				if !errors.As(err, &record.Error) {
 					record.Error = &apierr.Error{Code: apierr.Internal, Message: err.Error()}
 				}
-			} else {
-				record.Result = &result
 			}
 		}
 		if err := writePruneRecord(out, record, format); err != nil {
@@ -126,11 +122,9 @@ func writePruneRecord(out io.Writer, record pruneRecord, format string) error {
 		_, err := fmt.Fprintln(out, record.RunID)
 		return err
 	}
-	action := "deleted"
+	action := "pruned"
 	if record.DryRun {
 		action = "would prune"
-	} else if !record.Result.Deleted {
-		action = "already absent"
 	}
 	_, err := fmt.Fprintf(out, "%s: %s\n", record.RunID, action)
 	return err

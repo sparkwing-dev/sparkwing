@@ -71,7 +71,7 @@ while retaining the cache lease. `SDKCommand.Close` removes that private copy
 after execution. `source.Entry.Close`, upgrade verification and cache warm join
 that cleanup. `CachedExecutable` identifies the durable cache entry for cache
 warm reports. It does not authorize execution after the lease is released.
-Real Go fixtures cover missing checksums, overlays, SDK replacement refusal and
+Real Go fixtures cover missing checksums, overlays, undeclared SDK replacement refusal and
 execution after cache pruning. Native platform evidence remains separate.
 
 Local dispatch consumes ReadPin, VersionForPin and Resolve for both SDKs. It
@@ -91,6 +91,18 @@ C4 owns shared durations and CLI grammar. C1 stores the portable engine identity
 at seal point two. C3 hosts consume it on every execution placement.
 
 ## Exact selection and verification
+
+Decision 111 permits Go SDK replacements. `ReadPin` records the applicable
+replacement module selector in `Pin.Replacement` and retains the declared SDK
+requirement. `VersionForPin` selects the installed executable's embedded version
+for that pin. `Resolve` returns that executable with `engine_pin_disabled` notice
+and its SHA256 as both asset and manifest identity, without fetching a release.
+`Ensure` and installation require the same installed executable and identity.
+SDK hello still checks protocol and language; the replacement's self-reported
+SDK version need not equal the replaced requirement. The Go installer verifies
+that native module selection retains the recorded replacement. Undeclared
+overlay replacements remain refused. Release pins retain signed policy and
+release verification.
 
 The Go pin is the `github.com/sparkwing-dev/sparkwing` module requirement in the
 pipeline's go.mod. The TypeScript pin is `@sparkwing/sdk`, resolved exactly by its
@@ -279,11 +291,11 @@ release resolver and need an explicit development workflow during implementation
 | Export | Purpose |
 | --- | --- |
 | [`SDKKind`](../../../internal/engine/engine.go) | distinguishes the two pin formats without selecting a different engine. |
-| [`Pin`](../../../internal/engine/engine.go) | records the exact installed SDK version and the files that establish it. |
+| [`Pin`](../../../internal/engine/engine.go) | records the SDK requirement, applicable replacement and source files. |
 | [`ReadPin`](../../../internal/engine/pin.go) | resolves a Go requirement or a TypeScript lockfile entry without running pipeline code. |
-| [`VersionForPin`](../../../internal/engine/pin.go) | maps Go vX.Y.Z and TypeScript X.Y.Z to exactly engine vX.Y.Z. |
-| [`Identity`](../../../internal/engine/engine.go) | is portable across executor platforms and survives retry in the accepted run seal. |
-| [`Resolved`](../../../internal/engine/engine.go) | includes the executable verified for this machine's exact platform. |
+| [`VersionForPin`](../../../internal/engine/pin.go) | maps release pins to their exact engine and Go SDK replacements to the installed engine. |
+| [`Identity`](../../../internal/engine/engine.go) | binds the selected engine to SDK inputs in the accepted run seal. |
+| [`Resolved`](../../../internal/engine/engine.go) | includes the selected executable for this machine's platform. |
 | [`ReleaseBundle`](../../../internal/engine/engine.go) | is untrusted until VerifyRelease checks the shared release trust roots. |
 | [`VerifiedRelease`](../../../internal/engine/engine.go) | cannot be constructed outside this package before verification. |
 | [`VerifyRelease`](../../../internal/engine/release.go) | uses releaseauth.PublicKeys and releaseasset.Verify, the verify-release trust owners. |

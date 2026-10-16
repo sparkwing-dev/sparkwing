@@ -271,9 +271,13 @@ func externalRoute(method, path string, auth Authentication, owner Owner, retry 
 }
 
 func nodeRoute(method, path string, grant Grant, binding BindingRule, retry RetryPolicy) RoutePolicy {
+	ownerBinding := binding
+	if binding == BindOwnNode || binding == BindOwnCleanup {
+		ownerBinding = BindRunOfTrigger
+	}
 	return RoutePolicy{
 		Method: method, Path: path, Audience: NodeHost, Owner: OwnerNodeHost, Authentication: AuthCapability,
-		Access: []AccessRule{{CredentialNodeProcess, []Grant{grant}, binding, LiveProcess}}, Retry: retry,
+		Access: []AccessRule{{CredentialNodeProcess, []Grant{grant}, binding, LiveProcess}, {CredentialOwnerProcess, []Grant{grant}, ownerBinding, LiveProcess}}, Retry: retry,
 	}
 }
 

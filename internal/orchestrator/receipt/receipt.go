@@ -5,67 +5,23 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"sort"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type Receipt struct {
-	RunID      string     `json:"run_id"`
-	Pipeline   string     `json:"pipeline"`
-	GitSHA     string     `json:"git_sha"`
-	Status     string     `json:"status"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	DurationMS int64      `json:"duration_ms"`
-	Identity   Identity   `json:"identity"`
-
-	Invocation map[string]any `json:"invocation,omitempty"`
-	Steps      []Step         `json:"steps"`
-	Cost       Cost           `json:"cost"`
-	ReceiptSHA string         `json:"receipt_sha"`
-	// Store names the runs store the receipt was read from, and is excluded
-	// from ReceiptSHA: where a copy of the run sits says nothing about what
-	// ran, so the same run yields the same hash from any store.
-	Store string `json:"store,omitempty"`
-}
-
-type Identity struct {
-	PipelineVersionHash string            `json:"pipeline_version_hash"`
-	InputsHash          string            `json:"inputs_hash"`
-	PlanHash            string            `json:"plan_hash"`
-	OutputsHash         map[string]string `json:"outputs_hash"`
-}
-
-type Step struct {
-	ID         string `json:"id"`
-	NodeID     string `json:"node_id"`
-	DurationMS int64  `json:"duration_ms"`
-	Outcome    string `json:"outcome"`
-	SkipReason string `json:"skip_reason,omitempty"`
-}
-
-type Cost struct {
-	Currency     string `json:"currency"`
-	ComputeCents int64  `json:"compute_cents"`
-	RateSource   string `json:"rate_source"`
-	Settled      bool   `json:"settled"`
-}
-
 // BuildReceipt hashes a redacted reporting view and its job observations.
-func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource string) Receipt {
+func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource string) controllerwire.Receipt {
 	if run == nil {
-		return Receipt{}
+		return controllerwire.Receipt{}
 	}
-	r := Receipt{
+	r := controllerwire.Receipt{
 		RunID:      run.ID,
 		Pipeline:   run.Pipeline,
 		GitSHA:     run.GitSHA,
 		Status:     run.Status,
-		StartedAt:  run.StartedAt,
+		StartedAt:  &run.StartedAt,
 		FinishedAt: run.FinishedAt,
-
-		Invocation: run.Invocation,
 	}
 	if run.FinishedAt != nil {
 		r.DurationMS = run.FinishedAt.Sub(run.StartedAt).Milliseconds()
@@ -77,8 +33,8 @@ func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource 
 	return r
 }
 
-func buildIdentity(run *store.Run, nodes []*store.Node) Identity {
-	id := Identity{
+func buildIdentity(run *store.Run, nodes []*store.Node) controllerwire.ReceiptIdentity {
+	id := controllerwire.ReceiptIdentity{
 		PipelineVersionHash: hashBytes(run.PlanSnapshot),
 		PlanHash:            planTopologyHash(nodes),
 		OutputsHash:         outputsHashes(nodes),
@@ -124,10 +80,10 @@ func outputsHashes(nodes []*store.Node) map[string]string {
 	return out
 }
 
-func buildSteps(nodes []*store.Node) []Step {
-	steps := make([]Step, 0, len(nodes))
+func buildSteps(nodes []*store.Node) []controllerwire.ReceiptStep {
+	steps := make([]controllerwire.ReceiptStep, 0, len(nodes))
 	for _, n := range nodes {
-		s := Step{ID: n.NodeID, NodeID: n.NodeID, Outcome: stepOutcome(n)}
+		s := controllerwire.ReceiptStep{ID: n.NodeID, JobID: n.NodeID, Outcome: stepOutcome(n)}
 		if n.StartedAt != nil && n.FinishedAt != nil {
 			s.DurationMS = n.FinishedAt.Sub(*n.StartedAt).Milliseconds()
 		}
@@ -149,8 +105,8 @@ func stepOutcome(n *store.Node) string {
 	return n.Status
 }
 
-func buildCost(nodes []*store.Node, rate float64, rateSource string) Cost {
-	c := Cost{Currency: "USD", RateSource: rateSource, Settled: false}
+func buildCost(nodes []*store.Node, rate float64, rateSource string) controllerwire.ReceiptCost {
+	c := controllerwire.ReceiptCost{Currency: "USD", RateSource: rateSource, Settled: false}
 	if rate <= 0 {
 		return c
 	}
@@ -177,9 +133,8 @@ func buildCost(nodes []*store.Node, rate float64, rateSource string) Cost {
 	return c
 }
 
-func computeReceiptSHA(r Receipt) string {
+func computeReceiptSHA(r controllerwire.Receipt) string {
 	r.ReceiptSHA = ""
-	r.Store = ""
 	return hashCanonical(r)
 }
 

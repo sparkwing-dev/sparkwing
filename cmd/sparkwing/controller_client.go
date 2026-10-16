@@ -87,14 +87,7 @@ func localControllerOptions(ctx context.Context, home string, query func(context
 		return client.EngineOptions{}, nil, err
 	}
 	if err != nil || !status.Running {
-		services, err := resolve(ctx)
-		if err != nil {
-			return client.EngineOptions{}, nil, err
-		}
-		if services.lifecycle == nil || filepath.Clean(services.options.Home) != filepath.Clean(home) {
-			return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller lifecycle is unavailable or bound to another home"}
-		}
-		status, err = services.lifecycle.EnsureStarted(ctx, services.options)
+		status, err = ensureLocalController(ctx, home, resolve)
 		if err != nil {
 			return client.EngineOptions{}, nil, err
 		}

@@ -39,10 +39,10 @@ func (f *fakeRunReview) ListApprovals(_ context.Context, id string) (controllerw
 	return f.approvals, f.readErr
 }
 
-func (f *fakeRunReview) AppendAnnotation(_ context.Context, run, job string, input controllerwire.AnnotationWrite) (controllerwire.Applied, error) {
+func (f *fakeRunReview) AppendAnnotation(_ context.Context, run, job string, input controllerwire.AnnotationWrite) error {
 	f.selectors = append(f.selectors, run, job)
 	f.annotation = input
-	return controllerwire.Applied{Replayed: true}, f.errorWrite
+	return f.errorWrite
 }
 
 func (f *fakeRunReview) ResolveApproval(_ context.Context, run, job string, input controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error) {
@@ -122,7 +122,7 @@ func TestReviewAnnotationsMissingAndEmptyDiffer(t *testing.T) {
 func TestReviewAnnotationWriteAndPolicyGap(t *testing.T) {
 	f := reviewFixture()
 	out, err := runReviewFake(t, f, []string{"runs", "annotations", "add", "--run", "412", "--job", "deploy", "--step", "canary", "--message", "secret raw text", "-o", "json"})
-	if err != nil || f.annotation.StepID != "canary" || f.annotation.Level != "info" || f.annotation.Message != "secret raw text" || !strings.Contains(out, `"replayed":true`) || strings.Contains(out, "secret raw text") {
+	if err != nil || f.annotation.StepID != "canary" || f.annotation.Level != "info" || f.annotation.Message != "secret raw text" || strings.Contains(out, `"applied"`) || !strings.Contains(out, `"step_id":"canary"`) || strings.Contains(out, "secret raw text") {
 		t.Fatalf("write output=%s input=%+v err=%v", out, f.annotation, err)
 	}
 	var api *apierr.Error

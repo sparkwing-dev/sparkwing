@@ -365,3 +365,17 @@ func TestSchedulingMissingGeneratedWorkCannotContinue(t *testing.T) {
 		t.Fatalf("nonexistent generated work released downstream: %+v", decision)
 	}
 }
+
+func TestSchedulingProjectionAllowsStaticGroups(t *testing.T) {
+	snapshot := scheduleFixture(t,
+		nodeproto.JobSpec{ID: "source", Closures: nodeproto.ClosureSpec{Generate: []string{"fanout"}}},
+		nodeproto.JobSpec{ID: "static", Groups: []string{"fanout", "display"}, Needs: []string{"source"}},
+	)
+	got, err := snapshot.Scheduling()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Nodes) != 2 || len(got.Expansions) != 1 || len(got.Expansions[0].Members) != 0 {
+		t.Fatalf("static groups changed generated membership: %+v", got)
+	}
+}

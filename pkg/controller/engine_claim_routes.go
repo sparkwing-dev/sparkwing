@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"time"
@@ -37,7 +38,7 @@ func claimIDTarget(r *http.Request) (capability.RequestEvidence, error) {
 	return capability.RequestEvidence{Target: capability.Target{ClaimID: r.PathValue("claim")}}, nil
 }
 
-func ownUnitTarget(p capability.Principal, target capability.Target) (capability.Target, error) {
+func ownUnitTarget(_ context.Context, p capability.Principal, target capability.Target) (capability.Target, error) {
 	c, b := p.Capability, p.Capability.Binding
 	target.Team, target.RunID, target.NodeID = c.Team, b.RunID, b.NodeID
 	target.Unit, target.UnitID, target.UnitGeneration, target.UnitHolder = c.Unit, c.UnitID, b.Generation, b.Holder

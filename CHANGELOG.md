@@ -20,6 +20,22 @@ unlock.
 
 ## [Unreleased]
 
+- **sdk:** Encode empty service collections as objects or arrays instead of null, so child pipelines without arguments pass host validation.
+- **cli:** Show every job's outcome and recorded failing steps and errors in `runs status`, including plain output.
+
+- **api:** Reject retry requests without a valid mode and idempotency key before creating a run.
+
+- **api (Breaking):** Return shared public run details for retry history, with redacted inputs and current lineage. Check each run against the caller's binding and omit raw invocation metadata. See [migration guide](docs/migrations/_unreleased.md#public-retry-history).
+
+- **cli:** Preserve numeric run selectors and stable IDs on cancel, retry and prune, including stdin. The CLI no longer prepends `run-` before the controller resolves the selected run.
+
+- **cli (Breaking):** Accept committed run deletions through the shared client. `RunPruner.DeleteRun` returns only an error after the controller's HTTP 204 acknowledgement. `runs prune` drops its unsupported deletion receipt. See [migration guide](docs/migrations/_unreleased.md#run-deletion-acknowledgement).
+
+- **cli (Breaking):** Accept committed annotation writes through the shared client and team-local numeric run selectors for annotations and summaries. `RunReview.AppendAnnotation` returns only an error, and `runs annotations add` drops its unsupported `applied` result. See [migration guide](docs/migrations/_unreleased.md#job-reporting).
+
+- **api:** Accept the controller's verified default-ref selection in shared record reads while preserving the other record selectors. Malformed record-query escaping returns `bad_request`.
+
+- **api (Breaking):** Run-receipt steps use `job_id`, matching the shared client. Receipt responses omit invocation metadata and local store locations.
 - **store (Breaking):** Require sealed credential write types and remove raw token minting and duplicate credit settlement. Lease checks use database time and shared owner fences. Reaping continues after target failures. See [migration guide](docs/migrations/_unreleased.md#shared-lease-fences-and-sealed-credential-writes).
 
 - **store (Breaking):** Require an explicit tenant for event appends and an Operator handle for deployment compute controls. Remove unused compute helpers and the duplicate ready-job count. Both queue gauges use one state snapshot. See [migration guide](docs/migrations/_unreleased.md#tenant-event-append-and-deployment-compute-controls).
@@ -218,7 +234,7 @@ unlock.
   Run listing, status, logs, summaries and timelines use the CLI's shared controller projections. The obsolete standalone-store merge path, warm-cache sweep, `Client.ListRuns`, `Client.ListApprovalsForRun`, `backend.ClientBackend` and `storeurl.OpenStateStoreFromSpec` are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 
 - **cli + controller/client (Breaking):** Repository pipeline history uses the local controller's public run projection, and unused launcher, source-credential and unpositioned log-write client APIs are removed
-  History reads follow pagination and fail loudly. Here hosting preserves the controller-awarded runner identity. Run deletion uses `NewRunPruner` and its persistence receipt. The unused CLI supervisor-stop path and duplicate parsers/renderers are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
+  History reads follow pagination and fail loudly. Here hosting preserves the controller-awarded runner identity. Run deletion uses `NewRunPruner` and the controller's empty acknowledgement. The unused CLI supervisor-stop path and duplicate parsers/renderers are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 - **runner enrollment (Breaking):** `NewRunnerTokenManager` replaces `Client.EnrollRunner`, and service issuance uses `NewTokenManager` instead of `Client.CreateServiceToken`. Enrollment uses the shared authenticated transport without replaying one-time credentials. `runners add --reserved-for` forwards pool proposals to team-admin registration. See [migration guide](docs/migrations/_unreleased.md#root-provisioning).
 - **Breaking:** Pipeline trigger submits the sealed run request through the shared controller client. The old trigger request builder and separate here-host loop are removed. Here reasons, source bundles and captured environment delivery still require their native intake bindings.
 - **Breaking:** Local and detached runs, standalone hosting, schedules, debug resume and repository history use the final controller/host boundaries. The CLI's direct store writers, resident consumer, duplicate supervisor command and obsolete client helpers are removed. Native factories and missing local schedule/release/publication contracts still block those operations before effects.
@@ -232,6 +248,7 @@ unlock.
   Env and attach use the local API socket or profile transport. Failed pause reads stay errors. Attach uses the server's explicit pod, namespace and execution container. JSON streams shell output in `debug_output` records. Native debug projection bindings remain an integration requirement. See [job inspection](docs/debugging.md).
 
 - **engine CLI (Breaking):** Local dispatch uses the shared exact SDK-matched engine resolver
+  Applicable Go SDK replacements use the installed CLI's engine with an explicit pinning-disabled warning. The accepted identity retains its executable digest. See [SDK replacements](docs/migrations/_unreleased.md#go-sdk-replacements).
   Newer installed versions and missing release assets cannot substitute another engine. Cached starts still check signed policy. The legacy CLI downloader, cache and environment recursion marker are removed. Native engine resolution remains an integration requirement.
 
 - **daemon events (Breaking):** Cursor pagination replaces offsets

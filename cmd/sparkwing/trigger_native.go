@@ -64,7 +64,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (controllerwi
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	engines, err := engine.NewResolver(engine.Config{Mode: mode})
+	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode})
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

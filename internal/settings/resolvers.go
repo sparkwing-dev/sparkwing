@@ -399,6 +399,7 @@ func OwnerExecution(in Inputs) (time.Duration, Origin, error) {
 	}
 	value, origin, err := pickRun(in, "owner_execution", func(v runspec.Options) runspec.Setting[time.Duration] { return v.OwnerExecutionTimeout }, ceiling.Value)
 	if origin.Source == Default {
+		value = ceiling.Value
 		origin = fromOrigin(ceiling.Origin)
 	}
 	if err == nil && value <= 0 {

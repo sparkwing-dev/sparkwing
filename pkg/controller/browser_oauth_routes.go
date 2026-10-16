@@ -101,5 +101,5 @@ func oauthFlowError(err error) error {
 			return &apierr.Error{Code: code, Message: refused.message}
 		}
 	}
-	return &apierr.Error{Code: apierr.Unavailable, Message: "sign-in service unavailable; start again"}
+	return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "sign-in service unavailable; start again"}, err)
 }

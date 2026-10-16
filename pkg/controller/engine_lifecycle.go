@@ -75,6 +75,9 @@ func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, 
 // Retry delegates source-seal loading to AdmitRun. The new requester is recorded
 // as retrier lineage without reconstructing or changing the source's request.
 func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
+	if err := body.Validate(); err != nil {
+		return controllerwire.CreateRunResponse{}, err
+	}
 	return s.CreateRun(ctx, a, controllerwire.CreateRunRequest{IdempotencyKey: body.IdempotencyKey,
 		Request: runspec.Request{Version: 1, Team: a.Target.Team, Lineage: runspec.Lineage{RetryOf: a.Target.RunID}}})
 }

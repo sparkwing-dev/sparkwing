@@ -25,7 +25,7 @@ import (
 
 func coreReq(runID string, cores float64) wingwire.AdmissionRequest {
 	return wingwire.AdmissionRequest{
-		RunID:     runID,
+		RunID:     wingwire.HolderRef(runID),
 		Resources: wingwire.HostResources{Cores: cores},
 	}
 }
@@ -270,7 +270,7 @@ func TestPositionRebroadcastKeepsIndependentQueuesSeparate(t *testing.T) {
 	startDaemon(t, wingd.Config{Home: home})
 	semOnly := func(runID, key string) wingwire.AdmissionRequest {
 		return wingwire.AdmissionRequest{
-			RunID:          runID,
+			RunID:          wingwire.HolderRef(runID),
 			SemaphoresOnly: true,
 			Semaphores: []wingwire.SemaphoreClaim{
 				{Name: key, Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
@@ -936,7 +936,7 @@ func TestExplicitCancelSignalsConnectionThatReattachedDuringPersistence(t *testi
 	control := ensure(t, home, "")
 	result := make(chan error, 1)
 	go func() {
-		found, err := control.CancelLease(context.Background(), req.RunID)
+		found, err := control.CancelLease(context.Background(), string(req.RunID))
 		if err == nil && !found {
 			err = errors.New("cancel did not find run")
 		}
@@ -956,7 +956,7 @@ func TestExplicitCancelSignalsConnectionThatReattachedDuringPersistence(t *testi
 	}
 	select {
 	case got := <-cancelled:
-		if got.RunID != req.RunID {
+		if got.RunID != string(req.RunID) {
 			t.Fatalf("cancel run = %q", got.RunID)
 		}
 	case <-time.After(2 * time.Second):
@@ -976,7 +976,7 @@ func TestExplicitCancelRejectsReplacementAfterResolution(t *testing.T) {
 	holder := ensure(t, home, "")
 	mustAcquire(t, holder, req)
 	control := ensure(t, home, "")
-	found, err := control.CancelLease(context.Background(), req.RunID)
+	found, err := control.CancelLease(context.Background(), string(req.RunID))
 	if err != nil || !found {
 		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
 	}
@@ -1111,7 +1111,7 @@ func TestChildAttachRejectsDepartedLineageUnderCancelledAncestor(t *testing.T) {
 	} {
 		child := ensure(t, home, "")
 		lease := mustAcquire(t, child, wingwire.AdmissionRequest{
-			RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: rootLease.Token,
+			RunID: wingwire.HolderRef(member.id), ParentRunID: member.parent, ParentLeaseToken: rootLease.Token,
 		})
 		if member.id == "departed" {
 			departedLease = lease
@@ -1159,7 +1159,7 @@ func TestChildAttachChecksOnlyItsAncestorsWhileSiblingCancellationIsPending(t *t
 	for _, id := range []string{"child-a", "child-b"} {
 		child := ensure(t, home, "")
 		mustAcquire(t, child, wingwire.AdmissionRequest{
-			RunID: id, ParentRunID: "parent", ParentLeaseToken: parentLease.Token,
+			RunID: wingwire.HolderRef(id), ParentRunID: "parent", ParentLeaseToken: parentLease.Token,
 		})
 	}
 	control := ensure(t, home, "")
@@ -1180,7 +1180,7 @@ func TestChildAttachChecksOnlyItsAncestorsWhileSiblingCancellationIsPending(t *t
 	} {
 		child := ensure(t, home, "")
 		lease, err := child.Acquire(context.Background(), wingwire.AdmissionRequest{
-			RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
+			RunID: wingwire.HolderRef(member.id), ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
 		}, nil)
 		if (err == nil) != member.allowed {
 			t.Fatalf("attach %s: lease=%v err=%v, allowed=%t", member.id, lease, err, member.allowed)
@@ -1404,7 +1404,7 @@ func TestExplicitCancelRespectsRunTree(t *testing.T) {
 			} {
 				child := ensure(t, home, "")
 				mustAcquire(t, child, wingwire.AdmissionRequest{
-					RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
+					RunID: wingwire.HolderRef(member.id), ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
 				})
 			}
 			if tc.restart {
@@ -1457,7 +1457,7 @@ func TestExplicitCancelRespectsRunTree(t *testing.T) {
 				} {
 					child := ensure(t, home, "")
 					mustAcquire(t, child, wingwire.AdmissionRequest{
-						RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
+						RunID: wingwire.HolderRef(member.id), ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
 					})
 				}
 			}
@@ -1773,7 +1773,7 @@ func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		registration := ensure(t, home, "")
 		mustAcquire(t, registration, wingwire.AdmissionRequest{
-			RunID:          fmt.Sprintf("run-%d", i),
+			RunID:          wingwire.HolderRef(fmt.Sprintf("run-%d", i)),
 			SemaphoresOnly: true,
 		})
 	}
@@ -1789,7 +1789,7 @@ func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 	for i := range results {
 		cl := ensure(t, home, "")
 		positions, result := acquireAsync(cl, wingwire.AdmissionRequest{
-			RunID:        fmt.Sprintf("run-%d/node-host/bm9kZQ", i+1),
+			RunID:        wingwire.HolderRef(fmt.Sprintf("run-%d/node-host/bm9kZQ", i+1)),
 			OwnerRunID:   fmt.Sprintf("run-%d", i+1),
 			DisplayRunID: fmt.Sprintf("run-%d/node", i+1),
 			SubLease:     true,
@@ -2131,7 +2131,7 @@ func TestRepeatedInvalidRequestsSurfaceInQueueStateWindow(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		cl := ensure(t, home, "")
 		_, err := cl.Acquire(context.Background(), wingwire.AdmissionRequest{
-			RunID:      "bad-" + strconv.Itoa(i),
+			RunID:      wingwire.HolderRef("bad-" + strconv.Itoa(i)),
 			CostSource: wingwire.CostSource("typo"),
 			Resources:  wingwire.HostResources{Cores: 1},
 		}, nil)

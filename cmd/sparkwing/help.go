@@ -562,18 +562,20 @@ func renderHelp(cmd Command, args []string, w io.Writer) error {
 }
 
 func writeCommandHelp(cmd Command, w io.Writer, mode string) error {
+	var text bytes.Buffer
+	PrintHelp(cmd, &text)
+	return writeHelpText(cmd, w, mode, text.String())
+}
+
+func writeHelpText(cmd Command, w io.Writer, mode, text string) error {
 	if mode == "json" {
-		var text bytes.Buffer
-		PrintHelp(cmd, &text)
 		return json.NewEncoder(w).Encode(struct {
 			Kind string `json:"kind"`
 			Text string `json:"text"`
 			CommandJSON
-		}{Kind: "help", Text: text.String(), CommandJSON: toCommandJSON(&cmd)})
+		}{Kind: "help", Text: text, CommandJSON: toCommandJSON(&cmd)})
 	}
-	var text bytes.Buffer
-	PrintHelp(cmd, &text)
-	_, err := io.Copy(w, &text)
+	_, err := io.WriteString(w, text)
 	return err
 }
 

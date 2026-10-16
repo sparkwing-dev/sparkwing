@@ -150,7 +150,7 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: true}
 		var raw json.RawMessage
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
-			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
+			return session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: input.Run.Pipeline, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
 		})
 		if err != nil {
 			return nil, p.planningError(ctx, err, true)
@@ -234,13 +234,17 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 }
 
 func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) error {
-	code, message := apierr.SDKError, "SDK describe failed before secret declarations were known"
+	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
 		code = structured.Code
 	} else if errors.Is(err, context.DeadlineExceeded) {
 		code = apierr.DeadlineExceeded
 	}
+	if !known && !slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == code }) {
+		code = apierr.SDKError
+	}
+	message := "describe failed: " + string(code) + " (details withheld: secrets not yet known)"
 	if known {
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
 	}

@@ -144,7 +144,7 @@ func (s *Server) resolveGitHubRunnerIdentity(ctx context.Context, team string, r
 	case errors.Is(err, store.ErrNotFound):
 		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "the team's GitHub App installation does not cover this repository")
 	case err != nil:
-		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository coverage could not be verified"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository coverage could not be verified"}, err)
 	}
 	if request.RepositoryID != 0 && request.RepositoryID != repo.ID || request.RepositoryOwnerID != 0 && request.RepositoryOwnerID != repo.Owner.ID {
 		return invalidEngineBody("repository identity differs from GitHub")

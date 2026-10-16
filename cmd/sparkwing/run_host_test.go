@@ -142,6 +142,41 @@ func TestLocalRunUsesSealedIntakeAndNamedOwnerClaim(t *testing.T) {
 	}
 }
 
+func TestLocalRunEnsuresControllerAfterPreparationBeforeIntake(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprint(failed), func(t *testing.T) {
+			var calls []string
+			deps := localRuntimeFor(t, localTestAward(t), true, &calls)
+			resolve := deps.resolve
+			failure := errors.New("cannot start local controller: executable refused")
+			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+				runtime, err := resolve(ctx, options)
+				runtime.ensureController = func(context.Context) error {
+					calls = append(calls, "ensure")
+					if failed {
+						return failure
+					}
+					return nil
+				}
+				return runtime, err
+			}
+			err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, []string{"--password", "private-value"}, io.Discard, deps)
+			want := []string{"resolve", "prepare", "ensure", "create", "close"}
+			if failed {
+				want = []string{"resolve", "prepare", "ensure", "close"}
+				if !errors.Is(err, failure) {
+					t.Fatalf("startup failure: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(calls, want) {
+				t.Fatalf("calls=%v, want %v", calls, want)
+			}
+		})
+	}
+}
+
 func TestLocalRunRejectsUnsupportedSelectionsBeforeAnyEffect(t *testing.T) {
 	for _, flags := range []runFlags{{detached: true, index: "/index"}} {
 		deps := localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
@@ -216,7 +251,7 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 	}
 	return localRunPreparation{
 		identity:  clisurface.PipelineIdentity{Name: "ci", Entrypoint: "CI"},
-		described: []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
+		described: []nodeproto.PipelineDescription{{Name: "ci", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
 		git:       award.Request.Request.Git, source: runspec.Source{Entrypoint: "CI"}, environment: env,
 		settings: settings.Inputs{Context: settings.Context{NumCPU: 4}},
 	}

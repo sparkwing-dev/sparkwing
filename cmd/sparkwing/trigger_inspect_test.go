@@ -85,7 +85,7 @@ func TestInspectTriggerUsesAcquiredSourceAndSelectedEngine(t *testing.T) {
 		return nil
 	}
 	described, err := inspectTriggerSource(t.Context(), selection, input.environment, deps)
-	if err != nil || len(described) != 1 || described[0].Name != "Deploy" || described[0].Args[0].Name != "region" || !reflect.DeepEqual(calls, []string{"acquire", "describe", "close"}) {
+	if err != nil || len(described) != 1 || described[0].Name != "deploy-prod" || described[0].Args[0].Name != "region" || !reflect.DeepEqual(calls, []string{"acquire", "describe", "close"}) {
 		t.Fatalf("inspection: %+v calls=%v err=%v", described, calls, err)
 	}
 }

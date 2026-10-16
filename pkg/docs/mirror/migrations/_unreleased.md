@@ -1,5 +1,13 @@
 # Migrating to the next release
 
+## Go SDK replacements
+
+An applicable Go SDK `replace` directive runs with the installed CLI's engine.
+Sparkwing warns that engine pinning is off for that run. The replacement remains
+in `pin.replacement`; the accepted engine identity records the installed
+executable's digest. Resuming that identity requires the same executable.
+Ordinary release pins still use signed release verification and exact matching.
+
 ## Tenant event append and deployment compute controls
 
 `Store.AppendEvent` is removed. Select a tenant and use `Tenant.AppendEvent`.
@@ -508,7 +516,7 @@ transport, and `Bearer` supplies the credential without exposing it in a URL.
 | Approvals and annotations | `NewRunReview` |
 | Secret values, metadata, writes, deletion and rotation | `NewSecretManager` |
 | Authorized object transfers and records | `NewDataClient` |
-| Run deletion with a persistence receipt | `NewRunPruner` |
+| Run deletion with an empty HTTP 204 acknowledgement | `NewRunPruner` |
 
 Intake uses the sealed `CreateRunRequest`. Hosts accept plans and expansions
 atomically and report fenced job transitions and typed step observations. The old
@@ -528,13 +536,29 @@ The old orchestrator readers, SQLite/profile factories, `HostTriggerRun`,
 `RunLocalTriggerConsumer` and `ServeConsumer` are removed. Their state, logging,
 admission, submission-environment and child-dispatch backends and the old
 `pkg/localws` server are also removed. Captured environments use the shared host
-snapshot contract. W3's retained `StateStoreOld` scheduler still needs retirement.
+snapshot contract.
 
 Local lifecycle uses `wingd.LocalRuntime`. Foreground construction receives the
 parsed `--home` before election. Lifecycle, managed units and logs share that
-home. The elected controller factory, detached startup and native execution
-composition remain unfinished. Typed step reports also require the controller's
-matching request decoder and persistence acknowledgement.
+home. The elected controller supplies admission, private execution transport,
+storage and process services. Typed step reports commit under the observed
+attempt before the controller acknowledges persistence.
+
+## Run deletion acknowledgement
+
+`RunPruner.DeleteRun(ctx, run)` returns only an error. An empty HTTP 204 response
+acknowledges deletion and log cleanup. The former `RunDeletion` type is removed
+because the controller does not return a deleted-row or replay result.
+`runs prune -o json` emits `run_id`, optional `dry_run` and any structured `error`.
+The former `result` field is removed. Plain output emits the acknowledged selector.
+
+## Public retry history
+
+`GET /api/v1/runs/{run}/attempts` returns a complete `RunPage` of shared public
+`RunDetail` values. Consumers read pipeline and retry lineage from `inputs`.
+The former raw reporting row and its `invocation` field are removed. History
+checks the caller's binding for every entry and fails before writing a partial
+response if an entry is outside that binding.
 
 ## Sealed step selections
 
@@ -705,8 +729,8 @@ and its JSON failure receipt identifies the created run without its credential.
 ## Plan inspection
 
 Use `sparkwing pipeline plan --pipeline NAME -- <pipeline arguments>` to supply
-required inputs. The registered SDK entrypoint selects the code; the invoked
-project name remains in the run context. Secret inputs reach planning but are
+required inputs. The YAML pipeline name selects the SDK registration and remains
+in the run context. The YAML entrypoint identifies the Go type. Secret inputs reach planning but are
 redacted in previews and structured diagnostics. The preview JSON uses `jobs`
 in place of `nodes`.
 
@@ -1205,7 +1229,15 @@ Reports require an awarded job or trigger capability with `node.report`, or
 the run's local publication authority. Caller-supplied holder and generation
 headers grant no authority. Step finish accepts `passed`, `failed` and
 `cancelled`, plus an optional inner error with a code and masked message.
-Annotations and summaries accept at most 128 KiB of masked text.
+Annotations and summaries accept at most 128 KiB of masked text. Their job
+and step routes accept a stable run ID or its number within the authenticated
+team. Selecting a number preserves the awarded job and holder fences.
+
+`RunReview.AppendAnnotation` returns only an error after the controller's empty
+HTTP 204 acknowledgement. It has no `Applied` result. The JSON output of
+`runs annotations add` contains `run_id`, `job_id` and optional `step_id`.
+The former `applied` field is removed because annotation writes do not return
+transition or replay facts.
 
 ## Unit recovery requires the elected reaper lease
 

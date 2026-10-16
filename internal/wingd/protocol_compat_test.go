@@ -85,7 +85,7 @@ func TestOlderProtocolClientIsGrantedAdmission(t *testing.T) {
 	if !ok {
 		t.Fatalf("admission response = %T, want grant", msg)
 	}
-	if grant.RunID != req.RunID {
+	if grant.RunID != string(req.RunID) {
 		t.Errorf("granted run %q, want %q", grant.RunID, req.RunID)
 	}
 	if grant.LeaseToken == "" {

@@ -2,6 +2,8 @@ package localcontroller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -26,6 +28,11 @@ import (
 type nativeState struct {
 	nodehost.NativeHostStore
 	snapshot store.RunSnapshot
+	node     store.NodeRow
+}
+
+func (s *nativeState) ReadNode(ctx context.Context, _ store.NodeRef) (store.NodeRow, error) {
+	return s.node, context.Cause(ctx)
 }
 
 func (s *nativeState) ReadSnapshot(ctx context.Context, _ string) (store.RunSnapshot, error) {
@@ -97,6 +104,61 @@ func TestNativeServicesUsesSharedInterfacesAndCapturedEnvironment(t *testing.T) 
 	owner, claimed, evaluator, err := nodehost.NewNativeHost(services.Config)
 	if err != nil || owner == nil || claimed == nil || evaluator == nil {
 		t.Fatalf("shared native hosts cannot use the supplied interfaces: %v", err)
+	}
+}
+
+func TestNativeServicesValidatesPlansForEveryLaunchPlacement(t *testing.T) {
+	for _, test := range []struct {
+		placement nodeproto.Placement
+		origin    runspec.Origin
+		dispatch  runspec.Dispatch
+		here      bool
+		local     bool
+	}{
+		{nodeproto.PlacementLocal, runspec.OriginLocal, runspec.DispatchHost, false, true},
+		{nodeproto.PlacementLocalTriggered, runspec.OriginTrigger, runspec.DispatchHost, false, true},
+		{nodeproto.PlacementRunnerHosted, runspec.OriginTrigger, runspec.DispatchHost, false, false},
+		{nodeproto.PlacementLauncher, runspec.OriginTrigger, runspec.DispatchController, false, false},
+		{nodeproto.PlacementHere, runspec.OriginTrigger, runspec.DispatchHost, true, false},
+		{nodeproto.PlacementGitHubActions, runspec.OriginActions, runspec.DispatchHost, false, false},
+	} {
+		t.Run(string(test.placement), func(t *testing.T) {
+			cfg, state := nativeConfigFixture(t)
+			request := &state.snapshot.Run.Request.Request
+			request.Origin, request.Dispatch = test.origin, test.dispatch
+			if test.local {
+				root := t.TempDir()
+				request.Git.Repository.Key = runspec.RepoKey("local:" + root)
+				request.Source.Location = runspec.SourceLocation{LocalCheckout: root, PipelineDir: ".sparkwing"}
+			}
+			if test.here {
+				request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+			}
+			listener := &processListener{closed: make(chan struct{})}
+			services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := services.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			owner, _, _, err := nodehost.NewNativeHost(services.Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			planning := nodehost.PlanningInput{Disabled: true, Validation: owner.Planning.Validation}
+			planned, err := nodehost.PlanInitial(t.Context(), planning, nodehost.PlanningFunctions{Plan: func(context.Context) (json.RawMessage, error) {
+				return json.RawMessage(`{"jobs":[{"id":"generate","closures":{"generate":["children"]},"steps":[{"id":"run"}]},{"id":"approve","approval":{},"closures":{"skip_if":["condition"]}}],"concurrency":[{"group":"g","scope":"box","capacity":1,"cost":1,"on_limit":"queue"}]}`), nil
+			}})
+			if err != nil || len(planned.Plan.Jobs) != 2 {
+				t.Fatalf("native planning: %+v, %v", planned, err)
+			}
+			if got := owner.Planning.Validation.Placement; got != test.placement || got != store.RequestPlacement(*request) {
+				t.Fatalf("native placement = %q, request placement = %q, want %q", got, store.RequestPlacement(*request), test.placement)
+			}
+		})
 	}
 }
 
@@ -297,4 +359,45 @@ func FuzzNativeBindingsRejectForeignScopeBeforeTransport(f *testing.F) {
 			t.Fatal("foreign state reached process service construction")
 		}
 	})
+}
+
+func TestNativeOwnerEvaluationHasProductionBinder(t *testing.T) {
+	cfg, state := nativeConfigFixture(t)
+	claims, authority, _, _ := localClaimsFixture(t)
+	principal, _ := claims.current(t.Context())
+	principal.Class = capability.CredentialBearer
+	principal.Capability.Audience = capability.Controller
+	principal.Capability.Unit, principal.Capability.UnitID = capability.UnitTrigger, "owner-unit"
+	principal.Capability.Purpose, principal.Capability.Issuance = capability.PurposeTrigger, capability.Award
+	principal.Capability.Grants = []capability.Grant{capability.DataRead, capability.NodeReport}
+	principal.Capability.Digest = sha256.Sum256([]byte("owner-token"))
+	authority.snapshot.Authorities[0].Principal = principal
+	authority.snapshot.Binding.Current = principal.Capability.Binding
+	cfg.Principal, cfg.Parent, cfg.Bindings = principal, authority, authority
+	cfg.Refresh = func(context.Context) (capability.Principal, error) { return principal, nil }
+	cfg.Storage = func(context.Context, capability.Principal) (nodehost.StorageBinding, error) {
+		data := &nativeStorageFixture{}
+		return nodehost.StorageBinding{Bytes: data, Records: data, Authority: blob.Authority{CapabilityRef: principal.Capability.Prefix}}, nil
+	}
+	state.node = store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Spec: []byte(`{"id":"job"}`), SpecHash: "source-hash"}
+	listener := &processListener{closed: make(chan struct{})}
+	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := services.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	grant, err := services.Config.Evaluation.Bind(t.Context(), nodehost.EvaluationInput{Accepted: nodehost.AcceptedRun{RunID: "run"}, NodeID: "job", SpecHash: "source-hash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.Binding.JobID != "job" || grant.Binding.Routes.Bearer == "" || grant.Revoke == nil {
+		t.Fatalf("incomplete owner process: %+v", grant)
+	}
+	if err := grant.Revoke(); err != nil {
+		t.Fatal(err)
+	}
 }

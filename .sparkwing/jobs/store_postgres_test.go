@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestStorePostgresLayoutKeepsDataOutOfTheToolCache(t *testing.T) {
@@ -106,11 +104,8 @@ func TestStorePostgresStepPassesWithoutPostgresWhenTheStoreIsUntouched(t *testin
 }
 
 func TestStorePostgresStepWaitsOnTheTestStep(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&Gate{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
-	if w.StepByID("store-postgres") == nil {
+	w := inspectWork(t, &Gate{})
+	if findStep(w, "store-postgres") == nil {
 		t.Fatal("pre-commit does not run store-postgres")
 	}
 	if !stepWaitsOn(w, "store-postgres", "test") {

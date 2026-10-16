@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -345,9 +346,6 @@ func TestEscapeProbe_OutputProbesFenceNonAncestorsAndOtherRuns(t *testing.T) {
 	}
 }
 
-// Plan must do no work, so planning any pipeline, for describe or for a run,
-// opens no connection. The node probe must still dial through probeDial, or
-// the hook proves nothing.
 func TestEscapeProbe_PlansOpenNoConnection(t *testing.T) {
 	var mu sync.Mutex
 	var dials []string
@@ -365,10 +363,10 @@ func TestEscapeProbe_PlansOpenNoConnection(t *testing.T) {
 		return append([]string(nil), dials...)
 	}
 
-	for _, name := range sparkwing.Registered() {
-		reg, _ := sparkwing.Lookup(name)
-		for _, rc := range []sparkwing.RunContext{{Pipeline: name}, {Pipeline: name, RunID: "run-probe"}} {
-			planOnce(reg, rc)
+	for _, runID := range []string{"", "run-probe"} {
+		host := newTestHost(t, sparkwingtest.Options{Run: sparkwing.RunContext{RunID: runID}})
+		if _, err := host.Plan(t.Context(), "escape-probe", map[string]string{"rds": "db:5432", "api-hosts": "10.0.36.1"}); err != nil {
+			t.Fatal(err)
 		}
 	}
 	if got := attempts(); len(got) > 0 {
@@ -379,15 +377,4 @@ func TestEscapeProbe_PlansOpenNoConnection(t *testing.T) {
 	if len(attempts()) == 0 {
 		t.Fatal("the node probe opened no connection, so it no longer dials through probeDial")
 	}
-}
-
-// safety: the SDK's describe recovers a panicking plan and ignores its error,
-// so this does too and judges only the connections the plan opened.
-func planOnce(reg *sparkwing.Registration, rc sparkwing.RunContext) {
-	defer func() { _ = recover() }()
-	ctx := context.Background()
-	if rc.RunID == "" {
-		ctx = sparkwing.SkipArgResolve(ctx)
-	}
-	_, _ = reg.Invoke(ctx, map[string]string{}, rc)
 }

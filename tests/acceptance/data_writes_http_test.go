@@ -271,12 +271,14 @@ func TestDataWriteHTTPUploadRequiresExplicitNonnegativeSize(t *testing.T) {
 
 func TestDataRecordHTTPQueryValidationAndMiss(t *testing.T) {
 	for _, query := range []string{"", "kind=log&name=out", "kind=output&name=out&name=other", "kind=output&name=out&team=foreign", "kind=output&name=out&authority=foreign", "kind=output&name=out&deadline=bad", "kind=output&name=out&verified_default_only=bad", "kind=output&name=%xx"} {
-		f := newDataHTTPFixture()
-		w := authorityHTTP(f.handler(), f.boundary, "GET", "/api/v1/data/records?"+query, "")
-		assertEngineError(t, w, 400, apierr.BadRequest)
-		if len(*f.events) != 0 {
-			t.Fatalf("invalid query reached storage: %v", *f.events)
-		}
+		t.Run(query, func(t *testing.T) {
+			f := newDataHTTPFixture()
+			w := authorityHTTP(f.handler(), f.boundary, "GET", "/api/v1/data/records?"+query, "")
+			assertEngineError(t, w, 400, apierr.BadRequest)
+			if len(*f.events) != 0 {
+				t.Fatalf("invalid query reached storage: %v", *f.events)
+			}
+		})
 	}
 	f := newDataHTTPFixture()
 	w := authorityHTTP(f.handler(), f.boundary, "GET", "/api/v1/data/records?kind=output&name=absent&ref=manual%3Amain", "")
@@ -288,6 +290,22 @@ func TestDataRecordHTTPQueryValidationAndMiss(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Found || response.Members == nil || response.Record != nil {
 		t.Fatalf("miss HTTP %d %s", w.Code, w.Body.String())
 	}
+}
+
+func FuzzDataRecordHTTPMalformedQueryNeverReachesStorage(f *testing.F) {
+	f.Add("private-selector", uint8(0))
+	f.Add("private-selector", uint8(1))
+	f.Add("private-selector", uint8(2))
+	f.Fuzz(func(t *testing.T, value string, invalid uint8) {
+		fixture := newDataHTTPFixture()
+		badEscape := []string{"%xx", "%", "%a"}[invalid%3]
+		query := "kind=output&name=out&key=" + url.QueryEscape(value) + badEscape
+		w := authorityHTTP(fixture.handler(), fixture.boundary, "GET", "/api/v1/data/records?"+query, "")
+		assertEngineError(t, w, http.StatusBadRequest, apierr.BadRequest)
+		if len(*fixture.events) != 0 {
+			t.Fatalf("malformed selector reached storage: %v", *fixture.events)
+		}
+	})
 }
 
 func TestDataRecordHTTPRemoteCacheCannotBroadenReadOrWrite(t *testing.T) {

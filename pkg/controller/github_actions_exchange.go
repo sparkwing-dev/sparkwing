@@ -49,7 +49,7 @@ func (s *Server) verifyActionsExchange(r *http.Request) error {
 		return &apierr.Error{Code: apierr.Unauthenticated, Message: "GitHub Actions identity refused"}
 	}
 	if err != nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub Actions signing keys are unavailable"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub Actions signing keys are unavailable"}, err)
 	}
 	team := store.NormalizeTeam(store.Team(request.Team))
 	branch, isBranch := strings.CutPrefix(claims.Ref, "refs/heads/")

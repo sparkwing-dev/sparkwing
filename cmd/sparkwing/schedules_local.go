@@ -110,14 +110,6 @@ func validateLocalSchedules(services localScheduleServices) error {
 	return nil
 }
 
-func startScheduleController(ctx context.Context, services localScheduleServices) error {
-	status, err := services.lifecycle.EnsureStarted(ctx, services.options)
-	if err == nil && !status.Running {
-		err = scheduleUnavailable("a ready local controller")
-	}
-	return err
-}
-
 func prepareScheduleTimer(ctx context.Context, services localScheduleServices, goos string, install bool) (func(context.Context) error, error) {
 	if goos == "windows" {
 		return func(context.Context) error { return nil }, nil
@@ -200,7 +192,9 @@ func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts 
 			return err
 		}
 	}
-	if err := startScheduleController(ctx, services); err != nil {
+	if _, err := ensureLocalController(ctx, services.options.Home, func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: services.lifecycle, options: services.options}, nil
+	}); err != nil {
 		return err
 	}
 	for i, request := range requests {
@@ -248,7 +242,9 @@ func changeLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts s
 			root = roots[0]
 		}
 	}
-	if err := startScheduleController(ctx, services); err != nil {
+	if _, err := ensureLocalController(ctx, services.options.Home, func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: services.lifecycle, options: services.options}, nil
+	}); err != nil {
 		return err
 	}
 	connection, err := command.connect(ctx, "")
@@ -333,7 +329,9 @@ func runScheduleTickCommand(ctx context.Context, args []string, out io.Writer, r
 	if services.tick == nil {
 		return scheduleUnavailable("the controller-owned tick operation")
 	}
-	if err := startScheduleController(ctx, services); err != nil {
+	if _, err := ensureLocalController(ctx, services.options.Home, func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: services.lifecycle, options: services.options}, nil
+	}); err != nil {
 		return err
 	}
 	result, err := services.tick(ctx, inv.Bool("dry-run"))

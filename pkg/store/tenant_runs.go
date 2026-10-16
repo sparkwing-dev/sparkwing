@@ -60,11 +60,11 @@ func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, er
 	if runID == "" {
 		return nil, nil
 	}
-	// safety: a corrupted retry_of cycle would otherwise spin the upward walk forever.
-	const maxDepth = 256
+	visited := make(map[string]bool)
 	rootID := ""
 	next := runID
-	for range maxDepth {
+	for !visited[next] {
+		visited[next] = true
 		var parent string
 		err := t.s.queryRow(ctx,
 			`SELECT retry_of FROM runs WHERE team = ? AND id = ?`, string(t.team), next).Scan(&parent)
@@ -114,6 +114,9 @@ func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, er
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].Number < out[j].Number
+		}
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
 	return out, nil

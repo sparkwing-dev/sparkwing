@@ -64,7 +64,7 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 			return 0, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "GitHub installation does not cover the source repository")
 		}
 		if err != nil {
-			return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity could not be verified"}
+			return 0, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity could not be verified"}, err)
 		}
 		return repo.ID, nil
 	}

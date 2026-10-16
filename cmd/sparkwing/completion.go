@@ -121,7 +121,7 @@ func runInternalCompletePipelines(w io.Writer, _ []string) error {
 			rows = append(rows, completionRow{
 				name: p.Name,
 				kind: "pipeline",
-				desc: shortPipelineHint(shortByName[p.Entrypoint], helpByName[p.Entrypoint], p),
+				desc: shortPipelineHint(shortByName[p.Name], helpByName[p.Name], p),
 			})
 		}
 	}

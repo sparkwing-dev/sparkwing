@@ -41,7 +41,7 @@ Each entry has (these are the only valid keys; an unknown field is a
 hard parse error):
 
 - **name** - the invoked pipeline name (`sparkwing run build-deploy`), matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`
-- **entrypoint** - the registered SDK entrypoint implementing it (required). Several pipeline names can select the same entrypoint.
+- **entrypoint** - the Go type implementing it (required). Register each pipeline by its YAML name, even when several names use the same type.
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
 - **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (one entry, or a list of them, each with `name`, `cron`, a required `where`, `tz`, `overlap`, `catch_up`, `args`), `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
 - **guards** - gate dispatch on placement, args and git branch (`when` / `unless` token lists)
@@ -56,7 +56,9 @@ For the complete schema -- every top-level key, pipeline field, and
 trigger field with types -- see the generated [config-reference.md](config-reference.md).
 
 For `name: deploy-prod` with `entrypoint: Deploy`, use `deploy-prod` in commands.
-Help, flag completion, secrets and risk declarations come from `Deploy`.
+Register the SDK implementation as `sw.Register("deploy-prod", factory)`, with
+a factory returning the `Deploy` Go type. Scaffolds register the YAML name.
+Help, flag completion, secrets and risk declarations come from that registration.
 Help and argument errors keep the invoked name.
 
 ## Triggers

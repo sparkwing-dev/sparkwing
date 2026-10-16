@@ -108,6 +108,9 @@ func RequestPlacement(request runspec.Request) nodeproto.Placement {
 	case runspec.OriginActions:
 		return nodeproto.PlacementGitHubActions
 	default:
+		if request.ExecutionLocation == "local" || request.Source.Location.LocalCheckout != "" {
+			return nodeproto.PlacementLocalTriggered
+		}
 		return nodeproto.PlacementRunnerHosted
 	}
 }

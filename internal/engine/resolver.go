@@ -54,6 +54,9 @@ func NewResolver(config Config) (*Resolver, error) {
 
 // Resolve obtains the exact pin's permitted executable, including on a warm cache.
 func (r *Resolver) Resolve(ctx context.Context, pin Pin, target releaseasset.Target) (Resolved, error) {
+	if pin.SDK == GoSDK && pin.Replacement != "" {
+		return installedEngine(ctx, pin, target)
+	}
 	version, err := VersionForPin(pin)
 	if err != nil {
 		return Resolved{}, err
@@ -63,6 +66,13 @@ func (r *Resolver) Resolve(ctx context.Context, pin Pin, target releaseasset.Tar
 
 // Ensure binds another machine's executable to the accepted portable identity.
 func (r *Resolver) Ensure(ctx context.Context, identity Identity, target releaseasset.Target) (Resolved, error) {
+	if identity.Pin.SDK == GoSDK && identity.Pin.Replacement != "" {
+		resolved, err := installedEngine(ctx, identity.Pin, target)
+		if err == nil && resolved.Identity != identity {
+			err = integrity(fmt.Errorf("installed engine differs from the accepted replacement-pin engine"))
+		}
+		return resolved, err
+	}
 	version, err := VersionForPin(identity.Pin)
 	if err != nil {
 		return Resolved{}, err

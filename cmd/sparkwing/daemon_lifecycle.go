@@ -100,7 +100,10 @@ func executeDaemonLifecycle(ctx context.Context, inv clisurface.Invocation, serv
 	if action == "restart" {
 		options := services.options
 		options.Stay = status.Stay
-		stopped, err = services.lifecycle.EnsureStarted(ctx, options)
+		services.options = options
+		stopped, err = ensureLocalController(ctx, options.Home, func(context.Context) (dashboardServices, error) {
+			return services, nil
+		})
 		if err != nil {
 			return result, err
 		}

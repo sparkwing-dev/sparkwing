@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 // ProtocolSessionConfig launches a protocol-v2 process. Native Start methods
@@ -56,7 +57,7 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 		return nil, cfg.failedStartup(err)
 	}
 	cfg.Debug = debug
-	cfg.Command, cfg.Directory, cfg.Activity = input.Entry.Command, input.Entry.Directory, activity
+	cfg.Command, cfg.Directory, cfg.Activity = input.Entry.Command, sdkWorkingDirectory(input.Entry), activity
 	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
 	if err != nil {
 		return nil, cfg.failedStartup(err)
@@ -79,7 +80,7 @@ func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input Eval
 		return nil, cfg.failedStartup(err)
 	}
 	cfg.Debug = debug
-	cfg.Command, cfg.Directory = input.Entry.Command, input.Entry.Directory
+	cfg.Command, cfg.Directory = input.Entry.Command, sdkWorkingDirectory(input.Entry)
 	env, complete, err := cfg.Environments.jobEnvironments(ctx, procenv.Eval, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, cfg.RunCleanups != nil)
 	if err != nil {
 		return nil, cfg.failedStartup(err)
@@ -96,7 +97,7 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 		return nil, cfg.failedStartup(errors.New("SDK planning requires a source entry and log sink"))
 	}
 	cfg.Debug = input.Debug
-	cfg.Command, cfg.Directory, cfg.Log = input.Entry.Command, input.Entry.Directory, log
+	cfg.Command, cfg.Directory, cfg.Log = input.Entry.Command, sdkWorkingDirectory(input.Entry), log
 	if err := context.Cause(ctx); err != nil {
 		return nil, cfg.failedStartup(err)
 	}
@@ -107,6 +108,13 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 	cfg.Environment = env
 	cfg.cleanupEnv = slices.Clone(env)
 	return cfg.start(ctx)
+}
+
+func sdkWorkingDirectory(entry *source.Entry) string {
+	if root := entry.CheckoutDirectory(); root != "" {
+		return root
+	}
+	return entry.Directory
 }
 
 func (cfg ProtocolSessionConfig) start(ctx context.Context) (ExecutorProcess, error) {

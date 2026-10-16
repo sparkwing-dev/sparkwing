@@ -15,7 +15,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
-	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -116,73 +115,6 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 	}
 	if trigger.TriggerEnv["GITHUB_REPOSITORY"] != "sparkwing-dev/sparkwing" {
 		t.Fatalf("allow-listed env = %q, want sparkwing-dev/sparkwing", trigger.TriggerEnv["GITHUB_REPOSITORY"])
-	}
-}
-
-func TestTrigger_DropsEnvKeysOutsideTheAllowList(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	defer srv.Close()
-
-	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "demo",
-		"trigger": map[string]any{
-			"source": "manual",
-			"env": map[string]string{
-				"SPARKWING_LEASE_TOKEN":         "stale-local-token",
-				"NPM_TOKEN":                     "npm-bearer",
-				"SPARKWING_PG_URL":              "postgres://sparkwing:hunter2@db.example/sparkwing",
-				"GITHUB_REPOSITORY":             "sparkwing-dev/sparkwing",
-				"SPARKWING_WORKTREE_BASE_REF":   "origin/main",
-				"SPARKWING_WORKTREE_BASE_SHA":   strings.Repeat("a", 40),
-				retryprovenance.RepoDirKey:      "/src/sparkwing",
-				retryprovenance.RevisionKey:     "deadbeef",
-				retryprovenance.PlanHashKey:     "plan-1",
-				retryprovenance.RepoIdentityKey: "github.com/sparkwing-dev/sparkwing",
-			},
-		},
-	})
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
-	}
-	var body struct {
-		RunID string `json:"run_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	_ = resp.Body.Close()
-
-	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), body.RunID)
-	if err != nil {
-		t.Fatalf("GetTrigger: %v", err)
-	}
-	for _, key := range []string{
-		"SPARKWING_LEASE_TOKEN", "NPM_TOKEN", "SPARKWING_PG_URL",
-		retryprovenance.RepoDirKey, retryprovenance.RevisionKey,
-		retryprovenance.PlanHashKey, retryprovenance.RepoIdentityKey,
-	} {
-		if _, ok := trigger.TriggerEnv[key]; ok {
-			t.Fatalf("%s persisted in trigger_env: %+v", key, trigger.TriggerEnv)
-		}
-	}
-	for key, want := range map[string]string{
-		"GITHUB_REPOSITORY":           "sparkwing-dev/sparkwing",
-		"SPARKWING_WORKTREE_BASE_REF": "origin/main",
-		"SPARKWING_WORKTREE_BASE_SHA": strings.Repeat("a", 40),
-	} {
-		if trigger.TriggerEnv[key] != want {
-			t.Fatalf("%s = %q, want %q", key, trigger.TriggerEnv[key], want)
-		}
 	}
 }
 

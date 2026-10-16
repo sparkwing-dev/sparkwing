@@ -48,7 +48,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	if err != nil {
 		return err
 	}
-	if selected != version {
+	if pin.Replacement == "" && selected != version {
 		return &apierr.Error{Code: apierr.IntegrityFailure, Message: "SDK pin does not match the installing engine"}
 	}
 	masker := secrets.NewMasker()
@@ -100,9 +100,19 @@ func installGoSDK(ctx context.Context, dir, executableDirectory string, pin engi
 	}
 	var module struct {
 		Version string
-		Replace any
+		Replace *struct{ Path, Version string }
 	}
-	if err := json.Unmarshal(body, &module); err != nil || module.Version != pin.Version || module.Replace != nil {
+	if err := json.Unmarshal(body, &module); err != nil {
+		return nil, "", err
+	}
+	replacement := ""
+	if module.Replace != nil {
+		replacement = module.Replace.Path
+		if module.Replace.Version != "" {
+			replacement += "@" + module.Replace.Version
+		}
+	}
+	if module.Version != pin.Version || replacement != pin.Replacement {
 		return nil, "", &apierr.Error{Code: apierr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
 	}
 	source, err := os.Open(lease.Path())

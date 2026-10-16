@@ -84,11 +84,8 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 	}
 	if page.URL == "" {
 		if err := s.checkout.openReservedPage(r.Context(), &page); err != nil {
-			if recordErr := writer.RecordAuthorizedBillingPageFailure(r.Context(), a, page); recordErr != nil {
-				s.logger.Error("record billing page failure", "team", page.Team, "err", recordErr)
-			}
-			s.logger.Error("open billing page", "team", page.Team, "err", err)
-			return &apierr.Error{Code: apierr.Unavailable, Message: "the payment page could not be opened; try again"}
+			recordErr := writer.RecordAuthorizedBillingPageFailure(r.Context(), a, page)
+			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "the payment page could not be opened; try again"}, err, recordErr)
 		}
 		if err := writer.CompleteAuthorizedBillingPage(r.Context(), a, page); err != nil {
 			return billingMutationError(err)

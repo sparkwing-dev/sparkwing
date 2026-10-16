@@ -16,12 +16,11 @@ func collectRunIDs(flagIDs []string, stdin io.Reader) ([]string, error) {
 		if raw == "" {
 			return
 		}
-		id := normalizeRunID(raw)
-		if seen[id] {
+		if seen[raw] {
 			return
 		}
-		seen[id] = true
-		out = append(out, id)
+		seen[raw] = true
+		out = append(out, raw)
 	}
 	var sawDash bool
 	for _, id := range flagIDs {

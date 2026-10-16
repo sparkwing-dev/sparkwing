@@ -103,7 +103,7 @@ func executionWireFixture() controllerwire.ExecutionJob {
 	return controllerwire.ExecutionJob{
 		JobDetail: controllerwire.JobDetail{ID: "job", Status: "pending", Generation: 4, Attempt: 0, StateSeq: 11, Expansion: "expected", StartedAt: &now},
 		Spec:      spec, SpecHash: "job-hash", Execution: runspec.JobExecutionSettings{Retry: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 3}}},
-		ApplicationRetries: 2, Disruptions: 1, ReadyAt: &now, LeaseExpiresAt: &now, ClaimedBy: "holder", CapabilityPrefix: "claim-prefix", ExpansionDigest: "accepted-body",
+		ApplicationRetries: 2, Disruptions: 1, ReadyAt: &now, LeaseExpiresAt: &now, ClaimedBy: "holder", CapabilityPrefix: "claim-prefix", OwnerCapabilityPrefix: "owner-prefix", ExpansionDigest: "accepted-body",
 	}
 }
 
@@ -122,7 +122,7 @@ func TestRemoteReconciliationRetainsPrivateAwardAndExecutionState(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got.Bearer) != "private-award" || got.Node.ApplicationRetries != 2 || got.Node.Disruptions != 1 || got.Node.StateSeq != 11 || got.Node.ExpansionDigest != "accepted-body" || got.Node.Attempt != 0 || !reflect.DeepEqual(got.Node.Execution, job.Execution) || !bytes.Equal(got.Node.Spec, job.Spec) {
+	if string(got.Bearer) != "private-award" || got.Node.OwnerCapabilityPrefix != "owner-prefix" || got.Node.ApplicationRetries != 2 || got.Node.Disruptions != 1 || got.Node.StateSeq != 11 || got.Node.ExpansionDigest != "accepted-body" || got.Node.Attempt != 0 || !reflect.DeepEqual(got.Node.Execution, job.Execution) || !bytes.Equal(got.Node.Spec, job.Spec) {
 		t.Fatalf("lost execution state: %+v", got)
 	}
 	if f.run != "run" || f.job != "job" || f.request.Source.Attempt != source.Source || f.request.Policy != "memo" {
@@ -155,6 +155,30 @@ func TestRemoteReconciliationRetainsPrivateAwardAndExecutionState(t *testing.T) 
 			}
 		})
 	}
+}
+
+func FuzzRemoteReconciliationKeepsOwnerAndNodeAwardsSeparate(f *testing.F) {
+	f.Add("owner", "node", "holder")
+	f.Add("", "\x00/\"", "other")
+	f.Fuzz(func(t *testing.T, owner, node, holder string) {
+		job := executionWireFixture()
+		job.OwnerCapabilityPrefix, job.CapabilityPrefix, job.ClaimedBy = "owner:"+owner, "node:"+node, "holder:"+holder
+		response := controllerwire.ReconcileResponse{Kind: string(store.Execute), Job: job, Claim: &controllerwire.ClaimedUnit{
+			Unit: capability.UnitNode, RunID: "run", JobID: "job", Capability: "private-award", LeaseExpiresAt: *job.LeaseExpiresAt,
+			Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: job.ClaimedBy, Generation: job.Generation},
+		}}
+		body, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			t.Fatal(err)
+		}
+		got, err := (&RemoteOwnerStore{Controller: &ownerOperationWire{reconcile: response}}).ReconcileNode(t.Context(), store.ReconcileRequest{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Policy: store.SourceNone})
+		if err != nil || got.Node.OwnerCapabilityPrefix != response.Job.OwnerCapabilityPrefix || got.Node.CapabilityPrefix != response.Job.CapabilityPrefix || got.Claim == nil || got.Claim.CapabilityPrefix == got.Node.OwnerCapabilityPrefix || got.Claim.Holder != response.Job.ClaimedBy {
+			t.Fatalf("wire erased or substituted independently awarded authority: %+v: %v", got, err)
+		}
+	})
 }
 
 func TestRemoteReconciliationPreservesNonexecutingResults(t *testing.T) {

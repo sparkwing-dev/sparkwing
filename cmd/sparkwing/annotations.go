@@ -93,16 +93,14 @@ func writeAnnotationList(ctx context.Context, review controllerwire.RunReview, i
 
 func writeAnnotation(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation, out io.Writer, format string) error {
 	input := controllerwire.AnnotationWrite{Annotation: controllerwire.Annotation{Level: "info", Message: inv.Value("message")}, StepID: inv.Value("step")}
-	applied, err := review.AppendAnnotation(ctx, inv.Value("run"), inv.Value("job"), input)
-	if err != nil {
+	if err := review.AppendAnnotation(ctx, inv.Value("run"), inv.Value("job"), input); err != nil {
 		return err
 	}
 	record := struct {
-		RunID   string                 `json:"run_id"`
-		JobID   string                 `json:"job_id"`
-		StepID  string                 `json:"step_id,omitempty"`
-		Applied controllerwire.Applied `json:"applied"`
-	}{inv.Value("run"), inv.Value("job"), input.StepID, applied}
+		RunID  string `json:"run_id"`
+		JobID  string `json:"job_id"`
+		StepID string `json:"step_id,omitempty"`
+	}{inv.Value("run"), inv.Value("job"), input.StepID}
 	if format == "json" {
 		return json.NewEncoder(out).Encode(record)
 	}
@@ -111,9 +109,9 @@ func writeAnnotation(ctx context.Context, review controllerwire.RunReview, inv c
 		subject += "/" + record.StepID
 	}
 	if format == "plain" {
-		_, err = fmt.Fprintln(out, subject)
+		_, err := fmt.Fprintln(out, subject)
 		return err
 	}
-	_, err = fmt.Fprintf(out, "annotated %s\n", subject)
+	_, err := fmt.Fprintf(out, "annotated %s\n", subject)
 	return err
 }

@@ -3,38 +3,50 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-func startLocalController(ctx context.Context, home string, resolve func(context.Context) (dashboardServices, error)) error {
+func ensureLocalController(ctx context.Context, home string, resolve func(context.Context) (dashboardServices, error)) (status wingd.LocalStatus, err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("cannot start local controller: %w", err)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
-		return err
+		return wingd.LocalStatus{}, err
 	}
 	services, err := resolve(ctx)
 	if err != nil {
-		return err
+		return wingd.LocalStatus{}, err
 	}
 	if services.lifecycle == nil {
-		return dashboardUnavailable("the local controller lifecycle")
+		return wingd.LocalStatus{}, dashboardUnavailable("the local controller lifecycle")
 	}
 	home, err = wingd.HomeDir(home)
 	if err != nil {
-		return err
+		return wingd.LocalStatus{}, err
 	}
 	bound, err := wingd.HomeDir(services.options.Home)
 	if err != nil {
-		return err
+		return wingd.LocalStatus{}, err
 	}
 	if filepath.Clean(home) != filepath.Clean(bound) {
-		return errors.New("local controller is bound to another home")
+		return wingd.LocalStatus{}, errors.New("local controller is bound to another home")
 	}
 	options := services.options
 	options.Home = home
-	status, err := services.lifecycle.EnsureStarted(ctx, options)
-	if err == nil && !status.Running {
-		return errors.New("local controller stopped during startup")
+	status, err = services.lifecycle.EnsureStarted(ctx, options)
+	if err != nil {
+		return wingd.LocalStatus{}, err
 	}
-	return err
+	if err := ctx.Err(); err != nil {
+		return wingd.LocalStatus{}, err
+	}
+	if !status.Running || status.PID <= 0 || status.Version == "" {
+		return wingd.LocalStatus{}, errors.New("local controller has not established API readiness")
+	}
+	return status, nil
 }

@@ -261,3 +261,56 @@ func TestLocalNodeClaimsConcurrentAdoptionAndBinding(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalOwnerDelegatesEvaluationBeforeAnyNodeAward(t *testing.T) {
+	claims, state, award, _ := localClaimsFixture(t)
+	owner, _ := claims.current(t.Context())
+	owner.Class = capability.CredentialBearer
+	owner.Capability.Audience = capability.Controller
+	owner.Capability.Unit, owner.Capability.UnitID = capability.UnitTrigger, "owner-unit"
+	owner.Capability.Purpose, owner.Capability.Issuance = capability.PurposeTrigger, capability.Award
+	owner.Capability.Digest = sha256.Sum256([]byte("owner-token"))
+	owner.Capability.Grants = []capability.Grant{capability.DataRead, capability.NodeReport}
+	owner.Capability.Binding.Attempt = 0
+	state.snapshot.Authorities[0].Principal = owner
+	state.snapshot.Binding.Current = owner.Capability.Binding
+	claims.current = func(context.Context) (capability.Principal, error) { return owner, nil }
+	registry, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: state, Bindings: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := registry.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	claims.processes = &nodehost.NativeProcesses{Authorities: registry, Masks: nodehost.NewMaskRegistry(claims.masker), URL: "http://host"}
+	source := award.Node
+	source.Generation, source.Attempt = 0, 0
+	source.CapabilityPrefix, source.ClaimedBy = "", ""
+	source.SpecHash = "accepted-job-hash"
+	source.Spec = []byte(`{"id":"job"}`)
+	claims.readNode = func(context.Context, store.NodeRef) (store.NodeRow, error) { return source, nil }
+	input := nodehost.EvaluationInput{Accepted: nodehost.AcceptedRun{RunID: "run"}, NodeID: "job", SpecHash: source.SpecHash}
+	grant, err := claims.evaluate(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.Binding.RunID != "run" || grant.Binding.JobID != "job" {
+		t.Fatalf("SDK source: %+v", grant.Binding)
+	}
+	if len(claims.nodes) != 0 || source.Attempt != 0 {
+		t.Fatal("evaluation acquired a work award")
+	}
+	snapshot, err := registry.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.NodeHost, Digest: sha256.Sum256([]byte(grant.Binding.Routes.Bearer))}, capability.RequestEvidence{})
+	if err != nil || len(snapshot.Authorities) != 2 || snapshot.Authorities[0].Principal.Capability.Parent.ID != "owner" || snapshot.Authorities[0].Principal.Capability.Binding.Kind != capability.BindingTrigger {
+		t.Fatalf("owner ancestry: %+v %v", snapshot, err)
+	}
+	if err := grant.Revoke(); err != nil {
+		t.Fatal(err)
+	}
+	input.Generation++
+	if _, err := claims.evaluate(t.Context(), input); err == nil {
+		t.Fatal("stale source delegated")
+	}
+}

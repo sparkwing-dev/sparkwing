@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -35,21 +36,34 @@ func VerifyRelease(version string, target releaseasset.Target, bundle ReleaseBun
 	if settings["GOOS"] != target.GOOS || settings["GOARCH"] != target.GOARCH || info.Path != GoModule+"/cmd/"+string(target.Binary) {
 		return VerifiedRelease{}, integrity(fmt.Errorf("executable binary or platform does not match release target"))
 	}
-	embedded := info.Main.Version
-	for _, field := range strings.Fields(settings["-ldflags"]) {
-		if strings.HasPrefix(field, "main.Version=") {
-			candidate := strings.TrimPrefix(field, "main.Version=")
-			if embedded != "" && embedded != "(devel)" && embedded != candidate {
-				return VerifiedRelease{}, integrity(fmt.Errorf("conflicting embedded release versions"))
-			}
-			embedded = candidate
-		}
+	embedded, err := executableVersion(info)
+	if err != nil {
+		return VerifiedRelease{}, integrity(err)
 	}
 	if embedded != version {
 		return VerifiedRelease{}, integrity(fmt.Errorf("embedded release version %q does not match %s", embedded, version))
 	}
 	copyBundle := ReleaseBundle{Manifest: bytes.Clone(bundle.Manifest), ManifestSignature: bytes.Clone(bundle.ManifestSignature), Asset: bytes.Clone(bundle.Asset), AssetSignature: bytes.Clone(bundle.AssetSignature)}
 	return VerifiedRelease{version: version, target: target, asset: asset, bundle: copyBundle}, nil
+}
+
+func executableVersion(info *debug.BuildInfo) (string, error) {
+	embedded := info.Main.Version
+	for _, setting := range info.Settings {
+		if setting.Key != "-ldflags" {
+			continue
+		}
+		for _, field := range strings.Fields(setting.Value) {
+			if candidate, ok := strings.CutPrefix(field, "main.Version="); ok {
+				candidate = strings.Trim(candidate, "'\"")
+				if embedded != "" && embedded != "(devel)" && embedded != candidate {
+					return "", fmt.Errorf("conflicting embedded release versions")
+				}
+				embedded = candidate
+			}
+		}
+	}
+	return embedded, nil
 }
 
 // Version returns the verified release identity.
@@ -80,6 +94,7 @@ func (r *Resolver) fetchRelease(ctx context.Context, version string, target rele
 	}
 	return VerifyRelease(version, target, bundle)
 }
+
 func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]byte, error) {
 	client := *r.config.HTTPClient
 	priorCheck := client.CheckRedirect
@@ -119,6 +134,7 @@ func (r *Resolver) fetch(ctx context.Context, address string, release bool) ([]b
 	}
 	return body, nil
 }
+
 func allowedURL(u *url.URL, release bool) bool {
 	if u.Scheme != "https" || u.User != nil || u.Port() != "" || u.Fragment != "" {
 		return false

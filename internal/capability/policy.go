@@ -93,20 +93,21 @@ var LivenessPolicies = []LivenessPolicy{
 type CredentialRule string
 
 const (
-	CredentialBootstrap   CredentialRule = "pod_bootstrap"
-	CredentialAny         CredentialRule = "any_live"
-	CredentialMember      CredentialRule = "unbound_member_or_local"
-	CredentialAccount     CredentialRule = "account_session"
-	CredentialClaim       CredentialRule = "awarded_or_delegated_claim"
-	CredentialEval        CredentialRule = "eval_unit"
-	CredentialHere        CredentialRule = "here_award"
-	CredentialLauncher    CredentialRule = "launcher_service"
-	CredentialDeployment  CredentialRule = "deployment_admin"
-	CredentialOperator    CredentialRule = "operator_console_session"
-	CredentialNodeProcess CredentialRule = "nodehost_process"
-	CredentialPublisher   CredentialRule = "local_run_publisher"
-	CredentialRepoReader  CredentialRule = "repo_cache_reader"
-	CredentialDiscovery   CredentialRule = "discovery"
+	CredentialBootstrap    CredentialRule = "pod_bootstrap"
+	CredentialAny          CredentialRule = "any_live"
+	CredentialMember       CredentialRule = "unbound_member_or_local"
+	CredentialAccount      CredentialRule = "account_session"
+	CredentialClaim        CredentialRule = "awarded_or_delegated_claim"
+	CredentialEval         CredentialRule = "eval_unit"
+	CredentialHere         CredentialRule = "here_award"
+	CredentialLauncher     CredentialRule = "launcher_service"
+	CredentialDeployment   CredentialRule = "deployment_admin"
+	CredentialOperator     CredentialRule = "operator_console_session"
+	CredentialNodeProcess  CredentialRule = "nodehost_process"
+	CredentialOwnerProcess CredentialRule = "owner_process"
+	CredentialPublisher    CredentialRule = "local_run_publisher"
+	CredentialRepoReader   CredentialRule = "repo_cache_reader"
+	CredentialDiscovery    CredentialRule = "discovery"
 )
 
 // AccessRule is one complete alternative. Every grant in it is required.
@@ -416,7 +417,15 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 	case CredentialOperator:
 		return p.Class == CredentialConsole && c.Subject.Kind == SubjectOperator && c.Subject.ID != "" && c.Unit == "" && c.Binding.Kind == BindingNone
 	case CredentialNodeProcess:
-		return p.Class == CredentialBearer && c.Audience == NodeHost && c.Binding.Kind == BindingNode && c.Binding.Holder != "" && c.Binding.Generation > 0 && c.Binding.Attempt > 0
+		return p.Class == CredentialBearer && c.Audience == NodeHost && c.Binding.Kind == BindingNode && c.Binding.Holder != "" && c.Binding.Generation > 0 && c.Binding.Attempt > 0 && c.Binding.Expansion == nil
+	case CredentialOwnerProcess:
+		if !isClaim(p) || c.Audience != NodeHost || c.Delivery == DeliveryBootstrap {
+			return false
+		}
+		if c.Unit == UnitTrigger {
+			return (c.Purpose == PurposeTrigger || c.Purpose == PurposeHere) && c.Binding.Kind == BindingTrigger && c.Binding.NodeID == "" && c.Binding.Generation > 0 && c.Binding.Holder != "" && c.Binding.Attempt == 0 && c.Binding.Expansion == nil
+		}
+		return c.Unit == UnitEval && matchesCredential(p, CredentialEval)
 	case CredentialPublisher, CredentialRepoReader:
 		if c.Subject.Kind != SubjectAccount || c.Unit != "" || c.Purpose != "" || c.Data == nil || (p.Class != CredentialBearer && p.Class != CredentialSession) {
 			return false
@@ -553,7 +562,7 @@ func validateRoutePolicy(route RoutePolicy) error {
 	for _, access := range route.Access {
 		if !slices.Contains([]CredentialRule{
 			CredentialBootstrap, CredentialAny, CredentialMember, CredentialAccount, CredentialClaim, CredentialEval, CredentialHere, CredentialLauncher,
-			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery,
+			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialOwnerProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery,
 		}, access.Credential) ||
 			!slices.Contains([]BindingRule{
 				BindNone, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
