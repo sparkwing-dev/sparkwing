@@ -3170,3 +3170,26 @@ After exchange the launcher cannot renew the SDK-owned lease. Its preparation
 request receives no acknowledgement for that fence. Normal reconciliation still
 reports the exchanged live Job, while blocking publication treats a missing
 acknowledgement as `lock_held` and cancels its preparation context.
+
+## Integrated source submission authority
+
+`POST /api/v1/data/source` and `POST /api/v1/data/source/{upload}/commit` use
+controller audience, team ownership, authenticated capability/session delivery,
+and unbound member/local `runs.write` authority. Neither operation is retried
+transparently. The store rechecks tagged requester ancestry, live team grants
+and repository scope before reserve, commit and intake binding. The caller
+cannot select provenance or create a data execution grant.
+
+The `sealed_source` read edge admits only the `source_bundle` digest in the
+current run's persisted seal and its source-submission record. It remains under
+ordinary live awarded data authority. It grants no cross-run, cross-tenant,
+cache, binary or App trust. HTTPS and HTTP signed transfers follow the same
+configured endpoint contract as other shared data objects.
+
+GitHub identity is verified before admission using the configured App, a
+confirmed team HTTPS source credential, or the public repository API. Bound
+credential decryption remains server-side and registers the token with masking.
+A private package context proof carries the resolved location and repository
+through the intake transaction; policy refuses missing or changed proofs and
+does not open a second SQLite connection inside the transaction. The proof is
+absent from the wire and seal. CLI environment tokens stay at the GitHub API.

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -70,13 +71,13 @@ func addProfile(inv clisurface.Invocation, format string) error {
 
 func checkProfileConnection(ctx context.Context, p *namedProfile) error {
 	if reach := probeController(ctx, p); reach.Status == "fail" {
-		return fmt.Errorf("profiles add: controller probe failed: %s", reach.Detail)
+		return fmt.Errorf("profiles add: controller probe failed: %w", reach.err)
 	}
 	if p.ControllerToken() == "" {
-		return errors.New("profiles add: --token-stdin is required to verify controller access; use --no-probe to save without verification")
+		return &apierr.Error{Code: apierr.BadRequest, Message: "profiles add: --token-stdin is required to verify controller access; use --no-probe to save without verification"}
 	}
 	if auth := probeAuth(ctx, p); auth.Status == "fail" {
-		return fmt.Errorf("profiles add: authentication failed: %s", auth.Detail)
+		return fmt.Errorf("profiles add: authentication failed: %w", auth.err)
 	}
 	return nil
 }
@@ -151,13 +152,13 @@ func normalizeControllerURL(raw string) (string, error) {
 	trimmed := strings.TrimRight(strings.TrimSpace(raw), "/")
 	u, err := neturl.Parse(trimmed)
 	if err != nil {
-		return "", errors.New("profiles: --controller must be an http or https URL")
+		return "", &apierr.Error{Code: apierr.BadRequest, Message: "profiles: --controller must be an http or https URL"}
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", errors.New("profiles: --controller must be an http or https URL")
+		return "", &apierr.Error{Code: apierr.BadRequest, Message: "profiles: --controller must be an http or https URL"}
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", errors.New("profiles: --controller must not contain credentials, query parameters or a fragment")
+		return "", &apierr.Error{Code: apierr.BadRequest, Message: "profiles: --controller must not contain credentials, query parameters or a fragment"}
 	}
 	return trimmed, nil
 }

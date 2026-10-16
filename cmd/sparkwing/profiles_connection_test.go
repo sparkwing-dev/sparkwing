@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
@@ -39,8 +43,8 @@ func TestProfilesAddStoresExistingCredentialAfterProbe(t *testing.T) {
 			t.Fatal("credential did not reach controller")
 		}
 		switch r.URL.Path {
-		case "/api/v1/runs":
-			return 200, `{"runs":[],"next_cursor":"","truncated":false}`
+		case "/api/v1/auth/whoami":
+			return 200, `{"principal":"person","kind":"account","scopes":[]}`
 		default:
 			t.Fatalf("unexpected request: %s", r.URL)
 			return 500, ""
@@ -224,5 +228,37 @@ func TestProfilesAddRejectsInvalidController(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("invalid controller wrote config: %v", err)
 		}
+	}
+}
+
+func TestProfileProbePreservesCanonicalError(t *testing.T) {
+	for _, code := range []apierr.Code{apierr.Forbidden, apierr.Unauthenticated} {
+		t.Run(string(code), func(t *testing.T) {
+			profilesFixturePath(t)
+			withStdin(t, "private-credential\n")
+			profileHTTPFixture(t, func(r *http.Request) (int, string) {
+				if r.URL.Path == "/api/v1/health" {
+					return 200, `{"status":"ok","auth":"enabled"}`
+				}
+				return 403, `{"error":{"code":"` + string(code) + `","message":"denied","details":{"reason":"grant"}}}`
+			})
+			args := []string{"profiles", "add", "--controller=https://controller", "--token-stdin", "-o=json"}
+			inv, err := clisurface.Parse("sparkwing", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = runProfiles(args[1:])
+			if err == nil {
+				t.Fatal("probe accepted refusal")
+			}
+			var out bytes.Buffer
+			if err := writeInvocationError(&out, &invocationError{inv: inv, cause: err}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(apierr.Envelope{Error: e}) }); err != nil {
+				t.Fatal(err)
+			}
+			var response apierr.Envelope
+			if json.Unmarshal(out.Bytes(), &response) != nil || response.Error.Code != code || response.Error.Details["reason"] != "grant" {
+				t.Fatalf("error: %s", &out)
+			}
+		})
 	}
 }

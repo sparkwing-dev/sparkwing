@@ -37,7 +37,7 @@ func (c *engineClient) ListRunners(ctx context.Context) (controllerwire.Runners,
 }
 
 func validRunnerDetail(runner controllerwire.RunnerDetail) bool {
-	if !validSelector(runner.Name) || !validSelector(runner.Class) || !validSelector(runner.Location) || !validSelector(runner.Status) || runner.MaxConcurrent < 0 || !validRunnerResources(runner.Capacity) || !validRunnerTimestamp(runner.LastSeen, true) {
+	if !validSelector(runner.Name) || !validSelector(runner.Class) || runner.Location != "" && !validSelector(runner.Location) || !validSelector(runner.Status) || runner.MaxConcurrent < 0 || !validRunnerResources(runner.Capacity) || !validRunnerTimestamp(runner.LastSeen, true) {
 		return false
 	}
 	for _, values := range [][]string{runner.Labels, runner.ReservedPools, runner.Repos} {

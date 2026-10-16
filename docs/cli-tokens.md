@@ -28,7 +28,7 @@ Manage team credentials
 
 Mint a new API token
 
-Create a member or runner credential through the team token route. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry.
+Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry.
 
 ### Flags
 
@@ -38,7 +38,7 @@ Create a member or runner credential through the team token route. The controlle
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--type KIND` | type Values: member, runner. |
+| `--type KIND` | type Values: member. |
 | `--principal NAME` | principal |
 | `--scope SCOPE` | Credential scope. Repeatable; comma-separated values are accepted. |
 | `--ttl DURATION` | ttl |

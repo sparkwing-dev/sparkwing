@@ -147,13 +147,12 @@ process builder and sanitizer own credential filtering and diagnostic masking.
 These components have native Git fixtures, a selected-engine shell fixture,
 fake acquisition/controller and HTTP/api.sock transport evidence. The Git tests
 inject the declared process-environment boundary.
-W6 must implement `procenv.Build(procenv.Git, ...)`, which rejects the kind in this
-checkout. Native numeric-ID lookup, W3 source acquisition, W8 engine resolution,
-private environment retention and authorized working-tree bundle upload remain
-bindings. Native selected-engine process-tree cancellation remains unverified.
+Native numeric-ID lookup, W3 source acquisition and W8 engine resolution are
+wired. Private environment retention remains a binding. Working-tree upload
+is integrated below. Native selected-engine process-tree cancellation remains unverified.
 The public command now uses this prepared request and sealed intake path.
-GitHub numeric-ID lookup, private source access and captured environment delivery
-still need native bindings. Initial here intake requires a contract for persisting
+GitHub numeric-ID lookup and working-tree source binding use the integrated paths below.
+Captured environment delivery still needs a native binding. Initial here intake requires a contract for persisting
 the required reason and refuses before submission until that contract exists. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
 that reason. It must survive intake and replay before the CLI can replace the old
 path without dropping it. No foreign contract is changed by this component.
@@ -920,3 +919,42 @@ Jobs so one slow publication cannot strand another Job's source init. Its contex
 is passed to the blocking operations and the keeper is cancelled and joined on
 every return. The normal launcher loop owns preparation after activation until
 bootstrap exchange transfers lease ownership to the executing host.
+
+## W9 native QA corrections (2026-10-16)
+
+`GET /api/v1/runners` emits the shared `Runners` object and `RunnerDetail`
+rows. The old `agents` array, label map and encoded active-job strings are
+removed from this response. Active jobs retain separate run and job IDs. An empty location is an unknown
+observation, like zero capacity, and does not invalidate a live enrolled runner.
+
+`client.CheckIdentity` authenticates profile connections through
+`GET /api/v1/auth/whoami`. It requires a nonempty principal and subject kind,
+uses the shared transport and preserves canonical refusals. It requires no
+team read grant. A successful operator probe does not authorize team commands.
+
+Team `tokens create` accepts only `member`. Runner inventory, rotation and
+revocation still accept `runner`, while creation uses `runners add` enrollment.
+The production trigger identity resolver calls GitHub's repository API for a
+positive numeric ID. Private lookup accepts captured `GH_TOKEN` or
+`GITHUB_TOKEN`. Redirects are refused and provider bodies are not diagnostics.
+
+## Integrated working-tree submission
+
+`SourceUploadRequest` contains `git`, `source`, `digest` and `size`.
+`POST /api/v1/data/source` verifies repository identity and returns the shared
+`DataUploadTicket`. The client transfers only signed object headers, then calls
+`POST /api/v1/data/source/{upload}/commit` with `{}` and receives `DataReceipt`.
+The source bytes use the shared filesystem or S3 backend and SHA-256 commit
+verification. Provider bodies and signed transfer URLs never enter diagnostics.
+
+The CLI puts the committed digest in `request.source.bundle_digest`. The sealed
+intake atomically consumes its submitter's matching upload and retains a
+source-only record. Awarded source readers use the existing `/data/download`
+transport. A bundle containing the selected commit checks out directly; missing
+pinned source revisions use credentialed delta fetch. Git credentials are
+released only when a remote fetch, tags, submodules or LFS needs them.
+
+The production GitHub lookup is shared by CLI and controller. The controller
+verifies public repositories without requiring an App; private identities use
+its App or confirmed team HTTPS source credential. It never trusts a typed
+numeric ID or caller display name.

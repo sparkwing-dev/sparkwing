@@ -125,6 +125,9 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err = insertAdmissionTx(ctx, tx, team, result, snapshot, principal, request.IdempotencyKey, scope, string(digest), policy, now); err != nil {
 		return AdmissionResult{}, err
 	}
+	if err := bindSourceUploadTx(ctx, tx, team, request, result, principal); err != nil {
+		return AdmissionResult{}, err
+	}
 	input := snapshot.request.Request
 	if input.Mode == runspec.IntakeExecute {
 		result.OwnerUnit = &OwnerLeaseRef{Kind: OwnerTrigger, RunID: id}

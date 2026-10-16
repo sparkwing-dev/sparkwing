@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type profileProbeResult struct {
+	err       error
 	Name      string `json:"name"`
 	Status    string `json:"status"`
 	Target    string `json:"target,omitempty"`
@@ -26,6 +27,7 @@ func interpretHealthBody(r *profileProbeResult, resp *http.Response) (health.Res
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		r.Status = "fail"
+		r.err = &apierr.Error{Code: apierr.Unavailable, Message: "controller health check failed"}
 		r.Detail = fmt.Sprintf("health returned %s: %s",
 			resp.Status, strings.TrimSpace(string(raw)))
 		return health.Response{}, true
@@ -34,6 +36,7 @@ func interpretHealthBody(r *profileProbeResult, resp *http.Response) (health.Res
 	if err != nil && !errors.Is(err, health.ErrNotContract) {
 		r.Status = "fail"
 		r.Detail = err.Error()
+		r.err = &apierr.Error{Code: apierr.ProtocolError, Message: r.Detail}
 		return health.Response{}, true
 	}
 	if body.Degraded() {
@@ -52,6 +55,7 @@ func probeController(ctx context.Context, prof *namedProfile) profileProbeResult
 	if prof.ControllerURL() == "" {
 		r.Status = "fail"
 		r.Detail = "no controller URL in profile"
+		r.err = &apierr.Error{Code: apierr.BadRequest, Message: r.Detail}
 		return r
 	}
 	start := time.Now()
@@ -60,6 +64,7 @@ func probeController(ctx context.Context, prof *namedProfile) profileProbeResult
 	if err != nil {
 		r.Status = "fail"
 		r.Detail = err.Error()
+		r.err = &apierr.Error{Code: apierr.Unavailable, Message: r.Detail}
 		return r
 	}
 	defer resp.Body.Close()
@@ -89,21 +94,19 @@ func probeAuth(ctx context.Context, prof *namedProfile) profileProbeResult {
 		return r
 	}
 	start := time.Now()
-	reader, err := client.NewRunReader(client.EngineOptions{
+	err := client.CheckIdentity(ctx, client.EngineOptions{
 		URL: prof.ControllerURL(), HTTP: &http.Client{Timeout: 10 * time.Second},
 		Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil },
 	})
-	if err == nil {
-		_, err = reader.ListRuns(ctx, controllerwire.RunQuery{Limit: 1})
-	}
 	r.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
 		r.Status = "fail"
 		r.Detail = err.Error()
+		r.err = err
 		return r
 	}
 	r.Status = "ok"
-	r.Detail = "credential can read runs"
+	r.Detail = "credential authenticated"
 	return r
 }
 

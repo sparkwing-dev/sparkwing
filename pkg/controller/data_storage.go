@@ -31,6 +31,9 @@ func (s *Server) maintainDataObjects(ctx context.Context, lease store.SingletonL
 	if err != nil {
 		return err
 	}
+	if err := operator.ExpireSourceUploads(ctx, lease, 5000, s.dataController.Objects); err != nil {
+		return fmt.Errorf("expire source uploads: %w", err)
+	}
 	marked, err := operator.MarkBlobTombstones(ctx, lease, 5000)
 	if err != nil {
 		return fmt.Errorf("mark blob tombstones: %w", err)

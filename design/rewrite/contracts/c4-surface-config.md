@@ -884,3 +884,30 @@ boundary contract. It adds no grant, flag or configuration field.
 `FuzzProductionBoundaryRefusesConflictingDestinations` varies API, DaemonSet and
 kubelet collisions. Canary admission tests apply standard API readiness defaults
 to a cloned response. The authored probe includes those exact scalar defaults.
+
+## W9 native QA surface corrections (2026-10-16)
+
+Team `tokens create --type` accepts only `member`. `runner` remains an inventory
+filter and is issued only through `runners add`. Profile verification uses
+public health followed by authenticated identity, rather than team run reads.
+Canonical controller refusals survive the CLI envelope. Configuration field
+errors map to `bad_request`, and operator-ceiling errors to `limit_exceeded`.
+
+The controller executable accepts flags and its explicit `admin` command.
+`help`, `--help` and `-h` print usage without opening state or credentials.
+Unexpected positional arguments refuse with usage before startup.
+
+`SPARKWING_HOME` isolates runtime state but does not relocate machine config.
+An isolated `profiles add` also supplies `SPARKWING_CONFIG` to the write guard.
+
+## Integrated working-tree trigger composition
+
+`pipeline trigger --working-tree` captures the working tree with the existing
+secret-file checks, materializes its immutable private checkout, resolves the
+pipeline alias and entrypoint from the captured configuration, and describes
+that checkout with the selected engine. It leaves the user's HEAD and index
+untouched. `--allow-secret-file` applies to this capture. After validating
+arguments, the production client commits the bundle through shared source
+storage and seals its digest into the trigger request. A source pinned to a
+different revision keeps that pipeline revision while the execution snapshot
+remains immutable. Snapshot scratch closes on success and failure.

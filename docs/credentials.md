@@ -15,6 +15,10 @@ Removing a profile revokes a confirmed member credential unless `--keep-token`
 is explicit. Runner and deployment credentials require `--keep-token` because
 removing a saved connection must not revoke the machine that uses it.
 
+Team credential creation accepts only `--type member`. Enroll runners through
+`runners add`, which writes a private credential file. Runner credentials remain
+visible to token inventory, rotation and revocation.
+
 Team credential commands use the team token namespace:
 
 ```sh

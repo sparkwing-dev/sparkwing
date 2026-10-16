@@ -6,35 +6,15 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const runnerHeadroomStale = time.Hour
-
-// Agent is a public runner observation without credential or holder identifiers.
-type Agent struct {
-	Name          string            `json:"name"`
-	Type          string            `json:"type"`
-	Location      string            `json:"location"`
-	Labels        map[string]string `json:"labels"`
-	Capabilities  []string          `json:"capabilities,omitempty"`
-	LastSeen      string            `json:"last_seen"`
-	Status        string            `json:"status"`
-	ActiveJobs    []string          `json:"active_jobs"`
-	MaxConcurrent int               `json:"max_concurrent"`
-	Headroom      *AgentHeadroom    `json:"headroom,omitempty"`
-}
-
-// AgentHeadroom is free capacity measured at the store's observation time.
-type AgentHeadroom struct {
-	Cores       float64 `json:"cores"`
-	MemoryBytes int64   `json:"memory_bytes"`
-	QueueDepth  int     `json:"queue_depth"`
-	ObservedAt  string  `json:"observed_at"`
-}
 
 // RunnerInventoryReader projects tenant runners without inferring identity from holders.
 type RunnerInventoryReader interface {
@@ -95,14 +75,18 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request, a capabili
 	if err != nil {
 		return err
 	}
-	out := make([]Agent, 0, len(snapshot.Runners))
+	out := make([]controllerwire.RunnerDetail, 0, len(snapshot.Runners))
 	for _, row := range snapshot.Runners {
 		active := append([]string{}, row.ActiveJobs...)
 		slices.Sort(active)
-		agent := Agent{
-			Name: row.Runner.Name, Type: row.Runner.Type, Location: row.Location,
-			Labels: map[string]string{}, Capabilities: slices.Clone(row.Runner.Labels), ActiveJobs: slices.Compact(active),
+		agent := controllerwire.RunnerDetail{
+			Name: row.Runner.Name, Class: row.Runner.Type, Location: row.Location,
+			Labels: append([]string{}, row.Runner.Labels...), ReservedPools: []string{}, Repos: []string{}, ActiveJobs: []controllerwire.RunnerJob{},
 			Status: "idle", MaxConcurrent: row.MaxConcurrent,
+		}
+		for _, job := range slices.Compact(active) {
+			run, node, _ := strings.Cut(job, "/")
+			agent.ActiveJobs = append(agent.ActiveJobs, controllerwire.RunnerJob{RunID: run, JobID: node})
 		}
 		if !row.LastSeen.IsZero() {
 			agent.LastSeen = row.LastSeen.UTC().Format(time.RFC3339Nano)
@@ -114,12 +98,12 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request, a capabili
 			agent.Status = "offline"
 		}
 		if h := row.Headroom; h != nil && snapshot.Now.Sub(h.ObservedAt) <= runnerHeadroomStale {
-			agent.Headroom = &AgentHeadroom{Cores: h.Cores, MemoryBytes: h.MemoryBytes, QueueDepth: h.QueueDepth, ObservedAt: h.ObservedAt.UTC().Format(time.RFC3339Nano)}
+			agent.Headroom = &controllerwire.RunnerHeadroom{RunnerResources: controllerwire.RunnerResources{Cores: h.Cores, MemoryBytes: h.MemoryBytes}, QueueDepth: h.QueueDepth, ObservedAt: h.ObservedAt.UTC().Format(time.RFC3339Nano)}
 		}
 		out = append(out, agent)
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"agents": out})
+	writeJSON(w, http.StatusOK, controllerwire.Runners{Runners: out})
 	return nil
 }
 

@@ -1133,7 +1133,7 @@ CREATE TABLE blob_records (
     uploader_principal TEXT NOT NULL,
     provenance TEXT NOT NULL CHECK(provenance IN ('cloud','local')),
     source_identity_json BLOB NOT NULL,
-    source_kind TEXT NOT NULL CHECK(source_kind IN ('job','owner_unit','publication')),
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('job','owner_unit','publication','submission')),
     source_run_id TEXT NOT NULL,
     source_node_id TEXT,
     source_attempt BIGINT,
@@ -1516,3 +1516,26 @@ CREATE UNIQUE INDEX idx_blob_receipts_attempt ON blob_receipts(team,run_id,node_
 CREATE UNIQUE INDEX idx_blob_receipts_owner ON blob_receipts(team,run_id,unit_kind,unit_id,unit_generation,digest) WHERE uploader_kind = 'owner_unit';
 
 CREATE UNIQUE INDEX idx_blob_receipts_publication ON blob_receipts(team,run_id,digest) WHERE uploader_kind = 'publication' AND node_id IS NULL;
+
+CREATE TABLE source_uploads (
+    team TEXT NOT NULL REFERENCES teams(name),
+    id TEXT NOT NULL,
+    authority_kind TEXT NOT NULL,
+    authority_id TEXT NOT NULL,
+    repo_key TEXT NOT NULL,
+    replica_id TEXT NOT NULL DEFAULT '',
+    period TEXT NOT NULL DEFAULT '',
+    repo_display TEXT NOT NULL,
+    execution_sha TEXT NOT NULL,
+    pipeline_sha TEXT NOT NULL,
+    charged_objects BIGINT NOT NULL DEFAULT 0 CHECK(charged_objects IN (0,1)),
+    digest TEXT NOT NULL,
+    size BIGINT NOT NULL CHECK(size>=0),
+    expires_at BIGINT NOT NULL,
+    committed_at BIGINT NOT NULL DEFAULT 0,
+    bound_run_id TEXT,
+    PRIMARY KEY(team,id),
+    FOREIGN KEY(team,bound_run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_source_uploads_expiry ON source_uploads(expires_at,team,id);

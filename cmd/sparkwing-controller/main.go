@@ -49,6 +49,9 @@ func main() {
 
 func run(args []string) error {
 	fs := flag.NewFlagSet("sparkwing-controller", flag.ContinueOnError)
+	if len(args) == 1 && args[0] == "help" {
+		args = []string{"--help"}
+	}
 	addr := fs.String("addr", "127.0.0.1:4344", "bind address")
 	metricsAddr := fs.String("metrics-addr", "",
 		"bind address for the Prometheus /metrics endpoint. Set it to move "+
@@ -284,6 +287,11 @@ func run(args []string) error {
 			return nil
 		}
 		return err
+	}
+
+	if fs.NArg() != 0 {
+		fs.PrintDefaults()
+		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
 
 	creds, err := readCredentials(*credentialsDir)

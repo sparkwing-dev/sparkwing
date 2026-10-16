@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -31,6 +35,21 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 	var failure *apierr.Error
 	if !errors.As(err, &failure) {
 		failure = &apierr.Error{Code: apierr.Internal, Message: err.Error()}
+		var field *userconfig.FieldError
+		var setting *settings.Error
+		switch {
+		case errors.As(err, &setting):
+			failure.Code = apierr.BadRequest
+			if setting.CeilingFrom != nil {
+				failure.Code = apierr.LimitExceeded
+			}
+		case errors.As(err, &field), errors.Is(err, configguard.ErrOutsideSandboxHome):
+			failure.Code = apierr.BadRequest
+		case errors.Is(err, context.Canceled):
+			failure.Code = apierr.Cancelled
+		case errors.Is(err, context.DeadlineExceeded):
+			failure.Code = apierr.DeadlineExceeded
+		}
 		var usage *clisurface.UsageError
 		if errors.As(err, &usage) {
 			failure.Code, failure.Message = apierr.BadRequest, usage.Message

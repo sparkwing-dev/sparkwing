@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,7 +15,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -65,20 +68,20 @@ func TestRunnerInventoryHTTPUsesCommittedSnapshot(t *testing.T) {
 	h, raw := runnerInventoryFixture(t, f)
 	w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners?team=foreign", "", 200)
 	var response struct {
-		Agents []Agent `json:"agents"`
+		Runners []controllerwire.RunnerDetail `json:"runners"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Agents) != 3 || f.calls != 1 {
+	if len(response.Runners) != 3 || f.calls != 1 {
 		t.Fatalf("snapshot: %+v, calls=%d", response, f.calls)
 	}
-	busy, offline, idle := response.Agents[0], response.Agents[1], response.Agents[2]
-	if busy.Name != "same" || busy.Status != "busy" || busy.Type != "runner" || busy.Location != "machine" || busy.MaxConcurrent != 2 || !reflect.DeepEqual(busy.ActiveJobs, []string{"run/job"}) || !reflect.DeepEqual(busy.Capabilities, []string{"gpu"}) || busy.Headroom == nil || busy.Headroom.Cores != 1.5 || busy.Headroom.ObservedAt != now.Format(time.RFC3339Nano) {
+	busy, offline, idle := response.Runners[0], response.Runners[1], response.Runners[2]
+	if busy.Name != "same" || busy.Status != "busy" || busy.Class != "runner" || busy.Location != "machine" || busy.MaxConcurrent != 2 || !reflect.DeepEqual(busy.ActiveJobs, []controllerwire.RunnerJob{{RunID: "run", JobID: "job"}}) || !reflect.DeepEqual(busy.Labels, []string{"gpu"}) || busy.Headroom == nil || busy.Headroom.Cores != 1.5 || busy.Headroom.ObservedAt != now.Format(time.RFC3339Nano) {
 		t.Fatalf("busy runner: %+v", busy)
 	}
 	if offline.Status != "offline" || offline.Headroom != nil || idle.Status != "idle" || idle.Headroom != nil {
-		t.Fatalf("liveness: %+v", response.Agents)
+		t.Fatalf("liveness: %+v", response.Runners)
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("runner inventory may be cached")
@@ -107,7 +110,7 @@ func TestRunnerInventoryHTTPTenantProperty(t *testing.T) {
 			f.snapshot.Runners[0], f.snapshot.Runners[1] = foreign, own
 		}
 		w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 500)
-		return !strings.Contains(w.Body.String(), `"agents"`) && !strings.Contains(w.Body.String(), `"allowed"`)
+		return !strings.Contains(w.Body.String(), `"runners"`) && !strings.Contains(w.Body.String(), `"allowed"`)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Fatal(err)
@@ -128,14 +131,14 @@ func TestRunnerInventoryHTTPNameProperty(t *testing.T) {
 		}}
 		w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 200)
 		var response struct {
-			Agents []Agent `json:"agents"`
+			Runners []controllerwire.RunnerDetail `json:"runners"`
 		}
-		if json.Unmarshal(w.Body.Bytes(), &response) != nil || len(response.Agents) != 2 {
+		if json.Unmarshal(w.Body.Bytes(), &response) != nil || len(response.Runners) != 2 {
 			return false
 		}
-		return response.Agents[0].Name == name && response.Agents[1].Name == name &&
-			response.Agents[0].Status == "busy" && response.Agents[1].Status == "offline" &&
-			len(response.Agents[0].ActiveJobs) == 1 && len(response.Agents[1].ActiveJobs) == 0
+		return response.Runners[0].Name == name && response.Runners[1].Name == name &&
+			response.Runners[0].Status == "busy" && response.Runners[1].Status == "offline" &&
+			len(response.Runners[0].ActiveJobs) == 1 && len(response.Runners[1].ActiveJobs) == 0
 	}, &quick.Config{MaxCount: 100}); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +173,7 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now}}
 	h, raw := runnerInventoryFixture(t, f)
 	w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 200)
-	if strings.TrimSpace(w.Body.String()) != `{"agents":[]}` {
+	if strings.TrimSpace(w.Body.String()) != `{"runners":[]}` {
 		t.Fatalf("empty inventory: %s", w.Body.String())
 	}
 	for _, mutate := range []func(){
@@ -188,7 +191,7 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 		f.team, f.err, f.snapshot = "a", nil, capability.RunnerSnapshot{Now: now}
 		mutate()
 		w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 500)
-		if strings.Contains(w.Body.String(), "private inventory") || strings.Contains(w.Body.String(), `"agents"`) {
+		if strings.Contains(w.Body.String(), "private inventory") || strings.Contains(w.Body.String(), `"runners"`) {
 			t.Fatalf("unsafe failure: %s", w.Body.String())
 		}
 	}
@@ -225,13 +228,21 @@ func TestRunnerInventoryHTTPUsesStoreSnapshot(t *testing.T) {
 	}
 	w := engineClaimHTTP(t, h, credential.Capability, "GET", "/api/v1/runners?team=b", "", 200)
 	var response struct {
-		Agents []Agent `json:"agents"`
+		Runners []controllerwire.RunnerDetail `json:"runners"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Agents) != 1 || response.Agents[0].Name != "observed" || response.Agents[0].Type != "runner" || response.Agents[0].Status != "idle" || !reflect.DeepEqual(response.Agents[0].Capabilities, []string{"gpu"}) {
+	if len(response.Runners) != 1 || response.Runners[0].Name != "observed" || response.Runners[0].Class != "runner" || response.Runners[0].Status != "idle" || !reflect.DeepEqual(response.Runners[0].Labels, []string{"gpu"}) {
 		t.Fatalf("store inventory: %+v", response)
+	}
+	reader, err := client.NewRunnerReader(client.EngineOptions{URL: "https://controller", Bearer: func(context.Context) (string, error) { return credential.Capability, nil }, HTTP: &http.Client{Transport: inventoryRoundTrip{h}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := reader.ListRunners(t.Context())
+	if err != nil || len(inventory.Runners) != 1 || inventory.Runners[0].Name != "observed" {
+		t.Fatalf("store-to-client inventory: %+v %v", inventory, err)
 	}
 }
 
@@ -266,4 +277,48 @@ func TestRunnerInventoryMetricsPreservesSamplesOnReadFailure(t *testing.T) {
 	if got := mustSample(t, scrapeRegistry(t), `sparkwing_runners_live{label_set="gpu"}`); got != 2 {
 		t.Fatalf("failed snapshot replaced label series: %v", got)
 	}
+}
+
+func TestRunnerInventoryRealClient(t *testing.T) {
+	now := time.Now().UTC()
+	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "box", Type: "runner", Labels: []string{"gpu"}}, Location: "machine", LastSeen: now, ActiveJobs: []string{"run/build/linux"}}}}}
+	h, raw := runnerInventoryFixture(t, f)
+	reader, err := client.NewRunnerReader(client.EngineOptions{URL: "https://controller", Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: &http.Client{Transport: inventoryRoundTrip{h}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reader.ListRunners(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Runners) != 1 || got.Runners[0].Name != "box" || got.Runners[0].Class != "runner" || !reflect.DeepEqual(got.Runners[0].Labels, []string{"gpu"}) || !reflect.DeepEqual(got.Runners[0].ActiveJobs, []controllerwire.RunnerJob{{RunID: "run", JobID: "build/linux"}}) {
+		t.Fatalf("inventory: %+v", got)
+	}
+}
+
+type inventoryRoundTrip struct{ handler http.Handler }
+
+func (tr inventoryRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	tr.handler.ServeHTTP(w, r)
+	return w.Result(), nil
+}
+
+func TestProfileIdentityProbeAcceptsDeploymentAndTeamCredentials(t *testing.T) {
+	s, session := credentialSessionServer(t)
+	e := &EngineController{Store: s.store}
+	deployment := engineHTTPRoot(t, e, "", "deployment", []capability.Grant{capability.OperatorTokens})
+	machine := engineHTTPRoot(t, e, "a", "machine", []capability.Grant{capability.NodesClaim})
+	h := s.Handler()
+	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
+	var member credentialResponse
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &member) != nil {
+		t.Fatalf("issuance: %d %s", w.Code, w.Body)
+	}
+	for _, raw := range []string{deployment, machine, member.Capability} {
+		if err := client.CheckIdentity(t.Context(), client.EngineOptions{URL: "https://controller", Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: &http.Client{Transport: inventoryRoundTrip{h}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engineClaimHTTP(t, h, deployment, "GET", "/api/v1/runs", "", 403)
 }

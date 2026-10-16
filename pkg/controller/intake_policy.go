@@ -2,11 +2,11 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -85,9 +85,16 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if location.LocalCheckout != "" {
 		return facts, &apierr.Error{Code: apierr.Forbidden, Message: "remote intake cannot name a local checkout"}
 	}
-	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: location.RemoteURL})
-	if err != nil || repository.Key != request.Request.Git.Repository.Key {
-		return facts, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "verified source location is unavailable"}, err)
+	if strings.HasPrefix(string(request.Request.Git.Repository.Key), "gh:") {
+		verified, ok := ctx.Value(verifiedIntakeSourceKey{}).(verifiedIntakeSource)
+		if !ok || verified.location != location || verified.repository != request.Request.Git.Repository {
+			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "GitHub source requires verified intake repository identity"}
+		}
+	} else {
+		repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: location.RemoteURL})
+		if err != nil || repository.Key != request.Request.Git.Repository.Key {
+			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "source does not match repository identity"}
+		}
 	}
 	facts.SourceLocation = &location
 	return facts, nil

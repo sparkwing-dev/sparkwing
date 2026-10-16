@@ -143,7 +143,7 @@ func TestTriggerInspectionRetainsLiveDescribeArgumentsAndClassifications(t *test
 	}
 	entry.Directory = filepath.Join(input.checkout, ".sparkwing")
 	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
-	protocolFixture(t, fixture, counter, `[{"name":"Deploy","extra":true,"args":[{"name":"region","type":"string","required":true},{"name":"image","type":"string","required":true,"job_id":"rollout"},{"name":"password","type":"string","required":false,"secret":true}],"risks":["prod"]}]`)
+	protocolFixture(t, fixture, counter, `[{"name":"deploy-prod","extra":true,"args":[{"name":"region","type":"string","required":true},{"name":"image","type":"string","required":true,"job_id":"rollout"},{"name":"password","type":"string","required":false,"secret":true}],"risks":["prod"]}]`)
 	deps.exec = func(ctx context.Context, dir string, _ []string, program string, args ...string) ([]byte, error) {
 		if program != entry.Engine.Executable || dir != entry.Directory {
 			t.Fatal("inspection replaced the acquired engine or checkout")

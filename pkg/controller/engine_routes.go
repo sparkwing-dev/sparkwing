@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -185,7 +186,8 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err := s.resolveIntakeSource(r.Context(), a.Target.Team, &body.Request); err != nil {
 			return err
 		}
-		response, err := engine.CreateRun(r.Context(), a, body)
+		ctx := context.WithValue(r.Context(), verifiedIntakeSourceKey{}, verifiedIntakeSource{location: body.Request.Source.Location, repository: body.Request.Git.Repository})
+		response, err := engine.CreateRun(ctx, a, body)
 		if err != nil {
 			return err
 		}

@@ -197,6 +197,26 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 	return snapshot, nil
 }
 
+func (s *worktreeSnapshot) includeRevision(ctx context.Context, sha string) error {
+	gitDir := filepath.Join(s.tempDir, "repo.git")
+	ref := bincache.SeedRef(sha)
+	if _, err := gitDirOutput(ctx, gitDir, "update-ref", ref, sha); err != nil {
+		return err
+	}
+	if _, err := gitDirOutput(ctx, gitDir, "bundle", "create", s.BundlePath, bincache.SeedRef(s.SHA), ref); err != nil {
+		return err
+	}
+	info, err := os.Stat(s.BundlePath)
+	if err != nil {
+		return err
+	}
+	if info.Size() > maxWorktreeSnapshotBytes {
+		return fmt.Errorf("working-tree snapshot bundle is %d bytes; limit is %d bytes", info.Size(), maxWorktreeSnapshotBytes)
+	}
+	s.BundleSize = info.Size()
+	return nil
+}
+
 func resolveSnapshotBaseline(ctx context.Context, repoRoot string) bincache.WorkspaceBaseline {
 	ref := strings.TrimSpace(gitOutputOrEmpty(ctx, repoRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"))
 	if ref == "" {

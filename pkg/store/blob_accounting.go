@@ -98,7 +98,17 @@ WHERE storage_month_usage.bytes<=9223372036854775807-excluded.bytes AND storage_
 	if err := requireOneRow(result, "storage monthly usage"); err != nil {
 		return err
 	}
-	result, err = tx.ExecContext(ctx, `INSERT INTO storage_run_usage(team,period,replica_id,run_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,?,?)
+	if run == "" {
+		return nil
+	}
+	return recordStorageRunUsageTx(ctx, tx, team, run, replica, period, size, objects)
+}
+
+func recordStorageRunUsageTx(ctx context.Context, tx *storeTx, team Team, run, replica, period string, size, objects int64) error {
+	if size == 0 && objects == 0 {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO storage_run_usage(team,period,replica_id,run_id,bytes,objects,updated_at) VALUES (?,?,?,?,?,?,?)
 ON CONFLICT(team,period,replica_id,run_id) DO UPDATE SET bytes=storage_run_usage.bytes+excluded.bytes,objects=storage_run_usage.objects+excluded.objects,updated_at=excluded.updated_at
 WHERE storage_run_usage.bytes<=9223372036854775807-excluded.bytes AND storage_run_usage.objects<=9223372036854775807-excluded.objects`, team, period, replica, run, size, objects, tx.now().UnixNano())
 	if err != nil {

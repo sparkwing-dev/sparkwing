@@ -1,9 +1,8 @@
 # Self-hosting Sparkwing
 
 Use the CLI and local controller on one machine, or deploy the controller and
-runner stack to Kubernetes. Native controller, source, storage and chart
-composition still need acceptance evidence. The sections below identify the
-shared contract and the remaining installation boundaries.
+runner stack to Kubernetes. The controller authenticates private routes from its first start. Provisioning a
+new shared deployment is pending the operator onboarding route described below.
 
 ## Direct local execution
 
@@ -29,6 +28,68 @@ enforced network isolation. Chart rendering alone does not prove those propertie
 
 The opt-in `k8s-e2e` pipeline requires an explicit cluster and image set. It does
 not create or delete a cluster. Native deployment parity remains a launch check.
+
+### First shared deployment
+
+Create a private credentials directory and supply a controller capability seed:
+
+```sh
+install -d -m 700 ./controller-credentials
+python3 -c 'import base64, secrets; print("swk_" + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("="))' > ./controller-credentials/bootstrap-admin-token
+chmod 600 ./controller-credentials/bootstrap-admin-token
+sparkwing-controller --credentials-dir "$PWD/controller-credentials" --require-auth
+```
+
+Startup provisions that seed once. It grants `operator.limits`,
+`operator.object_store` and `operator.tokens`. It cannot read team runs, create a
+team member credential, or enroll a runner. Private routes remain authenticated
+when no seed exists. There is no unauthenticated token-mint endpoint.
+
+Creating a team and its first team-admin credential through an operator
+onboarding route is pending Korey's decision. A fresh shared deployment cannot
+complete team setup through the public API yet. The Kubernetes end-to-end script
+stops at this pending step. Do not mint a legacy `kind:user, scopes:[admin]` token
+or write rows into the database as an installation workaround.
+
+With an existing team member credential, save a profile and enroll a runner:
+
+```sh
+sparkwing profiles add --controller https://controller.example --profile team --token-stdin
+sparkwing runners add --profile team --runner builder
+sparkwing pipeline trigger build --profile team
+```
+
+`profiles add` verifies public health and authenticates with
+`GET /api/v1/auth/whoami`. Deployment credentials can pass this probe while
+remaining unable to call team routes. `tokens create --type member` issues a
+member credential. Runners enroll through `runners add`.
+
+Use `sparkwing pipeline trigger build --profile team --working-tree` to submit
+uncommitted changes. The CLI captures an immutable Git snapshot and commits its
+bytes through the controller's shared object store before creating the run.
+The run binds the bundle digest to the same team, repository and selected
+revisions. Workers acquire it with their awarded authority; it grants no App
+trust or verified-branch cache authority. Committed bundles awaiting intake expire
+after 24 hours; pending transfers follow signed-ticket expiry, and submitted
+source follows run retention.
+
+For GitHub, the CLI resolves numeric repository identity with `GH_TOKEN` or
+`GITHUB_TOKEN` when needed. The controller verifies identity independently:
+through its GitHub App, a configured team HTTPS source credential, or GitHub's
+public API for public repositories. The CLI never forwards its environment
+token to the controller.
+
+
+When isolating the CLI with `SPARKWING_HOME`, also set `SPARKWING_CONFIG` to a
+private config path before `profiles add`. The home selects runtime state.
+It does not relocate the machine config, and the write guard refuses an
+implicit write to the regular config from an isolated home:
+
+```sh
+export SPARKWING_HOME="$PWD/cli-state"
+export SPARKWING_CONFIG="$PWD/cli-config/config.yaml"
+sparkwing profiles add --controller https://controller.example --profile team --token-stdin
+```
 
 ### Node log retention
 
@@ -324,6 +385,9 @@ relation sizes, including indexes.
 Quotas belong to registered teams. Token principal labels do not select a
 quota. `default_tier` supplies limits only when a team has no explicit row.
 An empty default leaves those teams unlimited. A zero write limit is unbounded.
+
+Source uploads reserve monthly capacity before a run exists. Intake applies
+the committed unique-byte charge to the run and its per-run limits.
 
 Blob upload tickets reserve pending capacity against monthly bytes and per-run
 bytes and objects. Commit counts each new blob once. An authorized duplicate

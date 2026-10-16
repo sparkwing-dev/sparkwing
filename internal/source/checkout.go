@@ -69,9 +69,12 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		if options.Access == nil {
 			return entry, errors.New("remote source requires live source access")
 		}
-		credential, err := options.Access.GitCredential(ctx, spec)
-		if err != nil {
-			return entry, fmt.Errorf("authorize source: %w", err)
+		var credential Credential
+		if spec.BundleDigest == "" {
+			credential, err = options.Access.GitCredential(ctx, spec)
+			if err != nil {
+				return entry, fmt.Errorf("authorize source: %w", err)
+			}
 		}
 		remote, err := credentialRemote(spec.RemoteURL, credential)
 		if err != nil {
@@ -87,7 +90,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		if err := cloneCommit(ctx, &client, spec, remote, checkout, options.Access); err != nil {
 			return entry, err
 		}
-		if entry.DefaultBranch == "" {
+		if entry.DefaultBranch == "" && spec.BundleDigest == "" {
 			entry.DefaultBranch, err = remoteDefaultBranch(ctx, &client, checkout, remote)
 			if err != nil {
 				return entry, err
@@ -173,8 +176,30 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 		args = append(args, "--depth=1")
 	}
 	args = append(args, "--", remote, spec.SHA)
-	if _, err := client.run(ctx, checkout, remote, args...); err != nil {
-		return err
+	_, presentErr := client.run(ctx, checkout, "", "cat-file", "-e", spec.SHA+"^{commit}")
+	needsFetch := spec.BundleDigest == "" || presentErr != nil
+	needsTags := policy.Tags != nil && *policy.Tags
+	needsCheckoutAccess := policy.Submodules != nil && *policy.Submodules || policy.LFS != nil && *policy.LFS
+	if spec.BundleDigest != "" && (needsFetch || needsTags || needsCheckoutAccess) {
+		credential, err := access.GitCredential(ctx, spec)
+		if err != nil {
+			return fmt.Errorf("authorize source: %w", err)
+		}
+		remote, err = credentialRemote(remote, credential)
+		if err != nil {
+			return err
+		}
+		client.credential = credential
+		args[len(args)-2] = remote
+	}
+	if needsFetch {
+		if _, err := client.run(ctx, checkout, remote, args...); err != nil {
+			return err
+		}
+	} else if needsTags {
+		if _, err := client.run(ctx, checkout, remote, "fetch", "--quiet", "--tags", "--no-recurse-submodules", "--", remote); err != nil {
+			return err
+		}
 	}
 	if _, err := client.run(ctx, checkout, "", "checkout", "--quiet", "--detach", strings.ToLower(spec.SHA), "--"); err != nil {
 		return err

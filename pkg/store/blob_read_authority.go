@@ -18,15 +18,16 @@ type blobReadCandidate struct {
 	name, pipeline, repo, ref, run, node, scope string
 	attempt, generation                         int64
 	source                                      blob.UploadIdentity
+	digest                                      blob.Digest
 	facts                                       blob.RefFacts
 }
 
-const blobReadCandidateColumns = `b.kind,b.name,b.pipeline,b.repo_key,b.ref_scope,COALESCE(b.run_id,''),COALESCE(b.node_id,''),COALESCE(b.attempt,0),COALESCE(b.generation,0),b.source_identity_json,b.ref_facts_json,b.scope`
+const blobReadCandidateColumns = `b.kind,b.name,b.pipeline,b.repo_key,b.ref_scope,COALESCE(b.run_id,''),COALESCE(b.node_id,''),COALESCE(b.attempt,0),COALESCE(b.generation,0),b.source_identity_json,b.ref_facts_json,b.scope,b.digest`
 
 func scanBlobReadCandidate(row rowScanner) (blobReadCandidate, error) {
 	var c blobReadCandidate
 	var source, facts []byte
-	if err := row.Scan(&c.kind, &c.name, &c.pipeline, &c.repo, &c.ref, &c.run, &c.node, &c.attempt, &c.generation, &source, &facts, &c.scope); err != nil {
+	if err := row.Scan(&c.kind, &c.name, &c.pipeline, &c.repo, &c.ref, &c.run, &c.node, &c.attempt, &c.generation, &source, &facts, &c.scope, &c.digest); err != nil {
 		return c, err
 	}
 	if err := json.Unmarshal(source, &c.source); err != nil {
@@ -125,6 +126,21 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		allowed := c.facts.DefaultBranchVerified && slices.Contains(scope.ReadRefs, c.ref) && c.kind != blob.KindBinary && c.kind != blob.KindSourceBundle
 		edge.Kind = blob.EdgeMemoScope
 		return edge, allowed, nil
+	}
+	if c.kind == blob.KindSourceBundle && c.source.Kind == blob.UploadSubmission {
+		if c.run != a.source.RunID {
+			return edge, false, nil
+		}
+		var raw []byte
+		if err := tx.QueryRowContext(ctx, "SELECT request_json FROM runs WHERE team=? AND id=?", a.capability.Team, c.run).Scan(&raw); err != nil {
+			return edge, false, err
+		}
+		var seal runspec.SealedRequest
+		if err := json.Unmarshal(raw, &seal); err != nil {
+			return edge, false, err
+		}
+		edge.Kind = blob.EdgeSealedSource
+		return edge, seal.Request.Source.BundleDigest.Set && seal.Request.Source.BundleDigest.Value == string(c.digest), nil
 	}
 	if c.kind == blob.KindBinary || c.kind == blob.KindSourceBundle {
 		edge.Kind = blob.EdgeOwnUpload
