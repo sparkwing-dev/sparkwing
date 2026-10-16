@@ -236,7 +236,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if here {
 		parent = claimant
 	}
-	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}, RootMetered: parent.Capability.RootMetered}
+	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}}
 	c.Binding = capability.Binding{Kind: policy.Bindings[0], RunID: row.run, NodeID: row.node, Generation: row.generation, Holder: row.holder, Attempt: 0}
 	if row.expiry.Valid {
 		deadline := time.Unix(0, row.expiry.Int64).UTC()
@@ -286,7 +286,8 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if here || parent.Capability.Purpose == capability.PurposeHere {
 		executor = "here"
 	}
-	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: meteredPlacement(claimant.Capability, parent.Capability), ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
+	c.RootMetered = meteredPlacement(claimant.Capability, parent.Capability)
+	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: c.RootMetered, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
 	return c, nil
 }
 
