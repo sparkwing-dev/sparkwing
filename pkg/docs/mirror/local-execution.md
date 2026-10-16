@@ -285,6 +285,10 @@ repository access, job bindings and claim liveness come from authenticated serve
 facts. A management credential cannot substitute for the current execution
 holder. Public run details are redacted projections, not executable inputs.
 
+An awarded host retains its selected controller transport for private execution
+state, source credentials and storage. These controller API calls use the award's capability.
+The runner's reusable claim credential stays with the claim loop.
+
 ### The laptop boundary
 
 The local controller authenticates its OS account. Unix sockets require private

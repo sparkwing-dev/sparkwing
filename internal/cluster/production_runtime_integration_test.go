@@ -3,15 +3,25 @@
 package cluster
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
+
+const productionHTTPBoundary = "production HTTP boundary"
 
 func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 	if os.Getenv("SPARKWING_TEST_RUNNER_ENTRYPOINT") == "1" {
+		http.DefaultTransport = productionTransport(func(r *http.Request) (*http.Response, error) {
+			return nil, fmt.Errorf("%s: %s %s%s", productionHTTPBoundary, r.Method, r.URL.Host, r.URL.Path)
+		})
 		for i, arg := range os.Args {
 			if arg == "--" {
 				os.Args = append([]string{"sparkwing-runner"}, os.Args[i+1:]...)
@@ -21,19 +31,34 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 		}
 		os.Exit(2)
 	}
-	options, _ := bootstrapPlanFile(t)
+	options, award := bootstrapPlanFile(t)
+	award.Source = source.Spec{RepoKey: "gh:42", RemoteURL: "https://github.com/acme/project", SHA: strings.Repeat("a", 40), PipelineDir: ".sparkwing", DefaultBranch: "main"}
+	metadata, err := json.Marshal(award)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(options.BootstrapFile), "award.json"), metadata, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	directory := t.TempDir()
+	credentials := runnerCredentials(t)
 	config := filepath.Join(directory, "config.yaml")
-	if err := os.WriteFile(config, []byte("runner:\n  controller: https://controller.example\n  repos: [github.com/team/*]\n"), 0o600); err != nil {
+	if err := os.WriteFile(config, []byte("runner:\n  controller: https://controller.example\n  repos: [github.com/team/*]\n  credentials_dir: "+credentials+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
 	commands := map[string][]string{
 		"start":        {"--config=" + config},
-		"warm":         {"--controller=https://controller.example"},
-		"launch":       {"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + directory},
+		"warm":         {"--controller=https://controller.example", "--credentials-dir=" + credentials},
+		"launch":       {"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + credentials},
 		"fetch-source": bootstrapArguments(options),
 		"run-node":     bootstrapArguments(options),
+	}
+	operations := map[string]string{
+		"start":        "GET sparkwing.dev/versions.json",
+		"warm":         "GET sparkwing.dev/versions.json",
+		"fetch-source": "POST controller.example/api/v1/runs/run/source-credential",
+		"run-node":     "POST controller.example/api/v1/claims/exchange",
 	}
 	for name, args := range commands {
 		t.Run(name, func(t *testing.T) {
@@ -48,6 +73,13 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 				if strings.Contains(string(output), missing) {
 					t.Fatalf("installed entrypoint has no production composition: %s", output)
 				}
+			}
+			want := productionHTTPBoundary
+			if operation, ok := operations[name]; ok {
+				want += ": " + operation
+			}
+			if !strings.Contains(string(output), want) {
+				t.Fatalf("installed entrypoint did not reach its production HTTP operation: %s", output)
 			}
 		})
 	}
