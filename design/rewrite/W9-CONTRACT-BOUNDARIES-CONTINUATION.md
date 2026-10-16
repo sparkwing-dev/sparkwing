@@ -1,5 +1,52 @@
 # W9 remaining contract boundaries
 
+## Continuation at c535d9f2f
+
+Production code and foreign contracts are unchanged from the preceding report.
+No additional implementation can close the two assigned production gaps under
+the declared contracts. The brief requires stopping a piece before changing
+another area's contract. The separate evaluation binder and launcher boundary
+already have fake-based tests.
+
+The lead's next handoffs are:
+
+- **W2/W3:** declare how an owner/eval SDK process retains its live owner/eval
+  fence and separately names the source job. `CredentialNodeProcess` still
+  requires `BindingNode` with a positive attempt. `ProcessAuthorities.Delegate`
+  and `NativeProcesses.processServices` still equate the service job with that
+  node binding. A supported production evaluator must not claim a work attempt
+  to obtain its service authority. After that contract lands, W9 can implement
+  `NativeConfig.Evaluate` against it.
+- **W8:** supply a production `CloudBoundary` constructor, including actual
+  network enforcement and reservation-scoped teardown. `NewLauncher` accepts
+  that interface, but `KubernetesBoundary` still requires deployment callbacks
+  `Probe` and `Clear`, supplied only in tests. W9 can then compose
+  `ProductionRuntime.Launcher` and run the full installed-runner done test.
+- **Lead:** rerun `TestReviewPublicDoctorSweepsAndWarnsForPrunedRun` natively
+  against this branch with isolated state. The 00:55 failure predates the
+  committed drain fix. No combined native verdict is available here.
+- **Korey:** resolve the reserved unpublished SDK replacement policy. Its
+  implementation and test expectations remain unchanged.
+
+Fresh checks pass: whole-repository `go build -p 4 ./...`, the focused drain,
+service-install handover, process-service construction, separate owner-eval
+binder, pruned-run doctor, public doctor warning and peer-intake property tests,
+the drain regression under `-race`, surface/engine-amendment acceptance
+components, and commentcheck across 2,345 files. All Go commands used the
+required shared cache and worker scratch, with package parallelism at most four.
+The unchanged failing launch/native probes were not rerun. The preceding
+failure evidence still applies. No native acceptance cell or archived test was
+newly completed.
+
+Only this report changed. Production additions/deletions are 0/0. W9-owned
+production Go versus main remains +16,876/-23,797, net **-6,921**. No shared
+source, API, caller, lead-owned handoff or amendment changed. No mechanism was
+added. Scratch is removed after checks join, and the shared cache is retained.
+Friction remains the foreign contracts above, native socket/service-manager
+verification, and the installed Overwing binary's reported source lag.
+
+## Previous continuation
+
 Base: `9c19e6bdc`. The drain fix is already committed on this branch. This
 continuation changes no production code. Local-controller and local-schedule
 native passes remain the lead's evidence. SDK replacement policy is unchanged.
