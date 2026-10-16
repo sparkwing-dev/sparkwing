@@ -231,16 +231,17 @@ func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authoriz
 func engineActor(a capability.Authorized) store.Actor {
 	b := a.Binding
 	actor := store.Actor{
+		Result:    a.Result,
 		Authority: a.Principal.Authority, Kind: store.ActorRunHost,
 		CapabilityPrefix: principalCapabilityPrefix(a.Principal), Holder: b.Holder, Generation: b.Generation,
 	}
 	if a.Access.Credential == capability.CredentialPublisher {
 		actor.Kind = store.ActorOperator
 	}
-	if a.Principal.Capability.Unit == capability.UnitPlan || a.Principal.Capability.Unit == capability.UnitNode {
+	if a.Principal.Capability.Unit == capability.UnitNode {
 		actor.Kind = store.ActorHolder
 	}
-	if a.Principal.Capability.Unit == capability.UnitTrigger {
+	if a.Principal.Capability.Unit == capability.UnitTrigger || a.Principal.Capability.Unit == capability.UnitPlan {
 		actor.Owner = store.OwnerLeaseRef{
 			Kind: store.OwnerTrigger, Name: a.Principal.Capability.UnitID, RunID: a.Target.RunID,
 			Holder: b.Holder, Generation: b.Generation,

@@ -49,11 +49,14 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if !launcherClaimant(p.Capability) && p.Capability.Team != team {
 		return profile, match.Demand{}, authorityError(apierr.Forbidden, "claimant belongs to another team")
 	}
-	if len(p.Capability.Repositories) > 0 && !slices.Contains(p.Capability.Repositories, repo) {
-		return profile, match.Demand{}, authorityError(apierr.Forbidden, "claimant repository scope excludes work")
-	}
 	var requestSeal runspec.SealedRequest
 	if err = json.Unmarshal(requestBody, &requestSeal); err != nil {
+		return profile, match.Demand{}, err
+	}
+	if display == "" {
+		display = requestSeal.Request.Git.Repository.Display
+	}
+	if err := checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: repo, Display: display}); err != nil {
 		return profile, match.Demand{}, err
 	}
 	git := requestSeal.Request.Git
@@ -131,6 +134,15 @@ func authenticatedClaimProfile(c capability.Capability, profile match.Profile, h
 
 func validMatchingResources(v match.Resources) bool {
 	return v.Cores >= 0 && !math.IsNaN(v.Cores) && !math.IsInf(v.Cores, 0) && v.MemoryBytes >= 0
+}
+
+func checkRepositoryClaimScope(chain []authorityNode, repository capability.RepositoryIdentity) error {
+	for _, ancestor := range chain {
+		if !capability.RepositoryAllowed(ancestor.principal.Capability.Repositories, repository) {
+			return authorityError(apierr.Forbidden, "claimant repository scope excludes work")
+		}
+	}
+	return nil
 }
 
 func checkPushClaimScope(chain []authorityNode, repo, ref, sha string) error {

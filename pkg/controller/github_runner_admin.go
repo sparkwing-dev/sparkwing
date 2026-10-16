@@ -142,7 +142,7 @@ func (s *Server) resolveGitHubRunnerIdentity(ctx context.Context, team string, r
 	case errors.Is(err, store.ErrInvalidInput):
 		return invalidEngineBody("repository identity is invalid")
 	case errors.Is(err, store.ErrNotFound):
-		return &apierr.Error{Code: apierr.Forbidden, Message: "the team's GitHub App installation does not cover this repository"}
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "the team's GitHub App installation does not cover this repository")
 	case err != nil:
 		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository coverage could not be verified"}
 	}

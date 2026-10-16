@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -135,7 +136,9 @@ func (f *Filesystem) VerifyTransfer(r *http.Request) error {
 func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	object, err := f.signedRequest(r)
 	if err != nil {
-		http.Error(w, "invalid object signature", http.StatusForbidden)
+		if err := apierr.WriteHTTP(w, apierr.Authorization(apierr.ReasonBinding, "invalid object signature")); err != nil {
+			panic(http.ErrAbortHandler) //nolint:forbidigo // net/http aborts the incomplete response.
+		}
 		return
 	}
 	if object.Method == http.MethodPut {
@@ -144,11 +147,13 @@ func (f *Filesystem) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			put = f.putLog
 		}
 		if err := put(r, object); err != nil {
-			code := http.StatusInternalServerError
+			code := apierr.Internal
 			if errors.Is(err, ErrIntegrity) {
-				code = http.StatusBadRequest
+				code = apierr.BadRequest
 			}
-			http.Error(w, "object upload failed", code)
+			if err := apierr.WriteHTTP(w, &apierr.Error{Code: code, Message: "object upload failed"}); err != nil {
+				panic(http.ErrAbortHandler) //nolint:forbidigo // net/http aborts the incomplete response.
+			}
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -191,13 +196,17 @@ func (f *Filesystem) put(r *http.Request, object capability.ObjectToSign) (err e
 func (f *Filesystem) get(w http.ResponseWriter, r *http.Request, object capability.ObjectToSign) {
 	file, err := f.root.Open(object.Key)
 	if err != nil {
-		http.Error(w, "object unavailable", http.StatusNotFound)
+		if err := apierr.WriteHTTP(w, &apierr.Error{Code: apierr.NotFound, Message: "object unavailable"}); err != nil {
+			panic(http.ErrAbortHandler) //nolint:forbidigo // net/http aborts the incomplete response.
+		}
 		return
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() != object.Size {
-		http.Error(w, "object integrity mismatch", http.StatusConflict)
+		if err := apierr.WriteHTTP(w, &apierr.Error{Code: apierr.Conflict, Message: "object integrity mismatch"}); err != nil {
+			panic(http.ErrAbortHandler) //nolint:forbidigo // net/http aborts the incomplete response.
+		}
 		return
 	}
 	w.Header().Set("Content-Length", strconv.FormatInt(object.Size, 10))

@@ -150,6 +150,11 @@ type Error struct {
 	Details map[string]any `json:"details,omitempty"`
 }
 
+// Authorization constructs a forbidden error with its required reason.
+func Authorization(reason Reason, message string) *Error {
+	return &Error{Code: Forbidden, Message: message, Details: map[string]any{"reason": reason}}
+}
+
 // Error lets transport-neutral errors pass through normal Go error paths.
 func (e *Error) Error() string { return e.Message }
 

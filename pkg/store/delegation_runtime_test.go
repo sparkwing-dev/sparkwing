@@ -27,7 +27,7 @@ func TestDelegationRetainsAwardIdentityWithoutAnotherBillingAward(t *testing.T) 
 		t.Fatal(err)
 	}
 	s.delegation = delegationValidationFunc(func(capability.Principal, capability.DelegateSpec, time.Time) error { return nil })
-	child, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Binding: p.Capability.Binding, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: p.Capability.ExpiresAt})
+	child, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Binding: p.Capability.Binding, Repositories: p.Capability.Repositories, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: p.Capability.ExpiresAt})
 	if err != nil {
 		t.Fatal(err)
 	}

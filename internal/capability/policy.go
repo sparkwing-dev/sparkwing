@@ -93,6 +93,7 @@ var LivenessPolicies = []LivenessPolicy{
 type CredentialRule string
 
 const (
+	CredentialBootstrap   CredentialRule = "pod_bootstrap"
 	CredentialAny         CredentialRule = "any_live"
 	CredentialMember      CredentialRule = "unbound_member_or_local"
 	CredentialAccount     CredentialRule = "account_session"
@@ -237,6 +238,7 @@ type BindingChecker interface {
 // Authorized carries the server-derived fence to store writes for a transactional recheck.
 // ResultReplay and LogTailAttempt permit only exact result replay or the named final log tail.
 type Authorized struct {
+	Result         *RecordedResult
 	Principal      Principal
 	Target         Target
 	Binding        Binding
@@ -267,6 +269,9 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 		rule := route.Access[live.RuleIndex]
 		if live.ResultReplay && rule.Liveness != LiveResult || live.LogTailAttempt != 0 && rule.Liveness != LiveLogTail {
 			return Authorized{}, policyFailure()
+		}
+		if p.Capability.Delivery == DeliveryBootstrap && rule.Credential != CredentialBootstrap {
+			continue
 		}
 		if !matchesCredential(p, rule.Credential) || !subset(rule.Grants, p.Capability.Grants) {
 			continue
@@ -352,7 +357,7 @@ func unauthenticated() *apierr.Error {
 }
 
 func forbidden(reason apierr.Reason) *apierr.Error {
-	return &apierr.Error{Code: apierr.Forbidden, Message: "credential does not authorize this operation", Details: map[string]any{"reason": reason}}
+	return apierr.Authorization(reason, "credential does not authorize this operation")
 }
 
 func subset[T comparable](child, parent []T) bool {
@@ -389,6 +394,8 @@ func isMember(p Principal) bool {
 func matchesCredential(p Principal, rule CredentialRule) bool {
 	c := p.Capability
 	switch rule {
+	case CredentialBootstrap:
+		return isClaim(p) && c.Delivery == DeliveryBootstrap
 	case CredentialAny:
 		return true
 	case CredentialMember:
@@ -405,7 +412,7 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 	case CredentialLauncher:
 		return p.Class == CredentialBearer && c.Subject.Kind == SubjectService && c.Unit == "" && c.Binding.Kind == BindingNone && slices.Contains(c.Grants, ClaimsLaunch)
 	case CredentialDeployment:
-		return p.Class == CredentialBearer && c.Subject.Kind == SubjectOperator && c.Unit == "" && c.Binding.Kind == BindingNone
+		return DeploymentAuthority(p)
 	case CredentialOperator:
 		return p.Class == CredentialConsole && c.Subject.Kind == SubjectOperator && c.Subject.ID != "" && c.Unit == "" && c.Binding.Kind == BindingNone
 	case CredentialNodeProcess:
@@ -545,7 +552,7 @@ func validateRoutePolicy(route RoutePolicy) error {
 	}
 	for _, access := range route.Access {
 		if !slices.Contains([]CredentialRule{
-			CredentialAny, CredentialMember, CredentialAccount, CredentialClaim, CredentialEval, CredentialHere, CredentialLauncher,
+			CredentialBootstrap, CredentialAny, CredentialMember, CredentialAccount, CredentialClaim, CredentialEval, CredentialHere, CredentialLauncher,
 			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery,
 		}, access.Credential) ||
 			!slices.Contains([]BindingRule{

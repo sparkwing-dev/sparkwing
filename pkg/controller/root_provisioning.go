@@ -92,7 +92,7 @@ func (s *Server) handleIssueServiceCredential(w http.ResponseWriter, r *http.Req
 		return err
 	}
 	return s.provisionRoot(w, r, capability.ProvisionSpec{
-		Kind: capability.ProvisionService, Authority: &a.Principal.Authority, RegistrationID: "service:" + request.Name,
+		Kind: capability.ProvisionService, ConsoleProof: capability.ProofForConsole(a.Principal), Authority: &a.Principal.Authority, RegistrationID: "service:" + request.Name,
 		Subject: capability.Subject{Kind: capability.SubjectService, ID: request.Name},
 		Grants:  request.Grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: expires,
 	})
@@ -118,7 +118,9 @@ func (s *Server) provisionRoot(w http.ResponseWriter, r *http.Request, spec capa
 		return engineLookupError(err)
 	}
 	noteAuditTarget(r.Context(), "token_prefix", tokenPrefixTarget(issued.Capability.Prefix))
-	writeJSON(w, http.StatusCreated, credentialResponse{Capability: issued.Raw, Prefix: issued.Capability.Prefix,
-		Team: issued.Capability.Team, Grants: append([]capability.Grant{}, issued.Capability.Grants...), ExpiresAt: issued.Capability.ExpiresAt})
+	writeJSON(w, http.StatusCreated, credentialResponse{
+		Capability: issued.Raw, Prefix: issued.Capability.Prefix,
+		Team: issued.Capability.Team, Grants: append([]capability.Grant{}, issued.Capability.Grants...), ExpiresAt: issued.Capability.ExpiresAt,
+	})
 	return nil
 }

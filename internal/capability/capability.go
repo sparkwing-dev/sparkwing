@@ -89,7 +89,6 @@ type AuthorityRef struct {
 }
 
 // Capability contains no reusable secret. Digest is SHA-256 of a generated reference token.
-// A nil expiry is allowed only for provisioned roots or a bounded local connection.
 type Capability struct {
 	Digest        [32]byte           `json:"-"`
 	Prefix        string             `json:"prefix"`

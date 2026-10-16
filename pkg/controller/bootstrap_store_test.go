@@ -23,7 +23,7 @@ func TestBootstrapSeedStoreOnceProperty(t *testing.T) {
 		}
 		raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
 		created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, raw)
-		if err != nil || created != (i == 0) {
+		if (err != nil) != (i != 0) || created != (i == 0) {
 			t.Fatalf("bootstrap %d: created=%v err=%v", i, created, err)
 		}
 		if i != 0 {
@@ -44,7 +44,7 @@ func TestBootstrapSeedStoreOnceProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, initial); err != nil || created {
+	if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, initial); err == nil || created {
 		t.Fatalf("revoked seed revived: %v, %v", created, err)
 	}
 	if ready, err := e.Store.HasDeploymentAdministrator(t.Context()); err != nil || ready {
@@ -57,7 +57,7 @@ func TestBootstrapSeedStoreOnceProperty(t *testing.T) {
 		}
 		engineSQL(t, e.Store, `DELETE FROM settings WHERE key='bootstrap_capability_issued'`)
 		raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-		if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, raw); err != nil || created {
+		if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, raw); err == nil || created {
 			t.Fatalf("second administrator without marker: created=%v err=%v", created, err)
 		}
 		if _, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw))); err == nil {

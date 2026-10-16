@@ -93,7 +93,7 @@ func (s *Server) verifyOAuthCallback(r *http.Request) error {
 
 func oauthFlowError(err error) error {
 	if errors.Is(err, store.ErrNotMember) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "account has no active team membership"}
+		return apierr.Authorization(apierr.ReasonNoTeam, "account has no active team membership")
 	}
 	if refused, ok := refusalOf(err); ok {
 		codes := map[int]apierr.Code{400: apierr.BadRequest, 401: apierr.Unauthenticated, 403: apierr.Forbidden, 404: apierr.NotFound, 409: apierr.Conflict}

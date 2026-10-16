@@ -29,6 +29,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -105,6 +106,7 @@ type Store struct {
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
 	provisions       ProvisionPolicy
+	consolePolicy    func(capability.Principal, time.Time) bool
 	sourcePolicy     sourceReleaseContracts
 	clock            func() time.Time
 	db               *sql.DB
@@ -507,7 +509,7 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 		db.SetConnMaxIdleTime(5 * time.Minute)
 	}
 
-	s := &Store{db: db, dialect: dialect}
+	s := &Store{db: db, dialect: dialect, provisions: nativeProvisionPolicy{}}
 	if err := s.migrate(ctx, remedy); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}

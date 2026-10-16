@@ -61,7 +61,7 @@ func authorityTarget(r *http.Request) (capability.RequestEvidence, error) {
 }
 
 func authorityActor(a capability.Authorized) store.Actor {
-	return store.Actor{Authority: a.Principal.Authority, Kind: store.ActorOperator, CapabilityPrefix: principalCapabilityPrefix(a.Principal)}
+	return store.Actor{ConsoleProof: capability.ProofForConsole(a.Principal), Authority: a.Principal.Authority, Kind: store.ActorOperator, CapabilityPrefix: principalCapabilityPrefix(a.Principal)}
 }
 
 func (s *EngineController) handleMemberDirectory(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

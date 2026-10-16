@@ -66,11 +66,13 @@ func (s *Server) githubBrowserEndpoints() []Endpoint {
 }
 
 func (s *Server) githubBrowserEndpoint(method, pattern string, verify func(*http.Request) error, handle http.HandlerFunc) Endpoint {
-	return Endpoint{Method: method, Pattern: pattern, Authentication: capability.AuthBrowserFlow, Verify: verify,
+	return Endpoint{
+		Method: method, Pattern: pattern, Authentication: capability.AuthBrowserFlow, Verify: verify,
 		Handle: func(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 			handle(w, r)
 			return nil
-		}}
+		},
+	}
 }
 
 func (s *Server) verifyGitHubAppBrowser(r *http.Request) error {
@@ -124,7 +126,7 @@ func (s *Server) readGitHubAppForm(r *http.Request, csrf string) error {
 	}
 	if len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 || len(r.PostForm["csrf_token"]) != 1 ||
 		!validFormCSRF(r, s.cookiesSecure()) || !constantTimeEqual(r.PostForm.Get("csrf_token"), csrf) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	for key, values := range r.PostForm {
 		if len(values) != 1 || (key != "csrf_token" && (key != "installation_id" || r.URL.Path != "/github/app/select")) {
@@ -149,12 +151,12 @@ func (s *Server) verifyGitHubAppReturn(r *http.Request) error {
 	}
 	flow, ok := s.readGitHubAppFlow(r)
 	if !ok || s.githubApp == nil || !constantTimeEqual(query.Get("state"), flow.State) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: errConnectState.Error()}
+		return apierr.Authorization(apierr.ReasonReauthRequired, errConnectState.Error())
 	}
 	var state githubConnectState
 	if !openFlowState(s.githubApp.stateKey, flow.State, &state) || state.Nonce == "" || time.Now().Unix() >= state.Expires ||
 		!constantTimeEqual(state.Verifier, verifierDigest(flow.Verifier)) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: errConnectState.Error()}
+		return apierr.Authorization(apierr.ReasonReauthRequired, errConnectState.Error())
 	}
 	return nil
 }

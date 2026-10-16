@@ -1,0 +1,29 @@
+package store
+
+import (
+	"context"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+)
+
+// SetConsolePolicy binds the controller's current configuration to committing authorization.
+func (s *Store) SetConsolePolicy(policy func(capability.Principal, time.Time) bool) {
+	s.consolePolicy = policy
+}
+
+func resolveProvisionAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, proof *capability.ConsoleProof) (capability.Principal, error) {
+	p, err := tx.ResolveAuthority(ctx, ref)
+	if err != nil || proof == nil {
+		return p, err
+	}
+	if proof.Session != ref || tx.store.consolePolicy == nil || !tx.store.consolePolicy(p, tx.now()) {
+		return capability.Principal{}, authorityError(apierr.Forbidden, "direct operator session required")
+	}
+	p.Class = capability.CredentialConsole
+	p.Capability.Subject.Kind = capability.SubjectOperator
+	p.Capability.Team = ""
+	p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
+	return p, nil
+}

@@ -41,7 +41,7 @@ const (
 	OperatorConsole     Grant = "operator.console"
 )
 
-// Grants is the complete vocabulary. Claim grants may enter a child only through Award.
+// Grants is the complete vocabulary.
 var Grants = []Grant{
 	RunsRead, RunsWrite, RunsControl, RunsState, NodesClaim, TriggersClaim, ClaimsLaunch,
 	LogsRead, SecretsRead, ApprovalsWrite, TeamAdmin, SecretsRelease, SourceRead,
@@ -192,6 +192,7 @@ const (
 type ProvisionSpec struct {
 	Seed           string `json:"-"`
 	Kind           ProvisionKind
+	ConsoleProof   *ConsoleProof
 	Authority      *AuthorityRef
 	RegistrationID string
 	Subject        Subject
@@ -236,7 +237,7 @@ func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) err
 	if ownerExpansion && child.Data != nil {
 		dataNarrowed = narrowOwnerExpansionData(p, child)
 	}
-	if !subset(child.Repositories, p.Repositories) || !dataNarrowed {
+	if !RepositoryScopeNarrows(p.Repositories, child.Repositories) || !dataNarrowed {
 		return forbidden(apierr.ReasonRepositoryUnauthorized)
 	}
 	if (!narrowBinding(p.Binding, child.Binding) && !ownerExpansion) || !boundedExpiry(child.ExpiresAt, p.ExpiresAt, now) ||

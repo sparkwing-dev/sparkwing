@@ -32,7 +32,7 @@ func (s *DataController) persistedDataAuthority(ctx context.Context, a capabilit
 }
 
 func dataForbidden() *apierr.Error {
-	return &apierr.Error{Code: apierr.Forbidden, Message: "data authority does not match the authenticated scope", Details: map[string]any{"reason": "binding"}}
+	return apierr.Authorization(apierr.ReasonBinding, "data authority does not match the authenticated scope")
 }
 
 func validateDataAuthority(a capability.Authorized, authority blob.Authority) error {
