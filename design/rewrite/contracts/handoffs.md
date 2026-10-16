@@ -635,3 +635,7 @@ The full W8 review against main (`review/areas/W8-full-review-1792104216-final.m
 ## Lead decision 18:40 (Korey decision 109): bootstrap seed revoked on first real admin
 
 **W2:** in the transaction that creates the first real deployment administrator, revoke the seeded bootstrap credential and its descendants. A seed presented after that is refused as already used. Add a real-store test: seed, create an admin, then the seed's sessions and children are refused. W2 does this in its next fix pass.
+
+## Lead decision 20:45 (Korey decision 110): cross-host runtime-mask authority is not built
+
+W3 review finding 2's remaining piece is closed as an accepted residual. Do not add a run-scoped central mask authority or persist runtime mask values. Decision 90 stays enforced for declared and sealed secrets on every host and for `sw.Mask` values on the registering host. W9: state the residual in `docs/sdk.md` under "Secrets and masking" in one sentence (declare a secret if it may end up in an identifier).
