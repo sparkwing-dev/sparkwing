@@ -2608,3 +2608,21 @@ an operator releases it. Winning a dispute releases that dispute's hold.
 Decline holds identify the collection attempt. A declined retry creates its own
 hold after an operator releases an earlier one. Replayed declines preserve the
 release. Successful collection clears the team's decline holds together.
+
+
+Billing page routes now use tenant transactions through the production controller.
+Checkout, card setup and pay-now preserve the caller's idempotency key across
+provider failures. The checkout service returns its hosted-session `id` and
+`url`, plus `customer` and `setup_intent` for card setup or `payment_intent`
+for pay-now. These facts bind verified callbacks to the reserved payer.
+Owner budget updates recheck current team administration at commit.
+
+The raw tenant methods `OpenCreditCheckout`, `AttachCreditCheckout`,
+`DropCreditCheckout`, `SetSpendBudget` and `StartRecoveryAttempt` are removed.
+Embedded callers use `PrepareAuthorizedBillingPage`,
+`CompleteAuthorizedBillingPage`, `RecordAuthorizedBillingPageFailure` and
+`SetAuthorizedSpendBudget` with current team authority. An interrupted provider
+request retains its reservation because delivery may have succeeded.
+Controller startup persists `--payment-mode` through the operator billing owner,
+so the verifier and new reservations use the same mode without a separate
+settings-row seed.

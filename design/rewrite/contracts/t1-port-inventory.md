@@ -2830,3 +2830,31 @@ new attempt restores Held without stopping the running job.
 `TestBillingModelEveryDeclinedAttemptHoldsUntilReleasedProperty` generates retry
 counts and duplicate deliveries against real settlement and operator release.
 Each distinct decline holds the team. Replays preserve a released hold.
+
+The raw checkout open/bind/abort, budget and recovery APIs retire after the
+authorized billing writer cutover. Existing ledger and collection fixtures use
+test-only adapters to the transaction helpers. The controller prepay/chargeback
+proof opens and completes its checkout through the authorized writer. The
+unattached-checkout abort proof retires because ambiguous delivery now retains
+the reservation. `TestBillingPagesFailureRetainsReservationAndProviderBinding`
+covers that replacement. `TestStoreRetiresTokenMeteredBilling` also checks that
+the raw billing mutation methods are absent. The unrelated deletion HTTP
+fixture seeds a pending checkout directly. No native cell is promoted by this
+API retirement.
+
+`billing_native_test.go` verifies `New(...).Handler()` with real sessions and
+CSRF for checkout, card setup, pay-now and owner budgets. Signed setup, prepaid,
+decline and recovery events settle through the production verifier and store.
+Repeated page requests reuse their provider delivery and repeated callbacks have
+one ledger effect. An ambiguous delivery retains its reservation. Authority
+removed during provider delivery prevents completion. Only external provider
+transports are faked.
+
+`billing_pages_test.go` generates stale authority and altered financial facts
+against the real store, checks concurrent reservation replay, preserves payment
+mode isolation, rolls provider binding back with failed page persistence, and
+checks account removal followed by tenant purge. These are ordinary package
+tests. No native Stripe or PostgreSQL cell is promoted.
+`TestBillingPaymentModeRefusesInvalidConfigurationProperty` checks that generated
+invalid modes leave operator configuration unchanged. Production constructor
+proofs use the same operator mode setter as controller startup.

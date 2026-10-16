@@ -32,39 +32,51 @@ func (f *teamWriteFake) record(a capability.Authorized, value string) error {
 	f.calls++
 	return f.err
 }
+
 func (f *teamWriteFake) RenameAuthorizedTeam(_ context.Context, a capability.Authorized, name string) (store.TeamInfo, error) {
 	return store.TeamInfo{Slug: f.team, DisplayName: name}, f.record(a, name)
 }
+
 func (f *teamWriteFake) DeleteAuthorizedTeam(_ context.Context, a capability.Authorized) (store.TeamDeletion, error) {
 	return store.TeamDeletion{Team: f.team, State: store.TeamDeletionPending}, f.record(a, "delete team")
 }
+
 func (f *teamWriteFake) CreateAuthorizedInvitation(_ context.Context, a capability.Authorized, email string, role store.Role, key string) (store.Invitation, error) {
 	return store.Invitation{ID: "invite", Team: f.team, Email: email, Role: role}, f.record(a, key)
 }
+
 func (f *teamWriteFake) DeleteAuthorizedInvitation(_ context.Context, a capability.Authorized, id string) error {
 	return f.record(a, id)
 }
+
 func (f *teamWriteFake) SetAuthorizedBuildTrust(_ context.Context, a capability.Authorized, trust bool) error {
 	return f.record(a, fmt.Sprint(trust))
 }
+
 func (f *teamWriteFake) DeleteAuthorizedRun(_ context.Context, a capability.Authorized) error {
 	return f.record(a, a.Target.RunID)
 }
+
 func (f *teamWriteFake) UnbindAuthorizedGitHubInstallation(_ context.Context, a capability.Authorized, id int64) error {
 	return f.record(a, fmt.Sprint(id))
 }
+
 func (f *teamWriteFake) PutAuthorizedGitHubTrigger(_ context.Context, a capability.Authorized, row store.GitHubAppTrigger) (store.GitHubAppTrigger, error) {
 	return row, f.record(a, row.Repository)
 }
+
 func (f *teamWriteFake) DeleteAuthorizedGitHubTrigger(_ context.Context, a capability.Authorized, id int64, pipeline string) error {
 	return f.record(a, fmt.Sprint(id)+pipeline)
 }
+
 func (f *teamWriteFake) PutAuthorizedGitHubAutomation(_ context.Context, a capability.Authorized, row store.GitHubAppAutomation) error {
 	return f.record(a, row.Repository)
 }
+
 func (f *teamWriteFake) DeleteAuthorizedGitHubAutomation(_ context.Context, a capability.Authorized, id int64) error {
 	return f.record(a, fmt.Sprint(id))
 }
+
 func (f *teamWriteFake) SetAuthorizedGitHubExtraRepos(_ context.Context, a capability.Authorized, repo string, extras []string, _ map[string]int64) ([]string, error) {
 	return extras, f.record(a, repo)
 }
@@ -153,15 +165,18 @@ func (f *billingWriterFake) PrepareAuthorizedBillingPage(_ context.Context, a ca
 	page.Kind, page.Team, page.AmountCents = kind, string(f.team), amount
 	return page, f.err
 }
+
 func (f *billingWriterFake) CompleteAuthorizedBillingPage(_ context.Context, a capability.Authorized, page capability.BillingPage) error {
 	f.completed++
 	f.seen, f.page = a, page
 	return f.completeErr
 }
+
 func (f *billingWriterFake) RecordAuthorizedBillingPageFailure(_ context.Context, _ capability.Authorized, _ capability.BillingPage) error {
 	f.failed++
 	return nil
 }
+
 func (f *billingWriterFake) SetAuthorizedSpendBudget(_ context.Context, a capability.Authorized, cents int64) error {
 	f.seen, f.budget = a, cents
 	return f.err
@@ -195,14 +210,15 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 		if mode == 3 {
 			return nil, errors.New("private-provider-password")
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.example/page","id":"cs_17","expires_at":200}`))}, nil
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.example/page","id":"cs_17","setup_intent":"seti_17","payment_intent":"pi_17","expires_at":200}`))}, nil
 	})}}
 	for _, tc := range []struct {
 		path, body string
 		kind       capability.BillingPageKind
 	}{
 		{"checkout", `{"amount_cents":1000}`, capability.BillingPageCredits},
-		{"card", "", capability.BillingPageCard}, {"pay", "", capability.BillingPageRecovery},
+		{"card", "", capability.BillingPageCard},
+		{"pay", "", capability.BillingPageRecovery},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			property := func(selector []byte, phase uint8) bool {

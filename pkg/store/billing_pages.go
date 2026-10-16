@@ -39,8 +39,12 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 			return ErrInvalidInput
 		}
 		var data []byte
-		err := tx.QueryRowContext(ctx, `SELECT page_json FROM billing_pages WHERE team=? AND account_id=? AND request_key=?`, t.team, p.Capability.Subject.ID, key).Scan(&data)
+		var mode capability.PaymentMode
+		err := tx.QueryRowContext(ctx, `SELECT page_json,payment_mode FROM billing_pages WHERE team=? AND account_id=? AND request_key=?`, t.team, p.Capability.Subject.ID, key).Scan(&data, &mode)
 		if err == nil {
+			if err := configuredPaymentModeTx(ctx, tx, mode); err != nil {
+				return err
+			}
 			if err := json.Unmarshal(data, &page); err != nil {
 				return err
 			}
@@ -55,7 +59,7 @@ func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		mode, err := paymentModeTx(ctx, tx)
+		mode, err = paymentModeTx(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -141,7 +145,14 @@ func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability
 		}
 		switch page.Kind {
 		case capability.BillingPageCredits:
-			_, err = tx.ExecContext(ctx, `UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND id=? AND session_id=id AND paid_at IS NULL AND closed_at IS NULL`, page.ProviderID, page.ExpiresAt.UnixNano(), t.team, page.ReservationID)
+			if page.ProviderID == page.ReservationID || page.IntentID != "" {
+				return ErrInvalidInput
+			}
+			var result sql.Result
+			result, err = tx.ExecContext(ctx, `UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND id=? AND session_id=id AND paid_at IS NULL AND closed_at IS NULL`, page.ProviderID, page.ExpiresAt.UnixNano(), t.team, page.ReservationID)
+			if err == nil {
+				err = requireOneRow(result, "checkout page binding")
+			}
 		case capability.BillingPageCard:
 			if page.Customer == "" || page.IntentID == "" {
 				return ErrInvalidInput

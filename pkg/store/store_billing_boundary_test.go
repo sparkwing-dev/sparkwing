@@ -121,12 +121,12 @@ func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
 		if _, _, err := payer.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "fixture"}, *now); err != nil {
 			t.Fatal(err)
 		}
-		checkout, err := payer.OpenCreditCheckout(t.Context(), 10000*MicroCreditsPerCent, *now, time.Hour)
+		checkout, err := payer.TestOnlyOpenCreditCheckout(t.Context(), 10000*MicroCreditsPerCent, *now, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
 		session := "session-" + string(team)
-		if err := payer.AttachCreditCheckout(t.Context(), checkout, session, now.Add(time.Hour)); err != nil {
+		if err := payer.TestOnlyAttachCreditCheckout(t.Context(), checkout, session, now.Add(time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.settlePaymentFacts(t.Context(), capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "paid-" + string(team), CheckoutID: session, PaymentID: "payment-" + string(team), Kind: capability.PaymentCheckoutPaid, Currency: "usd", AmountMinor: 10000}); err != nil {

@@ -25,11 +25,11 @@ func checkoutCapFixture(t *testing.T, trusted bool) (*Store, *Tenant, *Tenant, *
 
 func TestPaymentCheckoutRawGrantCannotSettleProviderSession(t *testing.T) {
 	s, a, _, now := checkoutCapFixture(t, false)
-	id, err := a.OpenCreditCheckout(t.Context(), 100*MicroCreditsPerCent, *now, time.Hour)
+	id, err := a.TestOnlyOpenCreditCheckout(t.Context(), 100*MicroCreditsPerCent, *now, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.AttachCreditCheckout(t.Context(), id, "provider-session", now.Add(time.Hour)); err != nil {
+	if err := a.TestOnlyAttachCreditCheckout(t.Context(), id, "provider-session", now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: MicroCreditsPerCent, Reference: "provider-session", CreatedBy: "billing"}); !errors.Is(err, ErrInvalidInput) {

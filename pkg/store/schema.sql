@@ -697,7 +697,7 @@ CREATE INDEX idx_payment_events_object ON payment_events(payment_mode,object_id)
 CREATE TABLE billing_pages (
     id TEXT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),
-    account_id TEXT NOT NULL REFERENCES accounts(id),
+    account_id TEXT NOT NULL,
     request_key TEXT NOT NULL CHECK(request_key <> ''),
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     page_json BLOB NOT NULL,

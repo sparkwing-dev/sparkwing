@@ -241,11 +241,6 @@ func headroomTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (int
 // ErrStaleCardSetup refuses a card setup older than the card already on file.
 var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
 
-// SetSpendBudget sets the owner's budget, which stops Cloud usage when the team's 30-day spend reaches it.
-func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error {
-	return t.s.inTx(ctx, func(tx *storeTx) error { return setSpendBudgetTx(ctx, tx, t.team, cents) })
-}
-
 func setSpendBudgetTx(ctx context.Context, tx *storeTx, team Team, cents int64) error {
 	if cents < 0 || cents > MaxCreditGrantMicro/MicroCreditsPerCent {
 		return fmt.Errorf("%w: a budget is between $0 and $%d", ErrInvalidInput, MaxCreditGrantMicro/MicroCreditsPerCent/100)
@@ -434,20 +429,6 @@ func insertCardAttemptTx(ctx context.Context, tx *storeTx, team Team, chargeID, 
 
 // ErrNoPayableCharge is returned when an owner asks to pay a charge that is not open, or one with an attempt already in flight.
 var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
-
-// StartRecoveryAttempt opens a "pay now" attempt on t's open charge, for a Checkout the owner pays by hand.
-func (t *Tenant) StartRecoveryAttempt(ctx context.Context, now time.Time) (_ CardChargeWork, err error) {
-	var w CardChargeWork
-	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
-			return err
-		}
-		var e error
-		w, e = t.startRecoveryAttemptTx(ctx, tx, now)
-		return e
-	})
-	return w, err
-}
 
 func (t *Tenant) startRecoveryAttemptTx(ctx context.Context, tx *storeTx, now time.Time) (CardChargeWork, error) {
 	charge, err := openCardChargeTx(ctx, tx, t.team)

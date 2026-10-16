@@ -127,14 +127,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "New") {
 		t.Fatalf("oversized job omitted standing: %s", w.Body)
 	}
-	now := time.Now()
-	checkout, err := tenant.OpenCreditCheckout(t.Context(), 2000*store.MicroCreditsPerCent, now, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.AttachCreditCheckout(t.Context(), checkout, "prepay", now.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
+	billingModelCheckout(t, e.Store, tenant, "prepay", 2000)
 	webhook("prepay-paid", "checkout.session.completed", `{"id":"prepay","object":"checkout.session","mode":"payment","livemode":false,"payment_status":"paid","payment_intent":"payment","amount_total":2000,"currency":"usd"}`)
 	w = engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", request, http.StatusOK)
 	var response controllerwire.ClaimResponse

@@ -46,3 +46,14 @@ standing capacity or receive a standing deadline.
 
 New accounts receive no automatic free credits. Operators retain the per-account
 credit grant action. Add funds remains available to teams with saved cards.
+
+
+Checkout, saved-card setup and pay-now requests require an idempotency key.
+Retry an interrupted request with the same key. The controller retains its
+reservation after a provider failure and returns the saved page after completion.
+Changing the request under that key conflicts. An expired page requires a new key.
+Owner budgets take effect when their update commits.
+
+The controller's `--payment-mode` configures both provider verification and the
+ledger mode for new reservations. Test and live provider records retain separate
+mode tags. Empty mode disables settlement.

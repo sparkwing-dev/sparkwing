@@ -76,11 +76,11 @@ func TestBillingModelPrepayImmediatelyLiftsCloudStanding(t *testing.T) {
 	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
 	tenant := &Tenant{s: s, team: "a"}
 	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
-	checkout, err := tenant.OpenCreditCheckout(t.Context(), 5000*MicroCreditsPerCent, *now, time.Hour)
+	checkout, err := tenant.TestOnlyOpenCreditCheckout(t.Context(), 5000*MicroCreditsPerCent, *now, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.AttachCreditCheckout(t.Context(), checkout, "prepay-session", now.Add(time.Hour)); err != nil {
+	if err := tenant.TestOnlyAttachCreditCheckout(t.Context(), checkout, "prepay-session", now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.settlePaymentFacts(t.Context(), capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "prepay", CheckoutID: "prepay-session", PaymentID: "prepay-payment", Kind: capability.PaymentCheckoutPaid, AmountMinor: 5000, Currency: "usd"}); err != nil {

@@ -115,7 +115,7 @@ func TestABudgetAlertsOnceWithoutACard(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	acme := teamHandle(t, s, "acme")
-	if err := acme.SetSpendBudget(ctx, 2_000); err != nil {
+	if err := acme.TestOnlySetSpendBudget(ctx, 2_000); err != nil {
 		t.Fatal(err)
 	}
 	spend(t, s, "acme", "ch_1", 1_700)
@@ -197,7 +197,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 		}, now); err != nil {
 			t.Fatal(err)
 		}
-		rec, err := acme.StartRecoveryAttempt(ctx, now)
+		rec, err := acme.TestOnlyStartRecoveryAttempt(ctx, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +303,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 			if n := count(t, s, `SELECT COUNT(*) FROM card_charges WHERE id = ? AND state = 'paid'`, rec.ChargeID); n != 1 {
 				t.Fatalf("charge not paid; a later pay-now would charge the cleared debt again")
 			}
-			if _, err := acme.StartRecoveryAttempt(ctx, now); !errors.Is(err, store.ErrNoPayableCharge) {
+			if _, err := acme.TestOnlyStartRecoveryAttempt(ctx, now); !errors.Is(err, store.ErrNoPayableCharge) {
 				t.Fatalf("pay-now after settlement = %v, want ErrNoPayableCharge", err)
 			}
 			for range 2 {
@@ -397,7 +397,7 @@ func TestBillingWritersShareOneLockOrder(t *testing.T) {
 	}
 	writers := []func(i int){
 		func(i int) {
-			_, err := acme.OpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
+			_, err := acme.TestOnlyOpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
 			note(err)
 		},
 		func(i int) {
@@ -491,7 +491,7 @@ func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	rec, err := acme.StartRecoveryAttempt(ctx, now)
+	rec, err := acme.TestOnlyStartRecoveryAttempt(ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}

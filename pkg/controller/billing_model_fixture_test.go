@@ -1,0 +1,36 @@
+package controller
+
+import (
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+func billingModelCheckout(t *testing.T, s *store.Store, tenant *store.Tenant, provider string, cents int64) {
+	t.Helper()
+	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('billing-owner','billing@example.test',1,1)`)
+	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'billing-owner','owner',1)`, tenant.Team())
+	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('billing-session','billing-owner','team.admin',1,?,?,'billing-owner')`, time.Now().Add(time.Hour).UnixNano(), tenant.Team())
+	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "billing-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, ok := capability.LookupRoute("POST", "/api/v1/team/billing/checkout")
+	if !ok {
+		t.Fatal("checkout route is missing")
+	}
+	a, err := capability.Authorize(t.Context(), s, route, capability.Authenticated{Principal: p, Method: "POST", Pattern: "/api/v1/team/billing/checkout", Live: []capability.LiveAccess{{RuleIndex: 0}}}, capability.Target{Team: string(tenant.Team())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := tenant.PrepareAuthorizedBillingPage(t.Context(), a, capability.BillingPageCredits, cents, "prepay")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page.ProviderID, page.URL = provider, "https://checkout.test/prepay"
+	if err := tenant.CompleteAuthorizedBillingPage(t.Context(), a, page); err != nil {
+		t.Fatal(err)
+	}
+}

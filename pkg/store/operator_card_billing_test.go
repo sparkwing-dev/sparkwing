@@ -139,7 +139,7 @@ func TestADeclineHoldsTheTeamUntilPaid(t *testing.T) {
 	if err != nil || len(work) != 1 {
 		t.Fatalf("work = %+v, %v", work, err)
 	}
-	if _, err := acme.StartRecoveryAttempt(ctx, now); !errors.Is(err, ErrNoPayableCharge) {
+	if _, err := acme.TestOnlyStartRecoveryAttempt(ctx, now); !errors.Is(err, ErrNoPayableCharge) {
 		t.Fatalf("pay now during a live attempt = %v, want ErrNoPayableCharge", err)
 	}
 	team, first, err := s.AsOperator().FailCardAttempt(ctx, work[0].AttemptID, "pi_declined", "insufficient_funds", now)
@@ -162,7 +162,7 @@ func TestADeclineHoldsTheTeamUntilPaid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec, err := acme.StartRecoveryAttempt(ctx, now)
+	rec, err := acme.TestOnlyStartRecoveryAttempt(ctx, now)
 	if err != nil || rec.ChargeID != work[0].ChargeID || rec.AmountCents != 15_000 {
 		t.Fatalf("recovery = %+v, %v", rec, err)
 	}
