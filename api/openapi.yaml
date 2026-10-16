@@ -1082,6 +1082,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.blob.RecordKey'
             - type: "null"
+        owner_capability_prefix:
+          type: string
         ready_at:
           anyOf:
             - format: date-time

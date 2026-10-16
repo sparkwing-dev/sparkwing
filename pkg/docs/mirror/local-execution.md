@@ -321,6 +321,9 @@ The runner's reusable claim credential stays with the claim loop.
 The controller logs each HTTP server failure once with its request ID and masked
 cause. Match the response’s `X-Request-Id` to the controller log to investigate a
 generic client error.
+Unmatched routes log the method and sanitized path with the 404 response.
+The path excludes query parameters and masks registered secrets and credential
+selectors.
 
 ### The laptop boundary
 

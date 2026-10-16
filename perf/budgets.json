@@ -28,6 +28,12 @@
   },
   "routes": [
     {
+      "route": "/api/v1/runs/{run}/children/{child}/jobs/{job}/output",
+      "kind": "api",
+      "exempt": "Requires a live creating job and a child's committed result, absent from the dashboard corpus. In-process HTTP tests verify authority and output integrity. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/tokens",
       "kind": "api",
       "exempt": "Requires live scoped credential authority and a capability inventory/rotation transaction adapter, absent from the dashboard corpus. A write probe must not rotate real credentials. Fake-backed HTTP proofs establish correctness only. Authorized latency, cold start and response bytes are unmeasured.",

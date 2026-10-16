@@ -173,6 +173,9 @@ waits for its output. Options include `sw.WithFreshInputs(in)`,
 submission, authorization, cancellation and cycle checks. Call it inside an
 execution callback. Compose reusable job types into a plan when the work belongs
 in the same run.
+The creating job reads the child's committed output under its live claim.
+Missing output, missing bytes and failed digest verification fail the await.
+An explicit JSON `null` remains a valid output.
 
 ## Generated jobs
 

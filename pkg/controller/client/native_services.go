@@ -85,6 +85,15 @@ func (c *NativeProcessClient) Output(ctx context.Context, run, job string) (json
 	return result.Output, err
 }
 
+// ChildOutput reads a committed result through its creating job's child relation.
+func (c *NativeProcessClient) ChildOutput(ctx context.Context, run, job string) (json.RawMessage, error) {
+	var result struct {
+		Output json.RawMessage `json:"output"`
+	}
+	err := c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/output", "", nil, &result)
+	return result.Output, err
+}
+
 // Latest selects an authorized terminal pipeline result and its requested job.
 func (c *NativeProcessClient) Latest(ctx context.Context, pipeline, job string, age time.Duration) (string, json.RawMessage, error) {
 	var result struct {

@@ -71,7 +71,7 @@ func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
 			child, err := remote.Child(ctx, run, wait)
 			result := nodehost.ProcessChildResult{RunID: child.ID, Status: child.Status}
 			if err == nil && child.FinishedAt != nil && job != "" {
-				result.Output, err = remote.Output(ctx, run, job)
+				result.Output, err = remote.ChildOutput(ctx, run, job)
 			}
 			return result, err
 		}

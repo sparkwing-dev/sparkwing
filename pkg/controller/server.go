@@ -738,6 +738,9 @@ func withRequestLog(
 		start := time.Now()
 		finish := func(status int) {
 			elapsed := time.Since(start)
+			if status == http.StatusNotFound && rec.route == otherLabel {
+				rec.path = sanitizedMissingPath(r.URL.EscapedPath(), masker.Mask)
+			}
 			if status >= http.StatusInternalServerError {
 				cause := rw.cause
 				if cause == nil {

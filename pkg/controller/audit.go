@@ -83,6 +83,7 @@ var auditedReadPrefixes = []string{
 // holder and the line written after the handler returns can name the caller.
 type auditRecord struct {
 	id, route               string
+	path                    string
 	principalID, kind, team string
 	targets                 []any
 	// safety: a GET that changes who can act, such as a sign-in callback, is audited like a write.
@@ -177,8 +178,7 @@ func readOnlyMethod(method string) bool {
 	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
 }
 
-// safety: neither line carries the raw path, query, headers, body or
-// credential, because a path can name a secret.
+// safety: unmatched 404s carry only the sanitized path; queries and credentials never reach either line.
 func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *auditRecord,
 	status int, elapsed time.Duration, clientIP string,
 ) {
@@ -186,9 +186,13 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 		return
 	}
 	denied := status == http.StatusUnauthorized || status == http.StatusForbidden
+	var pathAttrs []any
+	if rec.path != "" {
+		pathAttrs = []any{"path", rec.path}
+	}
 	if readOnlyMethod(r.Method) && !denied && !rec.write && !auditedRead(rec.route) {
-		logger.InfoContext(ctx, "http", "request_id", rec.id, "method", r.Method, "route", rec.route,
-			"status", status, "dur_ms", elapsed.Milliseconds())
+		attrs := []any{"request_id", rec.id, "method", r.Method, "route", rec.route, "status", status, "dur_ms", elapsed.Milliseconds()}
+		logger.InfoContext(ctx, "http", append(attrs, pathAttrs...)...)
 		return
 	}
 	attrs := []any{
@@ -201,7 +205,28 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	}
 	attrs = append(attrs, auditPathAttrs(rec.route, r.URL.EscapedPath())...)
 	attrs = append(attrs, rec.targets...)
+	attrs = append(attrs, pathAttrs...)
 	logger.InfoContext(ctx, "audit", attrs...)
+}
+
+var pathCredential = regexp.MustCompile(`(?:swk_|swn_)[A-Za-z0-9_-]+`)
+
+func sanitizedMissingPath(path string, mask func(string) string) string {
+	parts := strings.Split(mask(path), "/")
+	previous := ""
+	for i, part := range parts {
+		value, err := url.PathUnescape(part)
+		if err != nil {
+			value = "[redacted]"
+		}
+		switch previous {
+		case "secrets", "tokens", "sessions":
+			value = "[redacted]"
+		}
+		previous = value
+		parts[i] = url.PathEscape(pathCredential.ReplaceAllString(mask(value), "[redacted]"))
+	}
+	return strings.Join(parts, "/")
 }
 
 func auditedRead(route string) bool {
