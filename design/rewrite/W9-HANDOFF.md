@@ -1,8 +1,8 @@
 # W9 continuation: local integration and runner transport
 
-Latest continuation: [W9-RETRY-ACTIONS-CONTINUATION.md](W9-RETRY-ACTIONS-CONTINUATION.md)
-ports sealed retry actions, enforces selection validation before admission and
-records the committing retry-mode contract gap.
+Latest continuation: [W9-INTEGRATION-RECHECK.md](W9-INTEGRATION-RECHECK.md)
+reproduces the owner metadata, committed retry selection and production launch
+blockers against the unchanged contracts. Build and focused checks pass.
 
 The next continuation fixes background queue service binding and log finalization.
 See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.
