@@ -193,6 +193,10 @@ Before a local run is accepted, foreground and queued hosts select Go or
 TypeScript from the sealed checkout's pipeline directory. A malformed manifest
 fails setup. Accepted runs retain the SDK identity in their sealed engine.
 
+SDK describe, plan, eval and attempt processes run from the acquired checkout
+root. If describe fails before secret declarations are known, the diagnostic
+names the error code and withholds the details because they may contain secrets.
+
 ## Remote execution
 
 ```bash

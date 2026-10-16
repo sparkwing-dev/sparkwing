@@ -234,13 +234,17 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 }
 
 func (p SDKPlanner) planningError(ctx context.Context, err error, known bool) error {
-	code, message := apierr.SDKError, "SDK describe failed before secret declarations were known"
+	code := apierr.SDKError
 	var structured *apierr.Error
 	if errors.As(err, &structured) {
 		code = structured.Code
 	} else if errors.Is(err, context.DeadlineExceeded) {
 		code = apierr.DeadlineExceeded
 	}
+	if !known && !slices.ContainsFunc(apierr.Codes, func(definition apierr.Definition) bool { return definition.Code == code }) {
+		code = apierr.SDKError
+	}
+	message := "describe failed: " + string(code) + " (details withheld: secrets not yet known)"
 	if known {
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
 	}
