@@ -115,6 +115,22 @@ func newRuntimeFixture(t *testing.T, controller *runtimeControllerFixture) *loca
 	}
 	r := runtime.(*localRuntime)
 	r.listen = func(string, string) (net.Listener, error) { return &runtimeListener{closed: make(chan struct{})}, nil }
+	t.Cleanup(func() {
+		r.mu.Lock()
+		session := r.run
+		r.mu.Unlock()
+		if session == nil {
+			return
+		}
+		select {
+		case <-session.done:
+			return
+		default:
+		}
+		if err := r.Drain(context.Background()); err != nil && !errors.Is(err, context.Canceled) {
+			t.Error(err)
+		}
+	})
 	return r
 }
 
@@ -150,6 +166,30 @@ func TestLocalRuntimeOwnsStoreUntilAllServicesJoin(t *testing.T) {
 	}
 	if held, err := LockHeld(f.home); err != nil || held {
 		t.Fatalf("ownership after shutdown: %v, %v", held, err)
+	}
+}
+
+func TestLocalRuntimeFixtureCleanupJoinsConsumers(t *testing.T) {
+	f := &runtimeControllerFixture{}
+	joined := make(chan struct{})
+	f.background = func(ctx context.Context, _ func(LocalActivity) error) error {
+		<-ctx.Done()
+		close(joined)
+		return nil
+	}
+	t.Run("controller", func(t *testing.T) {
+		r := newRuntimeFixture(t, f)
+		if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	select {
+	case <-joined:
+	default:
+		t.Error("fixture cleanup left its consumer running")
+	}
+	if !f.closed.Load() {
+		t.Error("fixture cleanup left its store open")
 	}
 }
 
@@ -542,5 +582,51 @@ func TestLocalRuntimeReadinessDoesNotWaitForConsumerPreparation(t *testing.T) {
 		default:
 			t.Fatal("controller readiness waits on consumer preparation")
 		}
+	})
+}
+
+func TestLocalRuntimeDefersConsumersUntilPrivateAPIReady(t *testing.T) {
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	signal.Stop(interrupt)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		entered, release, consumed := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		f := &runtimeControllerFixture{
+			http: func() LocalHTTP {
+				close(entered)
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+				return LocalHTTP{API: http.NotFoundHandler()}
+			},
+			background: func(ctx context.Context, _ func(LocalActivity) error) error {
+				close(consumed)
+				<-ctx.Done()
+				return nil
+			},
+		}
+		r := newRuntimeFixture(t, f)
+		done := make(chan error, 1)
+		go func() { done <- r.Run(ctx, LocalStartOptions{Home: f.home, Version: "v1", Stay: true}) }()
+		t.Cleanup(func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		})
+		<-entered
+		synctest.Wait()
+		select {
+		case <-consumed:
+			t.Fatal("consumer started before the private API was serving")
+		default:
+		}
+		close(release)
+		if status, err := r.AwaitReady(ctx); err != nil || !status.Running {
+			t.Fatalf("readiness after API startup: %+v %v", status, err)
+		}
+		<-consumed
 	})
 }

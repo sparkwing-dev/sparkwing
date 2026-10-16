@@ -4,12 +4,11 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
-The command adapters use sealed intake and the shared host interfaces. The CLI
-no longer opens the runs database or starts a separate trigger consumer. Native
-local controller, source, private environment, storage and host factories remain
-unbound in this rewrite checkout, so execution refuses before intake where those
-bindings are required. The command's presence in help is not native execution
-evidence. See [rewrite integration](architecture.md).
+The commands bind sealed intake to the shared controller, source, private
+environment, storage and host services. The CLI sends state operations over the
+authenticated private API. Owner evaluation still requires its separate process
+credential contract. Native execution evidence remains with the integration
+suite. See [rewrite integration](architecture.md).
 
 The old `pkg/localws` server, trigger-consumer election and `RunHosted` entrypoint
 are removed with their state, admission, logging and child-dispatch backends.
@@ -38,10 +37,9 @@ An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
 file. Publication still needs its authorized result/log publisher. A missing
 publisher fails before intake. It cannot change a completed local verdict.
 
-Local schedule registration, pins, timer installation and `__tick` now use
-controller/lifecycle adapters. Their remaining request and factory contracts must
-be connected before local schedules can run. Timers carry their absolute state
-home into resolution. The old CLI schedule writer is removed.
+Local schedule registration, pins, timer installation and `__tick` use the
+controller and lifecycle services. Timers carry their absolute state home into
+resolution. Scheduled execution still needs the scheduler's sealed-intake binding.
 
 ## Local execution
 
@@ -49,6 +47,9 @@ The local controller owns one home, its SQLite store, admission, queue and
 browser dashboard. It starts on demand. The CLI hosts a foreground run and
 sends state operations through the controller API. SDK processes declare and
 execute work through protocol v2. They do not open the controller's database.
+
+Startup reconciles orphaned work and starts the private API before consumers.
+Readiness does not wait for pipeline compilation or source preparation.
 
 The controller is the only writer of the shared store. Reads, cancellation,
 retry and doctor use its API too. The controller's route policy and wire
@@ -71,7 +72,8 @@ Daemon status, stop and restart use the shared local lifecycle. JSON reports
 `state`, `version`, `pid`, `stay`, `installed` and the four activity counts.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
-These adapters require the native local-services binding described above.
+Doctor also sweeps stray step sessions through the controller. A successful
+cleanup whose run was pruned reports an unrecorded-outcome warning and succeeds.
 
 Restart preserves a stopped controller. An answering controller on the exact
 installed version stays running unless `--force` is selected. Replacement waits
@@ -84,6 +86,9 @@ it alive. Health checks alone do not. `--stay` keeps it up until stopped.
 Linux and macOS support an installed login service through `dashboard install`.
 Windows supports stay mode. Machine updates refresh managed controller and
 schedule units together. See [local dashboard](native-mode.md).
+
+Installation drains and joins the existing owner before activating the managed
+service, then waits for the successor to acquire the same home and become ready.
 
 ### Running with no daemon available
 
