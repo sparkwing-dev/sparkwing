@@ -9,6 +9,14 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+const (
+	argonTime    = uint32(1)
+	argonMemory  = uint32(64 * 1024)
+	argonThreads = uint8(4)
+	argonKeyLen  = uint32(32)
+	argonSaltLen = 16
+)
+
 // DefaultArgon2MemoryBudget is the resident memory ceiling for
 // concurrent argon2id hashing. Each hash holds argonMemory KiB while
 // it runs, so the default admits four at a time.

@@ -52,7 +52,11 @@ func TestStoreRecoveryLocalOrphans(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, time.Now().UnixNano(), f.tenant.Team(), f.ref.RunID); err != nil {
+			now, err := f.s.TestOnlyDatabaseTime(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, now.UnixNano(), f.tenant.Team(), f.ref.RunID); err != nil {
 				t.Fatal(err)
 			}
 			for pass := range 2 {

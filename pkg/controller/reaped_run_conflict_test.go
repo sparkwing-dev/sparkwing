@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -78,8 +80,7 @@ func TestCreateNode_StrangerTokenLearnsNothingAboutTheRun(t *testing.T) {
 	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "victim", "failed", secret); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
-	raw, _, err := st.CreateToken("runner-stranger", store.TokenKindRunner,
-		[]string{"runs.state", "nodes.claim"}, 0, time.Now().UTC())
+	raw, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*"}, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner-stranger"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0), RegistrationID: "runner:" + string(store.DefaultTeam) + ":" + "runner-stranger"})
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

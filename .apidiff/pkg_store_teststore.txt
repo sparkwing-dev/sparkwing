@@ -1,9 +1,14 @@
 # pkg/store/teststore
 
+func CredentialExpiry(now time.Time, ttl time.Duration) *time.Time
+func CredentialGrants(scopes []string) []capability.Grant
 func ForTeam(t testing.TB, s *store.Store, team store.Team) *store.Tenant
 func MaintainConcurrency(ctx context.Context, s *store.Store, opts store.ConcurrencyMaintenanceOptions) (store.ConcurrencyMaintenanceResult, error)
 func Open(path string) (*store.Store, error)
+func ProvisionCredential(ctx context.Context, st *store.Store, spec capability.ProvisionSpec) (string, *capability.Capability, error)
 func ReapUnits(ctx context.Context, s *store.Store) ([]store.ReapedUnit, error)
+func SealGitCredential(t testing.TB, team store.Team, row store.GitCredential) store.SealedGitCredential
+func SealSecret(t testing.TB, team store.Team, row store.Secret) store.SealedSecret
 func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)
 func SeedMetric(db *sql.DB, ctx context.Context, run, job string, sample store.MetricSample) error
 func SeedNode(s *store.Store, ctx context.Context, n store.Node) error

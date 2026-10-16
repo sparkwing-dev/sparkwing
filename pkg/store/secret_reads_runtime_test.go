@@ -159,7 +159,7 @@ func TestSecretReadMemberScopesAndMaskedRefusal(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
 	a.Target.SecretName = "KEY"
 	for _, row := range []Secret{{Name: "KEY", Value: "team"}, {Name: "KEY", Pipeline: "build", Value: "pipeline"}, {Name: "MASKED", Value: "hidden", Masked: true}} {
-		if err := tenant.WriteSecret(t.Context(), a, row); err != nil {
+		if err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, row)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,7 +170,7 @@ func TestSecretReadMemberScopesAndMaskedRefusal(t *testing.T) {
 		if pipeline == "build" {
 			want = "pipeline"
 		}
-		if err != nil || row == nil || row.Value != want {
+		if err != nil || row == nil || openSecretFixture(t, tenant, row) != want {
 			t.Fatalf("member scope %q: %+v %v", pipeline, row, err)
 		}
 	}

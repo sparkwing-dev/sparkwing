@@ -25,6 +25,7 @@ unlock.
 - **api:** Accept the controller's verified default-ref selection in shared record reads while preserving the other record selectors. Malformed record-query escaping returns `bad_request`.
 
 - **api (Breaking):** Run-receipt steps use `job_id`, matching the shared client. Receipt responses omit invocation metadata and local store locations.
+- **store (Breaking):** Require sealed credential write types and remove raw token minting and duplicate credit settlement. Lease checks use database time and shared owner fences. Reaping continues after target failures. See [migration guide](docs/migrations/_unreleased.md#shared-lease-fences-and-sealed-credential-writes).
 
 - **store (Breaking):** Require an explicit tenant for event appends and an Operator handle for deployment compute controls. Remove unused compute helpers and the duplicate ready-job count. Both queue gauges use one state snapshot. See [migration guide](docs/migrations/_unreleased.md#tenant-event-append-and-deployment-compute-controls).
 

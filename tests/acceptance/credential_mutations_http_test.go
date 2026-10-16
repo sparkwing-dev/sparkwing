@@ -64,7 +64,8 @@ func (f *credentialMutationFake) record(a capability.Authorized) error {
 	return f.err
 }
 
-func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Authorized, row store.Secret) error {
+func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Authorized, sealed store.SealedSecret) error {
+	row := sealed.Row()
 	if err := f.record(a); err != nil {
 		return err
 	}
@@ -79,7 +80,7 @@ func (f *credentialMutationFake) RemoveSecret(ctx context.Context, a capability.
 	return f.Tenant.RemoveSecret(ctx, a, name, pipeline)
 }
 
-func (f *credentialMutationFake) WriteGitCredential(ctx context.Context, a capability.Authorized, row store.GitCredential) (store.GitCredential, error) {
+func (f *credentialMutationFake) WriteGitCredential(ctx context.Context, a capability.Authorized, row store.SealedGitCredential) (store.GitCredential, error) {
 	if err := f.record(a); err != nil {
 		return store.GitCredential{}, err
 	}
@@ -183,7 +184,8 @@ func TestCredentialMutationsHTTPGitValuesStayPrivateAndTenantBound(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := foreign.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, "foreign"), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialHTTPS, Secret: "foreign-value"}); err != nil {
+	foreignStored, err := foreign.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, "foreign"), teststore.SealGitCredential(t, foreign.Team(), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialHTTPS, Secret: "foreign-value"}))
+	if err != nil {
 		t.Fatal(err)
 	}
 	property := func(value, selector string) bool {
@@ -212,7 +214,7 @@ func TestCredentialMutationsHTTPGitValuesStayPrivateAndTenantBound(t *testing.T)
 			return false
 		}
 		other, err := foreign.GitCredentialForHost(t.Context(), "git.invalid")
-		return err == nil && other.Secret == "foreign-value"
+		return err == nil && other.Secret == foreignStored.Secret
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
@@ -357,7 +359,7 @@ func TestCredentialMutationsHTTPConfirmationUsesTenantAndPin(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialSSH, Secret: "private-ssh-key", Fingerprint: "SHA256:pin"}); err != nil {
+		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), teststore.SealGitCredential(t, tenant.Team(), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialSSH, Secret: "private-ssh-key", Fingerprint: "SHA256:pin"})); err != nil {
 			t.Fatal(err)
 		}
 	}

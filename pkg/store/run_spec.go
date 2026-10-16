@@ -229,7 +229,7 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 	var controllerGeneration int64
 	if lease.Kind == capability.UnitEval {
 		var until int64
-		if err := tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name='controller.owner'`+tx.forUpdate()).Scan(&controllerGeneration, &until); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&controllerGeneration, &until); err != nil {
 			return err
 		}
 		if until <= now.UnixNano() {
@@ -415,7 +415,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 	if dispatch == string(runspec.DispatchController) {
 		var holder string
 		var generation, until int64
-		err := tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name='controller.owner'`+tx.forUpdate()).Scan(&holder, &generation, &until)
+		err := tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder, &generation, &until)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return AcceptedPlan{}, err
 		}

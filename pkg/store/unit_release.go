@@ -11,7 +11,7 @@ import (
 func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string) error {
 	return s.inTx(ctx, func(tx *storeTx) error {
 		var holder string
-		if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forUpdate()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}

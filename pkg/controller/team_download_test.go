@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -95,8 +97,7 @@ func freeTeamToken(t *testing.T, st *store.Store, team store.Team) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _, err := tenant.CreateToken(ctx, "ci", store.TokenKindUser,
-		[]string{"runs.write", "runs.read"}, 0, time.Now())
+	raw, _, err := teststore.ProvisionCredential(ctx, st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(tenant.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "ci"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(time.Now(), 0)})
 	if err != nil {
 		t.Fatal(err)
 	}

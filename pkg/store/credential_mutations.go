@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
@@ -29,7 +30,11 @@ func (t *Tenant) mutateCredentials(ctx context.Context, a capability.Authorized,
 }
 
 // WriteSecret stores a secret under current tenant administration authority.
-func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, row Secret) error {
+func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, sealed SealedSecret) error {
+	if sealed.team != t.team || sealed.team == "" || !secrets.IsBound(sealed.row.Value) {
+		return ErrInvalidInput
+	}
+	row := sealed.row
 	return t.mutateCredentials(ctx, a, func(tx *storeTx, actor string) error {
 		if err := secretname.Validate(row.Name); err != nil {
 			return ErrInvalidInput
@@ -78,7 +83,11 @@ func credentialRowChanged(result sql.Result, err error) error {
 }
 
 // WriteGitCredential replaces a host credential under current administration authority.
-func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, row GitCredential) (GitCredential, error) {
+func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, sealed SealedGitCredential) (GitCredential, error) {
+	if sealed.team != t.team || sealed.team == "" || !secrets.IsBound(sealed.row.Secret) {
+		return GitCredential{}, ErrInvalidInput
+	}
+	row := sealed.row
 	var out GitCredential
 	err := t.mutateCredentials(ctx, a, func(tx *storeTx, actor string) error {
 		if row.Team != "" && row.Team != t.team || row.CreatedBy != "" && row.CreatedBy != actor {

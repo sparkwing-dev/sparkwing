@@ -356,23 +356,6 @@ func TestIdentityReservedSlugs(t *testing.T) {
 	}
 }
 
-func TestIdentityTeamTokensNeverCarryAdmin(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	u := signIn(t, st, "s", "adm@example.com")
-	tn := tenant(t, st, u.PersonalTeam)
-	if _, _, err := tn.CreateTokenWith(ctx, "ops", store.TokenKindUser, []string{"runs.read", "admin"}, 0, time.Now(),
-		store.TokenOptions{}); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
-		t.Fatalf("team mint with admin = %v, want ErrAdminScopeOnTeamToken", err)
-	}
-	if _, _, err := tn.CreateToken(ctx, "ops", store.TokenKindUser, []string{" admin "}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
-		t.Fatalf("team mint with padded admin = %v, want ErrAdminScopeOnTeamToken", err)
-	}
-	if _, _, err := tn.CreateToken(ctx, "ops", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
-		t.Fatalf("team mint with claims.launch = %v, want ErrAdminScopeOnTeamToken", err)
-	}
-}
-
 func TestIdentityOpenInvitationsAreCapped(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

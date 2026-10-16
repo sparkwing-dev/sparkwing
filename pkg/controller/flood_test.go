@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -169,13 +171,11 @@ func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
-	tenantA, _, err := st.CreateToken("tenant-a", store.TokenKindUser,
-		[]string{"runs.write"}, 0, now)
+	tenantA, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "tenant-a"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatalf("tenant-a token: %v", err)
 	}
-	tenantB, _, err := st.CreateToken("tenant-b", store.TokenKindUser,
-		[]string{"runs.write"}, 0, now)
+	tenantB, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "tenant-b"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatalf("tenant-b token: %v", err)
 	}

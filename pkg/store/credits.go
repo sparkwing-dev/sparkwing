@@ -136,15 +136,6 @@ const CreditHistoryMaxLimit = 1000
 
 const creditHistoryDefaultLimit = 200
 
-// safety: only failures where the platform, not the pipeline, stopped a node before execution belong
-// here, because they refund everything the claim billed. A lost runner or lease is excluded: its
-// machine ran until the lease ran out, and the recovery that clears the claim bills it to there.
-var platformSetupFailures = map[string]bool{
-	FailureQueueTimeout: true,
-	FailureLogsAuth:     true,
-	FailureLogsDropped:  true,
-}
-
 // CreditGrant is one row of credit_grants: credits the operator added.
 type CreditGrant struct {
 	ID string
@@ -159,7 +150,7 @@ type CreditGrant struct {
 	CreatedAt time.Time
 }
 
-// CreditCharge is one row of credit_charges: a claim's reservation, one interval of a node's execution, or the refund of a reservation the node did not use.
+// CreditCharge is one persisted reservation, usage debit or refund.
 type CreditCharge struct {
 	ID string
 	// Team is whose balance the row drew on.
@@ -174,9 +165,9 @@ type CreditCharge struct {
 	AmountMicro int64
 	// StorageBytes is the retained bytes above the free allowance a storage row billed, and zero on every other kind.
 	StorageBytes int64
-	// CPUClassCores is the cpu class the row was billed at, in whole cores, and zero for a row written before the rate table.
+	// CPUClassCores is the compute class, or zero for storage.
 	CPUClassCores int64
-	// RateMicroPerSecond is the price the row was billed at, which a later change to the rate table leaves alone.
+	// RateMicroPerSecond is the immutable price of this charge.
 	RateMicroPerSecond int64
 	ChargedAt          time.Time
 }
@@ -810,10 +801,6 @@ func creditMeteringDisabled(ctx context.Context) bool {
 	return ctx.Value(creditMeteringDisabledKey{}) == true
 }
 
-const triggerCreditNodeID = ""
-
-// safety: a frozen team is refused the way an empty balance is, so every
-// runner already backs off from it; the claim rolls back and the work waits.
 func refuseFrozenTeamTx(
 	ctx context.Context, tx *storeTx, team Team, balance, required int64, runID, nodeID string,
 ) error {
@@ -833,11 +820,6 @@ func refuseFrozenTeamTx(
 	}
 	return out
 }
-
-const insertCreditChargeSQL = `
-        INSERT INTO credit_charges (team, id, run_id, node_id, token_prefix, principal, kind, seconds, amount_micro,
-                cpu_class, rate_micro_per_second, charged_at, card_fingerprint)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // AppendEventOnce writes a tenant run event unless that run or job already has its kind.
 func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {

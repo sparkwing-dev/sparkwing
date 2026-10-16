@@ -51,7 +51,11 @@ func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
 		if reaped, err := s.ReapUnits(ctx, lease, 10); err != nil || len(reaped) != 0 {
 			return fmt.Errorf("live owner recovered: %+v: %v", reaped, err)
 		}
-		if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, time.Now().UnixNano(), acceptanceTeam, plan.RunID); err != nil {
+		now, err := s.TestOnlyDatabaseTime(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, now.UnixNano(), acceptanceTeam, plan.RunID); err != nil {
 			return err
 		}
 		for replay := range 2 {

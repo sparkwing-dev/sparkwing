@@ -2,8 +2,11 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -109,7 +112,11 @@ func TestRenewUnitRefusesStaleAndRootAuthority(t *testing.T) {
 				case "root":
 					prefix = demand.CapabilityPrefix
 				case "revoked":
-					rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, demand.CapabilityPrefix)
+					team := Team("a")
+					if kind == capability.UnitPlan || kind == capability.UnitEval {
+						team = ""
+					}
+					revokeClaimRoot(t, s, demand.CapabilityPrefix, team)
 				case "expired":
 					*now = claim.Award.LeaseExpiresAt
 				case "generation":
@@ -117,8 +124,17 @@ func TestRenewUnitRefusesStaleAndRootAuthority(t *testing.T) {
 				case "holder":
 					rewriteSchemaExec(t, s.db, `UPDATE `+table+` SET claimed_by='successor' WHERE `+predicate)
 				}
-				if _, err := s.RenewUnit(t.Context(), prefix, false); err == nil {
-					t.Fatal("invalid unit renewed")
+				_, err := s.RenewUnit(t.Context(), prefix, false)
+				if problem == "revoked" {
+					var refused *apierr.Error
+					if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated {
+						t.Fatalf("revocation refusal = %v", err)
+					}
+				} else {
+					var refused *ErrIllegalTransition
+					if !errors.As(err, &refused) || refused.Reason != ReasonHolderRights {
+						t.Fatalf("renewal refusal = %v", err)
+					}
 				}
 				var lease int64
 				if err := s.db.QueryRow(`SELECT lease_expires_at FROM ` + table + ` WHERE ` + predicate).Scan(&lease); err != nil || lease != claim.Award.LeaseExpiresAt.UnixNano() {
@@ -221,6 +237,25 @@ func TestRenewUnitRequiresBootstrapExchange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.RenewUnit(t.Context(), exchanged.Capability.Prefix, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func revokeClaimRoot(t *testing.T, s *Store, prefix string, team Team) {
+	t.Helper()
+	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
+	actor := Actor{Authority: ref}
+	var err error
+	if team != "" {
+		err = (&Tenant{s: s, team: team}).RevokeAuthority(t.Context(), actor, ref)
+	} else {
+		operator := authorityRoot("revoker", "")
+		operator.Subject.Kind = capability.SubjectOperator
+		operator.Grants = []capability.Grant{capability.OperatorTokens}
+		authorityPersist(t, s, operator)
+		err = s.AsOperator().RevokeAuthority(t.Context(), Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}}, ref)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 }
