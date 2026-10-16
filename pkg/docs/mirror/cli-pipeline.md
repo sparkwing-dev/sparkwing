@@ -571,7 +571,8 @@ separator passes through unchanged.
 |---|---|
 | `-C, --sw-cd PATH` | Run as if started in PATH |
 | `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
-| `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref |
+| `--sw-ref-worktree NAME` | Detached only, with --sw-ref: execute in the named worktree, reused across runs so build output Git ignores stays warm; a run holding it makes the next one wait |
+| `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; combines with --sw-ref only alongside --sw-ref-worktree |
 | `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
 | `--sw-idempotency-key KEY` | Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one |
 | `--sw-request-id ID` | Detached only: tracing identifier recorded on the run; never affects deduplication |

@@ -121,6 +121,7 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 		}.check,
 		Ref:            strings.TrimSpace(wf.ref),
 		PipelineRef:    strings.TrimSpace(wf.pipelineRef),
+		RefWorktree:    strings.TrimSpace(wf.refWorktree),
 		Priority:       priority,
 		IdempotencyKey: strings.TrimSpace(wf.idempotencyKey),
 		RequestID:      strings.TrimSpace(wf.requestID),
@@ -203,6 +204,8 @@ type submission struct {
 
 	PipelineRef string
 
+	RefWorktree string
+
 	// safety: a locked cron schedule pins its own binary, and the consumer
 	// execs this file instead of compiling the checkout.
 	PinnedBinary string
@@ -219,7 +222,10 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	if sub.Gate == nil {
 		return submitResult{}, errors.New("persist submission: the submission carries no risk gate")
 	}
-	if sub.Ref != "" && sub.PipelineRef != "" {
+	if sub.RefWorktree != "" && sub.Ref == "" {
+		return submitResult{}, errors.New("--sw-ref-worktree names where the --sw-ref commit executes; pass --sw-ref")
+	}
+	if sub.Ref != "" && sub.PipelineRef != "" && sub.RefWorktree == "" {
 		return submitResult{}, errors.New(
 			"--sw-ref and --sw-pipeline-ref both name the tree the pipeline compiles from; pass one")
 	}
@@ -238,7 +244,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	if pipelineRev != "" && sub.PinnedBinary != "" {
 		return submitResult{}, fmt.Errorf("pipeline %q declares source and has a pinned schedule binary; re-arm the schedule with --follow", sub.Pipeline)
 	}
-	if sub.Ref != "" && pipelineRev != "" {
+	if sub.Ref != "" && pipelineRev != "" && sub.RefWorktree == "" {
 		return submitResult{}, errors.New("--sw-ref cannot replace a declared pipeline source; run from the intended execution checkout")
 	}
 	if existing, err := findExistingSubmission(ctx, st, sub.Pipeline, sub.IdempotencyKey); err != nil {
@@ -247,11 +253,20 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		return existingSubmissionResult(ctx, st, paths, existing, sub, rev, pipelineRev)
 	}
 
+	var named orchestrator.NamedRefWorktree
+	if sub.RefWorktree != "" {
+		named, err = orchestrator.ResolveNamedRefWorktree(ctx, paths, sub.RepoDir, sub.RefWorktree)
+		if err != nil {
+			return submitResult{}, fmt.Errorf("--sw-ref-worktree %s: %w", sub.RefWorktree, err)
+		}
+	}
+
 	runID := orchestrator.NewLocalRunID()
 	repoDir := sub.RepoDir
 	var worktree string
 	gateDir := repoDir
-	if treeRev, flag := refTreeFor(sub, rev, pipelineRev); treeRev != "" {
+	treeRev, flag := refTreeFor(sub, rev, pipelineRev)
+	if treeRev != "" {
 		hold, held, herr := orchestrator.HoldRefWorktree(paths, runID)
 		if herr != nil {
 			return submitResult{}, fmt.Errorf("%s: could not hold a worktree for this run: %w", flag, herr)
@@ -279,6 +294,14 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		discardRefWorktree(ctx, paths, worktree)
 		return submitResult{}, err
 	}
+	// safety: a pipeline-ref worktree stays, because the run compiles it.
+	if named.Dir != "" {
+		repoDir = named.Dir
+		if pipelineRev == "" {
+			discardRefWorktree(ctx, paths, worktree)
+			worktree = ""
+		}
+	}
 	if err := orchestrator.CaptureSubmissionEnvironment(paths.Root, runID, os.Environ(), slog.Default()); err != nil {
 		discardRefWorktree(ctx, paths, worktree)
 		return submitResult{}, fmt.Errorf("capture submission environment: %w", err)
@@ -289,6 +312,9 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}
 	if rev != "" {
 		triggerEnv[orchestrator.RefWorktreeRevKey] = string(rev)
+	}
+	if named.Repo != "" {
+		triggerEnv[orchestrator.NamedRefWorktreeRepoKey] = named.Repo
 	}
 	if pipelineRev != "" {
 		triggerEnv[orchestrator.PipelineRevKey] = string(pipelineRev)
@@ -312,6 +338,12 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		userName = u.Username
 	}
 	branch, sha, repoSlug, repoURL := submitGitContext(repoDir)
+	if named.Dir != "" {
+		// safety: the named worktree may not exist yet, so the repository comes from
+		// the submitting checkout; like any --sw-ref run, the run names no branch.
+		_, _, repoSlug, repoURL = submitGitContext(sub.RepoDir)
+		branch, sha = "", string(rev)
+	}
 	now := time.Now()
 
 	trigger := store.Trigger{
