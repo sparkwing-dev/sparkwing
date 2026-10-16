@@ -24,7 +24,7 @@ func setComputeLimit(t *testing.T, f creditsFixture, name string, value int64) {
 func seedRunNodeFor(t *testing.T, f creditsFixture, principal, runID, nodeID string) {
 	t.Helper()
 	ctx := store.WithCreatingPrincipal(context.Background(), principal)
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -381,7 +381,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("list schedules = %d rows, %v", len(rows), err)
 	}
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: "run-already", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("seed a run: %v", err)

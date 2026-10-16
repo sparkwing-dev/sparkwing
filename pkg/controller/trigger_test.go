@@ -257,7 +257,7 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 
 	ctx := context.Background()
 	created := time.Now().Add(-time.Hour)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID:        "run-pending-1",
 		Pipeline:  "demo",
 		Status:    "pending",
@@ -268,7 +268,7 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	}
 
 	started := time.Now()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID:        "run-pending-1",
 		Pipeline:  "demo",
 		Status:    "running",
@@ -526,7 +526,7 @@ func TestListRoutes_ClampTheirLimit(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
 	for i := range store.MaxRunListLimit + 5 {

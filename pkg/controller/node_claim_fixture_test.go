@@ -10,7 +10,7 @@ import (
 
 func seedRunNode(t *testing.T, st *store.Store, runID, nodeID string) {
 	t.Helper()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(t.Context(), store.Run{
+	if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

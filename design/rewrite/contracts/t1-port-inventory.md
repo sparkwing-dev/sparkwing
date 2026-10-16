@@ -1,4 +1,18 @@
 `Tenant.FinishRun` and `finishRunOnceTx` are removed. The retained timestamp
+
+## W1 raw run writer continuation
+
+Controller and web reporting fixtures migrate from `Tenant.CreateRun` to
+`teststore.SeedRun`. `TestRunReportingSeedUsesSealedSchemaWithoutExecutableWork`
+checks current-schema reads, masked unclassified arguments, duplicate refusal,
+unregistered tenant refusal and absence of owner, job and credential rows.
+`TestOperatorActiveRunnersUseStoreClockAndWindow` retires with the unused
+lease-window gauge. `TestRunnerInventorySeparatesRenewalLivenessFromHeadroom`
+and the runner inventory properties retain current observation liveness.
+Profile aggregation and evidence-coverage cases use the final `memoized`
+outcome. Both suites pass through real SQLite, including memoized jobs beside
+measured jobs. No native matrix cell is newly claimed.
+
 checks in `TestATerminalRunAlwaysCarriesAFinishTime` now drive real admission,
 plan acceptance, claims and `FinishRunAndUnit` for success, failure and
 cancellation. Exact replay preserves the full terminal snapshot.

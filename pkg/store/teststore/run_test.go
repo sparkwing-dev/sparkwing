@@ -58,3 +58,45 @@ func TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun(t *testing.T) {
 		t.Fatal("missing job silently became ready")
 	}
 }
+
+func TestRunReportingSeedUsesSealedSchemaWithoutExecutableWork(t *testing.T) {
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	at := time.Unix(1700000000, 123).UTC()
+	seed := store.Run{
+		ID: "report", Pipeline: "build", Status: "success", CreatedAt: at, StartedAt: at,
+		Args: map[string]string{"target": "release"}, DeclaredRepo: "acme/widgets", RepoURL: "https://github.com/acme/widgets",
+		GitBranch: "main", GitSHA: "abc123", TriggerSource: "schedule", TriggerUser: "alice", Error: "fixture failure",
+	}
+	if err := teststore.SeedRun(s, t.Context(), store.DefaultTeam, seed); err != nil {
+		t.Fatal(err)
+	}
+	tenant := teststore.ForTeam(t, s, store.DefaultTeam)
+	got, err := tenant.GetRun(t.Context(), seed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Number != 1 || got.Pipeline != seed.Pipeline || got.Status != seed.Status || got.DeclaredRepo != seed.DeclaredRepo || got.RepoURL != seed.RepoURL || got.GitBranch != seed.GitBranch || got.GitSHA != seed.GitSHA || got.TriggerSource != seed.TriggerSource || got.TriggerUser != seed.TriggerUser || got.Error != seed.Error || !got.StartedAt.Equal(at) || got.FinishedAt == nil || !reflect.DeepEqual(got.Args, map[string]string{"target": "***"}) {
+		t.Fatalf("reporting fixture: %+v", got)
+	}
+	for _, table := range []string{"triggers", "eval_units", "nodes", "capabilities"} {
+		var count int
+		if err := s.DB().QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s has %d rows: %v", table, count, err)
+		}
+	}
+	if err := teststore.SeedRun(s, t.Context(), store.DefaultTeam, seed); err == nil {
+		t.Fatal("duplicate reporting seed accepted")
+	}
+	seed.ID = "foreign"
+	if err := teststore.SeedRun(s, t.Context(), "missing", seed); err == nil {
+		t.Fatal("unregistered tenant accepted")
+	}
+}

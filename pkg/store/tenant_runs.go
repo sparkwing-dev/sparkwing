@@ -7,19 +7,6 @@ import (
 	"sort"
 )
 
-// CreateRun writes the run into t's team.
-func (t *Tenant) CreateRun(ctx context.Context, r Run) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.s.createRunTx(ctx, tx, t.team, r); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // GetRun fetches one of t's runs by id. A run of another team reads as
 // [ErrNotFound], because a caller told the row exists but is not yours
 // learns that the id is in use elsewhere.

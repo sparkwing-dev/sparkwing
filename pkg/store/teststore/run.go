@@ -8,9 +8,60 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+// SeedRun inserts reporting facts without admitting executable work.
+func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) error {
+	if _, err := s.ForTeam(ctx, team); err != nil {
+		return err
+	}
+	created := r.CreatedAt
+	if created.IsZero() {
+		created = r.StartedAt
+		if created.IsZero() {
+			created = time.Now().UTC()
+		}
+	}
+	repository := r.DeclaredRepo
+	if repository == "" {
+		repository = r.RepoURL
+	}
+	request := runspec.SealedRequest{Version: 1, RunID: r.ID, AdmittedAt: created, Request: runspec.Request{
+		Version: 1, Team: string(team), Pipeline: r.Pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
+		RequestedArgs: r.Args, Actor: runspec.Actor{Display: r.TriggerUser},
+		Git:     runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: repository}, Ref: r.GitBranch, SHA: r.GitSHA},
+		Source:  runspec.Source{Location: runspec.SourceLocation{RemoteURL: r.RepoURL}},
+		Lineage: runspec.Lineage{ParentRunID: r.ParentRunID, RetryOf: r.RetryOf},
+	}}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	var started, finished, parent any
+	if !r.StartedAt.IsZero() {
+		started = r.StartedAt.UnixNano()
+	}
+	if r.FinishedAt != nil {
+		finished = r.FinishedAt.UnixNano()
+	} else if r.Status == "success" || r.Status == "failed" || r.Status == "cancelled" {
+		finished = created.UnixNano()
+	}
+	if r.ParentRunID != "" {
+		parent = r.ParentRunID
+	}
+	query := `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_at,started_at,finished_at,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,trigger_source,git_branch,git_sha,error,created_principal,log_retention_class,log_retention_days)
+SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,'gh:1',?,'host','execute',?,?,?,?,?,?,?,?,?,?,?,?,'fixture','r30',30 FROM runs WHERE team=?`
+	if s.Dialect() == store.DialectPostgres {
+		for i := 1; strings.Contains(query, "?"); i++ {
+			query = strings.Replace(query, "?", fmt.Sprintf("$%d", i), 1)
+		}
+	}
+	_, err = s.DB().ExecContext(ctx, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, []byte(`[]`), created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
+	return err
+}
 
 // SeedRunFinish sets terminal state for fixtures that do not exercise run execution.
 func SeedRunFinish(s *store.Store, ctx context.Context, team store.Team, id, status, message string) error {

@@ -1,9 +1,6 @@
 package store
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
 // CountPendingNodes returns the count of unclaimed ready nodes.
 func (o *Operator) CountPendingNodes(ctx context.Context) (int, error) {
@@ -65,18 +62,4 @@ func (o *Operator) CountNodesByQueueState(ctx context.Context) (map[string]int, 
 		QueueStateRunning:         running,
 		QueueStateApprovalPending: approval,
 	}, nil
-}
-
-// CountActiveRunners counts distinct claimed_by within `window`.
-func (o *Operator) CountActiveRunners(ctx context.Context, window time.Duration) (int, error) {
-	threshold := o.s.now().Add(-window).UnixNano()
-	var n int
-	err := o.s.queryRow(
-		ctx,
-		`SELECT COUNT(DISTINCT claimed_by) FROM nodes
-		  WHERE claimed_by IS NOT NULL AND claimed_by != ''
-		    AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?`,
-		threshold,
-	).Scan(&n)
-	return n, err
 }

@@ -47,7 +47,7 @@ func TestCreateNode_LiveRunStillAcceptsNodes(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "run-live", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -70,7 +70,7 @@ func TestCreateNode_StrangerTokenLearnsNothingAboutTheRun(t *testing.T) {
 	ctx := context.Background()
 
 	const secret = "s3://acme-private/creds.json not readable by sa/acme-prod"
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "victim", Pipeline: "secret-pipeline", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)

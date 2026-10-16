@@ -85,7 +85,7 @@ func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 	for i := range 20 {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(t.Context(), store.Run{
+		if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{
 			ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
@@ -425,7 +425,7 @@ func TestController_ValidationErrors(t *testing.T) {
 		map[string]any{"pipeline": "only-pipeline"},
 		http.StatusBadRequest)
 
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(context.Background(), store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(st, context.Background(), store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	mustPostJSON(t, base+"/api/v1/runs/run-1/finish",

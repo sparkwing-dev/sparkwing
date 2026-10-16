@@ -628,7 +628,7 @@ func TestGitHubAppRunFinishLeavesAnotherTeamsCheckUnderTheSameID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := other.CreateRun(ctx, store.Run{ID: "shared", Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.store, ctx, other.Team(), store.Run{ID: "shared", Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 

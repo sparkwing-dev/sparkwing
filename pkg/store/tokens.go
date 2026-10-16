@@ -43,11 +43,6 @@ const PrefixLen = 12
 
 const mintAttempts = 5
 
-var (
-	ErrTokenRevoked = errors.New("token is revoked")
-	ErrTokenExpired = errors.New("token is expired")
-)
-
 // Token is one row in the tokens table.
 type Token struct {
 	Hash   string
@@ -79,29 +74,6 @@ type TokenOptions struct {
 	Metered bool
 	// CreatedBy names the account minting the token.
 	CreatedBy string
-}
-
-// IsValid reports whether the token is usable at `now`.
-func (t *Token) IsValid(now time.Time) bool {
-	return TokenEnded(t.RevokedAt, t.ExpiresAt, now) == nil
-}
-
-// TokenEnded reports why a credential with these end times no longer
-// authenticates at now: [ErrTokenRevoked], [ErrTokenExpired], or nil while it
-// is live. Revocation wins when both have passed.
-func TokenEnded(revokedAt, expiresAt *time.Time, now time.Time) error {
-	if revokedAt != nil && !now.Before(*revokedAt) {
-		return ErrTokenRevoked
-	}
-	if expiresAt != nil && !now.Before(*expiresAt) {
-		return ErrTokenExpired
-	}
-	return nil
-}
-
-// HasScope reports exact-string membership.
-func (t *Token) HasScope(scope string) bool {
-	return slices.Contains(t.Scopes, scope)
 }
 
 // TokenKindFromPrefix maps the 3-char marker; "" = unrecognized.

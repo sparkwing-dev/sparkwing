@@ -26,7 +26,7 @@ func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "parent", Pipeline: "A", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -60,12 +60,12 @@ func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "root", Pipeline: "A", Status: "success", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "mid", Pipeline: "B", Status: "running", StartedAt: time.Now(), ParentRunID: "root",
 	}); err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestCycleDetect_RejectsDeepCycle(t *testing.T) {
 		{"r2", "B", "r1"},
 		{"r3", "C", "r2"},
 	} {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 			ID: e.id, Pipeline: e.pipeline, Status: "running",
 			StartedAt: time.Now(), ParentRunID: e.parent,
 		}); err != nil {
@@ -133,7 +133,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
 		StartedAt:     time.Now(),
 		TriggerSource: "manual",
@@ -206,7 +206,7 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
 		StartedAt:    time.Now(),
 		DeclaredRepo: "parent-repo", GitBranch: "main", GitSHA: "parentSHA",
@@ -266,7 +266,7 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
 		StartedAt:     time.Now(),
 		TriggerSource: "pipeline-working-tree@laptop.local",

@@ -1,5 +1,20 @@
 # C1 data contract
 
+## Raw run writer and unused liveness gauge removed
+
+`Tenant.CreateRun` is removed. Executable intake uses `AdmitRun` and its sealed
+request transaction. Reporting fixtures use `teststore.SeedRun`, which writes the
+current sealed schema and creates no owner unit, job or capability. Existing
+controller and web reporting fixtures now use that helper.
+
+`Operator.CountActiveRunners` is removed. Its lease-window gauge had no production
+caller. Tenant runner inventory uses `ReadRunners` and committed observations.
+The unused `runTeamSQL` default-team fallback, `CompileLogNode`,
+`ErrPlanAccepted`, `Token.IsValid`, `Token.HasScope`, `TokenEnded`,
+`ErrTokenRevoked` and `ErrTokenExpired` are removed too. Capability authentication
+and rotation continue through C2 and the store's live authority transactions.
+Profile folding recognizes `memoized` jobs and excludes their execution samples.
+
 ## Explicit tenant reporting readers
 
 `Store.GetRun`, `GetNode`, `ListNodes`, `ListEventsAfter` and
@@ -882,11 +897,11 @@ and revocation checks after locking the chain.
 
 
 Deployment queue metrics use `Operator.CountPendingNodes`,
-`Operator.CountNodesByQueueState` and `Operator.CountActiveRunners`.
+`Operator.CountNodesByQueueState`.
 Their raw Store methods are removed. Queue counts partition outstanding jobs
 by persisted state; a held job with no readiness timestamp is claimed once.
-Expired claims remain claimed until recovery commits. The runner window uses
-the store clock and retains its existing distinct-holder semantics.
+Expired claims remain claimed until recovery commits. Runner liveness uses
+the tenant's committed observation inventory.
 `Store.CountPendingTriggers` is also removed. Local queue readers select
 DefaultTeam explicitly; request admission keeps its authenticated Tenant.
 The tenant trigger count never includes another team's backlog.

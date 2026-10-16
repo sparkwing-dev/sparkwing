@@ -18,6 +18,7 @@ var declaredRepoReaders = map[string]string{
 	"pkg/store/latest_run.go":              "the tenant reporting query filters the sealed repository projection",
 	"pkg/store/runfilter_http.go":          "the HTTP filter parser selects repository display metadata",
 	"pkg/store/store.go":                   "the sealed run reporting projection exposes repository metadata without granting authority",
+	"pkg/store/teststore/run.go":           "the reporting fixture seeds sealed display metadata without admitting work or granting authority",
 }
 
 var declaredRepoPattern = regexp.MustCompile(`\bDeclaredRepos?\b|\bdeclared_repo\b`)

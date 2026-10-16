@@ -80,7 +80,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 	runValid := true
 	runPartial := false
 	for _, n := range nodes {
-		if n.Outcome == "cached" {
+		if n.Outcome == "memoized" {
 			continue
 		}
 		attempts := 0

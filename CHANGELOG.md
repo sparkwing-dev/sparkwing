@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove the raw `Tenant.CreateRun` writer, unused runner gauge and unused legacy credential helpers. Run admission uses sealed intake. Profile folding excludes memoized jobs. See [migration guide](docs/migrations/_unreleased.md#raw-run-writer-and-unused-liveness-gauge-removed).
+
 - **store (Breaking):** Remove default-team reporting readers and require one tenant for dashboard run, job and event reads. Cross-team run queries move to Operator. Remove the raw secret fallback reader. See [migration guide](docs/migrations/_unreleased.md#explicit-tenant-reporting-readers).
 
 - **store:** Runner lists, queue headroom and runner metrics use the tenant's committed inventory. Claim renewals update liveness without replacing the last capacity observation.

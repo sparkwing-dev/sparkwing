@@ -10,7 +10,7 @@ import (
 )
 
 func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
-	for _, mode := range []string{"missing", "unreadable", "cached", "zero"} {
+	for _, mode := range []string{"missing", "unreadable", "memoized", "zero"} {
 		t.Run(mode, func(t *testing.T) {
 			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
@@ -19,7 +19,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			t.Cleanup(func() { _ = st.Close() })
 			start := time.Now()
 			run := store.Run{ID: "r", Pipeline: "coverage", Status: "running", StartedAt: start}
-			if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(t.Context(), run); err != nil {
+			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, run); err != nil {
 				t.Fatal(err)
 			}
 			for _, id := range []string{"a", "c"} {
@@ -27,15 +27,15 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					t.Fatal(err)
 				}
 				outcome := "success"
-				if id == "c" && mode == "cached" {
-					outcome = "cached"
+				if id == "c" && mode == "memoized" {
+					outcome = "memoized"
 				}
 				if err := teststore.SeedNodeFinish(st, t.Context(), store.DefaultTeam, store.NodeRef{RunID: "r", NodeID: id}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
 				cpu := int64(100)
 				if id == "c" {
-					if mode == "missing" || mode == "cached" {
+					if mode == "missing" || mode == "memoized" {
 						continue
 					}
 					cpu = 0
@@ -52,9 +52,9 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					t.Fatal("corrupt metric read succeeded")
 				}
 			}
-			if mode == "cached" {
+			if mode == "memoized" {
 				n, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(t.Context(), "r", "c")
-				if err != nil || n.Outcome != "cached" {
+				if err != nil || n.Outcome != "memoized" {
 					t.Fatalf("cache fixture=%+v, %v", n, err)
 				}
 			}
@@ -91,7 +91,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			if p == nil || p.PinnedCores != 2 || p.PinnedMemoryBytes != 1024 {
 				t.Fatalf("explicit run pin changed: %+v", p)
 			}
-			wantRun := mode == "cached"
+			wantRun := mode == "memoized"
 			if wantRun {
 				if p == nil || p.SampleCount != 1 {
 					t.Fatalf("complete evidence produced no run observation: %+v", p)

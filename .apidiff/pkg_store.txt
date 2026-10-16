@@ -367,7 +367,6 @@ type ClaimProfileResolver interface {
 }
 const ClaimTokenPrefix = "swc"
 const CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
-const CompileLogNode = "_compile"
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
 const ComputeLimitCronSeconds = "min_cron_interval_seconds"
 type ComputeLimitError struct {
@@ -901,7 +900,6 @@ var ErrOnlyTeam = errors.New("store: this is your only team; delete your account
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
 var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")
-var ErrPlanAccepted = errors.New("store: the run's plan was accepted from its planning claim")
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
 var ErrPurchaseLimit = errors.New("credits: the 30-day purchase limit refuses this amount")
 var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
@@ -919,8 +917,6 @@ var ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payme
 var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
 var ErrTeamLimit = errors.New("store: this user has created as many teams as one user may")
 var ErrTeamOwes = errors.New("store: the team owes for usage or has a card charge in progress; pay it before deleting the team")
-var ErrTokenExpired = errors.New("token is expired")
-var ErrTokenRevoked = errors.New("token is revoked")
 var ErrUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
@@ -1486,7 +1482,6 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLease) (StorageChargeSweep, error)
 func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder string, now time.Time, lease time.Duration) (bool, error)
 func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLease, limit int, deleter BlobDeleter) (int64, error)
-func (o *Operator) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
 func (o *Operator) CountNodesByQueueState(ctx context.Context) (map[string]int, error)
 func (o *Operator) CountPendingNodes(ctx context.Context) (int, error)
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error
@@ -2572,7 +2567,6 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Authorized, job, reason string, expires time.Time, key string) error
 func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Authorized, email string, role Role, key string) (Invitation, error)
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
-func (t *Tenant) CreateRun(ctx context.Context, r Run) error
 func (t *Tenant) CreateToken(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error)
@@ -2775,9 +2769,6 @@ type Token struct {
 
 	CreatedBy string
 }
-func (t *Token) HasScope(scope string) bool
-func (t *Token) IsValid(now time.Time) bool
-func TokenEnded(revokedAt, expiresAt *time.Time, now time.Time) error
 func TokenKindFromPrefix(raw string) string
 const TokenKindRunner = "runner"
 const TokenKindService = "service"

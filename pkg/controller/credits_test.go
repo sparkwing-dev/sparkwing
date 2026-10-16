@@ -439,7 +439,7 @@ func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	}); status != http.StatusOK {
 		t.Fatalf("set the rate table = %d", status)
 	}
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: "run-huge", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":96}}]}`),
 	}); err != nil {
@@ -485,7 +485,7 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}); status != http.StatusOK {
 		t.Fatalf("set the rate table = %d", status)
 	}
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":16}}]}`),
 	}); err != nil {
@@ -542,7 +542,7 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 	}); status != http.StatusOK {
 		t.Fatalf("set the rate table = %d", status)
 	}
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":3}}]}`),
 	}); err != nil {
@@ -587,7 +587,7 @@ func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay-quarter", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: "run-quarter", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":0.25}}]}`),
 	}); err != nil {
@@ -624,7 +624,7 @@ func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":8}}]}`),
 	}); err != nil {
@@ -659,7 +659,7 @@ func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
 	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":8}}]}`),
 	}); err != nil {

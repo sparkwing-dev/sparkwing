@@ -649,7 +649,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
 	}
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateRun(t.Context(), store.Run{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.SetComputeLimit(t.Context(), store.ComputeLimitGlobalRunsPerHour, 1); err != nil {

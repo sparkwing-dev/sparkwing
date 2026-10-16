@@ -113,7 +113,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"the deployment's alarm; the route serves it to an admin only",
 	"(*Store).ComputeAlarmState": "the runner alarm is the deployment's, so the count it is checked against is every " +
 		"team's claimed cloud runners",
-	"(*Operator).CountActiveRunners":     "an operational gauge of the deployment's live runners across every team",
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Operator).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +

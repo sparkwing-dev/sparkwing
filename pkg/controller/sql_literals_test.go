@@ -28,7 +28,7 @@ func TestRunFiltersTreatSQLMetacharactersAsLiteral(t *testing.T) {
 		}
 		for i, value := range values {
 			for _, tn := range []*store.Tenant{f.teamA, f.teamB} {
-				if err := tn.CreateRun(ctx, store.Run{
+				if err := teststore.SeedRun(f.st, ctx, tn.Team(), store.Run{
 					ID: fmt.Sprintf("literal-%s-%d", tn.Team(), i), Pipeline: value,
 					Status: value, GitBranch: value, DeclaredRepo: value, RepoURL: value,
 					StartedAt: time.Now(),

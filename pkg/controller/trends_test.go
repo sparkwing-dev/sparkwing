@@ -38,7 +38,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 	for i := range 3 {
 		id := "r-succ-" + string(rune('a'+i))
 		start := now.Add(-10 * time.Minute).Add(time.Duration(i) * time.Minute)
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 			ID:        id,
 			Pipeline:  "demo",
 			Status:    "running",
@@ -53,7 +53,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 
 	{
 		id := "r-fail-1"
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 			ID:        id,
 			Pipeline:  "demo",
 			Status:    "running",
@@ -109,7 +109,7 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 	start := now.Add(-5 * time.Minute)
 	for i, waitMs := range []int{500, 1500} {
 		id := "r-wait-" + string(rune('a'+i))
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 			ID:        id,
 			Pipeline:  "demo",
 			Status:    "running",
@@ -159,7 +159,7 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	now := time.Now()
 	start := now.Add(-5 * time.Minute)
 
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID:        "r-real",
 		Pipeline:  "demo",
 		Status:    "running",
@@ -171,7 +171,7 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "r-real", "success", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID:        "r-legacy",
 		Pipeline:  "demo",
 		Status:    "running",
@@ -220,7 +220,7 @@ func TestTrends_PipelineFilter(t *testing.T) {
 	now := time.Now()
 	for i, p := range []string{"alpha", "beta", "alpha"} {
 		id := "r-" + p + "-" + string(rune('a'+i))
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 			ID:        id,
 			Pipeline:  p,
 			Status:    "running",
@@ -268,7 +268,7 @@ func TestTrendsRejectsStoreQueryFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer st.Close()
-			if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(t.Context(), store.Run{ID: "run", Pipeline: "example", Status: "success", StartedAt: time.Now()}); err != nil {
+			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "example", Status: "success", StartedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
 			var queries []string

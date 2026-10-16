@@ -32,7 +32,7 @@ func seedSecretArgRun(t *testing.T, st *store.Store, id string) {
 
 func seedSecretArgRunAs(t *testing.T, st *store.Store, id, status string) {
 	t.Helper()
-	err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(context.Background(), store.Run{
+	err := teststore.SeedRun(st, context.Background(), store.DefaultTeam, store.Run{
 		ID:        id,
 		Pipeline:  "deploy",
 		Status:    status,

@@ -163,7 +163,7 @@ func TestDashboardReadsStayInsideTheTeamBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := team.CreateRun(ctx, store.Run{ID: "run-a", Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.store, ctx, team.Team(), store.Run{ID: "run-a", Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"/api/v1/runs/run-a/logs", "/api/v1/runs/run-a/logs/n1/completeness", "/api/v1/runs/run-a/events/stream"} {
@@ -195,7 +195,7 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{Paths: paths.PathsAt(t.TempDir())})

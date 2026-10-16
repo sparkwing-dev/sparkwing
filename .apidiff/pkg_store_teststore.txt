@@ -10,6 +10,7 @@ func SeedNode(s *store.Store, ctx context.Context, n store.Node) error
 func SeedNodeFinish(s *store.Store, ctx context.Context, team store.Team, ref store.NodeRef, result store.NodeResult) error
 func SeedNodeReady(s *store.Store, ctx context.Context, run, node string) error
 func SeedPresence(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)
+func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) error
 func SeedRunFinish(s *store.Store, ctx context.Context, team store.Team, id, status, message string) error
 func SeedSecret(s *store.Store, team store.Team, row store.Secret, at time.Time) error
 func SeedUpload(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)

@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Raw run writer and unused liveness gauge removed
+
+`Tenant.CreateRun` is removed. Executable intake uses `AdmitRun` and its sealed
+request transaction. Reporting fixtures use `teststore.SeedRun`, which writes the
+current sealed schema and creates no owner unit, job or capability. Existing
+controller and web reporting fixtures now use that helper.
+
+`Operator.CountActiveRunners` is removed. Its lease-window gauge had no production
+caller. Tenant runner inventory uses `ReadRunners` and committed observations.
+The unused `runTeamSQL` default-team fallback, `CompileLogNode`,
+`ErrPlanAccepted`, `Token.IsValid`, `Token.HasScope`, `TokenEnded`,
+`ErrTokenRevoked` and `ErrTokenExpired` are removed too. Capability authentication
+and rotation continue through C2 and the store's live authority transactions.
+Profile folding recognizes `memoized` jobs and excludes their execution samples.
+
 ## Explicit tenant reporting readers
 
 `Store.GetRun`, `GetNode`, `ListNodes`, `ListEventsAfter` and
@@ -340,8 +355,7 @@ transport's authority adapter.
 
 ## Queue reads use explicit store owners
 
-`CountPendingNodes`, `CountNodesByQueueState` and `CountActiveRunners` move
-from Store to Operator. Select it with `store.AsOperator()` for deployment
+`CountPendingNodes` and `CountNodesByQueueState` move from Store to Operator. Select it with `store.AsOperator()` for deployment
 metrics. These reads continue to aggregate across teams.
 
 `Store.CountPendingTriggers` is removed. Select the intended Tenant with

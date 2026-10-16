@@ -43,7 +43,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		PlanSnapshot: []byte(`{"pipeline":"deploy","run_id":"src-run","nodes":[{"id":"deploy","deps":[]}]}`),
 		StartedAt:    time.Now().Add(-5 * time.Minute),
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, src); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, src); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, src.ID, "failed", "exit 1"); err != nil {
@@ -116,7 +116,7 @@ func TestRetry_WorkingTreeRunRetainsDesktopClaimSource(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	source := "pipeline-working-tree@moonborn.local"
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "workspace-run", Pipeline: "build", Status: "failed", TriggerSource: source,
 		GitSHA: strings.Repeat("a", 40), RepoURL: "https://git.example.com/acme/widgets.git", StartedAt: time.Now(),
 	}); err != nil {
@@ -162,7 +162,7 @@ func TestRetry_WorkingTreeRunIgnoresAnotherTeamsTriggerWithSameID(t *testing.T) 
 		t.Fatal(err)
 	}
 	const runID = "local-worktree"
-	if err := aliceTeam.CreateRun(t.Context(), store.Run{
+	if err := teststore.SeedRun(f.store, t.Context(), aliceTeam.Team(), store.Run{
 		ID: runID, Pipeline: "build", Status: "failed",
 		TriggerSource: "pipeline-working-tree@desktop", StartedAt: time.Now(),
 	}); err != nil {
@@ -212,7 +212,7 @@ func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *test
 		},
 		StartedAt: time.Now(),
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, src); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, src); err != nil {
 		t.Fatal(err)
 	}
 
@@ -264,7 +264,7 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 		Status:    "failed",
 		StartedAt: time.Now().Add(-5 * time.Minute),
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, src); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, src); err != nil {
 		t.Fatal(err)
 	}
 
@@ -321,7 +321,7 @@ func TestRetry_FullQueryParam(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "src-full", Pipeline: "p", Status: "failed", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -364,12 +364,12 @@ func TestRetry_ListAttempts(t *testing.T) {
 
 	ctx := context.Background()
 	t0 := time.Now().Add(-3 * time.Hour)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "root", Pipeline: "p", Status: "failed", CreatedAt: t0, StartedAt: t0,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "second", Pipeline: "p", Status: "failed",
 		RetryOf: "root", CreatedAt: t0.Add(time.Hour), StartedAt: t0.Add(time.Hour),
 	}); err != nil {

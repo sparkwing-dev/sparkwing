@@ -88,23 +88,6 @@ func TestOperatorQueueCountsReturnEveryEmptyState(t *testing.T) {
 	}
 }
 
-func TestOperatorActiveRunnersUseStoreClockAndWindow(t *testing.T) {
-	s, _, now := maintenanceStore(t)
-	maintenanceRun(t, s, "run", 1, RunRunning)
-	for i, offset := range []time.Duration{-time.Minute - time.Nanosecond, -time.Minute, 0, time.Minute, time.Minute} {
-		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,claimed_by,capability_prefix,generation,lease_expires_at,spec_json,execution_json) VALUES ('a','run',?,'pending',?,'claim',1,?,?,?)`, fmt.Sprintf("job-%d", i), fmt.Sprintf("runner-%d", min(i, 3)), now.Add(offset).UnixNano(), []byte(`{}`), []byte(`{}`))
-	}
-	count, err := s.AsOperator().CountActiveRunners(t.Context(), time.Minute)
-	if err != nil || count != 3 {
-		t.Fatalf("window: %d, %v; want 3", count, err)
-	}
-	*now = now.Add(time.Minute + time.Nanosecond)
-	count, err = s.AsOperator().CountActiveRunners(t.Context(), time.Minute)
-	if err != nil || count != 1 {
-		t.Fatalf("advanced window: %d, %v; want 1", count, err)
-	}
-}
-
 func TestTenantPendingTriggersIgnoreForeignQueueProperty(t *testing.T) {
 	s, _, _ := maintenanceStore(t)
 	want := map[Team]int{"a": 0, "b": 0}

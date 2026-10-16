@@ -62,10 +62,6 @@ func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error) {
 // Team reports which team t is scoped to.
 func (t *Tenant) Team() Team { return t.team }
 
-// safety: a row that belongs to a run takes the run's team in the statement that writes it, so no
-// caller can hand it another; a row whose run is gone lands where every pre-tenant row did.
-const runTeamSQL = `COALESCE((SELECT team FROM runs WHERE id = ?), '` + string(DefaultTeam) + `')`
-
 // Operator is the unscoped view of the store. It does not embed *Store,
 // because an embedded *Store would hand every method on the store to
 // anything holding an operator and the unscoped surface would grow by

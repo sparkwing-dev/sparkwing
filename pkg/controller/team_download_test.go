@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type teamDownloadFixture struct {
@@ -35,7 +36,7 @@ func teamRun(t *testing.T, st *store.Store, team store.Team, runID string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(st, ctx, tenant.Team(), store.Run{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 }
