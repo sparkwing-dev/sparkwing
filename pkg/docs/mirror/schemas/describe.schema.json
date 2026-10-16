@@ -422,6 +422,9 @@
           },
           "type": "array"
         },
+        "error": {
+          "$ref": "#/$defs/replyError"
+        },
         "examples": {
           "items": {
             "$ref": "#/$defs/example"
@@ -515,6 +518,35 @@
       },
       "required": [
         "jobs"
+      ],
+      "type": "object"
+    },
+    "replyError": {
+      "additionalProperties": true,
+      "not": {
+        "required": [
+          "error"
+        ]
+      },
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
       ],
       "type": "object"
     },

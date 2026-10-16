@@ -59,7 +59,7 @@ func switchToolchain(dir string, beforeExec func()) error {
 			return execToolchain(binary, args, environment)
 		}, diagnostics: os.Stderr,
 		resolve: func(ctx context.Context, pin engine.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
-			resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode})
+			resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, LocalOnly: true})
 			if err != nil {
 				return engine.Resolved{}, err
 			}

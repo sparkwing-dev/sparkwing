@@ -64,7 +64,9 @@ remove those values from stored invocation arguments, so use declared secrets
 for credentials.
 
 The SDK describes registered inputs, defaults, help, risks and secret names to
-the host. A discovery error fails the whole description. Describe uses defaults
+the host. A discovery error refuses only that pipeline and reports its sanitized
+cause when invoked. Other pipelines retain their own complete secret declarations.
+A pipeline cannot run when its declarations are incomplete. Describe uses defaults
 without requiring execution-only arguments and does not execute generators.
 
 ## Plan() must be pure

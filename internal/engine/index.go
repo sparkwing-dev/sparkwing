@@ -30,6 +30,9 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	if err := ctx.Err(); err != nil {
 		return IndexResult{}, err
 	}
+	if r.config.LocalOnly {
+		return r.localIndex(now), nil
+	}
 	if r.index.index.Format == 0 {
 		cached, err := r.loadIndex(now)
 		if err != nil {
@@ -71,6 +74,24 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	r.checkedAt = now
 	r.indexErr = err
 	return indexResult(r.index, err), nil
+}
+
+func (r *Resolver) localIndex(now time.Time) IndexResult {
+	cached, err := r.loadIndex(now)
+	if err == nil && cached.index.Format != 0 {
+		err = checkPolicyAdvance(r.index, cached)
+		if err == nil {
+			r.index = cached
+		}
+	}
+	if r.index.index.Format == 0 {
+		notice := Notice{Kind: NoticePolicyUnavailable, Reason: "No verified version policy is cached; local-only execution continues without policy enforcement.", Hint: "Controller runners still require a verified version policy."}
+		if err != nil {
+			notice.Reason += fmt.Sprintf(" Cached policy could not be read: %v", err)
+		}
+		return IndexResult{Index: VerifiedIndex{offline: true}, Notices: []Notice{notice}}
+	}
+	return indexResult(r.index, errors.Join(fmt.Errorf("local-only execution uses cached policy without a network refresh"), err))
 }
 
 func (r *Resolver) fetchIndex(ctx context.Context, now time.Time) (VerifiedIndex, error) {

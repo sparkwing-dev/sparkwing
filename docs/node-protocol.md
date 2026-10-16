@@ -112,7 +112,11 @@ allow the host to wait for cleanup before closing the process.
 names. Secrets are declared here once. A pipeline description always includes
 `name` and `args`. Each argument includes `name`, `type` and `required`, with
 optional description, default, enum, secret classification and owning `job_id`.
-Describe failures fail discovery instead of returning a partial schema.
+A failed pipeline has an `error` with the shared code, message and optional hint
+and details, an empty `args` array and no secret declarations. Other pipelines
+retain their complete descriptions. The host refuses the failed pipeline with
+its sanitized cause before planning. It withholds describe output when any
+pipeline fails because that output may contain unclassified secrets.
 
 ```text
 -> {"id":"3","op":"describe"}

@@ -28,6 +28,7 @@ func TestProtocolSchemaContract(t *testing.T) {
 		{"string_body_error", "node-protocol", "runResult", `{"outcome":"failed","error":"body failed"}`, false},
 		{"reply_both_payloads", "node-protocol", "reply", `{"reply":"2","ok":true,"result":{},"error":{"code":"internal","message":"bad"}}`, false},
 		{"describe", "describe", "", `{"pipelines":[{"name":"Build","args":[],"risks_by_step":[{"job_id":"build","step_id":"run","labels":[]}]}]}`, true},
+		{"pipeline_describe_failure", "describe", "", `{"pipelines":[{"name":"Broken","args":[],"error":{"code":"plan_failed","message":"missing deployment setting"}},{"name":"Build","args":[],"secrets":[{"name":"TOKEN"}]}]}`, true},
 		{"flat_plan", "describe", "plan", `{"jobs":[{"id":"build","steps":[{"id":"run"}],"result_step":"run","retry":{"attempts":0},"env":{"MODE":{"value":"test","startup":false}}}],"priority":0}`, true},
 		{"omitted_concurrency_defaults", "describe", "plan", `{"jobs":[],"concurrency":[{"group":"deploy"}]}`, true},
 		{"zero_concurrency", "describe", "plan", `{"jobs":[],"concurrency":[{"group":"deploy","capacity":0}]}`, false},

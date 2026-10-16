@@ -1022,3 +1022,13 @@ Runtime acceptance, schema generation and dependency decoupling remain
 implementation work. Panic stubs cannot prove those behaviors. No binary was
 installed and no stateful pipeline was run for these contracts. The lead retains
 commit and integration work.
+
+## Decision 113: describe failure isolation
+
+`PipelineDescription.Error` carries the shared inner error for that pipeline.
+Failed entries publish an empty args array and no partial secrets or other
+metadata. Both SDKs continue describing other registrations. The host refuses
+only a selected failed entry, preserves its sanitized cause, and never supplies
+a planning function without complete declarations for the selected pipeline.
+Any failed entry keeps all describe-process output behind the secret gate.
+The CLI uses the same selected-entry refusal for help, plan and run preparation.

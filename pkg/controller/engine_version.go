@@ -64,7 +64,7 @@ func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version st
 	if err != nil {
 		return controllerwire.Compatibility{}, err
 	}
-	if index.Index.Development() {
+	if index.Index.Development() || index.Index.Offline() {
 		return controllerwire.Compatibility{APIMajor: controllerwire.APIMajor, EngineRelease: version}, nil
 	}
 	for _, release := range services.Policy(index.Index).Versions {
@@ -73,6 +73,20 @@ func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version st
 		}
 	}
 	return controllerwire.Compatibility{}, &apierr.Error{Code: apierr.NotFound, Message: "engine release is absent from verified metadata"}
+}
+
+// CheckRunner applies local execution policy for authenticated local subjects.
+func (p SignedEngineVersionPolicy) CheckRunner(ctx context.Context, version string) error {
+	if p.Resolver == nil {
+		return versionPolicyUnavailable()
+	}
+	now := time.Now().UTC()
+	index, err := p.Resolver.Index(ctx, now)
+	if err != nil {
+		return err
+	}
+	_, err = engine.Evaluate(index.Index, version, now)
+	return err
 }
 
 // Notices retains signed warnings and displays enforcement without hiding persisted run status.
