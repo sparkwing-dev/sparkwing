@@ -36,3 +36,19 @@ func FuzzIntakeNeverAcceptsOperatorProvenance(f *testing.F) {
 		}
 	})
 }
+
+func TestIntakeOwnerExecutionResolvesDefaultAgainstCurrentPolicy(t *testing.T) {
+	duration := 2 * time.Hour
+	for _, captured := range []time.Duration{0, time.Hour} {
+		options := runspec.Options{OwnerExecutionTimeout: declaration(captured, runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "owner_execution"})}
+		resolved, err := ResolveIntake(options, OperatorInputs{Global: OperatorValues{OwnerExecution: &duration}}, Context{NumCPU: 2})
+		if err != nil || resolved.OwnerExecutionTimeout.Value != duration || resolved.OwnerExecutionTimeout.Origin.Layer != runspec.LayerOperatorGlobal {
+			t.Fatalf("captured=%s timeout=%+v err=%v", captured, resolved.OwnerExecutionTimeout, err)
+		}
+		options.OwnerExecutionTimeout.Origin.Layer = runspec.LayerFlag
+		resolved, err = ResolveIntake(options, OperatorInputs{Global: OperatorValues{OwnerExecution: &duration}}, Context{NumCPU: 2})
+		if captured == 0 && err == nil || captured != 0 && (err != nil || resolved.OwnerExecutionTimeout.Value != captured) {
+			t.Fatalf("explicit=%s timeout=%+v err=%v", captured, resolved.OwnerExecutionTimeout, err)
+		}
+	}
+}

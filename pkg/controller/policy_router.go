@@ -237,7 +237,7 @@ func writePolicyError(w http.ResponseWriter, err error) {
 		failure = &apierr.Error{Code: apierr.Internal, Message: "request failed"}
 	}
 	if apierr.Status(failure.Code) >= http.StatusInternalServerError {
-		noteResponseError(w, err)
+		apierr.NoteResponseError(w, err)
 		safe := &apierr.Error{Code: failure.Code, Message: "request failed"}
 		switch delay := failure.Details["retry_after_ms"].(type) {
 		case int, int64, float64:

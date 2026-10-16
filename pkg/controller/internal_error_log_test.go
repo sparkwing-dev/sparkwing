@@ -14,8 +14,11 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
@@ -92,3 +95,39 @@ func TestServerFailuresLogMaskedCauseOnceProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSignedUploadFailureLogsMaskedCauseOnceProperty(t *testing.T) {
+	property := func(value uint64) bool {
+		secret := fmt.Sprintf("private-%x", value)
+		root := t.TempDir()
+		objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: root, Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer objects.Close()
+		signed, err := objects.Sign(t.Context(), capability.ObjectToSign{Method: "PUT", Key: "teams/a/pending/object", Size: 1, SHA256: strings.Repeat("a", 64), ExpiresAt: time.Now().Add(time.Minute)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var logs bytes.Buffer
+		server := New(nil, slog.New(slog.NewJSONHandler(&logs, nil))).WithDataObjects(objects)
+		server.masker.Register(secret)
+		req := httptest.NewRequest("PUT", signed.URL, failingUploadBody{errors.New("upload read: " + secret)})
+		req.Header.Set(RequestIDHeader, "upload-request")
+		out := httptest.NewRecorder()
+		server.Handler().ServeHTTP(out, req)
+		records := auditLines(t, &logs, "http request failed")
+		if out.Code != 500 || len(records) != 1 || records[0]["request_id"] != "upload-request" || !strings.Contains(fmt.Sprint(records[0]["err"]), "upload read: ***") || !strings.Contains(fmt.Sprint(records[0]["err"]), "***") || strings.Contains(logs.String(), secret) || strings.Contains(out.Body.String(), secret) {
+			t.Logf("upload HTTP %d: %s logs=%s", out.Code, out.Body, logs.String())
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type failingUploadBody struct{ err error }
+
+func (r failingUploadBody) Read([]byte) (int, error) { return 0, r.err }

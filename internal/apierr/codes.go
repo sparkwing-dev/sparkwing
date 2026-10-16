@@ -277,6 +277,9 @@ func WriteHTTP(w http.ResponseWriter, failure *Error) error {
 	if err != nil {
 		return err
 	}
+	if Status(failure.Code) >= http.StatusInternalServerError {
+		NoteResponseError(w, failure)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if delay := retryAfter(failure.Details["retry_after_ms"]); delay != "" {
 		w.Header().Set("Retry-After", delay)
@@ -333,4 +336,19 @@ func retryAfter(value any) string {
 		return ""
 	}
 	return strconv.FormatFloat(math.Ceil(millis/1000), 'f', 0, 64)
+}
+
+// NoteResponseError retains the first cause for the request's masked diagnostic.
+func NoteResponseError(w http.ResponseWriter, err error) {
+	for {
+		if recorder, ok := w.(interface{ ResponseError(error) }); ok {
+			recorder.ResponseError(err)
+			return
+		}
+		wrapper, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return
+		}
+		w = wrapper.Unwrap()
+	}
 }

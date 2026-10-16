@@ -431,6 +431,7 @@ func OwnerExecution(in Inputs) (time.Duration, Origin, error) {
 	}
 	value, origin, err := pick(in, "owner_execution", func(v Values) *time.Duration { return v.OwnerExecution }, *op.OwnerExecution)
 	if origin.Source == Default {
+		value = *op.OwnerExecution
 		origin = op.Origins["operator.owner_execution"]
 	}
 	if err == nil && value <= 0 {

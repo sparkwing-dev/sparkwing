@@ -155,6 +155,13 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		return grant, err
 	}
 
+	outputs := nodehost.OutputRecords{Bind: func(_ context.Context, input nodehost.NodeInput) (nodehost.JobUpload, error) {
+		authority := input.Storage.Authority
+		if !authority.Upload.Set {
+			return nodehost.JobUpload{}, errors.New("job output requires authenticated upload identity")
+		}
+		return nodehost.JobUpload{Identity: authority.Upload.Value, Authority: authority, Key: blob.ResultRecordKey(authority.Attempt.Value, authority.Repo, authority.Ref.Scope, run.Run.Pipeline, blob.KindOutput)}, nil
+	}}
 	follower := nodehost.StateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	config := nodehost.NativeHostConfig{
 		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
@@ -165,7 +172,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},
-		Executor: nodehost.ExecutorDependencies{BindStorage: func(ctx context.Context, input nodehost.NodeInput) (nodehost.StorageBinding, error) {
+		Executor: nodehost.ExecutorDependencies{PublishOutput: outputs.PublishOutput, BindStorage: func(ctx context.Context, input nodehost.NodeInput) (nodehost.StorageBinding, error) {
 			principal, err := claims.principal(ctx, input.NodeID, input.Generation, input.Attempt)
 			if err != nil {
 				return nodehost.StorageBinding{}, err

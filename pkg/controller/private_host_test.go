@@ -1,18 +1,23 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -282,4 +287,95 @@ func FuzzLocalHostRejectsForeignAuthority(f *testing.F) {
 			t.Fatal("foreign authority crossed the host award boundary")
 		}
 	})
+}
+
+func TestLocalHostChildIntakeResolvesCapturedDefaults(t *testing.T) {
+	server, _, tenant, owner := localHostFixture(t)
+	engineSQL(t, server.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
+	engineSQL(t, server.store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','build','pending',1,?,?)`, []byte(`{"id":"build"}`), []byte(`{}`))
+	a := capability.Authorized{Principal: owner, Binding: owner.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}}
+	claim, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: store.NodeRef{RunID: "run", NodeID: "build"}, Actor: engineActor(a), Policy: store.SourceNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := settings.ResolveRequest(settings.Inputs{Context: settings.Context{Local: true, NumCPU: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := controllerwire.CreateRunRequest{IdempotencyKey: "child", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "weather-report", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginChild, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Options: options, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "build"}}}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("POST", "/api/v1/runs/run/children", bytes.NewReader(encoded))
+	request.Header.Set("Authorization", "Bearer "+string(claim.Bearer))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("children HTTP %d: %s", response.Code, response.Body)
+	}
+	var admitted controllerwire.CreateRunResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &admitted); err != nil {
+		t.Fatal(err)
+	}
+	child, err := tenant.ReadRun(t.Context(), admitted.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timeout := child.Request.Request.Options.OwnerExecutionTimeout
+	if !timeout.Set || timeout.Value != limits.RunDeadline {
+		t.Fatalf("child timeout: %+v", timeout)
+	}
+}
+
+type cancelSnapshotBinding struct {
+	capability.BindingChecker
+	cancel context.CancelFunc
+}
+
+func (b cancelSnapshotBinding) CheckBinding(ctx context.Context, p capability.Principal, rule capability.BindingRule, target capability.Target) error {
+	if err := b.BindingChecker.CheckBinding(ctx, p, rule, target); err != nil {
+		return err
+	}
+	b.cancel()
+	return nil
+}
+
+func TestLocalHostSnapshotFailuresLogStoreCauseOnce(t *testing.T) {
+	for _, stage := range []string{"store", "handler_cancel", "authentication_cancel"} {
+		t.Run(stage, func(t *testing.T) {
+			engine, _ := engineRuntimeStore(t)
+			engineRuntimeClaim(t, engine, capability.UnitNode)
+			engine.Store.SetClaimProfileResolver(engineProfileFake{})
+			award, err := engine.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: "run"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			server := New(engine.Store, slog.New(slog.NewJSONHandler(&logs, nil)))
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			wantStatus, wantCause := 500, "invalid character"
+			switch stage {
+			case "store":
+				engineSQL(t, engine.Store, `UPDATE nodes SET execution_json=?`, []byte(`!`))
+			case "handler_cancel":
+				server.authorization.Bindings = cancelSnapshotBinding{server.authorization.Bindings, cancel}
+				wantCause = "context canceled"
+			case "authentication_cancel":
+				cancel()
+				wantStatus, wantCause = 503, "context canceled"
+			}
+			r := httptest.NewRequest("GET", "/api/v1/runs/run/local-host/snapshot", nil).WithContext(ctx)
+			r.Header.Set("Authorization", "Bearer "+string(award.Bearer))
+			r.Header.Set(RequestIDHeader, "snapshot-request")
+			w := httptest.NewRecorder()
+			server.Handler().ServeHTTP(w, r)
+			records := auditLines(t, &logs, "http request failed")
+			if w.Code != wantStatus || len(records) != 1 || records[0]["request_id"] != "snapshot-request" || !strings.Contains(records[0]["err"].(string), wantCause) || records[0]["route"] != "/api/v1/runs/{run}/local-host/snapshot" {
+				t.Fatalf("snapshot HTTP %d: %s logs=%s", w.Code, w.Body, logs.String())
+			}
+		})
+	}
 }

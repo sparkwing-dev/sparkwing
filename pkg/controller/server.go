@@ -774,7 +774,7 @@ type statusRecorder struct {
 	cause  error
 }
 
-func (r *statusRecorder) responseError(err error) {
+func (r *statusRecorder) ResponseError(err error) {
 	if r.cause == nil {
 		r.cause = err
 	}

@@ -288,7 +288,7 @@ func refuseGitHubAppFlow(w http.ResponseWriter, status int, message string) {
 // safety: a refusal's message is written for the person in the flow, so the page shows it; a fault shows no
 // internal text.
 func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
-	noteResponseError(w, err)
+	apierr.NoteResponseError(w, err)
 	page := flowPage{ActionHref: githubAppSettingsPath, ActionLabel: "Back to GitHub settings"}
 	refused, ok := refusalOf(err)
 	var failure *apierr.Error

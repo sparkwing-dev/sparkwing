@@ -38,8 +38,8 @@ import (
 
 func localAwardPlan() nodeproto.PlanDoc {
 	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "first", Inline: true, Steps: []nodeproto.StepSpec{{ID: "run"}}},
-		{ID: "second", Inline: true, Steps: []nodeproto.StepSpec{{ID: "run"}}},
+		{ID: "first", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}},
+		{ID: "second", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}},
 	}}
 }
 
@@ -70,7 +70,7 @@ func TestLocalAwardProcess(t *testing.T) {
 				t.Fatal("process executed another job")
 			}
 			fmt.Println("ran " + request.Job)
-			result = map[string]any{"outcome": "success"}
+			result = map[string]any{"outcome": "success", "output": map[string]string{"job": request.Job}}
 		}
 		if err := frames.Encode(map[string]any{"reply": request.ID, "ok": true, "result": result}); err != nil {
 			t.Fatal(err)
@@ -337,6 +337,9 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		t.Fatalf("persisted pipeline: %+v: %v", stored, err)
 	}
 	for _, row := range stored.Nodes {
+		if row.OutputRecord == nil {
+			t.Fatalf("job output was not committed: %+v", row)
+		}
 		if row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.StateActor.Authority.ID != parents[row.Ref.NodeID] {
 			t.Fatalf("job used another award: %+v", row)
 		}
