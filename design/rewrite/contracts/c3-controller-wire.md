@@ -783,7 +783,15 @@ failures. Fakes and a Unix kubectl fixture establish only this adapter boundary.
 W2 must bind the two projections on its existing authenticated routes and derive
 the current execution target. W3 owns any future masked environment/directory
 capture. W9's legacy env/attach readers and claim-prefix pod guessing are deleted.
-Debug resume still needs W2's declared release route, authority and replay body.
+`DebugControl` extends the observation contract with `ResumeDebugPause`.
+`client.NewDebugControl` binds both operations to one authenticated transport.
+Pause release posts an empty object to W2's existing
+`POST /api/v1/runs/{run}/jobs/{job}/resume` route and requires an empty HTTP 204
+acknowledgement. The client uses that route's safe replay policy. It never sends
+an actor, attribution or lifecycle transition. The CLI reads the selected pause,
+validates its stable run/job identity, then releases that identity through the
+same controller. The committing transaction owns current authority and repeat
+release behavior. Numeric selector resolution remains with the controller.
 Native controller, Kubernetes, Windows and Darwin integration remains open.
 
 The legacy `Client`, `New` and `NewWithToken` and their raw trigger, claim,

@@ -177,6 +177,12 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	var failuresMu sync.Mutex
 	var failures error
 	stopping := func() bool {
+		d.mu.Lock()
+		draining := d.draining
+		d.mu.Unlock()
+		if draining {
+			return true
+		}
 		select {
 		case <-d.quit:
 			return true
