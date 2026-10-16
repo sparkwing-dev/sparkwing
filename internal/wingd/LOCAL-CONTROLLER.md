@@ -303,6 +303,8 @@ transport still refuses API access when it cannot supply a client SID.
 Drain preserves cancellation and unreachable-owner errors and requires a
 `drain_ack` on the current admission protocol. A successful drain then waits for
 the socket and election lock to close. It never starts a replacement process.
+The runtime recognises draining before the API listener closes, so its expected
+closure cannot cancel the acknowledgement write on the admission connection.
 
 `NewManagedUnitManager` implements `ManagedUnitManager` for one captured state
 home. Linux uses systemd user units. macOS uses LaunchAgents. Controller units
@@ -341,6 +343,8 @@ status/stay and dashboard messages.
 election races, home binding, concurrent reuse and refusal paths through the
 lifecycle interface with process-boundary fakes. `TestLocalDrain*` uses
 `net.Pipe` to cover acknowledgement validation and cancelled handshakes.
+The runtime drain test blocks the acknowledgement reader while the API closes
+and verifies that the acknowledgement arrives before connection shutdown.
 The process/store
 scenarios remain open: local controller
 idle lifecycle, health-probe process exit, dashboard install/update, Windows

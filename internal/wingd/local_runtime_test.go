@@ -1,6 +1,7 @@
 package wingd
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 type runtimeControllerFixture struct {
@@ -191,6 +193,39 @@ func TestLocalRuntimeFixtureCleanupJoinsConsumers(t *testing.T) {
 	if !f.closed.Load() {
 		t.Error("fixture cleanup left its store open")
 	}
+}
+
+func TestLocalRuntimeDrainAcknowledgesBeforeClosingConnection(t *testing.T) {
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	signal.Stop(interrupt)
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{}
+		r := newRuntimeFixture(t, f)
+		lifecycle := NewLocalLifecycle(r, nil)
+		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true}); err != nil {
+			t.Fatal(err)
+		}
+		peer, server := net.Pipe()
+		defer peer.Close()
+		r.run.daemon.startConn(newConn(r.run.daemon, server))
+		frames := bufio.NewReader(peer)
+		send(t, peer, &wingwire.Hello{ProtocolMajor: wingwire.ProtocolMajor, HolderLiveness: true})
+		if _, ok := receive(t, frames).(*wingwire.HelloAck); !ok {
+			t.Fatal("missing handshake acknowledgement")
+		}
+		send(t, peer, &wingwire.DrainRequest{})
+		synctest.Wait()
+		if _, ok := receive(t, frames).(*wingwire.DrainAck); !ok {
+			t.Fatal("missing drain acknowledgement")
+		}
+		if err := lifecycle.Stop(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if !f.closed.Load() {
+			t.Fatal("drain left the controller open")
+		}
+	})
 }
 
 func TestLocalRuntimeRefusesConcurrentOwnerBeforeOpeningStore(t *testing.T) {
