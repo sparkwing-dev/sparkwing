@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -54,6 +57,39 @@ func newCacheHTTPFixture(t testing.TB) (*dataHTTPFixture, *cacheHTTPTransactions
 		return tx, nil
 	}
 	return f, tx
+}
+
+func TestDataRecordClientVerifiedDefaultSelection(t *testing.T) {
+	f, tx := newCacheHTTPFixture(t)
+	f.boundary = authorityMember()
+	p := &f.boundary.snapshot.Authorities[0].Principal
+	p.Capability.Grants = []capability.Grant{capability.DataRead}
+	p.Capability.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:12", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
+	authority := blob.Authority{CapabilityRef: p.Authority.ID, Principal: blob.Principal(p.Capability.Subject.ID), Repo: "gh:12"}
+	f.data.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) { return authority, nil }
+	key := blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: blob.MemoRecordName, Scope: blob.Scope{Repo: "gh:12", Pipeline: "ci", Job: "build", Key: "hash"}}
+	selected := key
+	selected.Scope.Ref = blob.RefScope{Ref: "main", Verified: true}
+	tx.lookupResult = blob.RecordLookupResult{Found: true, Record: blob.Record{
+		Key: selected, Digest: dataDigest(), Uploader: "private-uploader", Source: blob.UploadIdentity{CapabilityRef: "private-capability"},
+		RefFacts: blob.RefFacts{Scope: selected.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "private-delivery", SHA: "private-sha"},
+	}}
+	h := f.handler()
+	_, records, err := client.NewDataClient(client.EngineOptions{URL: "https://controller.test", Bearer: func(context.Context) (string, error) { return f.boundary.raw, nil }, HTTP: &http.Client{Transport: surfaceTransport(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if strings.Contains(w.Body.String(), "private-") {
+			t.Fatalf("private record authority escaped: %s", w.Body.String())
+		}
+		return w.Result(), nil
+	})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := records.LookupRecord(t.Context(), blob.RecordLookup{Key: key, VerifiedDefaultOnly: true})
+	if err != nil || !result.Found || result.Record.Key != selected || result.Record.Digest != dataDigest() || !tx.lookup.VerifiedDefaultOnly || tx.lookup.Authority != authority {
+		t.Fatalf("verified-default HTTP record: %+v %v lookup=%+v", result, err, tx.lookup)
+	}
 }
 
 func cacheBody(operation string) string {

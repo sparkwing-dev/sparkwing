@@ -10,51 +10,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-type dataRecordRequest struct {
-	Kind           blob.Kind        `json:"kind"`
-	Pipeline       string           `json:"pipeline"`
-	Job            string           `json:"job"`
-	Key            string           `json:"key"`
-	Name           string           `json:"name"`
-	Digest         blob.Digest      `json:"digest"`
-	ManifestDigest *blob.Digest     `json:"manifest_digest,omitempty"`
-	Members        []dataMemberJSON `json:"members"`
-	ExpiresAt      *time.Time       `json:"expires_at,omitempty"`
-}
-
-type dataMemberJSON struct {
-	Digest blob.Digest `json:"digest"`
-	Path   string      `json:"path"`
-	Size   int64       `json:"size"`
-	Mode   uint32      `json:"mode"`
-}
-
-type dataRecordJSON struct {
-	Kind           blob.Kind       `json:"kind"`
-	Repo           runspec.RepoKey `json:"repo"`
-	Ref            string          `json:"ref"`
-	Pipeline       string          `json:"pipeline"`
-	Job            string          `json:"job"`
-	Key            string          `json:"key"`
-	Name           string          `json:"name"`
-	Digest         blob.Digest     `json:"digest"`
-	ManifestDigest *blob.Digest    `json:"manifest_digest,omitempty"`
-	Provenance     blob.Provenance `json:"provenance"`
-	CreatedAt      time.Time       `json:"created_at"`
-	ExpiresAt      *time.Time      `json:"expires_at,omitempty"`
-}
-
-type dataRecordLookupResponse struct {
-	Found   bool             `json:"found"`
-	Record  *dataRecordJSON  `json:"record,omitempty"`
-	Members []dataMemberJSON `json:"members"`
-}
-
 func (s *Server) handleDataRecordCommit(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var request dataRecordRequest
+	var request controllerwire.DataRecordWriteRequest
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
 	}
@@ -89,7 +50,7 @@ func (s *Server) handleDataRecordCommit(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-func validateDataRecordRequest(request dataRecordRequest) error {
+func validateDataRecordRequest(request controllerwire.DataRecordWriteRequest) error {
 	if !slices.Contains(blob.Kinds, request.Kind) || request.Name == "" || !validDataDigest(request.Digest) ||
 		request.ManifestDigest != nil && !validDataDigest(*request.ManifestDigest) || request.ExpiresAt != nil && request.ExpiresAt.IsZero() {
 		return invalidEngineBody("record requires a known kind, name and SHA-256 digests")
@@ -123,12 +84,12 @@ func (s *Server) handleDataRecordLookup(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		return dataRouteError(err)
 	}
-	response := dataRecordLookupResponse{Found: result.Found, Members: []dataMemberJSON{}}
+	response := controllerwire.DataRecordLookupResult{Found: result.Found, Members: []controllerwire.DataMember{}}
 	if result.Found {
 		record := dataRecordResponse(result.Record)
 		response.Record = &record
 		for _, member := range result.Members {
-			response.Members = append(response.Members, dataMemberJSON{Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
+			response.Members = append(response.Members, controllerwire.DataMember{Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
 		}
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -167,8 +128,8 @@ func dataRecordQuery(query url.Values) (blob.RecordLookup, error) {
 	return request, nil
 }
 
-func dataRecordResponse(record blob.Record) dataRecordJSON {
-	response := dataRecordJSON{Kind: record.Key.Kind, Repo: record.Key.Scope.Repo, Ref: record.Key.Scope.Ref.CapabilityScope(), Pipeline: record.Key.Scope.Pipeline, Job: record.Key.Scope.Job, Key: record.Key.Scope.Key, Name: record.Key.Name, Digest: record.Digest, Provenance: record.Provenance, CreatedAt: record.CreatedAt}
+func dataRecordResponse(record blob.Record) controllerwire.DataRecord {
+	response := controllerwire.DataRecord{Kind: record.Key.Kind, Repo: record.Key.Scope.Repo, Ref: record.Key.Scope.Ref.CapabilityScope(), Pipeline: record.Key.Scope.Pipeline, Job: record.Key.Scope.Job, Key: record.Key.Scope.Key, Name: record.Key.Name, Digest: record.Digest, Provenance: record.Provenance, CreatedAt: record.CreatedAt}
 	if record.ManifestDigest.Set {
 		response.ManifestDigest = &record.ManifestDigest.Value
 	}

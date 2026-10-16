@@ -14351,6 +14351,11 @@ paths:
               - node.report
             binding: ownNode
             liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
+            liveness: process
         retry: never
   /node/v1/children:
     post:
@@ -14371,6 +14376,11 @@ paths:
         authentication: capability
         access:
           - credential: nodehost_process
+            grants:
+              - children.start
+            binding: bodyNamesRun
+            liveness: process
+          - credential: owner_process
             grants:
               - children.start
             binding: bodyNamesRun
@@ -14406,6 +14416,11 @@ paths:
               - children.start
             binding: childOfBoundNode
             liveness: process
+          - credential: owner_process
+            grants:
+              - children.start
+            binding: childOfBoundNode
+            liveness: process
         retry: safe
       x-sparkwing-wire: undocumented
   /node/v1/cleanups:
@@ -14430,6 +14445,11 @@ paths:
             grants:
               - node.report
             binding: ownCleanup
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
             liveness: process
         retry: never
       x-sparkwing-wire: undocumented
@@ -14462,6 +14482,11 @@ paths:
               - node.report
             binding: ownCleanup
             liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
+            liveness: process
         retry: never
       x-sparkwing-wire: undocumented
   /node/v1/jobs/{job}/output:
@@ -14489,6 +14514,11 @@ paths:
         authentication: capability
         access:
           - credential: nodehost_process
+            grants:
+              - data.read
+            binding: readSet
+            liveness: process
+          - credential: owner_process
             grants:
               - data.read
             binding: readSet
@@ -14529,6 +14559,11 @@ paths:
               - node.report
             binding: ownNode
             liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
+            liveness: process
         retry: exact_body
   /node/v1/oidc-token:
     post:
@@ -14552,6 +14587,11 @@ paths:
             grants:
               - oidc.mint
             binding: ownNode
+            liveness: process
+          - credential: owner_process
+            grants:
+              - oidc.mint
+            binding: runOfTrigger
             liveness: process
         retry: never
       x-sparkwing-wire: undocumented
@@ -14584,6 +14624,11 @@ paths:
               - refs.read
             binding: readSet
             liveness: process
+          - credential: owner_process
+            grants:
+              - refs.read
+            binding: readSet
+            liveness: process
         retry: safe
       x-sparkwing-wire: undocumented
   /node/v1/secrets/{name}:
@@ -14611,6 +14656,11 @@ paths:
         authentication: capability
         access:
           - credential: nodehost_process
+            grants:
+              - secrets.release
+            binding: declaredSecret
+            liveness: process
+          - credential: owner_process
             grants:
               - secrets.release
             binding: declaredSecret
@@ -14650,6 +14700,11 @@ paths:
             grants:
               - node.report
             binding: ownNode
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: runOfTrigger
             liveness: process
         retry: exact_body
   /webhooks/github-app:

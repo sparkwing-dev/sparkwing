@@ -34,8 +34,11 @@ job B authority to reference the same bytes.
 
 `GET /api/v1/data/records` selects `kind`, `ref`, `pipeline`, `job`, `key` and
 `name`. Optional `deadline` is an RFC3339 timestamp. Optional
-`verified_default_only=true` narrows the lookup. Repeated or unknown selectors
-fail with `bad_request`. A miss returns `{"found":false,"members":[]}`.
+`verified_default_only=true` selects the repository's persisted verified default
+ref. The shared client accepts that ref selection while requiring the repository,
+kind, name, pipeline, job and key to match the request. Malformed query escaping,
+repeated selectors and unknown selectors fail with `bad_request`.
+A miss returns `{"found":false,"members":[]}`.
 A hit returns public record metadata and authorized member metadata. It omits
 private authority references, uploader identities and read-set snapshots.
 The `ref` selector and response metadata use `manual:<ref>` for submitter-vouched

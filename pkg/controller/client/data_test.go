@@ -38,6 +38,62 @@ func testDataClient(t *testing.T, transport dataTransport) (blob.DataSigner, blo
 	return signer, records
 }
 
+func TestDataClientAcceptsServerSelectedVerifiedDefaultRef(t *testing.T) {
+	key := blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: "output", Scope: blob.Scope{Repo: "gh:42", Pipeline: "ci", Job: "build", Key: "hash"}}
+	_, records := testDataClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Query().Get("verified_default_only") != "true" {
+			t.Fatal("lookup lost its verified-default selection")
+		}
+		return dataResponse(t, wire.DataRecordLookupResult{Found: true, Record: &wire.DataRecord{
+			Kind: blob.KindMemo, Repo: "gh:42", Ref: "main", Pipeline: "ci", Job: "build", Key: "hash", Name: "output", Digest: "digest",
+		}, Members: []wire.DataMember{}}), nil
+	})
+	result, err := records.LookupRecord(t.Context(), blob.RecordLookup{Key: key, VerifiedDefaultOnly: true})
+	if err != nil || !result.Found || result.Record.Key.Scope.Ref != (blob.RefScope{Ref: "main", Verified: true}) || result.Record.Digest != "digest" {
+		t.Fatalf("verified-default record: %+v %v", result, err)
+	}
+}
+
+func FuzzDataClientDefaultRefNeverChangesRecordSelectors(f *testing.F) {
+	for change := uint8(0); change < 7; change++ {
+		f.Add("main", change, true)
+	}
+	f.Add("", uint8(0), true)
+	f.Add("manual:main", uint8(0), true)
+	f.Add("main", uint8(0), false)
+	f.Add("manual:", uint8(0), false)
+	f.Fuzz(func(t *testing.T, ref string, change uint8, fallback bool) {
+		key := blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: "output", Scope: blob.Scope{Repo: "gh:42", Pipeline: "ci", Job: "build", Key: "hash"}}
+		record := wire.DataRecord{Kind: blob.KindMemo, Repo: "gh:42", Ref: ref, Pipeline: "ci", Job: "build", Key: "hash", Name: "output", Digest: "digest"}
+		switch change % 7 {
+		case 1:
+			record.Kind = blob.KindOutput
+		case 2:
+			record.Repo = "gh:99"
+		case 3:
+			record.Pipeline = "other"
+		case 4:
+			record.Job = "other"
+		case 5:
+			record.Key = "other"
+		case 6:
+			record.Name = "other"
+		}
+		_, records := testDataClient(t, func(*http.Request) (*http.Response, error) {
+			return dataResponse(t, wire.DataRecordLookupResult{Found: true, Record: &record, Members: []wire.DataMember{}}), nil
+		})
+		result, err := records.LookupRecord(t.Context(), blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback})
+		want := change%7 == 0 && (fallback && ref != "" && !strings.HasPrefix(ref, "manual:") || !fallback && ref == "manual:")
+		if want {
+			if err != nil || !result.Found {
+				t.Fatalf("selected record was rejected: %+v %v", result, err)
+			}
+		} else if err == nil || result.Found {
+			t.Fatalf("record selector substitution accepted: %+v %v", result, err)
+		}
+	})
+}
+
 func TestDataClientStructuredErrorsAndRetry(t *testing.T) {
 	for _, code := range []apierr.Code{apierr.Unavailable, apierr.RateLimited, apierr.Forbidden, "future_data_error"} {
 		t.Run(string(code), func(t *testing.T) {

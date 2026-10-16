@@ -187,6 +187,12 @@ or ref evidence is accepted in a request.
 | GET `/api/v1/data/records` | flattened `kind`, `name`, `ref`, `pipeline`, `job`, `key`, `deadline`, `verified_default_only` query selectors | `found`, optional flat `record`, `members` |
 | POST `/api/v1/data/records` | flat logical record selectors, digest, optional manifest/expiry, members | flat canonical record |
 
+Record handlers and the client use the shared DataRecordWriteRequest,
+DataRecordLookupResult, DataRecord and DataMember DTOs. A verified-default lookup
+accepts the server-selected nonempty verified ref while checking every other
+record selector against the request. An ordinary lookup requires an exact ref
+match. Invalid query escaping returns `bad_request` before storage access.
+
 The private local-host `data-authority` endpoints return C1's canonical live
 storage projection under the independently authenticated owner or node award.
 Native clients compare every byte/record authority argument against that captured

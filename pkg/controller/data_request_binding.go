@@ -6,6 +6,7 @@ import (
 	"net/url"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func decodeDataTarget(r *http.Request) (capability.RequestEvidence, error) {
@@ -35,13 +36,15 @@ func decodeDataTarget(r *http.Request) (capability.RequestEvidence, error) {
 		err = decodeEngineRequest(r, &body)
 		target.Operation, target.UploadID = capability.DataCommit, body.UploadID
 	case "POST /api/v1/data/records":
-		var body dataRecordRequest
+		var body controllerwire.DataRecordWriteRequest
 		err = decodeEngineRequest(r, &body)
 		target.Operation, target.Digest, target.RecordKind, target.RecordName = capability.DataRecord, string(body.Digest), string(body.Kind), body.Name
 	case "GET /api/v1/data/records":
 		var query url.Values
 		query, err = url.ParseQuery(r.URL.RawQuery)
-		if err == nil {
+		if err != nil {
+			err = invalidEngineBody("invalid record query")
+		} else {
 			body, e := dataRecordQuery(query)
 			err = e
 			target.Operation, target.RecordKind, target.RecordName, target.RecordScope = capability.DataLookup, string(body.Key.Kind), body.Key.Name, body.Key.Scope.Ref.CapabilityScope()

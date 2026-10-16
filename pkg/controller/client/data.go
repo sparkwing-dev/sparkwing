@@ -135,11 +135,7 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 	if err := c.checkAuthority(input.Authority); err != nil {
 		return blob.RecordLookupResult{}, err
 	}
-	var result struct {
-		Found   bool              `json:"found"`
-		Record  *wire.DataRecord  `json:"record,omitempty"`
-		Members []wire.DataMember `json:"members"`
-	}
+	var result wire.DataRecordLookupResult
 	key := input.Key
 	query := url.Values{"kind": {string(key.Kind)}, "name": {key.Name}, "ref": {key.Scope.Ref.CapabilityScope()}, "pipeline": {key.Scope.Pipeline}, "job": {key.Scope.Job}, "key": {key.Scope.Key}, "verified_default_only": {strconv.FormatBool(input.VerifiedDefaultOnly)}}
 	if !input.Budget.Deadline.IsZero() {
@@ -161,7 +157,14 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 		return blob.RecordLookupResult{}, dataProtocolError("record lookup has no payload")
 	}
 	record := decodeDataRecord(*result.Record, input.Key.Team)
-	if record.Key != input.Key {
+	expected := input.Key
+	if input.VerifiedDefaultOnly {
+		if !record.Key.Scope.Ref.Verified || record.Key.Scope.Ref.Ref == "" {
+			return blob.RecordLookupResult{}, dataProtocolError("record lookup did not select a verified default ref")
+		}
+		expected.Scope.Ref = record.Key.Scope.Ref
+	}
+	if record.Key != expected {
 		return blob.RecordLookupResult{}, dataProtocolError("record lookup changed selected key")
 	}
 	members := make([]blob.Member, 0, len(result.Members))
@@ -182,17 +185,7 @@ func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRe
 	if c.authority != nil && input.Source != c.authority.Upload.Value {
 		return blob.Record{}, localHostClientRefusal()
 	}
-	body := struct {
-		Kind           blob.Kind         `json:"kind"`
-		Pipeline       string            `json:"pipeline"`
-		Job            string            `json:"job"`
-		Key            string            `json:"key"`
-		Name           string            `json:"name"`
-		Digest         blob.Digest       `json:"digest"`
-		ManifestDigest *blob.Digest      `json:"manifest_digest,omitempty"`
-		Members        []wire.DataMember `json:"members"`
-		ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
-	}{Kind: input.Key.Kind, Pipeline: input.Key.Scope.Pipeline, Job: input.Key.Scope.Job, Key: input.Key.Scope.Key, Name: input.Key.Name, Digest: input.Digest, Members: []wire.DataMember{}}
+	body := wire.DataRecordWriteRequest{Kind: input.Key.Kind, Pipeline: input.Key.Scope.Pipeline, Job: input.Key.Scope.Job, Key: input.Key.Scope.Key, Name: input.Key.Name, Digest: input.Digest, Members: []wire.DataMember{}}
 	if input.ManifestDigest.Set {
 		body.ManifestDigest = &input.ManifestDigest.Value
 	}
@@ -229,12 +222,15 @@ func decodeDataRecord(r wire.DataRecord, team string) blob.Record {
 func (c *dataClient) LookupMemo(context.Context, blob.MemoLookup) (blob.MemoHit, error) {
 	return blob.MemoHit{}, missingDataProof()
 }
+
 func (c *dataClient) LookupDepcache(context.Context, blob.DepcacheLookup) (blob.DepcacheHit, error) {
 	return blob.DepcacheHit{}, missingDataProof()
 }
+
 func (c *dataClient) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error) {
 	return blob.MemoHit{}, missingDataProof()
 }
+
 func missingDataProof() error {
 	return &apierr.Error{Code: apierr.PolicyMissing, Message: "controller cache lookup does not transport canonical read-set proof"}
 }
@@ -243,6 +239,7 @@ func (c *dataClient) post(ctx context.Context, operation, key string, input, out
 	path := "/api/v1/data/" + operation
 	return c.transport.request(ctx, "POST", path, path, key, input, output)
 }
+
 func (c *dataClient) withBudget(ctx context.Context, budget blob.Budget, call func(context.Context) error) error {
 	if budget.Deadline.IsZero() {
 		return call(ctx)
@@ -261,12 +258,14 @@ func (c *dataClient) withBudget(ctx context.Context, budget blob.Budget, call fu
 	}
 	return err
 }
+
 func dataDeadline(budget blob.Budget) *time.Time {
 	if budget.Deadline.IsZero() {
 		return nil
 	}
 	return &budget.Deadline
 }
+
 func validateDataTransfer(transfer wire.DataSignedTransfer) error {
 	u, err := url.Parse(transfer.URL)
 	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" || transfer.Size < 0 || transfer.ExpiresAt.IsZero() {
@@ -279,6 +278,7 @@ func validateDataTransfer(transfer wire.DataSignedTransfer) error {
 	}
 	return nil
 }
+
 func dataProtocolError(message string) error {
 	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
 }
