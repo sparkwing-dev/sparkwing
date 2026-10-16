@@ -1,107 +1,88 @@
 # W9 runner composition blockers
 
-Base HEAD: `2ccf16448`. The runner composition is incomplete. This continuation
-adds one tagged regression and changes no production code. Four installed
-commands reach their first production HTTP operation, but an authenticated
-trigger owner cannot construct the native host. Numeric selectors already pass.
+Base HEAD: `1562be098`. Runner composition remains incomplete. This continuation
+adds production composition probes and changes no production code. The foreign
+contract gaps from the previous report remain unresolved on this branch.
 
-`TestProductionRunnerOwnerReachesNativeHost` supplies a trigger award and fakes
-only the external controller HTTP responses. It retains the production private
-client, authentication, state adapter and native service constructor. It fails
-with `owner hosting requires canonical placement eligibility` before socket
-creation. The fixture also supplies storage authority and the private snapshot,
-so those real clients remain in the path when placement is connected. It isolates
-HOME, configuration and state. A sandbox EPERM from listen is an explicit skip,
-and every earlier construction error is a failure. On a native host it requires
-successful construction and joined cleanup.
+`TestProductionRunnerNodeReachesNativeHost` uses the production private client,
+authentication, state adapter, service bindings and native constructor. It reaches
+`listen tcp 127.0.0.1:0`, where the sandbox returns EPERM. This is an explicit skip,
+not a native execution pass. On a native host, the probe constructs the shared
+hosts with `nodehost.NewNativeHost` and joins cleanup. The existing trigger-owner
+probe shares this fixture and still fails before sockets because placement
+eligibility is missing.
 
-The new probe extends the earlier first-HTTP evidence. It does not claim a
-completed claim loop, source acquisition, SDK execution or native pipeline pass.
-No acceptance cell was newly unskipped and no archived test was newly ported.
+`TestProductionCloudExchangeReachesAwardRenewal` invokes the production
+`run-node` bootstrap runtime with private award files for plan, eval and work.
+Only external HTTP is replaced. Parsing, file acquisition, bootstrap exchange,
+source/engine/resource comparison and production host selection remain real.
+Work renews with the exchanged credential. Plan and eval each exchange once,
+then fail before renewal with `controller awarded a unit this runner does not
+execute`. The production factory supplies `runners.Hosting`, whose validator
+accepts only trigger and node. Test cleanup restores the HTTP transport.
+No factory, host or controller implementation is faked.
 
-## Contract changes needed
+Contract changes and real integration still needed:
 
-1. **W1/W2/W3: canonical owner placement.** Invariant: the owner executes a job
-   only when the shared matcher accepts its live enrolled profile and the sealed
-   job demand. `productionHosting` leaves `NativeConfig.Local` nil, and
-   `localcontroller.NativeServices` rejects every trigger owner. The private
-   transport supplies neither a complete matching profile nor per-job
-   eligibility. `RunnerIdentity` has only name, type and labels. It cannot
-   reconstruct granted pool membership, location or capacity. The lead needs
-   to select a contract for a private eligibility projection or complete
-   canonical matching inputs. The proposed smaller shape is per-job eligibility
-   tied to the current owner, accepted seal and job generation, derived through
-   the store's shared matcher. Committing self-claims must keep their existing
-   transactional recheck. An always-true predicate would turn remote jobs into
-   failing self-claim attempts. An always-false predicate would lose in-process
-   execution and can strand an owner in a single-slot runner.
-2. **DESIGN: owner/eval result authority, retained from the prior handoff.**
-   Invariant: evaluation reports use a live owner/eval lease and source-job
-   fence without acquiring a work attempt. Both annotation and summary still
-   return HTTP 409 with `reason=holder_rights` in
-   `TestReviewOwnerEvaluationReportsBeforeWorkAward`.
-   `checkResultWriterTx` requires a node holder and positive running attempt.
-   The C1/C2 contract must define the independent source fence and committing
-   result proof before the integrator can bind it. This is the existing
-   two-strikes design request, so no further special-case patch was added.
-   Eval still receives only `expansion.submit` and `data.read`, while process
-   mask/cleanup routes require `node.report`. Persisted latest-reference binding
-   also requires `UnitNode`. Changing those grants or relations changes C2's
-   declared policy and needs its contract resolution.
-3. **W8: production Cloud boundary.** `ProductionRuntime.Launcher` remains
-   unbound. `KubernetesBoundary.Probe` and `Clear` still have no production
-   implementations. The launcher interface requires actual network-enforcement
-   evidence and reservation-scoped cleanup before node reuse. W8 must provide
-   these bindings or a production constructor before W9 can connect
-   `launcher.NewLauncher`. Fakes already establish the component interface.
+1. **W1/W2/W3: canonical owner placement.** Invariant: an owner executes a job
+   only when the shared matcher accepts its live enrolled profile and sealed
+   demand. The private host transport has no complete matching inputs or
+   per-job eligibility projection. `NativeConfig.Local` remains nil. The lead
+   must select that contract before W9 can bind it. Keep the committing
+   self-claim's transactional matcher recheck. An unconditional predicate does
+   not establish eligibility.
+2. **DESIGN: W1/W2/W3 owner/eval result authority.** Invariant: evaluation
+   reports use the live owner/eval lease and source-job fence without acquiring
+   a work attempt. Annotation and summary still return HTTP 409 with
+   `reason=holder_rights` in `TestReviewOwnerEvaluationReportsBeforeWorkAward`.
+   `checkResultWriterTx` requires a live node holder and positive attempt.
+   This retains the existing two-strikes design request. C1/C2 must define the
+   committing source proof. Eval's fixed grants still omit NodeReport, which
+   mask/cleanup need. Latest-reference binding still requires UnitNode. No
+   broader grant or synthetic work authority was added.
+3. **W8: production Cloud boundary.** `ProductionRuntime.Launcher` is unbound.
+   `KubernetesBoundary.Probe` and `Clear` have no production implementations.
+   W9 needs the real constructor or callbacks for enforced network evidence
+   and reservation-scoped cleanup before connecting `launcher.NewLauncher`.
+4. **W3/W8: Cloud plan/eval host dispatch.** The new bootstrap probe makes the
+   post-exchange failure executable. W9 needs the declared unit-host boundary
+   for plan and eval, including their private-state authentication and live
+   lease renewal. The existing runner host cannot accept these units. Merely
+   broadening its validator would dispatch both to the trigger owner path.
 
 The swarm brief requires stopping a piece that changes another area's contract.
-These are the remaining boundaries for this assignment. No foreign contract,
-lead-owned handoff, amendment, grant or default changed. The current C2
-owner-process credential and W3 evaluation binder were retained. The broader
-integration points recorded in earlier reports are not claimed complete here.
+These requests stay in this area report. Lead-owned handoffs and amendments,
+foreign contracts, grants and production defaults are unchanged. The earlier
+source-checkout, here/cache/publication and scheduled-intake integration
+requests remain in the prior W9 reports. Native self-hosted pipeline evidence
+is still pending with the lead.
 
-## Verification
+Verification used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache and GOTMPDIR under /tmp/sw-astra-W9. Final probe
+commands also set TMPDIR there. Package workers were limited to four.
 
-All Go checks used GOWORK=off, GOFLAGS=-buildvcs=false,
-GOCACHE=/tmp/sw-gocache and GOTMPDIR=/tmp/sw-astra-W9/gotmp. Package workers
-were limited to four. Commands ran in the assigned worktree with `go -C`.
+Passed: whole-repository `go build ./...`; full short suites for cluster,
+controller/client, controllerwire and clisurface; tagged cluster vet;
+commentcheck against main; numeric read/control and debug-selector regressions;
+all 24 metadata numeric-selector property seeds; and `git diff --check`.
 
-Passed:
+The tagged cluster selection remains red for trigger placement, launch's
+missing factory, and Cloud plan/eval dispatch. Start/warm reach signed-policy
+HTTP, fetch-source reaches source-credential HTTP, and installed run-node
+reaches bootstrap exchange. The separate metadata selection remains red for
+owner annotation and summary. No native acceptance cell was newly unskipped,
+no archived test was newly ported, and no full-repository test suite ran.
 
-- `go build ./...`.
-- `go test -p 4 -short ./internal/cluster ./pkg/controller/client ./internal/controllerwire ./internal/clisurface`.
-- `go vet -p 4 -tags rewrite_integration ./internal/cluster`.
-- `go run ./internal/commentcheck -base main .` across 2,573 files.
-- `TestPublicNumericSelectorsReadAndCommitCanonicalRun`,
-  `TestDebugNumericSelectorsThroughPersistedController`, and all 24 seeds of
-  `FuzzMetadataNumericSelectorsRetainJobAuthority` in pkg/controller.
-- `git diff --check`.
+Shared file touched: `internal/cluster/production_runtime_integration_test.go`.
+The other changed file is this report. Production additions/deletions are
+**0/0**. No legacy code or caller was deleted or migrated. W9 production Go
+versus main is **+16,945/-23,817, net -6,872**, within the -2,900 budget.
+Tests, testdata, acceptance and contract declarations are excluded.
 
-Still red, with reproducible commands:
-
-- `go test -p 4 -tags rewrite_integration ./internal/cluster -run '^(TestInstalledRunnerRuntimeComposition|TestProductionRunnerOwnerReachesNativeHost)$' -count=1 -v`.
-  Start/warm reach GET sparkwing.dev/versions.json. Fetch-source reaches POST
-  controller.example/api/v1/runs/run/source-credential. Run-node reaches POST
-  controller.example/api/v1/claims/exchange. Launch fails at the absent factory.
-  The new native-binding probe fails at the absent placement policy.
-- `go test -p 4 -tags rewrite_integration ./pkg/controller -run '^TestReviewOwnerEvaluationReportsBeforeWorkAward$' -count=1 -v`.
-  Annotation and summary both receive 409 instead of 204.
-
-These failures precede sandbox sockets. The lead's real self-hosted-runner
-pipeline remains pending. No native acceptance pass is claimed. No whole-repo
-test suite, pipeline, runner executable, installation, Git write, deployment or
-release ran. The required read-only Sparkwing orientation ran.
-
-Shared file touched: internal/cluster/production_runtime_integration_test.go.
-The other changed file is this W9 report. Production additions/deletions are
-0/0. No legacy code or caller was deleted or migrated. W9 production Go versus
-main is +16,945/-23,817, net **-6,872**, within the -2,900 budget. Tests,
-testdata, acceptance and contract declarations are excluded.
-
-Mechanisms added: none. Friction: the contract gaps above and Overwing's reported
-ten-commit installed-source lag. Git has no local user identity or core.worktree
-override. Test children exited. Worker scratch is deleted after checks join.
-The shared Go cache is retained.
+Mechanisms added: none. Friction: the contract gaps above, sandbox sockets and
+Overwing's reported ten-commit installed-source lag. No Git write, installation,
+operational Sparkwing command, pipeline, deployment or release ran. Git has no
+local identity or core.worktree override. Test children joined. Worker scratch
+is removed after checks complete. The shared Go cache is retained.
 
 STATUS: CONTINUE
