@@ -325,7 +325,7 @@ func createPersonalTeamTx(ctx context.Context, tx *storeTx, accountID, base, dis
 			suffix := "-" + strconv.Itoa(n)
 			candidate = strings.TrimRight(truncate(base, maxSlugLen-len(suffix)), "-") + suffix
 		}
-		err := createTeamTx(ctx, tx, accountID, Team(candidate), displayName, now)
+		err := createTeamTx(ctx, tx, accountID, Team(candidate), displayName, accountID, now)
 		if err == nil {
 			return Team(candidate), nil
 		}
@@ -616,17 +616,13 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 			"%w: one user creates at most %d teams, the personal team included, and this user has created %d",
 			ErrTeamLimit, MaxCreatedTeams, created)
 	}
-	if err := createTeamTx(ctx, tx, accountID, slug, displayName, now); err != nil {
+	if err := createTeamTx(ctx, tx, accountID, slug, displayName, accountID, now); err != nil {
 		return TeamInfo{}, err
 	}
 	return TeamInfo{Slug: slug, DisplayName: displayName, CreatedBy: accountID}, nil
 }
 
-// safety: a slug that ever named a team is never registered again, because a
-// credential minted for the deleted team, such as a cache grant verified by
-// its signature alone, can write under the slug after the purge, and a new
-// team holding it would inherit what that credential wrote.
-func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, now time.Time) error {
+func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName, actor string, now time.Time) error {
 	var deleted int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug = ?`, string(slug)).Scan(&deleted); err != nil {
 		return err
@@ -651,7 +647,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
 		At: now, Team: slug, Account: accountID, Kind: BusinessEventTeamCreated,
-		SubjectID: string(slug), Actor: accountID,
+		SubjectID: string(slug), Actor: actor,
 	}); err != nil {
 		return err
 	}

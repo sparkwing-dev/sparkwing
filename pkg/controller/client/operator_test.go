@@ -12,8 +12,64 @@ import (
 	"testing/synctest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
+
+func TestOperatorTeamCreationNeverReplaysOneTimeCredential(t *testing.T) {
+	for _, failure := range []string{"unavailable", "lost response"} {
+		t.Run(failure, func(t *testing.T) {
+			calls := 0
+			manager, err := NewOperatorManager(EngineOptions{URL: "https://controller.test", HTTP: &http.Client{Transport: engineTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.GetBody != nil || r.Method != "POST" || r.URL.Path != "/api/v1/operator/teams" {
+					t.Fatalf("unsafe request: %+v", r)
+				}
+				if failure == "lost response" {
+					return nil, io.ErrUnexpectedEOF
+				}
+				response := engineResponse(503, `{"error":{"code":"unavailable","message":"busy"}}`)
+				response.Header.Set("Retry-After", "1")
+				return response, nil
+			})}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := manager.CreateOperatorTeam(t.Context(), controllerwire.OperatorTeamCreate{Slug: "test-team"}); err == nil || calls != 1 {
+				t.Fatalf("failure=%v calls=%d", err, calls)
+			}
+		})
+	}
+}
+
+func TestOperatorTeamCreationRequiresCompleteCredential(t *testing.T) {
+	for _, field := range []string{"team", "account", "capability", "prefix", "grants"} {
+		t.Run(field, func(t *testing.T) {
+			created := controllerwire.OperatorTeamCreated{Team: "test-team", AccountID: "account", Capability: "one-time-credential", Prefix: "public-prefix", Grants: []capability.Grant{capability.TeamAdmin}}
+			switch field {
+			case "team":
+				created.Team = "foreign"
+			case "account":
+				created.AccountID = ""
+			case "capability":
+				created.Capability = ""
+			case "prefix":
+				created.Prefix = ""
+			case "grants":
+				created.Grants = nil
+			}
+			manager, err := NewOperatorManager(EngineOptions{URL: "https://controller.test", HTTP: &http.Client{Transport: engineTransport(func(*http.Request) (*http.Response, error) { return operatorResponse(t, created), nil })}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = manager.CreateOperatorTeam(t.Context(), controllerwire.OperatorTeamCreate{Slug: "test-team"})
+			var api *apierr.Error
+			if !errors.As(err, &api) || api.Code != apierr.ProtocolError {
+				t.Fatalf("incomplete %s: %v", field, err)
+			}
+		})
+	}
+}
 
 func operatorResponse(t *testing.T, value any) *http.Response {
 	t.Helper()

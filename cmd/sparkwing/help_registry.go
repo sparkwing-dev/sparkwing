@@ -146,6 +146,8 @@ var flagDescriptions = map[string]string{
 }
 
 var commandSynopses = map[string]string{
+	"sparkwing operator teams":                      "Create teams under operator authority",
+	"sparkwing operator teams create":               "Create a team and issue its first administrator credential",
 	"sparkwing":                                     "Run and inspect pipelines",
 	"sparkwing __complete":                          "Print completion candidates for the shell scripts",
 	"sparkwing __host-trigger":                      "Host one claimed local trigger's run (spawned by the trigger loop)",

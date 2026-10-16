@@ -2,6 +2,17 @@
 
 <!-- design:begin -->
 
+## Operator team creation (decision 114)
+
+OperatorManager.CreateOperatorTeam(ctx, OperatorTeamCreate) returns
+OperatorTeamCreated through POST `/api/v1/operator/teams`. Input contains
+`slug` and optional `display_name`. Output contains `team`, `account_id`,
+`capability`, `prefix` and `grants`. The response carries the first admin's
+one-time credential. C2's RetryNever policy prevents transport and HTTP retries.
+A lost response cannot be recovered by repeating creation. Existing or retired
+team slugs return conflict. C2 and C1 specify operator checks and the atomic
+creation transaction.
+
 `ExecutionJob.output_record` and `manifest_record` carry C1's exact committed
 record keys on private reconciliation and expansion responses. Terminal results
 may carry selectors with attempt zero. `ReuseSource.result` carries their run,

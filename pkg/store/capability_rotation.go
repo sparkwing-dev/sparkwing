@@ -133,7 +133,7 @@ func validCapabilityOrigin(c capability.Capability, origin CapabilityOrigin) boo
 		return false
 	}
 	switch origin.Kind {
-	case capability.ProvisionMember:
+	case capability.ProvisionMember, capability.ProvisionTeamAdmin:
 		return c.Subject.Kind == capability.SubjectAccount && c.Team != "" && c.Binding.Kind == capability.BindingNone && origin.RegistrationID == ""
 	case capability.ProvisionBootstrap:
 		return c.Subject.Kind == capability.SubjectOperator && c.Team == "" && c.Binding.Kind == capability.BindingNone

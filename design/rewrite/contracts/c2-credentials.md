@@ -4,6 +4,37 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Operator team creation (decision 114)
+
+POST `/api/v1/operator/teams` is a deployment-owned AuthCapability route with
+RetryNever. It accepts deployment `operator.tokens` or a direct configured
+console session with `operator.console` and CSRF. Team/member, machine,
+execution and local-peer authority cannot create a team through this operation.
+The CLI is `sparkwing operator teams create --team SLUG [--display-name NAME]
+[--profile NAME]`. Plain and pretty output emit the one-time capability.
+
+The strict OperatorTeamCreate wire object contains `slug` and optional
+`display_name`. OperatorTeamCreated returns `team`, `account_id`, `capability`,
+`prefix` and `grants`. OperatorManager.CreateOperatorTeam uses the shared
+transport and never retries. Server.New binds its route to the concrete
+Store.CreateOperatorTeam without an optional production adapter.
+
+The store re-resolves operator authority in its transaction, generates a
+dedicated account without an OAuth identity and creates its owner membership.
+It calls Store.Issue with the trusted ProvisionTeamAdmin (`operator_team_admin`)
+origin. That origin requires the exact team and account just created in the
+same transaction, the current operator and the complete owner grant table.
+Caller-selected subjects, grants, metering, scope and expiry are refused.
+Ordinary ProvisionCapability cannot use this origin to mint another admin for
+an existing team. Rotation retains the origin and uses member rotation rules.
+The root has no revocation parent and its created_by names the operator.
+
+Creation, membership, root issuance and the team.created business audit commit
+together. The audit's account is the new administrator and its actor is the
+operator. A used or retired slug returns conflict and rolls everything back.
+No schema, OAuth identity, verification claim or financial credit is added.
+The operation is the Cloud operations/support and test-environment path.
+
 ### Lead decisions: payment and bootstrap boundaries
 
 C2 extends PaymentEvent with verified non-checkout facts. The accepted provider

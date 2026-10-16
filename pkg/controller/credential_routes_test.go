@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -52,6 +54,12 @@ func servingRegistrations(t *testing.T, separateMetrics bool) []string {
 		server.WithMetricsAddr("127.0.0.1:0")
 	}
 	actual := server.Registrations()
+	local := httptest.NewRecorder()
+	server.HTTP().API.ServeHTTP(local, httptest.NewRequest("POST", "/api/v1/local/doctor", nil))
+	if local.Code != http.StatusInternalServerError || !strings.Contains(local.Body.String(), `"code":"policy_missing"`) {
+		t.Fatalf("local doctor registration: HTTP %d %s", local.Code, local.Body)
+	}
+	actual = append(actual, "POST /api/v1/local/doctor")
 	processes := controller.NewPolicyRouter(controller.RouteAuthorization{})
 	if err := nodehost.RegisterProcessServices(processes, func(context.Context, capability.Authorized) (*nodehost.ProcessServices, error) {
 		return nil, fmt.Errorf("route inventory must not resolve a process")

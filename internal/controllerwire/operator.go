@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // OperatorLimits reports configured guards and observed request budgets.
@@ -100,10 +102,26 @@ type ObjectStoreBreaker struct {
 	Thawed  bool                    `json:"thawed,omitempty"`
 }
 
-// OperatorManager uses deployment authority for operational guards and storage budgets.
+// OperatorManager manages team creation, operational guards and storage budgets under operator authority.
 type OperatorManager interface {
+	CreateOperatorTeam(context.Context, OperatorTeamCreate) (OperatorTeamCreated, error)
 	ReadOperatorLimits(context.Context) (OperatorLimits, error)
 	WriteOperatorLimits(context.Context, OperatorLimitsWrite) (OperatorLimits, error)
 	ReadObjectStoreBreaker(context.Context) (ObjectStoreBreaker, error)
 	ResetObjectStoreBreaker(context.Context, string) (ObjectStoreBreaker, error)
+}
+
+// OperatorTeamCreate names a new team for operator-managed onboarding.
+type OperatorTeamCreate struct {
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// OperatorTeamCreated carries the first administrator's one-time presentation.
+type OperatorTeamCreated struct {
+	Team       string             `json:"team"`
+	AccountID  string             `json:"account_id"`
+	Capability string             `json:"capability"`
+	Prefix     string             `json:"prefix"`
+	Grants     []capability.Grant `json:"grants"`
 }

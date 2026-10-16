@@ -1,5 +1,20 @@
 # C1 data contract
 
+## Operator team creation (decision 114)
+
+Store.CreateOperatorTeam(ctx, Authorized, slug, displayName) returns one
+capability.Issued only after commit. It re-resolves the operator, creates a
+dedicated account and owner membership, and calls Store.Issue with the trusted
+ProvisionTeamAdmin origin. A transaction-local created-team record confines
+that origin to the exact new team and account. The complete owner grant table
+applies. Ordinary rotation rechecks current membership.
+
+The existing createTeamTx takes an explicit actor for team.created. Account
+creation paths pass their account ID. Operator onboarding passes the verified
+operator ID. The registry, account, membership, capability and audit are one
+transaction. Existing and tombstoned slugs fail without writes. No schema or
+financial grant changes. C2 records the route and full issuance boundary.
+
 ## Shared lease fences and sealed credential writes
 
 Ordinary claim, renewal, release, reaper, secret, source and metric transactions

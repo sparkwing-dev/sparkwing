@@ -2,8 +2,10 @@ package client
 
 import (
 	"context"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
@@ -12,6 +14,15 @@ var _ controllerwire.OperatorManager = (*engineClient)(nil)
 // NewOperatorManager uses the common transport and deployment route policy.
 func NewOperatorManager(options EngineOptions) (controllerwire.OperatorManager, error) {
 	return newEngineClient(options)
+}
+
+func (c *engineClient) CreateOperatorTeam(ctx context.Context, input controllerwire.OperatorTeamCreate) (controllerwire.OperatorTeamCreated, error) {
+	var out controllerwire.OperatorTeamCreated
+	err := c.request(ctx, "POST", "/api/v1/operator/teams", "/api/v1/operator/teams", "", input, &out)
+	if err == nil && (out.Team != input.Slug || out.AccountID == "" || out.Capability == "" || out.Prefix == "" || !slices.Contains(out.Grants, capability.TeamAdmin)) {
+		err = &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned incomplete team administration"}
+	}
+	return out, err
 }
 
 func (c *engineClient) ReadOperatorLimits(ctx context.Context) (controllerwire.OperatorLimits, error) {

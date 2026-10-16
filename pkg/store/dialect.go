@@ -115,6 +115,7 @@ type storeTx struct {
 	store        *Store
 	snapshotRead bool
 	rotatingRoot *capability.Capability
+	createdTeam  *TeamInfo
 }
 
 // SetTestClock overrides the SQLite store clock until the test ends.

@@ -32,6 +32,7 @@ func (s *Server) operatorEndpoints() []Endpoint {
 		{Method: "PUT", Pattern: "/api/v1/operator/object-store/quotas/{team}/allowance", Handle: s.handleSetStorageAllowance},
 
 		{Method: "GET", Pattern: "/api/v1/operator/teams", Handle: s.handleOperatorTeams},
+		{Method: "POST", Pattern: "/api/v1/operator/teams", Handle: s.handleOperatorCreateTeam},
 		{Method: "GET", Pattern: "/api/v1/operator/teams/{team}", Handle: s.handleOperatorTeam},
 		{Method: "DELETE", Pattern: "/api/v1/operator/teams/{team}", Handle: s.handleOperatorDeleteTeam},
 		{Method: "POST", Pattern: "/api/v1/operator/teams/{team}/trust", Handle: s.handleBillingTrustSet},
