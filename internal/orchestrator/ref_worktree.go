@@ -23,8 +23,9 @@ const refWorktreeGitTimeout = 10 * time.Second
 
 const refWorktreeLeaseSuffix = ".lease"
 
-// CreateRefWorktree checks commit out into a worktree owned by runID. Nothing
-// here removes it: the tree outlives this process so a detached run can execute it.
+// CreateRefWorktree checks commit out into a worktree owned by runID. The tree
+// outlives this process so a detached run can execute it; [SweepRefWorktrees]
+// reclaims it once runID's trigger finishes.
 func CreateRefWorktree(
 	ctx context.Context, p Paths, originRepo string, commit Commit, runID string, logger *slog.Logger,
 ) (string, error) {
@@ -196,7 +197,7 @@ func ReleaseRefWorktree(file *os.File) error {
 
 // DispatchContext carries the claim a dispatch runs under, so a write it makes
 // after losing that claim is refused rather than applied over the dispatch that
-// took it. Every path executing a claimed trigger builds its context here.
+// took it.
 func DispatchContext(ctx context.Context, trig *store.Trigger) context.Context {
 	return store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trig.ClaimSeq})
 }

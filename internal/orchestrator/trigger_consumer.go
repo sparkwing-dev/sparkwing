@@ -556,8 +556,8 @@ func cancelClaimedTriggerIfRequested(
 	if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
 		logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
 	}
-	// safety: the dispatched child may already have created this row, and the
-	// terminal write below is the one that has to land.
+	// safety: an earlier claim's child may already have created this row, and
+	// the terminal write below is the one that has to land.
 	_ = st.CreateRun(ctx, store.Run{
 		ID:        trig.ID,
 		Pipeline:  trig.Pipeline,
