@@ -108,7 +108,7 @@ func sdkHello(ctx context.Context, session *executorSession, identity engine.Ide
 	if err != nil {
 		return err
 	}
-	if hello.Protocol != nodeproto.Version || hello.SDK.Language != string(identity.Pin.SDK) || strings.TrimPrefix(hello.SDK.Version, "v") != strings.TrimPrefix(identity.Pin.Version, "v") {
+	if hello.Protocol != nodeproto.Version || hello.SDK.Language != string(identity.Pin.SDK) || identity.Pin.Replacement == "" && strings.TrimPrefix(hello.SDK.Version, "v") != strings.TrimPrefix(identity.Pin.Version, "v") {
 		return executorError(apierr.ProtocolMismatch, "SDK hello does not match the sealed engine and SDK pin")
 	}
 	return nil

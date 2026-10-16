@@ -168,6 +168,13 @@ func (request SDKInstallRequest) PipelineDirectory() (string, error) {
 }
 
 func (r Resolved) verifyInstalledEngine() error {
+	if r.Identity.Pin.SDK == GoSDK && r.Identity.Pin.Replacement != "" {
+		current, err := installedEngine(context.Background(), r.Identity.Pin, r.Target)
+		if err == nil && (current.Identity != r.Identity || current.AssetDigest != r.AssetDigest || current.Executable != r.Executable) {
+			err = integrity(errors.New("SDK installation requires the installed replacement-pin engine"))
+		}
+		return err
+	}
 	version, err := VersionForPin(r.Identity.Pin)
 	if err != nil {
 		return err

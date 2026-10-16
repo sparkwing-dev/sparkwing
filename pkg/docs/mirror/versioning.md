@@ -3,17 +3,18 @@
 A repository's SDK pin selects its engine. The Go SDK, TypeScript SDK and engine
 release together. Spark libraries use their own module versions.
 
-The matching-engine policy is the frozen execution contract. Native release
-resolution, signed-index verification, cache and upgrade staging still need their
-engine-owner implementation. CLI fixtures establish command composition and
-reporting, not a verified release download or a complete native upgrade.
-
 ## Versioning per repo
 
 Go pipelines pin `github.com/sparkwing-dev/sparkwing` in `.sparkwing/go.mod`.
 TypeScript pipelines pin `@sparkwing/sdk` through their manifest and native
 lockfile. A version range alone cannot select an exact engine. Go `vX.Y.Z` and
 TypeScript `X.Y.Z` identify engine `vX.Y.Z`, including any prerelease suffix.
+
+A Go SDK `replace` directive that applies to the required version disables engine
+pinning for that run. Sparkwing warns and uses the installed CLI's engine to build
+and run the replacement. It records the replacement and installed executable's
+digest in the accepted identity. Resume requires that same executable. Removing
+the replacement restores release pinning and signed-release verification.
 
 Pin inspection reads regular manifest and lock files without running repository
 code. It refuses linked or special files. Go module inspection retains its

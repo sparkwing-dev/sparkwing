@@ -38,8 +38,11 @@ func ReadPin(checkout string, sdk SDKKind) (Pin, error) {
 	return pin, err
 }
 
-// VersionForPin preserves exact release identity, including prereleases.
+// VersionForPin selects the exact release or installed engine for an SDK replacement.
 func VersionForPin(pin Pin) (string, error) {
+	if pin.SDK == GoSDK && pin.Replacement != "" && pin.Version != "" {
+		return installedEngineVersion()
+	}
 	version := pin.Version
 	switch pin.SDK {
 	case GoSDK:
@@ -78,7 +81,10 @@ func readGoPin(dir string) (Pin, error) {
 	}
 	for _, replace := range file.Replace {
 		if replace.Old.Path == GoModule && (replace.Old.Version == "" || replace.Old.Version == pin.Version) {
-			return Pin{}, fmt.Errorf("SDK replacement is not a published release pin")
+			pin.Replacement = replace.New.String()
+			if replace.Old.Version != "" {
+				break
+			}
 		}
 	}
 	for _, exclude := range file.Exclude {

@@ -3446,6 +3446,8 @@ components:
           type: string
         manifest:
           type: string
+        replacement:
+          type: string
         sdk:
           type: string
         version:

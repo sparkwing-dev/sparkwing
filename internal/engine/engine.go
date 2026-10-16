@@ -26,23 +26,24 @@ const (
 	VersionIndexFormat               = 1
 )
 
-// Pin records the exact installed SDK version and the files that establish it.
+// Pin records the SDK requirement, applicable replacement and source files.
 type Pin struct {
 	SDK          SDKKind `json:"sdk"`
 	Version      string  `json:"version"`
 	Manifest     string  `json:"manifest"`
 	Lockfile     string  `json:"lockfile,omitempty"`
 	InputsDigest string  `json:"inputs_digest"`
+	Replacement  string  `json:"replacement,omitempty"`
 }
 
-// Identity is portable across executor platforms and survives retry in the accepted run seal.
+// Identity binds the selected engine to SDK inputs in the accepted run seal.
 type Identity struct {
 	Pin            Pin    `json:"pin"`
 	Version        string `json:"version"`
 	ManifestDigest string `json:"manifest_digest"`
 }
 
-// Resolved includes the executable verified for this machine's exact platform.
+// Resolved includes the selected executable for this machine's platform.
 type Resolved struct {
 	Identity    Identity
 	Target      releaseasset.Target
@@ -138,6 +139,7 @@ const (
 	NoticeSupportEnded  NoticeKind = "support_ended"
 	NoticeEnforcement   NoticeKind = "version_enforcement"
 	NoticeIndexFallback NoticeKind = "version_index_fallback"
+	NoticePinDisabled   NoticeKind = "engine_pin_disabled"
 )
 
 // Notice carries actionable policy text without turning a warning into an implicit revocation.

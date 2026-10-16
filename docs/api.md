@@ -300,4 +300,9 @@ revocation or minimum-version policy takes effect. Additive fields and codes
 remain readable. Each selected engine owns its matching node protocol.
 See [Versioning](versioning.md).
 
+An applicable Go SDK replacement uses the installed CLI's engine and emits an
+`engine_pin_disabled` notice. The pin retains the declared SDK version and the
+`replacement` module selector. The accepted identity records the installed
+executable's digest in `manifest_digest`, rather than a signed release manifest.
+
 <!-- design:end -->

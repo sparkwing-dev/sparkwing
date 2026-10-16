@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -18,6 +19,36 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 )
+
+func TestReplacementPinWarnsAndKeepsInstalledCLI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fixture\nrequire "+engine.GoModule+" v0.0.0\nreplace "+engine.GoModule+" => ../sdk\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := engine.NewResolver(engine.Config{CacheDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics bytes.Buffer
+	command := pipelineEngineSwitcher{
+		readPin: engine.ReadPin, versionFor: engine.VersionForPin, current: current,
+		target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, diagnostics: &diagnostics,
+		resolve: func(ctx context.Context, pin engine.Pin, target releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
+			return r.Resolve(ctx, pin, target)
+		},
+		execute: func(string, []string, []string) error { t.Fatal("replacement re-executed another engine"); return nil },
+	}
+	if err := command.run(t.Context(), dir, engine.GoSDK, "local", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diagnostics.String(), "engine pinning is off") || !strings.Contains(diagnostics.String(), "installed CLI") {
+		t.Fatalf("missing warning: %s", &diagnostics)
+	}
+}
 
 func engineSwitchFixture(t testing.TB, sdk engine.SDKKind) (pipelineEngineSwitcher, engine.Resolved, *bytes.Buffer, *int) {
 	t.Helper()

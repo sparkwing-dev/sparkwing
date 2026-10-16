@@ -1,5 +1,13 @@
 # Migrating to the next release
 
+## Go SDK replacements
+
+An applicable Go SDK `replace` directive runs with the installed CLI's engine.
+Sparkwing warns that engine pinning is off for that run. The replacement remains
+in `pin.replacement`; the accepted engine identity records the installed
+executable's digest. Resuming that identity requires the same executable.
+Ordinary release pins still use signed release verification and exact matching.
+
 ## Tenant event append and deployment compute controls
 
 `Store.AppendEvent` is removed. Select a tenant and use `Tenant.AppendEvent`.

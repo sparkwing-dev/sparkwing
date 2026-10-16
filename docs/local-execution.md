@@ -4,6 +4,10 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
+If the pipeline's `go.mod` replaces the Go SDK, Sparkwing uses the installed CLI's
+engine and warns that engine pinning is off for that run. The shared installer
+builds the replacement locally.
+
 The commands bind sealed intake to the shared controller, source, private
 environment, storage and host services. The CLI sends state operations over the
 authenticated private API. Owner evaluation delegates a fresh SDK process from
