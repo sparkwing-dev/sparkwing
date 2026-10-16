@@ -232,5 +232,5 @@ func mainModuleRoot() (string, error) {
 }
 
 func init() {
-	sparkwing.Register("integration", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Integration{} })
+	sparkwing.Register("Integration", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Integration{} })
 }

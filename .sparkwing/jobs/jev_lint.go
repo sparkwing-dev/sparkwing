@@ -1568,5 +1568,5 @@ func interpretJevLintInvariants(invariants []jevLintInvariant, response jevLintR
 }
 
 func init() {
-	sparkwing.Register[JevLintArgs]("jev-lint", func() sparkwing.Pipeline[JevLintArgs] { return &JevLint{} })
+	sparkwing.Register[JevLintArgs]("JevLint", func() sparkwing.Pipeline[JevLintArgs] { return &JevLint{} })
 }

@@ -24,7 +24,7 @@ func TestReviewProductionExecutionBindings(t *testing.T) {
 	offlineStopDaemon(t, home)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Run("local run", func(t *testing.T) {
-		err := runLocalCommand(t.Context(), "ci", runFlags{}, nil, io.Discard,
+		err := runLocalCommand(t.Context(), "example", runFlags{}, nil, io.Discard,
 			localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
 		if err != nil {
 			t.Fatalf("public local run cannot reach a concrete owner: %v", err)

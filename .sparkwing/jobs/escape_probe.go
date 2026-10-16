@@ -571,5 +571,5 @@ func insecureTLS() *tls.Config {
 }
 
 func init() {
-	sparkwing.Register[EscapeProbeArgs]("escape-probe", func() sparkwing.Pipeline[EscapeProbeArgs] { return &EscapeProbe{} })
+	sparkwing.Register[EscapeProbeArgs]("EscapeProbe", func() sparkwing.Pipeline[EscapeProbeArgs] { return &EscapeProbe{} })
 }

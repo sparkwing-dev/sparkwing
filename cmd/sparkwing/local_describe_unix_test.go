@@ -21,6 +21,36 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
+func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
+	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured := os.Environ()
+	seal, err := snapshots.Capture(t.Context(), captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", seal, captured, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := prepareLocalRunRequest(t.Context(), prepared, runFlags{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Request.Pipeline != "example" || request.Request.Source.Entrypoint != "Example" {
+		t.Fatalf("local alias binding: %+v", request.Request)
+	}
+}
+
 func TestLocalReplacementPipelineDescribeOverPipes(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SPARKWING_HOME", t.TempDir())

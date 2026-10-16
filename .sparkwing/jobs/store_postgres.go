@@ -262,7 +262,7 @@ func storePostgresGoCommand(h hostShape) string {
 }
 
 func init() {
-	sparkwing.Register("store-postgres", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &StorePostgres{} })
+	sparkwing.Register("StorePostgres", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &StorePostgres{} })
 }
 
 func runStorePostgresIfTouched(ctx context.Context) error {

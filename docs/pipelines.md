@@ -56,6 +56,9 @@ For the complete schema -- every top-level key, pipeline field, and
 trigger field with types -- see the generated [config-reference.md](config-reference.md).
 
 For `name: deploy-prod` with `entrypoint: Deploy`, use `deploy-prod` in commands.
+Register the SDK implementation as `sw.Register("Deploy", factory)` because
+`entrypoint` must match the registration name exactly. Scaffolds register the
+generated type name and keep the invoked project name in YAML.
 Help, flag completion, secrets and risk declarations come from `Deploy`.
 Help and argument errors keep the invoked name.
 

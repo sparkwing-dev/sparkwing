@@ -97,5 +97,5 @@ func (p *Lint) run(ctx context.Context) error {
 }
 
 func init() {
-	sparkwing.Register("lint", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Lint{} })
+	sparkwing.Register("Lint", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Lint{} })
 }
