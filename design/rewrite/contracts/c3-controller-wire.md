@@ -871,6 +871,8 @@ the atomic finish endpoint, including typed admission refusal. Authentication
 lookups are confined to the owner and its independently awarded current nodes.
 `client.NewNodeHostClient` confines the same transport to one node award.
 Its renewal uses the node bearer and unit ID separately from the owner.
+Closing the host also retires its retained process, storage and log transports.
+Later operations refuse before presenting the award credential.
 Private authentication responses retain digest sidecars because public
 capability JSON omits them. No reusable raw bearer appears in those responses.
 
