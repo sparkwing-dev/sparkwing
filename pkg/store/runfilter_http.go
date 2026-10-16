@@ -19,24 +19,6 @@ const maxRunListFetch = MaxRunListLimit + 1
 // needs the cursor checks this before trusting a page.
 const RunFilterVersion = "3"
 
-// SupportsRunIdentityFilters reports whether a controller announcing version
-// serves the branch, SHA and repo filters natively.
-func SupportsRunIdentityFilters(version string) bool { return runFilterVersion(version) >= 1 }
-
-func SupportsRunCursor(version string) bool { return runFilterVersion(version) >= 2 }
-
-// SupportsRunDisplayFilters reports whether a controller announcing version serves the
-// exclusions, trigger, repository name, time range and text filters and the before cursor.
-func SupportsRunDisplayFilters(version string) bool { return runFilterVersion(version) >= 3 }
-
-func runFilterVersion(version string) int {
-	n, err := strconv.Atoi(strings.TrimSpace(version))
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
 // ParseRunFilter accepts the public run-list query parameters. Unknown
 // parameters are ignored.
 func ParseRunFilter(q url.Values) RunFilter {

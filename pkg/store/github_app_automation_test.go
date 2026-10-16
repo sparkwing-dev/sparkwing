@@ -17,18 +17,18 @@ func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}
-	a := store.GitHubAppAutomation{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, EnabledBy: "acct-1"}
-	if err := other.PutGitHubAppAutomation(ctx, a, now); !errors.Is(err, store.ErrNotFound) {
+	a := store.GitHubAppAutomation{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, EnabledBy: "github-admin"}
+	if err := other.PutAuthorizedGitHubAutomation(ctx, githubAppAuthorization(t, st, other), a); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("other team's consent = %v", err)
 	}
-	if err := acme.PutGitHubAppAutomation(ctx, a, now); err != nil {
+	if err := acme.PutAuthorizedGitHubAutomation(ctx, githubAppAuthorization(t, st, acme), a); err != nil {
 		t.Fatal(err)
 	}
-	if err := acme.PutGitHubAppAutomation(ctx, a, now.Add(time.Hour)); err != nil {
+	if err := acme.PutAuthorizedGitHubAutomation(ctx, githubAppAuthorization(t, st, acme), a); err != nil {
 		t.Fatal(err)
 	}
 	got, err := acme.GitHubAppAutomation(ctx, 7, 701)
-	if err != nil || !got.Enabled || !got.EnabledAt.Equal(now) {
+	if err != nil || !got.Enabled || got.EnabledAt.Before(now) {
 		t.Fatalf("idempotent consent = %+v,%v", got, err)
 	}
 	if _, err := other.GitHubAppAutomation(ctx, 7, 701); !errors.Is(err, store.ErrNotFound) {
@@ -49,61 +49,20 @@ func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	if _, err := acme.GitHubAppAutomation(ctx, 7, 701); err != nil {
 		t.Fatalf("restored consent = %v", err)
 	}
-	if err := acme.DeleteGitHubAppAutomation(ctx, 701); err != nil {
+	if err := acme.DeleteAuthorizedGitHubAutomation(ctx, githubAppAuthorization(t, st, acme), 701); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := acme.GitHubAppAutomation(ctx, 7, 701); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("revoked consent = %v", err)
 	}
-	if err := acme.PutGitHubAppAutomation(ctx, a, now); err != nil {
+	if err := acme.PutAuthorizedGitHubAutomation(ctx, githubAppAuthorization(t, st, acme), a); err != nil {
 		t.Fatal(err)
 	}
-	if err := acme.UnbindGitHubAppInstallation(ctx, 7); err != nil {
+	if err := acme.UnbindAuthorizedGitHubInstallation(ctx, githubAppAuthorization(t, st, acme), 7); err != nil {
 		t.Fatal(err)
 	}
 	list, err := acme.GitHubAppAutomations(ctx)
 	if err != nil || len(list) != 0 {
 		t.Fatalf("unbound grants = %+v,%v", list, err)
-	}
-}
-
-func TestGitHubAppAutomationAdmissionChecksConsentGeneration(t *testing.T) {
-	st := storetest.Open(t)
-	acme := teamHandle(t, st, "acme")
-	ctx, now := t.Context(), time.Now()
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
-		t.Fatal(err)
-	}
-	a := store.GitHubAppAutomation{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, EnabledBy: "acct-1"}
-	if err := acme.PutGitHubAppAutomation(ctx, a, now); err != nil {
-		t.Fatal(err)
-	}
-	grant, err := acme.GitHubAppAutomation(ctx, 7, 701)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := acme.DeleteGitHubAppAutomation(ctx, 701); err != nil {
-		t.Fatal(err)
-	}
-	if err := acme.PutGitHubAppAutomation(ctx, a, now.Add(time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	trig := store.Trigger{ID: "revoked-plan", Pipeline: "deploy", GithubRepoID: 701, CreatedAt: now}
-	run := store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "pending", CreatedAt: now, StartedAt: now}
-	if err := acme.CreateGitHubAutomationTriggerWithRun(ctx, trig, run, grant); !errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
-		t.Fatalf("old generation admitted = %v", err)
-	}
-	if _, err := acme.GetRun(ctx, trig.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("refused plan left a run = %v", err)
-	}
-	if count, err := acme.CountPendingTriggers(ctx); err != nil || count != 0 {
-		t.Fatalf("refused plan left %d triggers,%v", count, err)
-	}
-	grant, err = acme.GitHubAppAutomation(ctx, 7, 701)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := acme.CreateGitHubAutomationTriggerWithRun(ctx, trig, run, grant); err != nil {
-		t.Fatalf("current generation refused = %v", err)
 	}
 }

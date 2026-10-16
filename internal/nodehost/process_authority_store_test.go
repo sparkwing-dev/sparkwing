@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -43,7 +44,37 @@ func TestProcessAuthorityRoutesUsePersistedParentRelations(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = registry.Close() })
 	service := &ProcessServices{RunID: ref.RunID, Job: job, Masks: NewMaskRegistry(secrets.NewMasker())}
-	issued, revoke, err := registry.Delegate(t.Context(), lookup, capability.DelegateSpec{Parent: parent.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport}, Binding: snapshot.Binding.Current, Repositories: parent.Capability.Repositories, ExpiresAt: parent.Capability.ExpiresAt}, service)
+	spec := capability.DelegateSpec{Parent: parent.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport}, Binding: snapshot.Binding.Current, Repositories: parent.Capability.Repositories, ExpiresAt: parent.Capability.ExpiresAt}
+	if parent.Capability.Repositories == nil || len(parent.Capability.Repositories) == 0 {
+		t.Fatal("node award must retain its repository scope")
+	}
+	checkScope := func(seed uint64) bool {
+		for _, scope := range []struct {
+			repositories []string
+			allowed      bool
+		}{
+			{nil, false}, {[]string{}, true}, {parent.Capability.Repositories, true},
+			{[]string{fmt.Sprintf("gh:foreign-%d", seed)}, false},
+		} {
+			child := spec
+			child.Repositories = scope.repositories
+			issued, revoke, err := registry.Delegate(t.Context(), lookup, child, service)
+			if err != nil {
+				if scope.allowed {
+					return false
+				}
+				continue
+			}
+			if err := revoke(); err != nil || !scope.allowed || !reflect.DeepEqual(issued.Capability.Repositories, scope.repositories) {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(checkScope, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+	issued, revoke, err := registry.Delegate(t.Context(), lookup, spec, service)
 	if err != nil {
 		t.Fatal(err)
 	}

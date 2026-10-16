@@ -42,6 +42,8 @@ type RunnerInventoryReader interface {
 	ReadRunners(context.Context) (capability.RunnerSnapshot, error)
 }
 
+var _ RunnerInventoryReader = (*store.Tenant)(nil)
+
 // WithRunnerInventory supplies tenant snapshots before Handler is constructed.
 func (s *Server) WithRunnerInventory(resolve func(context.Context, store.Team) (RunnerInventoryReader, error)) *Server {
 	s.resolveRunnerInventory = resolve

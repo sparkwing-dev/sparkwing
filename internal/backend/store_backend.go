@@ -9,36 +9,18 @@ import (
 )
 
 type StoreBackend struct {
-	st       *store.Store
+	tenant   *store.Tenant
 	logStore storage.LogStore
-	runs     RunReader
-
-	caps Capabilities
+	caps     Capabilities
 }
 
-// RunReader answers run reads from a view narrower than the whole store,
-// such as one team's runs.
-type RunReader interface {
-	ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error)
-	GetRun(ctx context.Context, runID string) (*store.Run, error)
-}
-
-// Scoped returns a backend whose run reads use the supplied tenant.
-func (b *StoreBackend) Scoped(runs RunReader) *StoreBackend {
-	c := *b
-	c.runs = runs
-	return &c
-}
-
-func NewStoreBackend(st *store.Store, logStore storage.LogStore) *StoreBackend {
-	return &StoreBackend{st: st, logStore: logStore}
+func NewStoreBackend(tenant *store.Tenant, logStore storage.LogStore) *StoreBackend {
+	return &StoreBackend{tenant: tenant, logStore: logStore}
 }
 
 var _ Backend = (*StoreBackend)(nil)
 
 func (b *StoreBackend) SetCapabilities(c Capabilities) { b.caps = c }
-
-func (b *StoreBackend) Store() *store.Store { return b.st }
 
 func (b *StoreBackend) Capabilities(context.Context) (Capabilities, error) {
 	if b.caps.Mode == "" {
@@ -52,25 +34,19 @@ func (b *StoreBackend) Capabilities(context.Context) (Capabilities, error) {
 }
 
 func (b *StoreBackend) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error) {
-	if b.runs != nil {
-		return b.runs.ListRuns(ctx, f)
-	}
-	return b.st.ListRuns(ctx, f)
+	return b.tenant.ListRuns(ctx, f)
 }
 
 func (b *StoreBackend) GetRun(ctx context.Context, runID string) (*store.Run, error) {
-	if b.runs != nil {
-		return b.runs.GetRun(ctx, runID)
-	}
-	return b.st.GetRun(ctx, runID)
+	return b.tenant.GetRun(ctx, runID)
 }
 
 func (b *StoreBackend) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
-	return b.st.ListNodes(ctx, runID)
+	return b.tenant.ListNodes(ctx, runID)
 }
 
 func (b *StoreBackend) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
-	return b.st.ListEventsAfter(ctx, runID, afterSeq, limit)
+	return b.tenant.ListEventsAfter(ctx, runID, afterSeq, limit)
 }
 
 func (b *StoreBackend) ReadNodeLog(ctx context.Context, runID, nodeID string, opts ReadOpts) ([]byte, error) {

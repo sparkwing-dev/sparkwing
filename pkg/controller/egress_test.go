@@ -242,7 +242,7 @@ func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
 	property := func(noise []byte) bool {
 		r := f.request("GET", egressLogPath, f.member)
 		value := strings.Repeat("x", len(noise)+1)
-		for _, header := range []string{store.RunnerIdentityHeader, store.ClaimHolderHeader, "X-Sparkwing-Team"} {
+		for _, header := range []string{store.RunnerIdentityHeader, "X-Sparkwing-Claim-Holder", "X-Sparkwing-Team"} {
 			r.Header.Set(header, value)
 		}
 		w := httptest.NewRecorder()

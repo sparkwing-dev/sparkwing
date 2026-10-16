@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRunFiltersTreatSQLMetacharactersAsLiteral(t *testing.T) {
@@ -27,7 +28,7 @@ func TestRunFiltersTreatSQLMetacharactersAsLiteral(t *testing.T) {
 		}
 		for i, value := range values {
 			for _, tn := range []*store.Tenant{f.teamA, f.teamB} {
-				if err := tn.CreateRun(ctx, store.Run{
+				if err := teststore.SeedRun(f.st, ctx, tn.Team(), store.Run{
 					ID: fmt.Sprintf("literal-%s-%d", tn.Team(), i), Pipeline: value,
 					Status: value, GitBranch: value, DeclaredRepo: value, RepoURL: value,
 					StartedAt: time.Now(),
@@ -79,7 +80,7 @@ func TestSecretMutationsTreatSQLMetacharactersAsLiteral(t *testing.T) {
 			want[tn.Team()] = make(map[[2]string]string)
 			for i, key := range keys {
 				value := fmt.Sprintf("%s-value-%d", tn.Team(), i)
-				if err := tn.CreateOrReplaceSecret(store.Secret{Name: key[0], Pipeline: key[1], Value: value}, time.Now()); err != nil {
+				if err := teststore.SeedSecret(f.st, tn.Team(), store.Secret{Name: key[0], Pipeline: key[1], Value: value}, time.Now()); err != nil {
 					t.Fatal(err)
 				}
 				want[tn.Team()][key] = value

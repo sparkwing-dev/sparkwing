@@ -211,7 +211,7 @@ func (s *Service) minIntervalRefusal(ctx context.Context, sched store.CronSchedu
 	if sched.Where != store.CronWhereController {
 		return nil, nil
 	}
-	limits, err := s.Store.ComputeLimits(ctx)
+	limits, err := s.Store.AsOperator().ComputeLimits(ctx)
 	if err != nil {
 		return nil, err
 	}

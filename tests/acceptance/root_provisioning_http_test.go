@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type rootIssuer struct {
@@ -223,6 +224,21 @@ func TestRootProvisioningHTTPExpiryAndCSRF(t *testing.T) {
 		assertEngineError(t, authorityHTTP(h, b, "POST", path, body), 403, apierr.Forbidden)
 		if len(f.specs) != 0 {
 			t.Fatal("CSRF refusal reached issuer")
+		}
+	}
+}
+
+func TestRootProvisioningHTTPEnrollmentConflicts(t *testing.T) {
+	for _, service := range []bool{false, true} {
+		for _, err := range []error{store.ErrAgentNameTaken, store.ErrRunnerTokenLimit} {
+			b, path, body := rootFixture(service)
+			issuer := &rootIssuer{err: err}
+			w := authorityHTTP(rootServer(b, issuer), b, "POST", path, body)
+			code := apierr.Conflict
+			if errors.Is(err, store.ErrRunnerTokenLimit) {
+				code = apierr.QuotaExceeded
+			}
+			assertEngineError(t, w, apierr.Status(code), code)
 		}
 	}
 }

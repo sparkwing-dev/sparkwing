@@ -80,7 +80,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 	runValid := true
 	runPartial := false
 	for _, n := range nodes {
-		if n.Outcome == "cached" {
+		if n.Outcome == "memoized" {
 			continue
 		}
 		attempts := 0
@@ -154,7 +154,7 @@ func (s *Server) emitNodeDrift(ctx context.Context, t *store.Tenant, run *store.
 	if err != nil {
 		return
 	}
-	if err := s.store.AppendEvent(ctx, run.ID, nodeID, "resource_pin_drift", payload); err != nil {
+	if err := t.AppendEvent(ctx, run.ID, nodeID, "resource_pin_drift", payload); err != nil {
 		s.logger.Warn("append run event", "kind", "resource_pin_drift", "run_id", run.ID, "node_id", nodeID, "err", err)
 	}
 }

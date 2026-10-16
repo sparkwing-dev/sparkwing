@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestConcurrency_CostWeightedAdmission(t *testing.T) {
@@ -91,7 +92,7 @@ func TestConcurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost(t *tes
 		t.Fatalf("child node id before parent release = %q, want empty plan holder node", childHolder.NodeID)
 	}
 
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "db", "parent/-", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "db", "parent/-", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("ReleaseConcurrencySlot(parent): %v", err)
 	}
 	state, err = tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "db")
@@ -211,10 +212,10 @@ func TestConcurrency_ReleaseTransfersCostToSiblingInheritedHolder(t *testing.T) 
 			t.Fatalf("%s: want Granted got %s", childRunID, child.Kind)
 		}
 	}
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "db", "parent/-", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "db", "parent/-", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("ReleaseConcurrencySlot(parent): %v", err)
 	}
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "db", "child-a/-", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "db", "child-a/-", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("ReleaseConcurrencySlot(child-a): %v", err)
 	}
 
@@ -270,7 +271,7 @@ func TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders(t *testing.T)
 			t.Fatalf("%s: want Granted got %s", childRunID, child.Kind)
 		}
 	}
-	if _, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctxT(t), "db", "parent/-", "success", "", "", 0); err != nil {
+	if _, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctxT(t), "db", "parent/-", "success", "", "", 0, 0); err != nil {
 		t.Fatalf("ReleaseConcurrencySlot(parent): %v", err)
 	}
 
@@ -294,7 +295,7 @@ func TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders(t *testing.T)
 func createRunningRunT(t *testing.T, s *store.Store, runID string) {
 	t.Helper()
 	now := time.Now()
-	if err := s.CreateRun(ctxT(t), store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctxT(t), store.Run{
 		ID:        runID,
 		Pipeline:  "test",
 		Status:    "running",
@@ -518,7 +519,7 @@ func TestConcurrency_CostBackfillDeletesDeadEarlierWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("dead: want Queued got %s", r.Kind)
 	}
-	if err := s.FinishRun(ctxT(t), "dead", "failed", "test terminal run"); err != nil {
+	if err := teststore.SeedRunFinish(s, ctxT(t), store.DefaultTeam, "dead", "failed", "test terminal run"); err != nil {
 		t.Fatalf("FinishRun(dead): %v", err)
 	}
 	if r := acquireT(t, s, store.AcquireSlotRequest{

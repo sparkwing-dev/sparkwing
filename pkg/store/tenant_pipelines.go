@@ -98,11 +98,11 @@ SELECT r.pipeline, r.id, r.status, r.started_at, r.finished_at
 
 func (t *Tenant) latestTriggerPerPipeline(ctx context.Context, limit int, byName map[string]*PipelineSummary) (err error) {
 	rows, err := t.s.query(ctx, `
-SELECT pipeline, MAX(created_at) AS latest
-  FROM triggers
- WHERE team = ?
- GROUP BY pipeline
- ORDER BY latest DESC, pipeline
+SELECT r.pipeline, MAX(t.created_at) AS latest
+ FROM triggers t JOIN runs r ON r.team=t.team AND r.id=t.id
+ WHERE t.team=?
+ GROUP BY r.pipeline
+ ORDER BY latest DESC,r.pipeline
  LIMIT ?`, string(t.team), limit)
 	if err != nil {
 		return err

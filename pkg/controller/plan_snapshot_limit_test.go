@@ -49,7 +49,7 @@ func TestUpdatePlanSnapshot_BodyLimit(t *testing.T) {
 		t.Errorf("over-cap snapshot status=%d want 400", got)
 	}
 
-	run, err := st.GetRun(context.Background(), "run-plan")
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), "run-plan")
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}

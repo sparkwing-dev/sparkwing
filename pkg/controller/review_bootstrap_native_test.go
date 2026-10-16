@@ -16,7 +16,10 @@ import (
 
 func reviewPodBootstrap(t *testing.T) (*Server, string) {
 	t.Helper()
-	e, _ := engineRuntimeStore(t)
+	e, tenant := engineRuntimeStore(t)
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "bootstrap-fixture", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 	seed := reviewSeed(t, e.Store)
 	s := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	w := engineClaimHTTP(t, s.Handler(), seed, "POST", "/api/v1/operator/tokens", `{"name":"launcher","grants":["claims.launch","operator.tokens"]}`, 201)

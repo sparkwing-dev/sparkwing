@@ -24,24 +24,24 @@ func setComputeLimit(t *testing.T, f creditsFixture, name string, value int64) {
 func seedRunNodeFor(t *testing.T, f creditsFixture, principal, runID, nodeID string) {
 	t.Helper()
 	ctx := store.WithCreatingPrincipal(context.Background(), principal)
-	if err := f.store.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{
+	if err := teststore.SeedNode(f.store, ctx, store.Node{
 		RunID: runID, NodeID: nodeID, Status: "pending",
 	}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := f.store.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, runID, nodeID); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 }
 
 func computeLimitEvents(t *testing.T, f creditsFixture, runID string) []store.Event {
 	t.Helper()
-	events, err := f.store.ListEventsAfter(context.Background(), runID, 0, 100)
+	events, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListEventsAfter(context.Background(), runID, 0, 100)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestComputeLimits_NodeCreationRefusedPastThePerRunCap(t *testing.T) {
 	if got := len(computeLimitEvents(t, f, "run-fan")); got != 1 {
 		t.Fatalf("compute_limit_blocked events = %d, want 1", got)
 	}
-	nodes, err := f.store.ListNodes(ctx, "run-fan")
+	nodes, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListNodes(ctx, "run-fan")
 	if err != nil {
 		t.Fatalf("list nodes: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("the second trigger = %d, want 429: %s", status, second)
 	}
-	runs, err := f.store.ListRuns(ctx, store.RunFilter{Limit: 10})
+	runs, err := f.store.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 		t.Fatalf("mint a writer for the metered principal: %v", err)
 	}
 	seedRunNodeFor(t, f, "pool", "run-source", "build")
-	if err := f.store.FinishRun(ctx, "run-source", "failed", "boom"); err != nil {
+	if err := teststore.SeedRunFinish(f.store, ctx, store.DefaultTeam, "run-source", "failed", "boom"); err != nil {
 		t.Fatalf("finish the source run: %v", err)
 	}
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
@@ -312,14 +312,14 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("a retry past the cap = %d, want 429: %s", status, body)
 	}
-	runs, err := f.store.ListRuns(ctx, store.RunFilter{Limit: 10})
+	runs, err := f.store.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
 	if len(runs) != 1 {
 		t.Fatalf("runs = %d, want the retry absent", len(runs))
 	}
-	triggers, err := f.store.ListTriggers(ctx, store.TriggerFilter{Limit: 10})
+	triggers, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list triggers: %v", err)
 	}
@@ -381,12 +381,12 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("list schedules = %d rows, %v", len(rows), err)
 	}
-	if err := f.store.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: "run-already", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("seed a run: %v", err)
 	}
-	if err := f.store.SetComputeLimit(ctx, store.ComputeLimitGlobalRunsPerHour, 1); err != nil {
+	if _, err := f.store.AsOperator().SetComputeLimits(ctx, map[string]int64{store.ComputeLimitGlobalRunsPerHour: 1}); err != nil {
 		t.Fatalf("set the guard: %v", err)
 	}
 
@@ -400,7 +400,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 		refusal.Limit != store.ComputeLimitGlobalRunsPerHour {
 		t.Fatalf("refusal = %+v, want the hourly guard named", refusal)
 	}
-	triggers, err := f.store.ListTriggers(ctx, store.TriggerFilter{Limit: 10})
+	triggers, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list triggers: %v", err)
 	}

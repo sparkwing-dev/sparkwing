@@ -49,20 +49,12 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 
 	current := "holder-0"
 	for step := 1; step <= N+1; step++ {
-		released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, key, current, "success", "", "", 0)
+		released, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, key, current, "success", "", "", 0, store.DefaultConcurrencyLease)
 		if err != nil {
 			t.Fatalf("release %d: %v", step, err)
 		}
 		if !released {
 			t.Fatalf("release %d: not released (current=%s)", step, current)
-		}
-		_, err = tenantFor(t, s, store.DefaultTeam).ResolveCoalesceFollowers(ctx, key, "", "")
-		if err != nil {
-			t.Fatalf("resolve followers: %v", err)
-		}
-		promoted, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, key, store.DefaultConcurrencyLease)
-		if err != nil {
-			t.Fatalf("promote %d: %v", step, err)
 		}
 		if step <= N {
 			if len(promoted) != 1 {
@@ -111,8 +103,10 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 		t.Fatalf("waiter: %v", err)
 	}
 
-	_, _ = tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "leader-id", "success", "", "", 0)
-	promoted, _ := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", time.Minute)
+	_, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "leader-id", "success", "", "", 0, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(promoted) != 1 {
 		t.Fatalf("expected 1 promoted, got %d", len(promoted))
 	}
@@ -184,12 +178,11 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 				}
 			}
 
-			_, relErr := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", holder, "success", "", "", 0)
+			_, _, _, relErr := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", holder, "success", "", "", 0, 0)
 			if relErr != nil {
 				errs <- fmt.Errorf("arrival %d release: %w", i, relErr)
 				return
 			}
-			_, _ = tenantFor(t, s, store.DefaultTeam).ResolveCoalesceFollowers(ctx, "k", "", "")
 			_, _ = tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
 		}(i)
 	}

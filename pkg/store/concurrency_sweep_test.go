@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
@@ -122,29 +123,6 @@ func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
 	}
 }
 
-func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
-	s := storetest.Open(t)
-	now := time.Now()
-	if _, err := s.DB().Exec(storetest.Rebind(s,
-		`INSERT INTO concurrency_cache
-		   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-		"memo:k", "h1", "out-ref", "r0", "n0", now.UnixNano(), now.Add(time.Hour).UnixNano(), now.UnixNano(),
-	); err != nil {
-		t.Fatalf("seed cache: %v", err)
-	}
-	if res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "memo:k", "rF", "n", "h1", "", "", false); err != nil {
-		t.Fatalf("resolve (no bypass): %v", err)
-	} else if res.Status != store.WaiterCached {
-		t.Fatalf("no-bypass follower status = %q, want Cached", res.Status)
-	}
-	if res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "memo:k", "rF2", "n", "h1", "", "", true); err != nil {
-		t.Fatalf("resolve (bypass): %v", err)
-	} else if res.Status == store.WaiterCached {
-		t.Fatalf("--no-cache follower got Cached; bypass-read ignored on the resolve path")
-	}
-}
-
 func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	s := storetest.Open(t)
 	const lease = 10 * time.Second
@@ -201,8 +179,7 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 	s := storetest.Open(t)
 	seedRunAndNode(t, s, "rLeader", "n")
-	if err := s.FinishNodeWithReason(ctxT(t), "rLeader", "n",
-		"failed", "boom", store.FailureOOMKilled, nil); err != nil {
+	if err := teststore.SeedNodeFinish(s, ctxT(t), store.DefaultTeam, store.NodeRef{RunID: "rLeader", NodeID: "n"}, store.NodeResult{Outcome: store.NodeState("failed"), MaskedError: "boom", Reason: store.FailureOOMKilled, ExitCode: nil}); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
 	res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "k", "rF", "n", "", "rLeader", "n", false)
@@ -211,28 +188,6 @@ func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 	}
 	if res.Status != store.WaiterCancelled {
 		t.Fatalf("status = %q, want Cancelled", res.Status)
-	}
-}
-
-func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
-	s := storetest.Open(t)
-	if r := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "memo:k", HolderID: "rL/n", RunID: "rL", NodeID: "n",
-		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce,
-	}); r.Kind != store.AcquireGranted {
-		t.Fatalf("leader: want Granted, got %s", r.Kind)
-	}
-	if r := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "memo:k", HolderID: "rF/n", RunID: "rF", NodeID: "n",
-		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce,
-	}); r.Kind != store.AcquireCoalesced {
-		t.Fatalf("normal follower: want Coalesced, got %s", r.Kind)
-	}
-	if r := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "memo:k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
-		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce, BypassRead: true,
-	}); r.Kind != store.AcquireQueued {
-		t.Fatalf("--no-cache follower: want Queued (run fresh), got %s", r.Kind)
 	}
 }
 

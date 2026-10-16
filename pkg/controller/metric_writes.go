@@ -32,7 +32,7 @@ func (s *Server) metricWriter(ctx context.Context, team string) (MetricWriter, e
 		var tenant *store.Tenant
 		tenant, err = s.store.ForTeam(ctx, store.Team(team))
 		if err == nil {
-			writer, _ = any(tenant).(MetricWriter)
+			writer = tenant
 		}
 	}
 	if err != nil {
@@ -43,3 +43,5 @@ func (s *Server) metricWriter(ctx context.Context, team string) (MetricWriter, e
 	}
 	return writer, nil
 }
+
+var _ MetricWriter = (*store.Tenant)(nil)

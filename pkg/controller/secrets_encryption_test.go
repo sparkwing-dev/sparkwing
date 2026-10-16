@@ -57,7 +57,7 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	row, err := st.GetSecret("TOKEN")
+	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("TOKEN", "")
 	if err != nil {
 		t.Fatalf("store.GetSecret: %v", err)
 	}
@@ -98,9 +98,9 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 		map[string]string{"name": "TOKEN", "value": "supersecret", "pipeline": "deploy-api"})
 	resp.Body.Close()
 
-	row, err := st.GetSecretForPipeline("TOKEN", "deploy-api")
+	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("TOKEN", "deploy-api")
 	if err != nil {
-		t.Fatalf("GetSecretForPipeline: %v", err)
+		t.Fatalf("GetSecretRow: %v", err)
 	}
 	if !strings.HasPrefix(row.Value, secrets.BoundPrefix) {
 		t.Fatalf("stored envelope = %q, want a %s prefix", row.Value, secrets.BoundPrefix)
@@ -114,7 +114,7 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 		{"same name on the unscoped row", "TOKEN", "", ""},
 	} {
 		t.Run(c2.label, func(t *testing.T) {
-			if err := st.CreateOrReplaceSecret(store.Secret{
+			if err := teststore.SeedSecret(st, store.DefaultTeam, store.Secret{
 				Name: c2.name, Value: row.Value, Principal: "attacker", Pipeline: c2.pipeline,
 			}, time.Now().UTC()); err != nil {
 				t.Fatalf("CreateOrReplaceSecret: %v", err)
@@ -144,8 +144,6 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 	}
 }
 
-// An envelope sealed before team binding could have been copied from another
-// team's row, so a read refuses it; the startup reseal is what brings it back.
 func TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding(t *testing.T) {
 	key, _ := secrets.GenerateKey()
 	c, _ := secrets.NewCipher(key)
@@ -155,7 +153,7 @@ func TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seal: %v", err)
 	}
-	if err := st.CreateOrReplaceSecret(store.Secret{
+	if err := teststore.SeedSecret(st, store.DefaultTeam, store.Secret{
 		Name: "LEGACY", Value: legacy, Principal: "admin",
 	}, time.Now().UTC()); err != nil {
 		t.Fatalf("CreateOrReplaceSecret: %v", err)
@@ -168,7 +166,7 @@ func TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding(t *testing.T) {
 	if strings.Contains(body, "older secret") {
 		t.Fatalf("refused read leaked the value: %s", body)
 	}
-	row, err := st.GetSecret("LEGACY")
+	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("LEGACY", "")
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
@@ -182,7 +180,7 @@ func TestSecrets_PlaintextRowFailsClosedOnceEncrypted(t *testing.T) {
 	c, _ := secrets.NewCipher(key)
 	srv, st := newSecretsTestServer(t, c)
 
-	if err := st.CreateOrReplaceSecret(store.Secret{
+	if err := teststore.SeedSecret(st, store.DefaultTeam, store.Secret{
 		Name: "PREDATES", Value: "plain value", Principal: "admin",
 	}, time.Now().UTC()); err != nil {
 		t.Fatalf("CreateOrReplaceSecret: %v", err)
@@ -212,7 +210,7 @@ func TestSecrets_EnvelopeIsBoundToAccessFields(t *testing.T) {
 		map[string]any{"name": "TOKEN", "value": "supersecret"})
 	resp.Body.Close()
 
-	row, err := st.GetSecret("TOKEN")
+	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("TOKEN", "")
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
@@ -231,7 +229,7 @@ func TestSecrets_EnvelopeIsBoundToAccessFields(t *testing.T) {
 			edited := *row
 			edited.Shared = c2.shared
 			edited.Masked = c2.masked
-			if err := st.CreateOrReplaceSecret(edited, time.Now().UTC()); err != nil {
+			if err := teststore.SeedSecret(st, store.DefaultTeam, edited, time.Now().UTC()); err != nil {
 				t.Fatalf("CreateOrReplaceSecret: %v", err)
 			}
 			status, body := getSecretStatus(t, srv.URL+"/api/v1/secrets/TOKEN")
@@ -244,7 +242,7 @@ func TestSecrets_EnvelopeIsBoundToAccessFields(t *testing.T) {
 		})
 	}
 
-	if err := st.CreateOrReplaceSecret(*row, time.Now().UTC()); err != nil {
+	if err := teststore.SeedSecret(st, store.DefaultTeam, *row, time.Now().UTC()); err != nil {
 		t.Fatalf("restore row: %v", err)
 	}
 	status, body := getSecretStatus(t, srv.URL+"/api/v1/secrets/TOKEN")
@@ -266,7 +264,7 @@ func TestSecrets_ListNamesUnboundRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seal: %v", err)
 	}
-	if err := st.CreateOrReplaceSecret(store.Secret{
+	if err := teststore.SeedSecret(st, store.DefaultTeam, store.Secret{
 		Name: "UNBOUND", Value: legacy, Principal: "admin", Masked: true,
 	}, time.Now().UTC()); err != nil {
 		t.Fatalf("CreateOrReplaceSecret: %v", err)

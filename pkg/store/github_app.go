@@ -165,21 +165,6 @@ func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInsta
 	return out, rows.Err()
 }
 
-// UnbindGitHubAppInstallation removes t's binding of installation and the
-// subscriptions that relied on it. An installation t does not hold is
-// ErrNotFound.
-func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.unbindGitHubAppInstallationTx(ctx, tx, installation); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // GitHubAppInstallationTeam answers the team installation is bound to, or
 // ErrNotFound. A webhook delivery and a repository's installation name no
 // team, so this read is how either finds one.
@@ -205,7 +190,9 @@ func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation
 	if err != nil {
 		return "", err
 	}
-	return in.Team, t.UnbindGitHubAppInstallation(ctx, installation)
+	return in.Team, o.s.inTx(ctx, func(tx *storeTx) error {
+		return t.unbindGitHubAppInstallationTx(ctx, tx, installation)
+	})
 }
 
 // SetGitHubAppInstallationSuspended records GitHub's suspension of
@@ -270,15 +257,13 @@ func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, erro
 		if err := json.Unmarshal([]byte(labels), &tr.PullRequestLabels); err != nil {
 			return nil, err
 		}
-		tr.CreatedAt = time.Unix(created, 0).UTC()
+		tr.CreatedAt = time.Unix(0, created).UTC()
 		out = append(out, tr)
 	}
 	return out, rows.Err()
 }
 
-// PutGitHubAppTrigger writes tr for t, replacing the subscription of the
-// same repository and pipeline. The installation must be one t holds.
-func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error) {
+func (t *Tenant) putGitHubAppTriggerTx(ctx context.Context, tx *storeTx, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error) {
 	repo, ok := ParseGitHubRepo(tr.Repository)
 	if !ok || tr.RepositoryID <= 0 || strings.TrimSpace(tr.Pipeline) == "" ||
 		(!tr.Push && len(tr.Tags) == 0 && !tr.PullRequest && !tr.PullRequestClosed && !tr.PullRequestLabeled && !tr.PullRequestReadyForReview &&
@@ -312,10 +297,10 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 	if err != nil {
 		return GitHubAppTrigger{}, err
 	}
-	if _, err := t.GitHubAppInstallation(ctx, tr.InstallationID); err != nil {
+	if err := t.liveGitHubInstallationTx(ctx, tx, tr.InstallationID); err != nil {
 		return GitHubAppTrigger{}, err
 	}
-	tr.Team, tr.Repository, tr.CreatedAt = t.team, repo.Slug(), now.UTC().Truncate(time.Second)
+	tr.Team, tr.Repository, tr.CreatedAt = t.team, repo.Slug(), now.UTC()
 	if tr.Tags == nil {
 		tr.Tags = []string{}
 	}
@@ -337,9 +322,9 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 	if err != nil {
 		return GitHubAppTrigger{}, fmt.Errorf("encode pull request base branches: %w", err)
 	}
-	_, err = t.s.exec(ctx, `
-		INSERT INTO github_app_triggers (team, `+githubAppTriggerCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO github_app_triggers (team, repo_key, `+githubAppTriggerCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (team, repository_id, pipeline) DO UPDATE SET
 		    repository = excluded.repository, installation_id = excluded.installation_id,
 		    on_push = excluded.on_push, tag_patterns = excluded.tag_patterns, on_pull_request = excluded.on_pull_request,
@@ -349,8 +334,8 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 		    on_release_published = excluded.on_release_published, on_release_prereleased = excluded.on_release_prereleased,
 		    on_branch_create = excluded.on_branch_create, on_branch_delete = excluded.on_branch_delete,
 		    created_by = excluded.created_by, created_at = excluded.created_at`,
-		string(t.team), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push), string(patterns),
-		flag(tr.PullRequest), string(branches), string(baseBranches), tr.CreatedBy, tr.CreatedAt.Unix(),
+		string(t.team), fmt.Sprintf("gh:%d", tr.RepositoryID), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push), string(patterns),
+		flag(tr.PullRequest), string(branches), string(baseBranches), tr.CreatedBy, tr.CreatedAt.UnixNano(),
 		flag(tr.PullRequestClosed), flag(tr.PullRequestLabeled), string(labels), flag(tr.PullRequestReadyForReview),
 		flag(tr.ReleasePublished), flag(tr.ReleasePrereleased), flag(tr.BranchCreate), flag(tr.BranchDelete))
 	if err != nil {
@@ -370,20 +355,6 @@ func validateGitHubBranchPatterns(field string, patterns []string) error {
 		if _, err := path.Match(pattern, ""); err != nil {
 			return fmt.Errorf("%w: invalid %s pattern %q: %w", ErrInvalidInput, field, pattern, err)
 		}
-	}
-	return nil
-}
-
-// DeleteGitHubAppTrigger removes t's subscription of pipeline to repository,
-// or answers ErrNotFound.
-func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error {
-	res, err := t.s.exec(ctx, `DELETE FROM github_app_triggers WHERE team = ? AND repository_id = ? AND pipeline = ?`,
-		string(t.team), repositoryID, pipeline)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return ErrNotFound
 	}
 	return nil
 }
@@ -412,35 +383,6 @@ func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, reposit
 	return t.scanGitHubAppTriggers(rows)
 }
 
-// GitHubAppSubscribedRepository returns the GitHub ID of repository, as
-// owner/name in any case, when t's App trigger subscriptions name it under
-// exactly one ID, and ErrNotFound otherwise.
-func (t *Tenant) GitHubAppSubscribedRepository(ctx context.Context, repository string) (_ int64, err error) {
-	rows, err := t.s.query(ctx, `SELECT DISTINCT repository_id FROM github_app_triggers
-		WHERE team = ? AND LOWER(repository) = LOWER(?) LIMIT 2`, string(t.team), repository)
-	if err != nil {
-		return 0, err
-	}
-	defer closeRowsInto(rows, &err)
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return 0, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	// safety: two IDs under one name are a rename GitHub has not reported yet,
-	// so neither is trusted to be the repository the run names.
-	if len(ids) != 1 || ids[0] <= 0 {
-		return 0, notFound("GitHub App subscription", repository)
-	}
-	return ids[0], nil
-}
-
 // RenameGitHubAppTriggerRepository updates subscriptions under the repository's
 // stable GitHub id when its name or installation changes.
 func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installation, repositoryID int64, name string) error {
@@ -453,25 +395,12 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 	return err
 }
 
-// AccountIdentity returns the subject of accountID's identity at provider,
-// such as the numeric GitHub user id, or ErrNotFound when the account has
-// none linked.
-func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error) {
-	var subject string
-	err := s.queryRow(ctx, `SELECT subject FROM identities WHERE account_id = ? AND provider = ?
-		ORDER BY created_at LIMIT 1`, accountID, provider).Scan(&subject)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return subject, err
-}
-
 // ConsumeGitHubAppConnectState records that the connect flow named by nonce
 // finished, and reports false when one already did. The record lives until
 // the state expires, so every replica and a restarted controller refuse a
 // state that was used once.
 func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
-	return s.consumeFlowNonce(ctx, "github_app_connect_states", nonce, expires, now)
+	return s.consumeFlowNonce(ctx, "github_app_connect", nonce, expires)
 }
 
 // GitHubAppDeliveryRetention is how long a delivery's digest is remembered.
@@ -605,48 +534,25 @@ func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ct
 
 const maxGitHubCommitTriggers = 100
 
-// GitHubCommitTriggers returns t's triggers for commit sha of the GitHub
-// repository repo, newest first and at most 100.
-func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) ([]*Trigger, error) {
+// GitHubCommitTriggers reads sealed trigger reports by numeric repository identity and exact commit.
+func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) (_ []*Trigger, err error) {
 	if repo.ID <= 0 {
 		return nil, nil
 	}
-	ids, err := t.githubCommitTriggerIDs(ctx, repo, sha)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*Trigger, 0, len(ids))
-	for _, id := range ids {
-		trig, err := t.GetTrigger(ctx, id)
-		if errors.Is(err, ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, trig)
-	}
-	return out, nil
-}
-
-func (t *Tenant) githubCommitTriggerIDs(ctx context.Context, repo GitHubRepo, sha string) (_ []string, err error) {
-	rows, err := t.s.query(ctx, `SELECT id FROM triggers
-		WHERE team = ? AND github_repo_id = ? AND github_owner = ? AND github_repo = ? AND git_sha = ?
-		ORDER BY created_at DESC, id DESC LIMIT ?`,
-		string(t.team), repo.ID, repo.Owner, repo.Name, sha, maxGitHubCommitTriggers)
+	rows, err := t.s.query(ctx, triggerSelect+` WHERE runs.team=? AND runs.repo_key=? AND runs.git_sha=? ORDER BY triggers.created_at DESC,triggers.id DESC LIMIT ?`, t.team, githubRepositoryKey(repo.ID), sha, maxGitHubCommitTriggers)
 	if err != nil {
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
-	var ids []string
+	var out []*Trigger
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		tr, err := scanTrigger(rows)
+		if err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		out = append(out, tr)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
 }
 
 func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx, installation int64) error {

@@ -399,7 +399,7 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 		return SignInResult{}, err
 	}
 	defer rollbackOrLog(tx)
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 
 	var res SignInResult
 	var accountID string
@@ -577,7 +577,7 @@ func scanAccount(row *sql.Row) (Account, error) {
 	}
 	a.EmailVerified = verified == 1
 	a.ActiveTeam = Team(active)
-	a.CreatedAt = time.Unix(created, 0).UTC()
+	a.CreatedAt = time.Unix(0, created).UTC()
 	a.Waitlisted = waitlisted != 0
 	return a, nil
 }
@@ -587,11 +587,7 @@ func (s *Store) Account(ctx context.Context, id string) (Account, error) {
 	return scanAccount(s.queryRow(ctx, accountSelect+` WHERE id = ?`, id))
 }
 
-// CreateTeam registers a team with its creator as owner and makes it the
-// creator's active team. The registry row, the membership and the switch are
-// one transaction, because a team with no owner is a team nobody can
-// administer.
-func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error) {
+func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error) {
 	slug = NormalizeTeam(slug)
 	if err := ValidateSlug(string(slug)); err != nil {
 		return TeamInfo{}, err
@@ -603,11 +599,6 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 	if len(displayName) > maxDisplayNameLen {
 		return TeamInfo{}, fmt.Errorf("%w: a display name is at most %d characters", ErrInvalidInput, maxDisplayNameLen)
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return TeamInfo{}, err
-	}
-	defer rollbackOrLog(tx)
 	var created int
 	var waitlisted int64
 	if err := tx.QueryRowContext(ctx, `SELECT teams_created, COALESCE(waitlisted_at, 0) FROM accounts WHERE id = ?`+tx.forUpdate(),
@@ -626,13 +617,6 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 			ErrTeamLimit, MaxCreatedTeams, created)
 	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, now); err != nil {
-		return TeamInfo{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`,
-		string(slug), now.UTC().Unix(), accountID); err != nil {
-		return TeamInfo{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return TeamInfo{}, err
 	}
 	return TeamInfo{Slug: slug, DisplayName: displayName, CreatedBy: accountID}, nil
@@ -662,7 +646,7 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO memberships (team, account_id, role, created_at) VALUES (?, ?, ?, ?)`,
-		string(slug), accountID, string(RoleOwner), now.UTC().Unix()); err != nil {
+		string(slug), accountID, string(RoleOwner), now.UTC().UnixNano()); err != nil {
 		return fmt.Errorf("identity: add owner: %w", err)
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
@@ -762,29 +746,14 @@ type InvitationAcceptance struct {
 	GateClosed *SignUpGate
 }
 
-// AcceptInvitation turns an invitation into a membership and makes its team
-// the account's active one. The account's verified email must be the address
-// the invitation names: the invitation id is a bearer secret anyone it was
-// forwarded to holds, and the verified email is what proves the person
-// accepting is the person invited.
-//
-// A team that has bought no credits holds at most the gate's FreeTeamMembers,
-// and a waitlisted account that joins counts as an admission, because one
-// admitted account could otherwise invite a farm of waitlisted ones into
-// team scopes while the gate holds them back.
-func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
+func acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
 	var none InvitationAcceptance
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return none, err
-	}
-	defer rollbackOrLog(tx)
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 
 	var team, email, role string
 	var expires int64
 	var accepted, withdrawn sql.NullInt64
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT team, email, role, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
 		Scan(&team, &email, &role, &expires, &accepted, &withdrawn)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -834,10 +803,6 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 		}
 		return none, err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`, team, at, accountID); err != nil {
-		return none, err
-	}
 	out := InvitationAcceptance{Team: Team(team)}
 	if acct.Waitlisted {
 		if out.GateClosed, err = tripVelocityTx(ctx, tx, gate, now); err != nil {
@@ -848,7 +813,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 		}
 		out.Admitted = true
 	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 // safety: a team that has bought credits pays for what its members run, so
@@ -881,18 +846,6 @@ func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) err
 		}
 	}
 	return ErrTeamFull
-}
-
-// SetActiveTeam records team as the account's sticky team. The account must be
-// a member of it.
-func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error {
-	t := &Tenant{s: s, team: NormalizeTeam(team)}
-	if _, err := t.MemberRole(ctx, accountID); err != nil {
-		return err
-	}
-	_, err := s.exec(ctx, `UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`,
-		string(t.team), now.UTC().Unix(), accountID)
-	return err
 }
 
 // CreateAccountSession opens a session for a current team member.
@@ -939,14 +892,22 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 		}
 	}
 	var role Role
-	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, acct.ID).Scan(&role); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = ErrNotMember
+	var sessionTeam any
+	if team == "" {
+		if provider == "" {
+			return "", "", nil, ErrNotMember
 		}
-		return "", "", nil, err
-	}
-	if !role.Valid() {
-		return "", "", nil, ErrNotMember
+	} else {
+		sessionTeam = string(team)
+		if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, acct.ID).Scan(&role); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				err = ErrNotMember
+			}
+			return "", "", nil, err
+		}
+		if !role.Valid() {
+			return "", "", nil, ErrNotMember
+		}
 	}
 	var email string
 	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
@@ -955,33 +916,13 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 	now := tx.now()
 	expires := now.Add(ttl)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
- VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), team, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
+ VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
 		return "", "", nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return "", "", nil, err
 	}
 	return raw, csrf, &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}, nil
-}
-
-// SwitchSessionTeam moves an account's session from one team to another. It
-// names the team the session is leaving, so a session already moved by a
-// concurrent switch is reported rather than moved twice.
-func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error {
-	res, err := s.exec(ctx,
-		`UPDATE sessions SET team = ? WHERE hash = ? AND account_id = ? AND team = ?
- AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?
- AND EXISTS (SELECT 1 FROM memberships WHERE team=? AND account_id=?)`,
-		string(to), sessionDigest(rawSession), accountID, string(from), s.now().UnixNano(), to, accountID)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n != 1 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 // MemberRole reads an account's role in t's team, or ErrNotMember.
@@ -998,19 +939,6 @@ func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 // Info reads t's team registry row.
 func (t *Tenant) Info(ctx context.Context) (TeamInfo, error) {
 	return t.s.TeamInfo(ctx, t.team)
-}
-
-// Rename changes t's display name. The slug is the tenant key and stays.
-func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error) {
-	displayName = strings.TrimSpace(displayName)
-	if displayName == "" || len(displayName) > maxDisplayNameLen {
-		return TeamInfo{}, fmt.Errorf("%w: a display name is 1 to %d characters", ErrInvalidInput, maxDisplayNameLen)
-	}
-	if _, err := t.s.exec(ctx, `UPDATE teams SET display_name = ?, updated_at = ? WHERE name = ?`,
-		displayName, now.UnixNano(), string(t.team)); err != nil {
-		return TeamInfo{}, err
-	}
-	return t.Info(ctx)
 }
 
 // Members lists t's members.
@@ -1040,111 +968,8 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 	return out, rows.Err()
 }
 
-// SetMemberRole changes subject's role. The actor may not grant a role above
-// their own, may not re-role someone who outranks them, and may not demote
-// the last owner, because a team without an owner cannot be administered and
-// nobody can put one back. A demotion to reader revokes every token the
-// subject minted in t's team: a reader may not mint a machine token, and a
-// member token minted at a higher role carries write scopes. An owner's member
-// token carries at most the editor's scopes, so a demotion to editor keeps it.
-// The revoked prefixes are returned so a caller can drop them from any cache.
-func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error) {
-	if !role.Valid() {
-		return nil, fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return nil, err
-	}
-	actor, err := t.roleTx(ctx, tx, actorID)
-	if err != nil {
-		return nil, err
-	}
-	current, err := t.roleTx(ctx, tx, subjectID)
-	if err != nil {
-		return nil, err
-	}
-	if !actor.AtLeast(role) || !actor.AtLeast(current) {
-		return nil, ErrRoleAboveOwn
-	}
-	if current == role {
-		return nil, nil
-	}
-	if current == RoleOwner {
-		if err := t.requireAnotherOwnerTx(ctx, tx, subjectID); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?`,
-		string(role), string(t.team), subjectID); err != nil {
-		return nil, err
-	}
-	if err := t.withdrawInvitationsIssuedByTx(ctx, tx, subjectID, role, now); err != nil {
-		return nil, err
-	}
-	var revoked []string
-	if role == RoleReader {
-		if revoked, err = t.revokeTokensMintedByTx(ctx, tx, subjectID, now); err != nil {
-			return nil, err
-		}
-	}
-	return revoked, tx.Commit()
-}
-
-// RemoveMember takes subject out of t's team and revokes every token they
-// minted in it, returning the revoked prefixes so a caller can drop them from
-// any cache. Anyone may remove themselves; removing someone else needs an
-// actor who outranks or equals them. The last owner stays.
-func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return nil, err
-	}
-	current, err := t.roleTx(ctx, tx, subjectID)
-	if err != nil {
-		return nil, err
-	}
-	if actorID != subjectID {
-		actor, err := t.roleTx(ctx, tx, actorID)
-		if err != nil {
-			return nil, err
-		}
-		if !actor.AtLeast(current) {
-			return nil, ErrRoleAboveOwn
-		}
-	}
-	if current == RoleOwner {
-		if err := t.requireAnotherOwnerTx(ctx, tx, subjectID); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE team = ? AND account_id = ?`,
-		string(t.team), subjectID); err != nil {
-		return nil, err
-	}
-	if err := t.moveSessionsOffTeamTx(ctx, tx, subjectID, now); err != nil {
-		return nil, err
-	}
-	if err := t.withdrawInvitationsIssuedByTx(ctx, tx, subjectID, "", now); err != nil {
-		return nil, err
-	}
-	revoked, err := t.revokeTokensMintedByTx(ctx, tx, subjectID, now)
-	if err != nil {
-		return nil, err
-	}
-	return revoked, tx.Commit()
-}
-
 func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) error {
-	if err := settleActiveTeamTx(ctx, tx, accountID, now.UTC().Unix()); err != nil {
+	if err := settleActiveTeamTx(ctx, tx, accountID, now.UTC().UnixNano()); err != nil {
 		return err
 	}
 	var active string
@@ -1156,61 +981,9 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 		return nil
 	}
 	_, err := tx.ExecContext(ctx,
-		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ?`,
+		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
 		active, accountID, string(t.team))
 	return err
-}
-
-// safety: accepting an invitation grants the role it names without asking
-// about its inviter again, so an invitation for more than the inviter now
-// holds goes with that authority; an empty keep withdraws every one.
-func (t *Tenant) withdrawInvitationsIssuedByTx(ctx context.Context, tx *storeTx, accountID string, keep Role, now time.Time) error {
-	var above []any
-	for _, r := range []Role{RoleReader, RoleEditor, RoleOwner} {
-		if r.rank() > keep.rank() {
-			above = append(above, string(r))
-		}
-	}
-	if accountID == "" || len(above) == 0 {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `
-		UPDATE invitations SET withdrawn_at = ?
-		WHERE team = ? AND invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL
-		  AND role IN (`+placeholders(len(above))+`)`,
-		append([]any{now.UTC().UnixNano(), string(t.team), accountID}, above...)...)
-	return err
-}
-
-// safety: a machine token outlives the membership that minted it and reads
-// the secrets of every run it claims, and a member token acts as its minter,
-// so both go with the minter's access, legacy runner and CLI tokens included.
-func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) ([]string, error) {
-	if accountID == "" {
-		return nil, nil
-	}
-	at := now.UTC().Unix()
-	rows, err := tx.QueryContext(ctx, `
-		SELECT prefix FROM tokens
-		WHERE team = ? AND created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		string(t.team), accountID, at)
-	if err != nil {
-		return nil, err
-	}
-	prefixes, err := scanPrefixes(rows)
-	if err != nil {
-		return nil, err
-	}
-	if len(prefixes) == 0 {
-		return nil, nil
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE tokens SET revoked_at = ?
-		WHERE team = ? AND created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		at, string(t.team), accountID, at); err != nil {
-		return nil, err
-	}
-	return prefixes, nil
 }
 
 func scanPrefixes(rows *sql.Rows) (_ []string, err error) {
@@ -1263,25 +1036,7 @@ func (t *Tenant) requireAnotherOwnerTx(ctx context.Context, tx *storeTx, exceptI
 	return nil
 }
 
-// CreateInvitation offers email a role in t's team. The actor cannot invite
-// above their own role, because an invitation is a grant and a second account
-// invited at a higher role is the same escalation SetMemberRole refuses.
-func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error) {
-	email = NormalizeEmail(email)
-	if !LooksLikeEmail(email) {
-		return Invitation{}, fmt.Errorf("%w: that is not an email address", ErrInvalidInput)
-	}
-	if !role.Valid() {
-		return Invitation{}, fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return Invitation{}, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return Invitation{}, err
-	}
+func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, email string, role Role, id string, now time.Time) (Invitation, error) {
 	actor, err := t.roleTx(ctx, tx, actorID)
 	if err != nil {
 		return Invitation{}, err
@@ -1321,10 +1076,6 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 		at, string(t.team), email, at); err != nil {
 		return Invitation{}, err
 	}
-	id, err := newIdentityID()
-	if err != nil {
-		return Invitation{}, err
-	}
 	inv := Invitation{
 		ID: id, Team: t.team, Email: email, Role: role, InvitedBy: actorID,
 		CreatedAt: now.UTC(), ExpiresAt: now.UTC().Add(invitationTTL),
@@ -1338,7 +1089,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 		}
 		return Invitation{}, err
 	}
-	return inv, tx.Commit()
+	return inv, nil
 }
 
 // Invitations lists t's open invitations.
@@ -1357,30 +1108,5 @@ func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation
 	return scanInvitations(rows)
 }
 
-// DeleteInvitation withdraws one of t's open invitations. An id that is
-// another team's, already accepted, or already withdrawn is ErrNotFound. The
-// row stays, so a withdrawn invitation still counts toward the daily cap.
-func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error {
-	res, err := t.s.exec(ctx, `
-		UPDATE invitations SET withdrawn_at = ?
-		WHERE team = ? AND id = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`,
-		now.UTC().UnixNano(), string(t.team), id)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// Member token limits. A member token authenticates as that member from a
-// terminal, so it lapses on its own like a machine token, and one member holds
-// a bounded number because every live token is a hash a bearer lookup may try.
-const (
-	CLITokenLifetime      = 90 * 24 * time.Hour
-	MaxCLITokensPerMember = 10
-)
-
-// ErrCLITokenLimit refuses a CLI token past [MaxCLITokensPerMember].
-var ErrCLITokenLimit = errors.New("store: this member holds as many member tokens as a member may")
+// CLITokenLifetime bounds a legacy member credential.
+const CLITokenLifetime = 90 * 24 * time.Hour

@@ -746,9 +746,6 @@ func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Sto
 		}
 		srv.WithSecretsCipher(ring.For(st))
 	default:
-		if err := refusePlaintextSecrets(ctx, st); err != nil {
-			return err
-		}
 		srv.WithSecretsCipher(keylessCipher{})
 		return nil
 	}

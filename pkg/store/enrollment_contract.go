@@ -28,9 +28,6 @@ func (s *Store) SetClaimProfileResolver(resolver ClaimProfileResolver) {
 // ReadClaimProfile supplies controller claim observations from the same enrollment
 // owner used by transactional matching. Claims re-read registration at award time.
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error) {
-	if s.claimProfiles == nil {
-		return match.Profile{}, match.Resources{}, authorityError(apierr.Unavailable, "claim enrollment is not configured")
-	}
 	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return match.Profile{}, match.Resources{}, err
@@ -41,7 +38,13 @@ func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.Autho
 		return match.Profile{}, match.Resources{}, err
 	}
 	principal := chain[0].principal
-	profile, available, err := s.claimProfiles.ResolveClaimProfile(ctx, principal)
+	var profile match.Profile
+	var available match.Resources
+	if s.claimProfiles != nil {
+		profile, available, err = s.claimProfiles.ResolveClaimProfile(ctx, principal)
+	} else {
+		profile, err = enrolledClaimProfileTx(ctx, tx, chain)
+	}
 	if err != nil {
 		return match.Profile{}, match.Resources{}, err
 	}

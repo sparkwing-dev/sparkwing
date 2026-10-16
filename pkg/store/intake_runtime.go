@@ -115,6 +115,13 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 		scope = ""
 		digest = ""
 	}
+	if err = enforceRunsPerHourTx(ctx, tx, team, id, principal.Capability.Subject, now); err != nil {
+		var refused *ComputeLimitError
+		if errors.As(err, &refused) {
+			err = errors.Join(err, &apierr.Error{Code: apierr.RateLimited, Message: "hourly run admission limit reached", Details: map[string]any{"limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed, "retry_after_ms": 5000}})
+		}
+		return AdmissionResult{}, err
+	}
 	if err = insertAdmissionTx(ctx, tx, team, result, snapshot, principal, request.IdempotencyKey, scope, string(digest), policy, now); err != nil {
 		return AdmissionResult{}, err
 	}

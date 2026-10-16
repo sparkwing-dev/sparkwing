@@ -51,7 +51,7 @@ func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Id
 			return nil, err
 		}
 		id.Linked = linked == 1
-		id.CreatedAt = time.Unix(created, 0).UTC()
+		id.CreatedAt = time.Unix(0, created).UTC()
 		out = append(out, id)
 	}
 	return out, rows.Err()
@@ -108,7 +108,7 @@ func (s *Store) linkIdentityOnce(ctx context.Context, accountID string, p SignIn
 	if sameProvider > 0 {
 		return Identity{}, ErrProviderAlreadyLinked
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO identities (provider, subject, account_id, email, email_verified, created_at, linked)
 		VALUES (?, ?, ?, ?, ?, ?, 1)`,
@@ -125,75 +125,58 @@ func (s *Store) linkIdentityOnce(ctx context.Context, accountID string, p SignIn
 	}
 	return Identity{
 		Provider: p.Provider, Subject: p.Subject, Email: p.Email, Linked: true,
-		CreatedAt: time.Unix(at, 0).UTC(),
+		CreatedAt: time.Unix(0, at).UTC(),
 	}, nil
 }
 
-// UnlinkIdentity detaches accountID's sign-in from provider and returns it.
-// An account keeps at least one sign-in method ([ErrLastSignInMethod]), and
-// a provider it has no sign-in from is [ErrNotFound]. The account's email
-// stays what it was.
-//
-// The provider account then signs in as a stranger: the email rule no longer
-// attaches it to accountID, even on the account's own verified address. Every
-// session of accountID other than keepSession, a raw session id, ends,
-// because one of them may have been opened with the sign-in just removed.
-func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return Identity{}, 0, err
-	}
-	defer rollbackOrLog(tx)
+func unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, accountID, provider, keepHash string, now time.Time) (int64, error) {
 	if err := lockAccountTx(ctx, tx, accountID); err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
-	var id Identity
-	var linked int
-	var created int64
-	err = tx.QueryRowContext(ctx, `SELECT provider, subject, email, linked, created_at FROM identities
+	var subject string
+	err := tx.QueryRowContext(ctx, `SELECT subject FROM identities
 		WHERE account_id = ? AND provider = ? ORDER BY created_at LIMIT 1`, accountID, provider).
-		Scan(&id.Provider, &id.Subject, &id.Email, &linked, &created)
+		Scan(&subject)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Identity{}, 0, ErrNotFound
+		return 0, ErrNotFound
 	}
 	if err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
-	id.Linked, id.CreatedAt = linked == 1, time.Unix(created, 0).UTC()
 	var methods int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM identities WHERE account_id = ?`, accountID).Scan(&methods); err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
 	if methods <= 1 {
-		return Identity{}, 0, ErrLastSignInMethod
+		return 0, ErrLastSignInMethod
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	for _, stmt := range []struct {
 		sql  string
 		args []any
 	}{
-		{`DELETE FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`, []any{id.Provider, id.Subject, accountID}},
-		{`DELETE FROM identity_unlinks WHERE provider = ? AND subject = ? AND account_id = ?`, []any{id.Provider, id.Subject, accountID}},
+		{`DELETE FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`, []any{provider, subject, accountID}},
+		{`DELETE FROM identity_unlinks WHERE provider = ? AND subject = ? AND account_id = ?`, []any{provider, subject, accountID}},
 		{
 			`INSERT INTO identity_unlinks (provider, subject, account_id, unlinked_at) VALUES (?, ?, ?, ?)`,
-			[]any{id.Provider, id.Subject, accountID, at},
+			[]any{provider, subject, accountID, at},
 		},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
-			return Identity{}, 0, err
+			return 0, err
 		}
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ?`,
-		accountID, sessionDigest(keepSession))
+		accountID, keepHash)
 	if err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
 	ended, err := res.RowsAffected()
 	if err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
-	return id, ended, tx.Commit()
+	return ended, nil
 }
 
 func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
@@ -224,22 +207,27 @@ func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
 // the state expires, so every replica and a restarted controller refuse a
 // state that was used once.
 func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
-	return s.consumeFlowNonce(ctx, "identity_link_states", nonce, expires, now)
+	return s.consumeFlowNonce(ctx, "identity_link", nonce, expires)
 }
 
-// safety: table is one of this package's own flow-state tables, never input.
-func (s *Store) consumeFlowNonce(ctx context.Context, table, nonce string, expires, now time.Time) (bool, error) {
+func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expires time.Time) (bool, error) {
 	if nonce == "" {
 		return false, nil
 	}
-	if _, err := s.exec(ctx, `DELETE FROM `+table+` WHERE expires_at <= ?`, now.Unix()); err != nil {
-		return false, err
-	}
-	_, err := s.exec(ctx, `INSERT INTO `+table+` (nonce, expires_at) VALUES (?, ?)`, nonce, expires.Unix())
-	if isUniqueViolation(err) {
-		return false, nil
-	}
-	return err == nil, err
+	used := false
+	err := s.inTx(ctx, func(tx *storeTx) error {
+		if !expires.After(tx.now()) {
+			return nil
+		}
+		result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		used = n == 1
+		return err
+	})
+	return err == nil && used, err
 }
 
 // IdentityLinkStateKey is the key a controller signs link-flow state with.

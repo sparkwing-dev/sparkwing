@@ -25,6 +25,10 @@ func (nativeProvisionPolicy) AuthorizeProvision(ctx context.Context, resolver ca
 		return bindingRefusal()
 	}
 	switch spec.Kind {
+	case capability.ProvisionBootstrap:
+		if tx.rotatingRoot == nil && (spec.Seed == "" || spec.Subject != (capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}) || spec.ExpiresAt != nil || spec.Metered || !slices.Equal(spec.Grants, []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore})) {
+			return bindingRefusal()
+		}
 	case capability.ProvisionMachine:
 		if spec.RegistrationID != "runner:"+spec.Team+":"+spec.Subject.ID {
 			return bindingRefusal()

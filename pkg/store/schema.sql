@@ -161,6 +161,7 @@ CREATE TABLE nodes (
     CHECK(owner_capability_prefix = '' OR (claimed_by IS NOT NULL AND capability_prefix <> '')),
     CHECK((status = 'done') = (outcome <> '')),
     CHECK((status = 'done') = (finished_at IS NOT NULL)),
+    CHECK((output_record IS NULL AND manifest_record IS NULL) OR status = 'done'),
     CHECK(status <> 'done' OR (claimed_by IS NULL AND lease_expires_at IS NULL AND capability_prefix = '')),
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
@@ -253,11 +254,25 @@ CREATE TABLE sessions (
     created_at BIGINT NOT NULL,
     expires_at BIGINT NOT NULL,
     last_used_at BIGINT,
-    team TEXT NOT NULL REFERENCES teams(name),
+    team TEXT REFERENCES teams(name),
     account_id TEXT NOT NULL DEFAULT '',
     capability_prefix TEXT NOT NULL DEFAULT '',
     revoked_at BIGINT,
-    auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0)
+    auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0),
+    CHECK(team IS NOT NULL OR (account_id <> '' AND capability_prefix = ''))
+);
+
+CREATE TABLE run_control_requests (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    subject_kind TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK(operation IN ('pause','approval')),
+    request_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    result_json BLOB NOT NULL,
+    PRIMARY KEY(team,run_id,subject_kind,subject_id,operation,request_key),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
 CREATE TABLE debug_pauses (
@@ -669,17 +684,39 @@ CREATE TABLE credit_checkouts (
 
 -- safety: provider-event deduplication and credit settlement survive operational run pruning.
 CREATE TABLE payment_events (
-    team TEXT NOT NULL REFERENCES teams(name),
+    team TEXT REFERENCES teams(name),
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     event_id TEXT NOT NULL,
-    checkout_id TEXT NOT NULL,
+    checkout_id TEXT,
     payment_id TEXT NOT NULL DEFAULT '',
-    event_kind TEXT NOT NULL CHECK(event_kind IN ('checkout_paid','checkout_expired','checkout_failed')),
+    event_kind TEXT NOT NULL CHECK(event_kind IN ('checkout_paid','checkout_expired','checkout_failed','card_setup','card_paid','card_failed','refund','warning','dispute_opened','dispute_closed')),
     event_digest TEXT NOT NULL,
     grant_id TEXT REFERENCES credit_grants(id),
     processed_at BIGINT NOT NULL,
+    object_id TEXT NOT NULL DEFAULT '',
+    event_json TEXT,
+    settlement_json TEXT,
     PRIMARY KEY(payment_mode,event_id),
-    FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode)
+    FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode),
+    CHECK(team IS NOT NULL OR event_kind = 'warning'),
+    CHECK((event_kind IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NOT NULL AND team IS NOT NULL)
+       OR (event_kind NOT IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NULL AND object_id <> '' AND event_json IS NOT NULL AND settlement_json IS NOT NULL))
+);
+
+CREATE INDEX idx_payment_events_object ON payment_events(payment_mode,object_id);
+
+CREATE TABLE payment_correlations (
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    provider_id TEXT NOT NULL CHECK(provider_id <> ''),
+    kind TEXT NOT NULL CHECK(kind IN ('setup','collection')),
+    team TEXT NOT NULL REFERENCES teams(name),
+    customer_id TEXT NOT NULL CHECK(customer_id <> ''),
+    currency TEXT NOT NULL DEFAULT '',
+    attempt_id TEXT NOT NULL DEFAULT '',
+    charge_id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(payment_mode,provider_id),
+    CHECK((kind = 'setup' AND currency = '' AND attempt_id = '' AND charge_id = '')
+       OR (kind = 'collection' AND currency <> '' AND attempt_id <> '' AND charge_id <> ''))
 );
 
 CREATE TABLE credit_freezes (
@@ -826,19 +863,6 @@ CREATE TABLE storage_commit_receipts (
     renew_status TEXT NOT NULL DEFAULT '',
     renew_result BLOB,
     PRIMARY KEY (team, store, id)
-);
-
-CREATE TABLE child_invocations (
-    team TEXT NOT NULL REFERENCES teams(name),
-    parent_run_id TEXT NOT NULL,
-    parent_node_id TEXT NOT NULL,
-    generation BIGINT NOT NULL,
-    ordinal BIGINT NOT NULL,
-    request_digest TEXT NOT NULL,
-    child_run_id TEXT NOT NULL,
-    created_at BIGINT NOT NULL,
-    PRIMARY KEY (team, parent_run_id, parent_node_id, generation, ordinal),
-    FOREIGN KEY(team,parent_run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
 -- safety: account audit events precede team creation, so this operator table permits no team.
@@ -1073,6 +1097,7 @@ CREATE TABLE capabilities (
     claim_by BIGINT,
     reserved_pools BLOB NOT NULL,
     advertised_labels_json BLOB,
+    claim_observation_json BLOB,
     created_at BIGINT NOT NULL,
     expires_at BIGINT,
     revoked_at BIGINT,
@@ -1080,7 +1105,6 @@ CREATE TABLE capabilities (
     created_by TEXT NOT NULL,
     metered BIGINT NOT NULL DEFAULT 0 CHECK(metered IN (0,1)),
     result_digest TEXT NOT NULL DEFAULT '',
-    source_mints BIGINT NOT NULL DEFAULT 0,
     payer_team TEXT REFERENCES teams(name),
     executor_class TEXT,
     reservation_id TEXT,

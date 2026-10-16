@@ -40,10 +40,10 @@ func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 			})
 			ctx := t.Context()
 			start := time.Now().Add(-time.Minute)
-			if err := st.CreateRun(ctx, store.Run{ID: "partial", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+			if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "partial", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.CreateNode(ctx, store.Node{RunID: "partial", NodeID: "build", Status: "running", StartedAt: &start}); err != nil {
+			if err := teststore.SeedNode(st, ctx, store.Node{RunID: "partial", NodeID: "build", Status: "running", StartedAt: &start}); err != nil {
 				t.Fatal(err)
 			}
 			for _, id := range []string{"build", ""} {
@@ -56,11 +56,11 @@ func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 				{Kind: store.MetricInterval, TS: start.Add(2 * time.Second), CPUMillicores: tc.cores, MemoryBytes: tc.memory},
 				{Kind: tc.marker, TS: start.Add(4 * time.Second)},
 			} {
-				if err := st.AddNodeMetricSample(ctx, "partial", "build", sample); err != nil {
+				if err := teststore.SeedMetric(st.DB(), ctx, "partial", "build", sample); err != nil {
 					t.Fatalf("sample %d: %v", i, err)
 				}
 			}
-			if err := st.FinishNode(ctx, "partial", "build", "success", ""); err != nil {
+			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: "partial", NodeID: "build"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
 				t.Fatal(err)
 			}
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/runs/partial/finish", strings.NewReader(`{"status":"success","error":""}`))

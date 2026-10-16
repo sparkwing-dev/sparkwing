@@ -1,3 +1,192 @@
+## W1 tenant event and compute-control continuation
+
+The concurrent append tests now select their tenant. The generated
+`TestTenantEventAppendIsolationProperty` refuses foreign selectors without
+changing their counters, preserves event order and uses the store clock.
+`TestTenantEventAppendFailureRollsBackSequenceAndBytes` refuses an event insert
+and verifies that the next successful append still receives sequence one.
+Compute-limit validation, zero removal and atomic batch rollback use Operator.
+The duplicate queue-count assertions and unused compute-alarm test retire with
+their deleted APIs. The retained queue partition property and StoreQueueOrder
+cell use the shared state projection. The cadence fixture supplies its resolved
+numeric GitHub identity before testing the operator interval guard.
+
+`Tenant.FinishRun` and `finishRunOnceTx` are removed. The retained timestamp
+
+## W1 raw run writer continuation
+
+Controller and web reporting fixtures migrate from `Tenant.CreateRun` to
+`teststore.SeedRun`. `TestRunReportingSeedUsesSealedSchemaWithoutExecutableWork`
+checks current-schema reads, masked unclassified arguments, duplicate refusal,
+unregistered tenant refusal and absence of owner, job and credential rows.
+`TestOperatorActiveRunnersUseStoreClockAndWindow` retires with the unused
+lease-window gauge. `TestRunnerInventorySeparatesRenewalLivenessFromHeadroom`
+and the runner inventory properties retain current observation liveness.
+Profile aggregation and evidence-coverage cases use the final `memoized`
+outcome. Both suites pass through real SQLite, including memoized jobs beside
+measured jobs. No native matrix cell is newly claimed.
+
+checks in `TestATerminalRunAlwaysCarriesAFinishTime` now drive real admission,
+plan acceptance, claims and `FinishRunAndUnit` for success, failure and
+cancellation. Exact replay preserves the full terminal snapshot.
+`TestAPendingRunCarriesNoFinishTime` reads the admitted final-schema row.
+`TestTenantWritesReportNotFoundForAnotherTeamsRun` now refuses foreign and
+missing owner completions. `TestRunCompletionAuthorityProperty` retains forged
+owner, tenant and generation refusal. Its mutation snapshot now counts business
+events too. The rollback check covers failures in both event tables.
+
+`TestBusinessEventFirstRunSucceededOncePerTeamSQLite` and its PostgreSQL variant
+now finish a cancelled run followed by two successful retry runs through the
+real lifecycle. The team gets one first-success event naming a successful run.
+The PostgreSQL case still requires native execution. Legacy creation/upsert
+checks that supply their own terminal timestamp or construct a finished pending
+row target abandoned insertion semantics and are retired. Final schema
+constraints reject that shape. The remaining raw intake caller cut stays open.
+Unrelated reporting, concurrency and transport fixtures use `SeedRunFinish`.
+That fixture sets three columns and implements no lifecycle or replay policy.
+
+The three `concurrency_heartbeat_interval_test.go` checks are retired with the
+unused timing API. The shared `internal/lease` keeper owns cadence and bounded
+attempts. The profile-key round-trip, bare-shape, pre-encoding and Windows URL
+checks are retired with the unused codec and duplicate identity helpers. No
+production writer calls them. The profile view displays its stored pipeline key.
+Current profile tenant-isolation and mutation properties remain.
+
+`TestFinishAtGeneration_ConcurrentReclaimKeepsTheCurrentOutcome` now runs as
+`TestOwnerFinishRaceRejectsStaleAwardProperty` through real `ClaimUnit`,
+`ReleaseUnit` and `FinishRunAndUnit` transactions. It varies the initial
+generation and races stale failure against current success. Same-verdict stale
+replay and release retain the completed snapshot. The two old team-generation
+tests are retired with their API. `TestRunCompletionAuthorityProperty` retains
+foreign-tenant and forged-owner refusal against the final schema. The colliding
+trigger fixture is invalid under the final composite run foreign key. Existing
+completion rollback and concurrent-winner tests remain. Native PostgreSQL
+evidence is separate.
+
+The old release-generation test now uses `TestReleaseUnitOwnerFenceProperty`,
+which generates 192 forged trigger, plan and eval releases without changing
+their unit rows, run snapshot or billing. `TestReleaseUnitReturnsUnstartedWorkWithoutAttempt`
+retains successful release and second-release refusal. The stale finish billing
+assertion uses `TestMeteredUnitStaleReportCannotSettleReplacementProperty` and
+`TestOwnerUnstartedRecoveryFencesPriorAwardsProperty`. The test for a leftover
+mutable trigger credit window is retired because final awards have immutable,
+generation-bound billing records. No raw release can leave that window behind.
+The two here tests that expected only one claim are removed because A1-55 allows
+reclaim. `TestClaimUnitHereWindowAndReclaim` retains the initial window,
+requester authority, reservation and expiry checks. The failed-trigger test
+becomes `TestFailedRunClosesOwnerAndKeepsVerdict`: its run keeps the failure and
+masked error, its queue owner closes, replay is exact and success cannot replace
+the committed failure. Old foreign-tenant generation assertions move to the
+current completion and release properties.
+
+The raw cancellation tests now run through `TransitionRun`, `ClaimUnit`,
+`RenewUnit` and `ReapUnits`. `TestRunCancellationPreventsUnclaimedAwards`
+retains unclaimed trigger/plan cancellation and reaper replay.
+`TestRunCancellationReachesClaimedOwner` retains cooperative cancellation
+through both trigger and exchanged plan authority.
+`TestRunCancellationRacesOwnerAwardProperty` ports cancel-versus-claim races.
+`TestRunCancellationCannotOverwriteTerminalProperty` replaces
+`TestCancellingATriggerDoesNotOverwriteARunThatAlreadyEnded`.
+`TestRunCancellationRequiresCurrentTeamAuthorityProperty` checks tenant,
+membership, role, session, expiry and revocation refusals without state,
+event or effect writes. Existing holder-result and cancellation-intent
+properties remain. Legacy transport tests seed cancellation state because
+they test response to that state rather than its mutation authority.
+
+The unused in-memory `FilterRuns` selector is removed. Its parallel assertions
+are deleted while the SQL listing, counting, case, literal and cursor checks
+remain. Those legacy SQL fixtures still need their final-schema migration.
+
+The legacy claim-token heartbeat/start cell
+`TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` is retired with those store
+methods and HTTP branches. Its retained requirements run in
+`TestRenewUnitRecordsOwnerExecutionForRecovery`,
+`TestRenewUnitRefusesStaleAndRootAuthority`,
+`TestRenewUnitDeliversCancellationWithoutStarting`,
+`TestRenewUnitNodeRequiresCommittedStart`, `TestTransitionHolderRights`,
+`TestSourceReleaseRefusesChangedAuthorityBeforeReleasing` and the final
+engine lifecycle HTTP tests. `TestRenewUnitRequiresCurrentAwardProperty`
+generates 384 invalid root, unknown-prefix, ancestor-revocation, lease-expiry,
+generation and holder cases, retaining the lease after every refusal.
+The old source-mint-spent assertion described a retired counter and is removed.
+Three final transition HTTP subcases still fail strict request decoding against
+the session baseline as well. The continuation report records those failures.
+
+The three raw git-credential mutation APIs have no production callers.
+Their maintenance and HTTP fixtures now use the current mutation transactions
+or the package-private transaction writer when seeding a rotation fixture.
+The existing confirmation, replacement, deletion, tenant-isolation and
+credential-mutation properties retain the behavior. No W1b fixture is changed.
+
+The two resealing tests and startup plaintext-conversion test are retired
+because the final pre-launch schema has no historical backfill. The sealed
+sample test moves unchanged into `secrets_sample_test.go`. Keyless access is
+checked directly at its cipher boundary. HTTP key-refusal and encryption-failure
+properties retain transport status, private errors and no-persistence checks.
+
+Store recovery continuation moves `store_started.go`, `store_unstarted.go`,
+`store_retry.go`, `store_capacity.go`, `store_capacity_maintenance.go`,
+`store_orphans.go` and the cancellation/reconciliation checks in
+`store_recovery.go` into ordinary `pkg/store` tests. Their final test names are
+`TestStoreRecoveryStartedLapseCap`, `TestStoreRecoveryUnstartedLapse`,
+`TestStoreRecoveryApplicationRetry`, `TestStoreRecoveryCapacityAdoption`,
+`TestStoreRecoveryCapacityMaintenance`, `TestStoreRecoveryLocalOrphans`,
+`TestStoreRecoveryCancellation` and `TestStoreRecoveryReconciliation`.
+They seed through storetest, current sign-in, issuance, intake and accepted plans.
+No moved test contains a hand-written INSERT. Competing capacity uses a second
+admitted host-owned run. Recovery projection updates simulate expiry; they do
+not claim real transport, process-death or native-placement evidence. Their old
+SQLite wrappers are removed. Host-event and billing consumers still share the
+remaining harness fixture.
+
+The six legacy git-credential tests are replaced by
+`TestSourceGitCredentialConfirmationAndReplacement` and
+`TestSourceGitCredentialHTTPSDeletionAndTenant`, plus the retained
+`TestSourceConsentRequiresCurrentMachineOwner`,
+`TestSourceConsentCannotChangeAnotherOwnersMachine`,
+`TestSourceReleaseRefusesChangedAuthorityBeforeReleasing` and
+`TestSourceReleaseCannotWidenPersistedFacts`. These retain confirmation replay,
+rotation under the same fingerprint, changed-fingerprint refusal, HTTPS automatic
+confirmation, deletion, tenant isolation, owner consent, ancestry, lease and audit
+rollback through capability transactions. The source-mint counter and its two
+controller tests retire with the unused counter implementation. Claim ancestry
+and source liveness remain in the final generated store tests. This does not
+establish GitHub App token-provider integration.
+
+
+Store continuation moves three more harness files into `pkg/store` tests.
+`store_actions_enrollment.go` becomes
+`acceptance_actions_enrollment_test.go:TestStoreActionsEnrollment`.
+`store_enrollment.go` becomes
+`acceptance_enrollment_test.go:TestStoreEnrolledClaims`.
+`store_launcher_sync.go` becomes
+`acceptance_launcher_sync_test.go:TestStoreLauncherSync`.
+They open through storetest and use sign-in, issuance, admission, acceptance and
+release transactions to seed their rows. They retain reopening, enrollment
+revocation, granted identity, award exchange and replacement-generation cleanup.
+The placement wrappers are removed. Native placement scenarios remain pending.
+
+The retired `internal/runretry.Create`, `Store.CreateRetryWithRun`,
+`Tenant.SetRetriedAs` and `InheritSecretArgs` have no production callers.
+`TestManualRetryPreservesOnlyItsTeamsSealedSourceProperty` ports tenant ownership,
+source selection and secret classification through real admission. It generates
+twelve pinned sources, rejects foreign tenants and forged team selectors, and
+checks the complete retained request seal. `TestManualRetryRefusesMissingSource`
+retains missing-source refusal. `TestManualRetryRetainsVerifiedRepositoryFacts`
+retains verified App repository identity and proves the retry does not repeat a
+webhook delivery. The prior reverse-link and invocation-copy tests are removed
+because the sealed lineage and classification replace those representations.
+`TestPipelineRefDispatchRecreatesSourceAfterCleanup` keeps the dispatch-side
+source reacquisition check with its recorded inputs supplied directly. That
+runtime check remains unverified in the socket-restricted sandbox.
+
+`TestTerminalRecordSelectorsProperty` generates optional output and manifest keys
+across reports, memo hits, manual retries and coalesced results. It checks the
+committed selectors in reconciliation, replay, ReadNode and ReadSnapshot even
+after event removal. Foreign tenants cannot read them. Attachment/copy failure
+and event-write failure leave no selectors. Record authorization and byte
+verification remain the record implementation's separate tests.
+
 The final unit-billing suite in `pkg/store/unit_billing_test.go` ports the
 unfunded-claim, last-reservation race, unstarted-refund and consumed-minimum
 assertions from the retained `pkg/store/credits_test.go` tests. It uses final
@@ -19,6 +208,48 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W1's persisted-enrollment continuation ports active-name uniqueness, team scope,
+reuse after revocation or expiry, rotation grace and concurrent mint limits to
+`TestMachineEnrollmentUsesStoreOrigin`, `TestMachineEnrollmentNameReuseProperty`,
+`TestMachineEnrollmentNamesAreTeamScoped` and
+`TestMachineEnrollmentSerializesNamesAndLimits`. These retain the concerns from
+`TestRunnerTokenRefusesADuplicateAgentName`, `TestAgentNameIsUniqueOnEveryMintPath`
+and `TestIdentityRunnerTokenCapHoldsUnderConcurrentMints`. Their superseded
+raw-token tests are removed with the unused team token constructors and inventory.
+The final machine origin requires current team administration, as C2 specifies.
+
+`TestProvisionMemberCurrentScopesProperty` ports current-role, requested-subset
+and removal assertions from `TestMemberTokenScopesAreBoundedByTheMintersRole`,
+`TestMemberTokenMintUsesCommittedMembershipAuthority` and the member portion of
+`TestIdentityTeamTokensNeverCarryAdmin`. It generates grant subsets, roles and
+missing memberships, checks that rejected requests persist no credential and
+preserves the supplied grant slice. The actual HTTP transaction race remains
+covered by `TestCredentialIssuanceRechecksMembershipInTransaction`.
+
+`TestMachineEnrollmentAuthorityProperty` retains the minter recheck from
+`TestRunnerTokenMintRechecksTheMintersRole` and the machine-scope refusals.
+`TestCapabilityInventoryScopesAndMetadata`, `OwnershipProperty` and
+`FiltersAndRefusals` retain own-credential selection, foreign-team exclusion
+and execution-credential hiding from the removed TeamTokens and TeamToken tests.
+`TestCapabilityMintWaitsOnAnUncommittedMembershipDrop` replaces the raw mint race
+with member and machine `ProvisionCapability` requests. It configures the sealed
+session key and uses a real account session; PostgreSQL execution remains pending.
+
+The raw family/prefix tests, legacy cross-kind counting and legacy-name-index
+assertions retire with their unused APIs. Current registered machine names,
+caps, rotation and reuse use the enrollment tests named above. This cut adds no
+member-root quota to C2. Sliding expiry and member-removal raw-token fixtures
+remain until the remaining token authentication and identity paths migrate.
+
+`TestMachineEnrollmentAuthorityProperty` generates invalid registration, role,
+grant, repository, pool, data and name inputs even with a permissive extra policy.
+`TestEnrolledClaimRepositoryAncestryProperty` varies direct and delegated claims
+against allowed and foreign repositories. `CheckStoreEnrolledClaims` extends
+`placement-granted-identity-and-capacity/store-sqlite` with default store enrollment,
+profile reopening, filtered claims and persisted award ancestry. Its run and owner
+rows remain fixtures. The HTTP root proofs now use the production enrollment
+transaction. Bootstrap origin, provider proof, host observations and native
+placements remain separate integrations. No native cell is newly closed.
 The [W3 unused executor cut](../w3-legacy-executor-cut-progress.md) removes the
 uncalled RunNodeOnce path and ports its blocked credential-release cancellation
 to source.PrepareCheckout. Repository refusal checks retain the live trigger
@@ -390,6 +621,18 @@ Branch labels below retain the descriptive suffix of each source branch. Tracker
 
 The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-machine, 4 placement, 1 credential matrix, 23 run-input, 24 storage, and 10 state/security. Placement also contributes 10 existing functions. Six removed predecessors bring the total to 90 unique revision/file/function identities. Subcases do not increase that count. Source objects were inspected statically; this is not evidence that old or target product tests pass.
 
+Capability management ports the legacy TestRotateToken, its concurrent-revocation
+regression and both revocation tests to pkg/store/capability_inventory_test.go.
+The ports retain grace validity, explicit-revocation precedence, terminal
+revocation refusal and distinct replacements. Generated deadlines now exercise
+nanosecond boundaries and descendants. Independent SQLite connections race
+rotation and revocation. A failed origin check or write returns no bearer.
+The old four functions are deleted. The added
+credentials-delegation-subset/store-sqlite cell proves persistence through two
+reopenings. TestCapabilityManagementHTTPUsesStoreTransactions exercises the
+production manager through the actual controller policy, session proof and CSRF.
+These components do not complete native placement or PostgreSQL cells.
+
 ## Source snapshots
 
 `TestCapabilityManagementHTTPRotation` replaces the legacy controller tests
@@ -655,8 +898,8 @@ The final three comparisons include all changes since the recorded merge base. E
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/retry_team_test.go` | `TestManualRetryKeepsActorAndPullRequest` | `TestManualRetryKeepsActorAndPullRequest` | Replace | `lifecycle_test.go:TestLifecycle/lifecycle-retry-sealed-lineage/actor_and_pull_request`. Retain sealed actor, PR, original SHA and verified branch facts. Remove trigger-env copying and agent-loss retry-run framing. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/run_inputs_test.go` | `TestCreateRun_TheIntakesInvocationKeysWin` | `TestCreateRun_TheIntakesInvocationKeysWin` | Replace | `pkg/store/run_spec_test.go:TestRequestSealIsImmutable` and `lifecycle_test.go:TestLifecycle/lifecycle-request-and-plan-seals/intake_precedence`. Fill resolved fields at the second seal without rewriting the request. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/run_inputs_test.go` | `TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs` | `TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs` | Replace | `pkg/store/run_spec_test.go:TestConcurrentClassification`. Interleave final API writes on Postgres and prove classification never shrinks. Replace the pending-upsert hook with the owning transaction boundary. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | Keep | `pkg/store/secretargs_test.go:TestUnclassifiedDisplay`. Absent or malformed classification hides all argument values and their reproducer/invocation copies. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | Keep | `pkg/store/secretargs_test.go:TestExplicitEmptyClassification`. Explicit empty classification differs from absent classification and survives inheritance. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | Keep | `pkg/store/reporting_seals_test.go:TestReportingDistinguishesUnknownAndEmptyClassification` and `TestReportingReadsSealedFactsWithoutSecretValuesProperty`. Real sealed reports and receipts hide absent, nil, duplicate and invalid classification. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | Keep | `pkg/store/reporting_seals_test.go:TestReportingDistinguishesUnknownAndEmptyClassification`. Explicit empty classification exposes public arguments and permits their receipt input hash. Absent classification hides values and omits the hash. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/artifacts/retention_test.go` | `TestCaptureRewritesStoredContentSoItsAgeRestarts` | `TestCaptureRewritesStoredContentSoItsAgeRestarts` | Replace | `storage_test.go:TestStorage/storage-reachability-and-retention-tails/reused_content`. Referenced bytes survive GC. Delete the exact two-PUT assertion because reachability and pinned records replace object-age refresh. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/artifacts/retention_test.go` | `TestPresentIsBoundedAndAnswersAMissPastItsBudget` | `TestPresentIsBoundedAndAnswersAMissPastItsBudget` | Replace | `internal/blob/store_test.go:TestHasManyBudget` and `storage_test.go:TestStorage/storage-memo-materialization-failures/budget`. Presence lookup respects its budget. A timed-out memo lookup is a miss. Do not pin the old worker count. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/cache/scope_test.go` | `TestArtifactsAreScopedToTheGrantsRepository` | `TestArtifactsAreScopedToTheGrantsRepository`, subtests `volume`, `bucket` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/filesystem` and `/s3`. Preserve foreign read/existence refusal and own-upload authority. Repository membership alone grants no read. Delete cache-server paths and credentials. |
@@ -1165,10 +1408,18 @@ by this cut, and no additional archived T1 source identity is claimed closed.
 | ReportAttempt output ownership and failed-attempt reuse | `TestBlobResultRecordsRejectForgedResultKeys` covers record team, namespace, job, run, attempt and generation. `TestResultRecordsFromAnEarlierAttemptCannotFinishARetry` refuses the earlier record before and after the retry ordinal advances. W1b's result fixture supplies SourceAttempt. |
 | Child invocation deduplication and live-parent rights | `TestChildIntakePersistsLineageAndInvocationReplay` uses explicit intake keys. `TestChildIntakeCannotEscapeItsLiveParentProperty` varies parent run, job, team, generation, cancellation and terminal state. New invocation keys replace implicit live-child reuse. |
 | Dependency verdicts, cancellation and application retry | Existing scheduling, cancellation-intent, holder-ordinal, leased-recovery and unit-billing tests retain these concerns through the final interfaces. The old settle-based automatic retries are removed. |
-| Old launcher Job synchronization tests | `ReleaseUnit`, renewal and unit billing retain the store concerns. Safe real Job synchronization remains open on the W8/W9 award-generation and Job-instance contract gap. |
+| Old launcher Job synchronization tests | `ReleaseUnit`, renewal and unit billing retain the store concerns. `TestLauncherSnapshotRetainsCurrentAwardThroughExchange`, `TestLauncherSnapshotFencingProperty`, `TestEngineLauncherSyncUsesStoreSnapshot` and `placement-run-host-to-launcher/store-sqlite` cover current award reconstruction and exact observed Job cleanup after reopening. Native Kubernetes adoption and teardown remain required. |
 
 The selected package files are in `../w1-session19-tests.txt`. The session report
 lists the remaining legacy surfaces and shared caller changes.
+
+The removed `TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills` is covered by
+`TestMeteredUnitUnstartedCloudReleaseRefundsReservation` and
+`TestMeteredUnitCloudRenewalStartsComputeWithoutAnAttempt`. The first proves a
+full refund before compute. The second proves that the first Cloud renewal opens
+compute without consuming an execution attempt and that a later release settles
+the job minimum. The old sync-side prohibition on handing back a billed Job is
+replaced by the final `ReleaseUnit` transaction and immutable accounting.
 
 ## W1 run-row heartbeat retirement
 
@@ -1212,6 +1463,25 @@ publisher remains pending its caller migrations.
 The package selection is in `../w1-session22-tests.txt`. Native route and
 platform cells remain pending.
 
+## W1 raw dependency writer retirement
+
+`UpdateNodeDeps` and its store/client/HTTP callers are removed. Generated
+membership is accepted once and scheduling projects its dependencies.
+The legacy host keeps its own membership for execution ordering.
+
+| Assertion | Final evidence |
+| --- | --- |
+| Generated members hold their dependent until every member succeeds | `TestLifecycle/lifecycle-generator-barrier/store-sqlite` accepts two members and an empty group, reopens SQLite, completes the members separately and checks the dependent's release. |
+| Expansion preserves initial declarations and terminal member state | The same cell checks unchanged initial plan/hash and dependent spec, terminal replay and atomic refusal of a different body. |
+| Mutable dependency projections cannot alter accepted topology | `TestGeneratedDependenciesUseAcceptedTopologyProperty` generates 32 expansions with zero to six members and adversarial deps_json values, then compares the full graph, decisions and replay. |
+| Old host resolves generated waits without a dependency writer | `TestGeneratedWaitsUsesMembershipWithoutRewritingDeclarations` checks unresolved, populated and empty groups through the host's wait calculation. |
+| Expansion validation receives initial plan concurrency on submission and replay | `TestExpansionValidationReceivesAcceptedPlanConcurrency` checks the contract context. Enforcement remains with the shared validator. |
+
+The store checks port the persisted-dependency expectation from
+`TestExpansionFansOutAndHoldsItsWaiter`. That host test retains execution-order
+assertions and expects its original declaration to stay unchanged. Its complete
+runtime fixture still needs W3's final admission/lifecycle migration. No archived
+T1 source-function identity or native cell is newly claimed complete.
 ## Egress persistence cutover
 
 The three tests in `pkg/store/egress_test.go` are replaced by final-schema proofs
@@ -1235,6 +1505,228 @@ restart, atomic rollback and serialized table-update checks through that owner.
 helper's dependency on a calculator for unmetered work. No native cell is newly
 marked complete by these caller migrations.
 
+## W1 launcher-only claim retirement
+
+`Store.ClaimLaunch`, its request/result types and in-process scan cursor are
+removed. The final queue has one transactional owner for runner and launcher
+awards. The deleted tests have these dispositions.
+
+| Retired test | Retained evidence |
+| --- | --- |
+| `TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams` | `TestMeteredUnitQueuePassesOverUnaffordableWork` and `TestLauncherQueueReachesFundedWorkBehindLargeUnpaidQueue` retain funded selection, reservations and refusal of unfunded teams. Metering follows the authenticated root, independently of launcher placement. |
+| `TestClaimLaunch_BoundsEachPollAndResumesWhereItStopped` | Replaced by `TestLauncherQueueReachesFundedWorkBehindLargeUnpaidQueue`, which reaches two funded jobs behind 257 unpaid jobs without local cursor state. The old implementation's per-poll scan budget is retired. |
+| `TestClaimLaunch_ConcurrentPollsNeverRollTheResumePointBack` | Replaced by `TestLauncherConcurrentQueueClaimsEachAwardOnce`. Four concurrent polls reach every funded job once behind 65 unpaid jobs. No per-process resume point remains. Existing claim-fence properties retain stale-generation refusal. |
+| `TestClaimLaunch_ReservesAtTheClaimAndBillsFromTheFirstRenewal` | `TestMeteredPlanRenewalExcludesSchedulingWait` retains reservation at award and computation from first renewal. Plan billing has zero minimum under C2. `TestMeteredUnitCloudRenewalStartsComputeWithoutAnAttempt` retains the separate job minimum. |
+| `TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath` | Retired with mutable repository dispatch opt-in. `TestClaimUnitOwnerKindsAndEvalFences` and the intake/plan acceptance cells retain distinct owner kinds from sealed dispatch. |
+| `TestRepoDispatch_ARetryOfAnOptedInRunIsControllerDispatched` | Mutable opt-in is retired. `TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate` retains the source seals, including dispatch. |
+
+Controller fixture callers now provision a service root, call `ClaimUnit` and
+exchange its bootstrap. `TestLauncherFixtureUsesCurrentUnitAward` exercises
+plan and job awards through those real store methods. The bootstrap-origin
+verifier and initial run rows are fixtures. Legacy controller HTTP scenarios
+still need their final wire migration. The SQLite placement, billing and
+lifecycle cells retain the final store evidence.
+
+## W1 acceptance tests move beside the store
+
+The lead's harness cleanup moves these checks from `internal/acceptance` into
+`pkg/store/acceptance_*_test.go`. Each is a plain package test. The old transport
+wrappers are removed, and the native scenario catalog is unchanged.
+
+| Former SQLite check | Package test |
+| --- | --- |
+| lifecycle-request-and-plan-seals | `TestStorePlanSeals` |
+| lifecycle-generator-barrier | `TestStoreGeneratedDependencies` |
+| lifecycle-transition-replay-and-fencing | `TestStoreTransitions` |
+| recovery-unstarted-lapse, owner portion | `TestStoreOwnerUnstartedRecovery` |
+| surface-schedules-and-managed-timers | `TestStoreScheduleBoundary` |
+| credentials-delegation-subset | `TestStoreCapabilityManagement` |
+| credentials-operator-console-split | `TestStoreProvisioningOrigins` |
+| credentials-session-digest-csrf | `TestStoreSessions` |
+
+The moved checks open through `pkg/store/internal/storetest`. Sign-in and
+invitation acceptance create accounts and membership. The planner enrolls a
+machine, admits the run with a member session and claims the owner through
+`ClaimUnit`. Expansion authority comes from `DelegateCapability`, including
+its parent's expiry and deadline. No hand-written row insertion remains in
+these moved files. Database triggers still inject failed writes, and UPDATEs
+still expire leases and sessions for recovery checks.
+
+`TestAccountAdmissionAuditRemainsOutsideTenantQueriesProperty` generates
+provider identities and checks account audit rows have no tenant and never
+appear in tenant event reads. It closes the signup foreign-key failure exposed
+by using real account admission in the moved checks. Existing shared recovery
+fixtures remain in `internal/acceptance` until their host, billing and remaining
+store consumers migrate. No native cell is newly claimed complete.
+
+## W1 planning-node and raw run-completion retirement
+
+`Store.CreatePlanNode`, `Store.FinishRunIfActive`, `Tenant.FinishRunIfActive`,
+`Store.FinishRunsIfActive` and `Tenant.FinishRunsIfActive` are removed.
+Admission owns planning units. Completion uses `FinishRunAndUnit`.
+
+| Removed check | Final evidence |
+| --- | --- |
+| `TestFinishRunIfActiveHasOneCommittedWinner` | `TestRunCompletionHasOneCommittedWinner` races eight completions across two SQLite handles. It observes one new commit and seven exact replays, then refuses changed terminal reports and preserves the original finish time. |
+| `TestFinishRunIfActivePreservesMutationFences` | `TestRunCompletionAuthorityProperty` generates forty authority, owner, holder, run and tenant mutations. Invalid terminal states and all forged owners leave run, owner, billing, events and completion intents unchanged. |
+| `TestFinishRunsIfActiveRollsBackEveryMemberWhenOneUpdateFails` | The cross-run batch API is removed. `TestRunCompletionFailureRollsBackOwnerAndVerdict` injects an event failure and proves the run and owner roll back together. Existing `TestFinishRunAndUnitCommitsTogetherAndReplays` also refuses failed owner and outbox writes. |
+| `placement-ordered-matching/store-sqlite` | `TestStoreQueueOrder` covers FIFO and preference order, registered Actions scope, an unchanged blocked job and later eligible acquisition through real admission and plan acceptance. |
+| `placement-granted-identity-and-capacity/store-sqlite` | `TestStoreClaimMatching` retains sixteen named/queued cases. Setup provisions actual machine and deployment-authorized metered roots. Refused claims preserve the snapshot, events, billing and completion intents. |
+
+The two moved harness files and their placement wrappers are deleted.
+The queue-count helper remains beside its recovery caller until that check moves.
+The shared recovery fixture is still used by other store, host and billing tests.
+The two controller fixtures lose their obsolete planning-node insertion.
+Their legacy routes and log transport still require their owners' cutovers.
+No native placement is newly unskipped.
+
+## W1 secret tenant selection and unused fence readers
+
+The seven default-team secret methods on Store are removed. Existing secret
+CRUD, scope, limits, sampling and team-isolation checks use explicit Tenant
+handles. Their assertions remain. Test fixtures use teststore.ForTeam so failed
+tenant selection fails the fixture instead of dropping an error.
+
+| Retired check | Retained evidence |
+| --- | --- |
+| Live/stale node lookup assertions in `TestClaimNamedNodeAwardsAnUnqueuedNode` | The lookup reader has no production caller and is removed. The legacy named fixture is also removed. The generated named-job property checks the current award and immutable accepted spec. `TestStoreClaimMatching` and `TestStoreLauncherSync` cover current award selection and immutable launcher correlation. |
+| `TestNodeExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | Both unused node-attempt readers and the old fixture are removed. `TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState` covers final attempt state. Tagged-log tests retain claim fencing and tail grace. |
+| `TestTriggerExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | Both unused trigger-attempt readers are removed. Current tagged logs use `TestLogPersistenceOwnerUnitsHaveIndependentFences`, `TestLogPersistenceTriggerReadRechecksItsOwnerLease` and `TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace`. |
+
+The current authentication, secret authority and store acceptance checks pass.
+Legacy named-claim and execution-reporting fixtures still fail while inserting
+removed runs.args_json. The old missing-run and missing-trigger lookups query
+removed columns. These failures also reproduce with the session's changed Go
+files restored from HEAD through an overlay. They remain part of the legacy
+cutover, not passing final-schema evidence. No native cell is newly unskipped.
+
+## W1 membership and table inventory ports
+
+The identity role, last-owner and cross-team tests now use `UpdateMembership`
+with real account sessions. The old runner-token minter-revocation test is
+replaced by `TestMembershipRevokesOnlyTheAffectedMintersCredentialsProperty`.
+It generates removal, promotion, demotion, existing rotation grace, other
+creators, foreign teams, deployment roots and descendants. Separate tests cover
+invitation withdrawal and rollback after a refused revocation. The raw member
+mutation methods and token-table revocation helper are deleted.
+
+`TestTeamPurgeIsolationProperty` generates adversarial tenant keys and compares
+all surviving rows through two purges. It covers restrictive pins, blob/member
+references, tagged logs, billing intervals, quota holds and team-bound operator
+rows. This tests row deletion directly. Team-deletion admission and account
+anonymization still use legacy paths and are not proven by this check.
+
+The created-table checks and SQL guards use the final inventory. No native cell
+or acceptance registry changes. `pool_access_rules` and `repos` have no production
+writer. Their writer backlog is explicit rather than omitted from classification.
+
+`TestGitHubAppRepositoryKeysSurviveRenamesProperty` generates two-team numeric
+repository identities and renamed displays. Both subscription and automation
+writers retain canonical keys, and subscription reads retain nanoseconds.
+The legacy automation-admission test still fails on removed trigger columns.
+
+Metric pagination, wall-clock guard and trigger-claim identity fixtures select
+an explicit tenant after their unused default-team Store twins are removed.
+Their legacy fixture behavior is not new final-schema execution evidence.
+
+The membership session property covers refusal after the last membership and
+transfer to an existing reader membership. Capability-backed sessions retain
+their original team and end with the parent. The existing removed-member session
+and authority-generation properties retain their refusal assertions.
+
+
+## W1 issuance and report retirement
+
+`TestRotatedTokenKeepsItsTeam` and `TestTokenRotationCarriesTheMeteredMarker`
+are replaced by the existing capability rotation scope property and
+`TestCapabilityRotationRetainsMeteredMachine`. The ambiguous-prefix lookup and
+revocation checks remain. The removed raw rotation's prefix case has no final
+analogue because capability prefixes have a primary key.
+
+`TestGitHubRunnerCredentialMintIsBoundedAndSweepsExpiredOnes` is replaced by
+`TestGitHubEnrollmentAndIssuanceLimitsSerialize` and
+`TestGitHubActionsExpiryFreesQuotaWithoutDeletingAudit`. The final quota counts
+live capabilities while retaining expired rows for their audit period. The
+raw-token sweep assertion is dropped under the final retention contract.
+`TestGitHubRunnerCredentialRemembersItsPush` is replaced by
+`TestStoreActionsEnrollment`, `TestGitHubActionsRequiresCurrentEnrollmentProperty`
+and the existing push-scope properties.
+
+`TestGitHubRunnerAttemptRecordsWorkflowRun` is replaced by
+`TestAttemptExecutorComesFromClaimAncestryProperty`. Its 48 cases check direct
+and trigger-host awards, Actions workflow identity, machine subject identity,
+node-wide attempt identity and forged executor metadata through claim, start
+and the run-view read. Provisioning-origin proofs remain separate.
+
+Concurrency callers use `ReleaseAndNotify` and consume its committed promotion
+and follower results. The tenant mutation property still compares every foreign
+holder row after release. The legacy fixture suites continue to fail at their
+raw CreateRun calls against args_json. That failure reproduces against the
+unmodified HEAD overlay. They are not passing final-schema evidence.
+
+`TestOperatorUsageMetrics_WeeklyTractionFromOwnTables` is dropped with the
+retired deployment usage report required by frozen architecture section 9.3.
+The unused child-trigger reader's foreign-team assertion is removed with that
+reader. Existing child-intake authorization and ancestry properties remain.
+No native acceptance cell is newly activated.
+The raw secret CRUD and size/count tests move to the current mutation suite.
+`TestCredentialMutationsUseCurrentActorAndStoreClock` retains replacement,
+actor, timestamp and missing-delete checks. The serialized-cap test retains
+replacement at the cap. `TestCredentialMutationsSecretLimitsPreserveExistingValues`
+checks oversized replacement rollback, the existing default-team exemption,
+count and sorted listing. `TestCredentialMutationsDeletionPreservesOtherScopesProperty`
+generates tenant and pipeline isolation checks. The unscoped-run fallback test
+moves to `TestSecretReadClaimScopePrecedenceProperty` through current claim
+authority. The old raw launcher mint refusal test is retired with its API.
+Current award fences remain covered by
+`TestAuthorityAwardRefusesForeignStaleAndUnreservedMeteredClaims`,
+`TestClaimUnitRejectsForeignAndMissingRequirements` and the generated award
+renewal properties. The old six-hour launcher token maximum is removed with
+the legacy issuer. Legacy token transport tests seed presentation rows and
+still require their final-schema fixture migration.
+
+## W1 split trigger-queue retirement
+
+`Store.ClaimNextTrigger` and `Store.ClaimNextTriggerFor` are removed with their
+scan cursor and candidate decoder. Legacy fixtures that need a particular
+trigger claim select that known ID through the retained named path. No
+production fallback or forwarding method is added.
+
+| Retired assertion | Retained evidence |
+| --- | --- |
+| `pkg/controller/claim_test.go:TestClaim_FIFOOrdering` | `TestQueuedTriggerRepositoryScopeProperty` verifies FIFO through real admission and `ClaimUnit`, with generated excluded queues longer than 64 entries. |
+| `TestClaimNextTriggerForTakesOnlyAnAllowedRepositoryPastTheQueueHead` | The same property provisions a registered root, delegates its repository scope, finds eligible work past excluded runs, refuses the remaining queue and compares every excluded run snapshot. |
+| Trigger portion of `TestConcurrentClaimsNeverCrossTeams` | `TestQueuedTriggerClaimsNeverCrossTeamsProperty` races eight workers across two real tenants and checks every award's tenant and uniqueness. The old test retains its node portion as `TestConcurrentNodeClaimsNeverCrossTeams`. |
+| Legacy context-scoped GitHub trigger checks | `TestStoreActionsEnrollment`, `TestGitHubActionsRequiresCurrentEnrollmentProperty`, `TestStoreQueueOrder` and the push-ancestor properties use registered Actions authority and persisted seals. The legacy node assertions remain with that path's retirement. |
+| Finished-attempt ownership reader | `TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState`, current holder properties and tagged log persistence retain the final-attempt and tail-grace requirements. The unused reader and its fixture are deleted. |
+
+The legacy financial fixture changes only replace queue selection with their
+known trigger IDs. Their assertions and the accounting implementation are
+unchanged. Those legacy fixtures are not new final-schema execution evidence.
+
+## Named job and renewal hard cut
+
+| Retired check | Retained evidence |
+| --- | --- |
+| `node_claim_named_test.go` and `node_claim_award_internal_test.go` | `TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty` covers absent, unready, held and terminal jobs and terminal runs with real intake, plan acceptance, enrollment and transitions. Naming work never bypasses readiness. `ReconcileNode` owns authorized self-claims. |
+| Named claim credit reservation and insufficient-funds checks | `TestMeteredUnitClaimAndReservationCommitTogether`, `TestMeteredUnitConcurrentClaimsCannotSpendTheSameCredit` and the unit billing lifecycle suite cover atomic reservation, refusal and settlement on the current named award. |
+| `node_spec_hash_test.go` | The named-job property checks the accepted job's nonempty spec hash before and after claiming and completion. |
+| Five `node_claim_test.go` heartbeat/principal/cap checks and `TestClaimToken_HeartbeatRenewsItUntilTheLeaseLapses` | `TestRenewUnitCannotMutateAStaleJobProperty` generates revoked, expired, superseded, wrong-holder, root and forged authorities. `TestRenewUnitRefusesStaleAndRootAuthority`, `TestRenewUnitNodeRequiresCommittedStart`, `TestRenewUnitRequiresBootstrapExchange` and owner-liveness properties retain current renewal, execution and deadline behavior. |
+| Expired-node heartbeat assertion in `agent_loss_retry_test.go` | The renewal property covers exact-boundary expiry and refuses both execution observations without changing the row. The old execution-start assertion remains. |
+| Older-credential renewal projection assertion in `agents_test.go` | The old heartbeat route is removed. `TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit` verifies current claim exchange, identity-scoped renewal and refusal of both removed routes. Persisted host observations remain an integration task. |
+| `TestANamedClaimSizingToClassNeedsAMeteredToken` | The sizes-to-class input is removed. `TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement`, `TestClaimUnitGrantedProfileKeys` and `TestStoreClaimMatching` check that metering and observed labels cannot grant cloud placement. |
+
+The remaining legacy finance and host fixtures receive only callsite migrations.
+They still require their owners' current-schema setup and are not reported as
+passing. The old PostgreSQL race test retains its queue branch. Native current
+named-award locking evidence remains with the lead.
+
+The legacy `TestNamedClaimRefusesAnotherTeamsNode`, the metered team's named
+lookup assertion and `TestToolNodeIsNeverClaimedByAnAgentWithoutTheTool` are
+ported to the named-job property and `TestStoreClaimMatching`. The property
+provisions a real second tenant's machine capability before attempting the
+foreign award. Both the complete job snapshot and the award/event counts remain
+unchanged. The matching suite retains granted cloud-tool and repository checks.
 ## W3 store admission and lease-ending port
 
 `internal/nodehost/local_admission_test.go:TestAdmissionLeaseEndings` replaces
@@ -1723,6 +2215,137 @@ copy remains absent. The catalog, port destinations and route declaration,
 ordering and drift checks pass. No scenario catalog, Harness or boundary registry
 entry is added.
 
+## W1 seeded bootstrap and raw claim retirement
+
+| Retired test | Retained evidence |
+| --- | --- |
+| `TestCreateTokenIfNoneExist_WritesOnceOnEmptyTable`, `TestCreateTokenIfNoneExist_SkipsWhenTheSameCredentialIsAlreadyStored` | `TestBootstrapSeedIsOnceOnlyProperty`, `TestBootstrapGateSurvivesConcurrentReplicasAndRestart` and `TestBootstrapDifferentSeedsRaceForOneGate` exercise the real issuing transaction. They retain only a digest and prefix, permit a live no-op and refuse another seed after issuance. |
+| `TestCreateTokenIfNoneExist_WritesOverTokensThatNoLongerAuthenticate` | Its rebootstrap behavior retires with the first-administrator gate. `TestBootstrapSeedIsOnceOnlyProperty` verifies that revocation and retention never reopen the gate. |
+| `TestCreateTokenIfNoneExist_RefusesMalformedRaw` | `TestIssueRejectsMalformedBootstrapPresentations` checks the adapter and direct Issue path. `TestBootstrapSeedCannotEnterOtherOriginsProperty` generates seeds across every non-bootstrap origin. `TestValidateRawToken_AcceptsAMintedShape` remains for legacy token constructors. |
+| `TestClaimToken_LiveClaimAuthorizesEveryClassBoundToItsClaim`, `TestClaimToken_UnknownTamperedOrExpiredTokenIsInvalid`, `TestClaimToken_CancelRefusesSensitiveButNotReportingOrResult` | `TestCapabilityClaimLivenessProperty` uses real awarded bearers, C2 authentication/authorization and SQLite snapshots. It generates tampering, cancellation and lease boundaries. `TestAuthenticationSnapshotRechecksAncestryAndMembership` retains credential expiry and class checks. |
+| `TestClaimToken_FinishOrLossEndsItOnTheNextRequest`, `TestClaimToken_ALaterGenerationFencesTheEarlierToken`, `TestRunnerClaimToken_BindsTheClaimAndDiesWithItsGeneration` | The same property generates holder and generation replacement, expiry, revocation and run deletion. `TestCapabilityResultCannotChangeAfterCompletionOrLossProperty` preserves terminal rows and event counts after refused writes. |
+| `TestClaimToken_ResultCommitsOnceAndReplaysOnlyTheSameResult`, `TestClaimToken_ReplayAnswersOnlyTheCommittedDigest`, `TestClaimToken_EndedClaimWithNoResultRefusesEveryResult` | `TestCapabilityResultCannotChangeAfterCompletionOrLossProperty` commits and replays actual node transitions, then generates changed reports and verifies no node or event changes. Unstarted release refuses an uncommitted result. `TestTransitionApplicationRetryKeepsClaimAndOrdinal` retains revoked-actor replay refusal. Exact HTTP result provenance is a separate open integration. |
+| `TestClaimToken_TriggerlessRunRefusesSensitiveOnceItsRunEnds`, `TestClaimRunCancelled_AMissingRunReadsAsCancelled` | Current intake creates the owner unit with the run. The liveness property deletes the bound run and verifies that no sensitive, reporting or result access survives. Triggerless raw execution is removed. |
+| `TestRunnerClaimToken_OnlyARunnersBoundClaimIsDelegated` | The raw launcher/runner discriminator retires. Current units and bootstrap exchange are covered by `TestExchangeCapabilityCommitsOnceAndPreservesTheAward`, `TestRenewUnitRequiresBootstrapExchange` and the named job authority property. |
+
+`TestBootstrapStartupUsesDurableCapabilityAuthority` joins the actual startup
+helper, store issuance, readiness read, authenticated operator inventory and
+revocation through the shared router. It uses no server socket.
+
+The dead `ReportAttempt` and `EnqueueChildRun` writers have no remaining callers.
+Their replacement requirements remain in the current transition, result-record,
+recovery and child-intake suites. `TestChildIntakePersistsLineageAndInvocationReplay`
+and `TestChildIntakeCannotEscapeItsLiveParentProperty` retain child identity,
+exact replay and current parent authority. No native
+acceptance cell is newly claimed by this cut.
+
+## W1 credential reader and here issuer retirement
+
+| Retired evidence | Current evidence |
+| --- | --- |
+| `TestCreateAndLookupToken`, the four `TestLookupToken_*` cases and collided-prefix lookup | `TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty` generates changed presentations and digests, verifies the exact issued authority, preserves stored expiry and refuses revoked and expired credentials. `TestAuthenticationSnapshotRechecksAncestryAndMembership` retains ancestry, membership, class and audience refusal. Current capability prefixes are unique. |
+| `TestListTokens_FiltersKindAndRevoked`, `TestAmbiguousPrefixRefusesLookupAndRevoke` | `TestCapabilityInventoryFiltersAndRefusals`, `TestCapabilityInventoryOwnershipProperty`, `TestCapabilityInventoryDeploymentIsolation` and capability rotation properties cover the current inventory and committing mutations. Legacy ambiguity recovery retires with the token-table reader. The legacy mint uniqueness test remains for retained fixture writers. |
+| `TestRunnerTokenExpiryFollowsItsLastUse`, `TestTokenUseIsWrittenAtMostHourly` | Their token-table sliding and throttled-write mechanism retires. Current authentication checks persisted absolute expiry without changing it. The digest property covers that invariant. Runner poll activity now has its own store-clock write. |
+| `TestCreateHereTriggerWithRun_RefusesAClaimAfterTheWindow` | `TestClaimUnitHereWindowAndReclaim`, `TestAdmissionHereAwardRetainsRequestingAuthority` and `TestAuthenticationSnapshotHereClaimHistorySurvivesRequeue` cover the live here award, first acquisition and reclaim. |
+| The four `TestClaimedRunFor*` functions | `TestSecretReadClaimScopePrecedenceProperty`, `TestSecretReadAuthorityAndSelectionProperty` and `TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun` preserve team, run, pipeline, current holder and declared-secret selection through the current committing reader. Triggerless raw execution is removed. |
+| `TestAgentClaimsUseTheStoreDialect` | The unused raw agent-claim report is removed. `TestRegisteredAgentsUseLiveCapabilityIdentityAndSavedLabels` retains current registration identity. The complete runner inventory and active-job projection remain open integration work. |
+
+`TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty` covers configured
+and declared preferences through named and queued claims. It generates labels
+and checks stale, revoked, expired, foreign, repository-excluded, grantless,
+under-capacity and hard-selector-mismatched runners, the exact hold deadline and
+granted-name preferences against forged labels. Held polls preserve the entire
+node and award count. `TestEngineClaimHTTPLocalFirstUsesPersistedPoll` carries
+server configuration through the real HTTP handler and store with only enrollment
+and software-policy fakes. No native cell is newly claimed.
+The retired node queue and named trigger claims use the current
+`TestClaimUnitNamedAndQueuedUseCapacityAndIdentity`,
+`TestClaimUnitRejectsForeignAndMissingRequirements`,
+`TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement`,
+`TestClaimUnitGrantedProfileKeys`, `TestClaimUnitHereWindowAndReclaim`,
+`TestClaimUnitMismatchPreservesQueueAndDoesNotHideEligibleWork`,
+`TestClaimQueueMismatchPreservesPositionProperty`,
+`TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty`,
+`TestCapabilityClaimLivenessProperty` and `TestReaperFenceProperty`.
+The final-schema `TestMeteredUnit*` proofs retain atomic reservation, concurrent
+spend, immutable awards, checkpoint, unstarted refund, retry and reaper settlement
+coverage. Legacy tests that called the deleted APIs are retired with them.
+Their token-table, mutable credit-window and old claim-column assertions are not
+current acceptance evidence. Card cap/fraud/warm-pool regressions from those
+fixtures still need final-schema ports by the accounting owner. Native PostgreSQL
+concurrent-claim evidence remains open.
+
+`TestRunnerMeteringChangesOnlyFutureAwards` uses real provisioning, claim,
+release, readiness and billing persistence. Origin verification and C2's billing
+calculator are fakes. The generated console-authority property refuses expired,
+revoked, delegated, forged and delisted authority without changing the root.
+`TestRunnerMeteringHTTPCommitsThroughCurrentConsoleSession` uses the production
+router, authentication, CSRF verification and store writer. Only provisioning
+origin verification is faked. `TestRegisteredAgentsHonorRotationGraceProperty`
+covers randomized deadlines and exact expiry. These are package tests. They add
+no native acceptance claim.
+
+## W1 execution-attempt and matcher retirement
+
+The raw execution writers and their local/trigger helpers have no production
+callers. Their tests no longer exercise the final schema. These replacements
+use real claims, transitions and persisted billing:
+
+| Retired tests | Current evidence |
+| --- | --- |
+| Local execution host/outcome, retry sequencing, replay and unnamed executor tests | `TestExecutionAttemptsStayInsideTheNodesTeamProperty`, `TestAttemptExecutorComesFromClaimAncestryProperty`, and current attempt-transition properties retain tenant isolation, stored attribution, ordinal and replay checks. |
+| Dispatched execution start and first-renewal billing, early finish and reserved grace fixtures | `TestMeteredUnitNodeLifecycleUsesImmutableAward`, `TestMeteredUnitCloudRenewalStartsComputeWithoutAnAttempt`, `TestMeteredUnitRenewalCheckpointsAfterComputeStarts`, `TestMeteredUnitApplicationRetryKeepsOneReservation` and `TestMeteredUnitSettlementFailureRollsBackResult` cover current reservations, starts, retries and rollback. Spend exhaustion and grace for all unit kinds remain open. |
+| `TestTriggerNamesGitHubRepoAcceptsEverySpellingOfTheRepository` | The name-based matcher is removed. `TestStoreActionsEnrollment`, `TestStoreQueueOrder`, `TestQueuedTriggerRepositoryScopeProperty` and current push-scope properties retain canonical repository and push authority. |
+| Old attempt-history lineage fixture | `TestExecutionAttemptsStayInsideTheNodesTeamProperty` uses real node transitions and generated hostile tenant/run selectors against final `node_attempts`. |
+
+`TestPlacementMeteringUsesEnrolledOriginProperty` covers all combinations of
+machine/service origin, root metering, direct/delegated claimant, named/queued
+claim and funded/unfunded payer. `TestMeteredRootPolicyCannotRewriteAwardProperty`
+now passes for Cloud awards from unmetered roots, including settlement replay.
+
+Provider-payment fixtures no longer replace the receipt and correlation schema.
+The existing provider payer, mode, replay, rollback and conservation properties
+exercise the installed final tables. `TestTeamPurgeIsolationProperty` also keeps
+unbound warnings and other teams' financial rows across repeated purges.
+
+
+## W1 metadata and approval writer ports
+
+`summary_test.go` moves to `metadata_ports_test.go` through the real sealed
+intake, claim and start fixture. The ports cover job/step overwrite, exact
+repeat, reopen persistence, absent targets and closing unfinished steps for
+success, failure and cancellation. Retry settlement checks both attempt rows.
+The old placeholder behavior is replaced by explicit missing-step refusal.
+
+`annotation_concurrent_test.go` moves to the current metadata ports. Concurrent
+job and step writers retain every distinct entry and the run counter. SQLite
+runs here. The matching PostgreSQL test uses the same native fixture and requires
+a configured database. The old uncommitted-placeholder interleaving has no
+remaining writer. Metadata requires a committed step, and all writes hold the
+run lock. Byte/count limits and refusal rollback are exercised through the
+current API. The generated fence property refuses foreign holder, authority,
+job/run selectors and generations without changing either target.
+
+`step_status_test.go` moves to terminal-step, skipped-step and immutable-replay
+checks through `RecordStep`. `approvals_test.go` moves to
+`TestApprovalTransitionsPersistDecisionsAndRefuseOverwrite` and
+`TestApprovalTransitionsKeepPendingRequestOrder`, alongside the existing
+approval reaper/race/rollback cases. Gate creation, decision attribution,
+comments, lists, tenant isolation, missing targets, exact replay and refusal
+to reopen a resolved gate use the current transitions.
+
+`generated_node_test.go` loses the removed input-resolver fixture. Its sealed
+spec/reference assertions move to
+`TestGeneratedSpecReferencesAreSealedWithTheAcceptedDeclarationProperty`.
+Generated specs retain their canonical hash and declared references, and a
+changed expansion replay cannot replace either. The native controller
+pipeline-latest reference lookup remains open with W2. This property does not
+claim that integration cell.
+
+The orphaned `internal/acceptance/store_recovery.go` is deleted. Its checks
+already run in `acceptance_recovery_*_test.go` beside the store, and W3 has
+migrated its final host consumer. The dead settlement export fixture is removed
+with the unused legacy settlement engine. No native placement cell is enabled.
 
 ## Debug-pause resume port
 
@@ -1785,3 +2408,317 @@ commit gate. The fake session and CSRF bypass are removed from their fixture.
 errors produce a canonical internal error and no private message. The retired
 agent and node-claim registrations stay absent. Inventory and runner policy are
 fake dependencies. These ports add no native acceptance matrix cell.
+
+
+## W1 ordered placement and unused reader retirement
+
+`TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty` exercises
+real named and queued claims with generated preference orders, holds, exact
+boundaries, runner liveness and forged identity labels. The existing placement
+property also covers stale polls followed by unrelated credential activity.
+Both test that waiting leaves the node and award count unchanged. The HTTP
+local-first test retains the existing controller flags through the real store.
+
+The unused raw debug-pause create/release APIs and their legacy tenant fixture
+are deleted. `TestResumeDebugPauseCurrentAuthorityProperty` and the native
+resume HTTP tests retain current membership, tenant, target, actor, replay and
+execution-fence coverage. The obsolete ancestor-query tests leave with the
+unused reader. Sealed child intake and its generated live-parent property retain
+lineage and parent-fence coverage. The unused child-trigger lookup and legacy
+mutable-token `NodeSettlement` have no callers or retained tests.
+
+No native acceptance matrix cell is enabled by these package properties.
+
+## Raw node-start retirement
+
+`Store.StartNode` and `Tenant.StartNode` are removed.
+
+| Port | Current evidence |
+| --- | --- |
+| `TestListNodesKeepsInsertionOrderAcrossUpdates` | `TestRunSnapshotKeepsDeclarationOrderAcrossStarts` admits and accepts five jobs, reconciles and starts them in reverse order, then reads their original declaration order through the typed snapshot. |
+| `TestPostgresListNodesKeepsInsertionOrderAcrossUpdates` | `TestPostgresRunSnapshotKeepsDeclarationOrderAcrossStarts` uses the same body against the configured PostgreSQL store. Native execution remains pending when no server is configured. |
+| `TestTenantNodeWritesStayInTheRunsTeam` | Uses real admission, acceptance and claims. The foreign tenant cannot start the job or write steps. The actual holder starts and records two steps. |
+| `TestTenantMetricsStayInTheRunsTeam` | Uses a real claimed and started job. Foreign reads and writes stay empty, and identical samples replay once. |
+| Metric identity and replay | `TestMetricIdentityPreservesTenantAndConflictingRetriesProperty` generates 64 readings with foreign tenants, exact retries and changed CPU, memory or process-time readings. Refused writes preserve the recorded sample. |
+
+The dashboard log-reader fixture no longer starts a node before seeding its
+terminal result. Four default-team Store write wrappers are removed. Existing
+callers select explicit tenant handles. Remaining raw run fixtures still need
+migration from the retired run schema to sealed intake.
+
+`Store.SetNodeArtifactManifest` and its tenant twin are removed.
+`TestSetNodeArtifactManifest_RoundTrips` and
+`TestSetNodeArtifactManifest_SurvivesFinishNode` retire with the raw digest
+column. `TestBlobResultRecordsCommitAndReplayWithTerminalState` verifies
+committed manifest selectors with terminal state and replay.
+`TestBlobResultRecordsRejectForgedResultKeys` generates tenant, run, attempt,
+generation and record-key forgeries. `TestNode_DefaultsToEmptyManifest` retires
+with that column. `TestResultRecordsCommitWithTerminalState` verifies absent
+selectors after refused attachment. Those current tests are unchanged.
+
+
+### W1 reporting transactions and cron lease continuation
+
+`TestMetrics_RoundTrip`, `TestMetricTimestampConflicts`,
+`TestMetricTimestampConcurrentWriters`, `TestMetricKindsRoundTrip`,
+`TestMetricKindsRejectInvalidCombinations`, `TestAddNodeMetricSample_Validation`,
+`TestNodeMetricsCapAndPages`, `TestMetricIdentityPreservesTenantAndConflictingRetriesProperty`,
+`TestTenantMetricsStayInTheRunsTeam` and all four `TestAddNodeUsage*` checks now
+use real admission, plan acceptance and claims with `WriteMetric`/`WriteUsage`.
+They retain timestamp limits, timezone-equivalent replay, conflicts, concurrent
+writers, resource kinds, pagination, sample and marker limits, integer boundaries,
+overflow rollback and foreign-tenant refusal. Identical retries at the cap now
+pass. The former raw writers are removed.
+
+`TestMetricTransactionsRecheckReportingAuthorityProperty` generates 96 forged
+team/run/job/fence/authority/rule combinations and verifies refusal without
+writes. `TestMetricReportsFollowAttemptAndCancellation` covers retries,
+cancellation reporting and terminal refusal. `TestMetricRunHostReportsFinishedJobsUnderItsOwnFence`
+retains post-process accounting under a live run host.
+
+The `TestRunCronTickLeased_*` checks now use Operator and the final lease table.
+`TestSweepClaimGenerationSQLDialects` retains repeated-failure generation checks.
+`TestCronTickUsesStoreClockAndFencesStaleCompletionProperty` generates 32 takeover
+and tick-window cases. `TestSingletonReleaseCannotClearAnotherFenceProperty`
+generates 64 invalid releases and checks stale takeover refusal.
+
+These checks do not promote native PostgreSQL or end-to-end HTTP acceptance.
+
+
+## W1 sealed reporting and terminal metadata ports
+
+`TestFinishNodeWithReason_PersistsStructuredMetadata`,
+`TestFinishNodeWithReason_DoesNotOverwriteTerminalNode` and
+`TestFinishNode_LeavesReasonEmpty` are replaced by
+`TestJobFinishPersistsMetadataAndRefusesOverwrite`. It uses real intake,
+acceptance, claims and starts. Success and failure preserve reason, masked
+error, exit code and finish time. Exact replay succeeds and changed terminal
+metadata fails without changing the reported job or attempt history.
+`TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome` retires because
+the final schema refuses that state. Existing schema shape tests retain that
+constraint.
+
+`TestStoreFinishRefusesAnotherTeamsNode` is replaced by
+`TestTenantFinishRejectsForeignAndMissingJobs`. Both refusals retain the
+holder, generation, attempt, state sequence and digest.
+
+`TestReportingReadsSealedFactsWithoutSecretValuesProperty` generates private
+and public arguments, reads before/after acceptance, compares run and trigger
+lists to individual reads, and refuses foreign tenant reads.
+`TestReportingReadsCurrentJobLifecycle` checks the final reporting projection
+against typed job state and attempt history. Pending paging, queue-status and
+literal repository filters are covered by
+`TestReportingPagesUnstartedRunsAndFiltersQueueState`.
+`TestReportingRefusesMalformedSeals` requires errors for corrupt requests.
+The unused dispatch-route fixture had no tests or consumers and is removed.
+No native topology matrix cell is claimed by these component tests.
+
+## W1 job insertion, ready replay and reporting ports
+
+- `TestNodesPerRunGuardRefusesAMeteredPrincipalPastTheCap`, the node half of
+  `TestPerPrincipalGuardsLeaveLocalWorkAlone`, and
+  `TestPerPrincipalGuardsUseTheRunsTeamForMetering` move to
+  `TestPlanInsertionLimitsAreAtomicProperty`. Metered scope comes from committed
+  awards. Unmetered and unrelated-run awards do not spend the per-run guard.
+- `TestGlobalNodesPerRunGuardCountsEveryRun`,
+  `TestConcurrentNodeCreationNeverPassesThePerRunGuard`, and the raw job-recreate
+  assertion move to `TestPlanInsertionGlobalLimitAndReplay`,
+  `TestConcurrentPlanAcceptanceCannotExceedInsertionLimit` and
+  `TestExpansionInsertionLimitRollsBackBatch`. Initial and generated batches
+  respect the configured cap, roll back together, and replay after a cap falls.
+  `TestStorePlanInsertionLimitUsesCanonicalRefusal` drives real shared validation
+  and seals, checks `plan_invalid` plus `ErrComputeLimit`, and retries/replays
+  through configured cap changes.
+  The run-rate assertions remain in `TestGuardsLetAnIdempotentRunRecreateThrough`
+  and `TestRunRateGuardsUseTheRunsTeamForMetering` until raw run intake retires.
+- `TestNodeClaim_MarkReadyIsIdempotent` moves to
+  `TestOwnerReadyReplayPreservesQueueAge`. The real owner transition preserves
+  the original ready timestamp and state sequence on replay.
+- `TestGitHubCheckRunIsRecordedOnce` moves to
+  `TestGitHubCommitReportingUsesSealedIdentityProperty`. Sealed intake supplies
+  runs. The generated probe retains first-check replay, foreign-team refusal,
+  exact SHA and numeric repository isolation, ordering and rename behavior.
+- Legacy `RedactedForDisplay`, `RedactedRuns` and receipt raw-invocation tests
+  move to `TestReportingReadsSealedFactsWithoutSecretValuesProperty` and
+  `TestReportingDistinguishesUnknownAndEmptyClassification`. These exercise
+  real intake and accepted seals, then report and receipt output. Unknown,
+  nil, malformed and explicit empty classification stay distinct. Receipt
+  component tests retain cost, topology, hash stability and optional-secret
+  behavior. Raw invocation rewriters and their historical compatibility tests
+  are removed with the old API.
+
+Reporting and legacy claim fixtures use explicit `teststore.SeedNode` and
+`SeedNodeReady`. They grant no production authority and run no admission logic.
+`TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun` checks their schema,
+nanosecond timestamps and failure when no target exists. New lifecycle and
+acceptance probes use `AdmitRun`, `AcceptPlan` and `TransitionNode` instead.
+
+## W1 authorized team mutation ports
+
+The identity invitation limits, email normalization, expiry, withdrawal and role
+checks now invoke `CreateAuthorizedInvitation` and `DeleteAuthorizedInvitation`
+through fresh account-session fixtures. Native generated authorization checks
+cover membership loss, role loss, revoked/missing session ancestry, delegated
+credentials and foreign tenants. Concurrent replay writes one invitation. A
+failed insertion rolls back the row and returns no result.
+
+`TestTeamWritesUseNativeTenantTransactions` exercises all six team mutation
+routes through the concrete store adapter. CSRF transport is a fixture, while
+credential snapshots, authorization and committing writes use SQLite.
+`TestTeamDeletionRetainsCheckoutAndHoldGuardsOnStoreClock` ports the deletion
+admission guards to the final checkout and hold contracts.
+`TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay` completes a
+sealed run before removing it and verifies current authority, ownership,
+financial retention and direct-store replay. It replaces the raw run-control
+fixture. The obsolete `TestDeleteRun_DropsMemoEntriesFromDeletedRun` is removed
+because `concurrency_cache` and its writers were already deleted. Blob memo
+selection and retention remain covered by W1b's current record tests.
+
+The broader legacy deletion fixtures still need final run/trigger seeding and
+checkout amounts. Their pre-mutation failures are recorded in W1's session 57
+report. No native placement acceptance cell is enabled by these ports.
+
+
+## W1 GitHub App administration and reservation continuation
+
+`TestGitHubAppMutationsRequireCurrentAdministrationProperty` covers all six
+committing mutations over direct/delegated authority, foreign tenants, lost
+membership, downgrade, revoked ancestry, wrong grants and replay modes.
+`TestGitHubAppMutationsCommitActorTimeAndConsentGeneration` ports the old
+`TestGitHubAppAutomationAdmissionChecksConsentGeneration` fence through the
+current consent transaction. It also checks store time and derived actors.
+`TestGitHubAppMutationRefusalsRollBack` covers incomplete identities, foreign
+owners/installations, suspension, actor forgery, late authority loss and insert
+failure. The extra-repository tests now use one names-and-IDs write. The
+name-only intermediate state is retired.
+
+`TestLauncherReservationOwnershipProperty` extends snapshot fencing to original
+bootstrap evidence across expiry, exchange, replacement and delegated launcher
+presentations. `TestStoreLauncherReservationW8` and
+`FuzzStoreLauncherReservationFenceW8` run the actual store/controller/launcher
+path with a fake Kubernetes boundary. They add no native Kubernetes claim.
+
+## W1 store fixture and measurement continuation
+
+Reporting fixtures now seed sealed request columns and current owner projections.
+They do not grant execution authority. Bootstrap exchange uses ClaimUnit instead
+of awarding onto an already-running row. Paid funding fixtures settle a committed
+provider checkout. The shared storetest opener configures its session cipher and
+test payment mode. Cloud lifecycle fixtures carry funds, and delegated fixtures
+retain repository scope.
+
+Removed tests target deleted invocation columns, token-table minting, independent
+run/trigger IDs, raw run upserts, the separate sweep claim, the trigger-filter scan
+horizon, concurrency_cache and on_limit=coalesce. Current record/materialization
+and fenced capacity tests retain those execution invariants. Retained reporting,
+queue, capacity cost and cancellation tests continue against current columns.
+
+The new generated properties check bucket-measurement successor fencing and
+execution-activity tenant isolation against the store clock. Existing random
+capacity tests now generate retained policies and seed live owner/job rows.
+
+
+## Sealed intake rate and deletion ports
+
+The eleven legacy run-rate/raw-attribution/oldest-ready tests in
+compute_limits_test.go are replaced by TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain,
+TestSealedIntakeRateCountsOnlyTheAuthenticatedTeam and
+TestConcurrentSealedIntakeNeverPassesTheHourlyGuard. They exercise AdmitRun,
+check every concurrent error, count both run and owner rows, reject a spent
+principal and permit replay without charging another slot. TestSealedIntakeRateKeepsPrincipalKindsSeparateProperty generates account/machine
+ID collisions against the committed actor kind. Token-metered-only intake, pending-row re-attribution and the uncalled oldest-ready diagnostic are
+retired. Matcher selection and claim eligibility retain their separate tests.
+
+Deletion fixtures provision real member roots through current account sessions.
+They verify capability revocation, cooperative run cancellation, foreign-tenant
+preservation, account-subject relabeling and whole-cent checkout guards. The
+removed storage-watermark test now checks both replica storage-usage rows and
+preserves another tenant's rows. The recheck test first proves the foreign key
+refuses a post-purge tenant write. Business-event expectations use the verified
+payment-provider actor and nullable deployment team.
+
+Run-control property tests cover live membership, exact tenant/run/job selectors,
+encoded secret masking, changed-body replay conflicts and rollback of state,
+events and receipts. TestRunControlHTTPUsesStoreTransactions drives the canonical
+controller routes through the concrete Tenant adapter with real member issuance.
+No acceptance registry or native-platform cell is added.
+
+
+## Committed runner inventory
+
+`Tenant.ReadRunners` now supplies C2's production `RunnerInventoryReader`.
+`TestRunnerInventoryWithSealedAdmissionAndEnrollment` uses storetest's isolated
+store through the real admission, plan, enrollment, claim and renewal paths.
+`TestRunnerInventoryHTTPUsesStoreSnapshot` drives the real default HTTP adapter.
+The fake-reader HTTP checks stay because they cover malformed foreign results
+and missing dependency refusals. The missing-reader case now explicitly injects
+an absent reader instead of assuming Tenant cannot implement the contract.
+
+`TestRunnerInventoryAttributesOnlyCurrentSameTenantAuthorityProperty` generates
+same-name roots, foreign tenants, revoked ancestry and leaf authority, expired
+leases, superseded generations, holder changes and cancellation. Only exact
+current same-team authority contributes activity. The liveness/headroom test
+checks that accepted renewal changes only last-seen. Cloud, local and here tests
+check immutable placement identity and separation from machine registrations.
+Observation-write failures prove award and renewal rollback. Corrupt observations
+return no partial snapshot. These are component and SQLite proofs. They do not
+claim a native placement cell or missing concurrency/queue-depth ingestion.
+
+## Explicit tenant reporting reader cut
+
+`TestStoreBackendTenantReadsProperty` generates 24 tenants and checks that the
+same backend returns only their run, jobs and events. It also refuses rows from
+the default team and checks the reverse direction. The original backend fails
+on the first nondefault job listing. The retained backend round-trip fixture now
+uses the current schema. Existing reader callers use Tenant explicitly, while
+cross-team query tests select Operator. Billing test files receive only reader
+caller substitutions.
+
+The two source-scanning default-team twin guards are deleted because the
+production twins and their backend fallback are removed. The compiler now
+rejects those calls. `TestSecrets_PipelineScopeResolution` retires with the raw
+fallback reader. `TestSecretReadClaimScopePrecedenceProperty`,
+`TestSecretReadAuthorityAndSelectionProperty` and
+`TestSecretReadMemberScopesAndMaskedRefusal` retain authorized scope coverage.
+The encryption and tenant-key tests inspect exact rows with `GetSecretRow`.
+
+## W1 account transactions and raw team-switch ports
+
+The four raw session-switch fixture calls now use `SelectAccountTeam`.
+`TestIdentitySessionSwitchNamesTheTeamItLeaves`,
+`TestRolelessSessionsHaveNoTeamAuthorityProperty` and `TestStoreSessions`
+retain stale-team and membership refusal and roleless selection coverage.
+`TestAccountMutationsRequireTheSameLiveDirectSessionProperty` generates changed
+identity, team, route rule, revoked/expired sessions, lost membership and
+capability ancestry against all four final account writers. The other account
+transaction tests cover atomic session selection, rollback, recent-sign-in
+boundaries, last-method preservation, other-session revocation and one invitation
+winner across two sessions. `TestAccountMutationsHTTPUseCommittedStoreAdapter`
+checks all four concrete defaults through socket-free HTTP and asserts C2
+interface conformance. `TestAccountMutationsKeepNanosecondTimestamps` checks
+public account/identity times, raw membership/update/unlink facts and signup
+window cutoffs without losing subsecond precision.
+
+`TestCacheExcludedCounts_CountsCacheDominantRunsPerPipeline` retires with its
+unused API and SQL. The profile-folding suites retain memoized-job exclusion.
+
+## Raw account writer retirement
+
+The remaining creation, invitation and unlink fixtures now call
+`CreateAccountTeam`, `AcceptAccountInvitation` and `UnlinkAccountIdentity`
+through fresh authenticated direct sessions. `storetest.AccountAuthority`
+supports member and roleless accounts. `SessionAuthority` preserves an existing
+session when a test checks unlink revocation.
+
+`TestIdentityInvitationLifetime` retains the seven-day lifetime assertion.
+`TestAccountInvitationExpiresOnStoreClock` checks refusal and unchanged rows
+at the exact expiry and one second later while the accepting session remains
+live. The PostgreSQL unlink contention fixtures create their authority before
+acquiring database gates. Concurrent unlink requests share the session they
+retain. Those native tests still require PostgreSQL execution.
+
+`TestLogTreeTraversesEveryTenantDescendantProperty` exercises the retained
+tenant run listing through the real HTTP log reader. Generated trees cross the
+100-row internal page, contain a nested descendant and a cycle, and include a
+foreign tenant's child naming the same parent. Every selected descendant appears
+once and foreign events stay absent.

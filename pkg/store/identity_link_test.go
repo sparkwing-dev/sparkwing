@@ -112,19 +112,19 @@ func TestUnlinkIdentityKeepsTheLastSignInMethod(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	owner := signIn(t, st, "g-owner", "owner@example.com")
-	if _, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGoogle, "", time.Now()); !errors.Is(err, store.ErrLastSignInMethod) {
+	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGoogle); !errors.Is(err, store.ErrLastSignInMethod) {
 		t.Fatalf("unlinking the only sign-in = %v, want ErrLastSignInMethod", err)
 	}
 	if back := signIn(t, st, "g-owner", "owner@example.com"); back.Account.ID != owner.Account.ID {
 		t.Fatal("the refused unlink detached the sign-in")
 	}
-	if _, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGitHub, "", time.Now()); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unlinking a provider the account lacks = %v, want ErrNotFound", err)
 	}
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "gh@example.com"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGoogle, "", time.Now()); err != nil {
+	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGoogle); err != nil {
 		t.Fatalf("unlinking google beside github = %v", err)
 	}
 }
@@ -136,6 +136,7 @@ func TestConcurrentUnlinksKeepOneMethodPostgres(t *testing.T) {
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "gh@example.com"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	a := storetest.AccountAuthority(t, st, owner.Account.ID)
 	if _, err := st.DB().Exec(`CREATE FUNCTION wait_identity_delete() RETURNS trigger LANGUAGE plpgsql AS $$
 	BEGIN PERFORM pg_advisory_xact_lock(74120912); RETURN OLD; END $$`); err != nil {
 		t.Fatal(err)
@@ -162,7 +163,7 @@ func TestConcurrentUnlinksKeepOneMethodPostgres(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, provider, "", time.Now())
+			_, err := st.UnlinkAccountIdentity(ctx, a, provider)
 			results <- err
 		}()
 	}
@@ -171,7 +172,8 @@ func TestConcurrentUnlinksKeepOneMethodPostgres(t *testing.T) {
 		var waiting int
 		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
 			WHERE wait_event_type = 'Lock' AND (query LIKE '%DELETE FROM identities%'
-			OR query LIKE '%accounts WHERE id%') AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			OR query LIKE '%accounts WHERE id%' OR query LIKE '%SELECT name FROM teams WHERE name%')
+			AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting >= 2 {
@@ -211,7 +213,7 @@ func TestUnlinkBeforeIdentitySessionCreationRefusesStaleResolution(t *testing.T)
 		t.Fatal(err)
 	}
 	resolved := resolve(t, st, profile)
-	if _, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGitHub, "", time.Now()); err != nil {
+	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); err != nil {
 		t.Fatal(err)
 	}
 	raw, _, _, err := st.CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
@@ -231,6 +233,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolved := resolve(t, st, profile)
+	a := storetest.AccountAuthority(t, st, owner.Account.ID)
 	if _, err := st.DB().Exec(`CREATE FUNCTION wait_session_insert() RETURNS trigger LANGUAGE plpgsql AS $$
 	BEGIN PERFORM pg_advisory_xact_lock(74120911); RETURN NEW; END $$`); err != nil {
 		t.Fatal(err)
@@ -279,7 +282,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 	waitForDBLock("%INSERT INTO sessions%")
 	unlinkDone := make(chan error, 1)
 	go func() {
-		_, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGitHub, "", time.Now())
+		_, err := st.UnlinkAccountIdentity(ctx, a, store.ProviderGitHub)
 		unlinkDone <- err
 	}()
 	unlinked := false
@@ -331,6 +334,7 @@ func TestSignInAndUnlinkUseTheSameLockOrderPostgres(t *testing.T) {
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "gh@example.com"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	a := storetest.AccountAuthority(t, st, owner.Account.ID)
 	if _, err := st.DB().Exec(`CREATE FUNCTION wait_identity_update() RETURNS trigger LANGUAGE plpgsql AS $$
 	BEGIN PERFORM pg_advisory_xact_lock(74120913); RETURN NEW; END $$`); err != nil {
 		t.Fatal(err)
@@ -368,7 +372,7 @@ func TestSignInAndUnlinkUseTheSameLockOrderPostgres(t *testing.T) {
 	}
 	unlinkDone := make(chan error, 1)
 	go func() {
-		_, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGoogle, "", time.Now())
+		_, err := st.UnlinkAccountIdentity(ctx, a, store.ProviderGoogle)
 		unlinkDone <- err
 	}()
 	for {
@@ -447,7 +451,7 @@ func TestSignInRetriesWhenIdentityWasUnlinkedWhileWaitingPostgres(t *testing.T) 
 		t.Fatal(err)
 	}
 	if _, err := gate.ExecContext(ctx, `INSERT INTO identity_unlinks (provider, subject, account_id, unlinked_at)
-		VALUES ($1, $2, $3, $4)`, profile.Provider, profile.Subject, owner.Account.ID, time.Now().Unix()); err != nil {
+		VALUES ($1, $2, $3, $4)`, profile.Provider, profile.Subject, owner.Account.ID, time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if err := gate.Commit(); err != nil {
@@ -483,12 +487,13 @@ func TestUnlinkedSignInNoLongerReachesTheAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gone, ended, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGitHub, keep, now)
+	ended, err := st.UnlinkAccountIdentity(ctx, storetest.SessionAuthority(t, st, keep), store.ProviderGitHub)
 	if err != nil {
 		t.Fatalf("UnlinkIdentity: %v", err)
 	}
-	if gone.Subject != "gh-1" || ended != 1 {
-		t.Fatalf("unlink = %+v, ended %d sessions; want gh-1 and one session", gone, ended)
+	ids := identitiesOf(t, st, owner.Account.ID)
+	if ended != 1 || len(ids) != 1 || ids[0].Provider != store.ProviderGoogle {
+		t.Fatalf("unlink ended %d sessions or retained the wrong sign-in", ended)
 	}
 	if _, err := st.LookupSession(t.Context(), keep); err != nil {
 		t.Fatalf("the session that unlinked = %v, want it kept", err)
@@ -515,7 +520,7 @@ func TestRelinkingLiftsAnUnlink(t *testing.T) {
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "owner@example.com"), now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGitHub, "", now); err != nil {
+	if _, err := st.UnlinkAccountIdentity(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.ProviderGitHub); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "owner@example.com"), now); err != nil {
@@ -526,32 +531,6 @@ func TestRelinkingLiftsAnUnlink(t *testing.T) {
 	}
 	if back := resolve(t, st, gh("gh-1", "owner@example.com")); back.Account.ID != owner.Account.ID {
 		t.Fatal("the relinked sign-in did not reach the account")
-	}
-}
-
-func TestIdentityLinkStateIsUsedOnce(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	expires := now.Add(10 * time.Minute)
-	fresh, err := st.ConsumeIdentityLinkState(ctx, "nonce-1", expires, now)
-	if err != nil || !fresh {
-		t.Fatalf("first use = %v, %v; want fresh", fresh, err)
-	}
-	again, err := st.ConsumeIdentityLinkState(ctx, "nonce-1", expires, now)
-	if err != nil || again {
-		t.Fatalf("second use = %v, %v; want refused", again, err)
-	}
-	other, err := st.ConsumeIdentityLinkState(ctx, "nonce-2", expires, now)
-	if err != nil || !other {
-		t.Fatalf("control: another nonce = %v, %v; want fresh", other, err)
-	}
-	if empty, err := st.ConsumeIdentityLinkState(ctx, "", expires, now); err != nil || empty {
-		t.Fatalf("empty nonce = %v, %v; want refused", empty, err)
-	}
-	k1, err := st.IdentityLinkStateKey(ctx)
-	if err != nil || len(k1) == 0 {
-		t.Fatalf("IdentityLinkStateKey = %x, %v", k1, err)
 	}
 }
 
@@ -569,7 +548,7 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 	}
 	space := tenant(t, st, holder.PersonalTeam)
 	runCtx := store.WithCreatingPrincipal(ctx, "holder@example.com")
-	if err := space.CreateTriggerWithRun(runCtx,
+	if err := space.TestOnlySeedTriggerWithRun(runCtx,
 		store.Trigger{ID: "run-h", Pipeline: "build", CreatedAt: now, TriggerUser: "holder@example.com"},
 		store.Run{ID: "run-h", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)

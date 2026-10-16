@@ -148,10 +148,10 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 
 	f.runA = "run-team-a"
 	seedRun(t, f.teamA, f.runA, "build-a")
-	if err := st.CreateNode(ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "running"}); err != nil {
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.teamA.CreateApproval(ctx, store.Approval{RunID: f.runA, NodeID: "n1", RequestedAt: now}); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES (?,?,?,?,?,?)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {
 		t.Fatal(err)
 	}
 	seedControllerCapacityHolder(t, st, f.teamA.Team(), "deploy", "holder-a", f.runA, "n1", 0)
@@ -197,11 +197,11 @@ func (f *tenancyFixture) member(owner store.Account, name string, role store.Rol
 	f.t.Helper()
 	ctx := context.Background()
 	acct, _ := signUp(f.t, f.st, name)
-	inv, err := f.teamA.CreateInvitation(ctx, owner.ID, acct.Email, role, time.Now().UTC())
+	inv, err := fixtureInvitation(f.t, f.st, f.teamA, owner.ID, acct.Email, role)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.st.AcceptInvitation(ctx, acct.ID, inv.ID, time.Now().UTC()); err != nil {
+	if _, err := f.st.AcceptAccountInvitation(ctx, fixtureAccountAuthority(f.t, f.st, acct), inv.ID); err != nil {
 		f.t.Fatal(err)
 	}
 	return session(f.t, f.st, acct, f.teamA.Team())
@@ -367,7 +367,7 @@ func TestTeamBoundary_ARunnerCreatesItsRunInItsOwnTeam(t *testing.T) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", f.runnerB)
-		req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
+		req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -668,7 +668,7 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", f.runnerB)
-			req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
+			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)
@@ -744,4 +744,39 @@ func TestTeamBoundary_SecretsStayWithTheirTeam(t *testing.T) {
 			t.Errorf("team B's delete removed team A's secret: %d %s", code, body)
 		}
 	})
+}
+
+func fixtureInvitation(t *testing.T, st *store.Store, tenant *store.Tenant, actor, email string, role store.Role) (store.Invitation, error) {
+	t.Helper()
+	account, err := st.Account(t.Context(), actor)
+	if err != nil {
+		return store.Invitation{}, err
+	}
+	raw := strings.TrimPrefix(session(t, st, account, tenant.Team()), "Session ")
+	route, _ := capability.LookupRoute("POST", "/api/v1/team/invitations")
+	target := capability.Target{Team: string(tenant.Team())}
+	auth, err := capability.NewAuthenticator(st).Authenticate(t.Context(), capability.Presentation{Raw: raw, Class: capability.CredentialSession, Evidence: capability.RequestEvidence{Target: target}}, route)
+	if err != nil {
+		return store.Invitation{}, err
+	}
+	a, err := capability.Authorize(t.Context(), st, route, auth, target)
+	if err != nil {
+		return store.Invitation{}, err
+	}
+	return tenant.CreateAuthorizedInvitation(t.Context(), a, email, role, email)
+}
+
+func fixtureAccountAuthority(t *testing.T, st *store.Store, account store.Account) capability.Authorized {
+	t.Helper()
+	raw := strings.TrimPrefix(session(t, st, account, account.ActiveTeam), "Session ")
+	route, _ := capability.LookupRoute("POST", "/api/v1/me/active-team")
+	auth, err := capability.NewAuthenticator(st).Authenticate(t.Context(), capability.Presentation{Raw: raw, Class: capability.CredentialSession}, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := capability.Authorize(t.Context(), st, route, auth, capability.Target{AccountID: account.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
 }

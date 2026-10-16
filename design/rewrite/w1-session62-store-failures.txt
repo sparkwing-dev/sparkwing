@@ -1,0 +1,54 @@
+Starting failures: 15; passing top-level tests: 1203
+Ending failures: 15; passing top-level tests: 1200; elapsed: 205.358 seconds
+
+TestCollectionBindingCannotChangePayerProperty
+    payment_collection_binding_test.go:119: constraint failed: CHECK constraint failed: (kind = 'setup' AND currency = '' AND attempt_id = '' AND charge_id = '')
+               OR (kind = 'collection' AND currency <> '' AND attempt_id <> '' AND charge_id <> '') (275)
+
+TestTenantWriters_EveryTenantTableHasAWriterThatSetsTheKey
+    tenant_writer_guard_test.go:40: no INSERT in this package sets storage_commit_receipts.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+    tenant_writer_guard_test.go:40: no INSERT in this package sets storage_reservations.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+
+TestAWarnedCardRepaysTheDebtOnPayNow
+    card_billing_test.go:289: seed a reservation refund: SQL logic error: table credit_charges has no column named token_prefix (1)
+    card_billing_test.go:289: seed a reservation refund: SQL logic error: table credit_charges has no column named token_prefix (1)
+
+TestARefundDebitsTheCardThatPaid
+    card_billing_test.go:529: mint acme's metered token: SQL logic error: no such table: tokens (1)
+
+TestMeteredClaimReservesAtTheNodesCPUClass
+    credit_rates_test.go:197: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestHeartbeatChargesAtTheNodesCPUClass
+    credit_rates_test.go:234: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestClaimIsRefusedAboveTheLargestPricedClass
+    credit_rates_test.go:276: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestTheDefaultLadderRefusesAClassAboveEight
+    credit_rates_test.go:311: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestARateTableChangeLeavesWrittenChargesAlone
+    credit_rates_test.go:353: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestAClaimantsOwnCPUFigureDoesNotLowerTheBill
+    credit_rates_test.go:440: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestTheChargeRowCarriesThePinnedClass
+    credit_rates_test.go:463: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass
+    credit_rates_test.go:519: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts
+    credits_test.go:122: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion
+    credits_test.go:167: mint a metered token: tokens: insert: SQL logic error: no such table: tokens (1)
+
+FuzzStorageStandingTenantInventory
+    storage_standing_runtime_test.go:150: tenant inventory={Tier:none AllowanceBytes:1073741824 EventBytes:17 BlobBytes:3 ReservedBlobBytes:0 LogBytes:3}: <nil>
+    storage_standing_runtime_test.go:150: tenant inventory={Tier:none AllowanceBytes:1073741824 EventBytes:0 BlobBytes:0 ReservedBlobBytes:0 LogBytes:3}: <nil>
+

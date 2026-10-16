@@ -28,14 +28,6 @@ func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID,
 	if err := chargeEventStorageTx(ctx, tx, t.team, replica, runID, size); err != nil {
 		return 0, err
 	}
-	if nodeID != "" {
-		err = t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID)
-	} else {
-		err = t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID)
-	}
-	if err != nil {
-		return 0, err
-	}
 	seq, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now())
 	if err != nil {
 		return 0, err

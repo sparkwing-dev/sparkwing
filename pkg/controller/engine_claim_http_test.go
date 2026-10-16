@@ -106,6 +106,27 @@ func TestEngineClaimHTTPDeliversPrivateAwardOnce(t *testing.T) {
 	}
 }
 
+func TestEngineClaimHTTPLocalFirstUsesPersistedPoll(t *testing.T) {
+	e, _, fallback := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	preferred := engineHTTPRoot(t, e, "a", "preferred", []capability.Grant{capability.NodesClaim})
+	now := time.Now().UnixNano()
+	engineSQL(t, e.Store, `UPDATE nodes SET ready_at=?,execution_json=?`, now, []byte(`{"requires":{"set":true,"value":["ready"]}}`))
+	h := New(e.Store, slog.New(slog.DiscardHandler)).WithEngineController(e).WithLocalFirstPlacement([]string{"gpu"}, time.Minute, time.Minute).Handler()
+	poll := `{"runner_version":"v1","kinds":["node"],"labels":["gpu"],"available_cores":1}`
+	engineClaimHTTP(t, h, preferred, "POST", "/api/v1/runners/claim", poll, http.StatusOK)
+	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
+	w := engineClaimHTTP(t, h, fallback, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, http.StatusOK)
+	var held controllerwire.ClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &held); err != nil || held.Claim != nil {
+		t.Fatalf("local-first hold: %+v, %v", held, err)
+	}
+	w = engineClaimHTTP(t, h, preferred, "POST", "/api/v1/runners/claim", poll, http.StatusOK)
+	var awarded controllerwire.ClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &awarded); err != nil || awarded.Claim == nil || awarded.Claim.Runner.Name != "preferred" {
+		t.Fatalf("preferred award: %+v, %v", awarded, err)
+	}
+}
+
 func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	for _, body := range []string{
@@ -146,7 +167,10 @@ func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 }
 
 func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
-	e, _ := engineRuntimeStore(t)
+	e, tenant := engineRuntimeStore(t)
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "launcher-test", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
@@ -172,6 +196,10 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	if claim.Capability == "" || claim.Capability == bootstrap || claim.Delivery != capability.DeliveryDirect || !reflect.DeepEqual(claim.Binding, response.Claim.Binding) || !claim.LeaseExpiresAt.Equal(response.Claim.LeaseExpiresAt) {
 		t.Fatal("exchange changed the immutable award or did not replace its bootstrap")
 	}
+	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Capability)))
+	if err != nil || principal.Capability.Billing == nil || !principal.Capability.Billing.Metered {
+		t.Fatalf("Cloud exchange lost metered provenance: %+v, %v", principal.Capability.Billing, err)
+	}
 	engineClaimHTTP(t, h, bootstrap, "POST", "/api/v1/claims/exchange", `{}`, 401)
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/claims/exchange", `{}`, 403)
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/claims/foreign/heartbeat", `{"executing":true}`, 403)
@@ -180,7 +208,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &renewal); err != nil || renewal.ExpiresAt.IsZero() {
 		t.Fatalf("renewal: %+v, %v", renewal, err)
 	}
-	for _, path := range []string{"/api/v1/triggers/claim", "/api/v1/nodes/claim", "/api/v1/triggers/run/claim"} {
+	for _, path := range []string{"/api/v1/triggers/claim", "/api/v1/nodes/claim", "/api/v1/triggers/run/claim", "/api/v1/runs/run/nodes/job/claim", "/api/v1/runs/run/nodes/job/heartbeat"} {
 		engineClaimHTTP(t, h, raw, "POST", path, `{}`, http.StatusNotFound)
 	}
 }

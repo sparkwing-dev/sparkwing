@@ -82,7 +82,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request, authoriz
 	if err != nil {
 		return engineLookupError(err)
 	}
-	runs = store.RedactedRuns(runs)
+
 	if runs == nil {
 		runs = []*store.Run{}
 	}
@@ -129,7 +129,7 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, store.RedactedRun(run))
+	writeJSON(w, http.StatusOK, run)
 	return nil
 }
 
@@ -172,8 +172,6 @@ type triggerIntake struct {
 	// store.ErrDuplicateIdempotencyKey rather than starting a second run.
 	IdempotencyKey string
 	At             time.Time
-	SourceKey      string
-	SourceToken    string
 }
 
 // safety: every path that starts a run on this controller writes its three rows
@@ -183,17 +181,9 @@ func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIn
 	// safety: the trigger and the run it names are written together, so a guard
 	// that refuses the run leaves no trigger behind for a worker to claim.
 	trig, run := triggerRows(in)
-	var err error
-	if in.SourceKey != "" {
-		err = t.CreateSourceTriggerWithRun(ctx, trig, run, in.SourceKey, in.User, in.SourceToken)
-	} else {
-		err = t.CreateTriggerWithRun(ctx, trig, run)
-	}
+	err := t.CreateTriggerWithRun(ctx, trig, run)
 	if err != nil {
 		if errors.Is(err, store.ErrDuplicateIdempotencyKey) || errors.Is(err, store.ErrComputeLimit) {
-			return err
-		}
-		if errors.Is(err, store.ErrSourceAlreadyBound) {
 			return err
 		}
 		return fmt.Errorf("persist the trigger and its run: %w", err)

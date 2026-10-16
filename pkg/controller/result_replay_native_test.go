@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"

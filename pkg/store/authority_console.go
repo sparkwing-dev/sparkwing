@@ -2,16 +2,10 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
-
-// SetConsolePolicy binds the controller's current configuration to committing authorization.
-func (s *Store) SetConsolePolicy(policy func(capability.Principal, time.Time) bool) {
-	s.consolePolicy = policy
-}
 
 func resolveProvisionAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, proof *capability.ConsoleProof) (capability.Principal, error) {
 	p, err := tx.ResolveAuthority(ctx, ref)

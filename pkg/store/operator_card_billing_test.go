@@ -13,7 +13,6 @@ import (
 func cardCollectionFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	t.Helper()
 	s, _ := paymentFixture(t, capability.PaymentTest)
-	providerCorrelationSchema(t, s)
 	now := time.Date(2026, 10, 15, 12, 0, 0, 123, time.UTC)
 	s.clock = func() time.Time { return now }
 	tenant := &Tenant{s: s, team: "a"}

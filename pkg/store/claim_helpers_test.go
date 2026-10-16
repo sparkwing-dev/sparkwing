@@ -9,50 +9,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
-
-func ackNodeAttempt(t *testing.T, s *store.Store, n *store.Node, identity store.ClaimIdentity, ordinal int) {
-	t.Helper()
-	team, err := s.AsOperator().RunTeam(context.Background(), n.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tn, err := s.ForTeam(context.Background(), team)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tn.AcknowledgeNodeExecutionStart(context.Background(), n.RunID, n.NodeID, identity, store.ExecutionStart{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID:   n.ReservationID,
-		ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: ordinal,
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func claimNode(t *testing.T, s *store.Store, runID string, identity store.ClaimIdentity, holder string) *store.Node {
-	t.Helper()
-	n, err := s.ClaimNextReadyNode(context.Background(), identity, holder, time.Minute, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n.RunID != runID {
-		t.Fatalf("claimed run %q, want %q", n.RunID, runID)
-	}
-	return n
-}
-
-func claimRetryNode(t *testing.T, s *store.Store, runID string, identity store.ClaimIdentity, holder string) *store.Node {
-	t.Helper()
-	n := claimNode(t, s, runID, identity, holder)
-	if _, err := s.DB().ExecContext(context.Background(), storetest.Rebind(s, `UPDATE nodes
-   SET executor_location = 'local'
- WHERE run_id = ? AND node_id = ?`), n.RunID, n.NodeID); err != nil {
-		t.Fatal(err)
-	}
-	n.ExecutorLocation = "local"
-	return n
-}
 
 func createRetryRunAndReadyNode(t *testing.T, s *store.Store, runID string, retries int) {
 	t.Helper()
@@ -60,16 +18,16 @@ func createRetryRunAndReadyNode(t *testing.T, s *store.Store, runID string, retr
 		"pipeline": "p", "run_id": runID,
 		"nodes": []any{map[string]any{"id": "build", "deps": []string{}, "modifiers": map[string]any{"retry": retries}}},
 	})
-	if err := s.CreateRun(context.Background(), store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
 		ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now(), PlanSnapshot: plan,
 		RepoURL: "https://example.com/acme/repo.git", GitSHA: strings.Repeat("a", 40),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateNode(context.Background(), store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(s, context.Background(), store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkNodeReady(context.Background(), runID, "build"); err != nil {
+	if err := teststore.SeedNodeReady(s, context.Background(), runID, "build"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -86,12 +44,12 @@ func seedSubmittedRun(t *testing.T, s *store.Store, id, pipeline string) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	if err := s.CreateTrigger(ctx, store.Trigger{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedTrigger(ctx, store.Trigger{
 		ID: id, Pipeline: pipeline, CreatedAt: now, TriggerSource: "runs-submit",
 	}); err != nil {
 		t.Fatalf("seed trigger %s: %v", id, err)
 	}
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: id, Pipeline: pipeline, Status: "pending",
 		TriggerSource: "runs-submit", CreatedAt: now, StartedAt: now,
 	}); err != nil {

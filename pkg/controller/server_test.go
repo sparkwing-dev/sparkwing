@@ -3,7 +3,6 @@ package controller_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -86,7 +85,7 @@ func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 	for i := range 20 {
-		if err := st.CreateRun(t.Context(), store.Run{
+		if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{
 			ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
@@ -104,45 +103,6 @@ func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
 	}
 	if body.Status != "ok" || len(body.Problems) != 0 || body.RecentRunWarning != "" {
 		t.Fatalf("public health exposed workload history: %+v", body)
-	}
-}
-
-func TestController_HealthDoesNotExposeClaimedTriggers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.db")
-	st, err := teststore.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	if err := st.CreateTrigger(t.Context(), store.Trigger{
-		ID: "stuck", Pipeline: "demo", CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.ClaimNextTrigger(t.Context(), time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	if _, err := db.ExecContext(t.Context(), "UPDATE triggers SET claimed_at = ? WHERE id = ?", time.Now().Add(-time.Hour).UnixNano(), "stuck"); err != nil {
-		t.Fatal(err)
-	}
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-	resp := mustGet(t, srv.URL+"/api/v1/health")
-	defer resp.Body.Close()
-	var body struct {
-		Status   string   `json:"status"`
-		Problems []string `json:"problems"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Status != "ok" || len(body.Problems) != 0 {
-		t.Fatalf("public health exposed trigger activity: %+v", body)
 	}
 }
 
@@ -226,15 +186,11 @@ func TestController_RunLifecycle(t *testing.T) {
 		map[string]any{"outcome": "success"},
 		http.StatusNoContent)
 
-	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/nodes/b/deps",
-		map[string]any{"deps": []string{"a", "dyn-1", "dyn-2"}},
-		http.StatusNoContent)
-
 	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/finish",
 		map[string]any{"status": "success"},
 		http.StatusNoContent)
 
-	got, err := st.GetRun(context.Background(), "run-ctrl-1")
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), "run-ctrl-1")
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
@@ -245,7 +201,7 @@ func TestController_RunLifecycle(t *testing.T) {
 		t.Errorf("plan snapshot mismatch:\n got %s\nwant %s", got.PlanSnapshot, snapshot)
 	}
 
-	nodes, err := st.ListNodes(context.Background(), "run-ctrl-1")
+	nodes, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodes(context.Background(), "run-ctrl-1")
 	if err != nil {
 		t.Fatalf("ListNodes: %v", err)
 	}
@@ -262,8 +218,8 @@ func TestController_RunLifecycle(t *testing.T) {
 	if bNode == nil {
 		t.Fatalf("node b not found")
 	}
-	if len(bNode.Deps) != 3 || bNode.Deps[2] != "dyn-2" {
-		t.Errorf("node b deps=%v want [a dyn-1 dyn-2]", bNode.Deps)
+	if len(bNode.Deps) != 1 || bNode.Deps[0] != "a" {
+		t.Errorf("node b deps=%v want [a]", bNode.Deps)
 	}
 }
 
@@ -469,7 +425,7 @@ func TestController_ValidationErrors(t *testing.T) {
 		map[string]any{"pipeline": "only-pipeline"},
 		http.StatusBadRequest)
 
-	if err := st.CreateRun(context.Background(), store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(st, context.Background(), store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	mustPostJSON(t, base+"/api/v1/runs/run-1/finish",

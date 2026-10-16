@@ -17,26 +17,26 @@ func displayFilterRuns() []store.Run {
 	finished := func(sec int) *time.Time { t := base.Add(time.Duration(sec) * time.Second); return &t }
 	return []store.Run{
 		{ID: "r-push-main", Pipeline: "build", Status: "success", TriggerSource: "push", GitBranch: "main", GitSHA: "aaaaaaa111", DeclaredRepo: "acme/web", StartedAt: base.Add(1 * time.Second), FinishedAt: finished(5)},
-		{ID: "r-cron-main", Pipeline: "nightly", Status: "failed", TriggerSource: "cron", GitBranch: "main", GitSHA: "bbbbbbb222", GithubRepo: "acme/api", StartedAt: base.Add(2 * time.Second), FinishedAt: finished(9)},
+		{ID: "r-cron-main", Pipeline: "nightly", Status: "failed", TriggerSource: "cron", GitBranch: "main", GitSHA: "bbbbbbb222", DeclaredRepo: "acme/api", StartedAt: base.Add(2 * time.Second), FinishedAt: finished(9)},
 		{ID: "r-manual-feat", Pipeline: "build", Status: "running", TriggerSource: "manual", GitBranch: "feat/x", GitSHA: "ccccccc333", DeclaredRepo: "web", StartedAt: base.Add(3 * time.Second)},
 		{ID: "r-norepo", Pipeline: "deploy", Status: "cancelled", GitBranch: "main", GitSHA: "aaaaaaa999", StartedAt: base.Add(4 * time.Second), FinishedAt: finished(20)},
 		{ID: "r-pct_literal", Pipeline: "deploy", Status: "success", TriggerSource: "push", DeclaredRepo: "100%_done", StartedAt: base.Add(5 * time.Second), FinishedAt: finished(30)},
 	}
 }
 
-func TestListRuns_DisplayFiltersSelectAcrossTheWholeStoreAndMatchTheInMemoryFilter(t *testing.T) {
+func TestListRuns_DisplayFiltersSelectAcrossTheWholeStore(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
 	alpha := tenantFor(t, st, "alpha")
 	beta := tenantFor(t, st, "beta")
 	runs := displayFilterRuns()
 	for _, r := range runs {
-		if err := alpha.CreateRun(ctx, r); err != nil {
+		if err := alpha.TestOnlySeedRun(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 		other := r
 		other.ID = "beta-" + r.ID
-		if err := beta.CreateRun(ctx, other); err != nil {
+		if err := beta.TestOnlySeedRun(ctx, other); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -53,7 +53,7 @@ func TestListRuns_DisplayFiltersSelectAcrossTheWholeStoreAndMatchTheInMemoryFilt
 		{"exclude branch", store.RunFilter{ExcludeGitBranches: []string{"main"}}, []string{"r-pct_literal", "r-manual-feat"}},
 		{"exclude sha prefix", store.RunFilter{ExcludeGitSHAPrefixes: []string{"AAAAAAA"}}, []string{"r-pct_literal", "r-manual-feat", "r-cron-main"}},
 		{"repo name is the last segment", store.RunFilter{RepoNames: []string{"web"}}, []string{"r-manual-feat", "r-push-main"}},
-		{"repo name falls back to the GitHub repository", store.RunFilter{RepoNames: []string{"api"}}, []string{"r-cron-main"}},
+		{"repo name uses the sealed repository display", store.RunFilter{RepoNames: []string{"api"}}, []string{"r-cron-main"}},
 		{"repo name of a run without one", store.RunFilter{RepoNames: []string{"unknown"}}, []string{"r-norepo"}},
 		{"repo name wildcards are literal", store.RunFilter{RepoNames: []string{"100%_done"}}, []string{"r-pct_literal"}},
 		{"exclude repo name", store.RunFilter{ExcludeRepoNames: []string{"web", "unknown"}}, []string{"r-pct_literal", "r-cron-main"}},
@@ -73,17 +73,6 @@ func TestListRuns_DisplayFiltersSelectAcrossTheWholeStoreAndMatchTheInMemoryFilt
 			if ids := runIDs(got); !slices.Equal(ids, tc.want) {
 				t.Errorf("ListRuns = %v, want %v", ids, tc.want)
 			}
-			all := make([]*store.Run, len(runs))
-			for i := range runs {
-				all[i] = &runs[i]
-			}
-			mem, err := store.FilterRuns(all, tc.filter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if ids := runIDs(mem); !slices.Equal(ids, tc.want) {
-				t.Errorf("FilterRuns = %v, want %v", ids, tc.want)
-			}
 			if n, err := alpha.CountRuns(ctx, tc.filter); err != nil || n != len(tc.want) {
 				t.Errorf("CountRuns = %d, %v; want %d", n, err, len(tc.want))
 			}
@@ -98,18 +87,16 @@ func TestListRuns_BeforeCursorWalksBackToTheNewestRunExactlyOnce(t *testing.T) {
 	beta := tenantFor(t, st, "beta")
 	const total = 23
 	instant := time.Unix(1700000000, 0)
-	var all []*store.Run
 	for i := range total {
 		r := store.Run{ID: "run-" + strconv.Itoa(100+i), Pipeline: "build", Status: "success", StartedAt: instant.Add(time.Duration(i/3) * time.Second)}
-		if err := alpha.CreateRun(ctx, r); err != nil {
+		if err := alpha.TestOnlySeedRun(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 		other := r
 		other.ID = "beta-" + r.ID
-		if err := beta.CreateRun(ctx, other); err != nil {
+		if err := beta.TestOnlySeedRun(ctx, other); err != nil {
 			t.Fatal(err)
 		}
-		all = append(all, &r)
 	}
 	newestFirst, err := alpha.ListRuns(ctx, store.RunFilter{Limit: total + 5})
 	if err != nil {
@@ -119,33 +106,23 @@ func TestListRuns_BeforeCursorWalksBackToTheNewestRunExactlyOnce(t *testing.T) {
 		t.Fatalf("listed %d runs, want %d", len(newestFirst), total)
 	}
 
-	for _, list := range []struct {
-		name string
-		page func(store.RunFilter) ([]*store.Run, error)
-	}{
-		{"store", func(f store.RunFilter) ([]*store.Run, error) { return alpha.ListRuns(ctx, f) }},
-		{"in memory", func(f store.RunFilter) ([]*store.Run, error) { return store.FilterRuns(all, f) }},
-	} {
-		t.Run(list.name, func(t *testing.T) {
-			oldest := newestFirst[total-1]
-			filter := store.RunFilter{Limit: 5, BeforeID: oldest.ID, BeforeStartedAt: store.RunCursorKey(oldest.StartedAt)}
-			var walked []string
-			for range total {
-				page, err := list.page(filter)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if len(page) == 0 {
-					break
-				}
-				walked = append(runIDs(page), walked...)
-				first := page[0]
-				filter.BeforeID, filter.BeforeStartedAt = first.ID, store.RunCursorKey(first.StartedAt)
-			}
-			if want := runIDs(newestFirst[:total-1]); !slices.Equal(walked, want) {
-				t.Errorf("walked %v, want %v", walked, want)
-			}
-		})
+	oldest := newestFirst[total-1]
+	filter := store.RunFilter{Limit: 5, BeforeID: oldest.ID, BeforeStartedAt: store.RunCursorKey(oldest.StartedAt)}
+	var walked []string
+	for range total {
+		page, err := alpha.ListRuns(ctx, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		walked = append(runIDs(page), walked...)
+		first := page[0]
+		filter.BeforeID, filter.BeforeStartedAt = first.ID, store.RunCursorKey(first.StartedAt)
+	}
+	if want := runIDs(newestFirst[:total-1]); !slices.Equal(walked, want) {
+		t.Errorf("walked %v, want %v", walked, want)
 	}
 
 	if _, err := alpha.ListRuns(ctx, store.RunFilter{AfterID: "a", BeforeID: "b"}); err == nil {
@@ -205,7 +182,7 @@ func TestParseRunFilterValidated_ReadsTheDisplayFilters(t *testing.T) {
 	}
 }
 
-func matchBothWays(t *testing.T, tn *store.Tenant, runs []store.Run, f store.RunFilter, want []string) {
+func matchRunList(t *testing.T, tn *store.Tenant, f store.RunFilter, want []string) {
 	t.Helper()
 	got, err := tn.ListRuns(context.Background(), f)
 	if err != nil {
@@ -213,17 +190,6 @@ func matchBothWays(t *testing.T, tn *store.Tenant, runs []store.Run, f store.Run
 	}
 	if ids := runIDs(got); !slices.Equal(ids, want) {
 		t.Errorf("ListRuns(%+v) = %v, want %v", f, ids, want)
-	}
-	all := make([]*store.Run, len(runs))
-	for i := range runs {
-		all[i] = &runs[i]
-	}
-	mem, err := store.FilterRuns(all, f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := runIDs(mem); !slices.Equal(ids, want) {
-		t.Errorf("FilterRuns(%+v) = %v, want %v", f, ids, want)
 	}
 }
 
@@ -237,17 +203,17 @@ func TestListRuns_RepoNamesMatchCaseSensitively(t *testing.T) {
 		{ID: "bare", Pipeline: "build", Status: "success", DeclaredRepo: "Web", StartedAt: base.Add(2 * time.Second)},
 	}
 	for _, r := range runs {
-		if err := alpha.CreateRun(context.Background(), r); err != nil {
+		if err := alpha.TestOnlySeedRun(context.Background(), r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	matchBothWays(t, alpha, runs, store.RunFilter{RepoNames: []string{"Web"}}, []string{"bare", "upper"})
-	matchBothWays(t, alpha, runs, store.RunFilter{RepoNames: []string{"web"}}, []string{"lower"})
-	matchBothWays(t, alpha, runs, store.RunFilter{ExcludeRepoNames: []string{"Web"}}, []string{"lower"})
-	matchBothWays(t, alpha, runs, store.RunFilter{RepoNames: []string{"owner/web"}}, []string{"lower"})
+	matchRunList(t, alpha, store.RunFilter{RepoNames: []string{"Web"}}, []string{"bare", "upper"})
+	matchRunList(t, alpha, store.RunFilter{RepoNames: []string{"web"}}, []string{"lower"})
+	matchRunList(t, alpha, store.RunFilter{ExcludeRepoNames: []string{"Web"}}, []string{"lower"})
+	matchRunList(t, alpha, store.RunFilter{RepoNames: []string{"owner/web"}}, []string{"lower"})
 }
 
-func TestListRuns_TextFoldsASCIICaseOnlyOnEveryPath(t *testing.T) {
+func TestListRuns_TextFoldsASCIICaseOnly(t *testing.T) {
 	st := storetest.New(t).Open(t)
 	alpha := tenantFor(t, st, "alpha")
 	base := time.Unix(1700000000, 0)
@@ -256,13 +222,13 @@ func TestListRuns_TextFoldsASCIICaseOnlyOnEveryPath(t *testing.T) {
 		{ID: "plain", Pipeline: "build", Status: "success", GitBranch: "etape", StartedAt: base.Add(time.Second)},
 	}
 	for _, r := range runs {
-		if err := alpha.CreateRun(context.Background(), r); err != nil {
+		if err := alpha.TestOnlySeedRun(context.Background(), r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	matchBothWays(t, alpha, runs, store.RunFilter{Text: []string{"ÉTAPE"}}, []string{"accented"})
-	matchBothWays(t, alpha, runs, store.RunFilter{Text: []string{"Étape"}}, []string{"accented"})
-	matchBothWays(t, alpha, runs, store.RunFilter{Text: []string{"étape"}}, nil)
-	matchBothWays(t, alpha, runs, store.RunFilter{Text: []string{"ETAPE"}}, []string{"plain"})
-	matchBothWays(t, alpha, runs, store.RunFilter{ExcludeText: []string{"ÉTAPE"}}, []string{"plain"})
+	matchRunList(t, alpha, store.RunFilter{Text: []string{"ÉTAPE"}}, []string{"accented"})
+	matchRunList(t, alpha, store.RunFilter{Text: []string{"Étape"}}, []string{"accented"})
+	matchRunList(t, alpha, store.RunFilter{Text: []string{"étape"}}, nil)
+	matchRunList(t, alpha, store.RunFilter{Text: []string{"ETAPE"}}, []string{"plain"})
+	matchRunList(t, alpha, store.RunFilter{ExcludeText: []string{"ÉTAPE"}}, []string{"plain"})
 }

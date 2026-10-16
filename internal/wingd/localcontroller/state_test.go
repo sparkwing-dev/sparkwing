@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func stateCipher(t testing.TB) controller.Cipher {
@@ -153,7 +154,7 @@ func FuzzStateTypeSafeKeyRequiresExactSecretBinding(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := b.Tenant.CreateOrReplaceSecret(secret, time.Now()); err != nil {
+			if err := teststore.SeedSecret(b.Store, b.Tenant.Team(), secret, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			services := serviceFixture(b)

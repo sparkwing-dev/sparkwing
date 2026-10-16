@@ -28,6 +28,10 @@ func TestPublicNumericSelectorsReadAndCommitCanonicalRun(t *testing.T) {
 	for _, suffix := range []string{"receipt", "events", "jobs", "jobs/job/attempts", "jobs/job/steps", "jobs/job/metrics", "debug-pauses", "approvals"} {
 		engineClaimHTTP(t, s.Handler(), bearer, "GET", "/api/v1/runs/1/"+suffix, "", 200)
 	}
+	receipt, err := reader.ReadReceipt(t.Context(), "1")
+	if err != nil || receipt.RunID != "run" || len(receipt.Steps) != 1 || receipt.Steps[0].JobID != "job" {
+		t.Fatalf("numeric receipt: %+v %v", receipt, err)
+	}
 	control, err := client.NewEngineClient(options)
 	if err != nil {
 		t.Fatal(err)

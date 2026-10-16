@@ -29,3 +29,22 @@ func assertSingletonLeaseTx(ctx context.Context, tx *storeTx, lease SingletonLea
 	}
 	return nil
 }
+
+// ReleaseSingletonLease releases only the caller's current lease generation.
+func (o *Operator) ReleaseSingletonLease(ctx context.Context, lease SingletonLease) error {
+	if !validSingletonWork(lease.Name) || lease.Holder == "" || lease.Generation <= 0 {
+		return ErrLockHeld
+	}
+	result, err := o.s.exec(ctx, `UPDATE leases SET holder='',until=0 WHERE name=? AND holder=? AND generation=?`, lease.Name, lease.Holder, lease.Generation)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return ErrLockHeld
+	}
+	return nil
+}

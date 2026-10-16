@@ -164,7 +164,7 @@ func (s *Server) writeComputeLimitRefusal(
 }
 
 func (s *Server) cronIntervalRefusal(r *http.Request, expr string) error {
-	limits, err := s.store.ComputeLimits(r.Context())
+	limits, err := s.store.AsOperator().ComputeLimits(r.Context())
 	if err != nil {
 		return err
 	}

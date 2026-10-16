@@ -1,50 +1,52 @@
-package store_test
+package store
 
 import (
-	"context"
+	"errors"
+	"fmt"
+	"reflect"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// A node row can already carry a lineage root naming another team's run, so
-// the attempt history read through that root keeps to the node's own team.
-func TestExecutionAttemptsStayInsideTheNodesTeam(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	acme := tenantFor(t, st, "acme")
-	other := tenantFor(t, st, "other")
-	seedTenantRun(t, acme, "run-acme", "demo")
-	seedTenantRun(t, other, "run-other", "demo")
-	for _, run := range []string{"run-acme", "run-other"} {
-		if err := st.CreateNode(ctx, store.Node{RunID: run, NodeID: "build", Status: "pending"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO node_execution_attempts
-  (team, lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation, coordinator_id, membership_id,
-   executor_kind, executor_name, executor_id, executor_location, holder_id, reservation_id, started_at,
-   outcome, failure_reason)
-VALUES ('acme', 'run-acme', 'run-acme', 'build', 1, 1, 'coord', 'member', 'runner', 'acme-box', 'exec', 'self-hosted',
-   'holder', 'res', ?, 'failed', 'acme private failure')`), time.Now().UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
-		`UPDATE nodes SET retry_root_run_id = 'run-acme' WHERE run_id = 'run-other' AND node_id = 'build'`)); err != nil {
-		t.Fatal(err)
-	}
-
-	own, err := st.ListNodeExecutionAttempts(ctx, "run-acme", "build")
-	if err != nil || len(own) != 1 || own[0].FailureReason != "acme private failure" {
-		t.Fatalf("acme's own attempts = %+v, %v", own, err)
-	}
-	foreign, err := st.ListNodeExecutionAttempts(ctx, "run-other", "build")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(foreign) != 0 {
-		t.Fatalf("a node naming acme's run as its root read acme's attempts: %+v", foreign)
+func TestExecutionAttemptsStayInsideTheNodesTeamProperty(t *testing.T) {
+	for i := range 24 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			s, demand, _ := meteredUnitFixture(t, i&1 != 0)
+			claim, actor := meteredUnitClaim(t, s, demand)
+			tenant := &Tenant{s: s, team: claim.Team}
+			ref := NodeRef{claim.RunID, claim.NodeID}
+			started, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			own, err := tenant.ListNodeExecutionAttempts(t.Context(), ref.RunID, ref.NodeID)
+			if err != nil || len(own) != 1 || own[0].Attempt != int(started.Attempt) || own[0].ClaimGeneration != claim.Award.Generation || own[0].HolderID != claim.Award.Holder || own[0].FinishedAt != nil {
+				t.Fatalf("started history=%+v, %v", own, err)
+			}
+			foreign := &Tenant{s: s, team: Team(fmt.Sprintf("tenant-'\";--%x", i))}
+			if err := s.AsOperator().CreateTeam(t.Context(), foreign.team); err != nil {
+				t.Fatal(err)
+			}
+			for _, target := range []NodeRef{ref, {RunID: ref.RunID + "' OR 1=1 --", NodeID: ref.NodeID}} {
+				if got, err := foreign.ListNodeExecutionAttempts(t.Context(), target.RunID, target.NodeID); !errors.Is(err, ErrNotFound) || got != nil {
+					t.Fatalf("foreign history=%+v, %v", got, err)
+				}
+			}
+			if after, err := tenant.ListNodeExecutionAttempts(t.Context(), ref.RunID, ref.NodeID); err != nil || !reflect.DeepEqual(own, after) {
+				t.Fatalf("refused reads changed history=%+v, %v", after, err)
+			}
+			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(started.Attempt)}); err != nil {
+				t.Fatal(err)
+			}
+			finished, err := tenant.ListNodeExecutionAttempts(t.Context(), ref.RunID, ref.NodeID)
+			if err != nil || len(finished) != 1 || finished[0].FinishedAt == nil || finished[0].Outcome != "success" {
+				t.Fatalf("finished history=%+v, %v", finished, err)
+			}
+			p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+			if err != nil || finished[0].HolderID != p.Capability.Subject.ID {
+				t.Fatalf("history lost enrolled identity: %+v, %v", finished, err)
+			}
+		})
 	}
 }

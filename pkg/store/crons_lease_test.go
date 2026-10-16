@@ -17,7 +17,7 @@ func TestRunCronTickLeased_RunsOnceAndBlocksTheSameMinute(t *testing.T) {
 	ctx := context.Background()
 
 	ran := 0
-	first, err := st.RunCronTickLeased(ctx, "alpha", time.Minute, func(context.Context) error {
+	first, err := st.AsOperator().RunCronTickLeased(ctx, "alpha", time.Minute, func(context.Context) error {
 		ran++
 		return nil
 	})
@@ -25,7 +25,7 @@ func TestRunCronTickLeased_RunsOnceAndBlocksTheSameMinute(t *testing.T) {
 		t.Fatalf("first tick: ran=%v err=%v, want a tick", first, err)
 	}
 
-	second, err := st.RunCronTickLeased(ctx, "beta", time.Minute, func(context.Context) error {
+	second, err := st.AsOperator().RunCronTickLeased(ctx, "beta", time.Minute, func(context.Context) error {
 		ran++
 		return nil
 	})
@@ -56,7 +56,7 @@ func TestRunCronTickLeased_ConcurrentClaimantLoses(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		firstRan, firstErr = st.RunCronTickLeased(ctx, "alpha", time.Minute, func(context.Context) error {
+		firstRan, firstErr = st.AsOperator().RunCronTickLeased(ctx, "alpha", time.Minute, func(context.Context) error {
 			close(entered)
 			<-release
 			return nil
@@ -64,7 +64,7 @@ func TestRunCronTickLeased_ConcurrentClaimantLoses(t *testing.T) {
 	}()
 
 	<-entered
-	secondRan, secondErr = st.RunCronTickLeased(ctx, "beta", time.Minute, func(context.Context) error {
+	secondRan, secondErr = st.AsOperator().RunCronTickLeased(ctx, "beta", time.Minute, func(context.Context) error {
 		t.Error("the losing claimant ran the tick")
 		return nil
 	})
@@ -87,7 +87,7 @@ func TestRunCronTickLeased_ReleasesTheClaimAfterAFailedTick(t *testing.T) {
 	ctx := context.Background()
 
 	boom := errors.New("the store went away")
-	ran, err := st.RunCronTickLeased(ctx, "alpha", time.Minute, func(context.Context) error {
+	ran, err := st.AsOperator().RunCronTickLeased(ctx, "alpha", time.Minute, func(context.Context) error {
 		return boom
 	})
 	if !ran {
@@ -98,7 +98,7 @@ func TestRunCronTickLeased_ReleasesTheClaimAfterAFailedTick(t *testing.T) {
 	}
 	// safety: a failed tick stamps nothing, so the next minute is free rather
 	// than suppressed for the whole interval by a tick that did no work.
-	again, err := st.RunCronTickLeased(ctx, "beta", time.Minute, func(context.Context) error { return nil })
+	again, err := st.AsOperator().RunCronTickLeased(ctx, "beta", time.Minute, func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatalf("second tick: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestRunCronTickLeased_ReleasesTheClaimAfterAFailedTick(t *testing.T) {
 
 func TestRunCronTickLeased_RefusesAMissingTickFunction(t *testing.T) {
 	st := storetest.Open(t)
-	if _, err := st.RunCronTickLeased(context.Background(), "alpha", time.Minute, nil); err == nil {
+	if _, err := st.AsOperator().RunCronTickLeased(context.Background(), "alpha", time.Minute, nil); err == nil {
 		t.Fatal("a nil tick function was accepted")
 	}
 }
@@ -130,7 +130,7 @@ func TestRunCronTickLeased_ReleasesTheClaimWhenTheTickIsCancelled(t *testing.T) 
 	st := storetest.Open(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ran, err := st.RunCronTickLeased(ctx, "alpha", time.Hour, func(tickCtx context.Context) error {
+	ran, err := st.AsOperator().RunCronTickLeased(ctx, "alpha", time.Hour, func(tickCtx context.Context) error {
 		cancel()
 		return tickCtx.Err()
 	})
@@ -146,7 +146,7 @@ func TestRunCronTickLeased_ReleasesTheClaimWhenTheTickIsCancelled(t *testing.T) 
 func TestRunCronTickLeased_RecoversAPanicAndReleasesTheClaim(t *testing.T) {
 	st := storetest.Open(t)
 
-	ran, err := st.RunCronTickLeased(context.Background(), "alpha", time.Hour, func(context.Context) error {
+	ran, err := st.AsOperator().RunCronTickLeased(context.Background(), "alpha", time.Hour, func(context.Context) error {
 		panic("the evaluator fell over")
 	})
 	if !ran {
@@ -162,7 +162,7 @@ func TestRunCronTickLeased_RecoversAPanicAndReleasesTheClaim(t *testing.T) {
 // only by a claim nobody released.
 func assertCronTickClaimFree(t *testing.T, st *store.Store) {
 	t.Helper()
-	next, err := st.RunCronTickLeased(context.Background(), "beta", time.Minute,
+	next, err := st.AsOperator().RunCronTickLeased(context.Background(), "beta", time.Minute,
 		func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatalf("the next tick: %v", err)

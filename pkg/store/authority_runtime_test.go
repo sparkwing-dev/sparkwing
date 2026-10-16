@@ -211,26 +211,8 @@ func TestAuthorityAwardDerivesBindingAndBilling(t *testing.T) {
 }
 
 func TestAuthorityBootstrapExchangeIsAtomicAndSingleUse(t *testing.T) {
-	s := authorityStore(t)
-	root := authorityRoot("launcher", "")
-	root.Subject.Kind = capability.SubjectService
-	root.Grants = []capability.Grant{capability.ClaimsLaunch}
-	spec := authorityClaimFixture(t, s, root)
-	spec.Delivery = capability.DeliveryBootstrap
+	s, bootstrap := adapterBootstrap(t)
 	tx, err := s.beginTx(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	bootstrap, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec})
-	if err != nil {
-		rollbackOrLog(tx)
-		t.Fatal(err)
-	}
-	rewriteSchemaExec(t, tx, "UPDATE nodes SET capability_prefix = ? WHERE team = 'a' AND run_id = 'run' AND node_id = 'job'", bootstrap.Capability.Prefix)
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	tx, err = s.beginTx(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

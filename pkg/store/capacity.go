@@ -640,46 +640,6 @@ SELECT pipeline, node_id, ` + profileColumns + `
 	return out, nil
 }
 
-// CacheExcludedCounts counts this tenant's cache-dominant runs per pipeline using the given outcome and fraction.
-func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error) {
-	q := `
-SELECT r.pipeline, COUNT(*)
-  FROM (
-    SELECT run_id,
-           SUM(CASE WHEN outcome = ? THEN 1 ELSE 0 END) AS cached,
-           SUM(CASE WHEN outcome != '' THEN 1 ELSE 0 END) AS total
-      FROM nodes
-     WHERE team = ?
-     GROUP BY run_id
-  ) x
-  JOIN runs r ON r.id = x.run_id
- WHERE r.team = ? AND x.total > 0 AND CAST(x.cached AS REAL) / x.total >= ?`
-	args := []any{cachedOutcome, string(t.team), string(t.team), fraction}
-	if pipeline != "" {
-		q += ` AND r.pipeline = ?`
-		args = append(args, pipeline)
-	}
-	q += ` GROUP BY r.pipeline`
-	rows, err := t.s.query(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out := map[string]int{}
-	for rows.Next() {
-		var p string
-		var n int
-		if err := rows.Scan(&p, &n); err != nil {
-			return nil, err
-		}
-		out[p] = n
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func scanProfile(row rowScanner, pipeline, nodeID string) (*PipelineProfile, error) {
 	prof, err := scanProfileInto(row.Scan)
 	if err != nil {

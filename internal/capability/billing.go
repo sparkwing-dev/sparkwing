@@ -41,8 +41,7 @@ var UnitBillingMappings = []UnitBilling{
 	{UnitEval, BillingEval},
 }
 
-// BillingProvenance is immutable at Award and survives Exchange and claimant revocation.
-// PayerTeam comes from the awarded row, Metered from the root or launcher service authority.
+// BillingProvenance snapshots placement-derived billing at Award and survives Exchange and claimant revocation.
 type BillingProvenance struct {
 	PayerTeam     string       `json:"payer_team"`
 	Metered       bool         `json:"metered"`

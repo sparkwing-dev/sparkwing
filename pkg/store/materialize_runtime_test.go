@@ -132,6 +132,11 @@ func TestReconcileRecordCopyRollsBackWithState(t *testing.T) {
 	if _, err := tenant.ReconcileNode(t.Context(), request); !errors.Is(err, copyErr) {
 		t.Fatalf("copy failure: %v", err)
 	}
+	node, err := tenant.ReadNode(t.Context(), request.Ref)
+	if err != nil || node.Status != StatusPending || node.StateSeq != 0 {
+		t.Fatalf("copy failure changed job state: %+v, %v", node, err)
+	}
+	assertResultSelectors(t, node, materializedRecords{})
 	rewriteSchemaCount(t, tenant.s.db, "settings", 0)
 	rewriteSchemaCount(t, tenant.s.db, "events", 0)
 }

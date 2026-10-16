@@ -58,7 +58,10 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref NodeRef,
 			return err
 		}
 	}
-	return accountUnitBillingTx(ctx, tx, t.team, unit, row.Generation, tx.now(), false)
+	if err := accountUnitBillingTx(ctx, tx, t.team, unit, row.Generation, tx.now(), false); err != nil {
+		return err
+	}
+	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 }
 
 // RenewOwner renews owner-bound jobs and capacity within the owner lease transaction.
@@ -118,8 +121,8 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 	}
 	// safety: awards parent to the claimant root; only the persisted self-claim fence identifies jobs this owner may renew.
 	_, err = tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at=CASE
- WHEN (SELECT expires_at FROM capabilities WHERE prefix=nodes.capability_prefix)<?
- THEN (SELECT expires_at FROM capabilities WHERE prefix=nodes.capability_prefix) ELSE ? END,last_heartbeat=?
+ WHEN (SELECT expires_at FROM capabilities WHERE team=nodes.team AND prefix=nodes.capability_prefix)<?
+ THEN (SELECT expires_at FROM capabilities WHERE team=nodes.team AND prefix=nodes.capability_prefix) ELSE ? END,last_heartbeat=?
  WHERE team=? AND run_id=? AND status<>'done' AND claimed_by=? AND lease_expires_at>? AND owner_capability_prefix=?
  AND capability_prefix IN (SELECT prefix FROM capabilities WHERE team=? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?))`, expiry.UnixNano(), expiry.UnixNano(), now.UnixNano(), t.team, runID, actor.Owner.Holder, now.UnixNano(), actor.CapabilityPrefix, t.team, now.UnixNano())
 	if err != nil {
@@ -133,7 +136,10 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 		return err
 	}
 	if actor.Owner.Kind == OwnerTrigger {
-		return accountOwnerBillingTx(ctx, tx, t.team, runID, actor.Owner.Generation, now, false)
+		if err := accountOwnerBillingTx(ctx, tx, t.team, runID, actor.Owner.Generation, now, false); err != nil {
+			return err
+		}
+		return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 	}
 	return nil
 }

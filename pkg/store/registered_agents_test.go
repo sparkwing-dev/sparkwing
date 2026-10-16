@@ -2,6 +2,8 @@ package store
 
 import (
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"slices"
 	"testing"
 	"time"
@@ -10,6 +12,34 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
+
+func TestRegisteredAgentsHonorRotationGraceProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(433, 800))
+	for i := range 32 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			s := authorityStore(t)
+			start := time.Unix(1700000000+random.Int64N(1000000), random.Int64N(1000000000)).UTC()
+			deadline := start.Add(time.Duration(1 + random.Int64N(int64(time.Hour))))
+			now := start
+			s.clock = func() time.Time { return now }
+			root := authorityRoot("runner", "a")
+			root.RevokedAt = &deadline
+			authorityPersist(t, s, root)
+			tenant := &Tenant{s: s, team: "a"}
+			for _, at := range []time.Time{start, deadline.Add(-time.Nanosecond), deadline, deadline.Add(time.Duration(random.Int64N(int64(time.Hour))))} {
+				now = at
+				agents, err := tenant.ListRegisteredAgents(t.Context())
+				want := 0
+				if now.Before(deadline) {
+					want = 1
+				}
+				if err != nil || len(agents) != want {
+					t.Fatalf("at %v deadline %v: %d agents, %v; want %d", now, deadline, len(agents), err, want)
+				}
+			}
+		})
+	}
+}
 
 func TestRegisteredAgentsUseLiveCapabilityIdentityAndSavedLabels(t *testing.T) {
 	s := authorityStore(t)
@@ -21,7 +51,7 @@ func TestRegisteredAgentsUseLiveCapabilityIdentityAndSavedLabels(t *testing.T) {
 	root.ReservedPools = []string{"prod"}
 	authorityPersist(t, s, root)
 	authorityPersist(t, s, authorityRoot("foreign", "b"))
-	if err := s.RecordAgentLabels(t.Context(), root.Prefix, []string{"gpu", "name=forged", "class=cloud", "pool=forged", "os=linux", "arch=arm64"}); err != nil {
+	if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu", "name=forged", "class=cloud", "pool=forged", "os=linux", "arch=arm64"}}); err != nil {
 		t.Fatal(err)
 	}
 	agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
@@ -84,7 +114,7 @@ func TestRegisteredAgentsExcludeExpiredRevokedAndNonClaimants(t *testing.T) {
 			if problem != "missing" {
 				authorityPersist(t, s, root)
 			}
-			if err := s.RecordAgentLabels(t.Context(), root.Prefix, []string{"gpu"}); err == nil {
+			if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}}); err == nil {
 				t.Fatal("unavailable agent recorded labels")
 			}
 			agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
@@ -108,7 +138,7 @@ func TestRegisteredAgentsRejectCorruptCapabilityAndLabels(t *testing.T) {
 	}
 }
 
-func TestRecordAgentLabelsRejectsExpiredParent(t *testing.T) {
+func TestRecordRunnerPollRejectsExpiredParent(t *testing.T) {
 	s := authorityStore(t)
 	now := time.Unix(1700000000, 123).UTC()
 	s.clock = func() time.Time { return now }
@@ -118,7 +148,7 @@ func TestRecordAgentLabelsRejectsExpiredParent(t *testing.T) {
 	root := authorityRoot("runner", "a")
 	root.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent.Prefix}
 	authorityPersist(t, s, root)
-	err := s.RecordAgentLabels(t.Context(), root.Prefix, []string{"gpu"})
+	err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}})
 	var denied *apierr.Error
 	if !errors.As(err, &denied) || denied.Code != apierr.Unauthenticated {
 		t.Fatalf("expired parent: %v", err)

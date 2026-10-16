@@ -22,10 +22,3 @@ func (t *Tenant) TrustLocalBuilds(ctx context.Context) (bool, error) {
 	}
 	return trust == 1, nil
 }
-
-// SetTrustLocalBuilds changes this team's local binary execution policy.
-func (t *Tenant) SetTrustLocalBuilds(ctx context.Context, trust bool) error {
-	_, err := t.s.exec(ctx, `INSERT INTO team_build_trust(team,trust_local_builds) VALUES (?,?)
-ON CONFLICT(team) DO UPDATE SET trust_local_builds=excluded.trust_local_builds`, t.team, boolInt(trust))
-	return err
-}

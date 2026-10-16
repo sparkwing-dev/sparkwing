@@ -208,19 +208,6 @@ func NodeEvents() []StateEventRule {
 	}
 }
 
-// LockClass fixes transaction lock order across claims, state, capacity and the financial ledger.
-type LockClass string
-
-// LockOrder is acquired left to right; keys within one class use lexical order.
-// Operations starting later in the list must not acquire an earlier class afterward.
-func LockOrder() []LockClass {
-	return []LockClass{
-		"singleton_lease", "capability_ancestry", "owner_unit", "run", "node",
-		"concurrency_entry", "free_slot", "quota", "blob", "credit_ledger",
-		"team", "card_charge", "card_attempt",
-	}
-}
-
 // safety: one advisory-lock spelling must serve all dialects to keep the declared lock order reviewable.
 func advisoryLockTx(ctx context.Context, tx *storeTx, name string) error {
 	if name == "" {

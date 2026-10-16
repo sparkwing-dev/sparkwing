@@ -55,7 +55,7 @@ func TestBootstrapSeedStoreOnceProperty(t *testing.T) {
 		if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, initial); err != nil || !created {
 			t.Fatalf("initial administrator: created=%v err=%v", created, err)
 		}
-		engineSQL(t, e.Store, `DELETE FROM settings WHERE key='bootstrap_capability_issued'`)
+		engineSQL(t, e.Store, `DELETE FROM settings WHERE key='bootstrap_admin'`)
 		raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 		if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, raw); err == nil || created {
 			t.Fatalf("second administrator without marker: created=%v err=%v", created, err)

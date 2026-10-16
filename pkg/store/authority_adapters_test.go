@@ -91,25 +91,24 @@ func assertUnavailableAuthority(t *testing.T, principal capability.Principal, er
 
 func adapterBootstrap(t *testing.T) (*Store, capability.Issued) {
 	t.Helper()
-	s := authorityStore(t)
+	s, demand := unitClaimFixture(t)
+	fundUnitClaim(t, s)
+	rewriteSchemaExec(t, s.db, "DELETE FROM capabilities WHERE prefix='runner'")
 	root := authorityRoot("launcher", "")
 	root.Subject.Kind = capability.SubjectService
 	root.Grants = []capability.Grant{capability.ClaimsLaunch}
-	spec := authorityClaimFixture(t, s, root)
-	spec.Delivery = capability.DeliveryBootstrap
-	var bootstrap capability.Issued
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		var err error
-		bootstrap, err = s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec})
-		if err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(t.Context(), `UPDATE nodes SET capability_prefix=? WHERE team='a' AND run_id='run' AND node_id='job'`, bootstrap.Capability.Prefix)
-		return err
-	}); err != nil {
+	authorityPersist(t, s, root)
+	rewriteSchemaExec(t, s.db, "UPDATE runs SET dispatch='controller'")
+	demand.CapabilityPrefix = root.Prefix
+	claim, err := s.ClaimUnit(t.Context(), demand)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return s, bootstrap
+	p, err := s.LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, capability.Issued{Raw: string(claim.Bearer), Capability: p.Capability}
 }
 
 func TestExchangeCapabilityCommitsOnceAndPreservesTheAward(t *testing.T) {

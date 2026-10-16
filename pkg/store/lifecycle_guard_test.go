@@ -13,7 +13,7 @@ func TestLifecycleGuard_StatusLiteralsStayCanonical(t *testing.T) {
 
 	for needle, allowed := range map[string]int{
 		"status != 'done'":                    1,
-		"status = 'done', outcome = 'failed'": 1,
+		"status = 'done', outcome = 'failed'": 0,
 		"WHERE status = 'pending'":            0,
 		"WHERE status = 'claimed'":            0,
 	} {

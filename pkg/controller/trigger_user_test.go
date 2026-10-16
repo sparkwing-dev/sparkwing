@@ -56,7 +56,7 @@ func TestTrigger_IgnoresAUserNamedInTheBody(t *testing.T) {
 	if resp.StatusCode/100 != 2 || decodeErr != nil || created.RunID == "" {
 		t.Fatalf("status = %d (%v, run %q), want a released CLI's body accepted", resp.StatusCode, decodeErr, created.RunID)
 	}
-	trig, err := st.GetTrigger(context.Background(), created.RunID)
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), created.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}

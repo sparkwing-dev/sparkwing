@@ -1,12 +1,64 @@
 package store
 
 import (
+	"fmt"
+	"math/rand/v2"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
+
+func TestProvisionMemberCurrentScopesProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(127, 901))
+	grants := []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsWrite, capability.TeamAdmin, capability.NodesClaim, capability.OperatorTokens, "unknown"}
+	for i := range 40 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			s := authorityStore(t)
+			member := authorityMember(t, s, "member", RoleOwner)
+			role := []Role{RoleReader, RoleEditor, RoleOwner}[random.IntN(3)]
+			removed := i%7 == 0
+			if removed {
+				rewriteSchemaExec(t, s.db, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
+			} else {
+				rewriteSchemaExec(t, s.db, `UPDATE memberships SET role=? WHERE team='a' AND account_id='member'`, role)
+			}
+			requested := []capability.Grant{}
+			for _, n := range random.Perm(len(grants))[:1+random.IntN(3)] {
+				requested = append(requested, grants[n])
+			}
+			original := slices.Clone(requested)
+			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &member.Authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Team: "a", Binding: capability.Binding{Kind: capability.BindingNone}, Grants: requested}
+			issued, err := s.ProvisionCapability(t.Context(), spec)
+			permitted := []capability.Grant{capability.RunsRead, capability.LogsRead}
+			if role == RoleEditor || role == RoleOwner {
+				permitted = append(permitted, capability.RunsWrite)
+			}
+			if role == RoleOwner {
+				permitted = append(permitted, capability.TeamAdmin)
+			}
+			allowed := !removed && !slices.ContainsFunc(requested, func(g capability.Grant) bool { return !slices.Contains(permitted, g) })
+			if !slices.Equal(requested, original) {
+				t.Fatal("provisioning changed requested grants")
+			}
+			if allowed {
+				if err != nil || issued.Raw == "" || !slices.Equal(issued.Capability.Grants, requested) {
+					t.Fatalf("requested subset changed: %+v, %v", issued.Capability.Grants, err)
+				}
+			} else {
+				var count int
+				if readErr := s.db.QueryRow(`SELECT COUNT(*) FROM capabilities`).Scan(&count); readErr != nil {
+					t.Fatal(readErr)
+				}
+				if err == nil || issued.Raw != "" || count != 0 {
+					t.Fatalf("refused authority persisted a credential: count=%d, error=%v", count, err)
+				}
+			}
+		})
+	}
+}
 
 func TestProvisionedMemberRootUsesMembershipWithoutSessionAncestry(t *testing.T) {
 	for _, expiry := range []string{"none", "beyond_session"} {

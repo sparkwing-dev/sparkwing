@@ -51,6 +51,11 @@ membership and the selected route alternative. Team administration, run deletion
 with `policy_missing`. Metrics on the API listener uses deployment or console
 policy.
 
+Embedded store users authenticate through capability snapshots and use the
+tenant or operator capability inventory and mutation methods. The unused
+token-table authentication, listing, lookup and revocation APIs are removed.
+Here runs use sealed admission and capability issuance.
+
 GitHub App connection pages verify their signed browser flow through the shared
 policy router. Connecting, listing administered installations, selecting and
 completing a connection require a live account session with `team.admin` in its
@@ -69,6 +74,13 @@ an `Idempotency-Key` header. A missing transaction adapter returns `policy_missi
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
 
 Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
+
+The default tenant adapters recheck secret and git-credential writes in their
+committing transactions. They use current team-admin membership and the store
+clock. Secret reads select the pipeline from the claim's bound run, check its
+sealed declarations and reserved pools, and commit a release audit before
+returning the stored envelope. Omitting the run selector does not remove the
+claim's binding. Members may read only unmasked values in their own team.
 
 `GET /api/v1/queue` uses the shared capability policy. A member or verified
 local peer needs `runs.read` for its active team. Queue groups and advertised
@@ -279,9 +291,15 @@ revocation ends that window at once.
 The rotation response returns `capability` once, `new` public metadata,
 `old_prefix` and the RFC3339 `old_revoked_at`. Do not replay a rotation after
 losing its response. Browser mutations require session-bound CSRF proof.
+
+A replacement retains the credential's owner, registration, scope, original
+parent and machine source-credential consent. A predecessor can be rotated once.
+Failed rotation leaves both the
+credential and its consent unchanged.
+
 All inventory and rotation responses use `Cache-Control: no-store` and the
-common error envelope. Embedded controllers provide `WithCapabilityManager`
-for authority-bearing inventory and rotation transactions.
+common error envelope. The controller uses its store manager by default. Embedded
+controllers can supply `WithCapabilityManager` for their own persistence.
 
 ## Browser session lifecycle
 
@@ -541,8 +559,8 @@ Service credentials cannot submit provider outcomes or grant team credit.
 The mounted `bootstrap-admin-token` must be a `swk_` controller capability.
 Startup supplies it to the once-only bootstrap transaction before opening the
 listener. That transaction stores only its digest and issues operational
-limits, object-store and token administration grants. It must refuse to issue
-another administrator or revive a revoked seed. It grants no operator-console
+limits, object-store and token administration grants. The gate refuses a second
+administrator and cannot revive a revoked seed. It grants no operator-console
 or claim authority.
 
 Creating the first real administrator issues its credential, revokes the seed

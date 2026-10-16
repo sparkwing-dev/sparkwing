@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"strconv"
 	"testing"
 	"time"
 
@@ -19,39 +18,34 @@ func TestSweepClaimGenerationSQLDialects(t *testing.T) {
 func testSweepClaimGeneration(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
-	// safety: a future legacy timestamp pins clock regression without depending
-	// on the platform clock's resolution or elapsed test time.
-	previous := time.Now().Add(24 * time.Hour).UnixNano()
-	_, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)`),
-		"crons.tick.claim", "0", previous)
-	if err != nil {
+	previous := int64(91)
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO leases(name,holder,until,generation) VALUES ('schedules.tick','',0,?)`), previous); err != nil {
 		t.Fatal(err)
 	}
 	failed := errors.New("tick failed")
 	for i := int64(1); i <= 2; i++ {
-		ran, err := st.RunCronTickLeased(ctx, "fixture", time.Minute, func(context.Context) error {
-			var token string
+		ran, err := st.AsOperator().RunCronTickLeased(ctx, "fixture", time.Minute, func(context.Context) error {
+			var token int64
 			if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st,
-				`SELECT value FROM sparkwing_meta WHERE key = ?`), "crons.tick.claim").Scan(&token); err != nil {
+				`SELECT generation FROM leases WHERE name = ?`), "schedules.tick").Scan(&token); err != nil {
 				t.Fatal(err)
 			}
-			if want := strconv.FormatInt(previous+i, 10); token != want {
-				t.Fatalf("token = %s, want %s", token, want)
+			if want := previous + i; token != want {
+				t.Fatalf("token = %d, want %d", token, want)
 			}
 			return failed
 		})
 		if !ran || !errors.Is(err, failed) {
 			t.Fatalf("tick: ran=%v err=%v", ran, err)
 		}
-		var value string
+		var until int64
 		var generation int64
 		if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st,
-			`SELECT value, updated_at FROM sparkwing_meta WHERE key = ?`), "crons.tick.claim").Scan(&value, &generation); err != nil {
+			`SELECT until,generation FROM leases WHERE name = ?`), "schedules.tick").Scan(&until, &generation); err != nil {
 			t.Fatal(err)
 		}
-		if value != "0" || generation != previous+i {
-			t.Fatalf("released claim = %s/%d, want 0/%d", value, generation, previous+i)
+		if until != 0 || generation != previous+i {
+			t.Fatalf("released claim = %d/%d, want 0/%d", until, generation, previous+i)
 		}
 	}
 }

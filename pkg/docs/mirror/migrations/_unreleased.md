@@ -1,5 +1,411 @@
 # Migrating to the next release
 
+## Tenant event append and deployment compute controls
+
+`Store.AppendEvent` is removed. Select a tenant and use `Tenant.AppendEvent`.
+It allocates the sequence and event bytes with the event insert in one
+transaction. Missing and foreign runs return `ErrNotFound`. Event timestamps
+come from the store clock. Profile drift uses its selected tenant, and the
+local session reaper records outcomes through `DefaultTeam`.
+
+`ComputeLimits`, `SetComputeLimits` and `ComputeUsage` move from `Store` to
+`Operator`. Select the deployment handle with `AsOperator()`. The unused
+`ComputeAlarmState` and single-setting `SetComputeLimit` methods are removed.
+Set one limit through the batch writer. Validation, zero-valued removal and
+transaction rollback remain unchanged. HTTP mutations still require the
+separate authority-bearing settings adapter.
+
+`Operator.CountPendingNodes` is removed. Read the ready count from
+`CountNodesByQueueState` with `QueueStateReady`. Both operational gauges use
+that one snapshot.
+
+## Account mutations and raw team-switch retirement
+
+Account writes use `SelectAccountTeam`, `CreateAccountTeam`,
+`AcceptAccountInvitation` and `UnlinkAccountIdentity` with the authenticated
+`capability.Authorized` value. They recheck the current direct account session
+and commit the account, membership and selected session together. The controller
+uses these store transactions by default. Unlinking requires sign-in within ten
+minutes and preserves the selected session. Account, membership and identity
+timestamps use the final schema's nanosecond unit.
+
+`Store.CreateTeam`, `Store.AcceptInvitation`, `Store.UnlinkIdentity`,
+`Store.SetActiveTeam` and `Store.SwitchSessionTeam` are removed. Use the
+authenticated account writers above. The store clock supplies mutation and
+expiry times. The unused
+`Store.AccountIdentity`, `GitHubRepo.CanonicalURL`, `MetricSample.OneShot`,
+`IsBusyErr` and `Tenant.CacheExcludedCounts` helpers are removed too.
+
+## Raw run writer and unused liveness gauge removed
+
+`Tenant.CreateRun` is removed. Executable intake uses `AdmitRun` and its sealed
+request transaction. Reporting fixtures use `teststore.SeedRun`, which writes the
+current sealed schema and creates no owner unit, job or capability. Existing
+controller and web reporting fixtures now use that helper.
+
+`Operator.CountActiveRunners` is removed. Its lease-window gauge had no production
+caller. Tenant runner inventory uses `ReadRunners` and committed observations.
+The unused `runTeamSQL` default-team fallback, `CompileLogNode`,
+`ErrPlanAccepted`, `Token.IsValid`, `Token.HasScope`, `TokenEnded`,
+`ErrTokenRevoked` and `ErrTokenExpired` are removed too. Capability authentication
+and rotation continue through C2 and the store's live authority transactions.
+Profile folding recognizes `memoized` jobs and excludes their execution samples.
+
+## Explicit tenant reporting readers
+
+`Store.GetRun`, `GetNode`, `ListNodes`, `ListEventsAfter` and
+`GetActiveDebugPause` are removed. Select the tenant with `ForTeam` and use its
+reporting readers. Cross-team `ListRuns` and `GetLatestRun` move from `Store` to
+`Operator`. The dashboard backend takes one tenant at construction and uses it
+for run, job and event reads. It has no default-team fallback or separate run
+scope.
+
+`Tenant.GetSecretForPipeline` is removed. Secret releases use `ReadSecret`
+with current authority, declared names, pipeline/shared precedence and pool
+restrictions. Trusted exact-row inspection still uses `GetSecretRow`.
+
+## Authorized GitHub App configuration and launcher reservations
+
+Tenant's raw `UnbindGitHubAppInstallation`, `PutGitHubAppTrigger`,
+`DeleteGitHubAppTrigger`, `PutGitHubAppAutomation`, `DeleteGitHubAppAutomation`,
+`SetGitHubAppExtraRepos` and `SetGitHubAppExtraRepoIDs` are removed.
+Use the six authority-bearing methods in `GitHubAppWriter`. Tenant supplies the
+production adapter. Supply slugs and verified numeric IDs together when setting
+extra repositories. Actors and timestamps come from the store transaction.
+
+`Store.ReadLauncherAwards` now takes the observed reservation fences as its
+third argument. Pass nil for a snapshot with no reservations. Unknown or foreign
+bootstrap fences refuse the snapshot. The controller returns exact reservation
+identities for cleanup after the original award ends, including after exchange.
+
+## Authorized team mutations
+
+`Tenant.Rename`, `RequestDeletion`, `CreateInvitation`, `DeleteInvitation`,
+`SetTrustLocalBuilds` and `DeleteRun` are removed. Use `RenameAuthorizedTeam`,
+`DeleteAuthorizedTeam`, `CreateAuthorizedInvitation`,
+`DeleteAuthorizedInvitation`, `SetAuthorizedBuildTrust` and
+`DeleteAuthorizedRun` with the selected tenant and current `Authorized` value.
+The store rechecks live authority, ancestry and membership in the committing
+transaction. Actors and timestamps come from that transaction.
+
+Invitation creation requires a nonempty request key. The same actor, tenant and
+key retain the first invitation and its expiry. A different email or role
+conflicts. Withdrawal retains the original replay result and daily count.
+Team deletion preserves owner, last-team, checkout, debt and hold guards.
+Run deletion requires terminal state and drained claims, removes operational rows and success pins,
+and preserves financial records. A repeated store call checks current authority
+before accepting an already-removed run.
+
+## Owner completion and retired store helpers
+
+`Tenant.FinishRun` and its unfenced terminal writer are removed. Use
+`Tenant.FinishRunAndUnit` with the current owner authority. Terminal time comes
+from the store clock. Exact replay preserves it. The first successful run
+records its team business event in the same transaction as the verdict, owner
+completion and pipeline pin. An event failure rolls the transaction back.
+
+The unused `ConcurrencyHeartbeatInterval`, `ConcurrencyHeartbeatTimeout` and
+both `DefaultConcurrencyHeartbeat*` constants are removed. The shared lease
+keeper owns refresh cadence and attempt deadlines.
+
+The unused `JoinProfileKey`, `SplitProfileKey`, `DisplayProfileKey`,
+`RepoIdentityFromURL` and `RepoIdentityFromPath` helpers are removed. Profile
+views display the stored pipeline key. They no longer decode historical keys.
+
+
+## Tenant writes and typed claim fences
+
+`Store.CreateRun`, `CreateTrigger`, `CreateTriggerWithRun` and `FinishRun` are
+removed. Select the registered tenant with `ForTeam(ctx, team)` for tenant
+operations. Executable lifecycle writes use `Tenant.AdmitRun`, `AcceptPlan`,
+`TransitionNode` and `FinishRunAndUnit` with current authority.
+
+`Store.SetNodeArtifactManifest` and `Tenant.SetNodeArtifactManifest` are
+removed. Commit the authorized manifest record with the terminal
+`TransitionNode` result through `NodeResult.ManifestRecord`. The separate
+raw manifest-column write is removed.
+
+`Store.StartNode` and `Tenant.StartNode` are removed. Start a claimed job with
+`Tenant.TransitionNode`, `NodeRunning`, `CauseStart` and the source attempt.
+The transaction checks the current holder and establishes the attempt ordinal.
+
+`Tenant.CreateSourceTriggerWithRun` and the unused source-upload admission
+branch are removed. Source acquisition uses the accepted request and source
+contracts. `NodeClaimFence`, `TriggerClaimFence`, their context constructors,
+readers and `WithoutClaimFences` are removed. The unused holder, membership,
+reservation, generation, attempt and trigger-generation header constants are
+removed too. Supply the typed actor and claim
+fence on each lifecycle request. Tenant checks remain in metric and metadata
+writes. Metric insertion uses `(team, run_id, node_id, ts)`, accepts identical
+retries and refuses conflicting readings without changing the stored sample.
+
+## Execution attempts and Cloud metering
+
+`AcknowledgeNodeExecutionStart`, `FinishNodeExecutionAttempt`, `ExecutionStart`
+and `ExecutionAttemptFinish` are removed. Use `Tenant.TransitionNode` with the
+current award and source attempt ordinal. Select a tenant before calling
+`ListNodeExecutionAttempts`. It reads the current run's committed attempts.
+The unused coordinator ID API and GitHub runner scope APIs are removed.
+Capability push bindings and the shared matcher own repository restrictions.
+
+Cloud awards require credits regardless of the launcher's root metering flag.
+Customer runners keep their enrolled metering policy. Existing award facts stay
+fixed. Verified non-checkout payments persist their receipt and provider
+correlation in the final schema.
+
+## Sole claim queue and console metering
+
+`Store.ClaimNextReadyNode`, `ClaimSpecificTrigger`, `ClaimSpecificTriggerFor`,
+`PrincipalHoldsTriggerClaim` and `Tenant.TriggerClaimant` are removed.
+`Tenant.HeartbeatTrigger` and `FinishTrigger` are removed too. Use `ClaimUnit`
+for named or queued jobs and owner units, then `RenewUnit`, `ReleaseUnit` and
+`FinishRunAndUnit` with the current award. `WithClaimProfile` and the store's
+`RepoFilter` alias are removed. Current enrollment owns repository authority.
+
+The console's runner metering route now commits through
+`Operator.SetRunnerMetered`. Its selector is the enrolled root's public
+capability prefix. A current operator account session and CSRF proof are
+required. Existing awards retain their original billing facts. Runner inventory
+keeps rotated credentials until their grace deadline.
+
+## Legacy claim authentication and writers
+
+`Store.AuthorizeClaimToken`, `AuthorizeRunnerClaim`, `ReplayClaimResult`,
+`ReportAttempt`, `EnqueueChildRun` and `IsChildRunOf` are removed with their
+raw claim classes, result-commit types and attempt-report types. Use capability
+authentication, `Tenant.TransitionNode` and `Tenant.AdmitRun`. Current
+transitions own generation checks, result replay, retry ordinals, events and
+settlement. The unused `CheckClaimSlot`, `CheckClaimKey`,
+`PrincipalHoldsRunClaim`, `TriggerClaimFenceIsLive` and `NodeClaimFenceIsLive`
+readers are removed too. Current binding and mutation transactions recheck
+authority using the store clock.
+
+## Named job claims and renewal
+
+`Store.ClaimNamedNode` and `NamedClaimOptions` are removed. Use `ClaimUnit` with
+a `UnitDemand.Target` selecting `capability.UnitNode`, the run and the job.
+Supply the live claimant capability prefix and observed labels and capacity.
+The store derives the holder and checks the job's readiness and sealed demand.
+Run owners self-claim through `Tenant.ReconcileNode`.
+
+`HeartbeatNodeClaim` and `HeartbeatNodeClaimWithCredits` are removed. Use
+`Store.RenewUnit` with the awarded capability prefix and the current execution
+observation. `LeaseBeat` carries cancellation and the store-selected deadline.
+
+The old `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` and node heartbeat routes
+are removed. Use the engine client's named claim and claim renewal methods.
+
+## Unified trigger queue
+
+`Store.ClaimNextTrigger` and `Store.ClaimNextTriggerFor` are removed. Use
+`Store.ClaimUnit` with `UnitDemand.Kinds` containing `capability.UnitTrigger`
+and the live claimant's capability prefix. The store derives the tenant and
+repository scope and returns the awarded owner fence and one-time bearer.
+Use `RenewUnit` and `FinishRunAndUnit` for that owner.
+
+The unused `Store.NodeExecutionAttemptBelongsToLiveClaim` reader is removed.
+Authentication snapshots retain current attempt and log-tail authority.
+
+## Explicit tenant readers and owner completion
+
+`Store.FinishRunAtGeneration` and `Tenant.FinishRunAtGeneration` are removed.
+Use `Tenant.FinishRunAndUnit` with the current owner authority and its complete
+fence. A stale owner cannot finish a successor's run, even with the same verdict.
+`FinishTriggerAtGeneration`, `ReleaseClaimAtGeneration` and
+`TriggerClaimGeneration` are removed from both handles too. Release unstarted
+work with `Store.ReleaseUnit`, using the awarded `UnitClaim` and its capability.
+Read the generation from that award or the current owner snapshot. Completion
+closes the owner queue unit while retaining the run's separate verdict.
+
+These default-team wrappers on `Store` are removed. Select the registered
+tenant with `ForTeam(ctx, team)` and call its existing method. Local consumers
+select `DefaultTeam` and handle the selection error.
+
+- `CountRuns`, `DeleteRun`, `ListNodeSteps` and `ListNodeMetrics`.
+- `ListTriggers`, `GetTrigger`, `FindTriggerByIdempotencyKey`,
+  `GetRunAncestorPipelines` and `ListPendingTriggersForParent`.
+- `ListApprovalsForRun`, `ListPendingApprovals` and `ListDebugPauses`.
+- `FinishNodeWithOutputRef`, `NodeSettlement`, `HeartbeatTrigger` and `FinishTrigger`.
+
+The unused `SupportsRunIdentityFilters`, `SupportsRunCursor` and
+`SupportsRunDisplayFilters` probes are removed. Shared clients use the current
+controller API contract. The run-filter response header remains unchanged.
+
+## Raw cancellation and unused readers removed
+
+`Store.RequestCancel`, `Tenant.RequestCancel`, `Store.CancelPendingTrigger`
+and `Tenant.CancelPendingTrigger` are removed. Cancellation uses the tenant's
+`TransitionRun` with current authority and `RunCancel`. It records the first
+intent without taking result rights from live holders. The elected unit reaper
+finishes cancelled unclaimed owner units. Terminal run outcomes never change.
+The separate controller-plan cancellation writer is also removed.
+
+The unused `FilterRuns` in-memory run selector is removed. SQL listing and
+counting keep their filters and cursors. The unused transaction helpers
+`fenceSensitiveClaimTx` and `fenceSensitiveTriggerClaimTx` are removed.
+
+## Legacy store issuance and reports
+
+`Store.RotateToken` is removed. Use the tenant's `RotateCapability` with
+current capability-management authority. `Tenant.MintGitHubRunnerCredential`
+is removed. Verified Actions exchange uses `Store.ProvisionCapability` with
+`ProvisionActions`.
+
+`Tenant.ReleaseConcurrencySlot` and `ResolveCoalesceFollowers` are removed.
+Use `ReleaseAndNotify` and consume its follower and promotion results from
+that transaction. `ActiveConcurrencyHolder` is removed. `ConcurrencyHolder`
+returns an unexpired holder. Check `Superseded` when active capacity is required.
+
+The unused `Tenant.ListSpawnedChildrenByRun`, `Operator.UsageMetrics`,
+`UsageMetrics`, `UsageWeek`, `RunsBands`, `FirstGreenStats` and `UsageWeekStart`
+store APIs are removed. The usage-metrics HTTP route was removed separately.
+
+Attempt history derives executor identity from claim ancestry. A supplied
+executor kind or location cannot override the awarded identity. Local host
+and cloud pod names remain display observations.
+
+## Membership mutations use current authority
+
+`Tenant.SetMemberRole` and `RemoveMember` are removed. Use
+`Tenant.UpdateMembership(ctx, actor, MembershipUpdate{AccountID: id, Role: role})`.
+Pass a nil role to remove the member. The actor carries persisted session or
+capability authority. The transaction checks current account membership and
+administration authority, preserves the last owner, withdraws invitations above
+the new role, moves sessions on removal, and revokes the member's affected
+credentials. Failed writes roll back every effect.
+
+The default-team `Store.ListNodeMetricsPage`, `TriggerClaimant` and
+`RunExceedsWallClock` readers are removed. Select a tenant with `ForTeam` and
+call the existing tenant methods.
+
+The unused `MaxCLITokensPerMember`, `ErrCLITokenLimit` and
+`Tenant.GitHubAppSubscribedRepository` symbols are also removed. Source credential
+release uses the authorized sealed repository through `ReleaseSourceCredential`.
+
+## Team token store API removed
+
+`Tenant.CreateMemberToken`, `CreateMachineToken`, `TeamTokens`, `TeamToken`
+and `RevokeTeamToken` are removed, along with `TokenFamily`, its constants,
+`TeamTokenFamily`, `Token.Family` and `MachinePrincipal`.
+
+Use `Store.ProvisionCapability` with a current session authority for member
+roots or a registered `ProvisionMachine` origin for machines. Use the tenant's
+`ListCapabilities`, `ReadCapability`, `RotateCapability` and `RevokeAuthority`
+methods for credential management. Enrollment derives identity and checks
+current team administration in the committing transaction.
+
+## Secret store calls select a tenant
+
+The default-team secret methods on `Store` are removed. Select the registered
+tenant with `store.ForTeam(ctx, team)` before calling `GetSecretRow`,
+`GetSecretForPipeline` or `ListSecrets`. Local readers select `store.DefaultTeam`.
+Writes use `WriteSecret` and `RemoveSecret` under current administration authority.
+
+## Raw secret writers and launcher token issuance removed
+
+`Tenant.CreateOrReplaceSecret` and `DeleteSecret` are removed. Use `WriteSecret`
+and `RemoveSecret` with current tenant administration authority. The transaction
+selects the actor and time. Existing secret count and size limits still apply.
+`Tenant.GetSecret` and `GetSecretForRun` are removed too. Metadata readers use
+`GetSecretRow(name, pipeline)`. Claim releases use `ReadSecret`, which checks the
+bound run, declarations, shared fallback, pool restrictions and release audit.
+
+`Store.MintClaimToken` and `MaxClaimTokenLifetime` are removed. Awards use
+`Store.Issue` within their claim transaction. Launcher delivery uses the one-use
+bootstrap exchange under the current award fence.
+The unused `Operator.TeamRunIDs` report is removed too. It has no production
+caller.
+
+The unused `Store.NodeClaimFenceNodeForRun`, `NodeExecutionAttemptIsLive`,
+`TriggerExecutionAttemptIsLive` and `TriggerExecutionAttemptBelongsToLiveClaim`
+helpers are also removed. Execution authentication uses the capability snapshot
+and tagged attempt identity.
+
+## Claim lifecycle and credential mutation APIs
+
+`Store.StartClaimExecution`, `Store.HeartbeatClaim`, `ClaimBeat` and the matching
+legacy client helpers are removed. Renew a capability-bound unit with
+`Store.RenewUnit`. Start a job through `Tenant.TransitionNode` using `CauseStart`
+and its current source attempt ordinal. Owner compute is reported through unit
+renewal. The old claim-token branches of the job heartbeat and start handlers
+are removed.
+
+`Tenant.PutGitCredential`, `ConfirmGitCredential` and `DeleteGitCredential` are
+removed. Use `WriteGitCredential(ctx, authorized, row)`,
+`ConfirmGitCredentialFor(ctx, authorized, host, fingerprint)` and
+`RemoveGitCredential(ctx, authorized, host)`. These transactions recheck current
+administration authority and use the store clock.
+
+`Store.ResealSecrets` and `SecretResealCounts` are removed with the startup
+plaintext scan. The pre-launch store has no automatic historical-secret
+conversion. Recreate disposable state with the final schema. Missing-key
+checks still inspect sealed samples, and keyless secret access remains refused.
+
+## Source credentials use capability transactions
+
+`Tenant.ReleaseGitCredential`, `GitCredentialReleases`,
+`SetGitCredentialMachine` and `GitCredentialMachine` are removed with
+`GitCredentialRelease`, `SourceSpend`, `MaxSourceMints` and
+`ErrSourceCredentialSpent`.
+
+Use `Tenant.ReleaseSourceCredential(ctx, authorized)` with the current
+capability authority. It derives the sealed source and executor, checks live
+ancestry, claim fences, SSH confirmation and owner consent, and commits the
+audit before returning a sealed credential. Read committed audits with
+`SourceReleaseAudits`. Change machine consent with `SetSourceMachineConsent`
+and the current machine owner's authority. These calls use the store clock. The unused `capabilities.source_mints`
+column is removed from the final schema.
+
+## Run completion and planning units
+
+`Store.CreatePlanNode` is removed. `Tenant.AdmitRun` creates the operational
+planning or trigger unit. Claim it with `Store.ClaimUnit` before submitting
+`Tenant.AcceptPlan`. A planning unit is separate from execution jobs.
+
+`FinishRunIfActive` and `FinishRunsIfActive` on Store and Tenant are removed.
+Use `Tenant.FinishRunAndUnit` with the current owner fence. It commits the run
+verdict, owner closure, event and completion intents together. An exact replay
+retains its original finish time. A different report against a terminal run
+is refused. Cancellation uses the authority-bearing cancellation transaction
+and lets held work drain before completion.
+
+## GitHub runner enrollment uses current administration authority
+
+`Tenant.AddGitHubRunnerBinding` and `RemoveGitHubRunnerBinding` are removed.
+Use `RegisterGitHubRunner(ctx, authorized, binding)` and
+`RevokeGitHubRunner(ctx, authorized, repositoryID)`. Each write rechecks the
+current team administrator in its transaction and uses the store clock.
+Removing an enrollment ends its Actions roots and their descendants atomically.
+An Actions root needs the current numeric repository and owner registration.
+
+## Secret release uses current authority
+
+`Tenant.ReleaseClaimSecret` and `ErrSecretUndeclared` are removed. Use
+`Tenant.ReadSecret(ctx, authorized)` through the controller's `SecretReader`
+interface. It checks the current claim and accepted declaration and commits
+the release audit with selection. Undeclared reads return the canonical
+`forbidden` error with reason `secret_undeclared`. The caller supplies no clock.
+The default tenant also implements `CredentialWriter` for secret and
+git-credential mutations. Verified local peer presentations still need the
+transport's authority adapter.
+
+## Queue reads use explicit store owners
+
+`CountPendingNodes` and `CountNodesByQueueState` move from Store to Operator. Select it with `store.AsOperator()` for deployment
+metrics. These reads continue to aggregate across teams.
+
+`Store.CountPendingTriggers` is removed. Select the intended Tenant with
+`store.ForTeam(ctx, team)` before reading its pending trigger count. Local
+consumers use DefaultTeam; controller requests use the authenticated team.
+
+## Generated dependencies use accepted expansions
+
+`UpdateNodeDeps` on Store, Tenant and Client and
+`POST /api/v1/runs/{id}/nodes/{nodeID}/deps` are removed.
+Declare `needs_generated` in the accepted plan and submit generated jobs with
+`Tenant.AcceptExpansion`. Read `RunSnapshot.Scheduling` to resolve group members
+and decide when dependents can run. Accepted declarations stay unchanged.
+
 ## Data signing and authentication metrics
 
 Embedded controllers use `blob.NewFilesystem` or `blob.NewS3` as their physical
@@ -33,6 +439,15 @@ observation times remain separate. Runner metrics read the same snapshots.
 `RunnerInventoryReader.ReadRunners` returns `capability.RunnerSnapshot`.
 The snapshot, observation and headroom types live in `internal/capability`,
 so the store adapter can implement the reader without a controller import.
+
+`Tenant.ReadRunners` implements the default adapter. It reads live authority,
+accepted polls and current award fences in one store snapshot. Claims and
+renewals update liveness in their committing transactions. A renewal preserves
+the last accepted capacity measurement. Revoked ancestry, expired leases and
+replaced awards contribute no activity. A cancelled holder remains visible
+while its live lease drains. Cloud and `here` identities come from their awards.
+Maximum concurrency and queue depth need enrollment and observation inputs
+before the inventory can report them.
 
 ## Reporting credential routes
 
@@ -568,9 +983,12 @@ Source-release audit lists use the same team policy. Replace `token_prefix`
 with `capability_prefix` in their responses. Each row also carries
 `repository`, `job_id` and `generation`. Times remain Unix seconds.
 
-Embedded controllers supply `WithCredentialRotator` and `WithSourceAuditReader`.
-Missing adapters return `policy_missing`. The old global rotation and legacy
-audit reader cannot provide these tenant and authority guarantees.
+The default store supplies `Tenant.RotateCredentials` and
+`Tenant.SourceReleaseAudits`. Embedded controllers may replace them through
+`WithCredentialRotator` and `WithSourceAuditReader`. Missing replacements return
+`policy_missing`. `Store.RotateSecretValues` and `Store.RotateGitCredentialSecrets`
+are removed. Select the authenticated tenant and pass its verified authority to
+the combined rotation transaction.
 
 ## Credential mutations
 
@@ -1352,11 +1770,9 @@ To upgrade:
 3. If an owner listed extra repositories before their GitHub IDs were
    recorded, save the list again; such a list now answers 409 rather than
    minting by name.
-4. Code that calls `store.Tenant.SpendSourceCredential` or
-   `ReleaseGitCredential` passes the claim token and a
-   `store.GitCredentialRelease`; code that decoded
-   `controller.GitCredentialResponse` or `controller.SourceTokenResponse`
-   decodes `store.SourceCredential`.
+4. Direct source-release consumers use the capability transactions described
+   in [Source credentials use capability transactions](#source-credentials-use-capability-transactions).
+
 
 ## S3 and Postgres state profiles are removed
 
@@ -1622,8 +2038,49 @@ The legacy `Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`,
 `Controller.CreateRun`; the request retains its captured environment digest and
 resolved intake options. Controller integrations retain the
 existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
-Missing origin policy refuses with `unavailable`. Production enrollment and
-console-origin persistence must be provided before enabling those flows.
+Machine and service enrollment use persisted root registrations by default.
+The store checks current authority, canonical registration selectors, repository
+patterns, pools, active names and the existing machine limit before commit.
+An active name returns `conflict`. The runner limit returns `quota_exceeded`.
+Bootstrap and Actions provisioning still require their trusted origin verifier.
+Console-origin persistence remains a separate integration.
+
+## Launcher claims use the shared unit queue
+
+Replace `Store.ClaimLaunch` with `Store.ClaimUnit`. A named plan selects
+`UnitRef{Kind: capability.UnitPlan, RunID: runID}` without a job ID. A named
+job selects `capability.UnitNode` and its job ID. Queue requests supply the
+requested kinds. A deployment service capability carrying `claims.launch`
+provides the launcher identity. Capacity and labels remain observations.
+
+`Client.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
+and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by
+`client.NewEngineClient` with `EngineOptions.Launcher`. Awards carry the persisted expiry and bootstrap
+presentation. Exchange the bootstrap before using its execution authority.
+The shared queue passes over unaffordable work without an in-process cursor.
+
+`Tenant.SetRepoDispatch` is removed. Dispatch belongs to the admitted request.
+The unused `Store.SeedToken`, `ErrSeededTokenRevoked`,
+`Store.CheckClaimSensitive`, `Store.PrincipalHoldsProfileClaim`,
+`Tenant.SpendSourceCredential`, `Tenant.SourceClaimant` and
+`Tenant.GitCredentialMachines` APIs are removed too. Use the capability issuer,
+current binding checks and `Tenant.ReleaseSourceCredential` for their retained
+responsibilities.
+
+## Manual retries use sealed intake
+
+Use `Tenant.AdmitRun` with `Request.Lineage.RetryOf` and current retry authority.
+The transaction retains the original sealed request and records the retrier in
+lineage. The raw `Store.CreateRetryWithRun`, `Tenant.SetRetriedAs` and
+`InheritSecretArgs` APIs are removed. Hosts use the retained source and secret
+classification from the seal.
+
+`Tenant.ReadNode`, `ReadSnapshot` and reconciliation expose `NodeRow.OutputRecord`
+and `NodeRow.ManifestRecord` from the committed terminal result. Use these
+selectors for materialized jobs, which may have no execution attempt. Authorize
+record reads through the data contract before reading bytes.
+
+Console-origin persistence must be provided before enabling console issuance.
 
 ## Account discovery authorization
 
@@ -1717,10 +2174,11 @@ Replace `swu_` bootstrap credentials with a `swk_` controller capability
 presentation. `EnsureBootstrapAdminToken` takes a context, `BootstrapAdminIssuer`
 and raw presentation. It forwards a
 trusted `ProvisionSpec.Seed` to its once-only transaction. It no longer calls
-`CreateTokenIfNoneExist` or accepts a caller clock. The transaction must use
-`Store.Issue`, keep only the digest, close the gate after the first admin
-credential and preserve revocation across restarts. Until that store adapter
-is installed, a configured bootstrap seed refuses startup. Bootstrap authority
+`CreateTokenIfNoneExist` or accepts a caller clock. `Store.EnsureBootstrapCapability`
+commits the seed through `Store.Issue` and closes the persisted deployment gate.
+A live repeated seed is a no-op. A different seed or an ended seed is refused,
+including after restart or credential retention. `Store.HasDeploymentAdministrator`
+checks complete current ancestry for startup readiness. Bootstrap authority
 is operational only. Sign in with an account capability or OAuth for dashboard
 access.
 
@@ -1830,7 +2288,24 @@ Egress concurrency refusals use `error.code=rate_limited`, with
 The exported `EgressDownloadLimitCode` and `EgressStreamLimitCode` constants are
 removed. Read the canonical error object instead of a top-level code.
 
+## Store credential readers and local-first claims
 
+Embedded callers replace `Store.LookupToken` and `LookupTokenByPrefix` with
+`ReadAuthentication` or `LookupCapability`, passing the complete digest.
+`ListTokens` and `RevokeToken` are removed. Use the tenant or operator capability
+inventory and authority-bearing mutation methods. Authentication reads preserve
+the credential's expiry.
+
+`CreateHereTriggerWithRun`, `HereRunner` and its principal-prefix helpers are
+removed. `AdmitRun` and `Issue` own here credentials. The initial acquisition
+window remains `limits.ClaimWindow`. `ClaimedRunFor` and the unused raw claim
+origin and agent-claim readers are removed. Secret reads use `ReadSecret`.
+
+`RecordRunnerPoll(ctx, UnitDemand)` replaces `RecordAgentLabels`. The controller
+stores observed capacity and labels with store time. Configured local-first
+preferences, hold and liveness now apply to shared named and queued job claims.
+Only a recent eligible runner with live authority and enough advertised capacity
+can hold work. No new flag, deadline or customer limit is added.
 ## Egress accounting uses tenant and replica counters
 
 `Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`
@@ -1915,3 +2390,123 @@ for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetentio
 require the current maintenance lease. Bucket listings no longer replace usage
 counters. Log retention follows the run's persisted class. Allowance-driven
 physical eviction still requires the final storage adapter.
+
+
+## Fenced store metadata and approval transitions
+
+`StateStoreOld` is removed. Hosts use the tenant-scoped `StateStore` contract.
+`Store.UpdatePlanSnapshot` and `Tenant.UpdatePlanSnapshot` are removed. Submit
+plans through `AcceptPlan` and generated declarations through `AcceptExpansion`.
+Neither accepted plan can be replaced through a raw snapshot writer.
+
+`StartNodeStep`, `FinishNodeStep`, `SkipNodeStep`, `AppendNodeAnnotation`,
+`AppendStepAnnotation`, `SetNodeSummary`, `SetStepSummary` and
+`UpdateNodeActivity` are removed from Store and Tenant. Use `RecordStep`,
+`WriteAnnotation` and `WriteSummary` with the current holder and attempt.
+Step metadata requires an existing step. It does not create placeholder rows.
+`ValidateStepTerminalStatus`, the old annotation bound constants and their
+sentinel errors are removed. Shared limits and canonical API errors apply.
+Closing an execution attempt closes its running steps in the same transaction.
+A retry keeps the earlier attempt's steps separate.
+
+`CreateApproval` and the raw store `ResolveApproval` are removed. Owners open
+approval gates through `TransitionNode`. Authorized decisions and timeouts use
+that transition too. A resolved gate cannot be reopened or overwritten.
+Approval reads require an explicit tenant.
+
+`ResolveClaimInput`, `ClaimInputRequest`, `ClaimInput`, `ClaimInputKind`,
+`PlanPipelineRef`, `ClaimMemoKey`, `ClaimRepoSlug` and `ErrInputUndeclared` are
+removed with their unused legacy decoder and memo-key builder. Current data
+reads use the authorized record and read-set interfaces. `Tenant.OwnsRun`,
+`ListPendingTriggersForParent` and `RunExceedsWallClock` are removed. Current
+snapshots, child invocation relations and sealed limits supply those facts.
+
+
+## Ordered placement and unused store APIs
+
+`ClaimPlacement.Preferences` replaces `DefaultPrefers`, `Hold` and `Live`.
+Supply an ordered slice of `PlacementPreference{Prefers, Hold}` values. An empty
+`Prefers` step admits everyone. Each hold adds to the prior steps' holds from
+the job's ready time. A later runner waits only while a live, eligible earlier
+runner has an unexpired hold. The existing local-first controller flags still
+configure two steps. An explicit job preference uses the first configured hold.
+Runner liveness uses the accepted poll timestamp rather than other credential
+activity. `RunnerPresence` is removed.
+
+`Store` and `Tenant` lose `CreateDebugPause`, `ReleaseDebugPause` and
+`FindSpawnedChildTriggerID`. `Tenant.GetRunAncestorPipelines`, `NodeSettlement`
+and `NodeMetering` are removed too. Pause resume uses the authorized tenant
+transaction. Child admission and lineage use sealed intake and the run snapshot.
+Current awards retain immutable metering and settlement facts.
+
+## Reporting transactions and schedule lease
+
+The raw `Store` and `Tenant` methods `AddNodeMetricSample` and `AddNodeUsage`
+are removed. Use the tenant's `WriteMetric` and `WriteUsage` with the current
+`capability.Authorized` from the reporting route. The store rechecks ancestry,
+tenant and reporting fences inside the write transaction. Use a current run-host
+award to record process accounting after the job has finished.
+
+`RunCronTickLeased` moves from `Store` to `Operator`. It uses `schedules.tick`
+and the store clock. `Operator.ReleaseSingletonLease` releases an exact lease
+fence. No legacy metadata table is needed for cron ticks.
+
+
+## Sealed reporting and job completion
+
+`Store.FinishNode`, `Store.FinishNodeWithReason` and
+`Tenant.FinishNodeWithOutputRef` are removed. Submit a `NodeTransition` with the
+current holder, generation and source attempt through `Tenant.TransitionNode`.
+Exact reports replay. Changed terminal metadata is refused.
+
+`GetRun`, `ListRuns`, `GetTrigger` and `ListTriggers` project their arguments
+through `runspec.DisplayRequest` or `DisplaySpec`. Before describe supplies a
+valid classification, every argument value is hidden. Execution and retry
+read the private snapshot APIs. `Run.Number` exposes the allocated team number.
+Repository filters read `repo_display`; text search also reads `repo_key`.
+The trigger repo filter runs in SQL without a scan horizon. Unstarted runs
+retain a zero `StartedAt` and participate in cursor paging.
+
+`GetNode` and `ListNodes` read the current generation and node-wide attempt
+ordinal, with attempt history from `node_attempts`. Output and manifest
+selectors remain on the typed `ReadNode` and `ReadSnapshot` records.
+Unused offer-priority fields, raw claim-token fields and `Node.ArtifactManifest`
+are removed. The unused legacy claim-token type and kind constants are removed.
+
+## Job creation, queue publication and sealed display
+
+`Store.CreateNode`, `Store.MarkNodeReady` and `Tenant.MarkNodeReady` are removed.
+Create jobs through `Tenant.AcceptPlan` or `Tenant.AcceptExpansion`. Publish
+ready work with the current owner's `Tenant.TransitionNode`, `NodeReady` and
+`CauseRelease`. Exact replay preserves the original queue timestamp.
+
+Acceptance enforces the configured job-count ceiling in the same transaction
+as the seal or expansion. Refusal leaves no partial jobs or accepted expansion.
+Metered per-run ceilings use persisted award billing facts.
+
+`Run.RedactedForDisplay`, `Run.SecretArgNames`, `RedactedRun`, `RedactedRuns`, `RedactInvocation`,
+`RedactedArgValue` and `IncludeSecretValues` are removed from `pkg/store`.
+`Run` is a redacted reporting view. Display projection belongs to
+`runspec.DisplayRequest` and `DisplaySpec`. Receipt builders consume that view
+and omit input hashes when classification is unknown or a secret is supplied.
+
+GitHub commit reports select the tenant's canonical numeric repository key
+and exact SHA. Repository renames preserve the reports. A different repository
+with the old name inherits none. The unused child-invocation table is removed
+because sealed run intake already owns child lineage and request replay.
+
+
+## Sealed intake rate guards and run control
+
+`Tenant.AdmitRun` applies the configured hourly run guards before creating a run
+and its owner. `max_runs_per_hour` is the single per-principal guard and includes
+unmetered member submissions within their tenant. Repeated sealed intake requests
+return their first admission without spending another slot. The unused
+`Tenant.OldestWaitingReadyNodeForPrincipal` lookup is removed.
+
+The canonical debug-pause and approval routes now use Tenant's run-control
+transactions. Both require an Idempotency-Key and current member authority.
+Reusing a key with a changed body returns conflict. Public text masks classified
+arguments and masked team secrets before state, events and the private replay
+receipt commit together. Approval history records the authenticated account
+subject. Pauses and decisions cannot be created for terminal or cancelling work.

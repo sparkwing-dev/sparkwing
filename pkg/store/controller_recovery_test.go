@@ -37,6 +37,7 @@ func controllerJobActor(t *testing.T, tenant *Tenant, runID string) Actor {
 	root.Grants = []capability.Grant{capability.NodesClaim}
 	authorityPersist(t, tenant.s, root)
 	demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "job"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+	fundUnitClaim(t, tenant.s)
 	claim, err := tenant.s.ClaimUnit(t.Context(), demand)
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +219,7 @@ func TestControllerRetryKeepsPlannerOwnershipUntilHandoff(t *testing.T) {
 			root.Grants = []capability.Grant{capability.ClaimsLaunch}
 			authorityPersist(t, tenant.s, root)
 			demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: retry.RunID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+			fundUnitClaim(t, tenant.s)
 			claim, err := tenant.s.ClaimUnit(t.Context(), demand)
 			if err != nil {
 				t.Fatal(err)
@@ -317,6 +319,7 @@ func TestControllerReconcileRestoresExpansionAndApprovalWaits(t *testing.T) {
 	root.Subject.Kind = capability.SubjectService
 	root.Grants = []capability.Grant{capability.ClaimsLaunch}
 	authorityPersist(t, tenant.s, root)
+	fundUnitClaim(t, tenant.s)
 	claim, err := tenant.s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitEval, RunID: request.RunID, NodeID: "job", SourceGeneration: 1}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}})
 	if err != nil {
 		t.Fatal(err)

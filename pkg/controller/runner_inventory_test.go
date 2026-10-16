@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"math"
@@ -51,11 +52,15 @@ func runnerInventoryFixture(t *testing.T, f *runnerInventoryFake) (http.Handler,
 func TestRunnerInventoryHTTPUsesCommittedSnapshot(t *testing.T) {
 	now := time.Unix(1800000000, 123).UTC()
 	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{
-		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, Location: "machine", LastSeen: now, ActiveJobs: []string{"run/job", "run/job"}, MaxConcurrent: 2,
-			Headroom: &capability.RunnerHeadroom{Cores: 1.5, MemoryBytes: 1024, QueueDepth: 3, ObservedAt: now}},
+		{
+			Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, Location: "machine", LastSeen: now, ActiveJobs: []string{"run/job", "run/job"}, MaxConcurrent: 2,
+			Headroom: &capability.RunnerHeadroom{Cores: 1.5, MemoryBytes: 1024, QueueDepth: 3, ObservedAt: now},
+		},
 		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner"}, Location: "machine", LastSeen: now.Add(-3 * time.Minute)},
-		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "idle", Type: "runner"}, Location: "machine", LastSeen: now,
-			Headroom: &capability.RunnerHeadroom{Cores: 1, ObservedAt: now.Add(-2 * time.Hour)}},
+		{
+			Team: "a", Runner: nodeproto.RunnerIdentity{Name: "idle", Type: "runner"}, Location: "machine", LastSeen: now,
+			Headroom: &capability.RunnerHeadroom{Cores: 1, ObservedAt: now.Add(-2 * time.Hour)},
+		},
 	}}}
 	h, raw := runnerInventoryFixture(t, f)
 	w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners?team=foreign", "", 200)
@@ -188,6 +193,7 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 		}
 	}
 	s, session := credentialSessionServer(t)
+	s.WithRunnerInventory(func(context.Context, store.Team) (RunnerInventoryReader, error) { return nil, nil })
 	h = s.Handler()
 	issued := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
 	var credential credentialResponse
@@ -197,6 +203,35 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 	w = engineClaimHTTP(t, h, credential.Capability, "GET", "/api/v1/runners", "", 500)
 	if !strings.Contains(w.Body.String(), `"code":"policy_missing"`) {
 		t.Fatalf("missing adapter: %s", w.Body.String())
+	}
+}
+
+func TestRunnerInventoryHTTPUsesStoreSnapshot(t *testing.T) {
+	s, session := credentialSessionServer(t)
+	e := &EngineController{Store: s.store}
+	raw := engineHTTPRoot(t, e, "a", "observed", []capability.Grant{capability.NodesClaim})
+	p, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: p.Capability.Prefix, Labels: []string{"gpu", "name=forged"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	issued := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
+	var credential credentialResponse
+	if issued.Code != 201 || json.Unmarshal(issued.Body.Bytes(), &credential) != nil {
+		t.Fatalf("member issuance: %d %s", issued.Code, issued.Body.String())
+	}
+	w := engineClaimHTTP(t, h, credential.Capability, "GET", "/api/v1/runners?team=b", "", 200)
+	var response struct {
+		Agents []Agent `json:"agents"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Agents) != 1 || response.Agents[0].Name != "observed" || response.Agents[0].Type != "runner" || response.Agents[0].Status != "idle" || !reflect.DeepEqual(response.Agents[0].Capabilities, []string{"gpu"}) {
+		t.Fatalf("store inventory: %+v", response)
 	}
 }
 

@@ -11,9 +11,32 @@ import (
 func TestRoutePolicyDoesNotRetainRemovedSurface(t *testing.T) {
 	for _, route := range capability.Routes {
 		key := route.Method + " " + route.Path
-		for _, removed := range []string{"/triggers", "/nodes/", "/gitcache", "/cache-grant", "/bounce", "/dispatches", "/auto-retry", "/usage-metrics", "/operator/cache"} {
+		for _, removed := range []string{"/triggers", "/api/v1/nodes", "/api/v1/runs/{run}/nodes", "/api/v1/runs/{run}/children/{child}/nodes", "/gitcache", "/cache-grant", "/bounce", "/dispatches", "/auto-retry", "/usage-metrics", "/operator/cache"} {
 			if strings.Contains(route.Path, removed) && !strings.Contains(route.Path, "/github-app/triggers") {
 				t.Errorf("removed surface in target table: %s", key)
+			}
+		}
+	}
+}
+
+func TestPrivateNodeHostRoutesRequireBoundClaimAuthority(t *testing.T) {
+	for _, operation := range []struct {
+		method string
+		suffix string
+	}{
+		{"GET", ""}, {"GET", "/snapshot"}, {"GET", "/data-authority"},
+		{"POST", "/authentication"}, {"POST", "/binding"}, {"POST", "/transition"},
+	} {
+		path := "/api/v1/runs/{run}/local-host/nodes/{job}" + operation.suffix
+		route, ok := capability.LookupRoute(operation.method, path)
+		if !ok || route.Authentication != capability.AuthCapability || route.Owner != capability.OwnerRun || len(route.Access) == 0 {
+			t.Fatalf("missing private claim policy: %s %s", operation.method, path)
+		}
+		for _, access := range route.Access {
+			if access.Credential != capability.CredentialClaim || len(access.Grants) == 0 ||
+				access.Binding != capability.BindOwnNode && access.Binding != capability.BindRunOfTrigger ||
+				access.Liveness != capability.LiveSensitive && access.Liveness != capability.LiveReporting && access.Liveness != capability.LiveResult {
+				t.Errorf("private host route lacks a live claim fence: %s %+v", path, access)
 			}
 		}
 	}

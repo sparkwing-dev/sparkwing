@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type pipelinesListBody struct {
@@ -33,10 +34,10 @@ func TestControllerPipelines_ListIsTheCallersTeamOnly(t *testing.T) {
 		t.Fatalf("ForTeam default: %v", err)
 	}
 	started := time.Now().Add(-time.Minute)
-	if err := own.CreateRun(ctx, store.Run{ID: "run-own", Pipeline: "own-build", Status: "success", StartedAt: started}); err != nil {
+	if err := teststore.SeedRun(f.store, ctx, own.Team(), store.Run{ID: "run-own", Pipeline: "own-build", Status: "success", StartedAt: started}); err != nil {
 		t.Fatalf("CreateRun own: %v", err)
 	}
-	if err := tenantB.CreateRun(ctx, store.Run{ID: "run-b", Pipeline: "b-deploy", Status: "failed", StartedAt: started}); err != nil {
+	if err := teststore.SeedRun(f.store, ctx, tenantB.Team(), store.Run{ID: "run-b", Pipeline: "b-deploy", Status: "failed", StartedAt: started}); err != nil {
 		t.Fatalf("CreateRun team B: %v", err)
 	}
 

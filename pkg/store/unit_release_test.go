@@ -1,13 +1,86 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
+	"fmt"
+	"math/rand/v2"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
+
+func TestReleaseUnitOwnerFenceProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(57, 813))
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, claim := releaseFixture(t, kind)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,lease_expires_at=NULL,attempt=0`)
+			tenant := &Tenant{s: s, team: claim.Team}
+			before, err := tenant.ReadSnapshot(t.Context(), claim.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var query string
+			if kind == capability.UnitEval {
+				query = `SELECT status,generation,claimed_by,capability_prefix,lease_expires_at,started_at FROM eval_units`
+			} else {
+				query = `SELECT status,generation,claimed_by,capability_prefix,lease_expires_at,started_at FROM triggers`
+			}
+			unitState := func() []any {
+				var status, prefix string
+				var generation int64
+				var holder sql.NullString
+				var lease, start sql.NullInt64
+				if err := s.db.QueryRowContext(t.Context(), query).Scan(&status, &generation, &holder, &prefix, &lease, &start); err != nil {
+					t.Fatal(err)
+				}
+				return []any{status, generation, holder, prefix, lease, start}
+			}
+			unit := unitState()
+			for i := range 64 {
+				forged, prefix := claim, claim.Award.CapabilityPrefix
+				suffix := fmt.Sprintf("/%x", random.Uint64())
+				switch i % 8 {
+				case 0:
+					forged.Team += Team(suffix)
+				case 1:
+					forged.RunID += suffix
+				case 2:
+					forged.SourceGeneration += 1 + random.Int64N(1000)
+				case 3:
+					forged.Award.Generation += 1 + random.Int64N(1000)
+				case 4:
+					forged.Award.Holder += suffix
+				case 5:
+					forged.Award.CapabilityPrefix += suffix
+				case 6:
+					prefix += suffix
+				case 7:
+					forged.NodeID += suffix
+				}
+				if err := s.ReleaseUnit(t.Context(), forged, prefix); err == nil {
+					t.Fatalf("forged owner release accepted: %+v", forged)
+				}
+				if !reflect.DeepEqual(unit, unitState()) {
+					t.Fatal("refused release changed the owner unit")
+				}
+			}
+			after, err := tenant.ReadSnapshot(t.Context(), claim.RunID)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("refused release changed run state: %v", err)
+			}
+			rewriteSchemaCount(t, s.db, "billing_awards", 1)
+			rewriteSchemaCount(t, s.db, "credit_charges", 0)
+			if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func releaseFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitClaim) {
 	t.Helper()

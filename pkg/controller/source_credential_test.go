@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -57,10 +59,10 @@ func (f *appFixture) claimRunNode(owner signedIn, runID, repoURL string, repoID 
 	f.t.Helper()
 	ctx := context.Background()
 	f.createRun(owner, runID, repoURL, repoID)
-	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.store.MarkNodeReady(ctx, runID, "compile"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, runID, "compile"); err != nil {
 		f.t.Fatal(err)
 	}
 	bearer, prefix = f.teamRunner(owner, "r-"+runID)
@@ -183,10 +185,10 @@ func TestSourceCredential_NeedsTheRunsOwnClaimToken(t *testing.T) {
 	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.createRun(olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
-	if err := f.store.CreateNode(context.Background(), store.Node{RunID: "run-widgets", NodeID: "compile", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, context.Background(), store.Node{RunID: "run-widgets", NodeID: "compile", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.MarkNodeReady(context.Background(), "run-widgets", "compile"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, context.Background(), "run-widgets", "compile"); err != nil {
 		t.Fatal(err)
 	}
 	machine, _ := f.teamRunner(olga, "holder")
@@ -207,35 +209,6 @@ func TestSourceCredential_NeedsTheRunsOwnClaimToken(t *testing.T) {
 	}
 }
 
-// A node's claim token is also in the node's own process, so the claim gets a
-// few credentials and then none, and revoking the machine stops it at once.
-func TestSourceCredential_NodeClaimGetsAFewAndStopsWithItsMachine(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	node, _ := f.nodeClaim(olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
-	for i := range store.MaxSourceMints {
-		if _, code := f.sourceCredential(node, "run-widgets"); code != http.StatusOK {
-			t.Fatalf("ask %d = %d, want a retry within the limit", i+1, code)
-		}
-	}
-	if got, code := f.sourceCredential(node, "run-widgets"); code != http.StatusForbidden || got.Error != "source_credential_spent" {
-		t.Fatalf("ask past the limit = %d %+v, want 403 source_credential_spent", code, got)
-	}
-
-	other, prefix := f.nodeClaim(olga, "run-other", "https://github.com/acme/widgets.git", 701)
-	if code := f.call("DELETE", "/api/v1/team/tokens/"+prefix, olga.auth, nil, nil); code != http.StatusNoContent && code != http.StatusOK {
-		t.Fatalf("revoke = %d", code)
-	}
-	if got, code := f.sourceCredential(other, "run-other"); code != http.StatusUnauthorized || got.Token != "" {
-		t.Fatalf("after its machine was revoked = %d %+v, want 401", code, got)
-	}
-}
-
-// A run's App token reads a further repository only once a team owner listed
-// it for the run's repository. What the runner sends widens nothing, and the
-// listed repository must be covered by the installation both when it is
-// listed and at every mint.
 func TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")

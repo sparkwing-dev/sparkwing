@@ -57,7 +57,7 @@ func (values planSecretValues) ContainsSecret(identifier string) bool {
 	return slices.ContainsFunc(values, func(value string) bool { return value != "" && strings.Contains(identifier, value) })
 }
 
-func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec) (nodeproto.SecretMatcher, error) {
+func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec) (planSecretValues, error) {
 	values := planSecretValues{}
 	for _, name := range spec.Resolved.SecretArgs {
 		value, exists := spec.Resolved.Args[name]

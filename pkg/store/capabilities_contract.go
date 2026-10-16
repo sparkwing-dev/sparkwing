@@ -20,11 +20,21 @@ import (
 type CapabilityRecord struct {
 	Version int                   `json:"version"`
 	Value   capability.Capability `json:"value"`
+	Origin  *CapabilityOrigin     `json:"origin,omitempty"`
+}
+
+// CapabilityOrigin retains the trusted provisioning kind and registration.
+type CapabilityOrigin struct {
+	Kind           capability.ProvisionKind `json:"kind"`
+	RegistrationID string                   `json:"registration_id,omitempty"`
 }
 
 // Validate rejects incomplete or unknown persisted authority shapes.
 func (r CapabilityRecord) Validate() error {
 	c := r.Value
+	if r.Origin != nil && !validCapabilityOrigin(c, *r.Origin) {
+		return authorityError(apierr.IntegrityFailure, "invalid capability origin")
+	}
 	if r.Version != 1 || c.Prefix == "" || c.Subject.ID == "" || c.IssuedAt.IsZero() {
 		return authorityError(apierr.IntegrityFailure, "invalid capability envelope")
 	}
@@ -192,8 +202,11 @@ func authorityProjection(c capability.Capability) ([]any, error) {
 	return []any{c.Prefix, optionalString(c.Team), string(c.Subject.Kind), c.Subject.ID, string(c.Audience), grants, string(c.Issuance), int64(1), parentKind, parentID, optionalString(string(c.Purpose)), optionalString(string(c.Delivery)), optionalString(c.UnitID), billingUnit, string(c.Binding.Kind), optionalString(c.Binding.RunID), optionalString(c.Binding.NodeID), generation, optionalString(c.Binding.Holder), optionalTime(c.Binding.ClaimBy), pools, c.IssuedAt.UnixNano(), optionalTime(c.ExpiresAt), optionalTime(c.RevokedAt), metered, payer, executor, reservation, start, optionalString(string(c.Unit)), expansion, repo, repos, ref, sha}, nil
 }
 
-func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
+func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, origin ...*CapabilityOrigin) error {
 	record := CapabilityRecord{Version: 1, Value: c}
+	if len(origin) > 0 {
+		record.Origin = origin[0]
+	}
 	if err := record.Validate(); err != nil {
 		return err
 	}
@@ -216,6 +229,11 @@ func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capabili
 
 // safety: indexed columns may accelerate lookup but cannot add authority to the envelope.
 func loadCapabilityTx(ctx context.Context, tx *storeTx, prefix string) (capability.Capability, error) {
+	record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+	return record.Value, err
+}
+
+func loadCapabilityRecordTx(ctx context.Context, tx *storeTx, prefix string) (CapabilityRecord, error) {
 	var digest string
 	var body []byte
 	actual := make([]any, len(authorityColumns))
@@ -225,33 +243,33 @@ func loadCapabilityTx(ctx context.Context, tx *storeTx, prefix string) (capabili
 	}
 	err := tx.QueryRowContext(ctx, "SELECT digest,authority_json,"+strings.Join(authorityColumns, ",")+" FROM capabilities WHERE prefix = ?", prefix).Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
-		return capability.Capability{}, authorityError(apierr.Unauthenticated, "authority is unavailable")
+		return CapabilityRecord{}, authorityError(apierr.Unauthenticated, "authority is unavailable")
 	}
 	if err != nil {
-		return capability.Capability{}, err
+		return CapabilityRecord{}, err
 	}
 	var record CapabilityRecord
 	if err := json.Unmarshal(body, &record); err != nil {
-		return capability.Capability{}, authorityError(apierr.IntegrityFailure, "invalid capability envelope")
+		return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "invalid capability envelope")
 	}
 	if err := record.Validate(); err != nil {
-		return capability.Capability{}, err
+		return CapabilityRecord{}, err
 	}
 	expected, err := authorityProjection(record.Value)
 	if err != nil {
-		return capability.Capability{}, err
+		return CapabilityRecord{}, err
 	}
 	for i, v := range actual {
 		if !equalProjection(v, expected[i]) {
-			return capability.Capability{}, authorityError(apierr.IntegrityFailure, "capability projection mismatch: "+authorityColumns[i])
+			return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "capability projection mismatch: "+authorityColumns[i])
 		}
 	}
 	bytes, err := hex.DecodeString(digest)
 	if err != nil || len(bytes) != sha256.Size {
-		return capability.Capability{}, authorityError(apierr.IntegrityFailure, "invalid bearer digest")
+		return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "invalid bearer digest")
 	}
 	copy(record.Value.Digest[:], bytes)
-	return record.Value, nil
+	return record, nil
 }
 
 func equalProjection(a, b any) bool {
@@ -293,7 +311,7 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		var created, expires int64
 		var revoked sql.NullInt64
 		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
-		err := tx.QueryRowContext(ctx, "SELECT principal,team,account_id,capability_prefix,created_at,expires_at,revoked_at,auth_generation FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &node.generation)
+		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,auth_generation FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &node.generation)
 		if err != nil {
 			return node, err
 		}
@@ -321,6 +339,11 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		return node, authorityError(apierr.Unauthenticated, "authority has ended")
 	}
 	if c.Subject.Kind == capability.SubjectAccount {
+		if c.Team == "" && node.principal.Class == capability.CredentialSession && c.Parent == nil {
+			var account string
+			err := tx.QueryRowContext(ctx, "SELECT id FROM accounts WHERE id=?"+suffix, c.Subject.ID).Scan(&account)
+			return node, err
+		}
 		var role Role
 		if err := tx.QueryRowContext(ctx, "SELECT role FROM memberships WHERE team = ? AND account_id = ?"+suffix, c.Team, c.Subject.ID).Scan(&role); err != nil {
 			return node, err
@@ -457,16 +480,13 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 	if targetNode.principal.Capability.Team != string(t.team) {
 		return authorityError(apierr.Forbidden, "revocation target belongs to another team")
 	}
-	c := targetNode.principal.Capability
-	metadata := capability.Metadata{Prefix: target.ID, Team: c.Team, Subject: c.Subject}
-	if target.Kind == capability.AuthorityCapability {
-		metadata, err = capabilityMetadataTx(ctx, tx, target.ID)
-		if err != nil {
+	if !slices.Contains(p.Capability.Grants, capability.TeamAdmin) && p.Authority != target {
+		if target.Kind != capability.AuthorityCapability {
+			return bindingRefusal()
+		}
+		if err := bindingTokenTx(ctx, tx, p.Capability, capability.Target{Team: string(t.team), TokenPrefix: target.ID}); err != nil {
 			return err
 		}
-	}
-	if !capability.OwnsToken(p, metadata) {
-		return authorityError(apierr.Forbidden, "revocation requires team administration or own authority")
 	}
 	if err := revokeAuthorityTx(ctx, tx, target); err != nil {
 		return err
@@ -505,12 +525,12 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capa
 func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) error {
 	now := tx.now()
 	if ref.Kind == capability.AuthorityCapability {
-		c, err := loadCapabilityTx(ctx, tx, ref.ID)
+		record, err := loadCapabilityRecordTx(ctx, tx, ref.ID)
 		if err != nil {
 			return err
 		}
-		c.RevokedAt = &now
-		body, err := json.Marshal(CapabilityRecord{Version: 1, Value: c})
+		record.Value.RevokedAt = &now
+		body, err := json.Marshal(record)
 		if err != nil {
 			return err
 		}
@@ -523,69 +543,6 @@ func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.Authorit
 		}
 	}
 	return advanceAuthGenerationsTx(ctx, tx, []capability.AuthorityRef{ref}, nil)
-}
-
-// MembershipUpdate changes a member's role, or removes it when Role is nil.
-type MembershipUpdate struct {
-	AccountID string
-	Role      *Role
-}
-
-// UpdateMembership preserves the last owner and invalidates cached membership authority atomically.
-func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change MembershipUpdate) error {
-	if change.AccountID == "" || (change.Role != nil && !change.Role.Valid()) {
-		return ErrInvalidInput
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return err
-	}
-	p, err := resolveActorTx(ctx, tx, actor)
-	if err != nil {
-		return err
-	}
-	if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone || p.Capability.Subject.Kind != capability.SubjectAccount {
-		return authorityError(apierr.Forbidden, "membership changes require an account")
-	}
-	selfRemoval := change.Role == nil && p.Capability.Subject.ID == change.AccountID
-	if !selfRemoval && !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
-		return authorityError(apierr.Forbidden, "membership changes require team administration")
-	}
-	actorRole, err := t.roleTx(ctx, tx, p.Capability.Subject.ID)
-	if err != nil {
-		return err
-	}
-	current, err := t.roleTx(ctx, tx, change.AccountID)
-	if err != nil {
-		return err
-	}
-	if !actorRole.AtLeast(current) || (change.Role != nil && !actorRole.AtLeast(*change.Role)) {
-		return ErrRoleAboveOwn
-	}
-	if change.Role != nil && current == *change.Role {
-		return tx.Commit()
-	}
-	if current == RoleOwner {
-		if err := t.requireAnotherOwnerTx(ctx, tx, change.AccountID); err != nil {
-			return err
-		}
-	}
-	if change.Role == nil {
-		_, err = tx.ExecContext(ctx, "DELETE FROM memberships WHERE team = ? AND account_id = ?", string(t.team), change.AccountID)
-	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?", string(*change.Role), string(t.team), change.AccountID)
-	}
-	if err != nil {
-		return err
-	}
-	if err := advanceAuthGenerationsTx(ctx, tx, nil, &t.team); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // safety: generation changes share the authority mutation's transaction.

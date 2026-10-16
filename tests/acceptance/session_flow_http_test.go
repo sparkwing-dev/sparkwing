@@ -311,3 +311,45 @@ func TestSessionFlowHTTPRefusesEndedAndInvalidSessions(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionFlowHTTPRolelessAccountHasNoTeamAuthority(t *testing.T) {
+	f := newSessionFlow(t)
+	for _, statement := range []string{
+		`INSERT INTO accounts(id,email,email_verified,created_at,updated_at,waitlist_reason) VALUES ('waitlisted','waitlisted@example.test',1,1,1,'signup_gate')`,
+		`INSERT INTO identities(provider,subject,account_id,email_verified,created_at) VALUES ('github','waitlisted','waitlisted',1,1)`,
+	} {
+		if _, err := f.store.DB().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, csrf, _, err := f.store.CreateIdentityAccountSession(t.Context(), store.Account{ID: "waitlisted"}, "", "github", "waitlisted", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.raw, f.csrf = raw, csrf
+	handler := f.server.Handler()
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, f.request("GET", "/api/v1/auth/session", ""))
+	var result struct {
+		Team   string   `json:"team"`
+		Role   string   `json:"role"`
+		UserID string   `json:"user_id"`
+		Scopes []string `json:"scopes"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Team != "" || result.Role != "" || len(result.Scopes) != 0 {
+		t.Fatalf("roleless session: %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, f.request("POST", "/api/v1/secrets/rotate", ""))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("roleless team write: %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, f.request("POST", "/api/v1/auth/logout", ""))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("roleless logout: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := f.store.LookupSession(t.Context(), raw); err == nil {
+		t.Fatal("roleless logout kept session live")
+	}
+}

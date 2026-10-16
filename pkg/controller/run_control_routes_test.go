@@ -124,7 +124,7 @@ func TestRunControlHTTPRefusals(t *testing.T) {
 	if writer.calls != 0 {
 		t.Fatal("foreign tenant reached a transaction")
 	}
-	f.s.WithRunControlWriter(nil)
+	f.s.WithRunControlWriter(func(context.Context, store.Team) (RunControlWriter, error) { return nil, nil })
 	f.call(t, "POST", "/api/v1/runs/bound-run/approvals/bound-job", `{"resolution":"approved"}`, "key", 500, nil)
 }
 

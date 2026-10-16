@@ -3,8 +3,6 @@ package controller
 import (
 	"context"
 	"net/http"
-	"slices"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -18,28 +16,19 @@ func (f consoleFixtureAuthority) Authenticate(ctx context.Context, presentation 
 	p := capability.Principal{Class: presentation.Class, Capability: capability.Capability{
 		Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone},
 	}}
-	if presentation.Class == capability.CredentialBearer {
-		tok, err := f.server.store.LookupToken(presentation.Raw, time.Now())
-		if err != nil {
-			return capability.Authenticated{}, &apierr.Error{Code: apierr.Unauthenticated}
-		}
-		p.Capability.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "fixture-member"}
-		if slices.Contains(tok.Scopes, "admin") {
-			p.Capability.Subject = capability.Subject{Kind: capability.SubjectOperator, ID: tok.Principal}
-			p.Capability.Grants = []capability.Grant{capability.OperatorLimits, capability.OperatorObjectStore}
-		}
-	} else {
-		session, err := f.server.store.LookupSession(ctx, presentation.Raw)
-		if err != nil {
-			return capability.Authenticated{}, &apierr.Error{Code: apierr.Unauthenticated}
-		}
-		p.Class = capability.CredentialSession
-		p.Capability.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: session.AccountID}
-		set := f.server.operators.Load()
-		if set != nil && (*set)[session.AccountID] {
-			p.Class, p.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
-			p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
-		}
+	if presentation.Class != capability.CredentialSession {
+		return capability.Authenticated{}, &apierr.Error{Code: apierr.Unauthenticated}
+	}
+	session, err := f.server.store.LookupSession(ctx, presentation.Raw)
+	if err != nil {
+		return capability.Authenticated{}, &apierr.Error{Code: apierr.Unauthenticated}
+	}
+	p.Class = capability.CredentialSession
+	p.Capability.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: session.AccountID}
+	set := f.server.operators.Load()
+	if set != nil && (*set)[session.AccountID] {
+		p.Class, p.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
+		p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 	}
 	var live []capability.LiveAccess
 	for i := range route.Access {

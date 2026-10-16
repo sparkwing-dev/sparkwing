@@ -16,7 +16,7 @@ func dollarsMicro(n int64) int64 { return n * 100 * store.MicroCreditsPerCent }
 
 func payTeam(t *testing.T, tenant *store.Tenant, ref string, dollars int64) time.Time {
 	t.Helper()
-	res, err := tenant.RecordCreditGrant(context.Background(), store.CreditGrantRequest{
+	res, err := tenant.TestOnlySettlePaidCredit(context.Background(), store.CreditGrantRequest{
 		Kind: store.CreditGrantPaid, AmountMicro: dollarsMicro(dollars), Reference: ref, CreatedBy: "billing",
 	})
 	if err != nil {

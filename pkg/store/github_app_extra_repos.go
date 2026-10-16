@@ -2,19 +2,17 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 )
 
 // MaxGitHubAppExtraRepos bounds one source repository's extra repositories.
 const MaxGitHubAppExtraRepos = 10
 
-// SetGitHubAppExtraRepos replaces the extra repositories a run of
-// repository's App token also reads, each an owner/name of repository's
-// owner, at most [MaxGitHubAppExtraRepos]. An empty list clears them.
-func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, extras []string, by string, now time.Time) (_ []string, err error) {
+func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, repository string, extras []string, ids map[string]int64, by string) ([]string, error) {
 	repo, ok := ParseGitHubRepo(repository)
 	if !ok {
 		return nil, fmt.Errorf("%w: repository %q is not owner/name", ErrInvalidInput, repository)
@@ -38,23 +36,38 @@ func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, 
 		return nil, fmt.Errorf("%w: at most %d extra repositories", ErrInvalidInput, MaxGitHubAppExtraRepos)
 	}
 	slices.Sort(list)
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
+	if len(list) != 0 {
+		var installation int64
+		if err := tx.QueryRowContext(ctx, `SELECT installation_id FROM github_app_installations WHERE team=? AND LOWER(account_login)=? AND suspended=0 ORDER BY installation_id LIMIT 1`+tx.forUpdate(), t.team, strings.ToLower(repo.Owner)).Scan(&installation); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
 	}
-	defer rollbackUnlessDone(tx, &err)
+	canonical := make(map[string]int64, len(ids))
+	for slug, id := range ids {
+		key := strings.ToLower(slug)
+		if id <= 0 || key != source && !slices.Contains(list, key) || canonical[key] != 0 {
+			return nil, ErrInvalidInput
+		}
+		canonical[key] = id
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_extra_repos WHERE team = ? AND repository = ?`,
 		string(t.team), source); err != nil {
 		return nil, err
 	}
 	for _, x := range list {
+		if canonical[x] <= 0 {
+			return nil, ErrInvalidInput
+		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO github_app_extra_repos (team, repository, extra_repo, created_by, created_at)
-			VALUES (?, ?, ?, ?, ?)`, string(t.team), source, x, by, now.UTC().Unix()); err != nil {
+			INSERT INTO github_app_extra_repos (team, repository, extra_repo, extra_repo_id, created_by, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, string(t.team), source, x, canonical[x], by, tx.now().UnixNano()); err != nil {
 			return nil, err
 		}
 	}
-	return list, tx.Commit()
+	return list, nil
 }
 
 // GitHubAppExtraRepos is the extra repositories an owner listed for
@@ -97,20 +110,6 @@ func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]str
 		out[repo] = append(out[repo], x)
 	}
 	return out, rows.Err()
-}
-
-// SetGitHubAppExtraRepoIDs records the GitHub ID of each of repository's
-// extra repositories, keyed by owner/name, so a token is minted for the
-// repositories an owner approved even after one is renamed or its name reused.
-func (t *Tenant) SetGitHubAppExtraRepoIDs(ctx context.Context, repository string, ids map[string]int64) error {
-	for slug, id := range ids {
-		if _, err := t.s.exec(ctx, `UPDATE github_app_extra_repos SET extra_repo_id = ?
- WHERE team = ? AND repository = ? AND extra_repo = ?`,
-			id, string(t.team), strings.ToLower(repository), strings.ToLower(slug)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // GitHubAppExtraRepoRefs is repository's extra repositories with the GitHub

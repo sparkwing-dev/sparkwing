@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
@@ -19,7 +20,7 @@ func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := st.CreateRun(t.Context(), store.Run{ID: "other-process", Pipeline: "sample", Status: "running"}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(t.Context(), store.Run{ID: "other-process", Pipeline: "sample", Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.Close(); err != nil {
@@ -87,7 +88,7 @@ func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
 					t.Fatalf("live SQLite file replaced: %s", name)
 				}
 			}
-			if _, err := reader.GetRun(t.Context(), "other-process"); err != nil {
+			if _, err := teststore.ForTeam(t, reader, store.DefaultTeam).GetRun(t.Context(), "other-process"); err != nil {
 				t.Fatalf("existing reader: %v", err)
 			}
 		})

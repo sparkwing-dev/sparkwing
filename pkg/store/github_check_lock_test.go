@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -21,14 +20,12 @@ func TestReportGitHubCheckAdmitsOneHolderAtATime(t *testing.T) {
 		second = target.Open(t)
 	}
 	ctx := context.Background()
-	if err := first.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	a, err := first.ForTeam(ctx, store.DefaultTeam)
+	a, accepted, err := storePlanSealRequest(ctx, first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := second.ForTeam(ctx, store.DefaultTeam)
+	runID := accepted.RunID
+	b, err := second.ForTeam(ctx, a.Team())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +33,7 @@ func TestReportGitHubCheckAdmitsOneHolderAtATime(t *testing.T) {
 	entered, release, secondIn := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	done := make(chan error, 2)
 	go func() {
-		done <- a.ReportGitHubCheck(ctx, "run-1", func(_ context.Context, id int64) (int64, error) {
+		done <- a.ReportGitHubCheck(ctx, runID, func(_ context.Context, id int64) (int64, error) {
 			if id != 0 {
 				t.Errorf("first holder saw check run %d, want none", id)
 			}
@@ -47,7 +44,7 @@ func TestReportGitHubCheckAdmitsOneHolderAtATime(t *testing.T) {
 	}()
 	<-entered
 	go func() {
-		done <- b.ReportGitHubCheck(ctx, "run-1", func(_ context.Context, id int64) (int64, error) {
+		done <- b.ReportGitHubCheck(ctx, runID, func(_ context.Context, id int64) (int64, error) {
 			if id != 41 {
 				t.Errorf("second holder saw check run %d, want the first holder's 41", id)
 			}
@@ -56,7 +53,7 @@ func TestReportGitHubCheckAdmitsOneHolderAtATime(t *testing.T) {
 		})
 	}()
 	if first.Dialect() == store.DialectPostgres {
-		waitForAdvisoryWaiter(t, first, "sparkwing/github-check/"+string(store.DefaultTeam)+"/run-1", secondIn)
+		waitForAdvisoryWaiter(t, first, "sparkwing/github-check/"+string(a.Team())+"/"+runID, secondIn)
 	}
 	select {
 	case <-secondIn:
@@ -97,21 +94,19 @@ func waitForAdvisoryWaiter(t *testing.T, st *store.Store, key string, entered <-
 func TestReportGitHubCheckRecordsNothingPastTheHoldersDeadline(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	tenant, accepted, err := storePlanSealRequest(ctx, st)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	held, cancel := context.WithCancel(ctx)
-	if err := tenant.ReportGitHubCheck(held, "run-1", func(context.Context, int64) (int64, error) {
+	if err := tenant.ReportGitHubCheck(held, accepted.RunID, func(context.Context, int64) (int64, error) {
 		cancel()
 		return 99, nil
 	}); err == nil {
 		t.Fatal("a holder past its deadline reported success")
 	}
-	if id, err := tenant.GitHubCheckRun(ctx, "run-1"); err != nil || id != 0 {
+	if id, err := tenant.GitHubCheckRun(ctx, accepted.RunID); err != nil || id != 0 {
 		t.Fatalf("recorded check run = %d, %v; want none", id, err)
 	}
 }

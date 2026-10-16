@@ -2,6 +2,10 @@
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
 
+Run receipts use the same response on HTTP and the local API socket. Each step
+identifies its job with `job_id`. Receipts omit raw invocation metadata and local
+store locations.
+
 Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
 
 Schedule reads and writes use `/api/v1/schedules`. Repository replacement uses
@@ -67,6 +71,13 @@ GitHub Actions OIDC, browser CSRF/nonce or exact signed-object URL. A missing or
 invalid credential returns 401. A live credential without the route's authority
 returns 403. Resource conflicts use their canonical code, including `lock_held`.
 
+Machine enrollment at `POST /api/v1/runners` rechecks current team administration,
+repository patterns, reserved pools, the existing runner limit and active name
+uniqueness in the issuing transaction. Service issuance at
+`POST /api/v1/operator/tokens` rechecks deployment authority and active service
+names. Registration facts persist with the capability root. Machine claims retain
+every ancestor's repository restriction, including after delegation and rotation.
+
 ## Errors and retries
 
 HTTP errors use one envelope:
@@ -112,6 +123,13 @@ once. Acceptance seals checkout declarations, resolved settings and the validate
 plan together. Retry retains the original request, source authority, SHA and
 accepted seals, with the retrier recorded separately. It never rewrites the
 original seal's identity to match the new run ID.
+
+Direct store consumers use `Store.ClaimUnit` for launcher and runner awards.
+`Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
+and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by
+`client.NewEngineClient` with `EngineOptions.Launcher`. `Client.ClaimLaunch` is removed.
+The granted service root supplies identity and metering. Claims persist their
+fences, billing reservations and bootstrap credentials in one transaction.
 
 Owner handoff keeps the awarded execution run ID separate from that original
 seal ID. The host receives the inner request document and its canonical seal
@@ -174,12 +192,18 @@ and the reserved `node_uid`. The award generation identifies the unit award,
 including an eval's own lease. It does not replace that eval's source generation.
 The server compares observations with this launcher's stored awards.
 
+The default store adapter reads ancestry, current claims and execution inputs in
+one snapshot. It checks the root and service identity, holder, generation,
+expiry and cancellation. Eval awards also require the current controller lease
+and unresolved source expansion. Exchange preserves the original award shown
+by synchronization. Sync never changes a claim or returns its bearer.
+
 The response contains held `awards` without bearer material and a `remove` list
 of exact Job instances. Each removal carries namespace, name and UID. The
 launcher must use that UID as a Kubernetes deletion precondition because a new
 Job can reuse the name. A failed transport, decode or validation returns no
-partial sync result. Native observation, reconciliation and cleanup bindings
-still require integration.
+partial sync result. Native Kubernetes adoption and teardown still require
+execution evidence.
 
 ## Logs and stored data
 

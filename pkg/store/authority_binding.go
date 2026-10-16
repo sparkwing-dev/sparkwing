@@ -224,7 +224,7 @@ func bindingTokenTx(ctx context.Context, tx *storeTx, c capability.Capability, t
 	if target.TokenPrefix == "" {
 		return bindingRefusal()
 	}
-	metadata, err := capabilityMetadataTx(ctx, tx, target.TokenPrefix)
+	_, metadata, err := capabilityMetadataTx(ctx, tx, target.TokenPrefix)
 	if err != nil {
 		return err
 	}

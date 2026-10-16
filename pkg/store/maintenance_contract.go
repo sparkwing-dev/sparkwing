@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 )
 
@@ -15,14 +14,17 @@ type SingletonLease struct {
 	ExpiresAt  time.Time
 }
 
-// SingletonWork lists every correctness-critical elected worker, including the local schedule worker.
-func SingletonWork() []string {
-	return []string{"controller.reaper", "controller.owner", "completion", "maintenance", "schedules.tick"}
+func validSingletonWork(name string) bool {
+	switch name {
+	case "controller.reaper", "controller.owner", "completion", "maintenance", "schedules.tick", "bucket.measure":
+		return true
+	}
+	return false
 }
 
 // AcquireSingletonLease refuses a live foreign holder and advances the fence after a lapse.
 func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder string, ttl time.Duration) (SingletonLease, error) {
-	if !slices.Contains(SingletonWork(), name) || holder == "" || ttl <= 0 {
+	if !validSingletonWork(name) || holder == "" || ttl <= 0 {
 		return SingletonLease{}, fmt.Errorf("invalid singleton lease")
 	}
 	tx, err := o.s.beginTx(ctx)
@@ -57,7 +59,7 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 
 // RenewSingletonLease refuses an expired fence; owner recovery acquires a new lease instead of reviving one.
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error) {
-	if ttl <= 0 || !slices.Contains(SingletonWork(), lease.Name) {
+	if ttl <= 0 || !validSingletonWork(lease.Name) {
 		return SingletonLease{}, fmt.Errorf("invalid singleton renewal")
 	}
 	tx, err := o.s.beginTx(ctx)
@@ -86,37 +88,6 @@ type ReapedUnit struct {
 	Requeued    bool
 	Cancelled   bool
 	Failed      bool
-}
-
-// RetentionRule separates operational expiration from pins and financial retention.
-type RetentionRule struct {
-	Data           string
-	Setting        string
-	CloudDays      *int
-	SelfHostedDays *int
-	Exception      string
-	Accounting     string
-}
-
-// RetentionRules is the full leased-pass policy; nil means operator-defined or disabled, never an implicit zero default.
-func RetentionRules() []RetentionRule {
-	days := func(n int) *int { return &n }
-	return []RetentionRule{
-		{"runs and operational children", "run_retention_days", days(90), nil, "keep newest successful run of each pipeline", "release usage in deletion transaction"},
-		{"events", "run_retention_days", days(90), nil, "expire through retained run deletion", "release event usage in deletion transaction"},
-		{"node metrics", "node_metric_retention_days", nil, nil, "independent metric retention setting", "release measured storage"},
-		{"outputs", "output_retention", days(30), days(30), "pin newest successful output per pipeline despite run/blob windows", "unique blob accounting"},
-		{"funded logs", "log_class_r90", days(90), days(90), "standing changes affect new runs only; operator classes allowed", "object lifecycle or filesystem expiration"},
-		{"free logs", "log_class_r30", days(30), days(30), "standing changes affect new runs only; operator classes allowed", "object lifecycle or filesystem expiration"},
-		{"financial ledger", "accounting_period", nil, nil, "never cascade or prune by run retention", "preserve grants minus charges"},
-		{"blob records", "record_expires_at", nil, nil, "pins survive expiry", "collect unreachable blobs after 24h through tombstones"},
-		{"blob receipts", "run_retention_days", days(90), nil, "expire with uploader run", "receipt is not a persistent read edge"},
-		{"capabilities", "capability_retention", days(7), days(7), "after expiry or revocation; descendants cannot outlive parent", "preserve independent billing evidence"},
-		{"run effects", "effect_retention", days(7), days(7), "terminal run and desired_rev=delivered_rev; age since delivery", "retain undelivered revisions"},
-		{"sessions and flow nonces", "expires_at", nil, nil, "existing configured expiry", "no financial deletion"},
-		{"invitations", "spent_identity_retention", days(30), days(30), "after acceptance, withdrawal or expiry", "preserve invitations counted by daily limits"},
-		{"webhook deliveries", "delivery_retention", nil, nil, "existing replay retention", "preserve accepted run trust facts"},
-	}
 }
 
 // FinancialTables identifies records that never take a cascading run foreign key.

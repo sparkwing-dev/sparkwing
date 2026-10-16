@@ -127,7 +127,7 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	*now = now.Add(123456789 * time.Nanosecond)
 	authorityMember(t, s, "owner", RoleOwner)
-	invitation, err := tenant.CreateInvitation(t.Context(), "owner", "invited@example.test", RoleReader, *now)
+	invitation, err := tenant.InviteForTest(t, t.Context(), "owner", "invited@example.test", RoleReader, *now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,17 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 		t.Fatalf("invitation persistence: created=%d expires=%d emailed=%d sent=%d", created, expires, emailed, sent)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('invited',?,1,1,1)`, invitation.Email)
-	accepted, err := s.AcceptInvitation(t.Context(), "invited", invitation.ID, *now)
+	rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email,created_at) VALUES ('google','invited','invited',?,1)`, invitation.Email)
+	raw, _, _, err := s.CreateIdentityAccountSession(t.Context(), Account{ID: "invited"}, "", ProviderGoogle, "invited", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, _ := capability.LookupRoute("POST", "/api/v1/invitations/{invitation}/accept")
+	accepted, err := s.AcceptAccountInvitation(t.Context(), capability.Authorized{Principal: p, Access: route.Access[0]}, invitation.ID)
 	if err != nil || accepted.Team != tenant.team {
 		t.Fatalf("invitation acceptance: %+v %v", accepted, err)
 	}
@@ -160,11 +170,11 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT accepted_at FROM invitations WHERE id=?`, invitation.ID).Scan(&at); err != nil || at != created {
 		t.Fatalf("acceptance timestamp: %d %v", at, err)
 	}
-	withdrawn, err := tenant.CreateInvitation(t.Context(), "owner", "withdrawn@example.test", RoleReader, *now)
+	withdrawn, err := tenant.InviteForTest(t, t.Context(), "owner", "withdrawn@example.test", RoleReader, *now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.DeleteInvitation(t.Context(), withdrawn.ID, *now); err != nil {
+	if err := tenant.WithdrawInvitationForTest(t, t.Context(), withdrawn.ID, *now); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.QueryRow(`SELECT withdrawn_at FROM invitations WHERE id=?`, withdrawn.ID).Scan(&at); err != nil || at != created {

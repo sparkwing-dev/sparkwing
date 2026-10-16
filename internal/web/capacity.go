@@ -276,7 +276,7 @@ func newCapacityProfile(rollup store.PipelineProfile, nodeCount, numCPU int) cap
 	res := capacity.Resolve(pin, &rollup, numCPU, rollup.PlanHash)
 	out := capacityProfile{
 		Pipeline:          rollup.Pipeline,
-		Display:           store.DisplayProfileKey(rollup.Pipeline),
+		Display:           rollup.Pipeline,
 		Charge:            chargeOf(res, rollup),
 		SampleCount:       rollup.SampleCount,
 		PeakCores:         rollup.PeakCores,

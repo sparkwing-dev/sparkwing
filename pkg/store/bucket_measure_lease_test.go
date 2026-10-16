@@ -14,7 +14,7 @@ func TestRunBucketMeasureLeased_OneHolderPerWindow(t *testing.T) {
 	ctx := context.Background()
 
 	measured := 0
-	ran, err := st.RunBucketMeasureLeased(ctx, "alpha", time.Hour, time.Minute, func(context.Context) error {
+	ran, err := st.AsOperator().RunBucketMeasureLeased(ctx, "alpha", time.Hour, time.Minute, func(context.Context) error {
 		measured++
 		return nil
 	})
@@ -22,7 +22,7 @@ func TestRunBucketMeasureLeased_OneHolderPerWindow(t *testing.T) {
 		t.Fatalf("first measurement ran=%t err=%v", ran, err)
 	}
 
-	ran, err = st.RunBucketMeasureLeased(ctx, "beta", time.Hour, time.Minute, func(context.Context) error {
+	ran, err = st.AsOperator().RunBucketMeasureLeased(ctx, "beta", time.Hour, time.Minute, func(context.Context) error {
 		measured++
 		return nil
 	})
@@ -41,7 +41,7 @@ func TestRunBucketMeasureLeased_ReturnsTheMeasurementError(t *testing.T) {
 	st := storetest.Open(t)
 	want := errors.New("bucket unreachable")
 
-	ran, err := st.RunBucketMeasureLeased(context.Background(), "alpha", time.Hour, time.Minute,
+	ran, err := st.AsOperator().RunBucketMeasureLeased(context.Background(), "alpha", time.Hour, time.Minute,
 		func(context.Context) error { return want })
 	if !ran {
 		t.Error("a failed measurement reports that it did not run")
@@ -55,12 +55,12 @@ func TestRunBucketMeasureLeased_AFailedWindowIsClaimableAgain(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 
-	if _, err := st.RunBucketMeasureLeased(ctx, "alpha", time.Hour, time.Minute,
+	if _, err := st.AsOperator().RunBucketMeasureLeased(ctx, "alpha", time.Hour, time.Minute,
 		func(context.Context) error { return errors.New("listing failed") }); err == nil {
 		t.Fatal("the failing measurement reported success")
 	}
 
-	ran, err := st.RunBucketMeasureLeased(ctx, "beta", time.Hour, time.Minute,
+	ran, err := st.AsOperator().RunBucketMeasureLeased(ctx, "beta", time.Hour, time.Minute,
 		func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatalf("retry after a failed measurement: %v", err)
@@ -72,10 +72,10 @@ func TestRunBucketMeasureLeased_AFailedWindowIsClaimableAgain(t *testing.T) {
 
 func TestRunBucketMeasureLeased_RefusesAnEmptyMeasurement(t *testing.T) {
 	st := storetest.Open(t)
-	if _, err := st.RunBucketMeasureLeased(context.Background(), "alpha", time.Hour, time.Minute, nil); err == nil {
+	if _, err := st.AsOperator().RunBucketMeasureLeased(context.Background(), "alpha", time.Hour, time.Minute, nil); err == nil {
 		t.Error("a nil measurement function was accepted")
 	}
-	if _, err := st.RunBucketMeasureLeased(context.Background(), "alpha", 0, time.Minute,
+	if _, err := st.AsOperator().RunBucketMeasureLeased(context.Background(), "alpha", 0, time.Minute,
 		func(context.Context) error { return nil }); err == nil {
 		t.Error("a zero window was accepted")
 	}

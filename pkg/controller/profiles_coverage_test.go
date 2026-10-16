@@ -10,7 +10,7 @@ import (
 )
 
 func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
-	for _, mode := range []string{"missing", "unreadable", "cached", "zero"} {
+	for _, mode := range []string{"missing", "unreadable", "memoized", "zero"} {
 		t.Run(mode, func(t *testing.T) {
 			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
@@ -19,28 +19,28 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			t.Cleanup(func() { _ = st.Close() })
 			start := time.Now()
 			run := store.Run{ID: "r", Pipeline: "coverage", Status: "running", StartedAt: start}
-			if err := st.CreateRun(t.Context(), run); err != nil {
+			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, run); err != nil {
 				t.Fatal(err)
 			}
 			for _, id := range []string{"a", "c"} {
-				if err := st.CreateNode(t.Context(), store.Node{RunID: "r", NodeID: id, Status: "running", StartedAt: &start}); err != nil {
+				if err := teststore.SeedNode(st, t.Context(), store.Node{RunID: "r", NodeID: id, Status: "running", StartedAt: &start}); err != nil {
 					t.Fatal(err)
 				}
 				outcome := "success"
-				if id == "c" && mode == "cached" {
-					outcome = "cached"
+				if id == "c" && mode == "memoized" {
+					outcome = "memoized"
 				}
-				if err := st.FinishNode(t.Context(), "r", id, outcome, ""); err != nil {
+				if err := teststore.SeedNodeFinish(st, t.Context(), store.DefaultTeam, store.NodeRef{RunID: "r", NodeID: id}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
 				cpu := int64(100)
 				if id == "c" {
-					if mode == "missing" || mode == "cached" {
+					if mode == "missing" || mode == "memoized" {
 						continue
 					}
 					cpu = 0
 				}
-				if err := st.AddNodeMetricSample(t.Context(), "r", id, store.MetricSample{Kind: store.MetricInterval, TS: start, CPUMillicores: cpu, MemoryBytes: 100}); err != nil {
+				if err := teststore.SeedMetric(st.DB(), t.Context(), "r", id, store.MetricSample{Kind: store.MetricInterval, TS: start, CPUMillicores: cpu, MemoryBytes: 100}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -48,13 +48,13 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				if _, err := st.DB().Exec(`UPDATE node_metrics SET memory_bytes='invalid' WHERE run_id='r' AND node_id='c'`); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := st.ListNodeMetrics(t.Context(), "r", "c"); err == nil {
+				if _, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(t.Context(), "r", "c"); err == nil {
 					t.Fatal("corrupt metric read succeeded")
 				}
 			}
-			if mode == "cached" {
-				n, err := st.GetNode(t.Context(), "r", "c")
-				if err != nil || n.Outcome != "cached" {
+			if mode == "memoized" {
+				n, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(t.Context(), "r", "c")
+				if err != nil || n.Outcome != "memoized" {
 					t.Fatalf("cache fixture=%+v, %v", n, err)
 				}
 			}
@@ -91,7 +91,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			if p == nil || p.PinnedCores != 2 || p.PinnedMemoryBytes != 1024 {
 				t.Fatalf("explicit run pin changed: %+v", p)
 			}
-			wantRun := mode == "cached"
+			wantRun := mode == "memoized"
 			if wantRun {
 				if p == nil || p.SampleCount != 1 {
 					t.Fatalf("complete evidence produced no run observation: %+v", p)

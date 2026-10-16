@@ -157,7 +157,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 	if err != nil {
 		return UnitRef{}, err
 	}
-	metered := chain[len(chain)-1].principal.Capability.RootMetered
+	metered := meteredPlacement(c, chain[len(chain)-1].principal.Capability)
 	var candidates []queuedClaim
 	for _, kind := range kinds {
 		query, args := queuedClaimQuery(c, kind, tx.now().UnixNano())
@@ -189,6 +189,13 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		}
 		verdict := match.Evaluate(profile, requirements)
 		if !verdict.OK() || !match.Fits(profile.Capacity, demand.Available, requirements.Request).OK() {
+			continue
+		}
+		placement, err := unitPlacementTx(ctx, tx, candidate.team, candidate.unit, profile, requirements)
+		if err != nil {
+			return UnitRef{}, err
+		}
+		if placement.hold {
 			continue
 		}
 		if metered {

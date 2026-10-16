@@ -177,7 +177,10 @@ func TestEngineExpansionReplayReturnsPersistedState(t *testing.T) {
 func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
-			server, _ := engineRuntimeStore(t)
+			server, tenant := engineRuntimeStore(t)
+			if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "launcher-test", CreatedBy: "fixture"}); err != nil {
+				t.Fatal(err)
+			}
 			root := capability.Capability{Prefix: "launcher", Team: "", Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Audience: capability.Controller, Grants: []capability.Grant{capability.ClaimsLaunch}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{}, IssuedAt: time.Unix(0, 1).UTC()}
 			envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: root})
 			if err != nil {
@@ -200,6 +203,9 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 			principal, err := server.Store.LookupCapability(t.Context(), sha256.Sum256(claim.Bearer))
 			if err != nil {
 				t.Fatal(err)
+			}
+			if principal.Capability.Billing == nil || !principal.Capability.Billing.Metered {
+				t.Fatal("Cloud bootstrap from an unmetered root lacks metered provenance")
 			}
 			authorized := capability.Authorized{Principal: principal, Binding: principal.Capability.Binding, Target: capability.Target{Team: "forged", RunID: "foreign"}}
 			got, err := server.Exchange(t.Context(), authorized)

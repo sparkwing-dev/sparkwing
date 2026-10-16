@@ -25,7 +25,7 @@ func TestCommittingAccountOriginProperty(t *testing.T) {
 	}
 	owner := authorityMember(t, s, "owner", RoleOwner)
 	s.SetProvisionPolicy(provisionPolicyFunc(func(_ context.Context, _ capability.AuthorityResolver, _ capability.ProvisionSpec) error { return nil }))
-	registration := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}}
+	registration := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &owner.Authority, RegistrationID: "runner:a:runner", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Repositories: []string{"github.com/acme/*"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}}
 	machine, err := s.ProvisionCapability(t.Context(), registration)
 	if err != nil {
 		t.Fatal(err)
@@ -82,13 +82,14 @@ func TestMachineProvisionGrantsProperty(t *testing.T) {
 	authorityPersist(t, s, deployment)
 	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
 	random := rand.New(rand.NewPCG(453, 28))
-	for _, origin := range []capability.AuthorityRef{owner.Authority, {Kind: capability.AuthorityCapability, ID: deployment.Prefix}} {
-		for _, grant := range capability.Grants {
+	for originIndex, origin := range []capability.AuthorityRef{owner.Authority, {Kind: capability.AuthorityCapability, ID: deployment.Prefix}} {
+		for grantIndex, grant := range capability.Grants {
 			grants := []capability.Grant{grant}
 			if random.IntN(2) == 0 && grant != capability.NodesClaim {
 				grants = append(grants, capability.NodesClaim)
 			}
-			spec := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, RegistrationID: "runner", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}}
+			name := fmt.Sprintf("runner-%d-%d", originIndex, grantIndex)
+			spec := capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Repositories: []string{"github.com/acme/*"}, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone}}
 			issued, err := s.ProvisionCapability(t.Context(), spec)
 			if grant == capability.NodesClaim || grant == capability.TriggersClaim {
 				if err != nil || issued.Raw == "" {

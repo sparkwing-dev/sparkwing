@@ -43,10 +43,10 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		PlanSnapshot: []byte(`{"pipeline":"deploy","run_id":"src-run","nodes":[{"id":"deploy","deps":[]}]}`),
 		StartedAt:    time.Now().Add(-5 * time.Minute),
 	}
-	if err := st.CreateRun(ctx, src); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, src); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.FinishRun(ctx, src.ID, "failed", "exit 1"); err != nil {
+	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, src.ID, "failed", "exit 1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -76,7 +76,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		t.Errorf("retry_of=%v want %s", body["retry_of"], src.ID)
 	}
 
-	trig, err := st.GetTrigger(ctx, newID)
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, newID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRetry_WorkingTreeRunRetainsDesktopClaimSource(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	source := "pipeline-working-tree@moonborn.local"
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "workspace-run", Pipeline: "build", Status: "failed", TriggerSource: source,
 		GitSHA: strings.Repeat("a", 40), RepoURL: "https://git.example.com/acme/widgets.git", StartedAt: time.Now(),
 	}); err != nil {
@@ -137,7 +137,7 @@ func TestRetry_WorkingTreeRunRetainsDesktopClaimSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, _ := body["id"].(string)
-	trigger, err := st.GetTrigger(ctx, id)
+	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestRetry_WorkingTreeRunIgnoresAnotherTeamsTriggerWithSameID(t *testing.T) 
 		t.Fatal(err)
 	}
 	const runID = "local-worktree"
-	if err := aliceTeam.CreateRun(t.Context(), store.Run{
+	if err := teststore.SeedRun(f.store, t.Context(), aliceTeam.Team(), store.Run{
 		ID: runID, Pipeline: "build", Status: "failed",
 		TriggerSource: "pipeline-working-tree@desktop", StartedAt: time.Now(),
 	}); err != nil {
@@ -212,7 +212,7 @@ func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *test
 		},
 		StartedAt: time.Now(),
 	}
-	if err := st.CreateRun(ctx, src); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, src); err != nil {
 		t.Fatal(err)
 	}
 
@@ -230,7 +230,7 @@ func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *test
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	trigger, err := st.GetTrigger(ctx, body["id"].(string))
+	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, body["id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 		Status:    "failed",
 		StartedAt: time.Now().Add(-5 * time.Minute),
 	}
-	if err := st.CreateRun(ctx, src); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, src); err != nil {
 		t.Fatal(err)
 	}
 
@@ -297,7 +297,7 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 		t.Fatal("empty id in response")
 	}
 
-	run, err := st.GetRun(ctx, newID)
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, newID)
 	if err != nil {
 		t.Fatalf("GetRun(%s): %v", newID, err)
 	}
@@ -321,7 +321,7 @@ func TestRetry_FullQueryParam(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "src-full", Pipeline: "p", Status: "failed", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -345,7 +345,7 @@ func TestRetry_FullQueryParam(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	fullID, _ := body1["id"].(string)
-	trig, err := st.GetTrigger(ctx, fullID)
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, fullID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -364,12 +364,12 @@ func TestRetry_ListAttempts(t *testing.T) {
 
 	ctx := context.Background()
 	t0 := time.Now().Add(-3 * time.Hour)
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "root", Pipeline: "p", Status: "failed", CreatedAt: t0, StartedAt: t0,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "second", Pipeline: "p", Status: "failed",
 		RetryOf: "root", CreatedAt: t0.Add(time.Hour), StartedAt: t0.Add(time.Hour),
 	}); err != nil {

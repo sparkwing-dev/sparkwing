@@ -35,6 +35,11 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if variants != 1 {
 		return capability.Issued{}, authorityError(apierr.BadRequest, "issuance requires exactly one variant")
 	}
+	if request.Provision != nil {
+		if err := capability.ValidateProvisionSeed(*request.Provision); err != nil {
+			return capability.Issued{}, err
+		}
+	}
 	var c capability.Capability
 	var err error
 	switch {
@@ -56,7 +61,7 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if request.Provision != nil {
 		seed = request.Provision.Seed
 	}
-	issued, err := persistIssuedCapabilityTx(ctx, tx, c, seed)
+	issued, err := persistIssuedCapabilityTx(ctx, tx, c, seed, request.Provision)
 	if err != nil {
 		return capability.Issued{}, err
 	}
@@ -64,6 +69,15 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if request.Provision != nil {
 		if err := recordProvisionCreatorTx(ctx, tx, *request.Provision, c); err != nil {
 			return capability.Issued{}, err
+		}
+		if request.Provision.Kind == capability.ProvisionBootstrap && tx.rotatingRoot == nil {
+			result, err := tx.ExecContext(ctx, `UPDATE settings SET value=? WHERE key='bootstrap_admin'`, []byte(c.Prefix))
+			if err != nil {
+				return capability.Issued{}, err
+			}
+			if err := requireOneRow(result, "bootstrap gate"); err != nil {
+				return capability.Issued{}, err
+			}
 		}
 		if err := finishBootstrapSetupTx(ctx, tx, c); err != nil {
 			return capability.Issued{}, err
@@ -76,6 +90,9 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	}
 	if request.Award != nil {
 		if err := persistUnitBillingTx(ctx, tx, c); err != nil {
+			return capability.Issued{}, err
+		}
+		if err := observeUnitTx(ctx, tx, c.Prefix); err != nil {
 			return capability.Issued{}, err
 		}
 	}
@@ -222,7 +239,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if here {
 		parent = claimant
 	}
-	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}, RootMetered: parent.Capability.RootMetered}
+	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}}
 	c.Binding = capability.Binding{Kind: policy.Bindings[0], RunID: row.run, NodeID: row.node, Generation: row.generation, Holder: row.holder, Attempt: 0}
 	if row.expiry.Valid {
 		deadline := time.Unix(0, row.expiry.Int64).UTC()
@@ -272,7 +289,8 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if here || parent.Capability.Purpose == capability.PurposeHere {
 		executor = "here"
 	}
-	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: parent.Capability.RootMetered, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
+	c.RootMetered = meteredPlacement(claimant.Capability, parent.Capability)
+	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: c.RootMetered, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
 	return c, nil
 }
 
@@ -351,7 +369,7 @@ func bindExchangedUnitTx(ctx context.Context, tx *storeTx, c capability.Capabili
 	return nil
 }
 
-func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, seed string) (capability.Issued, error) {
+func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, seed string, provision ...*capability.ProvisionSpec) (capability.Issued, error) {
 	var secret [32]byte
 	if _, err := rand.Read(secret[:]); err != nil {
 		return capability.Issued{}, err
@@ -367,7 +385,11 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 	c.Prefix = raw[:16]
 	c.Digest = sha256.Sum256([]byte(raw))
 	c.IssuedAt = tx.now()
-	if err := persistCapabilityTx(ctx, tx, c); err != nil {
+	var origin *CapabilityOrigin
+	if len(provision) > 0 && provision[0] != nil {
+		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID}
+	}
+	if err := persistCapabilityTx(ctx, tx, c, origin); err != nil {
 		return capability.Issued{}, err
 	}
 	return capability.Issued{Raw: raw, Capability: c}, nil

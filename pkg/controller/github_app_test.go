@@ -649,10 +649,10 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
 	}
-	if err := f.store.CreateRun(t.Context(), store.Run{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.SetComputeLimit(t.Context(), store.ComputeLimitGlobalRunsPerHour, 1); err != nil {
+	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 1}); err != nil {
 		t.Fatal(err)
 	}
 	payload := pushPayload(7, 701, "acme/widgets", headSHA)
@@ -662,7 +662,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	if got := f.triggers(olga.team); len(got) != 0 {
 		t.Fatalf("limited app webhook left triggers: %+v", got)
 	}
-	if err := f.store.SetComputeLimit(t.Context(), store.ComputeLimitGlobalRunsPerHour, 0); err != nil {
+	if _, err := f.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitGlobalRunsPerHour: 0}); err != nil {
 		t.Fatal(err)
 	}
 	if code, out := f.deliver("push", payload, ""); code != http.StatusAccepted || out["status"] != "dispatched" {

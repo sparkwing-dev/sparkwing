@@ -48,6 +48,14 @@ func TestLocalAndHereClaimsDoNotInventAnExecutionDeadline(t *testing.T) {
 			if err != nil || !beat.ExpiresAt.After(claim.Award.LeaseExpiresAt) {
 				t.Fatalf("local lease cannot renew: %+v, %v", beat, err)
 			}
+			inventory, err := (&Tenant{s: s, team: "a"}).ReadRunners(t.Context())
+			if err != nil || len(inventory.Runners) != 2 {
+				t.Fatalf("local inventory: %+v %v", inventory, err)
+			}
+			row := inventory.Runners[1]
+			if row.Runner.Type != placement || row.Runner.Name != root.Subject.ID || row.Location != "local" || len(row.ActiveJobs) != 1 || row.ActiveJobs[0] != "run" || row.Headroom != nil || !row.LastSeen.Equal(s.now()) {
+				t.Fatalf("local award identity: %+v", row)
+			}
 		})
 	}
 }

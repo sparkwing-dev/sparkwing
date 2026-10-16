@@ -17,36 +17,38 @@ import (
 
 // safety: a claim hides the reason without writing the run row.
 const runAttentionColumn = `COALESCE((SELECT n.attention_reason FROM nodes n
- WHERE n.run_id = runs.id AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL
+ WHERE n.team = runs.team AND n.run_id = runs.id AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL
    AND n.` + nodeNotDone + ` AND n.attention_reason != ''
  ORDER BY n.node_id LIMIT 1), '')`
 
-func planClaimWait(snapshot []byte) int64 {
-	var plan struct {
-		ClaimWaitMS int64 `json:"claim_wait_ms"`
-	}
-	if json.Unmarshal(snapshot, &plan) != nil || plan.ClaimWaitMS <= 0 {
-		return 0
-	}
-	return (time.Duration(plan.ClaimWaitMS) * time.Millisecond).Nanoseconds()
+type runnerPoll struct {
+	UnitDemand
+	ObservedAt time.Time `json:"observed_at"`
 }
 
-// RecordAgentLabels stores the labels the agent holding prefix advertised
-// on its latest claim, which say what it could run while it is offline.
-func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error {
-	raw, err := json.Marshal(match.SelfAsserted(labels))
+// RecordRunnerPoll stores a live machine's advertised capacity and labels with the store clock.
+func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
+	if !validMatchingResources(observation.Capacity) || !validMatchingResources(observation.Available) {
+		return authorityError(apierr.BadRequest, "invalid claim resources")
+	}
+	observation.Labels = match.SelfAsserted(observation.Labels)
+	raw, err := json.Marshal(observation.Labels)
 	if err != nil {
 		return err
 	}
 	return s.inTx(ctx, func(tx *storeTx) error {
-		principal, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+		principal, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix})
 		if err != nil {
 			return err
 		}
 		if !registeredClaimant(principal.Capability) {
-			return authorityError(apierr.Forbidden, "agent labels require an unbound machine claimant")
+			return authorityError(apierr.Forbidden, "runner observations require an unbound machine claimant")
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,last_used_at=? WHERE team=? AND prefix=?`, raw, tx.now().UnixNano(), principal.Capability.Team, prefix)
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, raw, body, tx.now().UnixNano(), principal.Capability.Team, observation.CapabilityPrefix)
 		return err
 	})
 }
@@ -57,6 +59,7 @@ type RegisteredAgent struct {
 	// Profile combines enrollment and granted identity with last observed labels.
 	Profile  match.Profile
 	LastSeen time.Time
+	poll     *runnerPoll
 }
 
 // ListRegisteredAgents reads this tenant's live machine claimants and observed labels.
@@ -66,15 +69,25 @@ func (t *Tenant) ListRegisteredAgents(ctx context.Context) ([]RegisteredAgent, e
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	agents, err := registeredAgentObservationsTx(ctx, tx, t.team)
+	out, err := registeredAgentsTx(ctx, tx, t.team)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func registeredAgentsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
+	agents, err := registeredAgentObservationsTx(ctx, tx, team)
 	if err != nil {
 		return nil, err
 	}
 	var out []RegisteredAgent
 	for _, observed := range agents {
-		agent, err := registeredAgentTx(ctx, tx, t.team, observed)
-		var denied *apierr.Error
-		if errors.As(err, &denied) && denied.Code == apierr.Unauthenticated {
+		agent, err := registeredAgentTx(ctx, tx, team, observed)
+		if unavailableRunner(err) {
 			continue
 		}
 		if err != nil {
@@ -84,13 +97,13 @@ func (t *Tenant) ListRegisteredAgents(ctx context.Context) ([]RegisteredAgent, e
 			out = append(out, *agent)
 		}
 	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at FROM capabilities
+	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at,claim_observation_json FROM capabilities
  WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
- AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, tx.now().UnixNano())
+ AND (revoked_at IS NULL OR revoked_at>?) AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, tx.now().UnixNano(), tx.now().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -98,9 +111,9 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 	var observations []RegisteredAgent
 	for rows.Next() {
 		var a RegisteredAgent
-		var advertised []byte
+		var advertised, body []byte
 		var used sql.NullInt64
-		if err := rows.Scan(&a.CapabilityPrefix, &advertised, &used); err != nil {
+		if err := rows.Scan(&a.CapabilityPrefix, &advertised, &used, &body); err != nil {
 			return nil, err
 		}
 		if len(advertised) > 0 {
@@ -111,6 +124,15 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 		}
 		if used.Int64 > 0 {
 			a.LastSeen = time.Unix(0, used.Int64).UTC()
+		}
+		if len(body) > 0 {
+			a.poll = &runnerPoll{}
+			if err := json.Unmarshal(body, a.poll); err != nil {
+				return nil, err
+			}
+			if !validMatchingResources(a.poll.Capacity) || !validMatchingResources(a.poll.Available) || a.poll.ObservedAt.IsZero() || a.poll.ObservedAt.After(tx.now()) {
+				return nil, authorityError(apierr.IntegrityFailure, "invalid runner capacity observation")
+			}
 		}
 		observations = append(observations, a)
 	}

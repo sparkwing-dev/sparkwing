@@ -89,6 +89,49 @@ func unitBillingTotal(t *testing.T, s *Store, want int64, settled bool) {
 	}
 }
 
+func TestUnmeteredUnitLifecycleNeedsNoCalculator(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
+		for _, end := range []string{"release", "unstarted_lapse", "started_lapse"} {
+			t.Run(string(kind)+"/"+end, func(t *testing.T) {
+				s, _, claim, now := renewalFixture(t, kind)
+				s.billing = func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error) {
+					t.Error("unmetered lifecycle called the billing calculator")
+					return capability.BillingSettlement{}, errors.New("no unmetered calculator")
+				}
+				started := end == "started_lapse"
+				if started && kind == capability.UnitNode {
+					ordinal := int64(0)
+					actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+					if _, err := (&Tenant{s: s, team: claim.Team}).TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{claim.RunID, claim.NodeID}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: &ordinal}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, started)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if end == "release" {
+					if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					*now = beat.ExpiresAt
+					lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
+					if err != nil {
+						t.Fatal(err)
+					}
+					units, err := s.ReapUnits(t.Context(), lease, 10)
+					if err != nil || len(units) != 1 || !units[0].Requeued {
+						t.Fatalf("unmetered recovery: %+v, %v", units, err)
+					}
+				}
+				unitBillingTotal(t, s, 0, true)
+				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
+			})
+		}
+	}
+}
+
 func TestMeteredUnitClaimAndReservationCommitTogether(t *testing.T) {
 	s, demand, _ := meteredUnitFixture(t, false)
 	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)

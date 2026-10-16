@@ -5,10 +5,14 @@ import (
 	"math/rand"
 	"testing"
 	"testing/quick"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestStoreDataBuildTrustDefaultsAndTenantIsolation(t *testing.T) {
 	s := authorityStore(t)
+	_ = authorityMember(t, s, "owner", RoleOwner)
 	a, err := s.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +27,7 @@ func TestStoreDataBuildTrustDefaultsAndTenantIsolation(t *testing.T) {
 		}
 	}
 	for _, trust := range []bool{true, true, false, false} {
-		if err := a.SetTrustLocalBuilds(t.Context(), trust); err != nil {
+		if err := a.SetAuthorizedBuildTrust(t.Context(), a.mutationFixtureAuthority(t, "owner", capability.TeamAdmin, time.Now()), trust); err != nil {
 			t.Fatal(err)
 		}
 		if got, err := a.TrustLocalBuilds(t.Context()); err != nil || got != trust {
@@ -37,6 +41,7 @@ func TestStoreDataBuildTrustDefaultsAndTenantIsolation(t *testing.T) {
 
 func TestStoreDataBuildTrustPersistsOnlyTheSelectedTenantProperty(t *testing.T) {
 	s := authorityStore(t)
+	_ = authorityMember(t, s, "owner", RoleOwner)
 	path := blobAccountingDiskStore(t, s)
 	iteration := 0
 	property := func(suffix string, first, second, reopen bool) bool {
@@ -45,6 +50,7 @@ func TestStoreDataBuildTrustPersistsOnlyTheSelectedTenantProperty(t *testing.T) 
 		for owner := range tenants {
 			team := NormalizeTeam(Team(fmt.Sprintf("build_%d_%d_%s_%%'--", iteration, owner, suffix)))
 			rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)", team)
+			rewriteSchemaExec(t, s.db, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'owner','owner',1)`, team)
 			var err error
 			tenants[owner], err = s.ForTeam(t.Context(), team)
 			if err != nil {
@@ -66,7 +72,7 @@ func TestStoreDataBuildTrustPersistsOnlyTheSelectedTenantProperty(t *testing.T) 
 		}
 		for _, want := range [][2]bool{{first, second}, {!first, second}, {!first, !second}} {
 			for owner, tenant := range tenants {
-				if err := tenant.SetTrustLocalBuilds(t.Context(), want[owner]); err != nil {
+				if err := tenant.SetAuthorizedBuildTrust(t.Context(), tenant.mutationFixtureAuthority(t, "owner", capability.TeamAdmin, time.Now()), want[owner]); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -89,12 +95,13 @@ func TestStoreDataBuildTrustPersistsOnlyTheSelectedTenantProperty(t *testing.T) 
 
 func TestStoreDataBuildTrustFailuresNeverEnableIt(t *testing.T) {
 	s := authorityStore(t)
+	_ = authorityMember(t, s, "owner", RoleOwner)
 	tenant, err := s.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_build_trust BEFORE INSERT ON team_build_trust BEGIN SELECT RAISE(ABORT,'policy write unavailable'); END`)
-	if err := tenant.SetTrustLocalBuilds(t.Context(), true); err == nil {
+	if err := tenant.SetAuthorizedBuildTrust(t.Context(), tenant.mutationFixtureAuthority(t, "owner", capability.TeamAdmin, time.Now()), true); err == nil {
 		t.Fatal("failed opt-in returned success")
 	}
 	if trust, err := tenant.TrustLocalBuilds(t.Context()); err != nil || trust {

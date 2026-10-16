@@ -558,6 +558,9 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) erro
 	if row.Ref.RunID == "" || row.Ref.NodeID == "" || row.Status != StatusPending || row.StateSeq != 0 || row.ClaimedBy != "" || row.Generation != 0 || row.SpecHash == "" {
 		return errors.New("invalid initial job")
 	}
+	if err := enforceNodesPerRunTx(ctx, tx, team, row.Ref.RunID); err != nil {
+		return err
+	}
 	execution, err := json.Marshal(row.Execution)
 	if err != nil {
 		return err
@@ -742,6 +745,16 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		if n != 1 {
 			return errors.New("attempt closure did not match live attempt")
 		}
+		stepState := StepFailed
+		switch outcome {
+		case NodeSuccess:
+			stepState = StepPassed
+		case NodeCancelled:
+			stepState = StepCancelled
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE node_steps SET status=?,finished_at=? WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND status='running'`, stepState, now.UnixNano(), team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation); err != nil {
+			return err
+		}
 	}
 	switch change.To {
 	case NodeReady:
@@ -763,14 +776,16 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		row.QueueStartedAt = nil
 		row.Attempt++
 		row.StartedAt = &now
-		kind, name, location := "runner", row.ClaimedBy, "unknown"
 		if a := change.Extra.Attempt; a != nil {
 			if a.Identity.Team != string(team) || a.Identity.RunID != row.Ref.RunID || a.Identity.NodeID != row.Ref.NodeID || a.Identity.Attempt != row.Attempt || a.Identity.Generation != row.Generation {
 				return errors.New("attempt identity does not match claim")
 			}
-			kind, name, location = a.ExecutorKind, a.ExecutorName, a.ExecutorLocation
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, row.ClaimedBy, row.CapabilityPrefix, kind, name, location, now.UnixNano())
+		kind, name, location, err := attemptExecutorTx(ctx, tx, change.Actor, change.Extra.Attempt)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, row.ClaimedBy, row.CapabilityPrefix, kind, name, location, now.UnixNano())
 		if err != nil {
 			return err
 		}
@@ -876,6 +891,7 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 		return errors.New("approval already resolved")
 	}
 	resolution := ""
+	approver := change.Actor.Owner.Holder
 	if change.Cause == CauseApprovalTimeout {
 		if timeout <= 0 || time.Unix(0, requested).Add(time.Duration(timeout)*time.Millisecond).After(now) {
 			return errors.New("approval deadline not reached")
@@ -900,6 +916,7 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 		if change.Extra.Approval == nil {
 			return errors.New("approval decision missing")
 		}
+		approver = principal.Capability.Subject.ID
 		resolution = change.Extra.Approval.Decision
 		if (resolution != "approved" && resolution != "denied") || (resolution == "approved") != (change.To == NodeSuccess) {
 			return errors.New("approval decision mismatch")
@@ -908,10 +925,6 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 	comment := ""
 	if change.Extra.Approval != nil {
 		comment = change.Extra.Approval.Comment
-	}
-	approver := change.Actor.Authority.ID
-	if change.Actor.Kind == ActorReaper {
-		approver = change.Actor.Owner.Holder
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE approvals SET resolved_at=?,resolution=?,approver=?,comment=? WHERE team=? AND run_id=? AND node_id=? AND resolved_at IS NULL`, now.UnixNano(), resolution, approver, comment, team, row.Ref.RunID, row.Ref.NodeID)
 	return err

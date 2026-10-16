@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type launcherSyncFunc func(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
@@ -22,7 +23,10 @@ func (f launcherSyncFunc) ReadLauncherSync(ctx context.Context, ref capability.A
 }
 
 func TestEngineLauncherSyncNativeFenceProperty(t *testing.T) {
-	e, _ := engineRuntimeStore(t)
+	e, tenant := engineRuntimeStore(t)
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100_000_000, Reference: "launcher-test", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
@@ -87,7 +91,7 @@ func TestEngineLauncherSyncHTTPUsesAuthenticatedRootAndNeverDeliversBearer(t *te
 	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
 	body := `{"observed":[{"award":{"kind":"node","id":"unit","holder":"launcher","generation":1},"job":{"namespace":"ci","name":"job","uid":"job-uid"},"node_uid":"node"}]}`
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/launcher/sync", body, 401)
-	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", body, 400)
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", body, 200)
 	called := 0
 	e.Launcher = launcherSyncFunc(func(_ context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
 		called++

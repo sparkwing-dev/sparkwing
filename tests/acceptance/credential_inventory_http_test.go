@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
@@ -55,11 +56,11 @@ func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := tenant.CreateOrReplaceSecret(store.Secret{Name: name, Value: value, Pipeline: "build", Masked: masked}, time.Now()); err != nil {
+			if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: name, Value: value, Pipeline: "build", Masked: masked}, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if _, err := tenant.PutGitCredential(t.Context(), store.GitCredential{Host: string(team) + ".invalid", Kind: store.GitCredentialHTTPS, Secret: string(team) + "-git-secret"}, time.Now()); err != nil {
+		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), store.GitCredential{Host: string(team) + ".invalid", Kind: store.GitCredentialHTTPS, Secret: string(team) + "-git-secret"}); err != nil {
 			t.Fatal(err)
 		}
 	}

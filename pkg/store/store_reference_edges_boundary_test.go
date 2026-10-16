@@ -18,7 +18,7 @@ func checkStoreReferenceBoundary(t *testing.T) error {
 	s, tenant, authority, digests := seedStoreReferenceBoundary(t)
 	blobAccountingDiskStore(t, s)
 	reader := authority.Attempt.Value
-	authorized := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: reader.Team}}}
+	authorized := capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef}, Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: reader.Team}}}
 	for _, test := range []struct {
 		name    string
 		spec    nodeproto.JobSpec
@@ -49,7 +49,7 @@ func checkStoreReferenceBoundary(t *testing.T) error {
 			return fmt.Errorf("%s read set=%+v, want %v: %v", test.name, presence, want, err)
 		}
 		for i, digest := range digests {
-			for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataRecord} {
+			for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataLookup} {
 				target := capability.DataTarget{Operation: operation, Digest: string(digest), RecordKind: string(blob.KindOutput), RunID: reader.RunID, NodeID: reader.NodeID, Attempt: reader.Attempt, Generation: reader.Generation}
 				err := tenant.CheckDataAccess(ctx, authorized, target)
 				allowed := test.allowed && i < 3

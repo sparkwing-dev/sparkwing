@@ -2,13 +2,16 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type runnerEnrollmentRequest struct {
@@ -30,7 +33,7 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
 	}
-	if !validRunnerName(request.Name) || len(request.Repos) == 0 || len(request.Repos) > maxRunnerRepos {
+	if !store.ValidRunnerName(request.Name) || len(request.Repos) == 0 || len(request.Repos) > maxRunnerRepos {
 		return invalidEngineBody("name must be 1 to 63 letters, digits, '-', '_' or '.'; repos must contain 1 to 32 patterns")
 	}
 	allow, err := sourceurl.ParseRepoAllowlist(request.Repos)
@@ -115,6 +118,12 @@ func (s *Server) provisionRoot(w http.ResponseWriter, r *http.Request, spec capa
 	}
 	issued, err := s.credentialIssuer.ProvisionCapability(r.Context(), spec)
 	if err != nil {
+		if errors.Is(err, store.ErrAgentNameTaken) {
+			return &apierr.Error{Code: apierr.Conflict, Message: "an enrolled credential already uses this name"}
+		}
+		if errors.Is(err, store.ErrRunnerTokenLimit) {
+			return &apierr.Error{Code: apierr.QuotaExceeded, Message: "the team's runner enrollment limit is reached"}
+		}
 		return engineLookupError(err)
 	}
 	noteAuditTarget(r.Context(), "token_prefix", tokenPrefixTarget(issued.Capability.Prefix))
