@@ -41,6 +41,11 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
+		if c.Billing.ExecutorClass == "cloud" {
+			if err := admitCloudTx(ctx, tx, Team(c.Team), price.Cores); err != nil {
+				return err
+			}
+		}
 		reservedSeconds = MinBillableSeconds
 	}
 	return recordBillingAwardTx(ctx, tx, c, price, reservedSeconds)
@@ -162,6 +167,16 @@ func applyBillingCancellationTx(ctx context.Context, tx *storeTx, team Team, uni
 	a, err := unitBillingAwardTx(ctx, tx, team, unit, generation)
 	if err != nil || a == nil || !a.provenance.Metered {
 		return err
+	}
+	if a.provenance.ExecutorClass == "cloud" {
+		st, err := spendStandingTx(ctx, tx, team, tx.now())
+		if err != nil {
+			return err
+		}
+		_, limit := st.Headroom()
+		if limit == SpendLimitChargePending || limit == SpendLimitChargeFailed {
+			return nil
+		}
 	}
 	exhausted, err := teamCreditExhaustedAtTx(ctx, tx, team)
 	if err != nil {

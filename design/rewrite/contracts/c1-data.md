@@ -3155,3 +3155,14 @@ executing flag, as Cloud job intervals do.
 Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because leased expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
+
+## Decision 112 billing cut
+
+The billing implementation uses `billing_policy.go` as its ladder and standing
+table. `BillingStanding` carries `Tier`, `CloudVCPU`, `MaxJobDuration` and the
+operator decision. `SpendStanding` keeps the owner budget, balance, current rung
+and collection state. Purchase-window and dollar-cap APIs and override fields
+are removed. The final schema replaces `billing_rung_cents` with `billing_rung_index` and
+removes shared-card spend buckets. Standing is enforced inside Cloud issuance
+under the ledger lock. The award captures the hard deadline. See
+`docs/billing.md` for the decision's policy table.

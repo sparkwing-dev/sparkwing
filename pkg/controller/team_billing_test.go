@@ -123,23 +123,19 @@ func billingFixture(t *testing.T) (*identityFixture, *fakeCheckout) {
 type teamBilling struct {
 	Team               string `json:"team"`
 	BalanceMicro       int64  `json:"balance_micro"`
-	BalanceCapMicro    int64  `json:"balance_cap_micro"`
 	MicroPerCredit     int64  `json:"micro_per_credit"`
 	CreditsPerDollar   int64  `json:"credits_per_dollar"`
 	MinBillableSeconds int64  `json:"min_billable_seconds"`
 	PurchaseMinCents   int64  `json:"purchase_min_cents"`
-	PurchaseMaxCents   int64  `json:"purchase_max_cents"`
 	RateTable          []struct {
 		Cores          int64 `json:"cores"`
 		MicroPerSecond int64 `json:"micro_per_second"`
 	} `json:"rate_table"`
-	Frozen             bool  `json:"frozen"`
-	Trusted            bool  `json:"trusted"`
-	PurchaseLimitCents int64 `json:"purchase_limit_cents"`
-	Purchased30dCents  int64 `json:"purchased_30d_cents"`
-	CheckoutEnabled    bool  `json:"checkout_enabled"`
-	CanPurchase        bool  `json:"can_purchase"`
-	Usage              []struct {
+	Frozen          bool `json:"frozen"`
+	Trusted         bool `json:"trusted"`
+	CheckoutEnabled bool `json:"checkout_enabled"`
+	CanPurchase     bool `json:"can_purchase"`
+	Usage           []struct {
 		RunID       string `json:"run_id"`
 		AmountMicro int64  `json:"amount_micro"`
 	} `json:"usage"`
@@ -148,15 +144,6 @@ type teamBilling struct {
 		AmountMicro int64  `json:"amount_micro"`
 		Reference   string `json:"reference"`
 	} `json:"grants"`
-}
-
-type capRefusal struct {
-	Code         string `json:"code"`
-	Error        string `json:"error"`
-	BalanceMicro int64  `json:"balance_micro"`
-	OpenMicro    int64  `json:"open_micro"`
-	CapMicro     int64  `json:"cap_micro"`
-	AmountMicro  int64  `json:"amount_micro"`
 }
 
 // safety: billing-page fixtures seed balances without inventing a payment proof.
@@ -174,14 +161,14 @@ func (f *identityFixture) grantTo(team, kind, reference string, micro int64) int
 	return http.StatusCreated
 }
 
-func (f *identityFixture) trust(team string, limitCents int64) {
+func (f *identityFixture) trust(team string) {
 	f.t.Helper()
 	t, err := f.store.ForTeam(context.Background(), store.Team(team))
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	if _, _, err := t.SetBillingTrust(context.Background(), store.BillingTrustChange{
-		Trust: store.BillingTrustGranted, Actor: "test", Reason: "test", LimitCents: limitCents,
+		Trust: store.BillingTrustGranted, Actor: "test", Reason: "test",
 	}, time.Now()); err != nil {
 		f.t.Fatalf("trust %s: %v", team, err)
 	}
@@ -214,9 +201,7 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 			t.Errorf("%s grants = %+v", tc.name, b.Grants)
 		}
 		if b.MicroPerCredit != 100_000 || b.CreditsPerDollar != 1_000 || b.MinBillableSeconds != 60 ||
-			b.PurchaseMinCents != 1_000 || b.PurchaseMaxCents != 5_000 ||
-			b.Trusted || b.PurchaseLimitCents != 5_000 || b.Purchased30dCents != 2_500 ||
-			b.BalanceCapMicro != 5_000*100*store.MicroCreditsPerCent || len(b.RateTable) != 3 {
+			b.PurchaseMinCents != 50 || b.Trusted || len(b.RateTable) == 0 {
 			t.Errorf("%s reads prices %+v", tc.name, b)
 		}
 	}
@@ -262,8 +247,7 @@ func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 		{"an editor", editor, map[string]any{"amount_cents": 2_500}, http.StatusForbidden},
 		{"a reader", reader, map[string]any{"amount_cents": 2_500}, http.StatusForbidden},
 		{"a body naming a team", owner, map[string]any{"amount_cents": 2_500, "team": "someone-else"}, http.StatusBadRequest},
-		{"a purchase under $10", owner, map[string]any{"amount_cents": 999}, http.StatusBadRequest},
-		{"a new team's purchase over $50", owner, map[string]any{"amount_cents": 5_001}, http.StatusBadRequest},
+		{"a purchase below the provider minimum", owner, map[string]any{"amount_cents": 49}, http.StatusBadRequest},
 		{"a negative purchase", owner, map[string]any{"amount_cents": -2_500}, http.StatusBadRequest},
 	}
 	for _, tc := range refused {
@@ -279,83 +263,10 @@ func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 	}
 }
 
-func TestTeamBillingCheckout_RefusesAPurchaseAboveTheBalanceCap(t *testing.T) {
-	f, fc := billingFixture(t)
-	owner := f.user("o", "olga@example.com")
-	f.trust(owner.team, 500_000)
-	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift_big", 4_990*100*store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Fatalf("grant = %d", code)
-	}
-	var refusal capRefusal
-	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-		map[string]any{"amount_cents": 2_500}, &refusal); code != http.StatusConflict {
-		t.Fatalf("a checkout past the cap = %d want 409", code)
-	}
-	if refusal.Code != "balance_cap" || refusal.BalanceMicro != 4_990*100*store.MicroCreditsPerCent ||
-		refusal.CapMicro != 5_000*100*store.MicroCreditsPerCent || refusal.AmountMicro != 2_500*store.MicroCreditsPerCent {
-		t.Errorf("refusal = %+v", refusal)
-	}
-	if len(fc.calls()) != 0 {
-		t.Error("a checkout refused at the cap still opened a session")
-	}
-	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-		map[string]any{"amount_cents": 1_000}, nil); code != http.StatusOK {
-		t.Errorf("a checkout landing exactly on the cap = %d want 200", code)
-	}
-	refusal = capRefusal{}
-	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-		map[string]any{"amount_cents": 1_000}, &refusal); code != http.StatusConflict ||
-		refusal.OpenMicro != 1_000*store.MicroCreditsPerCent {
-		t.Errorf("a checkout past the cap with one open = %d %+v, want 409 naming the open checkout", code, refusal)
-	}
-	tenant, err := f.store.ForTeam(t.Context(), store.Team(owner.team))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: 1_000 * store.MicroCreditsPerCent, Reference: "pi_open", CreatedBy: "test",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	var b teamBilling
-	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
-	if b.BalanceMicro != 5_000*100*store.MicroCreditsPerCent {
-		t.Errorf("balance after the paid checkout = %d, want the cap", b.BalanceMicro)
-	}
-}
-
-// Two owners' checkouts racing for the last room below the cap cannot both
-// open, because the cap counts the open one.
-func TestTeamBillingCheckout_ConcurrentCheckoutsCannotBothPassTheCap(t *testing.T) {
-	f, fc := billingFixture(t)
-	owner := f.user("o", "olga@example.com")
-	f.trust(owner.team, 500_000)
-	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift", 4_600*100*store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Fatalf("grant = %d", code)
-	}
-	codes := make([]int, 2)
-	var wg sync.WaitGroup
-	for i := range codes {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			codes[i] = f.call("POST", "/api/v1/team/billing/checkout", owner.auth, map[string]any{"amount_cents": 30_000}, nil)
-		}(i)
-	}
-	wg.Wait()
-	if !(codes[0] == http.StatusOK && codes[1] == http.StatusConflict) && !(codes[0] == http.StatusConflict && codes[1] == http.StatusOK) {
-		t.Fatalf("racing checkouts = %v, want one 200 and one 409", codes)
-	}
-	if n := len(fc.calls()); n != 1 {
-		t.Errorf("the checkout service opened %d sessions, want 1", n)
-	}
-}
-
 func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 	f, fc := billingFixture(t)
 	owner := f.user("o", "olga@example.com")
-	f.trust(owner.team, 500_000)
+	f.trust(owner.team)
 	for _, tc := range []struct {
 		name   string
 		status int
@@ -399,80 +310,6 @@ func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 	}
 }
 
-// The console holds an operator's free grant to the cap and the grant route
-// never holds a paid one: a paid grant follows a verified payment, whose
-// checkout already met it.
-func TestCreditsGrant_HoldsOnlyAFreeGrantToTheBalanceCap(t *testing.T) {
-	f, operator, owner := operatorFixture(t)
-	capMicro := int64(5_000 * 100 * store.MicroCreditsPerCent)
-	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift_1", capMicro-store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Fatalf("a grant one cent under the cap = %d", code)
-	}
-	var refusal capRefusal
-	if code := f.call("POST", "/api/v1/operator/teams/"+owner.team+"/grants", operator.auth, map[string]any{
-		"amount_cents": 2, "reason": "goodwill", "key": "gift_2",
-	}, &refusal); code != http.StatusConflict || refusal.Code != "balance_cap" {
-		t.Fatalf("a free grant past the cap = %d %+v want 409 balance_cap", code, refusal)
-	}
-	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 2*store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Errorf("a paid grant past the cap = %d want 201: the payment already went through", code)
-	}
-	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 2*store.MicroCreditsPerCent); code != http.StatusOK {
-		t.Errorf("a replayed payment = %d want 200: a webhook retry must still succeed", code)
-	}
-}
-
-// A new team buys at most $50 over 30 days: the checkout past it is refused
-// with purchase_limit before any session opens, and the page reads what
-// remains. A trusted team buys up to $500 at once.
-func TestTeamBillingCheckout_RefusesAPurchaseAboveThePurchaseLimit(t *testing.T) {
-	f, fc := billingFixture(t)
-	owner := f.user("o", "olga@example.com")
-	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 3_000*store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Fatalf("grant = %d", code)
-	}
-	var refusal struct {
-		Code           string `json:"code"`
-		Trusted        bool   `json:"trusted"`
-		LimitCents     int64  `json:"limit_cents"`
-		PurchasedCents int64  `json:"purchased_cents"`
-		AmountCents    int64  `json:"amount_cents"`
-	}
-	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-		map[string]any{"amount_cents": 2_001}, &refusal); code != http.StatusConflict {
-		t.Fatalf("a checkout past the limit = %d want 409", code)
-	}
-	if refusal.Code != "purchase_limit" || refusal.Trusted || refusal.LimitCents != 5_000 ||
-		refusal.PurchasedCents != 3_000 || refusal.AmountCents != 2_001 {
-		t.Errorf("refusal = %+v", refusal)
-	}
-	if len(fc.calls()) != 0 {
-		t.Error("a checkout refused at the purchase limit still opened a session")
-	}
-	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-		map[string]any{"amount_cents": 2_000}, nil); code != http.StatusOK {
-		t.Fatalf("a checkout filling the limit = %d want 200", code)
-	}
-	var b teamBilling
-	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
-	if b.Purchased30dCents != 5_000 || b.PurchaseLimitCents != 5_000 {
-		t.Errorf("billing after filling the limit = %+v", b)
-	}
-
-	trusted := f.user("t", "tess@example.com")
-	f.trust(trusted.team, 0)
-	if code := f.call("POST", "/api/v1/team/billing/checkout", trusted.auth,
-		map[string]any{"amount_cents": 50_000}, nil); code != http.StatusOK {
-		t.Errorf("a trusted team's $500 checkout = %d want 200", code)
-	}
-	f.call("GET", "/api/v1/team/billing", trusted.auth, nil, &b)
-	if !b.Trusted || b.PurchaseMaxCents != 50_000 || b.PurchaseLimitCents != 50_000 {
-		t.Errorf("trusted billing = %+v", b)
-	}
-}
-
-// Only the operator's console sets a team's trust; a revocation holds the
-// team to the new-team limits and names who revoked it and why.
 func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
 	f, operator, owner := operatorFixture(t)
 	path := "/api/v1/operator/teams/" + owner.team + "/trust"
@@ -487,17 +324,17 @@ func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
 	}
 
 	var got struct {
-		Trust              string `json:"trust"`
-		Trusted            bool   `json:"trusted"`
-		TrustReason        string `json:"trust_reason"`
-		TrustBy            string `json:"trust_by"`
-		PurchaseLimitCents int64  `json:"purchase_limit_cents"`
+		Trust       string `json:"trust"`
+		Trusted     bool   `json:"trusted"`
+		TrustReason string `json:"trust_reason"`
+		TrustBy     string `json:"trust_by"`
+		Standing    string `json:"standing"`
 	}
-	f.trust(owner.team, 0)
+	f.trust(owner.team)
 	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "revoked", "reason": "chargeback"}, &got); code != http.StatusOK {
 		t.Fatalf("revoke = %d", code)
 	}
-	if got.Trust != "revoked" || got.Trusted || got.TrustReason != "chargeback" || got.TrustBy != "korey@example.com" || got.PurchaseLimitCents != 5_000 {
+	if got.Trust != "revoked" || got.Trusted || got.TrustReason != "chargeback" || got.TrustBy != "korey@example.com" || got.Standing != "Held" {
 		t.Errorf("after revoke = %+v", got)
 	}
 	var team operatorTeam
@@ -508,7 +345,7 @@ func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
 		t.Errorf("a change naming no trust = %d want 400", code)
 	}
 	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "automatic", "reason": "cleared"}, &got); code != http.StatusOK ||
-		got.Trust != "automatic" || got.Trusted || got.TrustReason != "cleared" || got.PurchaseLimitCents != 5_000 {
+		got.Trust != "automatic" || got.Trusted || got.TrustReason != "cleared" || got.Standing != "New" {
 		t.Errorf("reset = %d %+v, want the automatic rule", code, got)
 	}
 }

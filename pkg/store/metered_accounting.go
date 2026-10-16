@@ -134,7 +134,7 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
-		if err := addSpendTx(ctx, tx, Team(c.Team), fingerprint, now, amount); err != nil {
+		if err := addSpendTx(ctx, tx, Team(c.Team), now, amount); err != nil {
 			return err
 		}
 	}
@@ -344,7 +344,7 @@ func settleBillingChargesTx(ctx context.Context, tx *storeTx, a billingAward, re
 	if err != nil {
 		return err
 	}
-	return addSpendTx(ctx, tx, a.team, fingerprint, chargedAt, delta)
+	return addSpendTx(ctx, tx, a.team, chargedAt, delta)
 }
 
 func settledBillingResultTx(ctx context.Context, tx *storeTx, a billingAward) (capability.BillingSettlement, error) {

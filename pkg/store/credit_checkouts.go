@@ -8,16 +8,9 @@ import (
 	"time"
 )
 
-// OpenCreditCheckout records a checkout of amountMicro that stays open until
-// hold from now, and returns its id. It refuses with a
-// [CreditBalanceCapError] when the team's balance, plus every checkout of the
-// team still open, plus this one would pass [MaxTeamBalanceMicro], so a
-// verified payment never meets a cap it cannot pass, and with a
-// [PurchaseLimitError] when what the team bought over [PurchaseLimitWindow],
-// plus its open checkouts, plus this one would pass its purchase limit.
-// Mode and USD cents are persisted before the provider session opens.
+// OpenCreditCheckout reserves a prepaid checkout before opening its provider session.
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error) {
-	if amountMicro <= 0 || amountMicro%MicroCreditsPerCent != 0 || hold <= 0 {
+	if amountMicro < MinCardChargeCents*MicroCreditsPerCent || amountMicro > MaxCreditGrantMicro || amountMicro%MicroCreditsPerCent != 0 || hold <= 0 {
 		return "", errors.New("credits: checkout requires whole positive USD cents and a positive hold")
 	}
 	id, err := newCreditID("checkout")
@@ -52,12 +45,6 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", ErrTeamBeingDeleted
 	}
 	nowNS := now.UnixNano()
-	if err := refuseAboveBalanceCapTx(ctx, tx, t.team, amountMicro, nowNS); err != nil {
-		return "", err
-	}
-	if err := refuseAbovePurchaseLimitTx(ctx, tx, t.team, amountMicro, now); err != nil {
-		return "", t.commitPurchaseRefusal(tx, id, err, now)
-	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO credit_checkouts (id, team, session_id, payment_mode, currency, amount_minor, amount_micro, opened_at, expires_at)
 		VALUES (?, ?, ?, ?, 'usd', ?, ?, ?, ?)`, id, string(t.team), id, string(mode), amountMicro/MicroCreditsPerCent, amountMicro, nowNS, now.Add(hold).UnixNano()); err != nil {
@@ -70,55 +57,6 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", err
 	}
 	return id, tx.Commit()
-}
-
-// safety: a refused purchase is recorded as a business event, so the refusal
-// commits rather than rolling back with the checkout it refused.
-func (t *Tenant) commitPurchaseRefusal(tx *storeTx, checkoutID string, refusal error, now time.Time) error {
-	var limit *PurchaseLimitError
-	if !errors.As(refusal, &limit) {
-		return refusal
-	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
-		Kind: BusinessEventPurchaseLimitRefused, Team: t.team, SubjectID: checkoutID, At: now,
-		Attrs: map[string]any{
-			"trusted": limit.Trusted, "limit_cents": limit.LimitMicro / MicroCreditsPerCent,
-			"purchased_cents": limit.PurchasedMicro / MicroCreditsPerCent,
-			"amount_cents":    limit.AmountMicro / MicroCreditsPerCent,
-		},
-	}); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return refusal
-}
-
-func openCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, nowNS int64) (int64, error) {
-	var open sql.NullInt64
-	err := q.QueryRowContext(ctx,
-		`SELECT SUM(amount_micro) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND closed_at IS NULL AND expires_at > ?`,
-		string(team), nowNS).Scan(&open)
-	return open.Int64, err
-}
-
-// CheckoutSettleWindow is how long after its session expires an unpaid
-// checkout keeps counting against the purchase limit. Stripe retries a
-// webhook for up to three days, so a session paid just before it expired can
-// be granted that late.
-const CheckoutSettleWindow = 72 * time.Hour
-
-// safety: a session paid just before expiry is granted when its webhook lands, possibly days later,
-// so it keeps counting against the purchase limit until then, or a second checkout could spend the
-// same room and both payments land. A session the processor reported closed can no longer be paid.
-func settlingCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (int64, error) {
-	var open sql.NullInt64
-	err := q.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_checkouts
-	  WHERE team = ? AND paid_at IS NULL AND closed_at IS NULL
-	    AND (expires_at > ? OR (session_id != id AND expires_at > ?))`,
-		string(team), now.UnixNano(), now.Add(-CheckoutSettleWindow).UnixNano()).Scan(&open)
-	return open.Int64, err
 }
 
 // AttachCreditCheckout names the payment session a checkout opened and the

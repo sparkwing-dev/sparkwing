@@ -151,8 +151,8 @@ func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request, aut
 	if err != nil {
 		return err
 	}
-	if req.AmountCents <= 0 || req.AmountCents > store.MaxPurchaseLimitCents {
-		return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("amount_cents must be 1 to %d", store.MaxPurchaseLimitCents)}
+	if req.AmountCents <= 0 || req.AmountCents > (store.MaxCreditGrantMicro/store.MicroCreditsPerCent) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "amount_cents must be positive and fit the credit ledger"}
 	}
 	if req.Key = strings.TrimSpace(req.Key); req.Key == "" {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "key is required, so a retried grant grants once"}
@@ -165,13 +165,6 @@ func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request, aut
 		Kind: store.CreditGrantFree, AmountMicro: req.AmountCents * store.MicroCreditsPerCent,
 		Reference: "console:" + req.Key, CreatedBy: authorized.Principal.Capability.Subject.ID, Reason: req.Reason,
 	})
-	var capErr *store.CreditBalanceCapError
-	if errors.As(err, &capErr) {
-		return &apierr.Error{Code: apierr.Conflict, Message: "credit balance cap exceeded", Details: map[string]any{
-			"reason": BalanceCapCode, "balance_micro": capErr.BalanceMicro, "open_micro": capErr.OpenMicro,
-			"cap_micro": capErr.CapMicro, "amount_micro": capErr.AmountMicro,
-		}}
-	}
 	if errors.Is(err, store.ErrInvalidInput) {
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}

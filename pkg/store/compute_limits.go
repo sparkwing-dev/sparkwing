@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // Compute guards use zero for an unlimited operator ceiling.
@@ -45,13 +44,6 @@ const (
 	// declare, in seconds.
 	ComputeLimitCronSeconds = "min_cron_interval_seconds"
 )
-
-// DefaultTeamCloudNodes is the Cloud nodes a team holds at once when neither
-// max_concurrent_runners nor the team's own cap says otherwise.
-const DefaultTeamCloudNodes = limits.TeamCloudJobs
-
-// safety: a per-team cap past this is a typo, not a decision.
-const maxTeamRunnerCap = int64(limits.MaxTeamCloudJobs)
 
 // EventKindComputeLimitBlocked records work a compute guard refused, so a run
 // that is waiting or was cut short says which cap it met.

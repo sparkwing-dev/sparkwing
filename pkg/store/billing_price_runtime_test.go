@@ -19,6 +19,9 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 		t.Run(fmt.Sprintf("cores=%g/memory=%d", pin.cores, pin.memory), func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, true)
 			s.billing = nil
+			if _, _, err := (&Tenant{s: s, team: "a"}).SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "operator", Reason: "price coverage"}, *now); err != nil {
+				t.Fatal(err)
+			}
 			rewriteSchemaExec(t, s.db, "UPDATE credit_grants SET amount_micro=100000000")
 			rates := CreditRateTable{{Cores: 2, MicroPerSecond: 10_000}, {Cores: 4, MicroPerSecond: 20_000}, {Cores: 8, MicroPerSecond: 36_667}, {Cores: 16, MicroPerSecond: 70_000}, {Cores: 64, MicroPerSecond: 270_000}}
 			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
@@ -101,7 +104,7 @@ func TestARefundDebitsTheCardThatPaid(t *testing.T) {
 	}
 	for _, fingerprint := range []string{"original", "replacement"} {
 		var amount int64
-		if err := s.db.QueryRow("SELECT COALESCE(SUM(amount_micro),0) FROM card_spend_days WHERE fingerprint=?", fingerprint).Scan(&amount); err != nil || amount != 0 {
+		if err := s.db.QueryRow("SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE card_fingerprint=?", fingerprint).Scan(&amount); err != nil || amount != 0 {
 			t.Fatalf("%s spend=%d, %v", fingerprint, amount, err)
 		}
 	}

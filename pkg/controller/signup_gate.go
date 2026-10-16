@@ -174,12 +174,14 @@ type signUpLimitsJSON struct {
 }
 
 type signUpCountsJSON struct {
+	Admitted   int `json:"admitted"`
 	LastHour   int `json:"last_hour"`
 	LastDay    int `json:"last_day"`
 	Waitlisted int `json:"waitlisted"`
 }
 
 type signUpStatusJSON struct {
+	AccountLimit       int              `json:"account_limit"`
 	State              string           `json:"state"`
 	Reasons            []string         `json:"reasons"`
 	Mode               string           `json:"mode"`
@@ -205,7 +207,7 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 	}
 	free := s.freeTierState(ctx)
 	out := signUpStatusJSON{
-		State: string(store.SignUpOpen), Reasons: []string{},
+		State: string(store.SignUpOpen), Reasons: []string{}, AccountLimit: store.LaunchAccountLimit,
 		Mode: string(g.Mode), Source: g.Source, Reason: g.Reason, SetBy: g.SetBy, UpdatedAt: g.UpdatedAt.Unix(),
 		DeploymentWaitlist: s.identity.signup.forceWaitlist, FreeTier: string(free),
 		Limits: signUpLimitsJSON{
@@ -213,8 +215,11 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 			HourlyWarn: g.Limits.HourlyWarn, GitHubMinAccountDays: g.Limits.GitHubMinAccountDays,
 			FreeTeamMembers: g.Limits.FreeTeamMembers,
 		},
-		Counts:          signUpCountsJSON{LastHour: counts.LastHour, LastDay: counts.LastDay, Waitlisted: counts.Waitlisted},
+		Counts:          signUpCountsJSON{LastHour: counts.LastHour, LastDay: counts.LastDay, Waitlisted: counts.Waitlisted, Admitted: counts.Admitted},
 		VelocityWarning: g.Limits.HourlyWarn > 0 && counts.LastHour > g.Limits.HourlyWarn,
+	}
+	if counts.Admitted >= store.LaunchAccountLimit {
+		out.Reasons = append(out.Reasons, store.WaitlistReasonLaunchCapacity)
 	}
 	if out.DeploymentWaitlist {
 		out.Reasons = append(out.Reasons, store.WaitlistReasonDeployment)

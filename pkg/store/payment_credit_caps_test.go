@@ -1,56 +1,11 @@
 package store
 
 import (
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
-
-func TestPaymentFreeGrantCapIncludesOtherGrantsAndOpenCheckouts(t *testing.T) {
-	t.Run("grants", func(t *testing.T) {
-		_, a, b, _ := checkoutCapFixture(t, false)
-		request := CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MaxTeamBalanceMicro - MicroCreditsPerCent, Reference: "gift", CreatedBy: "ops"}
-		first, err := a.RecordCreditGrant(t.Context(), request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = a.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 2 * MicroCreditsPerCent, Reference: "second", CreatedBy: "ops"})
-		var capErr *CreditBalanceCapError
-		if !errors.Is(err, ErrCreditBalanceCap) || !errors.As(err, &capErr) || capErr.BalanceMicro != request.AmountMicro || capErr.AmountMicro != 2*MicroCreditsPerCent || capErr.CapMicro != MaxTeamBalanceMicro {
-			t.Fatalf("free grant cap=%v", err)
-		}
-		if balance, err := a.CreditBalanceMicro(t.Context()); err != nil || balance != request.AmountMicro {
-			t.Fatalf("refused grant changed balance=%d: %v", balance, err)
-		}
-		if replay, err := a.RecordCreditGrant(t.Context(), request); err != nil || replay.Created || replay.Grant.ID != first.Grant.ID {
-			t.Fatalf("grant replay=%+v: %v", replay, err)
-		}
-		request.AmountMicro = MaxTeamBalanceMicro
-		if _, err := b.RecordCreditGrant(t.Context(), request); err != nil {
-			t.Fatalf("another team's grant consumed this cap: %v", err)
-		}
-	})
-	t.Run("checkout", func(t *testing.T) {
-		_, a, _, now := checkoutCapFixture(t, true)
-		const usd = 100 * MicroCreditsPerCent
-		if _, err := a.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 4000 * usd, Reference: "gift", CreatedBy: "ops"}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := a.OpenCreditCheckout(t.Context(), 500*usd, *now, 31*time.Minute); err != nil {
-			t.Fatal(err)
-		}
-		_, err := a.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1000 * usd, Reference: "second", CreatedBy: "ops"})
-		var capErr *CreditBalanceCapError
-		if !errors.As(err, &capErr) || capErr.OpenMicro != 500*usd {
-			t.Fatalf("free grant consumed checkout's hold: %v", err)
-		}
-		if _, err := a.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 500 * usd, Reference: "third", CreatedBy: "ops"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-}
 
 func TestPaymentPaidEventsPreserveFundsAboveBalanceCap(t *testing.T) {
 	s, a, _, _ := checkoutCapFixture(t, true)
@@ -82,35 +37,6 @@ func TestPaymentPaidEventsPreserveFundsAboveBalanceCap(t *testing.T) {
 		t.Fatalf("paid funds lost above cap: balance=%d: %v", balance, err)
 	}
 	rewriteSchemaCount(t, s.db, "payment_events", 2)
-}
-
-func TestPaymentConcurrentCheckoutClientsCannotBothPassCap(t *testing.T) {
-	s, a, _, now := checkoutCapFixture(t, true)
-	path := blobAccountingDiskStore(t, s)
-	other := &Tenant{s: &Store{db: blobAccountingDB(t, path), dialect: DialectSQLite, clock: s.clock}, team: "a"}
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	for _, tenant := range []*Tenant{a, other} {
-		go func() {
-			<-start
-			_, err := tenant.OpenCreditCheckout(t.Context(), MaxTeamBalanceMicro/2+MicroCreditsPerCent, *now, 31*time.Minute)
-			results <- err
-		}()
-	}
-	close(start)
-	winners := 0
-	for range 2 {
-		err := <-results
-		if err == nil {
-			winners++
-		} else if !errors.Is(err, ErrCreditBalanceCap) {
-			t.Error(err)
-		}
-	}
-	if winners != 1 {
-		t.Fatalf("checkout winners=%d", winners)
-	}
-	rewriteSchemaCount(t, s.db, "credit_checkouts", 1)
 }
 
 func TestStoreDataMeteredUsageByRunNetsHostJobAndRefunds(t *testing.T) {

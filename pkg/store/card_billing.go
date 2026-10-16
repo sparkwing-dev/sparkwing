@@ -11,25 +11,17 @@ import (
 )
 
 const (
-	NewSpendCeilingCents     = 5_000
-	NewDailyCapCents         = 2_500
-	TrustedSpendCeilingCents = 50_000
-	TrustedDailyCapCents     = 20_000
-	TrustedRungCents         = 10_000
-	// MinCardChargeCents is Stripe's smallest US card charge; a smaller debt waits for the next rung or month-end.
+	// MinCardChargeCents is the provider's minimum card charge.
 	MinCardChargeCents = 50
-	// SpendWindowDays is the ceiling's window: today plus 30 whole UTC days before it, so spend leaves the window up to a day late and never early.
+	// SpendWindowDays is the owner budget's rolling window in UTC days.
 	SpendWindowDays = 30
 )
 
 const (
-	SpendLimitBalance      = "balance"
-	SpendLimitCeiling      = "ceiling"
-	SpendLimitDailyCap     = "daily_cap"
-	SpendLimitCardCeiling  = "card_ceiling"
-	SpendLimitCardDailyCap = "card_daily_cap"
-	SpendLimitBudget       = "budget"
-	SpendLimitChargeFailed = "charge_failed"
+	SpendLimitBalance       = "balance"
+	SpendLimitBudget        = "budget"
+	SpendLimitChargeFailed  = "charge_failed"
+	SpendLimitChargePending = "charge_pending"
 )
 
 const (
@@ -78,26 +70,11 @@ const cardKeyLife = 23 * time.Hour
 
 const dayNS = int64(24 * time.Hour)
 
-// safety: a refund lands on the day and the card of the charge it refunds, so
-// refunding yesterday's reservation cannot free room under today's cap, nor
-// credit a card that paid nothing. The card is counted beside the team, so
-// one card cannot spend the limits again through a second team.
-func addSpendTx(ctx context.Context, tx *storeTx, team Team, fingerprint string, atNS, amount int64) error {
+func addSpendTx(ctx context.Context, tx *storeTx, team Team, atNS, amount int64) error {
 	if amount == 0 {
 		return nil
 	}
-	day := atNS / dayNS
-	if _, err := tx.ExecContext(ctx, `INSERT INTO team_spend_days (team, day, amount_micro) VALUES (?, ?, ?)
-		ON CONFLICT (team, day) DO UPDATE SET amount_micro = team_spend_days.amount_micro + excluded.amount_micro`,
-		string(team), day, amount); err != nil {
-		return err
-	}
-	if fingerprint == "" {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO card_spend_days (fingerprint, day, amount_micro) VALUES (?, ?, ?)
-		ON CONFLICT (fingerprint, day) DO UPDATE SET amount_micro = card_spend_days.amount_micro + excluded.amount_micro`,
-		fingerprint, day, amount)
+	_, err := tx.ExecContext(ctx, `INSERT INTO team_spend_days(team,day,amount_micro) VALUES (?,?,?) ON CONFLICT(team,day) DO UPDATE SET amount_micro=team_spend_days.amount_micro+excluded.amount_micro`, team, atNS/dayNS, amount)
 	return err
 }
 
@@ -135,60 +112,41 @@ type CardCharge struct {
 	OpenedAt      time.Time
 }
 
-// SpendStanding is what a team may still spend and why: its balance, the credit its card extends, and its spend, and its card's, against each limit.
+// SpendStanding reports balance, collection state and the owner's budget.
 type SpendStanding struct {
-	Billing             BillingStanding
-	Card                Card
-	OpenCharge          *CardCharge
-	BalanceMicro        int64
-	CreditLimitMicro    int64
-	RungMicro           int64
-	CeilingMicro        int64
-	DailyCapMicro       int64
-	BudgetMicro         int64
-	Spent30dMicro       int64
-	SpentTodayMicro     int64
-	CardSpent30dMicro   int64
-	CardSpentTodayMicro int64
+	Billing         BillingStanding
+	Card            Card
+	OpenCharge      *CardCharge
+	BalanceMicro    int64
+	RungMicro       int64
+	BudgetMicro     int64
+	Spent30dMicro   int64
+	SpentTodayMicro int64
 }
 
-// CardBilled reports that the team's usage is charged to its card: it is trusted and has one on file.
-func (s SpendStanding) CardBilled() bool {
-	return s.Billing.Trusted && s.Card.PaymentMethod != ""
-}
+// CardBilled reports whether usage can be collected from the team's card.
+func (s SpendStanding) CardBilled() bool { return s.Card.PaymentMethod != "" }
 
-// ChargeFailed reports an open charge whose last attempt failed.
-func (s SpendStanding) ChargeFailed() bool {
-	return s.OpenCharge != nil && s.OpenCharge.Failures > 0
-}
+// ChargeFailed reports an open collection with a failed attempt.
+func (s SpendStanding) ChargeFailed() bool { return s.OpenCharge != nil && s.OpenCharge.Failures > 0 }
 
-// Headroom is what the team may still spend and the limit that binds first.
+// Headroom reports admission room under standing, collection and the owner's budget.
 func (s SpendStanding) Headroom() (int64, string) {
-	room, limit := s.BalanceMicro+s.CreditLimitMicro, SpendLimitBalance
-	if s.ChargeFailed() && room <= 0 {
-		limit = SpendLimitChargeFailed
+	if s.Billing.Tier == "Held" || s.ChargeFailed() {
+		return 0, SpendLimitChargeFailed
 	}
-	checks := []struct {
-		room  int64
-		limit string
-	}{
-		{s.CeilingMicro - s.Spent30dMicro, SpendLimitCeiling},
-		{s.DailyCapMicro - s.SpentTodayMicro, SpendLimitDailyCap},
-		{s.BudgetMicro - s.Spent30dMicro, SpendLimitBudget},
+	if s.OpenCharge != nil {
+		return 0, SpendLimitChargePending
 	}
-	if s.Card.Fingerprint != "" {
-		checks = append(checks, []struct {
-			room  int64
-			limit string
-		}{
-			{s.CeilingMicro - s.CardSpent30dMicro, SpendLimitCardCeiling},
-			{s.DailyCapMicro - s.CardSpentTodayMicro, SpendLimitCardDailyCap},
-		}...)
-	}
-	for _, c := range checks {
-		if c.room < room {
-			room, limit = c.room, c.limit
+	room, limit := s.BalanceMicro, SpendLimitBalance
+	if s.CardBilled() {
+		room = 1<<63 - 1
+		if -s.BalanceMicro >= s.RungMicro {
+			return 0, SpendLimitChargePending
 		}
+	}
+	if s.BudgetMicro > 0 && s.BudgetMicro-s.Spent30dMicro < room {
+		return s.BudgetMicro - s.Spent30dMicro, SpendLimitBudget
 	}
 	return room, limit
 }
@@ -208,11 +166,11 @@ func spendStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 	if s.Billing, err = trustStandingTx(ctx, q, team, now); err != nil {
 		return s, err
 	}
-	var addedNS, rungCents, dailyCents, budgetCents int64
+	var addedNS, rungIndex, budgetCents int64
 	if err := q.QueryRowContext(ctx, `SELECT card_customer, card_payment_method, card_fingerprint, card_brand,
-	    card_last4, card_added_at, billing_rung_cents, billing_daily_cap_cents, billing_budget_cents
+	    card_last4, card_added_at, billing_rung_index, billing_budget_cents
 	    FROM teams WHERE name = ?`, string(team)).Scan(&s.Card.Customer, &s.Card.PaymentMethod,
-		&s.Card.Fingerprint, &s.Card.Brand, &s.Card.Last4, &addedNS, &rungCents, &dailyCents, &budgetCents); err != nil {
+		&s.Card.Fingerprint, &s.Card.Brand, &s.Card.Last4, &addedNS, &rungIndex, &budgetCents); err != nil {
 		return s, err
 	}
 	if addedNS > 0 {
@@ -226,43 +184,14 @@ func spendStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 		today, string(team), today-SpendWindowDays).Scan(&s.Spent30dMicro, &s.SpentTodayMicro); err != nil {
 		return s, err
 	}
-	if s.Card.Fingerprint != "" {
-		if err := q.QueryRowContext(ctx, fmt.Sprintf(spendWindowSQL, "card_spend_days", "fingerprint"),
-			today, s.Card.Fingerprint, today-SpendWindowDays).Scan(&s.CardSpent30dMicro, &s.CardSpentTodayMicro); err != nil {
-			return s, err
-		}
-	}
 	if s.BalanceMicro, err = creditBalanceTx(ctx, q, team); err != nil {
 		return s, err
 	}
-	ceiling, daily, rung := int64(NewSpendCeilingCents), int64(NewDailyCapCents), int64(0)
-	if s.Billing.Trusted {
-		ceiling, daily, rung = TrustedSpendCeilingCents, TrustedDailyCapCents, TrustedRungCents
+	if rungIndex < 0 || rungIndex >= int64(len(billingPolicy)) {
+		return s, fmt.Errorf("invalid billing rung index %d", rungIndex)
 	}
-	if s.Billing.Trust == BillingTrustGranted && s.Billing.Trusted {
-		if s.Billing.LimitOverrideCents > 0 {
-			ceiling = s.Billing.LimitOverrideCents
-		}
-		if dailyCents > 0 {
-			daily = dailyCents
-		}
-		if rungCents > 0 {
-			rung = rungCents
-		}
-	}
-	budget := ceiling
-	if budgetCents > 0 && budgetCents < ceiling {
-		budget = budgetCents
-	}
-	s.CeilingMicro = ceiling * MicroCreditsPerCent
-	s.DailyCapMicro = daily * MicroCreditsPerCent
-	s.BudgetMicro = budget * MicroCreditsPerCent
-	s.RungMicro = rung * MicroCreditsPerCent
-	// safety: a failed charge withdraws the card's credit until it is paid,
-	// so the team runs on what it has paid for while the owner fixes the card.
-	if s.CardBilled() && !s.ChargeFailed() {
-		s.CreditLimitMicro = 2 * s.RungMicro
-	}
+	s.RungMicro = billingPolicy[rungIndex].rungCents * MicroCreditsPerCent
+	s.BudgetMicro = budgetCents * MicroCreditsPerCent
 	return s, nil
 }
 
@@ -314,8 +243,8 @@ var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already 
 
 // SetSpendBudget sets the owner's budget, which stops Cloud usage when the team's 30-day spend reaches it.
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error {
-	if cents < 0 || cents > MaxPurchaseLimitCents {
-		return fmt.Errorf("%w: a budget is between $0 and $%d", ErrInvalidInput, MaxPurchaseLimitCents/100)
+	if cents < 0 || cents > MaxCreditGrantMicro/MicroCreditsPerCent {
+		return fmt.Errorf("%w: a budget is between $0 and $%d", ErrInvalidInput, MaxCreditGrantMicro/MicroCreditsPerCent/100)
 	}
 	_, err := t.s.exec(ctx, `UPDATE teams SET billing_budget_cents = ? WHERE name = ?`, cents, string(t.team))
 	return err
@@ -380,9 +309,9 @@ func decideCardChargeTx(ctx context.Context, tx *storeTx, team Team, now time.Ti
 		return err
 	}
 	nowNS := now.UnixNano()
-	var owedSince int64
-	if err := tx.QueryRowContext(ctx, `SELECT card_owed_since FROM teams WHERE name = ?`, string(team)).
-		Scan(&owedSince); err != nil {
+	var owedSince, paidCharges int64
+	if err := tx.QueryRowContext(ctx, `SELECT card_owed_since,(SELECT COUNT(*) FROM card_charges WHERE team=teams.name AND state=?) FROM teams WHERE name = ?`, CardChargePaid, string(team)).
+		Scan(&owedSince, &paidCharges); err != nil {
 		return err
 	}
 	switch {
@@ -406,6 +335,8 @@ func decideCardChargeTx(ctx context.Context, tx *storeTx, team Team, now time.Ti
 		cause = "settle"
 	case -st.BalanceMicro >= st.RungMicro:
 		cause = "rung"
+	case paidCharges == 0 && owedSince > 0 && !now.Before(time.Unix(0, owedSince).Add(7*24*time.Hour)):
+		cause = "first_week"
 	case owedSince < monthStart:
 		cause = "month_end"
 	default:

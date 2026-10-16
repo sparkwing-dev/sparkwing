@@ -43,15 +43,15 @@ func TestADebtAtTheRungIsChargedOnce(t *testing.T) {
 	s, acme, now := cardCollectionFixture(t)
 	ctx := t.Context()
 
-	cardCollectionDebt(t, s, "ch_small", 5_000)
+	cardCollectionDebt(t, s, "ch_small", 100)
 	if work, _, err := s.AsOperator().DueCardCharges(ctx, now); err != nil || len(work) != 0 {
-		t.Fatalf("a $50 debt under the $100 rung = %+v, %v; want no charge", work, err)
+		t.Fatalf("a $1 debt under the $5 rung = %+v, %v; want no charge", work, err)
 	}
-	cardCollectionDebt(t, s, "ch_more", 7_050)
+	cardCollectionDebt(t, s, "ch_more", 400)
 
 	work, _, err := s.AsOperator().DueCardCharges(ctx, now)
-	if err != nil || len(work) != 1 || work[0].AmountCents != 12_050 || work[0].PaymentMethod != "pm_1" {
-		t.Fatalf("work = %+v, %v; want one $120.50 charge to pm_1", work, err)
+	if err != nil || len(work) != 1 || work[0].AmountCents != 500 || work[0].PaymentMethod != "pm_1" {
+		t.Fatalf("work = %+v, %v; want one $5 charge to pm_1", work, err)
 	}
 	if again, _, err := s.AsOperator().DueCardCharges(ctx, now.Add(time.Second)); err != nil || len(again) != 0 {
 		t.Fatalf("a second pass = %+v, %v; want the live attempt left alone", again, err)
@@ -63,7 +63,7 @@ func TestADebtAtTheRungIsChargedOnce(t *testing.T) {
 
 	pay := CardPayment{
 		Team: "a", ChargeID: work[0].ChargeID, AttemptID: work[0].AttemptID,
-		PaymentIntent: "pi_card_1", AmountCents: 12_050,
+		PaymentIntent: "pi_card_1", AmountCents: 500,
 	}
 	if created, _, err := s.AsOperator().SettleCardPayment(ctx, pay, now); err != nil || !created {
 		t.Fatalf("settle = %v, %v", created, err)
@@ -147,7 +147,7 @@ func TestADeclineHoldsTheTeamUntilPaid(t *testing.T) {
 		t.Fatalf("fail = %s %v %v", team, first, err)
 	}
 	st, err := acme.SpendStanding(ctx, now)
-	if err != nil || !st.ChargeFailed() || st.CreditLimitMicro != 0 {
+	if err != nil || !st.ChargeFailed() || st.Billing.Tier != "Held" {
 		t.Fatalf("standing = %+v, %v; want the card's credit withdrawn", st, err)
 	}
 	if _, limit := st.Headroom(); limit != SpendLimitChargeFailed {
@@ -172,7 +172,7 @@ func TestADeclineHoldsTheTeamUntilPaid(t *testing.T) {
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	if st, err := acme.SpendStanding(ctx, now); err != nil || st.ChargeFailed() || st.CreditLimitMicro == 0 {
+	if st, err := acme.SpendStanding(ctx, now); err != nil || st.ChargeFailed() || !st.CardBilled() {
 		t.Fatalf("after paying = %+v, %v; want the card's credit back", st, err)
 	}
 }

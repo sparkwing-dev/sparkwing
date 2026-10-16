@@ -60,15 +60,11 @@ afterEach(() => {
 const billing = {
   team: "acme",
   balance_micro: 123_000_000,
-  balance_cap_micro: 500_000_000_000,
   micro_per_credit: 100_000,
   credits_per_dollar: 1_000,
   min_billable_seconds: 60,
-  purchase_min_cents: 1_000,
-  purchase_max_cents: 50_000,
+  purchase_min_cents: 50,
   trusted: true,
-  purchase_limit_cents: 500_000,
-  purchased_30d_cents: 0,
   rate_table: [
     { cores: 8, micro_per_second: 33_000 },
     { cores: 2, micro_per_second: 9_000 },
@@ -105,16 +101,6 @@ describe("balance", () => {
     assert.equal(lib.fmtUSD(-2.5), "-$2.50");
   });
 
-  it("formats the cap as whole dollars", () => {
-    const cap = lib.balanceUSD(billing.balance_cap_micro, billing);
-    assert.equal(cap, 5_000);
-    assert.equal(lib.fmtUSDShort(cap), "$5,000");
-    assert.equal(lib.fmtUSDShort(12.5), "$12.50");
-    assert.equal(
-      lib.fmtCredits(lib.balanceCredits(billing.balance_cap_micro, billing)),
-      "5,000,000",
-    );
-  });
 });
 
 describe("charges and grants", () => {
@@ -240,70 +226,7 @@ describe("purchase amount", () => {
     );
   });
 
-  it("accepts the inclusive range and refuses outside it", () => {
-    assert.equal(lib.purchaseProblem(1_000, billing), null);
-    assert.equal(lib.purchaseProblem(50_000, billing), null);
-    const range = "Enter an amount from $10 to $500.";
-    assert.equal(lib.purchaseProblem(999, billing), "Minimum purchase $10.");
-    assert.equal(lib.purchaseProblem(500, billing), "Minimum purchase $10.");
-    assert.equal(lib.purchaseProblem(50_001, billing), range);
-    assert.equal(lib.purchaseProblem(null, billing), range);
-  });
 
-  it("refuses a purchase that would pass the balance cap", () => {
-    const nearCap = { ...billing, balance_micro: 499_000_000_000 };
-    const msg = lib.purchaseProblem(10_000, nearCap);
-    assert.ok(msg);
-    assert.match(msg, /capped at \$5,000/);
-    assert.match(msg, /\$4,990\.00/);
-    assert.match(msg, /4,990,000 credits/);
-    assert.match(msg, /up to \$10\.00 more/);
-    // Exactly reaching the cap is allowed.
-    assert.equal(lib.purchaseProblem(1_000, nearCap), null);
-  });
-});
-
-describe("purchase limit", () => {
-  const newTeam = {
-    ...billing,
-    trusted: false,
-    purchase_max_cents: 5_000,
-    purchase_limit_cents: 5_000,
-    purchased_30d_cents: 3_000,
-  };
-
-  it("refuses a purchase past the 30-day limit and names what remains", () => {
-    assert.equal(lib.purchaseProblem(2_000, newTeam), null);
-    const msg = lib.purchaseProblem(2_001, newTeam);
-    assert.ok(msg);
-    assert.match(msg, /\$50 of credit every 30 days/);
-    assert.match(msg, /bought \$30\.00/);
-    assert.match(msg, /up to \$20\.00 more/);
-    assert.equal(lib.purchaseRemainingCents(newTeam), 2_000);
-    assert.equal(
-      lib.purchaseRemainingCents({ ...newTeam, purchased_30d_cents: 6_000 }),
-      0,
-    );
-  });
-
-  it("states the limit on a purchase_limit refusal", async () => {
-    respond = () =>
-      Response.json(
-        {
-          error: { code: "conflict", message: "over limit", details: {
-            reason: "purchase_limit", trusted: false, limit_cents: 5_000,
-            purchased_cents: 4_000, amount_cents: 2_000,
-          } },
-        },
-        { status: 409 },
-      );
-    await assert.rejects(lib.startCheckout(2_000, billing), (err: Error) => {
-      assert.ok(err instanceof lib.BillingApiError);
-      assert.equal(err.code, "purchase_limit");
-      assert.match(err.message, /up to \$10\.00 more/);
-      return true;
-    });
-  });
 });
 
 describe("checkoutReturn", () => {
@@ -349,7 +272,7 @@ describe("startCheckout", () => {
   it("posts only the amount through the session and returns the link", async () => {
     respond = () =>
       Response.json({ url: "https://checkout.stripe.com/c/pay/cs_test_1" });
-    const url = await lib.startCheckout(2_500, billing);
+    const url = await lib.startCheckout(2_500);
     assert.equal(url, "https://checkout.stripe.com/c/pay/cs_test_1");
     assert.equal(calls.length, 1);
     const [call] = calls;
@@ -361,49 +284,7 @@ describe("startCheckout", () => {
     assert.deepEqual(JSON.parse(call.body), { amount_cents: 2_500 });
   });
 
-  it("states the cap and the balance on a balance_cap refusal", async () => {
-    respond = () =>
-      Response.json(
-        {
-          error: { code: "conflict", message: "over cap", details: { reason: "balance_cap",
-          balance_micro: 499_500_000_000,
-          cap_micro: 500_000_000_000,
-          amount_micro: 1_000_000_000, } },
-        },
-        { status: 409 },
-      );
-    await assert.rejects(lib.startCheckout(1_000, billing), (err: Error) => {
-      assert.ok(err instanceof lib.BillingApiError);
-      assert.equal(err.status, 409);
-      assert.equal(err.code, "balance_cap");
-      assert.match(err.message, /capped at \$5,000/);
-      assert.match(
-        err.message,
-        /balance is \$4,995\.00 \(4,995,000 credits\)/,
-      );
-      assert.match(err.message, /up to \$5\.00 more/);
-      return true;
-    });
-  });
 
-  it("counts the team's open checkouts against the room left", async () => {
-    respond = () =>
-      Response.json(
-        {
-          error: { code: "conflict", message: "over cap", details: { reason: "balance_cap",
-          balance_micro: 400_000_000_000,
-          open_micro: 60_000_000_000,
-          cap_micro: 500_000_000_000,
-          amount_micro: 50_000_000_000, } },
-        },
-        { status: 409 },
-      );
-    await assert.rejects(lib.startCheckout(50_000, billing), (err: Error) => {
-      assert.match(err.message, /\$600\.00 in checkouts still open/);
-      assert.match(err.message, /up to \$400\.00 more/);
-      return true;
-    });
-  });
 
   for (const [status, body, pattern] of [
     [
@@ -425,7 +306,7 @@ describe("startCheckout", () => {
         new Response(typeof body === "string" ? body : JSON.stringify(body), {
           status,
         });
-      await assert.rejects(lib.startCheckout(2_500, billing), (err: Error) => {
+      await assert.rejects(lib.startCheckout(2_500), (err: Error) => {
         assert.ok(err instanceof lib.BillingApiError);
         assert.equal(err.status, status);
         assert.match(err.message, pattern);
@@ -436,6 +317,15 @@ describe("startCheckout", () => {
 
   it("refuses an answer without a link", async () => {
     respond = () => Response.json({ url: "javascript:alert(1)" });
-    await assert.rejects(lib.startCheckout(2_500, billing), /checkout link/);
+    await assert.rejects(lib.startCheckout(2_500), /checkout link/);
   });
+});
+
+it("decision 112 permits prepaid funds above the retired dollar caps", () => {
+ assert.equal(lib.purchaseProblem(600_000,billing),null);
+});
+
+it("prepay accepts the provider minimum and refuses smaller amounts", () => {
+ assert.equal(lib.purchaseProblem(50,billing),null);
+ assert.equal(lib.purchaseProblem(49,billing),"Minimum purchase $0.50.");
 });

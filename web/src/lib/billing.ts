@@ -31,7 +31,6 @@ export interface GrantRow {
 export interface Billing {
   team: string;
   balance_micro: number;
-  balance_cap_micro: number;
   // frozen is true while the team's cloud usage is held over a payment
   // dispute; its cloud runs do not start until the operator releases it.
   frozen: boolean;
@@ -39,12 +38,7 @@ export interface Billing {
   credits_per_dollar: number;
   min_billable_seconds: number;
   purchase_min_cents: number;
-  purchase_max_cents: number;
-  // A team may buy purchase_limit_cents over 30 days; purchased_30d_cents
-  // counts its payments and open checkouts against it.
   trusted: boolean;
-  purchase_limit_cents: number;
-  purchased_30d_cents: number;
   rate_table: RateRow[];
   storage_rate_micro_per_gb_day: number;
   storage_free_allowance_bytes: number;
@@ -53,8 +47,6 @@ export interface Billing {
   usage: UsageRow[];
   storage_charged_micro: number;
   grants: GrantRow[];
-  // A trusted team with a card on file is card_billed: its usage is charged
-  // to the card and it buys no prepaid credit.
   card?: { brand: string; last4: string; added_at: number };
   card_billed: boolean;
   can_add_card: boolean;
@@ -69,11 +61,11 @@ export interface Billing {
 }
 
 export interface SpendLimits {
-  ceiling_cents: number;
-  daily_cap_cents: number;
+ standing: string;
+ cloud_vcpu: number;
+ max_job_seconds: number;
   budget_cents: number;
   rung_cents: number;
-  credit_limit_cents: number;
   spent_30d_cents: number;
   spent_today_cents: number;
   headroom_cents: number;
@@ -83,12 +75,10 @@ export interface SpendLimits {
 // Why new Cloud work waits, by the limit the controller says binds first.
 export function limitReason(binding: string): string {
   switch (binding) {
-    case "ceiling":
-      return "The team reached its 30-day spend limit.";
-    case "daily_cap":
-      return "The team reached its daily spend limit; it resets at 00:00 UTC.";
     case "budget":
       return "The team reached its budget.";
+    case "charge_pending":
+      return "New Cloud work waits while the pending card charge completes. Running work finishes.";
     case "charge_failed":
       return "The last card charge failed. Pay it now or update the card.";
     default:
@@ -275,71 +265,10 @@ export function creditsForCents(cents: number, u: Units): number {
   return Math.floor((cents * u.credits_per_dollar) / 100);
 }
 
-// purchaseProblem mirrors the controller's checks so the owner hears about a
-// bad amount before leaving for Stripe; the controller checks again.
-export function purchaseProblem(
-  cents: number | null,
-  b: Units &
-    Pick<
-      Billing,
-      | "purchase_min_cents"
-      | "purchase_max_cents"
-      | "balance_micro"
-      | "balance_cap_micro"
-      | "purchase_limit_cents"
-      | "purchased_30d_cents"
-    >,
-): string | null {
-  const range = `Enter an amount from ${fmtCents(b.purchase_min_cents)} to ${fmtCents(b.purchase_max_cents)}.`;
-  if (cents === null) return range;
-  if (cents < b.purchase_min_cents) {
-    return `Minimum purchase ${fmtCents(b.purchase_min_cents)}.`;
-  }
-  if (cents > b.purchase_max_cents) {
-    return range;
-  }
-  if (b.balance_micro + cents * microPerCent(b) > b.balance_cap_micro) {
-    return capMessage(b.balance_micro, b.balance_cap_micro, b);
-  }
-  if (b.purchased_30d_cents + cents > b.purchase_limit_cents) {
-    return limitMessage(b.purchase_limit_cents, b.purchased_30d_cents);
-  }
-  return null;
-}
-
-// purchaseRemainingCents is what the team may still buy in the 30-day window.
-export function purchaseRemainingCents(
-  b: Pick<Billing, "purchase_limit_cents" | "purchased_30d_cents">,
-): number {
-  return Math.max(0, b.purchase_limit_cents - b.purchased_30d_cents);
-}
-
-function limitMessage(limitCents: number, purchasedCents: number): string {
-  const room = Math.max(0, limitCents - purchasedCents);
-  return (
-    `This team can buy ${fmtCents(limitCents)} of credit every 30 days. ` +
-    `It has bought ${fmtUSD(purchasedCents / 100)}, so it can buy up to ${fmtUSD(room / 100)} more now.`
-  );
-}
-
-function capMessage(
-  balanceMicro: number,
-  capMicro: number,
-  u: Units,
-  openMicro = 0,
-): string {
-  const room = Math.max(0, capMicro - balanceMicro - openMicro);
-  const roomCents = Math.floor(room / microPerCent(u));
-  const open =
-    openMicro > 0
-      ? ` and ${fmtUSD(balanceUSD(openMicro, u))} in checkouts still open`
-      : "";
-  return (
-    `A team balance is capped at ${fmtUSDShort(balanceUSD(capMicro, u))}. ` +
-    `The balance is ${fmtUSD(balanceUSD(balanceMicro, u))} ` +
-    `(${fmtCredits(balanceCredits(balanceMicro, u))} credits)${open}, so this team can buy ` +
-    `up to ${fmtUSD(roomCents / 100)} more.`
-  );
+export function purchaseProblem(cents: number | null,b: Pick<Billing,"purchase_min_cents">): string | null {
+ if (cents===null || !Number.isSafeInteger(cents)) return "Enter a dollar amount.";
+ if (cents<b.purchase_min_cents) return `Minimum purchase ${fmtCents(b.purchase_min_cents)}.`;
+ return null;
 }
 
 export class BillingApiError extends Error {
@@ -356,12 +285,6 @@ interface ErrorBody {
   error?: string;
   message?: string;
   code?: string;
-  balance_micro?: number;
-  open_micro?: number;
-  cap_micro?: number;
-  amount_micro?: number;
-  limit_cents?: number;
-  purchased_cents?: number;
 }
 
 async function readErrorBody(res: Response): Promise<ErrorBody> {
@@ -386,37 +309,11 @@ async function readErrorBody(res: Response): Promise<ErrorBody> {
   }
 }
 
-// checkoutErrorMessage turns a refused checkout into a sentence the owner can
-// act on. Units come from the loaded billing so the cap reads in dollars.
 export function checkoutErrorMessage(
   status: number,
   body: ErrorBody,
-  u: Units,
-): string {
+ ): string {
   const detail = body.error || body.message || "";
-  if (status === 409 && body.code === "balance_cap") {
-    if (
-      typeof body.balance_micro === "number" &&
-      typeof body.cap_micro === "number"
-    ) {
-      return capMessage(
-        body.balance_micro,
-        body.cap_micro,
-        u,
-        typeof body.open_micro === "number" ? body.open_micro : 0,
-      );
-    }
-    return detail || "This purchase would take the balance over its cap.";
-  }
-  if (status === 409 && body.code === "purchase_limit") {
-    if (
-      typeof body.limit_cents === "number" &&
-      typeof body.purchased_cents === "number"
-    ) {
-      return limitMessage(body.limit_cents, body.purchased_cents);
-    }
-    return detail || "This purchase would pass the team's 30-day limit.";
-  }
   if (status === 400) {
     return detail
       ? `The controller refused this amount: ${detail}`
@@ -444,8 +341,6 @@ function normalize(body: Partial<Billing>): Billing {
     storage_free_allowance_bytes: body.storage_free_allowance_bytes ?? 0,
     frozen: body.frozen === true,
     trusted: body.trusted === true,
-    purchase_limit_cents: body.purchase_limit_cents ?? 0,
-    purchased_30d_cents: body.purchased_30d_cents ?? 0,
     checkout_enabled: body.checkout_enabled === true,
     can_purchase: body.can_purchase === true,
   };
@@ -471,7 +366,6 @@ export async function getBilling(): Promise<Billing> {
 // active team, so the request never carries one.
 export async function startCheckout(
   amountCents: number,
-  u: Units,
 ): Promise<string> {
   const res = await authFetch("/api/v1/team/billing/checkout", {
     method: "POST",
@@ -485,7 +379,7 @@ export async function startCheckout(
     const body = await readErrorBody(res);
     throw new BillingApiError(
       res.status,
-      checkoutErrorMessage(res.status, body, u),
+      checkoutErrorMessage(res.status, body),
       body.code,
     );
   }

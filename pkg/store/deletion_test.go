@@ -69,7 +69,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	// safety: billing rows are tenant-owned, so an expired checkout and a
 	// released dispute hold go with the team rather than outliving it; open
 	// ones refuse the deletion, see TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds.
-	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now.Add(-2*time.Hour), time.Hour); err != nil {
+	if _, err := acme.OpenCreditCheckout(ctx, 50*store.MicroCreditsPerCent, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.ForTeam(t, st, "acme").TestOnlyHoldForDispute(ctx, "dp_acme", "", "dispute opened", now); err != nil {

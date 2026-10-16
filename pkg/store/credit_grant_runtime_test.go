@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"math"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -60,35 +59,6 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 		t.Fatalf("grants minus charges: %d, %v", balance, err)
 	}
 	rewriteSchemaCount(t, s.db, "credit_grants", 2)
-}
-
-func TestCreditGrantRequestValidation(t *testing.T) {
-	s, event := paymentFixture(t, capability.PaymentTest)
-	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
-		t.Fatal(err)
-	}
-	tenant := &Tenant{s: s, team: "a"}
-	for _, req := range []CreditGrantRequest{
-		{Kind: "gift", AmountMicro: 1},
-		{Kind: CreditGrantFree},
-		{Kind: CreditGrantFree, AmountMicro: -1},
-		{Kind: CreditGrantFree, AmountMicro: MaxCreditGrantMicro + 1},
-		{Kind: CreditGrantFree, AmountMicro: 1, Reference: unappliedPrefix + "reserved"},
-		{Kind: CreditGrantFree, AmountMicro: 1, Reverses: "payment:test:checkout"},
-		{Kind: CreditGrantPaid, AmountMicro: 1},
-		{Kind: CreditGrantReversal, AmountMicro: 1, Reference: "refund", Reverses: "payment:test:checkout"},
-		{Kind: CreditGrantReversal, AmountMicro: -1, Reverses: "payment:test:checkout"},
-		{Kind: CreditGrantReversal, AmountMicro: -1, Reference: "refund"},
-		{Kind: CreditGrantReversal, AmountMicro: math.MinInt64, Reference: "refund", Reverses: "payment:test:checkout"},
-	} {
-		if _, err := tenant.RecordCreditGrant(t.Context(), req); err == nil {
-			t.Fatalf("invalid grant accepted: %+v", req)
-		}
-	}
-	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: MaxCreditGrantMicro, Reference: "gift", CreatedBy: "ops"}); !errors.Is(err, ErrCreditBalanceCap) {
-		t.Fatalf("free grant ceiling bypassed balance cap: %v", err)
-	}
-	rewriteSchemaCount(t, s.db, "credit_grants", 1)
 }
 
 func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {

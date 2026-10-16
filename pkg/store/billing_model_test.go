@@ -1,0 +1,353 @@
+package store
+
+import (
+	"fmt"
+	"math/rand"
+	"strings"
+	"testing"
+	"testing/quick"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+)
+
+func billingModelFixture(t *testing.T) (*Store, UnitDemand, *time.Time) {
+	t.Helper()
+	s, demand, now := meteredUnitFixture(t, true)
+	rewriteSchemaExec(t, s.db, `UPDATE credit_grants SET kind='free'`)
+	rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=?`, now.Add(24*time.Hour).UnixNano())
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET card_customer='customer',card_payment_method='method',card_fingerprint='card',card_added_at=? WHERE name='a'`, now.UnixNano())
+	return s, demand, now
+}
+
+func billingModelJob(t *testing.T, s *Store, id string) {
+	t.Helper()
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT team,run_id,?,'pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`, id)
+}
+
+func TestBillingModelNewCloudAdmissionsShareEightVCPU(t *testing.T) {
+	s, demand, _ := billingModelFixture(t)
+	for _, id := range []string{"job", "second", "third"} {
+		if id != "job" {
+			billingModelJob(t, s, id)
+		}
+		demand.Target.NodeID = id
+		claim, err := s.ClaimUnit(t.Context(), demand)
+		if id != "third" {
+			if err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err == nil || len(claim.Bearer) > 0 {
+			t.Fatalf("New exceeded 8 concurrent Cloud vCPU: %+v, %v", claim, err)
+		}
+		if !strings.Contains(err.Error(), "New") {
+			t.Fatalf("refusal omits standing: %v", err)
+		}
+	}
+}
+
+func TestBillingModelNewCloudJobHasHardFourHourDeadline(t *testing.T) {
+	s, demand, now := billingModelFixture(t)
+	claim, _ := meteredUnitClaim(t, s, demand)
+	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := now.Add(4 * time.Hour)
+	if p.Capability.Binding.Deadline == nil || !p.Capability.Binding.Deadline.Equal(want) {
+		t.Fatalf("New job deadline=%v; want %v", p.Capability.Binding.Deadline, want)
+	}
+	*now = want.Add(-time.Second)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE team='a' AND run_id='run' AND node_id='job'`, want.Add(time.Minute).UnixNano())
+	beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false)
+	if err != nil || !beat.ExpiresAt.Equal(want) {
+		t.Fatalf("renewal escaped hard deadline: %+v: %v", beat, err)
+	}
+	*now = want
+	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, false); err == nil {
+		t.Fatal("job renewed past hard deadline")
+	}
+}
+
+func TestBillingModelPrepayImmediatelyLiftsCloudStanding(t *testing.T) {
+	s, demand, now := billingModelFixture(t)
+	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+	tenant := &Tenant{s: s, team: "a"}
+	rewriteSchemaExec(t, s.db, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
+	checkout, err := tenant.OpenCreditCheckout(t.Context(), 5000*MicroCreditsPerCent, *now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.AttachCreditCheckout(t.Context(), checkout, "prepay-session", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.settlePaymentFacts(t.Context(), capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "prepay", CheckoutID: "prepay-session", PaymentID: "prepay-payment", Kind: capability.PaymentCheckoutPaid, AmountMinor: 5000, Currency: "usd"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range []string{"job", "second", "third"} {
+		if id != "job" {
+			billingModelJob(t, s, id)
+		}
+		demand.Target.NodeID = id
+		if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+			t.Fatalf("prepay did not lift standing: %v", err)
+		}
+	}
+	standing, err := (&Tenant{s: s, team: "a"}).BillingStanding(t.Context(), s.now())
+	if err != nil || standing.Tier != "Established" {
+		t.Fatalf("prepaid standing=%+v: %v", standing, err)
+	}
+}
+
+func TestBillingModelPendingChargePausesAdmissionsWhileRunningJobFinishes(t *testing.T) {
+	s, demand, now := billingModelFixture(t)
+	claim, actor := meteredUnitClaim(t, s, demand)
+	tenant := &Tenant{s: s, team: "a"}
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: sourceAttempt(0)}); err != nil {
+		t.Fatal(err)
+	}
+	cardCollectionDebt(t, s, "debt", 1000)
+	work := cardCollectionDue(t, s, *now)
+	billingModelJob(t, s, "second")
+	demand.Target.NodeID = "second"
+	if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+		t.Fatal("pending charge admitted new Cloud work")
+	}
+	if _, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(time.Duration(DefaultCreditGraceSeconds+1) * time.Second)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=? WHERE node_id='job'`, now.Add(time.Minute).UnixNano())
+	beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+	if err != nil || beat.CancelRequested {
+		t.Fatalf("pending collection stopped running job: %+v: %v", beat, err)
+	}
+	if _, _, err := s.AsOperator().FailCardAttempt(t.Context(), work.AttemptID, "declined", "insufficient_funds", *now); err != nil {
+		t.Fatal(err)
+	}
+	beat, err = s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true)
+	if err != nil || beat.CancelRequested {
+		t.Fatalf("Held standing stopped running work: %+v: %v", beat, err)
+	}
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(1)}); err != nil {
+		t.Fatalf("running work could not finish: %v", err)
+	}
+}
+
+func TestBillingModelCardStartsAtFiveDollarsOrDaySeven(t *testing.T) {
+	for _, age := range []time.Duration{0, 7 * 24 * time.Hour} {
+		t.Run(age.String(), func(t *testing.T) {
+			s, _, now := billingModelFixture(t)
+			rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+			cardCollectionDebt(t, s, "small", 100)
+			if work, _, err := s.AsOperator().DueCardCharges(t.Context(), *now); err != nil || len(work) != 0 {
+				t.Fatalf("first $1 prematurely charged: %+v: %v", work, err)
+			}
+			if age == 0 {
+				cardCollectionDebt(t, s, "more", 400)
+			} else {
+				*now = now.Add(age)
+			}
+			work := cardCollectionDue(t, s, *now)
+			want := int64(500)
+			if age > 0 {
+				want = 100
+			}
+			if work.AmountCents != want {
+				t.Fatalf("first charge=%d, want %d", work.AmountCents, want)
+			}
+		})
+	}
+}
+
+func TestBillingModelDeclineHoldsAndSuccessfulChargeAdvancesLadder(t *testing.T) {
+	s, tenant, now := providerPaymentFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust=''`)
+	event := providerCollectionEvent(t, s, now, capability.PaymentCardFailed)
+	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+		t.Fatal(err)
+	}
+	standing, err := tenant.BillingStanding(t.Context(), now)
+	if err != nil || standing.Tier != "Held" {
+		t.Fatalf("decline standing=%+v: %v", standing, err)
+	}
+	now = now.Add(25 * time.Hour)
+	retry := cardCollectionDue(t, s, now)
+	if err := s.AsOperator().RecordAttemptIntent(t.Context(), retry.AttemptID, "retry", retry.Customer, now); err != nil {
+		t.Fatal(err)
+	}
+	paid := providerPaymentEvent(now, capability.PaymentCardPaid)
+	paid.ObjectID, paid.PaymentID, paid.CustomerID, paid.AmountMinor = "retry", "retry", retry.Customer, retry.AmountCents
+	if _, err := s.settlePaymentFacts(t.Context(), paid); err != nil {
+		t.Fatal(err)
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.RungMicro != 2000*MicroCreditsPerCent || st.Billing.Tier != "Established" {
+		t.Fatalf("successful first collection=%+v: %v", st, err)
+	}
+}
+
+func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
+	property := func(seed uint32) bool {
+		s, demand, _ := billingModelFixture(t)
+		rates := CreditRateTable{{Cores: 1, MicroPerSecond: 1}, {Cores: 2, MicroPerSecond: 2}, {Cores: 4, MicroPerSecond: 4}, {Cores: 8, MicroPerSecond: 8}, {Cores: 16, MicroPerSecond: 16}}
+		if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &rates}); err != nil {
+			t.Fatal(err)
+		}
+		demand.Available.Cores, demand.Capacity.Cores = 64, 64
+		allocated := 0
+		for i := range 9 {
+			cores := 1 << ((seed >> uint(i*3%27)) % 5)
+			id := fmt.Sprintf("generated-%d", i)
+			billingModelJob(t, s, id)
+			execution := fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%d}}}}`, cores)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=? WHERE team='a' AND run_id='run' AND node_id=?`, []byte(execution), id)
+			demand.Target.NodeID = id
+			claim, err := s.ClaimUnit(t.Context(), demand)
+			if allocated+cores <= 8 {
+				if err != nil {
+					t.Logf("fitting job refused: %v", err)
+					return false
+				}
+				allocated += cores
+			} else if err == nil || len(claim.Bearer) != 0 || !strings.Contains(err.Error(), "New") {
+				t.Logf("capacity bypass: allocated=%d requested=%d: %+v: %v", allocated, cores, claim, err)
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(112))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBillingModelLadderReplaysAndDeclinesMoveOneRung(t *testing.T) {
+	s, tenant, now := providerPaymentFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust=''`)
+	for i, rung := range []int64{500, 2000, 5000, 10000, 25000, 50000, 100000, 100000} {
+		cardCollectionDebt(t, s, fmt.Sprint("ladder-", i), rung)
+		work := cardCollectionDue(t, s, now)
+		if work.AmountCents != rung {
+			t.Fatalf("rung %d charge=%d", i, work.AmountCents)
+		}
+		payment := CardPayment{Team: tenant.team, ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: fmt.Sprint("ladder-payment-", i), AmountCents: rung}
+		for replay := range 2 {
+			first, _, err := s.AsOperator().SettleCardPayment(t.Context(), payment, now)
+			if err != nil || first != (replay == 0) {
+				t.Fatalf("settlement replay=%d first=%t: %v", replay, first, err)
+			}
+		}
+	}
+	cardCollectionDebt(t, s, "decline", 100000)
+	work := cardCollectionDue(t, s, now)
+	for replay := range 2 {
+		_, first, err := s.AsOperator().FailCardAttempt(t.Context(), work.AttemptID, "declined", "insufficient_funds", now)
+		if err != nil || first != (replay == 0) {
+			t.Fatalf("decline replay=%d first=%t: %v", replay, first, err)
+		}
+	}
+	st, err := tenant.SpendStanding(t.Context(), now)
+	if err != nil || st.RungMicro != 50000*MicroCreditsPerCent || st.Billing.Tier != "Held" {
+		t.Fatalf("decline did not move down one rung and hold: %+v: %v", st, err)
+	}
+}
+
+func TestBillingModelTrustedNeedsPaidHistoryAndCleanAge(t *testing.T) {
+	s, _, now := billingModelFixture(t)
+	tenant := &Tenant{s: s, team: "a"}
+	if _, err := tenant.TestOnlySettlePaidCredit(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: 5000 * MicroCreditsPerCent, Reference: "payment", CreatedBy: "billing"}); err != nil {
+		t.Fatal(err)
+	}
+	standing, err := tenant.BillingStanding(t.Context(), *now)
+	if err != nil || standing.Tier != "Established" {
+		t.Fatalf("young history: %+v: %v", standing, err)
+	}
+	*now = now.Add(30 * 24 * time.Hour)
+	standing, err = tenant.BillingStanding(t.Context(), *now)
+	if err != nil || standing.Tier != "Trusted" || standing.CloudVCPU != 128 || standing.MaxJobDuration != 6*time.Hour {
+		t.Fatalf("clean paid history: %+v: %v", standing, err)
+	}
+}
+
+func TestBillingModelIndependentClaimantsCannotOversubscribe(t *testing.T) {
+	s, demand, _ := billingModelFixture(t)
+	billingModelJob(t, s, "second")
+	billingModelJob(t, s, "third")
+	path := blobAccountingDiskStore(t, s)
+	clients := []*Store{s, {db: blobAccountingDB(t, path), dialect: DialectSQLite, clock: s.clock}, {db: blobAccountingDB(t, path), dialect: DialectSQLite, clock: s.clock}}
+	start, results := make(chan struct{}), make(chan error, 3)
+	for i, id := range []string{"job", "second", "third"} {
+		request := demand
+		target := *demand.Target
+		target.NodeID = id
+		request.Target = &target
+		go func(client *Store) { <-start; _, err := client.ClaimUnit(t.Context(), request); results <- err }(clients[i])
+	}
+	close(start)
+	admitted := 0
+	for range 3 {
+		if err := <-results; err == nil {
+			admitted++
+		} else if !strings.Contains(err.Error(), "New") {
+			t.Fatal(err)
+		}
+	}
+	if admitted != 2 {
+		t.Fatalf("admitted %d four-core jobs; want 2", admitted)
+	}
+}
+
+func TestBillingModelMonthEndCollectsTheProviderMinimum(t *testing.T) {
+	s, _, now := billingModelFixture(t)
+	rewriteSchemaExec(t, s.db, `DELETE FROM credit_grants`)
+	*now = time.Date(2026, 10, 31, 23, 59, 0, 0, time.UTC)
+	cardCollectionDebt(t, s, "small", 49)
+	if work, _, err := s.AsOperator().DueCardCharges(t.Context(), *now); err != nil || len(work) != 0 {
+		t.Fatalf("under minimum: %+v: %v", work, err)
+	}
+	*now = now.Add(time.Minute)
+	if work, _, err := s.AsOperator().DueCardCharges(t.Context(), *now); err != nil || len(work) != 0 {
+		t.Fatalf("under minimum on first: %+v: %v", work, err)
+	}
+	cardCollectionDebt(t, s, "penny", 1)
+	if work := cardCollectionDue(t, s, *now); work.AmountCents != 50 {
+		t.Fatalf("month-end charge=%d", work.AmountCents)
+	}
+}
+
+func TestBillingModelCustomerRunnerHasNoStandingCapacityOrDeadline(t *testing.T) {
+	s, demand, now := meteredUnitFixture(t, false)
+	deadline := now.Add(24 * time.Hour)
+	rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=?`, deadline.UnixNano())
+	for _, id := range []string{"job", "second", "third"} {
+		if id != "job" {
+			billingModelJob(t, s, id)
+		}
+		demand.Target.NodeID = id
+		claim, _ := meteredUnitClaim(t, s, demand)
+		principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+		if err != nil || principal.Capability.Binding.Deadline == nil || !principal.Capability.Binding.Deadline.Equal(deadline) {
+			t.Fatalf("customer runner inherited standing deadline: %+v: %v", principal.Capability.Binding.Deadline, err)
+		}
+	}
+}
+
+func TestBillingModelCloudReclaimCannotRestartJobDeadline(t *testing.T) {
+	s, demand, now := billingModelFixture(t)
+	began := *now
+	claim, _ := meteredUnitClaim(t, s, demand)
+	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(3 * time.Hour)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+	replacement, _ := meteredUnitClaim(t, s, demand)
+	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: replacement.Award.CapabilityPrefix})
+	if err != nil || p.Capability.Binding.Deadline == nil || !p.Capability.Binding.Deadline.Equal(began.Add(4*time.Hour)) {
+		t.Fatalf("reclaim restarted job deadline: %+v: %v", p.Capability.Binding.Deadline, err)
+	}
+}

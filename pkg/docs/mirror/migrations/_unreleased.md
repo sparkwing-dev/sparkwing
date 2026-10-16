@@ -1428,9 +1428,9 @@ that keep the logs service running.
   The card, refund, warning, dispute, unit and payment-lookup service routes
   under `/api/v1/credits/` are also removed. No service token can submit
   financial outcomes. Card and dispute provider-event integration remains
-  incomplete. The console's trust action sets the daily cap, card rung and
-  Cloud node cap alongside the purchase limit, and its unfreeze releases a
-  payment dispute's hold named by `hold`. The new
+  incomplete. The console's trust action changes standing. Its unfreeze releases a
+  payment dispute's hold named by `hold`. The billing-model section below
+  describes the current response fields. The new
   `sparkwing-controller admin freeze|unfreeze` holds or releases a team
   from inside the controller pod when console sign-in is down.
 - **Migrate:** list the operators' account ids in `--operator-accounts`
@@ -2566,3 +2566,36 @@ provisioning and immutable billing awards own issuance, charging and refunds.
 Compute usage counts live metered node awards. Unused raw token identity, scope
 and lease-limit declarations are removed. Controller fixtures issue current
 capabilities, and the browser fixture uses the bootstrap-capability gate.
+
+## Cloud billing uses collection rungs and standing
+
+Decision 112 replaces the team and shared-card dollar caps with the
+[Cloud billing model](../billing.md). That page contains the standing, ladder,
+first-collection, monthly-collection and launch-signup policy table.
+
+`GET /api/v1/team/billing` reports `standing`, `cloud_vcpu` and
+`max_job_seconds` inside `limits`. Owner `budget_cents`, current `rung_cents`,
+usage, balance and pending charge remain. An owner can add funds while using
+card billing. New accounts receive no automatic grant.
+
+The billing trust action accepts `trust` and `reason`. Granting standing selects
+High. Revocation selects Held. Automatic standing uses payment history and
+prepaid balance. Active payment holds take precedence. Removed fields are
+`limit_cents`, `daily_cap_cents`, `rung_cents` and `runner_cap` on that action.
+The corresponding override fields and purchase-window totals are removed from
+operator and team billing responses. Team billing also removes
+`balance_cap_micro`, `purchase_max_cents`, `purchase_limit_cents` and
+`purchased_30d_cents`. Its limits remove `ceiling_cents`, `daily_cap_cents` and
+`credit_limit_cents`. The dashboard consumes standing and keeps the owner budget.
+
+The final rewrite schema replaces the saved rung override with a bounded ladder index and
+removes dollar-cap columns and shared-card spend buckets. Recreate development
+stores made before this final schema. Released older stores remain unsupported. Existing
+awards retain immutable pricing and their captured deadline. New Cloud awards
+serialize capacity admission with reservation and issuance. Running work can
+finish during collection or a payment hold. The signup gate serializes launch
+admission and leaves operator approval available beyond the launch cap.
+
+The operator signup status includes `account_limit` and `counts.admitted` and
+reports `launch_capacity` while automatic launch admission is full. Existing
+accounts still sign in. Explicit operator approval remains available.

@@ -71,14 +71,6 @@ func TestPaymentCheckoutUnattachedAbortIsDurableAndIdempotent(t *testing.T) {
 		t.Fatal("aborted checkout attached")
 	}
 	rewriteSchemaCount(t, s.db, "credit_checkouts", 1)
-	var open int64
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		var err error
-		open, err = openCheckoutMicroTx(t.Context(), tx, "a", now.UnixNano())
-		return err
-	}); err != nil || open != 0 {
-		t.Fatalf("aborted checkout reserves %d: %v", open, err)
-	}
 }
 
 func TestPaymentCheckoutRefusesMissingModeAndInvalidAmount(t *testing.T) {

@@ -2797,3 +2797,17 @@ the shared validator through the real HTTP router. Refused requests create no
 run. `TestRetryActionRechecksAuthorityBeforeReplay` covers revocation and
 membership loss after a committed retry. No native placement cell is newly
 claimed by these ports.
+
+## Decision 112 billing policy
+
+The dollar-ceiling, daily-cap, purchase-window, shared-card bucket and operator
+cap-override tests retire with those APIs. `billing_model_test.go` and
+`billing_signup_test.go` cover the replacement through claims, renewal, real
+settlement, collection, sign-in and explicit operator admission. Generated
+admissions and independent SQLite clients pin the standing capacity invariant.
+`billing_model_internal_test.go` carries the controller claim, signup, status and
+card-prepay read paths through the real store. The identity provider and runner
+profile are external contract fakes. `billing_docs_test.go` checks the policy
+table against the source documentation. Existing immutable-price, refund,
+retention and payment replay proofs remain. No native Stripe or PostgreSQL cell
+is promoted by these SQLite and controller-handler proofs.

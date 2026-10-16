@@ -30,20 +30,16 @@ type teamBillingGrantJSON struct {
 type teamBillingJSON struct {
 	Team                      string                 `json:"team"`
 	BalanceMicro              int64                  `json:"balance_micro"`
-	BalanceCapMicro           int64                  `json:"balance_cap_micro"`
 	MicroPerCredit            int64                  `json:"micro_per_credit"`
 	CreditsPerDollar          int64                  `json:"credits_per_dollar"`
 	MinBillableSeconds        int64                  `json:"min_billable_seconds"`
 	PurchaseMinCents          int64                  `json:"purchase_min_cents"`
-	PurchaseMaxCents          int64                  `json:"purchase_max_cents"`
 	RateTable                 []creditRateJSON       `json:"rate_table"`
 	StorageRateMicroPerGBDay  int64                  `json:"storage_rate_micro_per_gb_day"`
 	StorageFreeAllowanceBytes int64                  `json:"storage_free_allowance_bytes"`
 	StorageChargedMicro       int64                  `json:"storage_charged_micro"`
 	Frozen                    bool                   `json:"frozen"`
 	Trusted                   bool                   `json:"trusted"`
-	PurchaseLimitCents        int64                  `json:"purchase_limit_cents"`
-	Purchased30dCents         int64                  `json:"purchased_30d_cents"`
 	CheckoutEnabled           bool                   `json:"checkout_enabled"`
 	CanPurchase               bool                   `json:"can_purchase"`
 	Card                      *teamCardJSON          `json:"card,omitempty"`
@@ -71,23 +67,24 @@ type teamChargeJSON struct {
 }
 
 type teamLimitsJSON struct {
-	CeilingCents     int64  `json:"ceiling_cents"`
-	DailyCapCents    int64  `json:"daily_cap_cents"`
-	BudgetCents      int64  `json:"budget_cents"`
-	RungCents        int64  `json:"rung_cents"`
-	CreditLimitCents int64  `json:"credit_limit_cents"`
-	Spent30dCents    int64  `json:"spent_30d_cents"`
-	SpentTodayCents  int64  `json:"spent_today_cents"`
-	HeadroomCents    int64  `json:"headroom_cents"`
-	Binding          string `json:"binding"`
+	Standing        string `json:"standing"`
+	CloudVCPU       int64  `json:"cloud_vcpu"`
+	MaxJobSeconds   int64  `json:"max_job_seconds"`
+	BudgetCents     int64  `json:"budget_cents"`
+	RungCents       int64  `json:"rung_cents"`
+	Spent30dCents   int64  `json:"spent_30d_cents"`
+	SpentTodayCents int64  `json:"spent_today_cents"`
+	HeadroomCents   int64  `json:"headroom_cents"`
+	Binding         string `json:"binding"`
 }
 
 func teamLimitsBody(st store.SpendStanding) teamLimitsJSON {
 	room, limit := st.Headroom()
 	c := int64(store.MicroCreditsPerCent)
 	return teamLimitsJSON{
-		CeilingCents: st.CeilingMicro / c, DailyCapCents: st.DailyCapMicro / c, BudgetCents: st.BudgetMicro / c,
-		RungCents: st.RungMicro / c, CreditLimitCents: st.CreditLimitMicro / c,
+		Standing: st.Billing.Tier, CloudVCPU: st.Billing.CloudVCPU, MaxJobSeconds: int64(st.Billing.MaxJobDuration.Seconds()),
+		BudgetCents:   st.BudgetMicro / c,
+		RungCents:     st.RungMicro / c,
 		Spent30dCents: st.Spent30dMicro / c, SpentTodayCents: st.SpentTodayMicro / c,
 		HeadroomCents: room / c, Binding: limit,
 	}
@@ -131,24 +128,20 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a cap
 	out := teamBillingJSON{
 		Team:                      string(t.Team()),
 		BalanceMicro:              state.BalanceMicro,
-		BalanceCapMicro:           store.MaxTeamBalanceMicro,
 		MicroPerCredit:            store.MicroCreditsPerCredit,
 		CreditsPerDollar:          store.CreditsPerDollar,
 		MinBillableSeconds:        store.MinBillableSeconds,
-		PurchaseMinCents:          store.CreditPurchaseMinCents,
-		PurchaseMaxCents:          standing.PurchaseMaxCents(),
+		PurchaseMinCents:          store.MinCardChargeCents,
 		RateTable:                 creditRateTableToJSON(state.RateTable),
 		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: state.StorageFreeAllowanceBytes,
 		StorageChargedMicro:       state.StorageChargedMicro,
 		Frozen:                    freeze.Frozen,
 		Trusted:                   standing.Trusted,
-		PurchaseLimitCents:        standing.LimitMicro / store.MicroCreditsPerCent,
-		Purchased30dCents:         standing.PurchasedMicro / store.MicroCreditsPerCent,
 		CheckoutEnabled:           s.checkout != nil,
-		CanPurchase:               s.checkout != nil && owner && !spend.CardBilled(),
+		CanPurchase:               s.checkout != nil && owner,
 		CardBilled:                spend.CardBilled(),
-		CanAddCard:                s.checkout != nil && owner && standing.Trusted,
+		CanAddCard:                s.checkout != nil && owner,
 		Limits:                    teamLimitsBody(spend),
 		Usage:                     make([]teamBillingUsageJSON, 0, len(usage)),
 		Grants:                    make([]teamBillingGrantJSON, 0, len(grants)),
@@ -189,8 +182,6 @@ type teamCheckoutReq struct {
 const (
 	CheckoutAmountCode      = "amount_out_of_range"
 	CheckoutUnavailableCode = "checkout_unavailable"
-	BalanceCapCode          = "balance_cap"
-	PurchaseLimitCode       = "purchase_limit"
 )
 
 func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

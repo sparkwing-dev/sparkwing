@@ -74,14 +74,10 @@ type operatorTeam struct {
 	Frozen       bool     `json:"frozen"`
 	Holds        []string `json:"holds"`
 	Billing      struct {
-		Trust              string `json:"trust"`
-		TrustBy            string `json:"trust_by"`
-		TrustReason        string `json:"trust_reason"`
-		PurchaseLimitCents int64  `json:"purchase_limit_cents"`
-		LimitOverrideCents int64  `json:"limit_override_cents"`
-		DailyCapCents      int64  `json:"daily_cap_cents"`
-		RungCents          int64  `json:"rung_cents"`
-		RunnerCap          int64  `json:"runner_cap"`
+		Trust       string `json:"trust"`
+		TrustBy     string `json:"trust_by"`
+		TrustReason string `json:"trust_reason"`
+		Standing    string `json:"standing"`
 	} `json:"billing"`
 	Events []struct {
 		Kind  string         `json:"kind"`
@@ -117,7 +113,7 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 		}
 	}
 
-	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{"trust": "granted", "reason": "known customer", "limit_cents": 250_000}, nil); code != http.StatusOK {
+	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{"trust": "granted", "reason": "known customer"}, nil); code != http.StatusOK {
 		t.Fatalf("trust = %d", code)
 	}
 	if code := f.call("POST", base+"/grants", operator.auth, map[string]any{"amount_cents": 500_001, "reason": "too much"}, nil); code != http.StatusBadRequest {
@@ -143,7 +139,7 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 	if team.Team != owner.team || len(team.Owners) != 1 || team.Owners[0] != "olga@example.com" ||
 		team.BalanceMicro != 2_000*store.MicroCreditsPerCent || !team.Frozen || len(team.Holds) != 1 ||
 		team.Billing.Trust != "granted" || team.Billing.TrustBy != operator.id ||
-		team.Billing.TrustReason != "known customer" || team.Billing.PurchaseLimitCents != 250_000 {
+		team.Billing.TrustReason != "known customer" || team.Billing.Standing != "Held" {
 		t.Errorf("after the actions = %+v", team)
 	}
 
@@ -177,7 +173,7 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 	if code := f.call("POST", base+"/trust", operator.auth, revoke, nil); code != http.StatusOK {
 		t.Fatalf("revoke = %d", code)
 	}
-	limit := map[string]any{"trust": "granted", "reason": "vip", "limit_cents": 250_000}
+	limit := map[string]any{"trust": "granted", "reason": "vip"}
 	if code := f.call("POST", base+"/trust", operator.auth, limit, nil); code != http.StatusBadRequest {
 		t.Errorf("a limit on a revoked team = %d want 400", code)
 	}
@@ -215,29 +211,13 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 	}
 }
 
-// The console sets and shows every override a granted team's trust carries,
-// and a grant that names none returns each to its default.
-func TestOperatorConsole_SetsATrustedTeamsOverrides(t *testing.T) {
+func TestOperatorConsoleRejectsRetiredDollarOverrides(t *testing.T) {
 	f, operator, owner := operatorFixture(t)
-	base := "/api/v1/operator/teams/" + owner.team
-	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{
-		"trust": "granted", "reason": "enterprise", "limit_cents": 300_000,
-		"daily_cap_cents": 50_000, "rung_cents": 20_000, "runner_cap": 250,
-	}, nil); code != http.StatusOK {
-		t.Fatalf("trust with overrides = %d", code)
-	}
-	var team operatorTeam
-	f.call("GET", base, operator.auth, nil, &team)
-	if b := team.Billing; b.LimitOverrideCents != 300_000 || b.DailyCapCents != 50_000 || b.RungCents != 20_000 || b.RunnerCap != 250 {
-		t.Errorf("overrides = %+v", b)
-	}
-	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{"trust": "granted", "reason": "back to defaults"}, nil); code != http.StatusOK {
-		t.Fatalf("plain grant = %d", code)
-	}
-	var after operatorTeam
-	f.call("GET", base, operator.auth, nil, &after)
-	if b := after.Billing; b.LimitOverrideCents+b.DailyCapCents+b.RungCents+b.RunnerCap != 0 {
-		t.Errorf("overrides after a plain grant = %+v, want none", b)
+	for _, field := range []string{"limit_cents", "daily_cap_cents", "rung_cents", "runner_cap"} {
+		body := map[string]any{"trust": "granted", "reason": "review", field: 100}
+		if code := f.call("POST", "/api/v1/operator/teams/"+owner.team+"/trust", operator.auth, body, nil); code != http.StatusBadRequest {
+			t.Fatalf("retired %s accepted: %d", field, code)
+		}
 	}
 }
 

@@ -521,7 +521,7 @@ reservation and current billing limits. The checkout service receives that
 reservation as its request key. A completed replay returns the recorded URL
 without opening another page. Provider failure leaves the reservation available
 for reconciliation. API failures use the canonical error envelope. Billing
-refusal details include a `reason`, such as `balance_cap` or `purchase_limit`.
+refusal details include a `reason`. Cloud admissions follow [billing standing](billing.md).
 
 
 The controller verifies Stripe signatures at `POST /webhooks/stripe`. Checkout
