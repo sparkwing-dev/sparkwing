@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"time"
 )
 
 // ListPendingApprovals returns t's unresolved approvals, oldest first. The
@@ -28,37 +27,6 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 			return nil, err
 		}
 		out = append(out, a)
-	}
-	return out, rows.Err()
-}
-
-// ListAgentClaims returns the live node claims on t's runs since the given
-// instant.
-func (t *Tenant) ListAgentClaims(ctx context.Context, since time.Time) (_ []AgentClaim, err error) {
-	rows, err := t.s.query(ctx, `
-SELECT run_id, status, claimed_by, claim_token_prefix,
-       COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
-  FROM nodes
- WHERE claimed_by IS NOT NULL AND claimed_by != ''
-   AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
-   AND run_id IN (SELECT id FROM runs WHERE team = ?)
-`, since.UnixNano(), string(t.team))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []AgentClaim
-	for rows.Next() {
-		var claim AgentClaim
-		var started, expires int64
-		if err := rows.Scan(&claim.RunID, &claim.Status, &claim.ClaimedBy, &claim.TokenPrefix, &started, &expires); err != nil {
-			return nil, err
-		}
-		if started > 0 {
-			claim.StartedAt = time.Unix(0, started)
-			claim.LastSeen = claim.StartedAt
-		}
-		out = append(out, claim)
 	}
 	return out, rows.Err()
 }

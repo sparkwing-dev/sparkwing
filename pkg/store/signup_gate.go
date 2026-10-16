@@ -249,13 +249,13 @@ func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignU
 // and how many wait on the list.
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error) {
 	var c SignUpCounts
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	err := s.queryRow(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
 			(SELECT COUNT(*) FROM accounts WHERE waitlisted_at <> 0)`,
-		at-int64(time.Hour/time.Second), at-int64(24*time.Hour/time.Second)).
+		at-int64(time.Hour), at-int64(24*time.Hour)).
 		Scan(&c.LastHour, &c.LastDay, &c.Waitlisted)
 	return c, err
 }
@@ -413,7 +413,7 @@ func (s *Store) waitlisted(ctx context.Context, order string, limit, offset int)
 			return nil, err
 		}
 		w.EmailVerified, w.ActiveTeam = verified == 1, Team(active)
-		w.CreatedAt, w.WaitlistedAt = time.Unix(created, 0).UTC(), time.Unix(0, waitlisted).UTC()
+		w.CreatedAt, w.WaitlistedAt = time.Unix(0, created).UTC(), time.Unix(0, waitlisted).UTC()
 		w.Waitlisted = true
 		out = append(out, w)
 	}
@@ -483,7 +483,7 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string, now time.T
 }
 
 func approveOneTx(ctx context.Context, tx *storeTx, id, actor string, now time.Time) (Account, bool, error) {
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	res, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET waitlisted_at = 0, waitlist_reason = '', updated_at = ? WHERE id = ? AND waitlisted_at <> 0`,
 		at, id)

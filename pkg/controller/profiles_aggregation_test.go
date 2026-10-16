@@ -11,7 +11,7 @@ import (
 )
 
 func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
-	for _, mode := range []string{"overlap", "sequential", "clock-skew", "single", "cached"} {
+	for _, mode := range []string{"overlap", "sequential", "clock-skew", "single", "memoized"} {
 		t.Run(mode, func(t *testing.T) {
 			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
@@ -22,7 +22,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			start := time.Unix(1700000000, 0)
 			finish := start.Add(time.Minute)
 			run := store.Run{ID: "r", Pipeline: "aggregate", Status: "success", StartedAt: start, FinishedAt: &finish}
-			if err := st.CreateRun(ctx, run); err != nil {
+			if err := teststore.SeedRun(st, ctx, store.DefaultTeam, run); err != nil {
 				t.Fatal(err)
 			}
 			if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "aggregate", "", 4, 400); err != nil {
@@ -44,23 +44,23 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 					begin, end = start.Add(20*time.Second), start.Add(30*time.Second)
 				}
 				outcome := "success"
-				if id == "b" && mode == "cached" {
-					outcome = "cached"
+				if id == "b" && mode == "memoized" {
+					outcome = "memoized"
 				}
-				if err := st.CreateNode(ctx, store.Node{RunID: "r", NodeID: id, Status: "running"}); err != nil {
+				if err := teststore.SeedNode(st, ctx, store.Node{RunID: "r", NodeID: id, Status: "running"}); err != nil {
 					t.Fatal(err)
 				}
-				if err := st.FinishNode(ctx, "r", id, outcome, ""); err != nil {
+				if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: "r", NodeID: id}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := st.DB().Exec(`UPDATE nodes SET started_at=?, finished_at=? WHERE run_id=? AND node_id=?`, begin.UnixNano(), end.UnixNano(), "r", id); err != nil {
 					t.Fatal(err)
 				}
-				n, err := st.GetNode(ctx, "r", id)
+				n, err := teststore.ForTeam(t, st, store.DefaultTeam).GetNode(ctx, "r", id)
 				if err != nil || n == nil || n.Outcome != outcome || n.StartedAt == nil || n.FinishedAt == nil || !n.StartedAt.Equal(begin) || !n.FinishedAt.Equal(end) {
 					t.Fatalf("node fixture differs: %+v, %v", n, err)
 				}
-				if outcome == "cached" {
+				if outcome == "memoized" {
 					continue
 				}
 				stamp := begin
@@ -68,7 +68,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 					stamp = stamp.Add(24 * time.Hour)
 				}
 				for i := range 2 {
-					if err := st.AddNodeMetricSample(ctx, "r", id, store.MetricSample{Kind: store.MetricInterval, TS: stamp.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 100}); err != nil {
+					if err := teststore.SeedMetric(st.DB(), ctx, "r", id, store.MetricSample{Kind: store.MetricInterval, TS: stamp.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 100}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -79,7 +79,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			}
 			New(st, nil).foldRunProfiles(ctx, tenant, &run)
 			for _, id := range []string{"a", "b"} {
-				if id == "b" && (mode == "single" || mode == "cached") {
+				if id == "b" && (mode == "single" || mode == "memoized") {
 					continue
 				}
 				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "aggregate", id)
@@ -91,7 +91,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if mode == "single" || mode == "cached" {
+			if mode == "single" || mode == "memoized" {
 				if after == nil || after.SampleCount != 1 || !after.CPUMeasured || after.PeakCores != 1 || after.PeakMemoryBytes != 100 || after.PinnedCores != 4 || after.PinnedMemoryBytes != 400 || after.WaitSampleCount != 1 {
 					t.Fatalf("single node observation lost: %+v", after)
 				}

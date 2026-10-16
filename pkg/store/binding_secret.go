@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -17,10 +18,12 @@ func bindingSecretTx(ctx context.Context, tx *storeTx, c capability.Capability, 
 		return err
 	}
 	if run.Spec == nil || !slices.Contains(run.Spec.Resolved.SecretNames, target.SecretName) {
+		return &apierr.Error{Code: apierr.Forbidden, Message: "the run's pipeline does not declare this secret", Details: map[string]any{"reason": apierr.ReasonSecretUndeclared}}
+	}
+	if target.Pipeline != "" && target.Pipeline != run.Pipeline {
 		return bindingRefusal()
 	}
-	var pool string
-	err = tx.QueryRowContext(ctx, `SELECT only_on FROM secrets WHERE team=? AND name=? AND (pipeline=? OR (pipeline='' AND shared=1)) ORDER BY CASE WHEN pipeline='' THEN 1 ELSE 0 END LIMIT 1`, c.Team, target.SecretName, run.Pipeline).Scan(&pool)
+	_, pool, err := selectedSecretTx(ctx, tx, Team(c.Team), target.SecretName, run.Pipeline, true)
 	if err != nil {
 		return err
 	}

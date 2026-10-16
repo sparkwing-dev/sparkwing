@@ -4,23 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"sort"
-	"time"
 )
-
-// CreateRun writes the run into t's team.
-func (t *Tenant) CreateRun(ctx context.Context, r Run) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.s.createRunTx(ctx, tx, t.team, r); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
 
 // GetRun fetches one of t's runs by id. A run of another team reads as
 // [ErrNotFound], because a caller told the row exists but is not yours
@@ -47,100 +32,6 @@ func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 // CountRuns returns how many of t's runs match f, ignoring its Limit.
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 	return t.s.countRuns(ctx, oneTeam(t.team), f)
-}
-
-// FinishRun marks one of t's runs terminal with the given status and
-// optional error. A run of another team reads as [ErrNotFound], the same
-// as [Tenant.GetRun] reports it, because a mutator that quietly matched
-// nothing would let a cancel endpoint answer 200 and cancel nothing.
-func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
-		return err
-	}
-	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
-		return err
-	}
-	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, t.team); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// FinishRunIfActive records a terminal outcome for one of t's runs once and
-// reports whether this call committed it. A run already terminal keeps the
-// outcome it has and reports false whatever status the retry names, so a
-// retried completion cannot rewrite what followers already acted on.
-func (t *Tenant) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (changed bool, err error) {
-	if !isTerminalRunStatus(status) {
-		return false, fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
-		return false, err
-	}
-	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
-		return false, err
-	}
-	res, err := tx.ExecContext(ctx, finishRunStmt,
-		status, errMsg, time.Now().UnixNano(), runID, string(t.team))
-	if err != nil {
-		return false, err
-	}
-	count, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if count == 1 && status == outcomeSuccess {
-		if err := RecordBusinessEvent(tx, BusinessEvent{
-			Team: t.team, Kind: BusinessEventFirstRunSucceeded, Attrs: map[string]any{"run_id": runID},
-		}); err != nil {
-			return false, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return count == 1, nil
-}
-
-// FinishRunsIfActive atomically finalizes the named non-terminal runs
-// of t's team. A failure rolls back every member, so one shared lease
-// cannot be partly cancelled, and a member of another team fails the
-// whole batch with [ErrNotFound] rather than being skipped.
-func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
-	if !isTerminalRunStatus(status) {
-		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
-	}
-	if len(runIDs) == 0 {
-		return nil
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	now := time.Now().UnixNano()
-	for _, runID := range runIDs {
-		if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE runs SET status = ?, error = ?, finished_at = ?
-			  WHERE team = ? AND id = ? AND finished_at IS NULL AND status NOT IN ('success','failed','cancelled')`,
-			status, errMsg, now, string(t.team), runID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 // safety: every tenant mutator runs this first, because a scoped UPDATE

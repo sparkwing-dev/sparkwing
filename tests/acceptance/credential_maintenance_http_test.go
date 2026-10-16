@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type credentialMaintenance struct {
@@ -74,7 +75,7 @@ func (f *credentialMaintenance) SourceReleaseAudits(_ context.Context, limit int
 
 func maintenanceServer(t testing.TB, b *credentialBoundary, f *credentialMaintenance) *controller.Server {
 	t.Helper()
-	s := mutationServerConfig(nil, nil, b)
+	s := mutationServerConfig(t, nil, nil, b)
 	resolve := func(team store.Team) {
 		f.resolves++
 		if team != "team" {
@@ -133,7 +134,7 @@ func TestCredentialMaintenanceHTTPRequiresLiveAuthority(t *testing.T) {
 				case "binding":
 					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "outside team"}
 				}
-				w := authorityHTTP(mutationServer(nil, nil, b), b, route.method, route.path, "")
+				w := authorityHTTP(mutationServer(t, nil, nil, b), b, route.method, route.path, "")
 				assertEngineError(t, w, apierr.Status(code), code)
 				if w.Header().Get("Cache-Control") != "no-store" {
 					t.Fatal("credential response is cacheable")
@@ -485,12 +486,12 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := tenant.CreateOrReplaceSecret(store.Secret{Name: "UNCHANGED", Value: "original-envelope", Masked: true}, time.Now()); err != nil {
+		if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: "UNCHANGED", Value: "original-envelope", Masked: true}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
 	b := authorityMember()
-	h := mutationServerConfig(s, cipher, b).
+	h := mutationServerConfig(t, s, cipher, b).
 		WithCredentialRotator(func(context.Context, store.Team) (controller.CredentialRotator, error) { return nil, nil }).
 		WithSourceAuditReader(func(context.Context, store.Team) (controller.SourceAuditReader, error) { return nil, nil }).Handler()
 	for _, route := range []struct{ method, path string }{{"POST", "/api/v1/secrets/rotate"}, {"GET", "/api/v1/team/git-credentials/releases"}} {
@@ -502,9 +503,77 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		row, err := tenant.GetSecret("UNCHANGED")
+		row, err := tenant.GetSecretRow("UNCHANGED", "")
 		if err != nil || row.Value != "original-envelope" {
 			t.Fatalf("legacy fallback changed %s: %+v %v", team, row, err)
 		}
+	}
+}
+
+func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
+	f := newSessionFlow(t)
+	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner' WHERE team='team' AND account_id='member'`); err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{34}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(t.Context(), "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := store.Secret{Name: "TOKEN", Pipeline: "deploy", Masked: true, Value: "private value"}
+	row.Value, err = controller.SealSecretValue(cipher, "team", &row, row.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := teststore.SeedSecret(f.store, tenant.Team(), row, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	gitValue, err := cipher.SealBound("team", "git-credential:git.example.test", "git-credential", false, true, "private key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, f.store, "team"), store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: gitValue}); err != nil {
+		t.Fatal(err)
+	}
+	handler := f.server.Handler()
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, f.request("POST", "/api/v1/secrets/rotate", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("real rotation: %d %s", w.Code, w.Body.String())
+	}
+	var result struct {
+		Rotated int `json:"rotated"`
+		Git     int `json:"git_credentials"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Rotated != 1 || result.Git != 1 {
+		t.Fatalf("rotation response: %s,%v", w.Body.String(), err)
+	}
+	got, err := tenant.GetSecretRow("TOKEN", "deploy")
+	if err != nil || got.Value == row.Value {
+		t.Fatalf("secret did not rotate: %+v,%v", got, err)
+	}
+	plain, err := controller.OpenSecretValue(cipher, "team", got)
+	if err != nil || plain != "private value" {
+		t.Fatalf("rotated secret unreadable: %v", err)
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, f.request("GET", "/api/v1/team/git-credentials/releases", ""))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"releases":[]`) {
+		t.Fatalf("real audit reader: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team='team' AND account_id='member'`); err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, f.request("POST", "/api/v1/secrets/rotate", ""))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("demoted rotation: %d %s", w.Code, w.Body.String())
+	}
+	after, err := tenant.GetSecretRow("TOKEN", "deploy")
+	if err != nil || after.Value != got.Value {
+		t.Fatalf("demoted request changed secret: %+v,%v", after, err)
 	}
 }

@@ -138,7 +138,7 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	}
 
 	ctx := context.Background()
-	trigger, err := f.store.GetTrigger(ctx, launched.RunID)
+	trigger, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetTrigger(ctx, launched.RunID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	if trigger.IdempotencyKey == "" {
 		t.Error("a scheduled launch carries no idempotency key")
 	}
-	run, err := f.store.GetRun(ctx, launched.RunID)
+	run, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetRun(ctx, launched.RunID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
@@ -183,12 +183,12 @@ func TestControllerCrons_ASecondLaunchOfOneDueInstantReachesTheFirstRun(t *testi
 		t.Fatalf("idempotency key = %q", key)
 	}
 	first := "run_first"
-	if err := f.store.CreateTrigger(ctx, store.Trigger{
+	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 		ID: first, Pipeline: sched.Pipeline, CreatedAt: time.Now(), IdempotencyKey: key,
 	}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	found, err := f.store.FindTriggerByIdempotencyKey(ctx, sched.Pipeline, key)
+	found, err := teststore.ForTeam(t, f.store, store.DefaultTeam).FindTriggerByIdempotencyKey(ctx, sched.Pipeline, key)
 	if err != nil {
 		t.Fatalf("FindTriggerByIdempotencyKey: %v", err)
 	}

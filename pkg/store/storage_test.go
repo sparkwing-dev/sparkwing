@@ -7,24 +7,25 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func seedRunWithNode(t *testing.T, st *store.Store, runID, nodeID, status string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: runID, Pipeline: "p", Status: status, StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("create run %s: %v", runID, err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		t.Fatalf("create node %s/%s: %v", runID, nodeID, err)
 	}
 }
 
 func appendEventAt(t *testing.T, st *store.Store, runID, nodeID, kind string, at time.Time) {
 	t.Helper()
-	if err := st.AppendEvent(context.Background(), runID, nodeID, kind, nil); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(context.Background(), runID, nodeID, kind, nil); err != nil {
 		t.Fatalf("append event %s: %v", kind, err)
 	}
 	if _, err := st.DB().Exec(storetest.Rebind(st,

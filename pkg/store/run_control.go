@@ -5,172 +5,215 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// Run admission states of a controller-dispatched run. A run that predates
-// them reads as "". Plan-level concurrency, which would hold a run queued, is
-// refused at plan acceptance, so an accepted plan is admitted at once.
-const (
-	RunAdmissionPlanning = "planning"
-	RunAdmissionAdmitted = "admitted"
-)
-
-const approvalControllerActor = "sparkwing"
-
-type approvalSpec struct {
-	Message   string `json:"message,omitempty"`
-	TimeoutMS int64  `json:"timeout_ms,omitempty"`
-	OnTimeout string `json:"on_timeout,omitempty"`
-}
-
-func openApprovalTx(ctx context.Context, tx *storeTx, team Team, runID string, n *settleNode, now time.Time) error {
-	var spec approvalSpec
-	if err := json.Unmarshal(n.approval, &spec); err != nil {
-		return fmt.Errorf("node %s/%s approval: %w", runID, n.id, err)
+// CreateAuthorizedDebugPause commits a masked pause under live run-control authority.
+func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Authorized, job, reason string, expires time.Time, key string) error {
+	if strings.TrimSpace(job) == "" || strings.TrimSpace(reason) == "" {
+		return ErrInvalidInput
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO approvals (team, run_id, node_id, requested_at, message, timeout_ms, on_timeout)
-VALUES (?, ?, ?, ?, ?, ?, ?)`, string(team), runID, n.id, now.UnixNano(), spec.Message, spec.TimeoutMS, spec.OnTimeout); err != nil {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		target := a.Target
+		if target.NodeID != "" && target.NodeID != job {
+			return bindingRefusal()
+		}
+		p, err := t.runControlAuthorityTx(ctx, tx, a, "/api/v1/runs/{run}/debug-pauses")
+		if err != nil {
+			return err
+		}
+		replay, err := runControlReplayTx(ctx, tx, t.team, target.RunID, p, "pause", key, struct {
+			Job, Reason string
+			Expires     time.Time
+		}{job, reason, expires}, nil)
+		if err != nil {
+			return err
+		}
+		if replay {
+			_, err = t.runControlAuthorityTx(ctx, tx, a, "/api/v1/runs/{run}/debug-pauses")
+			return err
+		}
+		run, err := readRunTx(ctx, tx, t.team, target.RunID)
+		if err != nil {
+			return err
+		}
+		row, err := readNodeTx(ctx, tx, t.team, NodeRef{target.RunID, job})
+		if err != nil {
+			return err
+		}
+		if run.FinishedAt != nil || run.CancelRequestedAt != nil || row.Status == StatusDone || row.CancelRequestedAt != nil {
+			return authorityError(apierr.IllegalTransition, "job cannot be paused")
+		}
+		now := tx.now()
+		if expires.IsZero() {
+			expires = now.Add(limits.DebugPause)
+		}
+		if !expires.After(now) {
+			return authorityError(apierr.BadRequest, "pause expiry must be in the future")
+		}
+		reason, err = controlTextTx(ctx, tx, t.team, run, reason)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO debug_pauses(team,run_id,node_id,reason,paused_at,expires_at) VALUES (?,?,?,?,?,?) ON CONFLICT(team,run_id,node_id,reason) DO UPDATE SET paused_at=excluded.paused_at,expires_at=excluded.expires_at,released_at=NULL,released_by='',release_kind=''`, t.team, target.RunID, job, reason, now.UnixNano(), expires.UnixNano()); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE nodes SET status_detail='paused' WHERE team=? AND run_id=? AND node_id=?`, t.team, target.RunID, job); err != nil {
+			return err
+		}
+		if _, err = appendEventTx(ctx, tx, t.team, target.RunID, job, "debug.paused", map[string]any{"reason": reason, "expires_at": expires}, now); err != nil {
+			return err
+		}
+		_, err = t.runControlAuthorityTx(ctx, tx, a, "/api/v1/runs/{run}/debug-pauses")
 		return err
+	})
+}
+
+// ResolveAuthorizedApproval commits one human decision and its replay under current authority.
+func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Authorized, decision controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error) {
+	var out controllerwire.ApprovalResult
+	if decision.Resolution != "approved" && decision.Resolution != "denied" {
+		return out, ErrInvalidInput
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ?, started_at = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND status = ?`,
-		NodeStatusApprovalPending, now.UnixNano(), string(team), runID, n.id, nodeStatusPending)
-	return err
-}
-
-func stampApprovalTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, resolution, approver, comment string, now time.Time) error {
-	_, err := tx.ExecContext(ctx, `UPDATE approvals SET resolved_at = ?, resolution = ?, approver = ?, comment = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND resolved_at IS NULL`,
-		now.UnixNano(), resolution, approver, comment, string(team), runID, nodeID)
-	return err
-}
-
-// safety: a timeout follows the gate's on_timeout policy, so a gate that
-// approves on timeout succeeds.
-func approvalOutcome(resolution, approver, comment, onTimeout string) (string, string) {
-	switch resolution {
-	case ApprovalResolutionApproved:
-		return outcomeSuccess, ""
-	case ApprovalResolutionTimedOut:
-		if onTimeout == ApprovalOnTimeoutApprove {
-			return outcomeSuccess, ""
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		if a.Target.NodeID == "" {
+			return bindingRefusal()
 		}
-		if onTimeout == "" {
-			onTimeout = ApprovalOnTimeoutFail
+		p, err := t.runControlAuthorityTx(ctx, tx, a, "/api/v1/runs/{run}/approvals/{job}")
+		if err != nil {
+			return err
 		}
-		return outcomeFailed, "approval timed out (policy=" + onTimeout + ")"
-	case ApprovalResolutionDenied:
-		msg := "denied by " + approver
-		if comment != "" {
-			msg += ": " + comment
+		body := struct{ Job, Resolution, Comment string }{a.Target.NodeID, decision.Resolution, decision.Comment}
+		replay, err := runControlReplayTx(ctx, tx, t.team, a.Target.RunID, p, "approval", decision.IdempotencyKey, body, &out)
+		if err != nil {
+			return err
 		}
-		return outcomeFailed, msg
+		if replay {
+			if _, err := t.runControlAuthorityTx(ctx, tx, a, "/api/v1/runs/{run}/approvals/{job}"); err != nil {
+				return err
+			}
+			out.Replayed = true
+			return nil
+		}
+		run, err := readRunTx(ctx, tx, t.team, a.Target.RunID)
+		if err != nil {
+			return err
+		}
+		if run.FinishedAt != nil || run.CancelRequestedAt != nil {
+			return authorityError(apierr.IllegalTransition, "run is no longer executable")
+		}
+		comment, err := controlTextTx(ctx, tx, t.team, run, decision.Comment)
+		if err != nil {
+			return err
+		}
+		to := NodeFailed
+		if decision.Resolution == "approved" {
+			to = NodeSuccess
+		}
+		change := NodeTransition{Ref: NodeRef{a.Target.RunID, a.Target.NodeID}, To: to, Cause: CauseApprovalResolve, Actor: Actor{Kind: ActorOperator, Authority: p.Authority}, Extra: TransitionExtra{Approval: &ApprovalResolution{Decision: decision.Resolution, Comment: comment}}}
+		if _, err = transitionNodeTx(ctx, tx, t.team, change, tx.now()); err != nil {
+			return err
+		}
+		gate, err := scanApproval(tx.QueryRowContext(ctx, `SELECT run_id,node_id,requested_at,message,timeout_ms,on_timeout,approver,resolved_at,resolution,comment FROM approvals WHERE team=? AND run_id=? AND node_id=?`, t.team, a.Target.RunID, a.Target.NodeID))
+		if err != nil {
+			return err
+		}
+		out.Approval = controllerwire.Approval{RunID: gate.RunID, JobID: gate.NodeID, RequestedAt: gate.RequestedAt, Message: gate.Message, TimeoutMS: gate.TimeoutMS, OnTimeout: gate.OnTimeout, ResolvedAt: gate.ResolvedAt, Resolution: gate.Resolution, Approver: p.Capability.Subject.ID, Comment: gate.Comment}
+		encoded, err := json.Marshal(out)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE run_control_requests SET result_json=? WHERE team=? AND run_id=? AND subject_kind=? AND subject_id=? AND operation='approval' AND request_key=?`, encoded, t.team, a.Target.RunID, p.Capability.Subject.Kind, p.Capability.Subject.ID, decision.IdempotencyKey); err != nil {
+			return err
+		}
+		_, err = t.runControlAuthorityTx(ctx, tx, a, "/api/v1/runs/{run}/approvals/{job}")
+		return err
+	})
+	if err != nil {
+		return controllerwire.ApprovalResult{}, err
 	}
-	return outcomeFailed, "unknown approval resolution: " + resolution
+	return out, nil
 }
 
-// safety: the run lock serializes competing gate resolutions.
-func resolveApprovalTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, resolution, approver, comment string,
-	now time.Time,
-) (bool, error) {
-	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
-		return false, err
+func (t *Tenant) runControlAuthorityTx(ctx context.Context, tx *storeTx, a capability.Authorized, path string) (capability.Principal, error) {
+	if a.Target.Team != string(t.team) || a.Target.RunID == "" {
+		return capability.Principal{}, bindingRefusal()
 	}
-	var onTimeout string
-	err := tx.QueryRowContext(ctx, `SELECT a.on_timeout FROM approvals a
-  JOIN nodes n ON n.team = a.team AND n.run_id = a.run_id AND n.node_id = a.node_id
- WHERE a.team = ? AND a.run_id = ? AND a.node_id = ? AND a.resolved_at IS NULL AND n.status = ?`,
-		string(team), runID, nodeID, NodeStatusApprovalPending).Scan(&onTimeout)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
 	if err != nil {
-		return false, err
+		return p, err
 	}
-	if err := stampApprovalTx(ctx, tx, team, runID, nodeID, resolution, approver, comment, now); err != nil {
-		return false, err
+	route, ok := capability.LookupRoute("POST", path)
+	if !ok || len(route.Access) != 1 || route.Access[0].Liveness != capability.LiveCredential {
+		return p, authorityError(apierr.PolicyMissing, "run control policy is unavailable")
 	}
-	outcome, msg := approvalOutcome(resolution, approver, comment, onTimeout)
-	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ?, outcome = ?, error = ?, finished_at = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND status = ?`,
-		nodeStatusDone, outcome, msg, now.UnixNano(), string(team), runID, nodeID, NodeStatusApprovalPending); err != nil {
-		return false, err
+	_, err = capability.Authorize(ctx, tx, route, capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, a.Target)
+	if err != nil {
+		return p, err
 	}
-	return true, settleTx(ctx, tx, team, runID, now)
+	return p, lockStateRunTx(ctx, tx, t.team, a.Target.RunID)
 }
 
-// safety: any node but a controller approval gate reports handled false and
-// writes nothing, so a gate the in-process dispatcher polls keeps its path.
-func (s *Store) resolveControllerApproval(ctx context.Context, team Team, runID, nodeID, resolution, approver, comment string) (handled bool, err error) {
-	tx, err := s.beginTx(ctx)
+func runControlReplayTx(ctx context.Context, tx *storeTx, team Team, run string, p capability.Principal, operation, key string, body, out any) (bool, error) {
+	if strings.TrimSpace(key) == "" {
+		return false, ErrInvalidInput
+	}
+	digest, err := stateHash(body)
 	if err != nil {
 		return false, err
 	}
-	defer rollbackUnlessDone(tx, &err)
-	// safety: a node's kind is fixed when it is inserted, so reading it before
-	// the run lock cannot misroute the resolution.
-	var kind string
-	err = tx.QueryRowContext(ctx, `SELECT kind FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
-		string(team), runID, nodeID).Scan(&kind)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && kind != nodeKindApproval) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	resolved, err := resolveApprovalTx(ctx, tx, team, runID, nodeID, resolution, approver, comment, time.Now())
-	if err != nil {
+	var previous string
+	var result []byte
+	err = tx.QueryRowContext(ctx, `SELECT request_hash,result_json FROM run_control_requests WHERE team=? AND run_id=? AND subject_kind=? AND subject_id=? AND operation=? AND request_key=?`, team, run, p.Capability.Subject.Kind, p.Capability.Subject.ID, operation, key).Scan(&previous, &result)
+	if err == nil {
+		if previous != digest {
+			return false, authorityError(apierr.Conflict, "idempotency key has different run control inputs")
+		}
+		if out != nil {
+			err = json.Unmarshal(result, out)
+		}
 		return true, err
 	}
-	if !resolved {
-		return true, ErrLockHeld
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
 	}
-	return true, tx.Commit()
+	_, err = tx.ExecContext(ctx, `INSERT INTO run_control_requests(team,run_id,subject_kind,subject_id,operation,request_key,request_hash,result_json) VALUES (?,?,?,?,?,?,?,?)`, team, run, p.Capability.Subject.Kind, p.Capability.Subject.ID, operation, key, digest, []byte(`{}`))
+	return false, err
 }
 
-type teamNodeRef struct {
-	team          Team
-	runID, nodeID string
-}
-
-// safety: a run with no controller planning node reports handled false and
-// writes nothing, so a run a trigger holder drives keeps the cooperative cancel.
-func (s *Store) requestControllerRunCancel(ctx context.Context, team Team, runID string, now time.Time) (handled bool, err error) {
-	tx, err := s.beginTx(ctx)
+func controlTextTx(ctx context.Context, tx *storeTx, team Team, run RunRow, text string) (string, error) {
+	spec := runspec.Spec{Request: run.Request}
+	if run.Spec != nil {
+		spec = *run.Spec
+	} else {
+		input := run.Request.Request
+		spec.Resolved.Args = input.RequestedArgs
+		spec.Resolved.SecretArgs = input.SecretArgs.Value
+		if !input.SecretArgs.Set {
+			for name := range input.RequestedArgs {
+				spec.Resolved.SecretArgs = append(spec.Resolved.SecretArgs, name)
+			}
+		}
+	}
+	values, err := planSecretsTx(ctx, tx, team, spec)
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	defer rollbackUnlessDone(tx, &err)
-	var one int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?`,
-		string(team), runID, PlanNodeID, nodeKindPlan).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+	masker := secrets.NewMasker()
+	for _, value := range values {
+		masker.Register(value)
 	}
-	if err != nil {
-		return false, err
+	if !utf8.ValidString(text) {
+		return "", authorityError(apierr.BadRequest, "control text must be UTF-8")
 	}
-	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
-		return true, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
- WHERE team = ? AND id = ? AND NOT (`+runTerminalIn+`)`, now.UnixNano(), string(team), runID); err != nil {
-		return true, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
- WHERE team = ? AND run_id = ? AND claimed_by IS NOT NULL AND `+nodeNotDone,
-		now.UnixNano(), string(team), runID); err != nil {
-		return true, err
-	}
-	if err := settleTx(ctx, tx, team, runID, now); err != nil {
-		return true, err
-	}
-	return true, tx.Commit()
+	return masker.Mask(text), nil
 }
-
-// safety: a node of a run with a cancel request is never awarded, so a claim
-// that ends on such a run cannot be replaced by a new one.
-const nodeRunNotCancelled = ` AND NOT EXISTS (SELECT 1 FROM runs cr
-     WHERE cr.team = nodes.team AND cr.id = nodes.run_id AND cr.cancel_requested_at IS NOT NULL)`

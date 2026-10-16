@@ -20,6 +20,83 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Require an explicit tenant for event appends and an Operator handle for deployment compute controls. Remove unused compute helpers and the duplicate ready-job count. Both queue gauges use one state snapshot. See [migration guide](docs/migrations/_unreleased.md#tenant-event-append-and-deployment-compute-controls).
+
+- **store (Breaking):** Commit account team selection, creation, invitation acceptance and identity unlinking through live direct-session transactions. Remove their raw account and team-switch APIs and unused store helpers. See [migration guide](docs/migrations/_unreleased.md#account-mutations-and-raw-team-switch-retirement).
+
+- **store (Breaking):** Remove the raw `Tenant.CreateRun` writer, unused runner gauge and unused legacy credential helpers. Run admission uses sealed intake. Profile folding excludes memoized jobs. See [migration guide](docs/migrations/_unreleased.md#raw-run-writer-and-unused-liveness-gauge-removed).
+
+- **store (Breaking):** Remove default-team reporting readers and require one tenant for dashboard run, job and event reads. Cross-team run queries move to Operator. Remove the raw secret fallback reader. See [migration guide](docs/migrations/_unreleased.md#explicit-tenant-reporting-readers).
+
+- **store:** Runner lists, queue headroom and runner metrics use the tenant's committed inventory. Claim renewals update liveness without replacing the last capacity observation.
+
+- **store (Breaking):** Enforce hourly admission guards in sealed intake and remove the unused oldest-ready principal lookup. Debug pauses and approval decisions commit with current authority, masked text and private replay receipts. See [migration guide](docs/migrations/_unreleased.md#sealed-intake-rate-guards-and-run-control).
+
+- **store (Breaking):** Replace raw GitHub App configuration writes with transactions that recheck current administration and installation ownership. Extra repository names and numeric IDs commit together. Launcher reservation cleanup proves the original bootstrap award's ownership after expiry or exchange. See [migration guide](docs/migrations/_unreleased.md#authorized-github-app-configuration-and-launcher-reservations).
+
+- **store (Breaking):** Replace raw team rename, deletion, invitation, build-trust and run-deletion APIs with transactions that recheck current authority and membership. Invitation retries preserve the first result and reject changed requests. See [migration guide](docs/migrations/_unreleased.md#authorized-team-mutations).
+
+- **store (Breaking):** Remove raw job creation and queue publication APIs and the legacy invocation redactors. Plan and expansion acceptance enforce job-count guards atomically. Reports and receipts use sealed display inputs, and GitHub commit reports follow numeric repository identity through renames. See [migration guide](docs/migrations/_unreleased.md#job-creation-queue-publication-and-sealed-display).
+
+- **store (Breaking):** Remove raw job finish APIs. Job results commit through fenced tenant transitions. Run and trigger reports read sealed inputs, mask secret arguments, and query the final schema. Pending runs page correctly before execution starts. See [migration guide](docs/migrations/_unreleased.md#sealed-reporting-and-job-completion).
+
+- **store (Breaking):** Remove the unfenced tenant run finisher and unused heartbeat timing and profile-key helpers. Fenced completion records the team’s first success atomically. See [migration guide](docs/migrations/_unreleased.md#owner-completion-and-retired-store-helpers).
+
+- **store (Breaking):** Replace raw metric and usage writers with tenant transactions that recheck current reporting authority. Metric retries succeed at the sample limit. Cron ticks move to Operator and use the fenced schedule lease. See [migration guide](docs/migrations/_unreleased.md#reporting-transactions-and-schedule-lease).
+
+- **store (Breaking):** Remove default-team run/trigger writers, raw node-start and manifest setters, unused source-upload admission and context-carried claim fences. Select a tenant and use its typed lifecycle transactions. Metric retries use the final tenant-keyed schema. See [migration guide](docs/migrations/_unreleased.md#tenant-writes-and-typed-claim-fences).
+
+- **store (Breaking):** Use ordered placement preferences with per-step holds on the store clock. Existing local-first flags configure the preferred runner and everyone else. Only accepted polls refresh placement liveness. Remove unused raw debug-pause writers, ancestor and child-trigger lookups, and legacy node settlement. See [migration guide](docs/migrations/_unreleased.md#ordered-placement-and-unused-store-apis).
+
+- **store (Breaking):** Remove raw plan, step, annotation, summary, activity and approval writers, the old cross-run input resolver and unused `StateStoreOld`. Use sealed acceptance and fenced tenant transitions. Closing an attempt now closes its unfinished steps in the same transaction. See [migration guide](docs/migrations/_unreleased.md#fenced-store-metadata-and-approval-transitions).
+
+- **store (Breaking):** Remove legacy execution-attempt writers and the unused GitHub runner scope matcher. Attempt history requires an explicit tenant and reads committed node transitions. Cloud awards are always metered, including awards from unmetered launcher credentials. Verified non-checkout payment events use the final receipt and correlation schema. See [migration guide](docs/migrations/_unreleased.md#execution-attempts-and-cloud-metering).
+
+- **store (Breaking):** Remove the unused node queue and named trigger claim APIs, trigger heartbeat/finish writers and duplicate claim matcher. Current capability claims own their lifecycle. Console runner metering commits against the current operator session and leaves existing awards unchanged. Runner inventory honors rotation grace. See [migration guide](docs/migrations/_unreleased.md#sole-claim-queue-and-console-metering).
+
+- **store (Breaking):** Remove unused token-table credential readers and mutations, the raw here issuer and unused claim-origin readers. Capability snapshots, management and sealed intake own their replacements. Shared job claims honor configured local-first preferences using live persisted runner polls. See [migration guide](docs/migrations/_unreleased.md#store-credential-readers-and-local-first-claims).
+
+- **store (Breaking):** Commit the seeded deployment administrator once through capability issuance. The persisted gate survives restart, rotation, revocation and credential retention. Startup checks current administrator ancestry. The token-table bootstrap issuer is removed. See [migration guide](docs/migrations/_unreleased.md#verified-billing-events-and-deployment-bootstrap).
+- **store (Breaking):** Remove unused raw claim authentication, attempt reporting and child-run writers. Current capability checks, node transitions and child admission own their retained behavior. See [migration guide](docs/migrations/_unreleased.md#legacy-claim-authentication-and-writers).
+
+- **store (Breaking):** Retire unused token issuance and report APIs
+  Rotation uses capability management, Actions credentials use verified provisioning, and concurrency release includes follower resolution and promotion. Attempt history derives executor identity from claim ancestry. See [migration guide](docs/migrations/_unreleased.md#legacy-store-issuance-and-reports).
+
+- **store (Breaking):** Membership mutations use current authority
+  Removed the raw member role and removal APIs, three default-team reader twins, unused member-token cap symbols and the unused subscription-name repository lookup. `UpdateMembership` commits membership, invitation, session and capability revocation effects together. Runtime purge and tenant guards share the final schema inventory. GitHub subscription and automation records persist canonical repository keys, and subscription timestamps preserve nanoseconds. See [migration guide](docs/migrations/_unreleased.md#membership-mutations-use-current-authority).
+
+- **store (Breaking):** Remove the unused team token store API
+  Member and machine provisioning, inventory and revocation use current capability authority. The old tenant token constructors, readers and revoker, token-family declarations and machine-principal helper are removed. See [migration guide](docs/migrations/_unreleased.md#team-token-store-api-removed).
+- **store (Breaking):** Secret calls require an explicit tenant
+  The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
+### Changed
+
+- **store (Breaking):** Named job claims and renewal use current capability authority
+  Removed `ClaimNamedNode`, `NamedClaimOptions`, `HeartbeatNodeClaim`, `HeartbeatNodeClaimWithCredits` and the two legacy HTTP routes. Use `ClaimUnit`, `ReconcileNode` and `RenewUnit`. See [migration guide](docs/migrations/_unreleased.md#named-job-claims-and-renewal).
+
+- **store (Breaking):** Trigger queues use the shared unit claimant
+  Removed `ClaimNextTrigger`, `ClaimNextTriggerFor` and the unused `NodeExecutionAttemptBelongsToLiveClaim` reader. Trigger queues use `ClaimUnit` with current capability authority. See [migration guide](docs/migrations/_unreleased.md#unified-trigger-queue).
+- **store (Breaking):** Run completion requires the current owner
+  Removed the legacy generation-based run and trigger completion, release and generation readers. Use `Tenant.FinishRunAndUnit` and `Store.ReleaseUnit` with current awarded authority. Nineteen default-team Store wrappers and three unused run-filter version probes are also removed. Select a tenant before reading or writing its rows. See [migration guide](docs/migrations/_unreleased.md#explicit-tenant-readers-and-owner-completion).
+- **store (Breaking):** Remove raw secret writers and launcher token issuance
+  Secret writes use `WriteSecret` and `RemoveSecret` with current administration authority. Claim secret reads use `ReadSecret`, and awards use `Store.Issue`. Removed the old secret writers, two redundant readers, `MintClaimToken` and its lifetime constant. See [migration guide](docs/migrations/_unreleased.md#raw-secret-writers-and-launcher-token-issuance-removed).
+- **store (Breaking):** Cancellation uses the fenced run transition
+  Removed `RequestCancel` and `CancelPendingTrigger` on Store and Tenant, the separate controller cancellation writer, and unused `FilterRuns`. Use `Tenant.TransitionRun` with `RunCancel`. The unit reaper completes cancelled unclaimed work. SQL run filtering remains. See [migration guide](docs/migrations/_unreleased.md#raw-cancellation-and-unused-readers-removed).
+- **store (Breaking):** Claim lifecycle and git-credential writes use current authority
+  Removed legacy claim-token start and heartbeat methods, raw git-credential mutations and automatic secret resealing. Unit renewal and job transitions use their capability fences. Git-credential mutations use the authority-bearing tenant methods. See [migration guide](docs/migrations/_unreleased.md#claim-lifecycle-and-credential-mutation-apis).
+- **store (Breaking):** Source credentials use capability transactions
+  Removed the unused token-based release, audit and machine-consent APIs and their source-mint counter. Direct consumers use `ReleaseSourceCredential`, `SourceReleaseAudits` and `SetSourceMachineConsent`. See [migration guide](docs/migrations/_unreleased.md#source-credentials-use-capability-transactions).
+- **store (Breaking):** Run completion uses the fenced run-and-owner transaction
+  Removed `CreatePlanNode`, `FinishRunIfActive` and `FinishRunsIfActive`. Admit the owner unit with `AdmitRun` and complete it with `Tenant.FinishRunAndUnit`. Exact completion replays retain the committed verdict and time. See [migration guide](docs/migrations/_unreleased.md#run-completion-and-planning-units).
+- **store (Breaking):** Manual retries use the sealed intake transaction
+  Removed the legacy retry writer, reverse-link writer and invocation-classification copier. `Tenant.AdmitRun` retains the source request, team and classification under current retry authority. See [migration guide](docs/migrations/_unreleased.md#manual-retries-use-sealed-intake).
+- **store:** Terminal job reads expose their committed output and manifest record selectors, including materialized jobs with no execution attempt. Selector persistence commits with the result and its event.
+- **store (Breaking):** Launcher awards use the shared unit queue
+  Removed `Store.ClaimLaunch`, its launcher-only scan and cursor, `Client.ClaimLaunch` and unused token/source authority helpers. Direct consumers use `ClaimUnit`. HTTP consumers use `client.NewEngineClient` with launcher options. See [migration guide](docs/migrations/_unreleased.md#launcher-claims-use-the-shared-unit-queue).
+- **store (Breaking):** GitHub runner enrollment commits with current administration authority
+  The default tenant registry stores canonical repository identity and atomically revokes Actions ancestry on removal. Issuance checks live enrollment and existing caps. Raw add/remove binding writers are removed. See [migration guide](docs/migrations/_unreleased.md#github-runner-enrollment-uses-current-administration-authority).
+- **store (Breaking):** Credential mutations and secret reads recheck current authority in their committing transactions
+  The default tenant adapters enforce administration, declaration and pool checks. Secret release commits its audit before returning a row. `ReleaseClaimSecret` is removed. See [migration guide](docs/migrations/_unreleased.md#secret-release-uses-current-authority).
 - **storage (Breaking):** Remove store-local output bytes and obsolete host storage paths
   Outputs use committed result selectors and verified blobs. The old scheduler, output grants and state-store interface are removed. Dashboard streams use the bound segment reader. See [migration guide](docs/migrations/_unreleased.md#committed-result-storage).
 
@@ -180,9 +257,9 @@ unlock.
 - **controller (Breaking):** OAuth browser callbacks verify proof through the shared route policy
   Start and callback require the configured provider and redirect. Callback refuses ambiguous flow cookies or query selectors before provider access. Refusals return canonical errors without upstream diagnostics or credentials. See [migration guide](docs/migrations/_unreleased.md#oauth-browser-callbacks).
 - **controller (Breaking):** Machine enrollment and deployment service issuance use the capability issuer and shared route policy
-  Machines use `/api/v1/runners` under `team.admin`; services use `/api/v1/operator/tokens` under operator authority. The legacy team-token mint is removed. Both return the capability once and refuse automatic replay. See [migration guide](docs/migrations/_unreleased.md#root-provisioning).
+  Machines use `/api/v1/runners` under `team.admin`; services use `/api/v1/operator/tokens` under operator authority. The store checks registration, current authority, active names and existing enrollment limits in the issuing transaction. Machine claims retain ancestor repository restrictions. The legacy team-token mint is removed. Both return the capability once and refuse automatic replay. See [migration guide](docs/migrations/_unreleased.md#root-provisioning).
 - **controller (Breaking):** Capability inventories and rotation use the shared policy and authority-bearing store transactions
-  Team lists use `/api/v1/tokens`. Deployment metadata uses `/api/v1/operator/tokens`. Metadata carries subjects, grants and RFC3339 times. Rotation returns its capability once and accepts an absolute expiry. Embedded controllers supply `WithCapabilityManager`. See [migration guide](docs/migrations/_unreleased.md#capability-inventory-and-rotation).
+  Team lists use `/api/v1/tokens`. Deployment metadata uses `/api/v1/operator/tokens`. Metadata carries subjects, grants and RFC3339 times. Rotation returns its capability once and accepts an absolute expiry. The default store preserves ownership, registration, ancestry and source consent through atomic rotation. Embedded controllers can supply `WithCapabilityManager`. See [migration guide](docs/migrations/_unreleased.md#capability-inventory-and-rotation).
 - **controller (Breaking):** Session renewal and logout use the shared route policy and verified session proof
   Logout takes no body and ends only the presented session. It requires session-bound CSRF and same-origin proof. Renewal refuses duplicate presentations and HEAD. Both routes return canonical errors. See [migration guide](docs/migrations/_unreleased.md#session-lifecycle).
 - **controller (Breaking):** Secret-by-name reads use the shared capability policy and a tenant transaction that rechecks authority
@@ -216,6 +293,7 @@ unlock.
 - **controller (Breaking):** Twelve console endpoints use the shared authorization policy. Account/team deletion, installation unbinding and credit-settings writes move under `/api/v1/operator` and refuse deployment bearers. Console mutations require CSRF proof and record the authenticated account ID. See [migration guide](docs/migrations/_unreleased.md#console-authorization).
 
 ### Added
+- **controller:** Launcher reconciliation reads current award fences and execution inputs from one store snapshot, including after bootstrap exchange. Cleanup selects the exact observed Kubernetes Job UID. Removed the legacy `Store.SyncLaunchJobs` and `Client.LauncherSync` APIs.
 - **controller:** Embedded data bindings validate persisted uploader identity, reserve uploads before signing, settle receipts after byte verification and check every record edge. Remote-cache bindings require verified default-branch reads and reject writes.
 - **controller:** Job cancellation and persisted recovery failures use the shared capability policy. Cancellation preserves a live holder's result rights. Failure reads require the declared recovery edge and source generation.
 - **controller:** A run owner can read `/api/v1/runs/{run}/snapshot` through the shared capability policy. One committed read supplies job state, accepted declarations and generator membership, including empty groups.
@@ -615,6 +693,11 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Fixed
+- **store:** Account admission records its audit before a team exists
+  Sign-in stores an absent team as NULL, so account creation passes the audit table's foreign key and tenant queries retain their scope.
+- **controller:** Preserve roleless sign-in sessions through renewal, persist one-use browser flow state, and include cancellation intent in authentication snapshots
+- **secrets:** Commit tenant key rotation across secret and git credentials together, retain nanosecond timestamps, and read committed source audits with capability identities
+- **controller:** Queue depth counts a held job once when it has no readiness timestamp; runner activity uses the store clock
 - **store:** Count compressed log payloads in retained storage and billing. Log cursors keep their decoded byte offsets, and replay preserves both byte counts.
 - **store:** Tenant record operations use the controller's configured manifest reader. Manifest commits and reads no longer fail with a missing-reader error after `WithDataObjects` setup. Corrupt physical manifests still refuse required reads and result attachment.
 - **controller:** Accept Session authorization headers on policy routes and enforce the configured session lifetime
@@ -683,6 +766,8 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **store (Breaking):** Queue metrics move from Store to Operator; pending trigger counts require an explicit Tenant. See [migration guide](docs/migrations/_unreleased.md#queue-reads-use-explicit-store-owners).
+- **store + controller (Breaking):** Removed `UpdateNodeDeps` and its HTTP endpoint. Generated dependencies use accepted expansion membership. See [migration guide](docs/migrations/_unreleased.md#generated-dependencies-use-accepted-expansions).
 - **store (Breaking):** Removed `Store.ReserveStorage`, `Store.CommitStorage`, their request/response types and `DefaultStorageReservationTTL`. Uploads use tenant blob tickets with verified commit and abort. The controller's log-retention probe reads storage standing without writing a reservation. See [migration guide](docs/migrations/_unreleased.md#storage-reservations-use-blob-tickets).
 - **store + controller (Breaking):** Remove `POST /api/v1/credits/grants` and caller-selected paid grants. Paid credit uses verified provider events matched to committed checkouts. Free operator grants and payment-linked reversals keep their existing paths. See the [migration guide](docs/migrations/_unreleased.md#paid-credit-requires-verified-checkout-settlement).
 - **store + controller (Breaking):** retire bucket-listing storage reconciliation, free-share log pruning and legacy receipt/download-day pruning. `Server.WithStoragePass`, `RunStoragePass` and `StoragePassEvery`, plus the store mark/reconcile/pruning APIs, are removed. Leased maintenance uses committed blob and tagged-log inventory and preserves replica usage. See [migration guide](docs/migrations/_unreleased.md#storage-maintenance-uses-committed-inventory).

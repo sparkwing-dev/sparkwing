@@ -316,6 +316,7 @@ func TestSecretReadHTTPRequiresTransactionalReader(t *testing.T) {
 				})
 				code = apierr.Internal
 			case "real tenant":
+				code = apierr.Unauthenticated
 				st, _ := credentialMutationStore(t)
 				s = controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(c).WithAuthorization(consoleAuthorization(b))
 			}

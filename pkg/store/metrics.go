@@ -45,9 +45,6 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 
-// OneShot reports whether this reading covers a completed command.
-func (sample MetricSample) OneShot() bool { return sample.Kind == MetricCommand }
-
 // Marker reports whether the sample only labels its node's measurement,
 // carrying no resource reading.
 func (sample MetricSample) Marker() bool {
@@ -69,44 +66,13 @@ func (sample MetricSample) ValidateResourceValues() error {
 	return nil
 }
 
-// AddNodeMetricSample accepts identical retries and rejects conflicting readings
-// at the same node timestamp.
-func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error {
-	return s.defaultTenant().AddNodeMetricSample(ctx, runID, nodeID, sample)
-}
-
-// AddNodeMetricSample is [Store.AddNodeMetricSample] confined to t's team.
-func (t *Tenant) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error {
-	if err := sample.ValidateResourceValues(); err != nil {
-		return err
-	}
-	if !time.Unix(0, sample.TS.UnixNano()).Equal(sample.TS) {
-		return errors.New("node metric timestamp exceeds the nanosecond storage range")
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	var held int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_metrics WHERE team = ? AND run_id = ? AND node_id = ?`,
-		string(t.team), runID, nodeID).Scan(&held); err != nil {
-		return err
-	}
-	if held >= MaxNodeMetricSamples && (!sample.Marker() || held >= MaxNodeMetricSamples+MaxNodeMetricMarkers) {
-		return ErrNodeMetricLimit
-	}
-	// safety: the guard never passes, so a retry inserts nothing and is told from a first write by
-	// RowsAffected; its team term is what keeps another team's row at this key from counting as ours.
+func insertMetricTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef, sample MetricSample) error {
+	runID, nodeID := ref.RunID, ref.NodeID
 	result, err := tx.ExecContext(ctx, `
 INSERT INTO node_metrics (team, run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (run_id, node_id, ts) DO UPDATE SET kind = node_metrics.kind
-  WHERE node_metrics.team = excluded.team AND 1 = 0`,
-		string(t.team), runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes,
+ON CONFLICT (team, run_id, node_id, ts) DO NOTHING`,
+		team, runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes,
 		int64(sample.CPUTime), sample.Kind)
 	if err != nil {
 		return err
@@ -121,19 +87,24 @@ ON CONFLICT (run_id, node_id, ts) DO UPDATE SET kind = node_metrics.kind
 		if err := tx.QueryRowContext(ctx, `
 SELECT cpu_millicores, memory_bytes, cpu_time_nanos, kind
   FROM node_metrics WHERE team = ? AND run_id = ? AND node_id = ? AND ts = ?`,
-			string(t.team), runID, nodeID, sample.TS.UnixNano()).Scan(&cpu, &memory, &cpuTime, &kind); err != nil {
+			team, runID, nodeID, sample.TS.UnixNano()).Scan(&cpu, &memory, &cpuTime, &kind); err != nil {
 			return err
 		}
 		if cpu != sample.CPUMillicores || memory != sample.MemoryBytes || cpuTime != int64(sample.CPUTime) || kind != sample.Kind {
 			return fmt.Errorf("conflicting node metric for %s/%s at %s", runID, nodeID, sample.TS.Format(time.RFC3339Nano))
 		}
 	}
-	return tx.Commit()
-}
+	if inserted == 1 {
+		var held int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_metrics WHERE team=? AND run_id=? AND node_id=?`, team, runID, nodeID).Scan(&held); err != nil {
+			return err
+		}
+		if held > MaxNodeMetricSamples && (!sample.Marker() || held > MaxNodeMetricSamples+MaxNodeMetricMarkers) {
+			return ErrNodeMetricLimit
+		}
+	}
 
-// ListNodeMetrics returns every sample oldest-first.
-func (s *Store) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error) {
-	return s.defaultTenant().ListNodeMetrics(ctx, runID, nodeID)
+	return nil
 }
 
 // ListNodeMetrics returns every sample of a node of one of t's runs,
@@ -142,15 +113,7 @@ func (t *Tenant) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]M
 	return t.ListNodeMetricsPage(ctx, runID, nodeID, time.Time{}, 0)
 }
 
-// ListNodeMetricsPage returns up to limit samples oldest-first whose
-// timestamps follow after; a zero after starts at the first sample and a
-// limit of zero or less returns them all. A node holds at most one sample
-// per timestamp, so the last sample's TS continues the listing.
-func (s *Store) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error) {
-	return s.defaultTenant().ListNodeMetricsPage(ctx, runID, nodeID, after, limit)
-}
-
-// ListNodeMetricsPage is [Store.ListNodeMetricsPage] confined to t's team.
+// ListNodeMetricsPage returns a tenant job's metric samples after the cursor.
 func (t *Tenant) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error) {
 	query := `
 SELECT ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind

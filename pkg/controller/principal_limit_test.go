@@ -64,7 +64,7 @@ func TestRequestBudgetHeartbeatUsesAuthenticatedHolderProperty(t *testing.T) {
 		for i := range 2 {
 			r := httptest.NewRequest("POST", "/", nil)
 			r.Header.Set(store.RunnerIdentityHeader, value)
-			r.Header.Set(store.ClaimHolderHeader, value)
+			r.Header.Set("X-Sparkwing-Claim-Holder", value)
 			w := httptest.NewRecorder()
 			if endpoint.Handle(w, r, a) != nil {
 				return false

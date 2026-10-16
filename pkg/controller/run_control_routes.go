@@ -92,7 +92,10 @@ func (s *Server) handleResumeDebugPause(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-var _ DebugPauseResumer = (*store.Tenant)(nil)
+var (
+	_ DebugPauseResumer = (*store.Tenant)(nil)
+	_ RunControlWriter  = (*store.Tenant)(nil)
+)
 
 func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body struct {

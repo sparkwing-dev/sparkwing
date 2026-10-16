@@ -92,51 +92,6 @@ type AccountDeletion struct {
 	RevokedPrefixes []string
 }
 
-// RequestDeletion queues t's team for deletion on behalf of an owner. The
-// owner must belong to another team, because every signed-in session lands
-// in a team and an account left with none would sign in to a team it cannot
-// use; deleting the account removes a last team instead. See
-// [Tenant.markForDeletionTx] for what the request does at once. It returns
-// the revoked token prefixes.
-func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	role, err := t.roleTx(ctx, tx, actorID)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	if role != RoleOwner {
-		return TeamDeletion{}, nil, ErrRoleAboveOwn
-	}
-	var others int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM memberships WHERE account_id = ? AND team <> ?`,
-		actorID, string(t.team)).Scan(&others); err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	if others == 0 {
-		return TeamDeletion{}, nil, ErrOnlyTeam
-	}
-	revoked, err := t.markForDeletionTx(ctx, tx, actorID, now)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	del, err := teamDeletionTx(ctx, tx, t.team)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	return del, revoked, tx.Commit()
-}
-
 // RequestTeamDeletion queues a team for deletion on the operator's word,
 // with no membership check, for a deletion request that arrived by mail.
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error) {
@@ -418,32 +373,13 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 // safety: runs goes last so the rows that reference a run are removed by
 // their own statements rather than by a cascade from a very large delete.
 func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
-	for _, table := range append(slices.DeleteFunc(slices.Clone(tenantTables), func(t string) bool { return t == "runs" }), "runs") {
+	tables := append([]string{"business_events", "capabilities", "sessions", "payment_events"}, tenantTables...)
+	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" }), "quota_admission", "runs") {
 		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}
 	}
 	return nil
-}
-
-// TeamRunIDs lists the ids of every run a team holds, so the caller can
-// remove what object storage keeps under each run before [Operator.PurgeTeam]
-// removes the rows that name them.
-func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error) {
-	rows, err := o.s.query(ctx, `SELECT id FROM runs WHERE team = ? ORDER BY id`, string(NormalizeTeam(team)))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }
 
 // PurgeTeam removes every row a team owns in every tenant-owned table, then
@@ -616,6 +552,7 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 		args []any
 	}{
 		{`UPDATE capabilities SET created_by='' WHERE created_by=?`, []any{accountID}},
+		{`DELETE FROM run_control_requests WHERE subject_kind='account' AND subject_id=?`, []any{accountID}},
 		{`DELETE FROM sessions WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identities WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identity_unlinks WHERE account_id = ?`, []any{accountID}},
@@ -841,7 +778,7 @@ func accountByEmailTx(ctx context.Context, tx *storeTx, email string) (_ Account
 		if err := rows.Scan(&a.ID, &a.Email, &verified, &a.Name, &active, &created, &waitlisted); err != nil {
 			return Account{}, err
 		}
-		a.EmailVerified, a.ActiveTeam, a.CreatedAt = verified == 1, Team(active), time.Unix(created, 0).UTC()
+		a.EmailVerified, a.ActiveTeam, a.CreatedAt = verified == 1, Team(active), time.Unix(0, created).UTC()
 		a.Waitlisted = waitlisted != 0
 		found = append(found, a)
 	}

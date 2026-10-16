@@ -117,10 +117,10 @@ func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 	}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.store.MarkNodeReady(ctx, runID, "compile"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, runID, "compile"); err != nil {
 		f.t.Fatal(err)
 	}
 }

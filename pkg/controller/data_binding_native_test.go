@@ -5,12 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )

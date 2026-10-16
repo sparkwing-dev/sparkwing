@@ -16,6 +16,26 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"revokeSetupAuthorityTx":     "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
+	"launcherReservationAwardTx": "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
+
+	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
+	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
+	"revokeSelectedCapabilitiesTx":               "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
+
+	"readPaymentCorrelationTx":      "verified provider mode and object resolve the payer from the persisted correlation before its tenant is known",
+	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
+	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
+	"loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
+	"(*Operator).SetRunnerMetered":  "a console-authorized deployment mutation resolves one enrolled root by its globally unique public prefix, validates its complete ancestry, and updates only that root's tenant row",
+	"persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
+	"deleteRetentionCapabilitiesTx": "the elected deployment pass removes ended credentials across teams while preserving cross-team ancestry",
+
+	"refundableBillingSecondsTx":        "the deployment credit sampler totals unsettled awards across teams from their immutable billing records",
+	"(*Operator).CollectBlobTombstones": "the elected blob collector visits expired tombstones across teams and deletes each exact tenant digest",
+	"(*Operator).maintainRetention":     "the elected maintenance pass counts retained pins and records across all teams",
+	"deleteRetentionRecordsTx":          "the elected maintenance pass selects expired records across teams and deletes exact tenant record keys",
+
 	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
 	"readAuthorityTx":                     "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
 	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
@@ -36,68 +56,43 @@ var reviewedUnscopedSQL = map[string]string{
 		"each row it touches is named by its global id",
 	"settleCardPaymentTx": "a payment names its charge by global id, and the charge row it reads " +
 		"is checked against the team the payment names",
-	"failCardAttemptTx":                 "a decline names its attempt by global id; the team is read from that row",
-	"(*Operator).DropCardAttempt":       "an attempt that never reached Stripe is closed by its global id",
-	"(*Operator).RecordAttemptIntent":   "the worker binds a payment to the attempt it names by global id",
-	"reportCardRefundTx":                "a provider refund names its payment identity before its persisted team is known",
-	"(*Operator).DueCardRefunds":        "the payment worker lists every team's queued refunds in one pass",
-	"globalRunnerRefusal":               "the global concurrent runner cap counts live claims from every team",
-	"globalRunsPerHourRefusal":          "the global hourly cap counts runs from every team",
-	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
-	"runOwnerTx":                        "asks which team owns an id, so an answer scoped to the asker is no answer",
-	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
-		"the asker is no answer; it is the read every other claim predicate is built from",
-	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
-		"a scope that is not exactly one team is refused there",
-	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
-		"it is of the row the award just proved in team",
-	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
-	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
-		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
-	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
-		"award and the read after it are of the row the scoped select just locked",
-	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
-		"read after the award is of the row the scoped update just proved in team",
+	"failCardAttemptTx":               "a decline names its attempt by global id; the team is read from that row",
+	"(*Operator).DropCardAttempt":     "an attempt that never reached Stripe is closed by its global id",
+	"(*Operator).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
+	"reportCardRefundTx":              "a provider refund names its payment identity before its persisted team is known",
+	"(*Operator).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
+	"globalRunnerRefusal":             "the global concurrent runner cap counts live claims from every team",
+	"globalRunsPerHourRefusal":        "the global hourly cap counts runs from every team",
+	"runOwnerTx":                      "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).countRuns": "shares listRuns' predicate builder and its refusal",
-	"(*Store).listTriggers": "the team predicate comes from its scope at run time; " +
-		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
-	"selectSecretsTx":              "reads every team's secret so one key rotation reseals the whole table, and rewrites each row under its own team",
-	"selectGitCredentialsTx":       "reads every team's git credential so one key rotation reseals the whole table, and rewrites each row under its own team",
-	"(*Store).secretsNotSealed":    "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
 	"(*Store).SampleSealedSecrets": "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
-	"(*Store).UnlinkIdentity":      "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
+	"unlinkAccountIdentityTx":      "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
 	"(*Store).lookupSession":       "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
-	"(*Store).claimantLive":        "checks the credential that made a claim by its prefix, which is unique across teams",
 	"(*Store).DeleteSession":       "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Store).mintCSRFKey":         "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"(*Store).resolveSignInOnce":   "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
-	"(*Store).approveOneOnce":      "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
-	"cancelRequeuedCancelledTriggersTx": "finalizes every team's cancelled triggers that lapsed back to the " +
-		"queue, because a claim that settled only its own team would leave the rest pending forever",
+	"approveOneTx":                 "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"settleTriggerCreditsTx": "asks which team owns a trigger id and whether its claim holds a credit " +
 		"reservation; the settlement that follows is scoped to that team",
 	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",
-	"(*Store).AcceptInvitation":        "finds an invitation by its id before the team is known; the accepting write then names that team",
-	"(*Store).DeleteAccount": "removes one account from every team it belongs to and relabels the rows it " +
+	"(*Store).AcceptAccountInvitation": "finds the invitation by its global id to lock its team before rechecking the account and committing the scoped acceptance",
+	"acceptAccountInvitationTx":        "finds an invitation by its id before the team is known; the accepting write then names that team",
+	"(*Store).deleteAccountTx": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
 	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
 		"account deletion counts their owners",
-	"accountPrincipalNamesTx": "lists the principal names of the tokens one account minted in every team, " +
-		"which are what the account deletion relabels",
 	"relabelPrincipalTx": "replaces a deleted account's name in every team's rows, because the account " +
 		"belonged to the deployment and acted in each of its teams",
 	"(*Store).ClaimInvitationEmail": "counts the invitation emails one address received from every team, " +
 		"because the daily cap protects the inbox, not the team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
 		"so the installation's binding is how either finds the team it belongs to",
-	"(*Operator).usageRuns": "counts every team's runs per week for the operator's usage metrics, " +
-		"which report totals across teams and name none",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
 	"freeSlotOpenTx":     "a reservation asks whether any slot is left, so it counts every team's",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
@@ -110,39 +105,14 @@ var reviewedUnscopedSQL = map[string]string{
 		"account deletion can tell sole ownership from shared",
 	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
 		"run's team",
-	"(*Store).TriggerClaimFenceIsLive": "matches the trigger's live claim against the exact claimant credential and " +
-		"generation, and a token prefix is unique across teams",
-	"(*Store).NodeClaimFenceIsLive": "matches the node's live claim against the exact holder, credential, reservation and " +
-		"generation, and a token prefix is unique across teams",
-	"(*Store).NodeExecutionAttemptIsLive": "matches the node's live claim and open attempt against the exact holder, " +
-		"credential and generation, and a token prefix is unique across teams",
-	"(*Store).NodeExecutionAttemptBelongsToLiveClaim": "matches the node's live claim and its attempt against the exact " +
-		"holder, credential and generation, and a token prefix is unique across teams",
-	"(*Store).TriggerExecutionAttemptIsLive": "matches the trigger's live claim and open attempt against the exact " +
-		"claimant credential and generation, and a token prefix is unique across teams",
-	"(*Store).TriggerExecutionAttemptBelongsToLiveClaim": "matches the trigger's live claim and its attempt against the " +
-		"exact claimant credential and generation, and a token prefix is unique across teams",
-	"(*Store).PrincipalHoldsRunClaim": "matches a live claim on the run's nodes against the exact claimant credential, and " +
-		"a token prefix is unique across teams",
-	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +
-		"token prefix is unique across teams",
-	"(*Store).PrincipalHoldsProfileClaim": "matches a live claim of the exact claimant credential on the pipeline's runs " +
-		"or triggers; a token prefix is unique across teams and a claim only reaches its own team's work",
-	"(*Store).ClaimedRunFor": "asks which team a run the exact claimant credential holds live work in belongs to, so an " +
-		"answer scoped to the asker is no answer; a token prefix is unique across teams",
-	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
-		"selected, in the order the claim path names, and read nothing back",
+
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +
 		"through that team's handle; an answer scoped to the asker is no answer",
-	"(*Store).ComputeUsage": "the operator's compute view counts every team's claimed cloud runners per principal against " +
+	"(*Operator).ComputeUsage": "the operator's compute view counts every team's claimed cloud runners per principal against " +
 		"the deployment's alarm; the route serves it to an admin only",
-	"(*Store).ComputeAlarmState": "the runner alarm is the deployment's, so the count it is checked against is every " +
-		"team's claimed cloud runners",
-	"(*Store).CountActiveRunners":     "an operational gauge of the deployment's live runners across every team",
-	"(*Store).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
-	"(*Store).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
+	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",
 	"(*Operator).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
@@ -150,22 +120,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +
 		"principal",
 	"(*Operator).EgressUsageAcrossTeams": "reloads team egress totals into the controller alarm before serving",
-	"(*Store).selectTokensByPrefix": "authenticates a presented token by its prefix before its team is known; a token " +
-		"prefix is unique across teams and the row it returns carries its team",
-	"selectTokensByPrefixTx": "reads the credential the operator's rotate names by its prefix, which is unique across " +
-		"teams, and returns the row with its team",
-	"(*Store).rotateToken": "the operator rotates one credential named by its prefix, which is unique across teams; the " +
-		"replacement is minted into the old token's own team",
-	"(*Store).RevokeToken": "the operator revokes one credential named by its prefix, which is unique across teams; the " +
-		"admin scope is the deployment operator's and no team membership grants it",
-	"(*Store).ListTokens": "the operator's credential listing spans every team and returns each token's team; the admin " +
-		"scope is the deployment operator's and no team membership grants it",
-	"tokenMeteredTx": "reads whether the claiming credential pays credits by its prefix, which is unique across teams, so " +
-		"the answer is that credential's own",
-	"(*Store).SeedToken": "a provisioned credential is seeded once by its prefix, which is unique across " +
-		"every team's tokens",
-	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
-		"exists in any team, because an install with any credential already has an operator path",
 }
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
@@ -176,7 +130,7 @@ var tenantOwnedTableRe = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|INTO|UPDATE)\s+
 // safety: covers every shape this package writes the predicate in: a
 // bare column, a qualified one, an IN list, and the excluded.team a
 // conflict guard compares against.
-var teamPredicateRe = regexp.MustCompile(`(?is)\b(?:[a-z_][a-z0-9_]*\.)?team\s*(?:=|IN\b|<>|!=)`)
+var teamPredicateRe = regexp.MustCompile(`(?is)(?:\b(?:[a-z_][a-z0-9_]*\.)?team|\bCOALESCE\(\s*(?:[a-z_][a-z0-9_]*\.)?team\s*,\s*''\s*\))\s*(?:=|IN\b|<>|!=)`)
 
 // safety: reads an INSERT's column list, because a write with no WHERE
 // carries its key there and nowhere else.
@@ -281,6 +235,9 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		sql   string
 		scope bool
 	}{
+		{"nullable tenant", `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=?`, true},
+		{"qualified nullable tenant", `SELECT prefix FROM capabilities c WHERE COALESCE(c.team, '') = ?`, true},
+		{"nullable tenant without predicate", `SELECT COALESCE(team,'') FROM capabilities WHERE prefix=?`, false},
 		{"scoped select", `SELECT id FROM runs WHERE team = ? AND id = ?`, true},
 		{"unscoped select", `SELECT id FROM runs WHERE id = ?`, false},
 		{"qualified predicate", `UPDATE nodes SET x = 1 WHERE nodes.team = ? AND run_id = ?`, true},
@@ -325,7 +282,7 @@ func tenantTablesTouchedBy(sql string) []string {
 	var out []string
 	for _, m := range tenantOwnedTableRe.FindAllStringSubmatch(sql, -1) {
 		name := strings.ToLower(m[1])
-		if slices.Contains(tenantTables, name) && !slices.Contains(out, name) {
+		if (slices.Contains(tenantTables, name) || slices.Contains([]string{"business_events", "capabilities", "sessions"}, name)) && !slices.Contains(out, name) {
 			out = append(out, name)
 		}
 	}

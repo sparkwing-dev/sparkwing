@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -21,7 +23,7 @@ func TestListRuns_CursorWalksRunsSharingAnInstantExactlyOnce(t *testing.T) {
 	const runs = 12
 	instant := time.Unix(1700000000, 0)
 	for i := range runs {
-		if err := st.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID:        "run-tie-" + strconv.Itoa(i),
 			Pipeline:  "checks",
 			Status:    "success",
@@ -35,7 +37,7 @@ func TestListRuns_CursorWalksRunsSharingAnInstantExactlyOnce(t *testing.T) {
 	var filter store.RunFilter
 	filter.Limit = 5
 	for page := 0; page < runs+2; page++ {
-		got, err := st.ListRuns(ctx, filter)
+		got, err := st.AsOperator().ListRuns(ctx, filter)
 		if err != nil {
 			t.Fatalf("ListRuns: %v", err)
 		}
@@ -69,7 +71,7 @@ func TestCountRuns_IgnoresLimitAndHonoursTheCursor(t *testing.T) {
 	ctx := context.Background()
 	const runs = 30
 	for i := range runs {
-		if err := st.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID:        "run-count-" + strconv.Itoa(i),
 			Pipeline:  "checks",
 			Status:    "success",
@@ -79,7 +81,7 @@ func TestCountRuns_IgnoresLimitAndHonoursTheCursor(t *testing.T) {
 		}
 	}
 
-	got, err := st.CountRuns(ctx, store.RunFilter{Limit: 5})
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).CountRuns(ctx, store.RunFilter{Limit: 5})
 	if err != nil {
 		t.Fatalf("CountRuns: %v", err)
 	}
@@ -88,7 +90,7 @@ func TestCountRuns_IgnoresLimitAndHonoursTheCursor(t *testing.T) {
 	}
 
 	newest := time.Unix(1700000000+runs-1, 0)
-	remaining, err := st.CountRuns(ctx, store.RunFilter{
+	remaining, err := teststore.ForTeam(t, st, store.DefaultTeam).CountRuns(ctx, store.RunFilter{
 		AfterStartedAt: newest.UnixNano(),
 		AfterID:        "run-count-" + strconv.Itoa(runs-1),
 	})
@@ -109,7 +111,7 @@ func TestListRuns_CursorResumesAfterARunAtTheEpoch(t *testing.T) {
 
 	ctx := context.Background()
 	for i := range 4 {
-		if err := st.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID:        "run-epoch-" + strconv.Itoa(i),
 			Pipeline:  "checks",
 			Status:    "success",
@@ -119,12 +121,12 @@ func TestListRuns_CursorResumesAfterARunAtTheEpoch(t *testing.T) {
 		}
 	}
 
-	first, err := st.ListRuns(ctx, store.RunFilter{Limit: 2})
+	first, err := st.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
 	last := first[len(first)-1]
-	next, err := st.ListRuns(ctx, store.RunFilter{
+	next, err := st.AsOperator().ListRuns(ctx, store.RunFilter{
 		Limit: 2, AfterStartedAt: last.StartedAt.UnixNano(), AfterID: last.ID,
 	})
 	if err != nil {
@@ -150,7 +152,7 @@ func TestListRuns_CursorWalksPastNeverStartedRuns(t *testing.T) {
 	ctx := context.Background()
 	const started, queued = 3, 5
 	for i := range started {
-		if err := st.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID: "run-live-" + strconv.Itoa(i), Pipeline: "checks", Status: "success",
 			StartedAt: time.Unix(int64(1700000000+i), 0),
 		}); err != nil {
@@ -158,7 +160,7 @@ func TestListRuns_CursorWalksPastNeverStartedRuns(t *testing.T) {
 		}
 	}
 	for i := range queued {
-		if err := st.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID: "run-queued-" + strconv.Itoa(i), Pipeline: "checks", Status: "pending",
 		}); err != nil {
 			t.Fatal(err)
@@ -169,7 +171,7 @@ func TestListRuns_CursorWalksPastNeverStartedRuns(t *testing.T) {
 	var filter store.RunFilter
 	filter.Limit = 2
 	for range started + queued + 2 {
-		page, err := st.ListRuns(ctx, filter)
+		page, err := st.AsOperator().ListRuns(ctx, filter)
 		if err != nil {
 			t.Fatalf("ListRuns: %v", err)
 		}

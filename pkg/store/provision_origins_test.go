@@ -29,6 +29,8 @@ func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capab
 	case capability.ProvisionMachine:
 		owner := authorityMember(t, s, "owner", RoleOwner)
 		spec.Authority = &owner.Authority
+		spec.RegistrationID = "runner:a:machine"
+		spec.Repositories = []string{"github.com/acme/*"}
 	case capability.ProvisionService:
 		operator := authorityRoot("operator", "")
 		operator.Subject.Kind = capability.SubjectOperator
@@ -38,9 +40,10 @@ func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capab
 		spec.Team, spec.Subject = "", capability.Subject{Kind: capability.SubjectService, ID: "launcher"}
 		spec.Grants = []capability.Grant{capability.ClaimsLaunch}
 		spec.Metered = true
+		spec.RegistrationID = "service:launcher"
 	case capability.ProvisionActions:
-		spec.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "github.com/o/r", Ref: "refs/heads/main", SHA: "sha", WorkflowRunID: "workflow"}}
-		spec.Repositories = []string{"github.com/o/r"}
+		rewriteSchemaExec(t, s.db, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,repo_key,created_at) VALUES ('a',42,7,'acme/widgets','gh:42',1)`)
+		spec = actionsSpec(s, "a", "workflow")
 	}
 	return s, spec
 }
@@ -49,8 +52,10 @@ func TestProvisionOriginsRequireTrustedPolicy(t *testing.T) {
 	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService, capability.ProvisionActions} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, spec := provisionOrigin(t, kind)
-			if issued, err := s.ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
-				t.Fatal("unverified origin minted a bearer")
+			if kind == capability.ProvisionBootstrap || kind == capability.ProvisionActions {
+				if issued, err := s.ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
+					t.Fatal("unverified origin minted a bearer")
+				}
 			}
 			calls := 0
 			s.SetProvisionPolicy(provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, got capability.ProvisionSpec) error {

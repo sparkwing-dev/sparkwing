@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func deleteAndPurge(t *testing.T, st *store.Store, team store.Team, now time.Time) {
@@ -29,12 +30,12 @@ func TestDeletedSlugIsNeverRegisteredAgain(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	other := signIn(t, st, "x", "other@example.com")
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
 	deleteAndPurge(t, st, "acme", now)
 	for _, at := range []time.Time{now.Add(time.Hour), now.Add(365 * 24 * time.Hour)} {
-		if _, err := st.CreateTeam(ctx, other.Account.ID, "acme", "", at); !errors.Is(err, store.ErrSlugTaken) {
+		if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, other.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); !errors.Is(err, store.ErrSlugTaken) {
 			t.Fatalf("registering a deleted slug at %s = %v, want ErrSlugTaken", at, err)
 		}
 	}
@@ -51,24 +52,24 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 				now := time.Now()
 				a := signIn(t, st, fmt.Sprintf("a%d", i), "a@example.com")
 				b := signIn(t, st, fmt.Sprintf("b%d", i), "b@example.com")
-				if _, err := st.CreateTeam(ctx, a.Account.ID, "shared", "", now); err != nil {
+				if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, a.Account.ID), store.TeamInfo{Slug: "shared", DisplayName: ""}); err != nil {
 					t.Fatal(err)
 				}
 				shared := tenant(t, st, "shared")
-				inv, err := shared.CreateInvitation(ctx, a.Account.ID, "b@example.com", store.RoleOwner, now)
+				inv, err := shared.InviteForTest(t, ctx, a.Account.ID, "b@example.com", store.RoleOwner, now)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := st.AcceptInvitation(ctx, b.Account.ID, inv.ID, now); err != nil {
+				if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, b.Account.ID), inv.ID); err != nil {
 					t.Fatal(err)
 				}
 				if withEditor {
 					e := signIn(t, st, fmt.Sprintf("e%d", i), "e@example.com")
-					inv, err := shared.CreateInvitation(ctx, a.Account.ID, "e@example.com", store.RoleEditor, now)
+					inv, err := shared.InviteForTest(t, ctx, a.Account.ID, "e@example.com", store.RoleEditor, now)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := st.AcceptInvitation(ctx, e.Account.ID, inv.ID, now); err != nil {
+					if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, e.Account.ID), inv.ID); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -110,10 +111,10 @@ func TestInvitationEmailCapSurvivesTeamDeletion(t *testing.T) {
 	for i, to := range spellings {
 		owner := signIn(t, st, fmt.Sprintf("o%d", i), fmt.Sprintf("owner%d@example.com", i))
 		slug := store.Team(fmt.Sprintf("churn-%d", i))
-		if _, err := st.CreateTeam(ctx, owner.Account.ID, slug, "", now); err != nil {
+		if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: ""}); err != nil {
 			t.Fatal(err)
 		}
-		inv, err := tenant(t, st, slug).CreateInvitation(ctx, owner.Account.ID, to, store.RoleReader, now)
+		inv, err := tenant(t, st, slug).InviteForTest(t, ctx, owner.Account.ID, to, store.RoleReader, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,7 +143,7 @@ func TestTeamCreationIsCappedOverTheAccountsLifetime(t *testing.T) {
 	created := 1
 	for i := range 30 {
 		slug := store.Team(fmt.Sprintf("churn-%d", i))
-		if _, err = st.CreateTeam(ctx, owner.Account.ID, slug, "", now); err != nil {
+		if _, err = st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: ""}); err != nil {
 			break
 		}
 		created++
@@ -153,27 +154,26 @@ func TestTeamCreationIsCappedOverTheAccountsLifetime(t *testing.T) {
 	}
 }
 
-// A storage watermark names its team in its key, so the purge removes it
-// with the team's rows.
-func TestTeamPurgeRemovesTheTeamsStorageWatermarks(t *testing.T) {
+func TestTeamPurgeRemovesOnlyItsReplicaStorageUsage(t *testing.T) {
 	st := storetest.Open(t)
-	ctx := context.Background()
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "", now); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"storage_charged_through/acme/ci", "storage_charged_through/keep/ci"} {
-		if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, '1', 1)`), key); err != nil {
+	for _, team := range []store.Team{"acme", "keep"} {
+		if _, err := st.CreateAccountTeam(t.Context(), storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: team, DisplayName: ""}); err != nil {
 			t.Fatal(err)
+		}
+		for _, replica := range []string{"one", "two"} {
+			if err := tenant(t, st, team).AddUsage(t.Context(), store.UsageDelta{Period: "period", ReplicaID: replica, Counter: "storage_bytes", Amount: 1}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	deleteAndPurge(t, st, "acme", now)
-	if n := countWhere(t, st, "sparkwing_meta", "key = 'storage_charged_through/acme/ci'"); n != 0 {
-		t.Fatal("the purge left the team's storage watermark")
+	if n := countWhere(t, st, "storage_month_usage", "team = 'acme'"); n != 0 {
+		t.Fatalf("purge left %d storage rows", n)
 	}
-	if n := countWhere(t, st, "sparkwing_meta", "key = 'storage_charged_through/keep/ci'"); n != 1 {
-		t.Fatal("the purge removed another team's storage watermark")
+	if n := countWhere(t, st, "storage_month_usage", "team = 'keep'"); n != 2 {
+		t.Fatalf("purge changed another tenant's replica rows: %d", n)
 	}
 }
 
@@ -196,7 +196,7 @@ func TestTeamDeletionLeaseKeepsOnePurger(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
 	op := st.AsOperator()
@@ -227,20 +227,18 @@ func TestTeamDeletionLeaseKeepsOnePurger(t *testing.T) {
 	}
 }
 
-// Rows written under a deleted slug after the purge, by a credential that
-// outlived the team, are removed by the recheck once it is due.
-func TestTeamRecheckRemovesRowsWrittenAfterThePurge(t *testing.T) {
+func TestTeamRecheckPreservesForeignKeyFenceAfterThePurge(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
 	deleteAndPurge(t, st, "acme", now)
 	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
-		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 1, 1, 'acme')`)); err != nil {
-		t.Fatal(err)
+		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 1, 1, 'acme')`)); err == nil {
+		t.Fatal("deleted team accepted a new usage row")
 	}
 	op := st.AsOperator()
 	if ok, err := op.ClaimTeamDeletion(ctx, "acme", "p", now.Add(30*time.Minute), time.Minute); err != nil || ok {
@@ -271,23 +269,23 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	owner := signIn(t, st, "o", "owner@example.com")
 	leaver := signIn(t, st, "l", "leaver@example.com")
 	shared := tenant(t, st, owner.PersonalTeam)
-	inv, err := shared.CreateInvitation(ctx, owner.Account.ID, "leaver@example.com", store.RoleEditor, now)
+	inv, err := shared.InviteForTest(t, ctx, owner.Account.ID, "leaver@example.com", store.RoleEditor, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, leaver.Account.ID, inv.ID, now); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := shared.CreateTriggerWithRun(ctx,
+	if err := shared.TestOnlySeedTriggerWithRun(ctx,
 		store.Trigger{ID: "run-l", Pipeline: "build", CreatedAt: now},
 		store.Run{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := shared.CreateOrReplaceSecret(store.Secret{Name: "K", Value: "v", Principal: "leaver@example.com"}, now); err != nil {
+	if err := teststore.SeedSecret(st, shared.Team(), store.Secret{Name: "K", Value: "v", Principal: "leaver@example.com"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := shared.CreateTokenWith(ctx, "deploy-bot", store.TokenKindService, []string{"runs.read"}, 0, now,
-		store.TokenOptions{CreatedBy: leaver.Account.ID}); err != nil {
+	shared.MemberCapabilityForTest(t, leaver.Account.ID, now)
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: "run-l", NodeID: "n", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
 	team := string(owner.PersonalTeam)
@@ -295,15 +293,14 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	for _, q := range []string{
 		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 700, 1, '` + team + `')`,
 		`INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at, released_by, team) VALUES ('run-l', 'n', 'r', 1, 2, 'leaver@example.com', '` + team + `')`,
-		`INSERT INTO approvals (run_id, node_id, requested_at, approver, team) VALUES ('run-l', 'n', 1, 'deploy-bot', '` + team + `')`,
-		`INSERT INTO cron_schedules (id, repo_path, pipeline, cron, tz, overlap, catch_up_ns, armed_at, armed_by, updated_at, cursor_at, team)
-		 VALUES ('c1', '/r', 'build', '* * * * *', 'UTC', 'skip', 0, 1, 'leaver@example.com', 1, 1, '` + team + `')`,
-		`INSERT INTO nodes (run_id, node_id, status, claim_principal, team) VALUES ('run-l', 'n', 'pending', 'deploy-bot', '` + team + `')`,
+		`INSERT INTO approvals (run_id, node_id, requested_at, approver, team) VALUES ('run-l', 'n', 1, '` + leaver.Account.ID + `', '` + team + `')`,
+		`INSERT INTO cron_schedules (id, repo_path, pipeline, cron, tz, overlap, catch_up_ns, armed_at, armed_by, updated_at, cursor_at, team, repo_key)
+		 VALUES ('c1', '/r', 'build', '* * * * *', 'UTC', 'skip', 0, 1, 'leaver@example.com', 1, 1, '` + team + `', 'gh:1')`,
+		`UPDATE nodes SET claim_principal = '` + leaver.Account.ID + `' WHERE run_id = 'run-l' AND node_id = 'n'`,
 		`UPDATE triggers SET claim_principal = 'leaver@example.com' WHERE id = 'run-l'`,
 		`INSERT INTO credit_grants (id, kind, amount_micro, created_by, created_at, team) VALUES ('g2', 'free', 5, 'deploy-bot', 1, '` + bystander + `')`,
 		`INSERT INTO credit_grants (id, kind, amount_micro, created_by, created_at, team) VALUES ('g1', 'free', 5, 'leaver@example.com', 1, '` + team + `')`,
 		`INSERT INTO events (run_id, seq, ts, kind, payload, team) VALUES ('run-l', 1, 1, 'note', '{"by":"leaver@example.com"}', '` + team + `')`,
-		`UPDATE triggers SET trigger_user = 'leaver@example.com' WHERE id = 'run-l'`,
 		`UPDATE runs SET created_principal = 'leaver@example.com' WHERE id = 'run-l'`,
 	} {
 		if _, err := st.DB().ExecContext(ctx, q); err != nil {
@@ -317,7 +314,6 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	for _, c := range []struct{ table, col string }{
 		{"credit_grants", "created_by"},
 		{"secrets", "principal"},
-		{"triggers", "trigger_user"},
 		{"triggers", "claim_principal"},
 		{"runs", "created_principal"},
 		{"debug_pauses", "released_by"},
@@ -325,7 +321,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 		{"approvals", "approver"},
 		{"nodes", "claim_principal"},
 	} {
-		if n := countWhere(t, st, c.table, c.col+" IN ('leaver@example.com', 'deploy-bot') AND team = '"+team+"'"); n != 0 {
+		if n := countWhere(t, st, c.table, c.col+" IN ('leaver@example.com', '"+leaver.Account.ID+"') AND team = '"+team+"'"); n != 0 {
 			t.Errorf("%s.%s still names the deleted account", c.table, c.col)
 		}
 	}

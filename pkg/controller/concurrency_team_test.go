@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A runner resolving a coalesce follower names its leader in the query. A
@@ -20,17 +21,17 @@ import (
 func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		ctx := context.Background()
-		if err := f.teamA.FinishNodeWithOutputRef(ctx, f.runA, "n1", "success", "", nil, store.FailureUnknown, nil); err != nil {
+		if err := teststore.SeedNodeFinish(f.st, ctx, f.teamA.Team(), store.NodeRef{RunID: f.runA, NodeID: "n1"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
 			t.Fatal(err)
 		}
 		claimSeq := f.claimRun(f.runnerB, "run-by-b", "")
 
 		leaderB := "leader-b"
 		seedRun(t, f.teamB, leaderB, "build-b")
-		if err := f.st.CreateNode(ctx, store.Node{RunID: leaderB, NodeID: "lead", Status: "running"}); err != nil {
+		if err := teststore.SeedNode(f.st, ctx, store.Node{RunID: leaderB, NodeID: "lead", Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.teamB.FinishNodeWithOutputRef(ctx, leaderB, "lead", "success", "", nil, store.FailureUnknown, nil); err != nil {
+		if err := teststore.SeedNodeFinish(f.st, ctx, f.teamB.Team(), store.NodeRef{RunID: leaderB, NodeID: "lead"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -46,7 +47,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 				t.Fatal(err)
 			}
 			req.Header.Set("Authorization", f.runnerB)
-			req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimSeq, 10))
+			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimSeq, 10))
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)
@@ -102,7 +103,7 @@ func (f *tenancyFixture) claimRun(auth, runID, extraRunJSON string) int64 {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", auth)
-	req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
+	req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +142,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", spawner)
-			req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimSeq, 10))
+			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimSeq, 10))
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)

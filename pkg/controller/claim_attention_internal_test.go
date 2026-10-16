@@ -23,7 +23,7 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 		return match.Profile{Capacity: match.Resources{Cores: capacity}}, match.Resources{Cores: capacity}, nil
 	}))
 	engineHTTPRoot(t, e, "a", "box", []capability.Grant{capability.NodesClaim})
-	if err := st.RecordAgentLabels(t.Context(), "box", []string{"tool:git"}); err != nil {
+	if err := st.RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "box", Labels: []string{"tool:git"}}); err != nil {
 		t.Fatal(err)
 	}
 	srv := New(st, nil)
@@ -40,7 +40,7 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 	}
 	expect("node apply needs tool:terraform; no agent in team a has it")
 	engineHTTPRoot(t, e, "a", "pi", []capability.Grant{capability.NodesClaim})
-	if err := st.RecordAgentLabels(t.Context(), "pi", []string{"tool:terraform"}); err != nil {
+	if err := st.RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "pi", Labels: []string{"tool:terraform"}}); err != nil {
 		t.Fatal(err)
 	}
 	seen := now.Add(-time.Hour)

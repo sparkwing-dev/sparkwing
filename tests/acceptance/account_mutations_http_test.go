@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -52,6 +53,73 @@ func (f *accountWrites) AcceptAccountInvitation(_ context.Context, a capability.
 
 func (f *accountWrites) UnlinkAccountIdentity(_ context.Context, a capability.Authorized, provider string) (int64, error) {
 	return 2, f.called(a, provider)
+}
+
+var _ controller.AccountWriter = (*store.Store)(nil)
+
+func TestAccountMutationsHTTPUseCommittedStoreAdapter(t *testing.T) {
+	f := newSessionFlow(t)
+	now := time.Now()
+	member, err := f.store.ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-member", Email: "real-member@example.test", EmailVerified: true}, store.SignUpConditions{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.raw, f.csrf, _, err = f.store.CreateAccountSession(t.Context(), member.Account, member.PersonalTeam, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.LinkIdentity(t.Context(), member.Account.ID, store.SignInProfile{Provider: store.ProviderGitHub, Subject: "linked"}, now); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := f.store.ResolveSignIn(t.Context(), store.SignInProfile{Provider: store.ProviderGoogle, Subject: "real-owner", Email: "real-owner@example.test", EmailVerified: true}, store.SignUpConditions{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerRaw, _, _, err := f.store.CreateAccountSession(t.Context(), owner.Account, owner.PersonalTeam, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, _ := capability.LookupRoute("POST", "/api/v1/team/invitations")
+	auth, err := capability.NewAuthenticator(f.store).Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialSession, Raw: ownerRaw}, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := capability.Authorize(t.Context(), f.store, route, auth, capability.Target{Team: string(owner.PersonalTeam)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(t.Context(), owner.PersonalTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitation, err := tenant.CreateAuthorizedInvitation(t.Context(), a, member.Account.Email, store.RoleEditor, "real-invitation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := f.server.Handler()
+	for _, action := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{"POST", "/api/v1/teams", `{"slug":"next-team","display_name":"Next"}`, 201},
+		{"POST", "/api/v1/me/active-team", `{"slug":"` + string(member.PersonalTeam) + `"}`, 204},
+		{"POST", "/api/v1/invitations/" + invitation.ID + "/accept", "", 204},
+		{"DELETE", "/api/v1/me/identities/github", "", 204},
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, f.request(action.method, action.path, action.body))
+		if w.Code != action.status {
+			t.Fatalf("%s: %d %s", action.path, w.Code, w.Body.String())
+		}
+	}
+	session, err := f.store.LookupSession(t.Context(), f.raw)
+	if err != nil || session.Team != invitation.Team {
+		t.Fatalf("session=%+v: %v", session, err)
+	}
+	account, err := f.store.Account(t.Context(), session.AccountID)
+	if err != nil || account.ActiveTeam != invitation.Team {
+		t.Fatalf("account=%+v: %v", account, err)
+	}
 }
 
 func TestAccountMutationHTTPIdentityProperty(t *testing.T) {
@@ -213,7 +281,7 @@ func TestAccountMutationHTTPTransactionRefusals(t *testing.T) {
 	}
 }
 
-func TestAccountMutationHTTPInputAndMissingWriter(t *testing.T) {
+func TestAccountMutationHTTPInputAndMethods(t *testing.T) {
 	f := newSessionFlow(t)
 	writes := &accountWrites{}
 	h := f.server.WithAccountWriter(writes).Handler()
@@ -232,9 +300,6 @@ func TestAccountMutationHTTPInputAndMissingWriter(t *testing.T) {
 	assertEngineError(t, w, 404, apierr.NotFound)
 	h = f.server.WithAccountWriter(nil).Handler()
 	for _, action := range accountMutations {
-		w = httptest.NewRecorder()
-		h.ServeHTTP(w, f.request(action[0], action[1], action[2]))
-		assertEngineError(t, w, 500, apierr.PolicyMissing)
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, f.request("HEAD", action[1], ""))
 		assertEngineError(t, w, 405, apierr.MethodNotAllowed)

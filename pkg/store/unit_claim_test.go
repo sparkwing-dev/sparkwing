@@ -177,6 +177,7 @@ func TestClaimUnitGrantedProfileKeys(t *testing.T) {
 		for _, requirement := range []string{"name=runner", "class=cloud", "gpu"} {
 			t.Run(map[bool]string{false: "named", true: "queue"}[queued]+"/"+requirement, func(t *testing.T) {
 				s, demand := unitClaimFixture(t)
+				fundUnitClaim(t, s)
 				if queued {
 					demand.Target = nil
 					demand.Kinds = []capability.UnitKind{capability.UnitNode}
@@ -226,6 +227,7 @@ func TestClaimUnitOwnerKindsAndEvalFences(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
+			fundUnitClaim(t, s)
 			demand.Target = &UnitRef{Kind: kind, RunID: "run"}
 			if kind != capability.UnitTrigger {
 				root := authorityRoot("launcher", "")
@@ -386,7 +388,7 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 		t.Run(map[bool]string{false: "within window", true: "after window"}[late], func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
 			root := authorityRoot("requester", "a")
-			root.Grants = []capability.Grant{capability.RunsWrite}
+			root.Grants = []capability.Grant{capability.RunsWrite, capability.TriggersClaim}
 			authorityPersist(t, s, root)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET created_at=?`, s.now().UnixNano())
 			var here capability.Issued
@@ -413,6 +415,19 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			inventory := readRunnerInventory(t, s, "a")
+			if len(inventory.Runners) != 3 {
+				t.Fatalf("here and machine identities merged: %+v", inventory)
+			}
+			for _, row := range inventory.Runners {
+				if row.Runner.Type == "here" {
+					if row.Runner.Name != "requester" || len(row.ActiveJobs) != 1 || row.ActiveJobs[0] != "run" {
+						t.Fatalf("here identity: %+v", row)
+					}
+				} else if len(row.ActiveJobs) != 0 {
+					t.Fatalf("here activity attached to machine registration: %+v", row)
+				}
 			}
 			if err = s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 				t.Fatal(err)
@@ -523,5 +538,12 @@ func TestClaimUnitRefusesAcceptedGuardFailure(t *testing.T) {
 				t.Fatalf("owner cannot finish guard-refused run: %v", err)
 			}
 		})
+	}
+}
+
+func fundUnitClaim(t *testing.T, s *Store) {
+	t.Helper()
+	if _, err := (&Tenant{s: s, team: "a"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100000000, Reference: "claim-fixture", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -14,9 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type installFingerprint struct {
@@ -55,7 +60,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 	for i, pipeline := range []string{"build", "deploy", "nightly"} {
 		runID := fmt.Sprintf("drill-run-%d", i)
 		finished := start.Add(time.Duration(i+1) * time.Minute)
-		if err := st.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID:            runID,
 			Pipeline:      pipeline,
 			Status:        "success",
@@ -72,7 +77,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		}
 		for n := range 2 {
 			nodeID := fmt.Sprintf("node-%d", n)
-			if err := st.CreateNode(ctx, store.Node{
+			if err := teststore.SeedNode(st, ctx, store.Node{
 				RunID:      runID,
 				NodeID:     nodeID,
 				Status:     "done",
@@ -84,7 +89,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 				t.Fatalf("create node %s/%s: %v", runID, nodeID, err)
 			}
 		}
-		if err := st.AppendEvent(ctx, runID, "", "run_start", []byte(`{"drill":true}`)); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, runID, "", "run_start", []byte(`{"drill":true}`)); err != nil {
 			t.Fatalf("append event for %s: %v", runID, err)
 		}
 	}
@@ -97,7 +102,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		if err != nil {
 			t.Fatalf("seal %s: %v", name, err)
 		}
-		if err := st.CreateOrReplaceSecret(store.Secret{
+		if err := teststore.SeedSecret(st, store.DefaultTeam, store.Secret{
 			Name:      name,
 			Value:     sealed,
 			Principal: "operator",
@@ -107,18 +112,22 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		}
 	}
 
-	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 5_000_000, Reference: "drill-invoice-1", CreatedBy: "operator"}); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 5_000_000, Reference: "drill-invoice-1", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant credits: %v", err)
 	}
-	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 2_500_000, Reference: "drill-invoice-2", CreatedBy: "operator"}); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 3_000_000, Reference: "drill-invoice-2", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant credits: %v", err)
 	}
 
-	if _, _, err := st.CreateToken("runner-1", store.TokenKindRunner, []string{"nodes.claim"}, 0, start); err != nil {
-		t.Fatalf("create runner token: %v", err)
+	secret := [32]byte{17}
+	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
+	spec := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
+	if created, err := st.EnsureBootstrapCapability(ctx, spec); err != nil || !created {
+		t.Fatalf("seed admin: %v %v", created, err)
 	}
-	if _, _, err := st.CreateToken("operator", store.TokenKindUser, []string{"admin"}, 0, start); err != nil {
-		t.Fatalf("create admin token: %v", err)
+	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: seed[:16]}
+	if _, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(store.DefaultTeam), Repositories: []string{"example.com/acme/repo"}, RegistrationID: "runner:default:runner-1", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner-1"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}}); err != nil {
+		t.Fatalf("enroll runner: %v", err)
 	}
 }
 
@@ -133,13 +142,13 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 	}
 	f.Schema = schema
 
-	runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 100})
+	runs, err := st.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 100})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
 	for _, r := range runs {
 		f.Runs = append(f.Runs, fmt.Sprintf("%s/%s/%s/%s", r.ID, r.Pipeline, r.Status, r.GitSHA))
-		nodes, err := st.ListNodes(ctx, r.ID)
+		nodes, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodes(ctx, r.ID)
 		if err != nil {
 			t.Fatalf("list nodes for %s: %v", r.ID, err)
 		}
@@ -148,12 +157,12 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		}
 	}
 
-	list, err := st.ListSecrets()
+	list, err := teststore.ForTeam(t, st, store.DefaultTeam).ListSecrets()
 	if err != nil {
 		t.Fatalf("list secrets: %v", err)
 	}
 	for _, sec := range list {
-		row, err := st.GetSecretRow(sec.Name, sec.Pipeline)
+		row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow(sec.Name, sec.Pipeline)
 		if err != nil {
 			t.Fatalf("read secret %s: %v", sec.Name, err)
 		}
@@ -177,12 +186,19 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		f.Grants = append(f.Grants, fmt.Sprintf("%s/%s/%d", g.Kind, g.Reference, g.AmountMicro))
 	}
 
-	tokens, err := st.ListTokens("", true)
+	rows, err := st.DB().QueryContext(ctx, `SELECT prefix,subject_id,subject_kind FROM capabilities`)
 	if err != nil {
-		t.Fatalf("list tokens: %v", err)
+		t.Fatal(err)
 	}
-	for _, tok := range tokens {
-		f.Tokens = append(f.Tokens, fmt.Sprintf("%s/%s/%s", tok.Prefix, tok.Principal, tok.Kind))
+	for rows.Next() {
+		var prefix, principal, kind string
+		if err := rows.Scan(&prefix, &principal, &kind); err != nil {
+			t.Fatal(err)
+		}
+		f.Tokens = append(f.Tokens, fmt.Sprintf("%s/%s/%s", prefix, principal, kind))
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		t.Fatal(err)
 	}
 
 	sort.Strings(f.Runs)
@@ -335,7 +351,7 @@ func drillSQLiteWithoutKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	list, err := rst.ListSecrets()
+	list, err := teststore.ForTeam(t, rst, store.DefaultTeam).ListSecrets()
 	if err != nil {
 		t.Fatalf("list secrets: %v", err)
 	}
@@ -343,7 +359,7 @@ func drillSQLiteWithoutKey(t *testing.T) {
 		t.Fatal("the restored store holds no secrets, so the check proves nothing")
 	}
 	for _, sec := range list {
-		row, err := rst.GetSecretRow(sec.Name, sec.Pipeline)
+		row, err := teststore.ForTeam(t, rst, store.DefaultTeam).GetSecretRow(sec.Name, sec.Pipeline)
 		if err != nil {
 			t.Fatalf("read secret %s: %v", sec.Name, err)
 		}

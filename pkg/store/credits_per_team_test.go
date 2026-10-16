@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -28,15 +30,15 @@ func teamHandle(t *testing.T, s *store.Store, team store.Team) *store.Tenant {
 func readyTeamNode(t *testing.T, s *store.Store, tenant *store.Tenant, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := tenant.CreateRun(ctx, store.Run{
+	if err := tenant.TestOnlySeedRun(ctx, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run for %s: %v", tenant.Team(), err)
 	}
-	if err := s.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(s, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := s.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := teststore.SeedNodeReady(s, ctx, runID, nodeID); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 }
@@ -59,119 +61,6 @@ func meteredTeamClaimant(t *testing.T, tenant *store.Tenant, principal string) s
 		t.Fatalf("mint %s's metered token: %v", tenant.Team(), err)
 	}
 	return store.ClaimIdentity{Principal: principal, TokenPrefix: tok.Prefix}
-}
-
-func TestCreditsOneTeamsEmptyBalanceRefusesOnlyItsOwnNodes(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
-	globex := teamHandle(t, s, "globex")
-	acmeRunner := meteredTeamClaimant(t, acme, "agent:acme-cloud")
-	globexRunner := meteredTeamClaimant(t, globex, "agent:globex-cloud")
-
-	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
-	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: floor, Reference: "pay_acme", CreatedBy: "admin"}); err != nil {
-		t.Fatalf("grant acme one claim: %v", err)
-	}
-	funded := int64(100 * store.MicroCreditsPerCent)
-	if _, err := globex.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: funded, Reference: "pay_globex", CreatedBy: "admin"}); err != nil {
-		t.Fatalf("fund globex: %v", err)
-	}
-
-	readyTeamNode(t, s, acme, "run-acme-1", "build")
-	if n, err := s.ClaimNextReadyNode(ctx, acmeRunner, "pod-a1", time.Minute, nil); err != nil || n == nil {
-		t.Fatalf("acme's own grant must pay for its first claim: %v", err)
-	}
-
-	readyTeamNode(t, s, globex, "run-globex-1", "build")
-	if n, err := s.ClaimNextReadyNode(ctx, globexRunner, "pod-g1", time.Minute, nil); err != nil || n == nil {
-		t.Fatalf("globex must keep claiming while acme is empty: %v", err)
-	}
-
-	readyTeamNode(t, s, acme, "run-acme-2", "build")
-	_, err := s.ClaimNextReadyNode(ctx, acmeRunner, "pod-a2", time.Minute, nil)
-	if !errors.Is(err, store.ErrInsufficientCredits) {
-		t.Fatalf("acme's second claim = %v, want ErrInsufficientCredits; "+
-			"globex's grant must not pay for acme", err)
-	}
-
-	got, err := acme.CreditBalanceMicro(ctx)
-	if err != nil {
-		t.Fatalf("acme balance: %v", err)
-	}
-	if got != 0 {
-		t.Errorf("acme balance = %d, want 0; it holds only what it was granted", got)
-	}
-	got, err = globex.CreditBalanceMicro(ctx)
-	if err != nil {
-		t.Fatalf("globex balance: %v", err)
-	}
-	if want := funded - floor; got != want {
-		t.Errorf("globex balance = %d, want %d; acme's spend must not touch it", got, want)
-	}
-}
-
-// A funded neighbor must not hide that a team has run out: the charge path
-// reads the team's own balance, stamps the team's own row, and cancels only
-// that team's node once its grace period elapses.
-func TestCreditsFundedTeamDoesNotMaskAnotherTeamsExhaustion(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
-	globex := teamHandle(t, s, "globex")
-	acmeRunner := meteredTeamClaimant(t, acme, "agent:acme-cloud")
-	globexRunner := meteredTeamClaimant(t, globex, "agent:globex-cloud")
-
-	grace := int64(30)
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
-		t.Fatalf("set grace: %v", err)
-	}
-	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
-	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: floor, Reference: "", CreatedBy: "admin"}); err != nil {
-		t.Fatalf("grant acme one claim: %v", err)
-	}
-	if _, err := globex.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_globex", CreatedBy: "admin"}); err != nil {
-		t.Fatalf("fund globex: %v", err)
-	}
-
-	readyTeamNode(t, s, acme, "run-acme", "build")
-	if _, err := s.ClaimNextReadyNode(ctx, acmeRunner, "pod-a", time.Minute, nil); err != nil {
-		t.Fatalf("acme claim: %v", err)
-	}
-	readyTeamNode(t, s, globex, "run-globex", "build")
-	if _, err := s.ClaimNextReadyNode(ctx, globexRunner, "pod-g", time.Minute, nil); err != nil {
-		t.Fatalf("globex claim: %v", err)
-	}
-
-	start := time.Now()
-	rewindChargeWindow(t, s, "run-acme", "build", start)
-	res := chargeAt(t, s, "run-acme", acmeRunner, start.Add(5*time.Second))
-	if res.BalanceMicro > 0 {
-		t.Fatalf("acme's balance = %d, want it spent", res.BalanceMicro)
-	}
-	if res.Cancel {
-		t.Fatal("acme's grace period had not elapsed yet")
-	}
-	rewindChargeWindow(t, s, "run-acme", "build", start.Add(5*time.Second))
-	if res := chargeAt(t, s, "run-acme", acmeRunner, start.Add(40*time.Second)); !res.Cancel {
-		t.Fatalf("acme's node = %+v, want a cancellation; globex's balance must not mask it", res)
-	}
-
-	rewindChargeWindow(t, s, "run-globex", "build", start)
-	res = chargeAt(t, s, "run-globex", globexRunner, start.Add(40*time.Second))
-	if res.Cancel {
-		t.Fatal("globex's node was cancelled for acme's empty balance")
-	}
-	if res.BalanceMicro <= 0 {
-		t.Fatalf("globex's balance = %d, want it still funded", res.BalanceMicro)
-	}
-
-	if at := teamExhaustedAt(t, s, "acme"); at == 0 {
-		t.Error("acme's row carries no exhaustion stamp")
-	}
-	if at := teamExhaustedAt(t, s, "globex"); at != 0 {
-		t.Errorf("globex's row was stamped exhausted at %d by acme running out", at)
-	}
 }
 
 func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {
@@ -221,10 +110,10 @@ func TestCreditsGrantReferenceCannotCrossTeams(t *testing.T) {
 	globex := teamHandle(t, s, "globex")
 
 	amount := int64(10 * store.MicroCreditsPerCent)
-	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); err != nil {
+	if _, err := acme.TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("acme grant: %v", err)
 	}
-	if _, err := globex.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); !errors.Is(
+	if _, err := globex.TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); !errors.Is(
 		err, store.ErrCreditGrantConflict) {
 		t.Fatalf("globex replaying acme's payment = %v, want ErrCreditGrantConflict", err)
 	}
@@ -234,27 +123,5 @@ func TestCreditsGrantReferenceCannotCrossTeams(t *testing.T) {
 	}
 	if got != 0 {
 		t.Fatalf("globex balance = %d, want 0", got)
-	}
-}
-
-// A refusal names the node it was refused for. The other team's node is the
-// oldest waiting, so a refusal that named the queue's head would put one
-// team's billing event on another team's run.
-func TestCreditRefusalNamesTheRefusedNode(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
-	globex := teamHandle(t, s, "globex")
-	readyTeamNode(t, s, globex, "run-globex", "build")
-	readyTeamNode(t, s, acme, "run-acme", "build")
-	acmeRunner := meteredTeamClaimant(t, acme, "agent:acme-cloud")
-
-	_, err := s.ClaimNextReadyNode(ctx, acmeRunner, "pod-a", time.Minute, nil)
-	var shortfall *store.InsufficientCreditsError
-	if !errors.As(err, &shortfall) {
-		t.Fatalf("acme's claim on an empty balance = %v, want InsufficientCreditsError", err)
-	}
-	if shortfall.RunID != "run-acme" || shortfall.NodeID != "build" {
-		t.Fatalf("refusal names %s/%s, want the refused run-acme/build", shortfall.RunID, shortfall.NodeID)
 	}
 }

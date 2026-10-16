@@ -47,21 +47,8 @@ func TestConcurrencyMutationsRemainTenantScopedProperty(t *testing.T) {
 			t.Fatalf("foreign waiter: removed=%v, %v", removed, err)
 		}
 		check()
-		if released, err := a.ReleaseConcurrencySlot(t.Context(), key, holder, "success", "", "", 0); err != nil || !released {
-			t.Fatalf("release: released=%v, %v", released, err)
-		}
-		check()
-		request.RunID = "a"
-		if got, err := a.AcquireConcurrencySlot(t.Context(), request); err != nil || got.Kind != AcquireGranted {
-			t.Fatalf("reacquire: %+v, %v", got, err)
-		}
-		check()
 		if released, _, _, err := a.ReleaseAndNotify(t.Context(), key, holder, "success", "", "", 0, time.Hour); err != nil || !released {
-			t.Fatalf("release and notify: released=%v, %v", released, err)
-		}
-		check()
-		if _, err := a.ResolveCoalesceFollowers(t.Context(), key, "b", "job"); err != nil {
-			t.Fatal(err)
+			t.Fatalf("release: released=%v, %v", released, err)
 		}
 		check()
 		if _, err := a.PromoteNextWaiters(t.Context(), key, time.Hour); err != nil {

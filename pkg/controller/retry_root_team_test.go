@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // A node's attempt history is read through its lineage root, so a root the
@@ -42,7 +40,7 @@ VALUES ($1, $2, $2, 'n1', 1, 1, 'coord-a', 'member-a', 'runner', 'team-a-box', '
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", f.runnerB)
-		req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(gen, 10))
+		req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(gen, 10))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

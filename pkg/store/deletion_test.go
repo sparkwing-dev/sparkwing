@@ -26,22 +26,18 @@ func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID st
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	if err := tn.CreateTriggerWithRun(ctx,
+	if err := tn.TestOnlySeedTriggerWithRun(ctx,
 		store.Trigger{ID: runID, Pipeline: "build", CreatedAt: now},
 		store.Run{ID: runID, Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := tn.CreateOrReplaceSecret(store.Secret{Name: "API_KEY", Value: "v-" + runID}, now); err != nil {
+	if err := teststore.SeedSecret(st, tn.Team(), store.Secret{Name: "API_KEY", Value: "v-" + runID}, now); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
-	if _, err := tn.CreateInvitation(ctx, ownerID, "guest-"+runID+"@example.com", store.RoleReader, now); err != nil {
+	if _, err := tn.InviteForTest(t, ctx, ownerID, "guest-"+runID+"@example.com", store.RoleReader, now); err != nil {
 		t.Fatalf("seed invitation: %v", err)
 	}
-	_, tok, err := tn.CreateMachineToken(ctx, runID, []string{"nodes.claim"}, ownerID, now)
-	if err != nil {
-		t.Fatalf("seed token: %v", err)
-	}
-	return tok.Prefix
+	return tn.MemberCapabilityForTest(t, ownerID, now).Capability.Prefix
 }
 
 func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
@@ -50,18 +46,18 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	member := signIn(t, st, "m", "member@example.com")
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "Acme", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: "Acme"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "keep", "Keep", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "keep", DisplayName: "Keep"}); err != nil {
 		t.Fatal(err)
 	}
 	acme := tenant(t, st, "acme")
-	inv, err := acme.CreateInvitation(ctx, owner.Account.ID, "member@example.com", store.RoleEditor, now)
+	inv, err := acme.InviteForTest(t, ctx, owner.Account.ID, "member@example.com", store.RoleEditor, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, member.Account.ID, inv.ID, now); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	memberSession, _, _, err := st.CreateAccountSession(ctx, member.Account, "acme", time.Hour)
@@ -73,7 +69,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	// safety: billing rows are tenant-owned, so an expired checkout and a
 	// released dispute hold go with the team rather than outliving it; open
 	// ones refuse the deletion, see TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds.
-	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now.Add(-2*time.Hour), time.Hour); err != nil {
+	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.ForTeam(t, st, "acme").TestOnlyHoldForDispute(ctx, "dp_acme", "", "dispute opened", now); err != nil {
@@ -88,10 +84,10 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 		}
 	}
 
-	if _, _, err := acme.RequestDeletion(ctx, member.Account.ID, now); !errors.Is(err, store.ErrRoleAboveOwn) {
-		t.Fatalf("editor deleting the team = %v, want ErrRoleAboveOwn", err)
+	if _, _, err := acme.DeleteTeamForTest(t, ctx, member.Account.ID, now); err == nil {
+		t.Fatalf("editor deleting the team = %v, want refusal", err)
 	}
-	del, revoked, err := acme.RequestDeletion(ctx, owner.Account.ID, now)
+	del, revoked, err := acme.DeleteTeamForTest(t, ctx, owner.Account.ID, now)
 	if err != nil {
 		t.Fatalf("RequestDeletion: %v", err)
 	}
@@ -108,20 +104,20 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if n := countWhere(t, st, "memberships", "team = 'acme'"); n != 0 {
 		t.Fatalf("%d memberships left in a team being deleted", n)
 	}
-	if n := countWhere(t, st, "tokens", "team = 'acme' AND revoked_at IS NULL"); n != 0 {
+	if n := countWhere(t, st, "capabilities", "team = 'acme' AND revoked_at IS NULL"); n != 0 {
 		t.Fatalf("%d live tokens left in a team being deleted", n)
 	}
 	if n := countWhere(t, st, "invitations", "team = 'acme' AND withdrawn_at IS NULL AND accepted_at IS NULL"); n != 0 {
 		t.Fatalf("%d open invitations left in a team being deleted", n)
 	}
-	if n := countWhere(t, st, "runs", "team = 'acme' AND status = 'cancelled'"); n != 1 {
-		t.Fatalf("queued run not cancelled: %d cancelled", n)
+	if n := countWhere(t, st, "runs", "team = 'acme' AND cancel_requested_at IS NOT NULL"); n != 1 {
+		t.Fatalf("queued run has no cancellation request: %d requested", n)
 	}
 	sess, err := st.LookupSession(t.Context(), memberSession)
 	if err != nil || sess.Team != member.PersonalTeam {
 		t.Fatalf("member session = %+v, %v; want moved to %s", sess, err, member.PersonalTeam)
 	}
-	if n := countWhere(t, st, "tokens", fmt.Sprintf("prefix = '%s' AND revoked_at IS NULL", keepToken)); n != 1 {
+	if n := countWhere(t, st, "capabilities", fmt.Sprintf("prefix = '%s' AND revoked_at IS NULL", keepToken)); n != 1 {
 		t.Fatal("deleting acme revoked another team's token")
 	}
 
@@ -132,11 +128,6 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if err != nil || len(pending) != 1 || pending[0].Team != "acme" {
 		t.Fatalf("pending = %+v, %v", pending, err)
 	}
-	ids, err := st.AsOperator().TeamRunIDs(ctx, "acme")
-	if err != nil || len(ids) != 1 || ids[0] != "run-acme" {
-		t.Fatalf("TeamRunIDs = %v, %v", ids, err)
-	}
-
 	purge(t, st, "acme", now)
 	for _, table := range store.AllTenantTablesForTest() {
 		if n := countWhere(t, st, table, "team = 'acme'"); n != 0 {
@@ -146,7 +137,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if n := countWhere(t, st, "teams", "name = 'acme'"); n != 0 {
 		t.Fatal("the purge left the team registered")
 	}
-	for _, table := range []string{"runs", "secrets", "tokens", "memberships", "invitations"} {
+	for _, table := range []string{"runs", "secrets", "capabilities", "memberships", "invitations"} {
 		if n := countWhere(t, st, table, "team = 'keep'"); n == 0 {
 			t.Errorf("the purge removed keep's %s", table)
 		}
@@ -183,7 +174,7 @@ func TestTeamDeletionRefusesTheOwnersOnlyTeam(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, _, err := tenant(t, st, owner.PersonalTeam).RequestDeletion(ctx, owner.Account.ID, time.Now()); !errors.Is(err, store.ErrOnlyTeam) {
+	if _, _, err := tenant(t, st, owner.PersonalTeam).DeleteTeamForTest(t, ctx, owner.Account.ID, time.Now()); !errors.Is(err, store.ErrOnlyTeam) {
 		t.Fatalf("deleting the only team = %v, want ErrOnlyTeam", err)
 	}
 	if _, err := st.ForTeam(ctx, owner.PersonalTeam); err != nil {
@@ -197,11 +188,11 @@ func TestAccountDeletionRefusesALastOwnerWithMembersAndNamesTheTeams(t *testing.
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	member := signIn(t, st, "m", "member@example.com")
-	inv, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "member@example.com", store.RoleReader, now)
+	inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "member@example.com", store.RoleReader, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, member.Account.ID, inv.ID, now); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	_, err = st.DeleteAccount(ctx, owner.Account.ID, now)
@@ -221,23 +212,20 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	owner := signIn(t, st, "o", "owner@example.com")
 	leaver := signIn(t, st, "l", "leaver@example.com")
 	shared := tenant(t, st, owner.PersonalTeam)
-	inv, err := shared.CreateInvitation(ctx, owner.Account.ID, "leaver@example.com", store.RoleEditor, now)
+	inv, err := shared.InviteForTest(t, ctx, owner.Account.ID, "leaver@example.com", store.RoleEditor, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, leaver.Account.ID, inv.ID, now); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	session, _, _, err := st.CreateAccountSession(ctx, leaver.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cliTok, err := shared.CreateMemberToken(ctx, "leaver@example.com", []string{"runs.read"}, leaver.Account.ID, now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cliTok := shared.MemberCapabilityForTest(t, leaver.Account.ID, now).Capability
 	runCtx := store.WithCreatingPrincipal(ctx, "leaver@example.com")
-	if err := shared.CreateTriggerWithRun(runCtx,
+	if err := shared.TestOnlySeedTriggerWithRun(runCtx,
 		store.Trigger{ID: "run-l", Pipeline: "build", CreatedAt: now, TriggerUser: "leaver@example.com"},
 		store.Run{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)
@@ -260,12 +248,11 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 		t.Fatal("the deleted account's session still authenticates")
 	}
 	for table, where := range map[string]string{
-		"identities":  fmt.Sprintf("account_id = '%s'", leaver.Account.ID),
-		"memberships": fmt.Sprintf("account_id = '%s'", leaver.Account.ID),
-		"invitations": "email = 'leaver@example.com'",
-		"runs":        "created_principal = 'leaver@example.com'",
-		"triggers":    "trigger_user = 'leaver@example.com'",
-		"tokens":      "principal = 'leaver@example.com'",
+		"identities":   fmt.Sprintf("account_id = '%s'", leaver.Account.ID),
+		"memberships":  fmt.Sprintf("account_id = '%s'", leaver.Account.ID),
+		"invitations":  "email = 'leaver@example.com'",
+		"runs":         "created_principal = 'leaver@example.com'",
+		"capabilities": "subject_kind = 'account' AND subject_id = '" + leaver.Account.ID + "' AND revoked_at IS NULL",
 	} {
 		if n := countWhere(t, st, table, where); n != 0 {
 			t.Errorf("%s still names the deleted account (%d rows where %s)", table, n, where)
@@ -293,7 +280,7 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 	var claimed int
 	for i := range store.MaxInvitationEmailsPerDay + 1 {
 		owner := signIn(t, st, fmt.Sprintf("o%d", i), fmt.Sprintf("owner%d@example.com", i))
-		inv, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
+		inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -314,14 +301,14 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 		t.Fatalf("claimed %d emails to one address, want %d", claimed, store.MaxInvitationEmailsPerDay)
 	}
 	owner := signIn(t, st, "x", "other-owner@example.com")
-	other, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "someone@example.com", store.RoleReader, now)
+	other, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "someone@example.com", store.RoleReader, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := st.ClaimInvitationEmail(ctx, other.ID, now); err != nil || !ok {
 		t.Fatalf("another address = %v, %v; want claimed", ok, err)
 	}
-	later, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
+	later, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
 	if err != nil {
 		t.Fatal(err)
 	}

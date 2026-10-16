@@ -22,16 +22,16 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	for _, slug := range []store.Team{"acme", "held"} {
-		if _, err := st.CreateTeam(ctx, owner.Account.ID, slug, string(slug), now); err != nil {
+		if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: slug, DisplayName: string(slug)}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	acme := tenant(t, st, "acme")
-	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now, time.Hour); err != nil {
+	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := acme.RequestDeletion(ctx, owner.Account.ID, now)
+	_, _, err := acme.DeleteTeamForTest(t, ctx, owner.Account.ID, now)
 	if !errors.Is(err, store.ErrOpenCheckout) || !strings.Contains(err.Error(), "wait for the checkout to expire or complete") {
 		t.Fatalf("deleting a team with an open checkout = %v, want ErrOpenCheckout naming the remedy", err)
 	}
@@ -41,7 +41,7 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	if _, err := st.ForTeam(ctx, "acme"); err != nil {
 		t.Fatalf("a refused deletion closed the team: %v", err)
 	}
-	if _, _, err := acme.RequestDeletion(ctx, owner.Account.ID, now.Add(2*time.Hour)); err != nil {
+	if _, _, err := acme.DeleteTeamForTest(t, ctx, owner.Account.ID, now.Add(2*time.Hour)); err != nil {
 		t.Fatalf("deleting it once the checkout expired = %v", err)
 	}
 
@@ -49,14 +49,14 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	if _, err := teststore.ForTeam(t, st, "held").TestOnlyHoldForDispute(ctx, "dp_held", "", "dispute opened", now); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = held.RequestDeletion(ctx, owner.Account.ID, now)
+	_, _, err = held.DeleteTeamForTest(t, ctx, owner.Account.ID, now)
 	if !errors.Is(err, store.ErrTeamFrozen) || !strings.Contains(err.Error(), "contact support") {
 		t.Fatalf("deleting a held team = %v, want ErrTeamFrozen naming the remedy", err)
 	}
 	if _, err := teststore.ForTeam(t, st, "held").ReleaseCreditFreezes(ctx, "dp_held", "", "", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := held.RequestDeletion(ctx, owner.Account.ID, now); err != nil {
+	if _, _, err := held.DeleteTeamForTest(t, ctx, owner.Account.ID, now); err != nil {
 		t.Fatalf("deleting it once the hold was released = %v", err)
 	}
 }
@@ -68,17 +68,17 @@ func TestACheckoutCannotOpenOnceTheTeamIsBeingDeleted(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "Acme", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: "Acme"}); err != nil {
 		t.Fatal(err)
 	}
 	stale := tenant(t, st, "acme")
-	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now.Add(-2*time.Hour), time.Hour); err != nil {
+	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatalf("a checkout before the deletion = %v", err)
 	}
-	if _, _, err := stale.RequestDeletion(ctx, owner.Account.ID, now); err != nil {
+	if _, _, err := stale.DeleteTeamForTest(t, ctx, owner.Account.ID, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now, time.Hour); !errors.Is(err, store.ErrTeamBeingDeleted) {
+	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now, time.Hour); !errors.Is(err, store.ErrTeamBeingDeleted) {
 		t.Fatalf("a checkout on a team being deleted = %v, want ErrTeamBeingDeleted", err)
 	}
 	if n := countWhere(t, st, "credit_checkouts", fmt.Sprintf("team = 'acme' AND opened_at >= %d", now.UnixNano())); n != 0 {

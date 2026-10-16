@@ -133,6 +133,13 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if err = checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
 		return UnitClaim{}, err
 	}
+	placement, err := unitPlacementTx(ctx, tx, team, unit, profile, requirements)
+	if err != nil {
+		return UnitClaim{}, err
+	}
+	if placement.hold {
+		return UnitClaim{}, authorityError(apierr.LockHeld, "work is waiting for a preferred runner")
+	}
 	unitID, err := encodeAwardUnit(unit)
 	if err != nil {
 		return UnitClaim{}, err
@@ -168,6 +175,9 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if unit.Kind == capability.UnitNode {
 		actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Holder: row.holder, Generation: row.generation}
 		_, err = transitionNodeTx(ctx, tx, team, NodeTransition{Ref: NodeRef{unit.RunID, unit.NodeID}, To: NodeClaimed, Cause: CauseAward, Actor: actor, Extra: TransitionExtra{Claim: &claim.Award}}, now)
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE nodes SET placement_reason=? WHERE team=? AND run_id=? AND node_id=?`, placement.reason, team, unit.RunID, unit.NodeID)
+		}
 	} else {
 		err = writeOwnerClaimTx(ctx, tx, claim)
 	}

@@ -206,18 +206,6 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, 
 
 const maxRunnerRepos = 32
 
-func validRunnerName(name string) bool {
-	if name == "" || len(name) > 63 {
-		return false
-	}
-	for _, r := range name {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '.' {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *Server) controllerURL(r *http.Request) string {
 	if s.externalURL != "" {
 		return strings.TrimRight(s.externalURL, "/")

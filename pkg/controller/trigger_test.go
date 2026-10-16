@@ -102,7 +102,7 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	trigger, err := st.GetTrigger(context.Background(), body.RunID)
+	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestTrigger_DropsEnvKeysOutsideTheAllowList(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	trigger, err := st.GetTrigger(context.Background(), body.RunID)
+	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 		t.Fatal("empty run_id")
 	}
 
-	run, err := st.GetRun(context.Background(), body.RunID)
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatalf("GetRun(%s): %v", body.RunID, err)
 	}
@@ -231,7 +231,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	if run.CreatedAt.IsZero() {
 		t.Error("CreatedAt is zero")
 	}
-	runs, err := st.ListRuns(context.Background(), store.RunFilter{Limit: 10})
+	runs, err := st.AsOperator().ListRuns(context.Background(), store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 
 	ctx := context.Background()
 	created := time.Now().Add(-time.Hour)
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID:        "run-pending-1",
 		Pipeline:  "demo",
 		Status:    "pending",
@@ -268,7 +268,7 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	}
 
 	started := time.Now()
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID:        "run-pending-1",
 		Pipeline:  "demo",
 		Status:    "running",
@@ -277,7 +277,7 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 		t.Fatalf("CreateRun running upsert: %v", err)
 	}
 
-	got, err := st.GetRun(ctx, "run-pending-1")
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, "run-pending-1")
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
@@ -526,18 +526,18 @@ func TestListRoutes_ClampTheirLimit(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
 	for i := range store.MaxRunListLimit + 5 {
-		if err := st.CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 			ID:        "tg-" + strconv.Itoa(i),
 			Pipeline:  "push",
 			CreatedAt: time.Unix(int64(i+1), 0),
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -716,7 +716,7 @@ func TestTriggerRecordsTheRunFlagsOnTheRunRow(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	run, err := st.GetRun(context.Background(), body.RunID)
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,24 +20,7 @@ func providerPaymentFixture(t *testing.T) (*Store, *Tenant, time.Time) {
 	t.Helper()
 	s, tenant, now := cardCollectionFixture(t)
 	rewriteSchemaExec(t, s.db, "UPDATE credit_checkouts SET amount_micro=?", 100*MicroCreditsPerCent)
-	rewriteSchemaExec(t, s.db, "DROP TABLE payment_events")
-	rewriteSchemaExec(t, s.db, `CREATE TABLE payment_events (
- team TEXT REFERENCES teams(name), payment_mode TEXT NOT NULL, event_id TEXT NOT NULL,
- checkout_id TEXT, payment_id TEXT NOT NULL DEFAULT '', event_kind TEXT NOT NULL,
- event_digest TEXT NOT NULL, grant_id TEXT REFERENCES credit_grants(id), processed_at BIGINT NOT NULL,
- object_id TEXT NOT NULL DEFAULT '', event_json TEXT, settlement_json TEXT,
- PRIMARY KEY(payment_mode,event_id),
- FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode))`)
 	return s, tenant, now
-}
-
-func providerCorrelationSchema(t *testing.T, s *Store) {
-	t.Helper()
-	rewriteSchemaExec(t, s.db, `CREATE TABLE payment_correlations (
- payment_mode TEXT NOT NULL, provider_id TEXT NOT NULL, kind TEXT NOT NULL,
- team TEXT NOT NULL REFERENCES teams(name), customer_id TEXT NOT NULL,
- currency TEXT NOT NULL DEFAULT '', attempt_id TEXT NOT NULL DEFAULT '', charge_id TEXT NOT NULL DEFAULT '',
- PRIMARY KEY(payment_mode,provider_id))`)
 }
 
 func providerPaymentEvent(now time.Time, kind capability.PaymentEventKind) capability.PaymentEvent {

@@ -52,21 +52,6 @@ type CapacityAdoption struct {
 	Waiter *CapacityWaiter
 }
 
-// CapacityLivenessRule describes the conditions which renew the holder's continuity lease.
-type CapacityLivenessRule struct {
-	Scope      string
-	Conditions []string
-}
-
-// CapacityLiveness retains existing admission policy while changing who keeps capacity alive.
-func CapacityLiveness() []CapacityLivenessRule {
-	return []CapacityLivenessRule{
-		{"node", []string{"node nonterminal", "holder lease unexpired", "not superseded", "node claim OR owner lease live"}},
-		{"plan", []string{"run nonterminal", "holder lease unexpired", "not superseded", "owner lease OR any run node claim live"}},
-		{"waiter", []string{"waiter lease unexpired", "bound work nonterminal", "authorized successor owner"}},
-	}
-}
-
 // AdoptCapacity checks continuity under the entry lock; expired holders and waiters are removed before a fresh request.
 func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding CapacityBinding, actor Actor) (CapacityAdoption, error) {
 	if key == "" || id == "" || binding.RunID == "" || binding.Generation < 0 {

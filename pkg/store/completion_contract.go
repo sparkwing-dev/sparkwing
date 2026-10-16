@@ -30,28 +30,6 @@ const (
 	EffectTerminal EffectPhase = "terminal"
 )
 
-// EffectPolicy controls delivery phases and external idempotency keys.
-type EffectPolicy struct {
-	Effect       Effect
-	TerminalOnly bool
-	Idempotency  string
-}
-
-// CompletionEffects is the entire effect registry consumed by the elected reconciler.
-func CompletionEffects() []EffectPolicy {
-	return []EffectPolicy{
-		{EffectGitHubCheck, false, "team/run/effect/revision; serialized report lock"},
-		{EffectMetrics, true, "team/run/effect"},
-		{EffectProfileFold, true, "team/run/effect"},
-		{EffectNotifyParent, true, "team/run/effect"},
-	}
-}
-
-// EffectPhaseRanks supplies the monotone desired-state order.
-func EffectPhaseRanks() map[EffectPhase]int {
-	return map[EffectPhase]int{EffectPending: 0, EffectRunning: 1, EffectTerminal: 2}
-}
-
 // DesiredRunEffect is a committed snapshot for delivery; Payload comes from the run, never an executor.
 type DesiredRunEffect struct {
 	Team         Team
@@ -189,16 +167,16 @@ func writeRunEffectsTx(ctx context.Context, tx *storeTx, team Team, runID string
 		return fmt.Errorf("invalid effect state %q", state)
 	}
 	phase := effectPhase(state)
-	for _, policy := range CompletionEffects() {
-		if policy.TerminalOnly && phase != EffectTerminal {
+	for _, effect := range []Effect{EffectGitHubCheck, EffectMetrics, EffectProfileFold, EffectNotifyParent} {
+		if effect != EffectGitHubCheck && phase != EffectTerminal {
 			continue
 		}
 		var prior RunState
-		err := tx.QueryRowContext(ctx, `SELECT desired_state FROM run_effects WHERE team = ? AND run_id = ? AND effect = ?`+tx.forUpdate(), team, runID, policy.Effect).Scan(&prior)
+		err := tx.QueryRowContext(ctx, `SELECT desired_state FROM run_effects WHERE team = ? AND run_id = ? AND effect = ?`+tx.forUpdate(), team, runID, effect).Scan(&prior)
 		if errors.Is(err, sql.ErrNoRows) {
-			_, err = tx.ExecContext(ctx, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES (?,?,?,?,1,?)`, team, runID, policy.Effect, state, now.UnixNano())
-		} else if err == nil && prior != state && EffectPhaseRanks()[phase] > EffectPhaseRanks()[effectPhase(prior)] {
-			_, err = tx.ExecContext(ctx, `UPDATE run_effects SET desired_state = ?, desired_rev = desired_rev + 1, next_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, state, now.UnixNano(), team, runID, policy.Effect)
+			_, err = tx.ExecContext(ctx, `INSERT INTO run_effects(team,run_id,effect,desired_state,desired_rev,next_at) VALUES (?,?,?,?,1,?)`, team, runID, effect, state, now.UnixNano())
+		} else if err == nil && phase != EffectPending && effectPhase(prior) != phase && effectPhase(prior) != EffectTerminal {
+			_, err = tx.ExecContext(ctx, `UPDATE run_effects SET desired_state = ?, desired_rev = desired_rev + 1, next_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, state, now.UnixNano(), team, runID, effect)
 		} else if err == nil && prior != state && effectPhase(prior) == EffectTerminal && phase == EffectTerminal {
 			return fmt.Errorf("terminal completion outcome cannot change from %s to %s", prior, state)
 		}

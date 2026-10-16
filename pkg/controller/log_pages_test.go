@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -19,6 +20,49 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
+
+func TestLogTreeTraversesEveryTenantDescendantProperty(t *testing.T) {
+	property := func(size uint8, order uint32) bool {
+		engine, _ := engineRuntimeStore(t)
+		st := engine.Store
+		count := 101 + int(size%7)
+		want := map[string]bool{}
+		for i := range count + 1 {
+			id, parent := fmt.Sprintf("child-%03d", i), "run"
+			if i == count {
+				parent = "child-000"
+			}
+			want[id] = true
+			logSearchCandidate(t, st, id, i+2, "ci")
+			engineSQL(t, st, `UPDATE runs SET parent_run_id=?,started_at=? WHERE team='a' AND id=?`, parent, int64((uint32(i)+order)%3), id)
+			engineSQL(t, st, `INSERT INTO events(team,run_id,seq,kind,ts,payload) VALUES ('a',?,1,'run_started',1,?)`, id, []byte(`{}`))
+		}
+		engineSQL(t, st, `UPDATE runs SET parent_run_id=? WHERE team='a' AND id='run'`, fmt.Sprintf("child-%03d", count))
+		engineSQL(t, st, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
+		engineSQL(t, st, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,parent_run_id,log_retention_class,log_retention_days) SELECT 'foreign','foreign-child',1,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,'run',log_retention_class,log_retention_days FROM runs WHERE team='a' AND id='run'`)
+		engineSQL(t, st, `INSERT INTO events(team,run_id,seq,kind,ts,payload) VALUES ('foreign','foreign-child',1,'run_started',1,?)`, []byte(`{"private":"foreign"}`))
+		options, _, _ := memberObservationOptions(t, st, nil)
+		reader, err := client.NewLogReader(options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, err := reader.ReadLogs(t.Context(), "run", controllerwire.LogQuery{Tree: true, EventsOnly: true})
+		if err != nil || page.Truncated || len(page.Records) != len(want) {
+			t.Logf("tree returned %d of %d descendants: %v", len(page.Records), len(want), err)
+			return false
+		}
+		for _, record := range page.Records {
+			if !want[record.RunID] {
+				return false
+			}
+			delete(want, record.RunID)
+		}
+		return len(want) == 0
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestPersistedLogPageUsesCanonicalSubjectAndCursor(t *testing.T) {
 	logs, subject, st := committedDashboardLogs(t, []byte("first\nsecond\n"))

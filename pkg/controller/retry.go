@@ -17,7 +17,7 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request, auth
 	if err != nil {
 		return engineLookupError(err)
 	}
-	runs = store.RedactedRuns(runs)
+
 	if runs == nil {
 		runs = []*store.Run{}
 	}

@@ -54,45 +54,6 @@ const (
 // for the full window to be reaped.
 const DefaultConcurrencyLease = DefaultLeaseDuration
 
-// DefaultConcurrencyHeartbeatInterval is the fast holder-heartbeat cadence
-// for CancelOthers slots, where a superseding acquirer must be noticed
-// within ~3s. Other policies refresh at the slower cadence returned by
-// ConcurrencyHeartbeatInterval.
-const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
-
-// DefaultConcurrencyHeartbeatTimeout bounds one heartbeat attempt on the
-// fast CancelOthers cadence; it is shorter than that 3s interval so a
-// wedged tick can't stack. The policy-correct bound is
-// ConcurrencyHeartbeatTimeout.
-const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
-
-// ConcurrencyHeartbeatInterval is how often a holder under onLimit refreshes
-// its lease. Only CancelOthers needs the fast 3s cadence, to notice a
-// superseding acquirer within one tick; other policies have no supersede to
-// observe and refresh at lease/3. With one holder per memo node plus the
-// plan slot sharing one store, the slower cadence is a fraction of the
-// write load.
-func ConcurrencyHeartbeatInterval(onLimit string) time.Duration {
-	if onLimit == OnLimitCancelOthers {
-		return DefaultConcurrencyHeartbeatInterval
-	}
-	return DefaultConcurrencyLease / 3
-}
-
-// ConcurrencyHeartbeatTimeout bounds one heartbeat attempt under onLimit. An
-// _txlock=immediate heartbeat can busy-wait seconds for the write lock, so
-// the slow cadence needs a bound long enough to outwait that: a short bound
-// abandons a winnable attempt and counts a false miss, and at lease/3 only
-// three misses lapse a live holder's lease. The bound stays below the slow
-// interval so attempts can't stack; CancelOthers keeps the short
-// DefaultConcurrencyHeartbeatTimeout against its 3s cadence.
-func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration {
-	if onLimit == OnLimitCancelOthers {
-		return DefaultConcurrencyHeartbeatTimeout
-	}
-	return DefaultConcurrencyLease / 4
-}
-
 // DefaultCancelTimeout bounds CancelOthers eviction.
 const DefaultCancelTimeout = 60 * time.Second
 
@@ -272,11 +233,6 @@ type ConcurrencyState struct {
 	UsedCost          int
 	Holders           []ConcurrencyHolder
 	Waiters           []ConcurrencyWaiter
-}
-
-// ActiveConcurrencyHolder returns a tenant's live holder that has not been superseded.
-func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
-	return t.concurrencyHolder(ctx, key, holderID, now, holderLiveSQL(""))
 }
 
 // ConcurrencyHolder returns an unexpired tenant holder, including superseded holders.
@@ -1726,7 +1682,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	).Scan(&holderID, &leaseNS, &superInt)
 	switch {
 	case err == nil && superInt == 0 && leaseNS > nowNS:
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
@@ -1743,7 +1699,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		return WaiterResolution{}, err
 	}
 	if hit != nil {
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
@@ -1768,7 +1724,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
 				return WaiterResolution{}, err
 			}
-			if err := tx.Commit(); err != nil {
+			if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 				return WaiterResolution{}, err
 			}
 			return WaiterResolution{Status: WaiterExpired}, nil
@@ -1872,7 +1828,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		if e != nil {
 			return WaiterResolution{}, e
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{Status: WaiterStillWaiting, Position: position, QueueLength: queueLength, Holders: holders}, nil
@@ -1887,12 +1843,12 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 			return WaiterResolution{}, err
 		}
 		if !found || !coalesceFollowersCanInherit(leaderOutcome) {
-			if err := tx.Commit(); err != nil {
+			if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 				return WaiterResolution{}, err
 			}
 			return WaiterResolution{Status: WaiterCancelled}, nil
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
@@ -1904,7 +1860,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		}, nil
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 		return WaiterResolution{}, err
 	}
 	return WaiterResolution{Status: WaiterCancelled}, nil

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -18,11 +20,10 @@ func webSecretRun(id string) *store.Run {
 	return &store.Run{
 		ID:       id,
 		Pipeline: "deploy",
-		Args:     map[string]string{"token": webSecretValue, "env": webVisibleValue},
+		Args:     map[string]string{"token": runspec.RedactedArgValue, "env": webVisibleValue},
 		Invocation: map[string]any{
-			"args":                        map[string]string{"token": webSecretValue, "env": webVisibleValue},
-			"reproducer":                  "sparkwing run deploy --env=" + webVisibleValue + " --token=" + webSecretValue,
-			"inputs_hash":                 "sha256:legacy-oracle",
+			"args":                        map[string]string{"token": runspec.RedactedArgValue, "env": webVisibleValue},
+			"reproducer":                  "sparkwing run deploy --env=" + webVisibleValue + " --token=" + runspec.RedactedArgValue,
 			store.InvocationSecretArgsKey: []string{"token"},
 		},
 	}
@@ -33,8 +34,8 @@ func assertWebRedacted(t *testing.T, surface, body string) {
 	if strings.Contains(body, webSecretValue) {
 		t.Errorf("%s sent the secret arg value to the browser:\n%s", surface, body)
 	}
-	if !strings.Contains(body, store.RedactedArgValue) {
-		t.Errorf("%s carries no %s marker:\n%s", surface, store.RedactedArgValue, body)
+	if !strings.Contains(body, runspec.RedactedArgValue) {
+		t.Errorf("%s carries no %s marker:\n%s", surface, runspec.RedactedArgValue, body)
 	}
 	if !strings.Contains(body, webVisibleValue) {
 		t.Errorf("%s redacted the non-secret arg too:\n%s", surface, body)
@@ -91,7 +92,7 @@ func TestSecretArgs_GetRunHandlerLeavesBackendRunUntouched(t *testing.T) {
 	req.SetPathValue("id", "r1")
 	GetRunHandler(b)(httptest.NewRecorder(), req)
 
-	if shared.Args["token"] != webSecretValue {
+	if shared.Args["token"] != runspec.RedactedArgValue {
 		t.Errorf("handler mutated the shared run: Args[token] = %q", shared.Args["token"])
 	}
 }

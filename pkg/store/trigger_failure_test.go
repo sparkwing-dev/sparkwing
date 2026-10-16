@@ -1,44 +1,44 @@
 package store_test
 
 import (
-	"context"
+	"database/sql"
+	"reflect"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func TestFailedRunClosesTriggerAsFailed(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	const id = "failed-pipeline"
-	if err := st.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "missing", CreatedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := st.ClaimNextTrigger(ctx, 0)
+func TestFailedRunClosesOwnerAndKeepsVerdict(t *testing.T) {
+	st := storetest.OpenSQLite(t)
+	tenant, plan, err := storePlanSealRequest(t.Context(), st)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateRun(ctx, store.Run{ID: id, Pipeline: "missing", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	const reason = "pipeline missing is not defined in acme/web@abc; defined: build"
-	if err := st.FinishRun(ctx, id, "failed", reason); err != nil {
-		t.Fatal(err)
+	finish := store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunTransition{RunID: plan.RunID, Actor: plan.Actor, To: store.RunFailed, Cause: store.RunFinish, MaskedError: reason}}
+	for replay := range 2 {
+		applied, err := tenant.FinishRunAndUnit(t.Context(), finish)
+		if err != nil || applied.Replayed != (replay == 1) {
+			t.Fatalf("completion: %+v, %v", applied, err)
+		}
 	}
-	if ok, err := st.FinishTriggerAtGeneration(ctx, id, claimed.ClaimSeq); err != nil || !ok {
-		t.Fatalf("FinishTriggerAtGeneration = %t, %v", ok, err)
+	var status, verdict, failure string
+	var lease sql.NullInt64
+	if err := st.DB().QueryRowContext(t.Context(), `SELECT t.status,r.status,r.error,t.lease_expires_at FROM triggers t JOIN runs r ON r.team=t.team AND r.id=t.id WHERE t.team=? AND t.id=?`, tenant.Team(), finish.Unit.RunID).Scan(&status, &verdict, &failure, &lease); err != nil || status != "done" || verdict != "failed" || failure != reason || lease.Valid {
+		t.Fatalf("failed run: owner=%s verdict=%s error=%q lease=%v, %v", status, verdict, failure, lease, err)
 	}
-	got, err := st.GetTrigger(ctx, id)
+	before, err := tenant.ReadSnapshot(t.Context(), finish.Unit.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != "failed" || got.Error != reason || !got.IsFinished() {
-		t.Fatalf("failed trigger = %+v", got)
+	finish.Transition.To = store.RunSuccess
+	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
+		t.Fatal("success replaced committed failure")
 	}
-	listed, err := st.ListTriggers(ctx, store.TriggerFilter{Statuses: []string{"failed"}})
-	if err != nil || len(listed) != 1 || listed[0].Error != reason {
-		t.Fatalf("failed trigger listing = %+v, %v", listed, err)
+	after, err := tenant.ReadSnapshot(t.Context(), finish.Unit.RunID)
+	before.StoreNow = after.StoreNow
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("conflicting completion changed failed run: %v", err)
 	}
 }

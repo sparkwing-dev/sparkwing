@@ -8,7 +8,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
+
+func defaultTenant(t *testing.T, st *store.Store) *store.Tenant {
+	t.Helper()
+	return tenant(t, st, store.DefaultTeam)
+}
 
 func tenantFor(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
@@ -38,7 +44,7 @@ func runTeam(ctx context.Context, t *testing.T, st *store.Store, runID string) *
 
 func seedTenantRun(t *testing.T, tn *store.Tenant, id, pipeline string) {
 	t.Helper()
-	if err := tn.CreateRun(context.Background(), store.Run{
+	if err := tn.TestOnlySeedRun(context.Background(), store.Run{
 		ID:        id,
 		Pipeline:  pipeline,
 		Status:    "running",
@@ -154,120 +160,33 @@ func TestTenantRunsAreInvisibleToAnotherTeam(t *testing.T) {
 	}
 }
 
-// A mutator handed another team's id reports the same not-found its read
-// side reports, because a cancel endpoint that answered 200 and cancelled
-// nothing is the shape this disagreement takes in production.
 func TestTenantWritesReportNotFoundForAnotherTeamsRun(t *testing.T) {
-	ctx := context.Background()
 	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-	seedTenantRun(t, alpha, "run-alpha", "build")
-
-	if err := beta.FinishRun(ctx, "run-alpha", "failed", "not yours"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("beta.FinishRun(run-alpha) = %v, want ErrNotFound", err)
-	}
-	if err := beta.FinishRunsIfActive(ctx, []string{"run-alpha"}, "cancelled", ""); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("beta.FinishRunsIfActive(run-alpha) = %v, want ErrNotFound", err)
-	}
-	if err := beta.FinishRun(ctx, "run-nowhere", "failed", ""); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("beta.FinishRun(run-nowhere) = %v, want ErrNotFound", err)
-	}
-
-	got, err := alpha.GetRun(ctx, "run-alpha")
-	if err != nil {
-		t.Fatalf("alpha.GetRun: %v", err)
-	}
-	if got.Status != "running" {
-		t.Errorf("status = %q after another team tried to finish it, want running", got.Status)
-	}
-	if got.FinishedAt != nil {
-		t.Errorf("finished_at = %v after another team tried to finish it, want nil", got.FinishedAt)
-	}
-
-	if err := alpha.FinishRun(ctx, "run-alpha", "success", ""); err != nil {
-		t.Fatalf("alpha.FinishRun: %v", err)
-	}
-	got, err = alpha.GetRun(ctx, "run-alpha")
-	if err != nil {
-		t.Fatalf("alpha.GetRun after finish: %v", err)
-	}
-	if got.Status != "success" {
-		t.Errorf("status = %q after its own team finished it, want success", got.Status)
-	}
-}
-
-// CreateRun is an upsert whose conflict target is the caller-supplied run
-// id, so a team that names another team's pending run id would reach that
-// row unless the conflict guard carries the team too. The victim would
-// then execute the writer's plan under its own repo and secrets while the
-// writer was told it succeeded.
-func TestTenantCreateRunCannotOverwriteAnotherTeamsPendingRun(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-
-	if err := alpha.CreateRun(ctx, store.Run{
-		ID: "shared-id", Pipeline: "alpha-pipeline", Status: "pending",
-		DeclaredRepo: "alpha-repo", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("alpha.CreateRun: %v", err)
-	}
-
-	err := beta.CreateRun(ctx, store.Run{
-		ID: "shared-id", Pipeline: "beta-pipeline", Status: "pending",
-		DeclaredRepo: "beta-repo", StartedAt: time.Now(),
-	})
-	if !errors.Is(err, store.ErrIDOwnedByAnotherTeam) {
-		t.Errorf("beta.CreateRun on alpha's pending id = %v, want ErrIDOwnedByAnotherTeam", err)
-	}
-
-	got, err := alpha.GetRun(ctx, "shared-id")
-	if err != nil {
-		t.Fatalf("alpha.GetRun: %v", err)
-	}
-	if got.Pipeline != "alpha-pipeline" {
-		t.Errorf("pipeline = %q after the cross-team insert, want alpha-pipeline", got.Pipeline)
-	}
-	if got.DeclaredRepo != "alpha-repo" {
-		t.Errorf("declared repo = %q after the cross-team insert, want alpha-repo", got.DeclaredRepo)
-	}
-	if got.Status != "pending" {
-		t.Errorf("status = %q after the cross-team insert, want pending", got.Status)
-	}
-
-	if _, err := beta.GetRun(ctx, "shared-id"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("beta.GetRun(shared-id) = %v; beta must not read what it did not create", err)
-	}
-	if n, err := beta.CountRuns(ctx, store.RunFilter{}); err != nil || n != 0 {
-		t.Errorf("beta.CountRuns = %d, %v; want 0", n, err)
-	}
-}
-
-// Re-creating a team's own pending run is the upsert's reason to exist,
-// so the guard must not have closed it.
-func TestTenantCreateRunStillUpsertsItsOwnPendingRun(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-
-	if err := alpha.CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "first", Status: "pending", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("first CreateRun: %v", err)
-	}
-	if err := alpha.CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "second", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("second CreateRun: %v", err)
-	}
-	got, err := alpha.GetRun(ctx, "run-1")
+	own, finish := runCompletionFixture(t, st)
+	foreign := tenantFor(t, st, "foreign")
+	before, err := own.ReadRun(t.Context(), finish.Unit.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Pipeline != "second" || got.Status != "running" {
-		t.Errorf("run = %s/%s after its own team re-created it, want second/running", got.Pipeline, got.Status)
+	if _, err := foreign.ReadRun(t.Context(), finish.Unit.RunID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("foreign read: %v", err)
+	}
+	if _, err := foreign.FinishRunAndUnit(t.Context(), finish); err == nil {
+		t.Fatal("foreign tenant finished run")
+	}
+	missing := finish
+	missing.Unit.RunID = "missing"
+	missing.Transition.RunID = "missing"
+	missing.Transition.Actor.Owner = missing.Unit
+	if _, err := own.FinishRunAndUnit(t.Context(), missing); err == nil {
+		t.Fatal("missing run finish succeeded")
+	}
+	after, err := own.ReadRun(t.Context(), finish.Unit.RunID)
+	if err != nil || before.State != after.State || after.FinishedAt != nil || before.StateSeq != after.StateSeq {
+		t.Fatalf("refused mutation changed run: %+v, %v", after, err)
+	}
+	if _, err := own.FinishRunAndUnit(t.Context(), finish); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -276,7 +195,7 @@ func TestTenantCreateRunStillUpsertsItsOwnPendingRun(t *testing.T) {
 func TestUnportedStoreWritesLandInTheDefaultTeam(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: "run-legacy", Pipeline: "build", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -307,32 +226,4 @@ func runIDs(runs []*store.Run) []string {
 		out[i] = r.ID
 	}
 	return out
-}
-
-// Two teams may each hold one of a run and a trigger under the same id; the
-// run's owner and the trigger's owner are answered apart.
-func TestOwnerLookupsKeepARunAndATriggerSharingAnIDApart(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	op := st.AsOperator()
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-
-	seedTenantRun(t, alpha, "shared", "build")
-	if err := beta.CreateTrigger(ctx, store.Trigger{ID: "shared", Pipeline: "build", CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-
-	if team, err := op.RunTeam(ctx, "shared"); err != nil || team != "alpha" {
-		t.Errorf("RunTeam = %q, %v; want alpha", team, err)
-	}
-	if team, err := op.TriggerTeam(ctx, "shared"); err != nil || team != "beta" {
-		t.Errorf("TriggerTeam = %q, %v; want beta", team, err)
-	}
-	if _, err := op.RunTeam(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("RunTeam(missing) = %v, want ErrNotFound", err)
-	}
-	if _, err := op.TriggerTeam(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("TriggerTeam(missing) = %v, want ErrNotFound", err)
-	}
 }

@@ -2,106 +2,14 @@ package store_test
 
 import (
 	"context"
-	"io"
-	"log/slog"
-	"net/http"
-	"net/http/httptest"
-	"strings"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
-
-func TestMonitoringHTTPRoutesUseTheStoreDialect(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	if err := st.CreateRun(ctx, store.Run{ID: "http-agent-run", Pipeline: "demo", Status: "running", StartedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "http-agent-run", NodeID: "work", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.MarkNodeReady(ctx, "http-agent-run", "work"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.ClaimNextReadyNode(ctx,
-		store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"},
-		"runner:http-agent:1", time.Minute, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateRun(ctx, store.Run{ID: "http-trend-run", Pipeline: "demo", Status: "running", StartedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "http-trend-run", NodeID: "work", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.FinishNode(ctx, "http-trend-run", "work", "cached", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.FinishRun(ctx, "http-trend-run", "success", ""); err != nil {
-		t.Fatal(err)
-	}
-
-	srv := httptest.NewServer(controller.New(st, slog.New(slog.DiscardHandler)).Handler())
-	defer srv.Close()
-	for _, test := range []struct {
-		path, want string
-	}{
-		{path: "/api/v1/agents", want: `"name":"http-agent"`},
-		{path: "/api/v1/trends?pipeline=demo", want: `"cached":1`},
-	} {
-		resp, err := http.Get(srv.URL + test.path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, readErr := io.ReadAll(resp.Body)
-		closeErr := resp.Body.Close()
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		if closeErr != nil {
-			t.Fatal(closeErr)
-		}
-		if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), test.want) {
-			t.Fatalf("GET %s = %d %s, want body containing %s", test.path, resp.StatusCode, body, test.want)
-		}
-	}
-}
-
-func TestAgentClaimsUseTheStoreDialect(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	if err := st.CreateRun(ctx, store.Run{ID: "agent-run", Pipeline: "demo", Status: "running", StartedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "agent-run", NodeID: "work", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.MarkNodeReady(ctx, "agent-run", "work"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.ClaimNextReadyNode(ctx,
-		store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"},
-		"runner:laptop:1", time.Minute, nil); err != nil {
-		t.Fatal(err)
-	}
-	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	claims, err := tenant.ListAgentClaims(ctx, now.Add(-time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(claims) != 1 || claims[0].RunID != "agent-run" || claims[0].ClaimedBy != "runner:laptop:1" || claims[0].TokenPrefix != "swr_runner" {
-		t.Fatalf("agent claims = %+v", claims)
-	}
-}
 
 func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 	st := storetest.Open(t)
@@ -111,27 +19,27 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 		id, pipeline string
 		outcomes     []string
 	}{
-		{id: "cached-run", pipeline: "alpha", outcomes: []string{"cached", "satisfied"}},
-		{id: "mixed-run", pipeline: "alpha", outcomes: []string{"cached", "success"}},
-		{id: "other-run", pipeline: "beta", outcomes: []string{"cached"}},
+		{id: "cached-run", pipeline: "alpha", outcomes: []string{"memoized", "memoized"}},
+		{id: "mixed-run", pipeline: "alpha", outcomes: []string{"memoized", "success"}},
+		{id: "other-run", pipeline: "beta", outcomes: []string{"memoized"}},
 	} {
-		if err := st.CreateRun(ctx, store.Run{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}); err != nil {
 			t.Fatal(err)
 		}
-		for _, outcome := range run.outcomes {
-			nodeID := "work-" + outcome
-			if err := st.CreateNode(ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
+		for i, outcome := range run.outcomes {
+			nodeID := fmt.Sprintf("work-%d", i)
+			if err := teststore.SeedNode(st, ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.FinishNode(ctx, run.id, nodeID, outcome, ""); err != nil {
+			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: run.id, NodeID: nodeID}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := st.FinishRun(ctx, run.id, "success", ""); err != nil {
+		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, run.id, "success", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := st.CreateRun(ctx, store.Run{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	tenant, err := st.ForTeam(ctx, store.DefaultTeam)

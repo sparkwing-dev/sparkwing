@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
@@ -50,9 +51,11 @@ func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 
 type credentialMutationFake struct {
 	*store.Tenant
-	err   error
-	calls int
-	actor capability.Authorized
+	store     *store.Store
+	err       error
+	calls     int
+	actor     capability.Authorized
+	authority capability.AuthorityRef
 }
 
 func (f *credentialMutationFake) record(a capability.Authorized) error {
@@ -65,56 +68,64 @@ func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Aut
 	if err := f.record(a); err != nil {
 		return err
 	}
-	return f.Tenant.CreateOrReplaceSecret(row, time.Now())
+	return teststore.SeedSecret(f.store, f.Team(), row, time.Now())
 }
 
-func (f *credentialMutationFake) RemoveSecret(_ context.Context, a capability.Authorized, name, pipeline string) error {
+func (f *credentialMutationFake) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error {
 	if err := f.record(a); err != nil {
 		return err
 	}
-	return f.Tenant.DeleteSecret(name, pipeline)
+	a.Principal.Authority = f.authority
+	return f.Tenant.RemoveSecret(ctx, a, name, pipeline)
 }
 
 func (f *credentialMutationFake) WriteGitCredential(ctx context.Context, a capability.Authorized, row store.GitCredential) (store.GitCredential, error) {
 	if err := f.record(a); err != nil {
 		return store.GitCredential{}, err
 	}
-	return f.Tenant.PutGitCredential(ctx, row, time.Now())
+	a.Principal.Authority = f.authority
+	return f.Tenant.WriteGitCredential(ctx, a, row)
 }
 
 func (f *credentialMutationFake) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, fingerprint string) (store.GitCredential, error) {
 	if err := f.record(a); err != nil {
 		return store.GitCredential{}, err
 	}
-	return f.Tenant.ConfirmGitCredential(ctx, host, fingerprint, time.Now())
+	a.Principal.Authority = f.authority
+	return f.Tenant.ConfirmGitCredentialFor(ctx, a, host, fingerprint)
 }
 
 func (f *credentialMutationFake) RemoveGitCredential(ctx context.Context, a capability.Authorized, host string) error {
 	if err := f.record(a); err != nil {
 		return err
 	}
-	return f.Tenant.DeleteGitCredential(ctx, host)
+	a.Principal.Authority = f.authority
+	return f.Tenant.RemoveGitCredential(ctx, a, host)
 }
 
-func mutationServerConfig(s *store.Store, cipher controller.Cipher, b *credentialBoundary) *controller.Server {
+func mutationServerConfig(t testing.TB, s *store.Store, cipher controller.Cipher, b *credentialBoundary) *controller.Server {
 	server := controller.New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithAuthorization(consoleAuthorization(b))
 	if s != nil {
 		server.WithCredentialWriter(func(ctx context.Context, team store.Team) (controller.CredentialWriter, error) {
 			tenant, err := s.ForTeam(ctx, team)
-			return &credentialMutationFake{Tenant: tenant}, err
+			if err != nil {
+				return nil, err
+			}
+			a := credentialSeedAuthority(t, s, team)
+			return &credentialMutationFake{Tenant: tenant, store: s, authority: a.Principal.Authority}, nil
 		})
 	}
 	return server
 }
 
-func mutationServer(s *store.Store, cipher controller.Cipher, b *credentialBoundary) http.Handler {
-	return mutationServerConfig(s, cipher, b).Handler()
+func mutationServer(t testing.TB, s *store.Store, cipher controller.Cipher, b *credentialBoundary) http.Handler {
+	return mutationServerConfig(t, s, cipher, b).Handler()
 }
 
 func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 	s, cipher := credentialMutationStore(t)
 	b := authorityMember()
-	h := mutationServer(s, cipher, b)
+	h := mutationServer(t, s, cipher, b)
 	property := func(value, selector string, masked, shared bool) bool {
 		pipeline := "pipeline-" + selector
 		query := url.Values{"team": {selector}, "pipeline": {pipeline}, "run": {selector}}
@@ -126,7 +137,7 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := foreign.CreateOrReplaceSecret(store.Secret{Name: "KEY", Pipeline: pipeline, Value: "foreign-value"}, time.Now()); err != nil {
+		if err := teststore.SeedSecret(s, foreign.Team(), store.Secret{Name: "KEY", Pipeline: pipeline, Value: "foreign-value"}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		body, err := json.Marshal(map[string]any{"name": "KEY", "value": value, "pipeline": pipeline, "masked": masked, "shared": shared})
@@ -153,7 +164,7 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		if err != nil || other.Value != "foreign-value" {
 			return false
 		}
-		return foreign.DeleteSecret("KEY", pipeline) == nil
+		return foreign.RemoveSecret(t.Context(), credentialSeedAuthority(t, s, "foreign"), "KEY", pipeline) == nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
@@ -163,7 +174,7 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 func TestCredentialMutationsHTTPGitValuesStayPrivateAndTenantBound(t *testing.T) {
 	s, cipher := credentialMutationStore(t)
 	b := authorityMember()
-	h := mutationServer(s, cipher, b)
+	h := mutationServer(t, s, cipher, b)
 	target, err := s.ForTeam(t.Context(), "team")
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +183,7 @@ func TestCredentialMutationsHTTPGitValuesStayPrivateAndTenantBound(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := foreign.PutGitCredential(t.Context(), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialHTTPS, Secret: "foreign-value"}, time.Now()); err != nil {
+	if _, err := foreign.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, "foreign"), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialHTTPS, Secret: "foreign-value"}); err != nil {
 		t.Fatal(err)
 	}
 	property := func(value, selector string) bool {
@@ -248,7 +259,7 @@ func TestCredentialMutationsHTTPRefuseUnrelatedAuthorityBeforeStorage(t *testing
 				case "binding":
 					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "outside team"}
 				}
-				w := authorityHTTP(mutationServer(nil, nil, b), b, route.method, route.path, route.body)
+				w := authorityHTTP(mutationServer(t, nil, nil, b), b, route.method, route.path, route.body)
 				assertEngineError(t, w, apierr.Status(code), code)
 				if w.Header().Get("Cache-Control") != "no-store" {
 					t.Fatal("credential refusal is cacheable")
@@ -267,7 +278,7 @@ func TestCredentialMutationsHTTPSessionsRequireCSRFBeforeStorage(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		mutationServer(nil, nil, b).ServeHTTP(w, r)
+		mutationServer(t, nil, nil, b).ServeHTTP(w, r)
 		assertEngineError(t, w, 403, apierr.Forbidden)
 	}
 }
@@ -311,10 +322,12 @@ func TestCredentialMutationsHTTPTransactionBoundary(t *testing.T) {
 						t.Fatal(err)
 					}
 					code, writes = apierr.PolicyMissing, 0
-				case "nil", "default":
+				case "nil":
 					writer, code, writes = nil, apierr.PolicyMissing, 0
+				case "default":
+					writer, code, writes = nil, apierr.Unauthenticated, 0
 				}
-				server := mutationServerConfig(s, cipher, b).WithCredentialWriter(func(_ context.Context, team store.Team) (controller.CredentialWriter, error) {
+				server := mutationServerConfig(t, s, cipher, b).WithCredentialWriter(func(_ context.Context, team store.Team) (controller.CredentialWriter, error) {
 					if team != "team" {
 						t.Fatalf("resolved tenant %q", team)
 					}
@@ -344,11 +357,11 @@ func TestCredentialMutationsHTTPConfirmationUsesTenantAndPin(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenant.PutGitCredential(t.Context(), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialSSH, Secret: "private-ssh-key", Fingerprint: "SHA256:pin"}, time.Now()); err != nil {
+		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), store.GitCredential{Host: "git.invalid", Kind: store.GitCredentialSSH, Secret: "private-ssh-key", Fingerprint: "SHA256:pin"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	h := mutationServer(s, cipher, b)
+	h := mutationServer(t, s, cipher, b)
 	path := "/api/v1/team/git-credentials/git.invalid/confirm?team=foreign"
 	w := authorityHTTP(h, b, "POST", path, `{"fingerprint":"SHA256:wrong"}`)
 	assertEngineError(t, w, 409, apierr.Conflict)
@@ -382,7 +395,7 @@ func TestCredentialMutationsHTTPValidatesBodiesBeforeTransactions(t *testing.T) 
 		for _, body := range []string{"", "null", "[]", "true", `{"team":"foreign"}`, route.body + `{}`, strings.TrimSuffix(route.body, "}") + `,"actor":"forged"}`} {
 			b := authorityMember()
 			f := &credentialMutationFake{Tenant: tenant}
-			server := mutationServerConfig(s, cipher, b).WithCredentialWriter(func(context.Context, store.Team) (controller.CredentialWriter, error) { return f, nil })
+			server := mutationServerConfig(t, s, cipher, b).WithCredentialWriter(func(context.Context, store.Team) (controller.CredentialWriter, error) { return f, nil })
 			w := authorityHTTP(server.Handler(), b, route.method, route.path, body)
 			assertEngineError(t, w, 400, apierr.BadRequest)
 			if f.calls != 0 {
@@ -393,7 +406,7 @@ func TestCredentialMutationsHTTPValidatesBodiesBeforeTransactions(t *testing.T) 
 	for _, name := range []string{"", "new..name", "KEY' OR 1=1 --"} {
 		b := authorityMember()
 		if name != "" {
-			if err := tenant.CreateOrReplaceSecret(store.Secret{Name: name, Value: "unchanged"}, time.Now()); err != nil {
+			if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: name, Value: "unchanged"}, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -401,7 +414,7 @@ func TestCredentialMutationsHTTPValidatesBodiesBeforeTransactions(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		w := authorityHTTP(mutationServer(s, cipher, b), b, "POST", "/api/v1/secrets", string(body))
+		w := authorityHTTP(mutationServer(t, s, cipher, b), b, "POST", "/api/v1/secrets", string(body))
 		assertEngineError(t, w, 400, apierr.BadRequest)
 		if strings.Contains(w.Body.String(), name) && name != "" {
 			t.Fatalf("invalid name was echoed: %s", w.Body.String())
@@ -421,7 +434,7 @@ func TestCredentialMutationsHTTPMemberTransports(t *testing.T) {
 			p.Authority = capability.AuthorityRef{}
 			p.Capability.Subject = capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}
 		}
-		h := mutationServer(s, cipher, b)
+		h := mutationServer(t, s, cipher, b)
 		w := authorityHTTP(h, b, "POST", "/api/v1/secrets", `{"name":"KEY","value":"default-masked"}`)
 		if w.Code != 204 {
 			t.Fatalf("class %s HTTP %d %s", class, w.Code, w.Body.String())
@@ -469,7 +482,7 @@ func TestCredentialMutationsHTTPEncryptionFailuresStoreNothing(t *testing.T) {
 				cipher, code = mutationSealFailure{errors.New("private credential cipher diagnostic")}, apierr.Internal
 			}
 			request := credentialMutationRequests[route]
-			w := authorityHTTP(mutationServer(s, cipher, b), b, request.method, request.path, request.body)
+			w := authorityHTTP(mutationServer(t, s, cipher, b), b, request.method, request.path, request.body)
 			assertEngineError(t, w, apierr.Status(code), code)
 		}
 	}
@@ -483,4 +496,21 @@ func TestCredentialMutationsHTTPEncryptionFailuresStoreNothing(t *testing.T) {
 	if row, err := tenant.GitCredentialForHost(t.Context(), "git.invalid"); !errors.Is(err, store.ErrNotFound) || row.ID != "" {
 		t.Fatalf("stored failed credential: %+v %v", row, err)
 	}
+}
+
+func credentialSeedAuthority(t testing.TB, s *store.Store, team store.Team) capability.Authorized {
+	t.Helper()
+	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','credential-fixture@example.test',1,1) ON CONFLICT(id) DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,'account','owner',1) ON CONFLICT(team,account_id) DO NOTHING`, team); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("credential-fixture:" + team))
+	hash := hex.EncodeToString(digest[:])
+	if _, err := s.DB().ExecContext(t.Context(), `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'account','',?,?,?,'account') ON CONFLICT(hash) DO NOTHING`, hash, time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), team); err != nil {
+		t.Fatal(err)
+	}
+
+	return capability.Authorized{Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hash}}, Target: capability.Target{Team: string(team)}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
 }

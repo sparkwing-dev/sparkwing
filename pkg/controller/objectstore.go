@@ -152,7 +152,7 @@ func (s *Server) measureBucketLeased(ctx context.Context, ceiling *objectguard.C
 	if s.store == nil || window <= 0 {
 		return true, measure(ctx)
 	}
-	return s.store.RunBucketMeasureLeased(ctx, s.measureHolder(), window, window, measure)
+	return s.store.AsOperator().RunBucketMeasureLeased(ctx, s.measureHolder(), window, window, measure)
 }
 
 func (s *Server) measureHolder() string {

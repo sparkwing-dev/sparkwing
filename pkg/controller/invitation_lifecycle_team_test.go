@@ -38,11 +38,11 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 					t.Fatal(err)
 				}
 				erin, _ := signUp(t, f.st, "erin")
-				inv, err := f.teamA.CreateInvitation(ctx, alice.ID, erin.Email, store.RoleOwner, time.Now().UTC())
+				inv, err := fixtureInvitation(t, f.st, f.teamA, alice.ID, erin.Email, store.RoleOwner)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.st.AcceptInvitation(ctx, erin.ID, inv.ID, time.Now().UTC()); err != nil {
+				if _, err := f.st.AcceptAccountInvitation(ctx, fixtureAccountAuthority(t, f.st, erin), inv.ID); err != nil {
 					t.Fatal(err)
 				}
 				erinSess := session(t, f.st, erin, f.teamA.Team())

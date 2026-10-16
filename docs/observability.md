@@ -508,7 +508,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_signups_total` | Counter | `outcome`, `reason` | New accounts: `admitted` (reason `none`, or `invitation` for a waitlisted account that joined a team by invitation) or `waitlisted` with the reason (`deployment`, `operator`, `free_tier_closed`, `free_tier_unreadable`, `hourly_signups`, `daily_signups`, `github_account_age`) |
 | `sparkwing_signup_gate_closed_total` | Counter | `reason` | Times the sign-up gate closed itself because new accounts crossed the hourly or daily limit (`hourly_signups`, `daily_signups`) |
 | `sparkwing_signup_velocity_warnings_total` | Counter | (none) | Times the last hour's new accounts crossed the sign-up warn threshold, once per crossing; it closes nothing |
-| `sparkwing_queue_depth` | Gauge | `state` | Unfinished nodes of active runs: `waiting`, `ready`, `claimed`, `running`, `approval_pending`. Node rows retained by a finished run do not count. |
+| `sparkwing_queue_depth` | Gauge | `state` | Each unfinished job of an active run counts once: `waiting`, `ready`, `claimed`, `running`, `approval_pending`. A held job stays claimed until recovery commits, including after lease expiry. Jobs retained by a finished run do not count. |
 | `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
 | `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
@@ -713,7 +713,9 @@ The ceiling is the controller's alone; no other process takes one.
 
 Three properties keep the measurement from becoming the cost it bounds.
 One replica measures per window: the controllers claim a store-wide
-lease, so N replicas cost one listing rather than N. The measurement's
+lease, so N replicas cost one listing rather than N. A completed measurement
+advances the window only while its captured lease is live. An expired worker
+cannot overwrite a successor's window. The measurement's
 requests sit outside the object-store request budget, because totalling
 a million-object bucket spends twice the per-minute list budget in one
 pass and would otherwise leave every other reader refused for the rest

@@ -162,14 +162,25 @@ func (s *Server) readLogPage(ctx context.Context, tenant *store.Tenant, reader s
 		}
 		page.Complete = page.Complete && view.Snapshot.Run.FinishedAt != nil
 		if q.Tree {
-			children, err := tenant.ListSpawnedChildrenByRun(ctx, run)
-			if err != nil {
-				return page, err
-			}
-			for _, child := range children {
-				if !seen[child.ChildRunID] {
-					seen[child.ChildRunID] = true
-					runs = append(runs, child.ChildRunID)
+			filter := store.RunFilter{ParentRunID: run, Limit: 100}
+			for {
+				children, err := tenant.ListRuns(ctx, filter)
+				if err != nil {
+					return page, err
+				}
+				for _, child := range children {
+					if !seen[child.ID] {
+						seen[child.ID] = true
+						runs = append(runs, child.ID)
+					}
+				}
+				if len(children) < filter.Limit {
+					break
+				}
+				last := children[len(children)-1]
+				filter.AfterID, filter.AfterStartedAt = last.ID, last.StartedAt.UnixNano()
+				if last.StartedAt.IsZero() {
+					filter.AfterStartedAt = 0
 				}
 			}
 		}

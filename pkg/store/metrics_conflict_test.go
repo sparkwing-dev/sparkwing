@@ -12,18 +12,18 @@ import (
 func TestMetricTimestampConflicts(t *testing.T) {
 	for _, field := range []string{"kind", "CPU rate", "memory", "CPU time"} {
 		t.Run(field, func(t *testing.T) {
-			st := storetest.New(t).Open(t)
-			readyNode(t, st, "run", "node")
+			f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
+			a := metricAuthorization(t, f, "metrics")
 			original := store.MetricSample{Kind: store.MetricCommand, TS: time.Unix(10, 123), CPUMillicores: 250, MemoryBytes: 4096, CPUTime: time.Second}
-			if err := st.AddNodeMetricSample(t.Context(), "run", "node", original); err != nil {
+			if err := f.tenant.WriteMetric(t.Context(), a, original); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.AddNodeMetricSample(t.Context(), "run", "node", original); err != nil {
+			if err := f.tenant.WriteMetric(t.Context(), a, original); err != nil {
 				t.Fatalf("identical retry: %v", err)
 			}
 			zoned := original
 			zoned.TS = original.TS.In(time.FixedZone("offset", 3600))
-			if err := st.AddNodeMetricSample(t.Context(), "run", "node", zoned); err != nil {
+			if err := f.tenant.WriteMetric(t.Context(), a, zoned); err != nil {
 				t.Fatalf("same instant in another timezone: %v", err)
 			}
 			conflict := original
@@ -37,11 +37,11 @@ func TestMetricTimestampConflicts(t *testing.T) {
 			case "CPU time":
 				conflict.CPUTime++
 			}
-			err := st.AddNodeMetricSample(t.Context(), "run", "node", conflict)
+			err := f.tenant.WriteMetric(t.Context(), a, conflict)
 			if err == nil || !strings.Contains(err.Error(), "conflicting node metric") {
 				t.Fatalf("conflicting sample was not rejected: %v", err)
 			}
-			got, err := st.ListNodeMetrics(t.Context(), "run", "node")
+			got, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
 			if err != nil || len(got) != 1 {
 				t.Fatalf("stored samples = %v, %v", got, err)
 			}
@@ -59,8 +59,8 @@ func TestMetricTimestampConcurrentWriters(t *testing.T) {
 			name = "conflicting"
 		}
 		t.Run(name, func(t *testing.T) {
-			st := storetest.New(t).Open(t)
-			readyNode(t, st, "run", "node")
+			f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
+			a := metricAuthorization(t, f, "metrics")
 			samples := [2]store.MetricSample{
 				{Kind: store.MetricInterval, TS: time.Unix(10, 123), MemoryBytes: 4096},
 				{Kind: store.MetricInterval, TS: time.Unix(10, 123), MemoryBytes: 4096},
@@ -77,7 +77,7 @@ func TestMetricTimestampConcurrentWriters(t *testing.T) {
 			for index, sample := range samples {
 				go func() {
 					<-start
-					results <- writeResult{index, st.AddNodeMetricSample(t.Context(), "run", "node", sample)}
+					results <- writeResult{index, f.tenant.WriteMetric(t.Context(), a, sample)}
 				}()
 			}
 			close(start)
@@ -101,7 +101,7 @@ func TestMetricTimestampConcurrentWriters(t *testing.T) {
 			if failures != wantFailures {
 				t.Fatalf("write failures = %d; want %d", failures, wantFailures)
 			}
-			got, err := st.ListNodeMetrics(t.Context(), "run", "node")
+			got, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)
 			if err != nil || len(got) != 1 {
 				t.Fatalf("stored samples = %v, %v", got, err)
 			}

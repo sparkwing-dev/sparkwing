@@ -100,7 +100,7 @@ func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *c
 	}
 	resources, err := launcher.BuildJob(t.Context(), time.Now(), cfg, *award, boundary)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("build reservation: %v", err)
 	}
 	return runtime, kube, server, resources, &clears
 }
@@ -161,11 +161,11 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 			}
 		case 8:
 			var parent string
-			if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='cloud-operator'`).Scan(&parent); err != nil {
+			if err := server.Store.DB().QueryRowContext(t.Context(), `SELECT prefix FROM capabilities WHERE subject_id='operator'`).Scan(&parent); err != nil {
 				t.Fatal(err)
 			}
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent}
-			other, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "runner-store-fixture", Authority: &ref, Subject: capability.Subject{Kind: capability.SubjectService, ID: foreign}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
+			other, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:" + foreign, Authority: &ref, Subject: capability.Subject{Kind: capability.SubjectService, ID: foreign}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,8 +184,8 @@ func FuzzStoreLauncherReservationFenceW8(f *testing.F) {
 				t.Fatal(err)
 			}
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
-			result, err := server.Store.AsOperator().ReadLauncherSync(t.Context(), ref, []controllerwire.LauncherObservation{{Award: held.Award, NodeUID: held.NodeUID, ReservationID: held.ReservationID}})
-			if err == nil || len(result.RemoveReservations) != 0 {
+			result, err := server.Store.ReadLauncherAwards(t.Context(), ref, []capability.LeaseRef{held.Award})
+			if err == nil || len(result) != 0 {
 				t.Fatalf("store authorized a fabricated award: mode=%d result=%+v: %v", mode, result, err)
 			}
 		}

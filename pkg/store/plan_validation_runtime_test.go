@@ -17,7 +17,7 @@ import (
 func TestPlanSecretPreflightNamesUnreadableScopes(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchHost)
 	for _, secret := range []Secret{{Name: "TEAM_ONLY", Value: "v"}, {Name: "ELSEWHERE", Value: "v", Pipeline: "release"}, {Name: "OWN", Value: "v", Pipeline: "p"}, {Name: "SHARED", Value: "v", Shared: true}} {
-		if err := tenant.CreateOrReplaceSecret(secret, *now); err != nil {
+		if err := seedSecret(t, tenant, secret, *now); err != nil {
 			t.Fatal(err)
 		}
 	}

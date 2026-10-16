@@ -19,8 +19,7 @@ var enumGroups = map[string]struct {
 	"sparkwing.Outcome": {
 		file: "sparkwing/outcome.go",
 		values: []string{
-			"Success", "Failed", "Satisfied", "Cached", "Skipped",
-			"Cancelled", "SkippedConcurrent", "Superseded",
+			"Success", "Failed", "Skipped", "Cancelled", "Superseded",
 		},
 	},
 	"store.AcquireKind": {
@@ -35,7 +34,7 @@ var enumGroups = map[string]struct {
 		file: "pkg/store/concurrency.go",
 		values: []string{
 			"WaiterStillWaiting", "WaiterPromoted", "WaiterCached",
-			"WaiterLeaderFinished", "WaiterCancelled",
+			"WaiterLeaderFinished", "WaiterCancelled", "WaiterExpired",
 		},
 	},
 	"store.CronOverlap": {
@@ -52,14 +51,6 @@ var enumGroups = map[string]struct {
 			"CronOutcomeFired", "CronOutcomeSkippedOverlap",
 			"CronOutcomeMissed", "CronOutcomeFailed",
 		},
-	},
-	"store.executorLocation": {
-		file:   "pkg/store/execution_attempts.go",
-		values: []string{"executorLocationLocal", "executorLocationCloud"},
-	},
-	"store.ExecutorKind": {
-		file:   "pkg/store/execution_attempts.go",
-		values: []string{"ExecutorKindLocal"},
 	},
 	"store.OnLimit": {
 		file: "pkg/store/concurrency.go",

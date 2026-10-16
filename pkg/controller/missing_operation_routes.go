@@ -2,10 +2,11 @@ package controller
 
 import (
 	"errors"
+	"net/http"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"net/http"
 )
 
 func (s *Server) missingOperationEndpoints() []Endpoint {
@@ -106,7 +107,7 @@ func (s *Server) handleJobActivity(w http.ResponseWriter, r *http.Request, a cap
 
 func (s *Server) handleDeleteRunner(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	name := r.PathValue("runner")
-	if !validRunnerName(name) {
+	if !store.ValidRunnerName(name) {
 		return invalidEngineBody("invalid runner name")
 	}
 	tenant, err := s.reportingTenant(r, a)

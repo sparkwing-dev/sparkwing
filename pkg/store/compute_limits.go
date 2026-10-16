@@ -8,6 +8,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Compute guards use zero for an unlimited operator ceiling.
@@ -29,9 +32,7 @@ const (
 	// ComputeLimitNodesPerRun caps the nodes a metered principal's run may
 	// carry, which is what bounds a dynamic fan-out.
 	ComputeLimitNodesPerRun = "max_nodes_per_run"
-	// ComputeLimitRunsPerHour caps the runs one metered principal creates in
-	// an hour, which is what bounds a retry loop and a cron that fires too
-	// often.
+	// ComputeLimitRunsPerHour bounds intake per authenticated principal and team.
 	ComputeLimitRunsPerHour = "max_runs_per_hour"
 	// ComputeLimitGlobalNodesPerRun caps the nodes any run may carry,
 	// whichever principal created it.
@@ -209,8 +210,8 @@ func scanComputeLimits(rows *sql.Rows) (ComputeLimits, error) {
 
 // ComputeLimits reads every guard. A guard nothing set reads zero, which is
 // unlimited.
-func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error) {
-	rows, err := s.query(ctx, computeLimitsSQL, computeLimitKeyArgs...)
+func (o *Operator) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error) {
+	rows, err := o.s.query(ctx, computeLimitsSQL, computeLimitKeyArgs...)
 	if err != nil {
 		return ComputeLimits{}, err
 	}
@@ -233,7 +234,7 @@ func validateComputeLimit(name string, value int64) error {
 
 // SetComputeLimits validates and writes every named guard in one transaction.
 // A value of zero removes that ceiling.
-func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error) {
+func (o *Operator) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error) {
 	if len(updates) == 0 {
 		return ComputeLimits{}, fmt.Errorf("%w: name at least one guard", ErrInvalidComputeLimitSetting)
 	}
@@ -242,7 +243,7 @@ func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) 
 			return ComputeLimits{}, err
 		}
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return ComputeLimits{}, err
 	}
@@ -265,12 +266,6 @@ func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) 
 	return out, tx.Commit()
 }
 
-// SetComputeLimit sets one guard. A value of zero removes the ceiling.
-func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error {
-	_, err := s.SetComputeLimits(ctx, map[string]int64{name: value})
-	return err
-}
-
 func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err error) {
 	rows, err := tx.QueryContext(ctx, computeLimitsSQL, computeLimitKeyArgs...)
 	if err != nil {
@@ -282,9 +277,9 @@ func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err err
 
 // ComputeUsage counts the cloud runners claimed now, in total and per
 // principal, and reports whether the count reached the alarm.
-func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
+func (o *Operator) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
 	out := ComputeUsage{ByPrincipal: map[string]int64{}}
-	rows, err := s.query(ctx, `SELECT claim_principal, COUNT(*) FROM nodes
+	rows, err := o.s.query(ctx, `SELECT claim_principal, COUNT(*) FROM nodes
 	  WHERE credit_charged_through > 0 GROUP BY claim_principal`)
 	if err != nil {
 		return ComputeUsage{}, err
@@ -302,27 +297,12 @@ func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
 	if err := rows.Err(); err != nil {
 		return ComputeUsage{}, err
 	}
-	limits, err := s.ComputeLimits(ctx)
+	limits, err := o.ComputeLimits(ctx)
 	if err != nil {
 		return ComputeUsage{}, err
 	}
 	out.AlarmReached = limits.RunnerAlarm > 0 && out.Runners >= limits.RunnerAlarm
 	return out, nil
-}
-
-// ComputeAlarmState reports the cloud runners claimed now against the alarm,
-// which is how a caller logs the crossing once rather than on every claim. It
-// returns a zero alarm and counts nothing when no alarm is set.
-func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error) {
-	alarm, err = s.creditSetting(ctx, computeLimitKey(ComputeLimitRunnerAlarm), 0)
-	if err != nil || alarm <= 0 {
-		return 0, 0, err
-	}
-	if err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0`).Scan(&runners); err != nil {
-		return 0, 0, err
-	}
-	return runners, alarm, nil
 }
 
 // safety: the guards run inside the claim's own transaction, under the ledger
@@ -403,10 +383,7 @@ func runElapsedSecondsTx(ctx context.Context, tx *storeTx, team Team, runID stri
 	return elapsed / int64(time.Second), nil
 }
 
-// safety: a re-created row is the caller guaranteeing the row exists before it
-// writes a terminal status, so it is measured against nothing; only a row the
-// statement would actually insert counts.
-func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
+func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	limits, err := computeLimitsTx(ctx, tx)
 	if err != nil {
 		return err
@@ -414,18 +391,13 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID, no
 	if limits.NodesPerRun <= 0 && limits.GlobalNodesPerRun <= 0 {
 		return nil
 	}
-	present, err := rowPresentTx(ctx, tx,
-		`SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`, team, runID, nodeID)
-	if err != nil || present {
-		return err
-	}
 	principal, err := runPrincipalTx(ctx, tx, team, runID)
 	if err != nil {
 		return err
 	}
 	ceiling, guard := limits.GlobalNodesPerRun, ComputeLimitGlobalNodesPerRun
 	if limits.NodesPerRun > 0 {
-		metered, err := principalMetered(ctx, tx, team, principal)
+		metered, err := rowPresentTx(ctx, tx, `SELECT 1 FROM capabilities WHERE team=? AND bind_run=? AND issuance='award' AND unit_kind IN ('trigger','plan') AND metered=1 LIMIT 1`, team, runID)
 		if err != nil {
 			return err
 		}
@@ -436,24 +408,20 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID, no
 	if ceiling <= 0 {
 		return nil
 	}
-	if err := lockComputeGuardsTx(ctx, tx); err != nil {
-		return err
-	}
 	var nodes int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM nodes WHERE team = ? AND run_id = ?`, team, runID).Scan(&nodes); err != nil {
 		return err
 	}
 	if nodes >= ceiling {
-		return &ComputeLimitError{
-			Limit: guard, Cap: ceiling, Observed: nodes,
-			Scope: "run " + runID, Principal: principal,
-		}
+		refused := &ComputeLimitError{Limit: guard, Cap: ceiling, Observed: nodes, Scope: "run " + runID, Principal: principal}
+		return errors.Join(refused, authorityError(apierr.PlanInvalid, refused.Error()))
 	}
+
 	return nil
 }
 
-func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID, principal string, now time.Time) error {
+func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID string, principal capability.Subject, now time.Time) error {
 	limits, err := computeLimitsTx(ctx, tx)
 	if err != nil {
 		return err
@@ -473,40 +441,32 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID, pr
 			return fmt.Errorf("%w: run %s", ErrIDOwnedByAnotherTeam, runID)
 		}
 		createdBy, err := runPrincipalTx(ctx, tx, team, runID)
-		if err != nil || createdBy != "" || principal == "" {
+		if err != nil || createdBy != "" || principal.ID == "" {
 			return err
 		}
-		// safety: a pending run already spent the global slot; its first claimant still
-		// spends a metered principal's hourly slot before it takes ownership.
 		return runsPerHourRefusal(ctx, tx, team, ComputeLimits{RunsPerHour: limits.RunsPerHour}, principal, now)
 	}
 	return runsPerHourRefusal(ctx, tx, team, limits, principal, now)
 }
 
 func runsPerHourRefusal(
-	ctx context.Context, q rowQuerier, team Team, limits ComputeLimits, principal string, now time.Time,
+	ctx context.Context, q *storeTx, team Team, limits ComputeLimits, principal capability.Subject, now time.Time,
 ) error {
 	since := now.Add(-time.Hour).UnixNano()
-	if limits.RunsPerHour > 0 {
-		metered, err := principalMetered(ctx, q, team, principal)
-		if err != nil {
+	if limits.RunsPerHour > 0 && principal.ID != "" {
+		kind := `COALESCE(json_extract(request_json, '$.request.actor.kind'), '')`
+		if q.dialect == DialectPostgres {
+			kind = `COALESCE(convert_from(request_json,'UTF8')::jsonb->'request'->'actor'->>'kind','')`
+		}
+		var runs int64
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team = ? AND created_principal = ? AND created_at >= ? AND `+kind+`=?`, team, principal.ID, since, principal.Kind).Scan(&runs); err != nil {
 			return err
 		}
-		if metered {
-			var runs int64
-			if err := q.QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM runs WHERE team = ? AND created_principal = ? AND created_at >= ?`,
-				team, principal, since).Scan(&runs); err != nil {
-				return err
-			}
-			if runs >= limits.RunsPerHour {
-				return &ComputeLimitError{
-					Limit: ComputeLimitRunsPerHour, Cap: limits.RunsPerHour, Observed: runs,
-					Scope: "principal " + principal, Principal: principal,
-				}
-			}
+		if runs >= limits.RunsPerHour {
+			return &ComputeLimitError{Limit: ComputeLimitRunsPerHour, Cap: limits.RunsPerHour, Observed: runs, Scope: "principal " + principal.ID, Principal: principal.ID}
 		}
 	}
+
 	if limits.GlobalRunsPerHour > 0 {
 		return globalRunsPerHourRefusal(ctx, q, limits.GlobalRunsPerHour, since)
 	}
@@ -557,16 +517,6 @@ func runPrincipalTx(ctx context.Context, tx *storeTx, team Team, runID string) (
 	return principal, nil
 }
 
-// safety: metering follows the operator's token marker, so a principal holding
-// no metered token is local work the per-principal guards leave alone.
-func principalMetered(ctx context.Context, q rowQuerier, team Team, principal string) (bool, error) {
-	if principal == "" {
-		return false, nil
-	}
-	return rowPresentTx(ctx, q,
-		`SELECT 1 FROM tokens WHERE team = ? AND principal = ? AND metered != 0 LIMIT 1`, team, principal)
-}
-
 // safety: the create-side guards count runs and nodes, which no claim reads, so
 // they serialize on a key of their own rather than the ledger's.
 func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
@@ -575,61 +525,6 @@ func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/compute-guards")
 	return err
-}
-
-// RunExceedsWallClock reports whether the run has held cloud runners past the
-// wall-clock guard, which is what the heartbeat path reads to decide that a
-// node must stop. It reports false when no guard is set.
-func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error) {
-	return s.defaultTenant().RunExceedsWallClock(ctx, runID, now)
-}
-
-// RunExceedsWallClock is [Store.RunExceedsWallClock] confined to t's team.
-func (t *Tenant) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error) {
-	ceiling, err := t.s.creditSetting(ctx, computeLimitKey(ComputeLimitRunSeconds), 0)
-	if err != nil {
-		return 0, false, err
-	}
-	if ceiling <= 0 {
-		return 0, false, nil
-	}
-	var started int64
-	err = t.s.queryRow(ctx, `SELECT started_at FROM runs WHERE team = ? AND id = ?`, string(t.team), runID).Scan(&started)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	if started <= 0 {
-		return 0, false, nil
-	}
-	elapsed := (now.UnixNano() - started) / int64(time.Second)
-	return ceiling, elapsed > ceiling, nil
-}
-
-// OldestWaitingReadyNodeForPrincipal names the ready node a claim by this
-// principal would have been given, so a refusal is recorded against a run that
-// principal owns rather than one it cannot see. A runner's principal name is
-// unique only within its team, so the search stays in t's team. It returns
-// empty strings when that principal has nothing waiting.
-func (t *Tenant) OldestWaitingReadyNodeForPrincipal(
-	ctx context.Context, principal string,
-) (runID, nodeID string, err error) {
-	if principal == "" {
-		return "", "", nil
-	}
-	err = t.s.queryRow(ctx, `SELECT run_id, node_id FROM nodes
-	  WHERE team = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
-	    AND run_id IN (SELECT id FROM runs WHERE team = ? AND created_principal = ?)
-	  ORDER BY ready_at ASC LIMIT 1`, string(t.team), string(t.team), principal).Scan(&runID, &nodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", nil
-	}
-	if err != nil {
-		return "", "", err
-	}
-	return runID, nodeID, nil
 }
 
 type creatingPrincipalKey struct{}

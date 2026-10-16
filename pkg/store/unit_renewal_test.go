@@ -11,6 +11,7 @@ import (
 func renewalFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitDemand, UnitClaim, *time.Time) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
+	fundUnitClaim(t, s)
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	demand.Target = &UnitRef{Kind: kind, RunID: "run"}

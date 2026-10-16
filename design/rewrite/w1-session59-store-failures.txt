@@ -1,0 +1,118 @@
+Post-merge starting failures: 222 (lead list: 214)
+Ending failures: 35
+Passing top-level tests: 1178
+Elapsed: 216.819 seconds
+
+TestCollectionBindingCannotChangePayerProperty
+    payment_collection_binding_test.go:119: constraint failed: CHECK constraint failed: (kind = 'setup' AND currency = '' AND attempt_id = '' AND charge_id = '')
+               OR (kind = 'collection' AND currency <> '' AND attempt_id <> '' AND charge_id <> '') (275)
+
+TestTenantWriters_EveryTenantTableHasAWriterThatSetsTheKey
+    tenant_writer_guard_test.go:40: no INSERT in this package sets debug_pauses.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+    tenant_writer_guard_test.go:40: no INSERT in this package sets storage_commit_receipts.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+    tenant_writer_guard_test.go:40: no INSERT in this package sets storage_reservations.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+
+TestBusinessEventsRecordLifecycleSQLite
+    business_events_test.go:17: paid event = {ID:event-20d1e440c086fdc45ad2e9b0 At:2026-10-15 23:24:34.446704868 -0600 MDT Team:ev-space Account: Kind:checkout.paid SubjectID:paid-844e9a765cf6da2ae10fc030 Actor:payment_provider Attrs:map[amount_micro:1e+06 grant_kind:paid reference:payment:test:fixture-row:pi_1 session_id:fixture-checkout:pi_1]}, want actor checkout and its payment
+
+TestBusinessEventsFollowAccountAndTeamDeletion
+    business_events_test.go:105: the remaining account's admission = 0, want 1
+
+TestAWarnedCardRepaysTheDebtOnPayNow
+    card_billing_test.go:289: seed a reservation refund: SQL logic error: table credit_charges has no column named token_prefix (1)
+    card_billing_test.go:289: seed a reservation refund: SQL logic error: table credit_charges has no column named token_prefix (1)
+
+TestARefundDebitsTheCardThatPaid
+    card_billing_test.go:529: mint acme's metered token: SQL logic error: no such table: tokens (1)
+
+TestRunRateGuardsLeaveLocalWorkAlone
+    compute_limits_test.go:171: a local run was refused: SQL logic error: table runs has no column named args_json (1)
+
+TestRunsPerHourGuardRefusesAMeteredPrincipalPastTheCap
+    compute_limits_test.go:178: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestRunsPerHourGuardCountsSharedPrincipalWithinOneTeam
+    compute_limits_test.go:208: mint acme's metered token: SQL logic error: no such table: tokens (1)
+
+TestRunsPerHourGuardChecksFirstAttributionOfPendingRun
+    compute_limits_test.go:234: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestGlobalRunsPerHourGuardCountsEveryPrincipal
+    compute_limits_test.go:276: the first run must be allowed: SQL logic error: table runs has no column named args_json (1)
+
+TestOldestWaitingReadyNodeForPrincipalStaysInsideThePrincipal
+    compute_limits_test.go:298: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestOldestWaitingReadyNodeForPrincipalStaysInsideTheTeam
+    compute_limits_test.go:344: SQL logic error: table runs has no column named args_json (1)
+
+TestTriggerAndItsRunAreRefusedTogether
+    compute_limits_test.go:395: the first admission must be allowed: SQL logic error: table triggers has no column named pipeline (1)
+
+TestGuardsLetAnIdempotentRunRecreateThrough
+    compute_limits_test.go:417: re-creating the same run must not meet the hourly guard: SQL logic error: table runs has no column named args_json (1)
+
+TestRunRateGuardsUseTheRunsTeamForMetering
+    compute_limits_test.go:427: mint acme's metered token: SQL logic error: no such table: tokens (1)
+
+TestMeteredClaimReservesAtTheNodesCPUClass
+    credit_rates_test.go:197: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestHeartbeatChargesAtTheNodesCPUClass
+    credit_rates_test.go:234: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestClaimIsRefusedAboveTheLargestPricedClass
+    credit_rates_test.go:276: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestTheDefaultLadderRefusesAClassAboveEight
+    credit_rates_test.go:311: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestARateTableChangeLeavesWrittenChargesAlone
+    credit_rates_test.go:353: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestAClaimantsOwnCPUFigureDoesNotLowerTheBill
+    credit_rates_test.go:440: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestTheChargeRowCarriesThePinnedClass
+    credit_rates_test.go:463: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass
+    credit_rates_test.go:519: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts
+    credits_test.go:122: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion
+    credits_test.go:167: mint a metered token: tokens: insert: SQL logic error: no such table: tokens (1)
+
+TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds
+    deletion_billing_test.go:32: credits: checkout requires whole positive USD cents and a positive hold
+
+TestACheckoutCannotOpenOnceTheTeamIsBeingDeleted
+    deletion_billing_test.go:76: a checkout before the deletion = credits: checkout requires whole positive USD cents and a positive hold
+
+TestTeamPurgeRemovesTheTeamsStorageWatermarks
+    deletion_review_test.go:169: SQL logic error: no such table: sparkwing_meta (1)
+
+TestTeamRecheckRemovesRowsWrittenAfterThePurge
+    deletion_review_test.go:244: constraint failed: FOREIGN KEY constraint failed (787)
+
+TestAccountDeletionRelabelsEveryRowThatNamedTheAccount
+    deletion_review_test.go:292: tokens: insert: SQL logic error: no such table: tokens (1)
+
+TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow
+    deletion_test.go:71: seed token: SQL logic error: no such table: tokens (1)
+
+TestTeamPurgeRefusesATeamNobodyAskedToDelete
+    deletion_test.go:162: seed token: SQL logic error: no such table: tokens (1)
+
+TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns
+    deletion_test.go:232: tokens: insert: SQL logic error: no such table: tokens (1)
+
+FuzzStorageStandingTenantInventory
+    storage_standing_runtime_test.go:150: tenant inventory={Tier:none AllowanceBytes:1073741824 EventBytes:17 BlobBytes:3 ReservedBlobBytes:0 LogBytes:3}: <nil>
+    storage_standing_runtime_test.go:150: tenant inventory={Tier:none AllowanceBytes:1073741824 EventBytes:0 BlobBytes:0 ReservedBlobBytes:0 LogBytes:3}: <nil>
+

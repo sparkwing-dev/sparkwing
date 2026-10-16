@@ -11,6 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+func meteredPlacement(claimant, root capability.Capability) bool {
+	return launcherClaimant(claimant) || root.RootMetered
+}
+
 func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
 	if c.Purpose == capability.PurposeHere {
 		return nil
@@ -135,11 +139,6 @@ func accountUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	calculate := tx.store.billing
 	if calculate == nil {
 		calculate = capability.SettleBilling
-	}
-	if !a.provenance.Metered {
-		calculate = func(p capability.BillingProvenance, _ []capability.BillableInterval) (capability.BillingSettlement, error) {
-			return capability.BillingSettlement{ReservationID: p.ReservationID}, nil
-		}
 	}
 	_, err = accountBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, through, final, calculate)
 	return err

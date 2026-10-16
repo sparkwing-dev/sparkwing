@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -30,7 +32,7 @@ func seedSecretArgRun(t *testing.T, st *store.Store, id string) {
 
 func seedSecretArgRunAs(t *testing.T, st *store.Store, id, status string) {
 	t.Helper()
-	err := st.CreateRun(context.Background(), store.Run{
+	err := teststore.SeedRun(st, context.Background(), store.DefaultTeam, store.Run{
 		ID:        id,
 		Pipeline:  "deploy",
 		Status:    status,
@@ -85,8 +87,8 @@ func assertRedactedResponse(t *testing.T, surface, body string) {
 	if strings.Contains(body, ctlSecretValue) {
 		t.Errorf("%s served the secret arg value to the client:\n%s", surface, body)
 	}
-	if !strings.Contains(body, store.RedactedArgValue) {
-		t.Errorf("%s carries no %s marker:\n%s", surface, store.RedactedArgValue, body)
+	if !strings.Contains(body, runspec.RedactedArgValue) {
+		t.Errorf("%s carries no %s marker:\n%s", surface, runspec.RedactedArgValue, body)
 	}
 	if !strings.Contains(body, ctlVisibleValue) {
 		t.Errorf("%s redacted the non-secret arg too:\n%s", surface, body)
@@ -109,7 +111,7 @@ func TestSecretArgs_ControllerReceiptRedacts(t *testing.T) {
 	if strings.Contains(body, ctlSecretValue) {
 		t.Errorf("receipt served the secret arg value:\n%s", body)
 	}
-	if !strings.Contains(body, store.RedactedArgValue) {
+	if !strings.Contains(body, runspec.RedactedArgValue) {
 		t.Errorf("receipt carries no redaction marker:\n%s", body)
 	}
 	if strings.Contains(body, "offline-oracle") {
@@ -151,7 +153,7 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 		got, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST /api/v1/runs status = %d, want 400: %s", resp.StatusCode, got)
 	}
-	if _, err := st.GetRun(context.Background(), "old-writer"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), "old-writer"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("GetRun error = %v, want ErrNotFound", err)
 	}
 }
@@ -159,7 +161,7 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 func TestSecretArgs_ControllerPipelineLatestRedacts(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRunAs(t, st, "run-1", "pending")
-	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
+	if err := teststore.SeedRunFinish(st, context.Background(), store.DefaultTeam, "run-1", "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest",
@@ -187,7 +189,7 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	src, err := st.GetRun(ctx, "run-1")
+	src, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,15 +199,15 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 	if src.RetriedAs == "" {
 		t.Fatal("retry did not record RetriedAs")
 	}
-	retried, err := st.GetRun(ctx, src.RetriedAs)
+	retried, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, src.RetriedAs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if retried.Args["token"] != ctlSecretValue {
 		t.Errorf("retry run args[token] = %q, want plaintext %q -- the retry would execute with a literal %s",
-			retried.Args["token"], ctlSecretValue, store.RedactedArgValue)
+			retried.Args["token"], ctlSecretValue, runspec.RedactedArgValue)
 	}
-	trig, err := st.GetTrigger(ctx, src.RetriedAs)
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, src.RetriedAs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +215,7 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 		t.Errorf("retry trigger args[token] = %q, want plaintext", trig.Args["token"])
 	}
 
-	if got := retried.SecretArgNames(); len(got) != 1 || got[0] != "token" {
+	if got, _ := retried.Invocation[store.InvocationSecretArgsKey].([]any); len(got) != 1 || got[0] != "token" {
 		t.Fatalf("retry run classification = %v, want [token]", got)
 	}
 	assertRedactedResponse(t, "GET /api/v1/runs/{id} for a pending retry",
@@ -223,10 +225,10 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRunAs(t, st, "run-1", "pending")
-	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
+	if err := teststore.SeedRunFinish(st, context.Background(), store.DefaultTeam, "run-1", "success", ""); err != nil {
 		t.Fatal(err)
 	}
-	const q = "?include=" + store.IncludeSecretValues
+	const q = "?include=" + "secret_values"
 	assertRedactedResponse(t, "GET /api/v1/runs"+q, getBody(t, srv.URL+"/api/v1/runs"+q))
 	assertRedactedResponse(t, "GET /api/v1/runs/{id}/attempts"+q,
 		getBody(t, srv.URL+"/api/v1/runs/run-1/attempts"+q))

@@ -1,273 +1,96 @@
-package store_test
+package store
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func sshCredential(fingerprint string) store.GitCredential {
-	return store.GitCredential{
-		Host: "gitlab.example.com", Kind: store.GitCredentialSSH, Secret: "enc:key",
-		KnownHosts: "gitlab.example.com ssh-ed25519 AAAA", Fingerprint: fingerprint, CreatedBy: "owner",
-	}
-}
-
-type heldRelease struct {
-	tok store.ClaimToken
-	rel store.GitCredentialRelease
-}
-
-func release(t *testing.T, st *store.Store, tn *store.Tenant, runID string) heldRelease {
+func sourceGitCredentialFixture(t *testing.T) (*Tenant, capability.Authorized, capability.Authorized) {
 	t.Helper()
-	ctx := context.Background()
-	now := time.Now()
-	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{ID: runID, Pipeline: "build", CreatedAt: now},
-		store.Run{ID: runID, Pipeline: "build", Status: "pending", CreatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	claimant := mintTeamClaimant(t, tn, "agent:"+runID)
-	trig, err := st.ClaimSpecificTriggerFor(ctx, runID, claimant, time.Minute)
-	if err != nil || trig == nil {
-		t.Fatalf("claim %s: %+v, %v", runID, trig, err)
-	}
-	tok, err := st.AuthorizeClaimToken(ctx, trig.ClaimToken, store.ClaimSensitive, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return heldRelease{tok: tok, rel: store.GitCredentialRelease{Runner: "runner:pool", TokenPrefix: claimant.TokenPrefix}}
+	tenant, source, _ := sourceReleaseFixture(t)
+	tenant.s.sourcePolicy = nil
+	owner := authorityMember(t, tenant.s, "owner", RoleOwner)
+	admin := capability.Authorized{Principal: capability.Principal{Authority: owner.Authority}, Target: capability.Target{Team: string(tenant.team)}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	return tenant, admin, source
 }
 
-func (h heldRelease) from(ctx context.Context, tn *store.Tenant, host string, now time.Time) (store.GitCredential, error) {
-	rel := h.rel
-	rel.Host = host
-	c, _, err := tn.ReleaseGitCredential(ctx, h.tok, rel, now)
-	return c, err
-}
-
-// An ssh credential is released only after its owner confirms the pinned
-// host key, and every release leaves an audit row.
-func TestGitCredentialIsReleasedOnlyOnceConfirmed(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, st, "acme")
-	now := time.Now()
-	rel1 := release(t, st, acme, "run-1")
-
-	stored, err := acme.PutGitCredential(ctx, sshCredential("SHA256:one"), now)
-	if err != nil || stored.ConfirmedAt != nil || stored.Team != "acme" {
-		t.Fatalf("put = %+v, %v; want an unconfirmed acme credential", stored, err)
+func TestSourceGitCredentialConfirmationAndReplacement(t *testing.T) {
+	tenant, admin, source := sourceGitCredentialFixture(t)
+	ctx := t.Context()
+	row := GitCredential{Host: "github.com", Kind: GitCredentialSSH, Secret: "sealed-key", KnownHosts: "github.com ssh-ed25519 AAAA", Fingerprint: "SHA256:one"}
+	stored, err := tenant.WriteGitCredential(ctx, admin, row)
+	if err != nil || stored.ConfirmedAt != nil || stored.Team != tenant.team {
+		t.Fatalf("unconfirmed credential: %+v, %v", stored, err)
 	}
-	if _, err := rel1.from(ctx, acme, "gitlab.example.com", now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("release of an unconfirmed credential = %v, want ErrNotFound", err)
+	if c, audit, err := tenant.ReleaseSourceCredential(ctx, source); err == nil || c.ID != "" || audit.ID != "" {
+		t.Fatalf("unconfirmed release: %+v, %+v, %v", c, audit, err)
 	}
-	if _, err := acme.ConfirmGitCredential(ctx, "gitlab.example.com", "SHA256:other", now); !errors.Is(err, store.ErrFingerprintMismatch) {
-		t.Fatalf("confirming another fingerprint = %v, want ErrFingerprintMismatch", err)
+	if _, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, "SHA256:other"); !errors.Is(err, ErrFingerprintMismatch) {
+		t.Fatalf("wrong fingerprint: %v", err)
 	}
-	confirmed, err := acme.ConfirmGitCredential(ctx, "gitlab.example.com", "SHA256:one", now)
+	confirmed, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, row.Fingerprint)
 	if err != nil || confirmed.ConfirmedAt == nil {
-		t.Fatalf("confirm = %+v, %v", confirmed, err)
+		t.Fatalf("confirmation: %+v, %v", confirmed, err)
 	}
-	got, err := rel1.from(ctx, acme, "gitlab.example.com", now)
-	if err != nil || got.Secret != "enc:key" || got.KnownHosts == "" {
-		t.Fatalf("release = %+v, %v", got, err)
+	at := tenant.s.now().Add(time.Nanosecond)
+	tenant.s.clock = func() time.Time { return at }
+	replayed, err := tenant.ConfirmGitCredentialFor(ctx, admin, row.Host, row.Fingerprint)
+	if err != nil || !replayed.ConfirmedAt.Equal(*confirmed.ConfirmedAt) || !replayed.UpdatedAt.Equal(confirmed.UpdatedAt) {
+		t.Fatalf("confirmation replay: %+v, %v", replayed, err)
 	}
-	rels, err := acme.GitCredentialReleases(ctx, 10)
-	if err != nil || len(rels) != 1 {
-		t.Fatalf("releases = %+v, %v; want one audit row", rels, err)
-	}
-	if r := rels[0]; r.Team != "acme" || r.CredentialID != stored.ID || r.RunID != "run-1" ||
-		r.Runner != "runner:pool" || r.TokenPrefix != rel1.rel.TokenPrefix || r.Host != "gitlab.example.com" {
-		t.Fatalf("audit row = %+v", r)
-	}
-}
-
-func TestGitCredentialHTTPSIsConfirmedWhenStored(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, st, "acme")
-	rel1 := release(t, st, acme, "run-1")
-	c, err := acme.PutGitCredential(ctx, store.GitCredential{
-		Host: "bitbucket.org", Kind: store.GitCredentialHTTPS, Username: "x-token-auth", Secret: "enc:tok",
-	}, time.Now())
-	if err != nil || c.ConfirmedAt == nil {
-		t.Fatalf("put https = %+v, %v; want confirmed", c, err)
-	}
-	if _, err := rel1.from(ctx, acme, "bitbucket.org", time.Now()); err != nil {
-		t.Fatalf("release = %v", err)
-	}
-}
-
-// Replacing the key keeps the credential usable only while the host key it
-// pins is the one the owner already confirmed.
-func TestGitCredentialReplacementKeepsOnlyAConfirmedHostKey(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, st, "acme")
-	now := time.Now()
-	rel2, rel3 := release(t, st, acme, "run-2"), release(t, st, acme, "run-3")
-	if _, err := acme.PutGitCredential(ctx, sshCredential("SHA256:one"), now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := acme.ConfirmGitCredential(ctx, "gitlab.example.com", "SHA256:one", now); err != nil {
-		t.Fatal(err)
-	}
-	rotated := sshCredential("SHA256:one")
-	rotated.Secret = "enc:rotated"
-	c, err := acme.PutGitCredential(ctx, rotated, now)
-	if err != nil || c.ConfirmedAt == nil {
-		t.Fatalf("rotation under the same host key = %+v, %v; want still confirmed", c, err)
-	}
-	if got, err := rel2.from(ctx, acme, "gitlab.example.com", now); err != nil || got.Secret != "enc:rotated" {
-		t.Fatalf("release after rotation = %+v, %v; want the new key", got, err)
-	}
-	moved, err := acme.PutGitCredential(ctx, sshCredential("SHA256:two"), now)
-	if err != nil || moved.ConfirmedAt != nil {
-		t.Fatalf("a new host key = %+v, %v; want unconfirmed", moved, err)
-	}
-	if _, err := rel3.from(ctx, acme, "gitlab.example.com", now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("release after the host key changed = %v, want ErrNotFound until confirmed", err)
-	}
-	if list, err := acme.GitCredentials(ctx); err != nil || len(list) != 1 {
-		t.Fatalf("list = %+v, %v; want the one credential for the host", list, err)
-	}
-}
-
-// A deleted credential is never released, and another team neither reads nor
-// releases, nor deletes, a team's credential.
-func TestGitCredentialIsTheTeamsAloneAndGoneOnceDeleted(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	now := time.Now()
-	rel1, rel2, relX := release(t, st, acme, "run-1"), release(t, st, acme, "run-2"), release(t, st, other, "run-x")
-	c := store.GitCredential{Host: "gitlab.example.com", Kind: store.GitCredentialHTTPS, Secret: "enc:tok"}
-	if _, err := acme.PutGitCredential(ctx, c, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := other.GitCredentialForHost(ctx, "gitlab.example.com"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("another team reads acme's credential: %v", err)
-	}
-	if _, err := relX.from(ctx, other, "gitlab.example.com", now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("another team releases acme's credential: %v", err)
-	}
-	if err := other.DeleteGitCredential(ctx, "gitlab.example.com"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("another team deletes acme's credential: %v", err)
-	}
-	if _, err := rel1.from(ctx, acme, "gitlab.example.com", now); err != nil {
-		t.Fatalf("control: acme's release before the delete = %v", err)
-	}
-	if err := acme.DeleteGitCredential(ctx, "gitlab.example.com"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := rel2.from(ctx, acme, "gitlab.example.com", now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("release after delete = %v, want ErrNotFound", err)
-	}
-	if rels, err := acme.GitCredentialReleases(ctx, 10); err != nil || len(rels) != 1 {
-		t.Fatalf("releases = %d, %v; want only the one before the delete", len(rels), err)
-	}
-	if rels, err := other.GitCredentialReleases(ctx, 10); err != nil || len(rels) != 0 {
-		t.Fatalf("the other team sees %d of acme's releases, %v", len(rels), err)
-	}
-}
-
-func TestGitCredentialMachineOptInIsForTheTeamsOwnRunnerTokens(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	seedMinter(t, st, "acme", "owner", store.RoleOwner)
-	now := time.Now()
-	_, tok, err := acme.CreateMachineToken(ctx, "laptop", []string{"nodes.claim"}, "owner", now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := other.SetGitCredentialMachine(ctx, tok.Prefix, true, "intruder", now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("another team opts in acme's machine = %v, want ErrNotFound", err)
-	}
-	if on, err := acme.GitCredentialMachine(ctx, tok.Prefix); err != nil || on {
-		t.Fatalf("before the opt-in = %v, %v", on, err)
-	}
-	if err := acme.SetGitCredentialMachine(ctx, tok.Prefix, true, "owner", now); err != nil {
-		t.Fatal(err)
-	}
-	if err := acme.SetGitCredentialMachine(ctx, tok.Prefix, true, "owner", now); err != nil {
-		t.Fatalf("opting in twice = %v", err)
-	}
-	if on, err := acme.GitCredentialMachine(ctx, tok.Prefix); err != nil || !on {
-		t.Fatalf("after the opt-in = %v, %v", on, err)
-	}
-	if on, err := other.GitCredentialMachine(ctx, tok.Prefix); err != nil || on {
-		t.Fatalf("the other team sees acme's opt-in = %v, %v", on, err)
-	}
-	if err := acme.SetGitCredentialMachine(ctx, tok.Prefix, false, "owner", now); err != nil {
-		t.Fatal(err)
-	}
-	if on, err := acme.GitCredentialMachine(ctx, tok.Prefix); err != nil || on {
-		t.Fatalf("after opting out = %v, %v", on, err)
-	}
-	if err := acme.RevokeTeamToken(ctx, tok.Prefix, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := acme.SetGitCredentialMachine(ctx, tok.Prefix, true, "owner", now.Add(time.Second)); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("opting in a revoked token = %v, want ErrNotFound", err)
-	}
-}
-
-func TestRotateGitCredentialSecretsRewritesEveryTeam(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	teams := map[string]*store.Tenant{"acme": teamHandle(t, st, "acme"), "other": teamHandle(t, st, "other")}
-	for team, tn := range teams {
-		if _, err := tn.PutGitCredential(ctx, store.GitCredential{
-			Host: "gitlab.example.com", Kind: store.GitCredentialHTTPS, Secret: "old:" + team,
-		}, now); err != nil {
-			t.Fatal(err)
+	for _, fingerprint := range []string{"SHA256:one", "SHA256:two"} {
+		row.Fingerprint, row.Secret = fingerprint, "sealed-rotated"
+		rotated, err := tenant.WriteGitCredential(ctx, admin, row)
+		if err != nil || !rotated.CreatedAt.Equal(stored.CreatedAt) || rotated.ID == stored.ID {
+			t.Fatalf("replacement: %+v, %v", rotated, err)
+		}
+		c, audit, err := tenant.ReleaseSourceCredential(ctx, source)
+		if fingerprint == "SHA256:one" {
+			if err != nil || c.Secret != row.Secret || c.KnownHosts != row.KnownHosts || audit.CredentialID != rotated.ID || audit.CapabilityPrefix != source.Principal.Capability.Prefix || audit.RunID != "run" || audit.Team != string(tenant.team) || !audit.ReleasedAt.Equal(at) {
+				t.Fatalf("confirmed release: %+v, %+v, %v", c, audit, err)
+			}
+		} else if err == nil || c.ID != "" || audit.ID != "" || rotated.ConfirmedAt != nil {
+			t.Fatalf("changed host key released: %+v, %+v, %v", c, audit, err)
 		}
 	}
-	n, err := st.RotateGitCredentialSecrets(ctx, func(c store.GitCredential) (string, error) {
-		return "new:" + string(c.Team), nil
-	})
-	if err != nil || n != 2 {
-		t.Fatalf("rotate = %d, %v", n, err)
-	}
-	for team, tn := range teams {
-		c, err := tn.GitCredentialForHost(ctx, "gitlab.example.com")
-		if err != nil || c.Secret != "new:"+team {
-			t.Fatalf("%s after rotation = %q, %v", team, c.Secret, err)
-		}
+	rows, err := tenant.SourceReleaseAudits(ctx, 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("committed releases: %+v, %v", rows, err)
 	}
 }
 
-// The release re-checks the claim inside its own transaction, so a lease
-// that lapses after the caller's check, or a claimant that never held the
-// run, releases nothing and leaves no audit row.
-func TestReleaseGitCredentialRefusesAClaimThatLapsedBeforeTheCommit(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, st, "acme")
-	now := time.Now()
-	c := store.GitCredential{Host: "gitlab.example.com", Kind: store.GitCredentialHTTPS, Secret: "enc:tok"}
-	if _, err := acme.PutGitCredential(ctx, c, now); err != nil {
+func TestSourceGitCredentialHTTPSDeletionAndTenant(t *testing.T) {
+	tenant, admin, source := sourceGitCredentialFixture(t)
+	ctx := t.Context()
+	row, err := tenant.WriteGitCredential(ctx, admin, GitCredential{Host: "github.com", Kind: GitCredentialHTTPS, Secret: "sealed-token"})
+	if err != nil || row.ConfirmedAt == nil {
+		t.Fatalf("HTTPS confirmation: %+v, %v", row, err)
+	}
+	foreign := &Tenant{s: tenant.s, team: "b"}
+	if c, audit, err := foreign.ReleaseSourceCredential(ctx, source); err == nil || c.ID != "" || audit.ID != "" {
+		t.Fatalf("foreign release: %+v, %+v, %v", c, audit, err)
+	}
+	if err := foreign.RemoveGitCredential(ctx, admin, row.Host); err == nil {
+		t.Fatal("foreign credential deleted")
+	}
+	if c, _, err := tenant.ReleaseSourceCredential(ctx, source); err != nil || c.ID != row.ID {
+		t.Fatalf("HTTPS release: %+v, %v", c, err)
+	}
+	if err := tenant.RemoveGitCredential(ctx, admin, row.Host); err != nil {
 		t.Fatal(err)
 	}
-	rel := release(t, st, acme, "run-1")
-	if _, err := rel.from(ctx, acme, "gitlab.example.com", now); err != nil {
-		t.Fatalf("control: release under the live claim = %v", err)
+	if c, audit, err := tenant.ReleaseSourceCredential(ctx, source); !errors.Is(err, ErrNotFound) || c.ID != "" || audit.ID != "" {
+		t.Fatalf("deleted release: %+v, %+v, %v", c, audit, err)
 	}
-	if _, err := rel.from(ctx, acme, "gitlab.example.com", now.Add(2*time.Minute)); !errors.Is(err, store.ErrClaimNotLive) {
-		t.Fatalf("release once the lease lapsed = %v, want ErrClaimNotLive", err)
+	rows, err := tenant.SourceReleaseAudits(ctx, 10)
+	if err != nil || len(rows) != 1 || rows[0].CredentialID != row.ID {
+		t.Fatalf("audit after deletion: %+v, %v", rows, err)
 	}
-	stranger := rel
-	stranger.tok.Prefix = "swc_strange"
-	if _, err := stranger.from(ctx, acme, "gitlab.example.com", now); !errors.Is(err, store.ErrClaimNotLive) {
-		t.Fatalf("release to a runner that holds no claim = %v, want ErrClaimNotLive", err)
-	}
-	if rels, err := acme.GitCredentialReleases(ctx, 10); err != nil || len(rels) != 1 {
-		t.Fatalf("releases = %d, %v; want only the one under the live claim", len(rels), err)
+	rows, err = foreign.SourceReleaseAudits(ctx, 10)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("foreign audits: %+v, %v", rows, err)
 	}
 }

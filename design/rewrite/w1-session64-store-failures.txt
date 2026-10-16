@@ -1,0 +1,112 @@
+Starting failures: 15; passing top-level tests: 1199; elapsed: 201.313 seconds
+Ending failures: 15; passing top-level tests: 1204; elapsed: 204.028 seconds
+New failures: none. Resolved failures: none.
+
+FuzzStorageStandingTenantInventory
+    storage_standing_runtime_test.go:150: tenant inventory={Tier:none AllowanceBytes:1073741824 EventBytes:17 BlobBytes:3 ReservedBlobBytes:0 LogBytes:3}: <nil>
+    storage_standing_runtime_test.go:150: tenant inventory={Tier:none AllowanceBytes:1073741824 EventBytes:0 BlobBytes:0 ReservedBlobBytes:0 LogBytes:3}: <nil>
+
+TestAClaimantsOwnCPUFigureDoesNotLowerTheBill
+    credit_rates_test.go:440: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestARateTableChangeLeavesWrittenChargesAlone
+    credit_rates_test.go:353: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestARefundDebitsTheCardThatPaid
+    card_billing_test.go:529: mint acme's metered token: SQL logic error: no such table: tokens (1)
+
+TestAWarnedCardRepaysTheDebtOnPayNow
+    card_billing_test.go:289: seed a reservation refund: SQL logic error: table credit_charges has no column named token_prefix (1)
+    card_billing_test.go:289: seed a reservation refund: SQL logic error: table credit_charges has no column named token_prefix (1)
+
+TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass
+    credit_rates_test.go:519: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestClaimIsRefusedAboveTheLargestPricedClass
+    credit_rates_test.go:276: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestCollectionBindingCannotChangePayerProperty
+    payment_collection_binding_test.go:119: constraint failed: CHECK constraint failed: (kind = 'setup' AND currency = '' AND attempt_id = '' AND charge_id = '')
+               OR (kind = 'collection' AND currency <> '' AND attempt_id <> '' AND charge_id <> '') (275)
+
+TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts
+    credits_test.go:122: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestHeartbeatChargesAtTheNodesCPUClass
+    credit_rates_test.go:234: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestMeteredClaimReservesAtTheNodesCPUClass
+    credit_rates_test.go:197: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion
+    credits_test.go:167: mint a metered token: tokens: insert: SQL logic error: no such table: tokens (1)
+
+TestTenantWriters_EveryTenantTableHasAWriterThatSetsTheKey
+    tenant_writer_guard_test.go:40: no INSERT in this package sets storage_commit_receipts.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+    tenant_writer_guard_test.go:40: no INSERT in this package sets storage_reservations.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+
+TestTheChargeRowCarriesThePinnedClass
+    credit_rates_test.go:463: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestTheDefaultLadderRefusesAClassAboveEight
+    credit_rates_test.go:311: mint a metered token: SQL logic error: no such table: tokens (1)
+
+
+Intermediate scope-inventory failure, fixed without weakening the guard:
+--- FAIL: TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey (0.09s)
+    tenant_sql_scope_guard_test.go:181: identity.go:807: statement in acceptAccountInvitationTx touches invitations with no team predicate.
+        Scope it, or add "acceptAccountInvitationTx" to reviewedUnscopedSQL with the reason it crosses teams.
+        	SELECT team, email, role, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?
+    tenant_sql_scope_guard_test.go:181: account_mutations.go:98: statement in (*Store).AcceptAccountInvitation touches invitations with no team predicate.
+        Scope it, or add "(*Store).AcceptAccountInvitation" to reviewedUnscopedSQL with the reason it crosses teams.
+        	SELECT team FROM invitations WHERE id=?
+    tenant_sql_scope_guard_test.go:181: identity_link.go:198: statement in unlinkAccountIdentityTx touches sessions with no team predicate.
+        Scope it, or add "unlinkAccountIdentityTx" to reviewedUnscopedSQL with the reason it crosses teams.
+        	DELETE FROM sessions WHERE account_id = ? AND hash <> ?
+    tenant_sql_scope_guard_test.go:190: reviewedUnscopedSQL exempts "(*Store).UnlinkIdentity", which no longer has an unscoped statement; delete the entry
+    tenant_sql_scope_guard_test.go:190: reviewedUnscopedSQL exempts "(*Store).AcceptInvitation", which no longer has an unscoped statement; delete the entry
+FAIL
+FAIL	github.com/sparkwing-dev/sparkwing/pkg/store	0.245s
+FAIL
+
+Timestamp regression before the fix:
+--- FAIL: TestAccountMutationsKeepNanosecondTimestamps (0.05s)
+    account_mutations_test.go:268: created=2027-01-15 08:00:00 +0000 UTC, want 2027-01-15 08:00:00.000000123 +0000 UTC: <nil>
+FAIL
+FAIL	github.com/sparkwing-dev/sparkwing/pkg/store	0.060s
+FAIL
+
+Broader controller selection (inherited raw-token fixtures):
+--- FAIL: TestDeleteAccountNeedsARecentSignIn (0.06s)
+    deletion_review_test.go:33: tokens: insert: SQL logic error: no such table: tokens (1)
+--- FAIL: TestDeleteAccountOwningTheDefaultTeamIsABadRequest (0.10s)
+    deletion_review_test.go:49: tokens: insert: SQL logic error: no such table: tokens (1)
+--- FAIL: TestOperatorDeletesAnAccountByEmailAndATeamBySlug (0.06s)
+    deletion_test.go:130: tokens: insert: SQL logic error: no such table: tokens (1)
+--- FAIL: TestGitHubAppConnectNeedsTheAccountsAdmin (0.04s)
+    github_app_test.go:448: tokens: insert: SQL logic error: no such table: tokens (1)
+--- FAIL: TestAClosedFreeTierWaitlistsNewAccounts (0.04s)
+    signup_gate_test.go:234: tokens: insert: SQL logic error: no such table: tokens (1)
+--- FAIL: TestYoungGitHubAccountsAreWaitlistedAtSignIn (0.07s)
+    signup_gate_test.go:331: tokens: insert: SQL logic error: no such table: tokens (1)
+--- FAIL: TestAnUnreadableFreeTierWaitlistsNewAccounts (0.13s)
+    signup_gate_test.go:366: tokens: insert: SQL logic error: no such table: tokens (1)
+--- FAIL: TestTeamBoundary_AFreshAccountCannotReachAnotherTeamsRun (0.04s)
+        team_boundary_test.go:259: tokens: insert: SQL logic error: no such table: tokens (1)
+
+Focused final checks:
+account-time-green:
+ok  	github.com/sparkwing-dev/sparkwing/pkg/store	5.193s
+account-race-final:
+ok  	github.com/sparkwing-dev/sparkwing/pkg/store	25.519s
+account-http-final:
+ok  	github.com/sparkwing-dev/sparkwing/tests/acceptance	0.668s
+comments-final:
+commentcheck: clean across 2440 file(s)
+docs-check:
+sync-docs --check: pkg/docs/mirror matches docs/, pkg/docs/changelog.md matches CHANGELOG.md
+api-spec-check:
+check-api-spec: policy inventory and shared JSON shapes are current
+Whole-repository build, scoped vet, API snapshot check and whitespace check exited 0.

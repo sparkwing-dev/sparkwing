@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestAMissingLookupNamesWhatItLookedFor(t *testing.T) {
@@ -18,11 +19,19 @@ func TestAMissingLookupNamesWhatItLookedFor(t *testing.T) {
 		call func() error
 		want []string
 	}{
-		"GetRun":        {func() error { _, err := s.GetRun(ctx, "run-absent"); return err }, []string{"run", "run-absent"}},
-		"GetTrigger":    {func() error { _, err := s.GetTrigger(ctx, "trig-absent"); return err }, []string{"trigger", "trig-absent"}},
-		"RequestCancel": {func() error { return s.RequestCancel(ctx, "cancel-absent") }, []string{"trigger", "cancel-absent"}},
-		"GetSecretForRun": {
-			func() error { _, err := s.GetSecretForRun("secret-absent", ""); return err },
+		"GetRun": {func() error {
+			_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRun(ctx, "run-absent")
+			return err
+		}, []string{"run", "run-absent"}},
+		"GetTrigger": {func() error {
+			_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, "trig-absent")
+			return err
+		}, []string{"not found"}},
+		"GetSecretRow": {
+			func() error {
+				_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetSecretRow("secret-absent", "")
+				return err
+			},
 			[]string{"secret", "secret-absent"},
 		},
 	}

@@ -27,6 +27,10 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 	if s.localSessions == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "local session ledger is unavailable"}
 	}
+	tenant, err := s.store.ForTeam(r.Context(), store.DefaultTeam)
+	if err != nil {
+		return engineLookupError(err)
+	}
 	var request struct {
 		DryRun bool `json:"dry_run"`
 	}
@@ -46,7 +50,7 @@ func (s *Server) localDoctor(w http.ResponseWriter, r *http.Request, a capabilit
 			findings = append(findings, wingd.LocalDoctorFinding{Code: "stray_step_session", Message: "step session would be reaped", Unit: outcome.Record.Run})
 			continue
 		}
-		for _, recordErr := range sessionledger.RecordOutcomes(r.Context(), s.store, "doctor", []sessionledger.Outcome{outcome}) {
+		for _, recordErr := range sessionledger.RecordOutcomes(r.Context(), tenant, "doctor", []sessionledger.Outcome{outcome}) {
 			findings = append(findings, wingd.LocalDoctorFinding{Code: "unrecorded_step_outcome", Unit: outcome.Record.Run, Message: fmt.Sprintf("step cleanup %s could not be recorded: %v", outcome.Verdict, recordErr)})
 		}
 		if outcome.Err != nil {

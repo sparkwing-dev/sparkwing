@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Dialect identifies the SQL flavor a Store is backed by. The Store
@@ -36,13 +38,6 @@ func (d Dialect) String() string {
 	default:
 		return "unknown"
 	}
-}
-
-func (s *Store) forUpdateSkipLocked() string {
-	if s.dialect == DialectPostgres {
-		return " FOR UPDATE SKIP LOCKED"
-	}
-	return ""
 }
 
 // safety: SQLite's variadic max() is a scalar function; Postgres spells that
@@ -127,6 +122,7 @@ type storeTx struct {
 	dialect      Dialect
 	store        *Store
 	snapshotRead bool
+	rotatingRoot *capability.Capability
 }
 
 func (s *Store) now() time.Time {

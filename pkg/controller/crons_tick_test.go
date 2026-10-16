@@ -95,7 +95,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 		t.Errorf("%d controllers held the tick at once, want at most 1", peak)
 	}
 
-	triggers, err := st.ListTriggers(ctx, store.TriggerFilter{Pipelines: []string{"nightly"}})
+	triggers, err := teststore.ForTeam(t, st, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Pipelines: []string{"nightly"}})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	if trigger.IdempotencyKey == "" {
 		t.Error("the launch carried no idempotency key")
 	}
-	run, err := st.GetRun(ctx, trigger.ID)
+	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, trigger.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 	if second != first {
 		t.Errorf("the repeated instant started run %s, want the first run %s", second, first)
 	}
-	if triggers, err := st.ListTriggers(context.Background(), store.TriggerFilter{Pipelines: []string{"nightly"}}); err != nil || len(triggers) != 1 {
+	if triggers, err := teststore.ForTeam(t, st, store.DefaultTeam).ListTriggers(context.Background(), store.TriggerFilter{Pipelines: []string{"nightly"}}); err != nil || len(triggers) != 1 {
 		t.Errorf("recorded %d runs (%v), want 1", len(triggers), err)
 	}
 }
@@ -169,10 +169,10 @@ func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now()
-	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run_old", Pipeline: "nightly", CreatedAt: now}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{ID: "run_old", Pipeline: "nightly", CreatedAt: now}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
 		ID: "run_old", Pipeline: "nightly", Status: "pending",
 		CreatedAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour),
 	}); err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const (
@@ -28,7 +29,7 @@ func appendEventsConcurrently(t *testing.T, st *store.Store, runID string) int {
 		go func(worker int) {
 			defer wg.Done()
 			for j := 0; j < seqAppendsEach; j++ {
-				if err := st.AppendEvent(ctx, runID, fmt.Sprintf("n-%d", worker), "log", nil); err != nil {
+				if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, runID, fmt.Sprintf("n-%d", worker), "log", nil); err != nil {
 					t.Errorf("AppendEvent(worker %d, append %d): %v", worker, j, err)
 					return
 				}
@@ -47,7 +48,7 @@ func checkAppendedSeqs(t *testing.T, st *store.Store, runID string, landed int) 
 	if landed != seqAppendsExpected {
 		t.Fatalf("appends that landed = %d, want %d", landed, seqAppendsExpected)
 	}
-	events, err := st.ListEventsAfter(context.Background(), runID, 0, seqAppendsExpected+1)
+	events, err := teststore.ForTeam(t, st, store.DefaultTeam).ListEventsAfter(context.Background(), runID, 0, seqAppendsExpected+1)
 	if err != nil {
 		t.Fatalf("ListEventsAfter: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestAppendEventConcurrentAppendsAllLand(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -86,7 +87,7 @@ func TestAppendEventConcurrentAppendsAllLand(t *testing.T) {
 func TestPostgresAppendEventConcurrentAppendsAllLand(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)

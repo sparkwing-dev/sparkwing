@@ -172,7 +172,7 @@ func (s *Server) cronTickOnce(ctx context.Context) {
 		ctx = store.WithoutCreditMetering(ctx)
 	}
 	var report crons.TickReport
-	ran, err := s.store.RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
+	ran, err := s.store.AsOperator().RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
 		// safety: a tick that outlives the lease is a tick running beside
 		// whoever claimed the next minute, so it is cut at the lease instead.
 		deadline, cancel := context.WithTimeout(tickCtx, cronTickLeaseTTL)

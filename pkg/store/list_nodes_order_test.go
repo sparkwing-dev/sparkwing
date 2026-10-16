@@ -1,76 +1,57 @@
 package store_test
 
 import (
-	"context"
 	"testing"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-var orderedNodeIDs = []string{"zulu", "yankee", "xray", "whiskey", "victor"}
-
-func seedOrderedNodes(t *testing.T, st *store.Store) {
+func checkNodeOrderAfterStarts(t *testing.T, st *store.Store) {
 	t.Helper()
-	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	for _, id := range orderedNodeIDs {
-		if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: id, Status: "pending"}); err != nil {
-			t.Fatalf("CreateNode(%s): %v", id, err)
+	ids := []string{"zulu", "yankee", "xray", "whiskey", "victor"}
+	tenant, plan, err := storePlanSealRequestWith(t.Context(), st, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
+		doc.Jobs = nil
+		for _, id := range ids {
+			doc.Jobs = append(doc.Jobs, nodeproto.JobSpec{ID: id, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 		}
-	}
-	for i := len(orderedNodeIDs) - 1; i >= 0; i-- {
-		if err := st.StartNode(ctx, "run-1", orderedNodeIDs[i]); err != nil {
-			t.Fatalf("StartNode(%s): %v", orderedNodeIDs[i], err)
-		}
-	}
-}
-
-func checkNodeOrder(t *testing.T, st *store.Store) {
-	t.Helper()
-	nodes, err := st.ListNodes(context.Background(), "run-1")
+	})
 	if err != nil {
-		t.Fatalf("ListNodes: %v", err)
+		t.Fatal(err)
 	}
-	if len(nodes) != len(orderedNodeIDs) {
-		t.Fatalf("nodes = %d, want %d", len(nodes), len(orderedNodeIDs))
+	if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
+		t.Fatal(err)
+	}
+	for i := len(ids) - 1; i >= 0; i-- {
+		ref := store.NodeRef{RunID: plan.RunID, NodeID: ids[i]}
+		reconciled, err := tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: plan.Actor, Policy: store.SourceNone})
+		if err != nil || reconciled.Kind != store.Execute || reconciled.Claim == nil {
+			t.Fatalf("reconcile %s: %+v, %v", ids[i], reconciled, err)
+		}
+		claim := reconciled.Claim
+		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.CapabilityPrefix}, CapabilityPrefix: claim.CapabilityPrefix, Holder: claim.Holder, Generation: claim.Generation}
+		if _, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot, err := tenant.ReadSnapshot(t.Context(), plan.RunID)
+	nodes := snapshot.Nodes
+	if err != nil || len(nodes) != len(ids) {
+		t.Fatalf("nodes = %d, %v; want %d", len(nodes), err, len(ids))
 	}
 	for i, n := range nodes {
-		if n.NodeID != orderedNodeIDs[i] {
-			got := make([]string, len(nodes))
-			for j, x := range nodes {
-				got[j] = x.NodeID
-			}
-			t.Fatalf("ListNodes order = %v, want %v", got, orderedNodeIDs)
+		if n.Ref.NodeID != ids[i] || n.Status != store.StatusRunning || n.StartedAt == nil {
+			t.Fatalf("node %d = %+v; want running %s", i, n, ids[i])
 		}
 	}
 }
 
-// TestListNodesKeepsInsertionOrderAcrossUpdates runs in whichever dialect
-// the suite selects; SQLite held this before seq existed, through rowid.
-func TestListNodesKeepsInsertionOrderAcrossUpdates(t *testing.T) {
-	st, err := storetest.New(t).TryOpen()
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	seedOrderedNodes(t, st)
-	checkNodeOrder(t, st)
+func TestRunSnapshotKeepsDeclarationOrderAcrossStarts(t *testing.T) {
+	checkNodeOrderAfterStarts(t, storetest.Open(t))
 }
 
-// TestPostgresListNodesKeepsInsertionOrderAcrossUpdates pins the promise
-// ListNodes makes. It used to implement it on Postgres as ORDER BY ctid, the
-// physical tuple location, which every update moves; the ids run backwards
-// through the alphabet and the rows are rewritten in reverse creation order,
-// so neither the heap layout nor an alphabetical fallback would answer with
-// the order the nodes were created in.
-func TestPostgresListNodesKeepsInsertionOrderAcrossUpdates(t *testing.T) {
-	st := openPGTestStore(t)
-	seedOrderedNodes(t, st)
-	checkNodeOrder(t, st)
+func TestPostgresRunSnapshotKeepsDeclarationOrderAcrossStarts(t *testing.T) {
+	checkNodeOrderAfterStarts(t, openPGTestStore(t))
 }

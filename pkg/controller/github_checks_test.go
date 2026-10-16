@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func (f *appFixture) drainChecks() {
@@ -88,7 +89,7 @@ func (f *appFixture) runnerCall(c claimedRun, method, path string, body any) int
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", c.auth)
-	req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(c.generation, 10))
+	req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(c.generation, 10))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		f.t.Fatal(err)
@@ -112,18 +113,14 @@ func (f *appFixture) finishRun(c claimedRun, runID, status, errMsg string) {
 func (f *appFixture) addNode(runID, nodeID, outcome, errMsg string) {
 	f.t.Helper()
 	ctx := context.Background()
-	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
 	team, err := f.store.AsOperator().RunTeam(ctx, runID)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	tn, err := f.store.ForTeam(ctx, team)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	if err := tn.FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, nil, store.FailureUnknown, nil); err != nil {
+	if err := teststore.SeedNodeFinish(f.store, ctx, team, store.NodeRef{RunID: runID, NodeID: nodeID}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: errMsg}); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -631,7 +628,7 @@ func TestGitHubAppRunFinishLeavesAnotherTeamsCheckUnderTheSameID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := other.CreateRun(ctx, store.Run{ID: "shared", Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.SeedRun(f.store, ctx, other.Team(), store.Run{ID: "shared", Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -742,7 +739,7 @@ func TestGitHubAppStaleQueuedUpdateKeepsATimedOutConclusion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.FinishRun(ctx, runID, "failed", "reaped: queue deadline"); err != nil {
+	if err := teststore.SeedRunFinish(f.store, ctx, tenant.Team(), runID, "failed", "reaped: queue deadline"); err != nil {
 		t.Fatal(err)
 	}
 	controller.ReportGitHubRunState(ctx, f.srv, runID, "timed_out")

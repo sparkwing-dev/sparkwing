@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -92,6 +93,9 @@ func Open(t *testing.T) *store.Store {
 		return New(t).Open(t)
 	}
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err == nil {
+		err = configure(st)
+	}
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
@@ -137,9 +141,17 @@ func (tg *Target) TryOpen() (*store.Store, error) {
 
 func (tg *Target) open() (*store.Store, error) {
 	if tg.dialect == store.DialectPostgres {
-		return store.OpenPostgres(context.Background(), tg.dsn)
+		st, err := store.OpenPostgres(context.Background(), tg.dsn)
+		if err == nil {
+			err = configure(st)
+		}
+		return st, err
 	}
-	return store.Open(tg.path)
+	st, err := store.Open(tg.path)
+	if err == nil {
+		err = configure(st)
+	}
+	return st, err
 }
 
 func newSchema(t *testing.T, baseDSN string) string {
@@ -245,4 +257,14 @@ func sanitize(s string) string {
 		return '_'
 	}, s)
 	return out
+}
+
+func configure(st *store.Store) error {
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		return err
+	}
+	st.SetSessionKeyCipher(cipher)
+	_, err = st.DB().Exec(Rebind(st, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO NOTHING`), []byte(`"test"`))
+	return err
 }

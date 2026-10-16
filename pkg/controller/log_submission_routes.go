@@ -210,5 +210,7 @@ func (s *Server) handleLiveLogSubmission(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
-var _ logSubmissionObjects = (*blob.Filesystem)(nil)
-var _ logSubmissionObjects = (*blob.S3)(nil)
+var (
+	_ logSubmissionObjects = (*blob.Filesystem)(nil)
+	_ logSubmissionObjects = (*blob.S3)(nil)
+)
