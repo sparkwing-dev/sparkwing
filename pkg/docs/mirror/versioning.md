@@ -70,6 +70,11 @@ refuse rollback and retain the last verified copy when refresh fails. There is
 no fallback-age cutoff. First use without any verified copy fails with an
 unavailable error and connectivity guidance.
 
+A development CLI build has no released version for runner policy to judge.
+Its local controller skips the runner policy fetch and logs once that version
+policy checks are off for a development build. Released CLI builds retain the
+signed runner policy checks, regardless of the version reported by a runner.
+
 Warnings appear in run output and the dashboard before enforcement, with signed
 reason and fix guidance. A revoked or unsupported release fails loudly and names
 `sparkwing upgrade`. The CLI renders the same notice data as run status.

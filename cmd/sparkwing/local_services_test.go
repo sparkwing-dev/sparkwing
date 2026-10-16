@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -208,6 +209,12 @@ func TestProductionLocalQueueAdvertisesUsableCapacity(t *testing.T) {
 	var runner runners.StoreRunnerConfig
 	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
 		services, err := bindLocalController(ctx, binding)
+		if err == nil {
+			policy, ok := binding.Controller.RunnerPolicy.(*controller.SignedRunnerAdmission)
+			if !ok || policy.BuildVersion != installedVersion() {
+				t.Fatal("local runner policy lost the CLI build identity")
+			}
+		}
 		runner = services.Runner
 		return services, err
 	}}).Open(t.Context(), t.TempDir())

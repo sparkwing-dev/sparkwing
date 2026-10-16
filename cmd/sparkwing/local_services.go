@@ -110,7 +110,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
-	b.Controller.RunnerPolicy = controller.SignedRunnerAdmission{Resolver: engines}
+	b.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: engines, BuildVersion: installedVersion()}
 	b.Controller.VersionPolicy = &controller.SignedEngineVersionPolicy{Resolver: engines}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
