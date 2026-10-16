@@ -210,8 +210,8 @@ func scanComputeLimits(rows *sql.Rows) (ComputeLimits, error) {
 
 // ComputeLimits reads every guard. A guard nothing set reads zero, which is
 // unlimited.
-func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error) {
-	rows, err := s.query(ctx, computeLimitsSQL, computeLimitKeyArgs...)
+func (o *Operator) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error) {
+	rows, err := o.s.query(ctx, computeLimitsSQL, computeLimitKeyArgs...)
 	if err != nil {
 		return ComputeLimits{}, err
 	}
@@ -234,7 +234,7 @@ func validateComputeLimit(name string, value int64) error {
 
 // SetComputeLimits validates and writes every named guard in one transaction.
 // A value of zero removes that ceiling.
-func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error) {
+func (o *Operator) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error) {
 	if len(updates) == 0 {
 		return ComputeLimits{}, fmt.Errorf("%w: name at least one guard", ErrInvalidComputeLimitSetting)
 	}
@@ -243,7 +243,7 @@ func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) 
 			return ComputeLimits{}, err
 		}
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return ComputeLimits{}, err
 	}
@@ -266,12 +266,6 @@ func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) 
 	return out, tx.Commit()
 }
 
-// SetComputeLimit sets one guard. A value of zero removes the ceiling.
-func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error {
-	_, err := s.SetComputeLimits(ctx, map[string]int64{name: value})
-	return err
-}
-
 func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err error) {
 	rows, err := tx.QueryContext(ctx, computeLimitsSQL, computeLimitKeyArgs...)
 	if err != nil {
@@ -283,9 +277,9 @@ func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err err
 
 // ComputeUsage counts the cloud runners claimed now, in total and per
 // principal, and reports whether the count reached the alarm.
-func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
+func (o *Operator) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
 	out := ComputeUsage{ByPrincipal: map[string]int64{}}
-	rows, err := s.query(ctx, `SELECT claim_principal, COUNT(*) FROM nodes
+	rows, err := o.s.query(ctx, `SELECT claim_principal, COUNT(*) FROM nodes
 	  WHERE credit_charged_through > 0 GROUP BY claim_principal`)
 	if err != nil {
 		return ComputeUsage{}, err
@@ -303,27 +297,12 @@ func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
 	if err := rows.Err(); err != nil {
 		return ComputeUsage{}, err
 	}
-	limits, err := s.ComputeLimits(ctx)
+	limits, err := o.ComputeLimits(ctx)
 	if err != nil {
 		return ComputeUsage{}, err
 	}
 	out.AlarmReached = limits.RunnerAlarm > 0 && out.Runners >= limits.RunnerAlarm
 	return out, nil
-}
-
-// ComputeAlarmState reports the cloud runners claimed now against the alarm,
-// which is how a caller logs the crossing once rather than on every claim. It
-// returns a zero alarm and counts nothing when no alarm is set.
-func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error) {
-	alarm, err = s.creditSetting(ctx, computeLimitKey(ComputeLimitRunnerAlarm), 0)
-	if err != nil || alarm <= 0 {
-		return 0, 0, err
-	}
-	if err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0`).Scan(&runners); err != nil {
-		return 0, 0, err
-	}
-	return runners, alarm, nil
 }
 
 // safety: the guards run inside the claim's own transaction, under the ledger

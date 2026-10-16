@@ -1,5 +1,24 @@
 # C1 data contract
 
+## Tenant event append and deployment compute controls
+
+`Store.AppendEvent` is removed. Select a tenant and use `Tenant.AppendEvent`.
+It allocates the sequence and event bytes with the event insert in one
+transaction. Missing and foreign runs return `ErrNotFound`. Event timestamps
+come from the store clock. Profile drift uses its selected tenant, and the
+local session reaper records outcomes through `DefaultTeam`.
+
+`ComputeLimits`, `SetComputeLimits` and `ComputeUsage` move from `Store` to
+`Operator`. Select the deployment handle with `AsOperator()`. The unused
+`ComputeAlarmState` and single-setting `SetComputeLimit` methods are removed.
+Set one limit through the batch writer. Validation, zero-valued removal and
+transaction rollback remain unchanged. HTTP mutations still require the
+separate authority-bearing settings adapter.
+
+`Operator.CountPendingNodes` is removed. Read the ready count from
+`CountNodesByQueueState` with `QueueStateReady`. Both operational gauges use
+that one snapshot.
+
 ## Account mutations and raw team-switch retirement
 
 `Store` implements C2's `AccountWriter`: `SelectAccountTeam`,

@@ -29,7 +29,7 @@ func appendEventsConcurrently(t *testing.T, st *store.Store, runID string) int {
 		go func(worker int) {
 			defer wg.Done()
 			for j := 0; j < seqAppendsEach; j++ {
-				if err := st.AppendEvent(ctx, runID, fmt.Sprintf("n-%d", worker), "log", nil); err != nil {
+				if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, runID, fmt.Sprintf("n-%d", worker), "log", nil); err != nil {
 					t.Errorf("AppendEvent(worker %d, append %d): %v", worker, j, err)
 					return
 				}

@@ -1479,8 +1479,9 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLease) (StorageChargeSweep, error)
 func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder string, now time.Time, lease time.Duration) (bool, error)
 func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLease, limit int, deleter BlobDeleter) (int64, error)
+func (o *Operator) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
+func (o *Operator) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
 func (o *Operator) CountNodesByQueueState(ctx context.Context) (map[string]int, error)
-func (o *Operator) CountPendingNodes(ctx context.Context) (int, error)
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error
 func (o *Operator) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, error)
 func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error)
@@ -1526,6 +1527,7 @@ func (o *Operator) RunCronTickLeased(ctx context.Context, holder string, ttl tim
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error)
 func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonLease, limit int) (int64, error)
 func (o *Operator) SeedRunRetention(ctx context.Context, days int64) (bool, error)
+func (o *Operator) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)
 func (o *Operator) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error)
 func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error
 func (o *Operator) SetNodeAttention(ctx context.Context, updates []NodeAttention) error
@@ -2401,7 +2403,6 @@ func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
 func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
-func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error)
 func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string, now time.Time) ([]Account, error)
 func (s *Store) AsConsole(allowed func(string) bool) *Console
@@ -2412,9 +2413,6 @@ func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal
 func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error)
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error)
 func (s *Store) Close() error
-func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error)
-func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
-func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
 func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error)
@@ -2463,8 +2461,6 @@ func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, li
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
 func (s *Store) SelectAccountTeam(ctx context.Context, a capability.Authorized, team Team) error
 func (s *Store) SetClaimProfileResolver(resolver ClaimProfileResolver)
-func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
-func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)
 func (s *Store) SetConsolePolicy(policy func(capability.Principal, time.Time) bool)
 func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error)
 func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error
@@ -2540,6 +2536,7 @@ func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error)
 func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding CapacityBinding, actor Actor) (CapacityAdoption, error)
 func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]string, err error)
+func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID, kind string, payload []byte) (int64, error)
 func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)

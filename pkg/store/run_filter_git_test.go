@@ -161,7 +161,7 @@ func TestListEventsAfterClampsLimitToTheCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range store.MaxRunListLimit + 5 {
-		if err := st.AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}

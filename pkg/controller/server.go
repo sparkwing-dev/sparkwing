@@ -678,15 +678,10 @@ func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
 }
 
 func (s *Server) sampleOperationalSeries(ctx context.Context) {
-	if n, err := s.store.AsOperator().CountPendingNodes(ctx); err != nil {
-		s.logger.Error("pending nodes sample failed", "err", err)
-	} else {
-		setPendingNodes(n)
-	}
-
 	if counts, err := s.store.AsOperator().CountNodesByQueueState(ctx); err != nil {
 		s.logger.Error("queue depth sample failed", "err", err)
 	} else {
+		setPendingNodes(counts[store.QueueStateReady])
 		setQueueDepth(counts)
 	}
 	s.sampleRunners(ctx)

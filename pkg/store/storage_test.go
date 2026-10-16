@@ -25,7 +25,7 @@ func seedRunWithNode(t *testing.T, st *store.Store, runID, nodeID, status string
 
 func appendEventAt(t *testing.T, st *store.Store, runID, nodeID, kind string, at time.Time) {
 	t.Helper()
-	if err := st.AppendEvent(context.Background(), runID, nodeID, kind, nil); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(context.Background(), runID, nodeID, kind, nil); err != nil {
 		t.Fatalf("append event %s: %v", kind, err)
 	}
 	if _, err := st.DB().Exec(storetest.Rebind(st,

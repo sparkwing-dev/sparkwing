@@ -1,0 +1,74 @@
+start: 15 failures, 1206 passing top-level tests, 17 skipped, 215.791 seconds
+end: 15 failures, 1207 passing top-level tests, 17 skipped, 225.209 seconds
+
+FuzzStorageStandingTenantInventory
+    storage_standing_runtime_test.go:150: tenant inventory={Tier:none AllowanceBytes:1073741824 EventBytes:17 BlobBytes:3 ReservedBlobBytes:0 LogBytes:3}: <nil>
+    storage_standing_runtime_test.go:150: tenant inventory={Tier:none AllowanceBytes:1073741824 EventBytes:0 BlobBytes:0 ReservedBlobBytes:0 LogBytes:3}: <nil>
+
+TestAClaimantsOwnCPUFigureDoesNotLowerTheBill
+    credit_rates_test.go:440: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestARateTableChangeLeavesWrittenChargesAlone
+    credit_rates_test.go:353: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestARefundDebitsTheCardThatPaid
+    card_billing_test.go:529: mint acme's metered token: SQL logic error: no such table: tokens (1)
+
+TestAWarnedCardRepaysTheDebtOnPayNow
+    card_billing_test.go:289: seed a reservation refund: SQL logic error: table credit_charges has no column named token_prefix (1)
+    card_billing_test.go:289: seed a reservation refund: SQL logic error: table credit_charges has no column named token_prefix (1)
+
+TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass
+    credit_rates_test.go:519: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestClaimIsRefusedAboveTheLargestPricedClass
+    credit_rates_test.go:276: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestCollectionBindingCannotChangePayerProperty
+    payment_collection_binding_test.go:119: constraint failed: CHECK constraint failed: (kind = 'setup' AND currency = '' AND attempt_id = '' AND charge_id = '')
+               OR (kind = 'collection' AND currency <> '' AND attempt_id <> '' AND charge_id <> '') (275)
+
+TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts
+    credits_test.go:122: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestHeartbeatChargesAtTheNodesCPUClass
+    credit_rates_test.go:234: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestMeteredClaimReservesAtTheNodesCPUClass
+    credit_rates_test.go:197: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion
+    credits_test.go:167: mint a metered token: tokens: insert: SQL logic error: no such table: tokens (1)
+
+TestTenantWriters_EveryTenantTableHasAWriterThatSetsTheKey
+    tenant_writer_guard_test.go:40: no INSERT in this package sets storage_commit_receipts.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+    tenant_writer_guard_test.go:40: no INSERT in this package sets storage_reservations.team, so this table has no production seeding path for "default".
+        Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.
+
+TestTheChargeRowCarriesThePinnedClass
+    credit_rates_test.go:463: mint a metered token: SQL logic error: no such table: tokens (1)
+
+TestTheDefaultLadderRefusesAClassAboveEight
+    credit_rates_test.go:311: mint a metered token: SQL logic error: no such table: tokens (1)
+
+The failure set is unchanged. W1b billing/storage files beyond the AppendEvent caller substitution in storage_test.go are untouched.
+
+Focused race
+ok  github.com/sparkwing-dev/sparkwing/pkg/store  17.850s
+
+Scoped controller
+ok  	github.com/sparkwing-dev/sparkwing/pkg/controller	0.830s
+
+Local doctor tenant isolation
+ok  	github.com/sparkwing-dev/sparkwing/pkg/controller	0.456s
+
+Store acceptance cells
+ok  	github.com/sparkwing-dev/sparkwing/pkg/store	2.131s
+
+Broader controller probe (inherited failure)
+TestFinishRunFoldsPartialSamplesRaiseOnly fails in all three cases before profile folding.
+POST /api/v1/runs/partial/finish returns 401 with code unauthenticated and message session is unavailable.
+Its fixture sends no authentication. No auth bypass was added. Direct folding tests pass.
+EngineController.Finish currently has no call to foldRunProfiles; W2 must preserve the completion integration.
+

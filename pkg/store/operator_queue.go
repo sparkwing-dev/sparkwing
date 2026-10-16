@@ -2,18 +2,6 @@ package store
 
 import "context"
 
-// CountPendingNodes returns the count of unclaimed ready nodes.
-func (o *Operator) CountPendingNodes(ctx context.Context) (int, error) {
-	var n int
-	err := o.s.queryRow(
-		ctx,
-		`SELECT COUNT(*) FROM nodes
-		  WHERE ready_at IS NOT NULL AND (claimed_by IS NULL OR claimed_by = '')
-		    AND status = 'pending' AND `+nodeRunActiveSQL("nodes."),
-	).Scan(&n)
-	return n, err
-}
-
 const (
 	// QueueStateWaiting is an unclaimed job that is not ready.
 	QueueStateWaiting = "waiting"

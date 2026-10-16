@@ -124,8 +124,4 @@ func checkStoreQueueCounts(t *testing.T, s *store.Store, want map[string]int) {
 	if err != nil || !reflect.DeepEqual(counts, want) {
 		t.Fatalf("queue states: %v, %v; want %v", counts, err, want)
 	}
-	ready, err := s.AsOperator().CountPendingNodes(t.Context())
-	if err != nil || ready != want[store.QueueStateReady] {
-		t.Fatalf("ready count: %d, %v; want %d", ready, err, want[store.QueueStateReady])
-	}
 }

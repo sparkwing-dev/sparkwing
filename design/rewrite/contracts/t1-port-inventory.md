@@ -1,3 +1,16 @@
+## W1 tenant event and compute-control continuation
+
+The concurrent append tests now select their tenant. The generated
+`TestTenantEventAppendIsolationProperty` refuses foreign selectors without
+changing their counters, preserves event order and uses the store clock.
+`TestTenantEventAppendFailureRollsBackSequenceAndBytes` refuses an event insert
+and verifies that the next successful append still receives sequence one.
+Compute-limit validation, zero removal and atomic batch rollback use Operator.
+The duplicate queue-count assertions and unused compute-alarm test retire with
+their deleted APIs. The retained queue partition property and StoreQueueOrder
+cell use the shared state projection. The cadence fixture supplies its resolved
+numeric GitHub identity before testing the operator interval guard.
+
 `Tenant.FinishRun` and `finishRunOnceTx` are removed. The retained timestamp
 
 ## W1 raw run writer continuation

@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Require an explicit tenant for event appends and an Operator handle for deployment compute controls. Remove unused compute helpers and the duplicate ready-job count. Both queue gauges use one state snapshot. See [migration guide](docs/migrations/_unreleased.md#tenant-event-append-and-deployment-compute-controls).
+
 - **store (Breaking):** Commit account team selection, creation, invitation acceptance and identity unlinking through live direct-session transactions. Remove their raw account and team-switch APIs and unused store helpers. See [migration guide](docs/migrations/_unreleased.md#account-mutations-and-raw-team-switch-retirement).
 
 - **store (Breaking):** Remove the raw `Tenant.CreateRun` writer, unused runner gauge and unused legacy credential helpers. Run admission uses sealed intake. Profile folding excludes memoized jobs. See [migration guide](docs/migrations/_unreleased.md#raw-run-writer-and-unused-liveness-gauge-removed).

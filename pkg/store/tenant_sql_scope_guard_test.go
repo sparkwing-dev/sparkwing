@@ -110,12 +110,9 @@ var reviewedUnscopedSQL = map[string]string{
 		"team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +
 		"through that team's handle; an answer scoped to the asker is no answer",
-	"(*Store).ComputeUsage": "the operator's compute view counts every team's claimed cloud runners per principal against " +
+	"(*Operator).ComputeUsage": "the operator's compute view counts every team's claimed cloud runners per principal against " +
 		"the deployment's alarm; the route serves it to an admin only",
-	"(*Store).ComputeAlarmState": "the runner alarm is the deployment's, so the count it is checked against is every " +
-		"team's claimed cloud runners",
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
-	"(*Operator).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",
 	"(*Operator).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +

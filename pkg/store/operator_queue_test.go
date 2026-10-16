@@ -67,10 +67,6 @@ func TestOperatorQueueCountsPartitionPersistedStates(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("queue partition: %v, %v; want %v", got, err, want)
 		}
-		ready, err := s.AsOperator().CountPendingNodes(t.Context())
-		if err != nil || ready != want[QueueStateReady] {
-			t.Fatalf("ready: %d, %v; want %d", ready, err, want[QueueStateReady])
-		}
 		*now = now.Add(24 * time.Hour)
 	}
 }

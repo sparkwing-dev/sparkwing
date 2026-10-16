@@ -386,7 +386,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed a run: %v", err)
 	}
-	if err := f.store.SetComputeLimit(ctx, store.ComputeLimitGlobalRunsPerHour, 1); err != nil {
+	if _, err := f.store.AsOperator().SetComputeLimits(ctx, map[string]int64{store.ComputeLimitGlobalRunsPerHour: 1}); err != nil {
 		t.Fatalf("set the guard: %v", err)
 	}
 

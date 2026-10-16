@@ -1346,21 +1346,15 @@ SELECT run_id, seq, node_id, kind, ts, payload
 	return out, rows.Err()
 }
 
-// safety: holding the run row serializes callers that allocate a per-run
-// sequence number from MAX(seq)+1. NO KEY UPDATE leaves foreign-key checks
-// on sibling nodes free to proceed while those nodes await their event turn.
-// A missing run leaves nothing to lock; the insert then fails its foreign key.
 // AppendEvent writes the run's next event in order.
-func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
+func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		_, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, tx.now())
+		if errors.Is(err, sql.ErrNoRows) {
+			return notFound("run", runID)
+		}
 		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now()); err != nil {
-		return err
-	}
-	return tx.Commit()
+	})
 }
 
 func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
@@ -1388,16 +1382,6 @@ VALUES (?,?,?,?,?,?,?)`, string(team), runID, seq, nodeID, kind, at.UnixNano(), 
 		return 0, err
 	}
 	return seq, err
-}
-
-// safety: a caller without a tenant handle appends into its run's own team, the team the run's
-// other rows were written into.
-func appendRunEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
-	team, err := creditTeamForRunTx(ctx, tx, runID)
-	if err != nil {
-		return 0, err
-	}
-	return appendEventTx(ctx, tx, team, runID, nodeID, kind, payload, at)
 }
 
 // ErrNotFound is returned when a lookup misses.

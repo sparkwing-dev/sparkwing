@@ -89,7 +89,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 				t.Fatalf("create node %s/%s: %v", runID, nodeID, err)
 			}
 		}
-		if err := st.AppendEvent(ctx, runID, "", "run_start", []byte(`{"drill":true}`)); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, runID, "", "run_start", []byte(`{"drill":true}`)); err != nil {
 			t.Fatalf("append event for %s: %v", runID, err)
 		}
 	}

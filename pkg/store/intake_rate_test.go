@@ -14,7 +14,7 @@ import (
 
 func TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain(t *testing.T) {
 	tenant, request, now := intakeFixture(t)
-	if err := tenant.s.SetComputeLimit(t.Context(), ComputeLimitRunsPerHour, 1); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: 1}); err != nil {
 		t.Fatal(err)
 	}
 	request.IdempotencyKey = "first"
@@ -54,7 +54,7 @@ func TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain(t *testing.T) {
 
 func TestSealedIntakeRateCountsOnlyTheAuthenticatedTeam(t *testing.T) {
 	tenant, request, _ := intakeFixture(t)
-	if err := tenant.s.SetComputeLimit(t.Context(), ComputeLimitRunsPerHour, 1); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.AdmitRun(t.Context(), request); err != nil {
@@ -77,7 +77,7 @@ func TestSealedIntakeRateCountsOnlyTheAuthenticatedTeam(t *testing.T) {
 
 func TestConcurrentSealedIntakeNeverPassesTheHourlyGuard(t *testing.T) {
 	tenant, request, _ := intakeFixture(t)
-	if err := tenant.s.SetComputeLimit(t.Context(), ComputeLimitGlobalRunsPerHour, 3); err != nil {
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitGlobalRunsPerHour: 3}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -118,7 +118,7 @@ func TestSealedIntakeRateKeepsPrincipalKindsSeparateProperty(t *testing.T) {
 		machine.Grants = []capability.Grant{capability.RunsWrite}
 		authorityPersist(t, tenant.s, machine)
 		request.Authority.ID = machine.Prefix
-		if err := tenant.s.SetComputeLimit(t.Context(), ComputeLimitRunsPerHour, 1); err != nil {
+		if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: 1}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := tenant.AdmitRun(t.Context(), request); err != nil {

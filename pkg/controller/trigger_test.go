@@ -537,7 +537,7 @@ func TestListRoutes_ClampTheirLimit(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
