@@ -1,8 +1,16 @@
 # W9 remaining contract boundaries
 
-Base: `112188414`. The drain fix is already committed on this branch. This
+Base: `9c19e6bdc`. The drain fix is already committed on this branch. This
 continuation changes no production code. Local-controller and local-schedule
 native passes remain the lead's evidence. SDK replacement policy is unchanged.
+
+The reported 00:55 native doctor failure predates the drain fix in `112188414`,
+committed at 00:59. This continuation attempted the combined public doctor probe.
+It failed before reaching the sweep because the sandbox refused the api/admission
+socket connection with `connect: operation not permitted`. Its cleanup likewise
+could not connect. Rerun `TestReviewPublicDoctorSweepsAndWarnsForPrunedRun` natively
+against `112188414` or a descendant with isolated HOME and state. The existing
+in-memory drain race regression passes. There is no new native cleanup verdict.
 
 ## Verified state
 
@@ -87,7 +95,7 @@ test was newly ported.
 
 ## Scope and friction
 
-Only this report is added. No shared source, contract, lead-owned handoff or
+Only this report is updated. No shared source, contract, lead-owned handoff or
 amendment changed. No API was removed and no caller migration was needed.
 Production lines added/deleted in this continuation: **0/0**. W9-owned production
 paths versus main remain **+16,876/-23,797, net -6,921**, within the -2,900
