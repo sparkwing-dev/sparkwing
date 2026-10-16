@@ -37,8 +37,8 @@ func (d *fakeDaemon) Acquire(ctx context.Context, req wingwire.AdmissionRequest,
 		select {
 		case <-d.hostGate:
 		default:
-			onQueued(wingwire.Queued{RunID: req.RunID, Key: "cores", Position: 1})
-			d.queued <- req.RunID
+			onQueued(wingwire.Queued{RunID: string(req.RunID), Key: "cores", Position: 1})
+			d.queued <- string(req.RunID)
 			select {
 			case <-d.hostGate:
 			case <-ctx.Done():
@@ -64,7 +64,7 @@ func (d *fakeDaemon) Acquire(ctx context.Context, req wingwire.AdmissionRequest,
 				cancel: make(chan wingwire.Cancel, 1), lose: make(chan error, 1), probes: make(chan string), acks: make(chan string, 1),
 				watchDone: make(chan struct{}),
 			}
-			d.leases[req.RunID] = l
+			d.leases[string(req.RunID)] = l
 			d.live++
 			d.granted++
 			d.mu.Unlock()
@@ -80,8 +80,8 @@ func (d *fakeDaemon) Acquire(ctx context.Context, req wingwire.AdmissionRequest,
 		}
 		if !reported {
 			reported = true
-			onQueued(wingwire.Queued{RunID: req.RunID, Key: full, Position: 2})
-			d.queued <- req.RunID
+			onQueued(wingwire.Queued{RunID: string(req.RunID), Key: full, Position: 2})
+			d.queued <- string(req.RunID)
 		}
 		select {
 		case <-ch:
@@ -117,7 +117,7 @@ type fakeLease struct {
 	watchDone chan struct{}
 }
 
-func (l *fakeLease) Token() string { return "lease-" + l.req.RunID }
+func (l *fakeLease) Token() string { return "lease-" + string(l.req.RunID) }
 
 func (l *fakeLease) Release() error {
 	l.once.Do(func() {

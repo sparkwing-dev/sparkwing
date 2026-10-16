@@ -106,11 +106,11 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
-	engines, err := engine.NewResolver(engine.Config{CacheDirectory: filepath.Join(b.Home, "engines")})
+	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), CacheDirectory: filepath.Join(b.Home, "engines")})
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
-	b.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: engines, BuildVersion: installedVersion()}
+	b.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: engines}
 	b.Controller.VersionPolicy = &controller.SignedEngineVersionPolicy{Resolver: engines}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {

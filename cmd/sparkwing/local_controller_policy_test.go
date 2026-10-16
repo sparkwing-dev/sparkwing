@@ -107,7 +107,13 @@ func productionLocalPolicyClient(t *testing.T) client.EngineOptions {
 }
 
 func TestProductionLocalControllerAdmitsRun(t *testing.T) {
-	signedLocalPolicy(t)
+	previous := http.DefaultClient
+	requests := 0
+	http.DefaultClient = &http.Client{Transport: queueHostTransport(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = previous })
 	options := productionLocalPolicyClient(t)
 	engine, err := client.NewEngineClient(options)
 	if err != nil {
@@ -138,6 +144,17 @@ func TestProductionLocalControllerAdmitsRun(t *testing.T) {
 		t.Fatalf("replay: %+v: %v", replay, err)
 	}
 	exerciseLocalRun(t, options, admitted)
+	reader, err := client.NewRunReader(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := reader.ListRuns(t.Context(), controllerwire.RunQuery{Limit: 20})
+	if err != nil || len(page.Runs) != 1 || page.Runs[0].Status != string(store.RunSuccess) {
+		t.Fatalf("development run page: %+v: %v", page, err)
+	}
+	if requests != 0 {
+		t.Fatalf("development controller fetched policy %d times", requests)
+	}
 }
 
 func signedLocalPolicy(t *testing.T) {

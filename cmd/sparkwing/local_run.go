@@ -87,7 +87,7 @@ func localSourceOptions(home string, captured []string, masker *secrets.Masker) 
 	if err != nil {
 		return source.Options{}, err
 	}
-	engines, err := engine.NewResolver(engine.Config{Mode: mode, CacheDirectory: filepath.Join(home, "engines")})
+	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, CacheDirectory: filepath.Join(home, "engines")})
 	if err != nil {
 		return source.Options{}, err
 	}

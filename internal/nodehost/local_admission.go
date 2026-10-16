@@ -58,7 +58,7 @@ func (a *LocalAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 	resources := localResources(options.Resources.Value)
 	parent := localRunLease{runID: accepted.RunID, resources: resources.Cores > 0 || resources.MemoryBytes > 0}
 	request := wingwire.AdmissionRequest{
-		RunID: accepted.RunID, Pipeline: spec.Request.Request.Pipeline,
+		RunID: wingwire.HolderRef(accepted.RunID), Pipeline: spec.Request.Request.Pipeline,
 		Semaphores: claims, SemaphoresOnly: !parent.resources, Resources: resources,
 		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}

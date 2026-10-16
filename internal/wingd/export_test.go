@@ -1,5 +1,7 @@
 package wingd
 
+import "github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+
 // MaxUnsupportedReplies is maxUnsupportedReplies for external tests.
 const MaxUnsupportedReplies = maxUnsupportedReplies
 
@@ -14,11 +16,11 @@ type FuncRunStore struct {
 	NotReady          error
 }
 
-func (f *FuncRunStore) IsRunTerminal(runID string) (bool, error) {
+func (f *FuncRunStore) IsRunTerminal(runID wingwire.RunID) (bool, error) {
 	if f == nil || f.IsTerminal == nil {
 		return false, nil
 	}
-	return f.IsTerminal(runID)
+	return f.IsTerminal(string(runID))
 }
 
 func (f *FuncRunStore) FinalizeRun(runID string) {

@@ -147,6 +147,9 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest, p
 	version := request.Version
 	if version == "" {
 		version = policy.Index.index.Latest
+		if policy.Index.Development() {
+			return "", plan, resolved, invalid("development builds require an explicit upgrade version", "Use sparkwing upgrade --version vMAJOR.MINOR.PATCH.")
+		}
 	}
 	if !strings.HasPrefix(version, "v") {
 		version = "v" + version
@@ -448,12 +451,15 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 	if target.Binary != releaseasset.SparkwingRunner {
 		return SoftwareUpdate{}, invalid("runner updates require sparkwing-runner", "Select the runner executable target.")
 	}
-	if _, err := target.NameForVersion(currentVersion); err != nil {
-		return SoftwareUpdate{}, err
-	}
 	now := time.Now()
 	policy, err := r.Index(ctx, now)
 	if err != nil {
+		return SoftwareUpdate{}, err
+	}
+	if policy.Index.Development() {
+		return SoftwareUpdate{CurrentVersion: currentVersion, Version: currentVersion}, nil
+	}
+	if _, err := target.NameForVersion(currentVersion); err != nil {
 		return SoftwareUpdate{}, err
 	}
 	notices, policyErr := EvaluateRunner(policy.Index, currentVersion, now)

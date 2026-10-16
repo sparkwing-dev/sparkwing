@@ -64,6 +64,9 @@ func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version st
 	if err != nil {
 		return controllerwire.Compatibility{}, err
 	}
+	if index.Index.Development() {
+		return controllerwire.Compatibility{APIMajor: controllerwire.APIMajor, EngineRelease: version}, nil
+	}
 	for _, release := range services.Policy(index.Index).Versions {
 		if release.Version == version {
 			return services.CompatibilityFor(release), nil

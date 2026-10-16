@@ -73,6 +73,7 @@ type Config struct {
 	CacheDirectory string
 	Mode           toolchain.Mode
 	HTTPClient     *http.Client
+	BuildVersion   string
 }
 
 // Resolver owns the version-index cache and verified executable cache for one machine.
@@ -82,6 +83,7 @@ type Resolver struct {
 	index     VerifiedIndex
 	checkedAt time.Time
 	indexErr  error
+	notice    sync.Once
 	command   func(context.Context, string, string, ...string) error
 }
 
@@ -117,11 +119,12 @@ type SignedIndex struct {
 	Signature []byte
 }
 
-// VerifiedIndex is obtainable only by checking the shared releaseauth trust roots.
+// VerifiedIndex carries signed policy or the host development-build exemption.
 type VerifiedIndex struct {
-	index      VersionIndex
-	signed     SignedIndex
-	verifiedAt time.Time
+	index       VersionIndex
+	signed      SignedIndex
+	verifiedAt  time.Time
+	development bool
 }
 
 // IndexResult reports fallback explicitly so output and the dashboard can show the same notice.

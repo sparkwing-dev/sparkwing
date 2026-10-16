@@ -73,7 +73,7 @@ func TestAGrandchildIsHandedEveryGroupUpItsChain(t *testing.T) {
 		t.Fatalf("grandchild holds %v, want its grandparent's run and node groups", leaf.Semaphores)
 	}
 	for _, g := range []wingwire.SemaphoreClaim{runGroup, nodeGroup} {
-		if _, err := ensure(t, home, "").Acquire(context.Background(), wingwire.AdmissionRequest{RunID: "other-" + g.Name, SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{g}}, nil); err == nil {
+		if _, err := ensure(t, home, "").Acquire(context.Background(), wingwire.AdmissionRequest{RunID: wingwire.HolderRef("other-" + g.Name), SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{g}}, nil); err == nil {
 			t.Fatalf("an unrelated run took %s while the chain holds it", g.Name)
 		}
 	}

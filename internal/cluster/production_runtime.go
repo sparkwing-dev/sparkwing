@@ -32,7 +32,7 @@ func ProductionRuntime(version string) Runtime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			engines, err := engine.NewResolver(engine.Config{CacheDirectory: filepath.Join(home, "engines")})
+			engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines")})
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
@@ -104,7 +104,7 @@ func productionHosting(home, version string, connection client.EngineOptions) ru
 			return services, principal, err
 		}
 		state.Finish = private.FinishRunAndUnit
-		engines, err := engine.NewResolver(engine.Config{CacheDirectory: filepath.Join(home, "engines")})
+		engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines")})
 		if err != nil {
 			return services, principal, err
 		}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func (c *localController) Ready() error {
@@ -19,8 +20,8 @@ func (c *localController) Ready() error {
 	return c.State.Ready()
 }
 
-func (c *localController) IsRunTerminal(runID string) (bool, error) {
-	row, err := c.tenant.ReadRun(context.Background(), runID)
+func (c *localController) IsRunTerminal(runID wingwire.RunID) (bool, error) {
+	row, err := c.tenant.ReadRun(context.Background(), string(runID))
 	return terminal(row.State), err
 }
 

@@ -135,7 +135,7 @@ func ensure(t *testing.T, home, version string) *client.Client {
 
 func semReq(runID, key string, capacity, cost int, policy wingwire.Policy) wingwire.AdmissionRequest {
 	return wingwire.AdmissionRequest{
-		RunID:     runID,
+		RunID:     wingwire.HolderRef(runID),
 		Resources: wingwire.HostResources{Cores: 0.1},
 		Semaphores: []wingwire.SemaphoreClaim{
 			{Name: key, Capacity: capacity, Cost: cost, Policy: policy},

@@ -45,7 +45,7 @@ func TestOwnerPreservesIndependentLocalAcquisitionFailures(t *testing.T) {
 							return parent.Acquire(ctx, request, queued)
 						}
 						if policy == "queue" {
-							queued(wingwire.Queued{RunID: request.RunID, Key: request.Semaphores[0].Name})
+							queued(wingwire.Queued{RunID: string(request.RunID), Key: request.Semaphores[0].Name})
 							<-ctx.Done()
 							return nil, independent
 						}

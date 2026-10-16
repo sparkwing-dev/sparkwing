@@ -480,7 +480,7 @@ func (f *fakeProcSampler) CPUUsage(pid int) (wingd.ProcUsage, bool) {
 
 func semHostReq(runID, pipeline string, pid int, key string) wingwire.AdmissionRequest {
 	return wingwire.AdmissionRequest{
-		RunID:     runID,
+		RunID:     wingwire.HolderRef(runID),
 		Pipeline:  pipeline,
 		PID:       pid,
 		Resources: wingwire.HostResources{Cores: 1},

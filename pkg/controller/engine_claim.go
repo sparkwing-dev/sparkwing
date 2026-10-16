@@ -3,13 +3,10 @@ package controller
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -26,17 +23,11 @@ type RunnerAdmissionPolicy interface {
 
 // SignedRunnerAdmission uses the engine owner's verified index and runner policy.
 type SignedRunnerAdmission struct {
-	Resolver     *engine.Resolver
-	BuildVersion string
-	notice       sync.Once
+	Resolver *engine.Resolver
 }
 
 // CheckRunner applies runner release policy for configured release builds.
 func (p *SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error {
-	if p.BuildVersion != "" && !buildinfo.IsReleaseVersion(p.BuildVersion) {
-		p.notice.Do(func() { slog.Info("version policy checks are off for a development build") })
-		return ctx.Err()
-	}
 	if p.Resolver == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "runner version policy is unavailable"}
 	}

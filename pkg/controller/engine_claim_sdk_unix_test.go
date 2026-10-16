@@ -125,7 +125,11 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 		}
 	})
 	st.SetClaimProfileResolver(claimant)
-	e := &controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{BuildVersion: "development"}}
+	resolver, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{Resolver: resolver}}
 	server := controller.New(st, nil).WithEngineController(e).WithPeerIdentity(func(*http.Request) capability.Subject {
 		return capability.Subject{Kind: capability.SubjectLocal, ID: fmt.Sprintf("local:%d", os.Getuid())}
 	})

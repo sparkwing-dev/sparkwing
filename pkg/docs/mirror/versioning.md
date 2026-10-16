@@ -70,10 +70,12 @@ refuse rollback and retain the last verified copy when refresh fails. There is
 no fallback-age cutoff. First use without any verified copy fails with an
 unavailable error and connectivity guidance.
 
-A development CLI build has no released version for runner policy to judge.
-Its local controller skips the runner policy fetch and logs once that version
-policy checks are off for a development build. Released CLI builds retain the
-signed runner policy checks, regardless of the version reported by a runner.
+A development build skips signed version-policy checks and logs once per
+resolver that the checks are off. This applies to run admission, run pages,
+compatibility queries, engine selection and runner updates. A development build
+needs an explicit `--version` when upgrading a repository because it does not
+fetch the latest-version index. Released builds retain signed policy checks,
+regardless of the version reported by a runner or selected by a pipeline.
 
 Warnings appear in run output and the dashboard before enforcement, with signed
 reason and fix guidance. A revoked or unsupported release fails loudly and names

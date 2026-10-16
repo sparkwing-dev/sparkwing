@@ -211,7 +211,7 @@ func TestProductionLocalQueueAdvertisesUsableCapacity(t *testing.T) {
 		services, err := bindLocalController(ctx, binding)
 		if err == nil {
 			policy, ok := binding.Controller.RunnerPolicy.(*controller.SignedRunnerAdmission)
-			if !ok || policy.BuildVersion != installedVersion() {
+			if !ok || policy.Resolver == nil || policy.Resolver != binding.Controller.VersionPolicy.Resolver {
 				t.Fatal("local runner policy lost the CLI build identity")
 			}
 		}

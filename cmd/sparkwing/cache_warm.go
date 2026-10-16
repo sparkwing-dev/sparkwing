@@ -125,7 +125,7 @@ func resolveWarmEngine(ctx context.Context, dir string, sdk engine.SDKKind) (eng
 	if err != nil {
 		return engine.Resolved{}, err
 	}
-	resolver, err := engine.NewResolver(engine.Config{Mode: mode})
+	resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode})
 	if err != nil {
 		return engine.Resolved{}, err
 	}

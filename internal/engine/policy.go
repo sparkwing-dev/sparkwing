@@ -107,6 +107,9 @@ func (v VerifiedIndex) Policy() VersionIndex {
 	return p
 }
 
+// Development reports that the host build disabled release-policy enforcement.
+func (v VerifiedIndex) Development() bool { return v.development }
+
 // Evaluate applies signed restrictions without treating age as a revocation.
 func Evaluate(index VerifiedIndex, version string, now time.Time) ([]Notice, error) {
 	return evaluate(index, version, now, UpgradeCommand)
@@ -120,6 +123,9 @@ func EvaluateRunner(index VerifiedIndex, version string, now time.Time) ([]Notic
 const runnerHint = "Allow the runner to update automatically, then restart its existing service; check connectivity if the update fails."
 
 func evaluate(index VerifiedIndex, version string, now time.Time, hint string) ([]Notice, error) {
+	if index.development {
+		return nil, nil
+	}
 	if index.index.Format != VersionIndexFormat || len(index.signed.Body) == 0 {
 		return nil, &apierr.Error{Code: apierr.Unavailable, Message: "No verified version policy is available", Hint: "Check connectivity to sparkwing.dev and retry."}
 	}

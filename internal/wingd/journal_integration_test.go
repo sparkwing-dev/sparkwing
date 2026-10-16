@@ -116,7 +116,7 @@ func TestJournalRecordsChildLineageAndCancelScope(t *testing.T) {
 	} {
 		child := ensure(t, home, "")
 		lease := mustAcquire(t, child, wingwire.AdmissionRequest{
-			RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: rootLease.Token,
+			RunID: wingwire.HolderRef(member.id), ParentRunID: member.parent, ParentLeaseToken: rootLease.Token,
 		})
 		if member.id == "departed" {
 			departedLease = lease
