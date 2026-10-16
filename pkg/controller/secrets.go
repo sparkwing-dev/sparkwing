@@ -51,21 +51,21 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a ca
 	if s.secretsCipher == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "secret encryption is unavailable"}
 	}
-	binding := secretBinding{Team: tn.Team(), Name: req.Name, Scope: req.Pipeline, Shared: req.Shared, Masked: masked}
-	stored, err := sealSecret(s.secretsCipher, binding, req.Value)
+	cipher, ok := s.secretsCipher.(BoundCipher)
+	if !ok {
+		return credentialWriteError(errBoundCipherRequired)
+	}
+	stored, err := store.SealSecret(cipher, tn.Team(), store.Secret{
+		Name: req.Name, Value: req.Value, Principal: a.Principal.Capability.Subject.ID,
+		Pipeline: req.Pipeline, Masked: masked, Shared: req.Shared,
+	})
 	if err != nil {
 		return credentialWriteError(err)
 	}
-	if err := tn.WriteSecret(r.Context(), a, store.Secret{
-		Name:      req.Name,
-		Value:     stored,
-		Principal: a.Principal.Capability.Subject.ID,
-		Pipeline:  req.Pipeline,
-		Masked:    masked,
-		Shared:    req.Shared,
-	}); err != nil {
+	if err := tn.WriteSecret(r.Context(), a, stored); err != nil {
 		return credentialWriteError(err)
 	}
+
 	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	w.WriteHeader(http.StatusNoContent)
 	return nil

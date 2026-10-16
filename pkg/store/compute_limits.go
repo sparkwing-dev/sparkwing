@@ -52,23 +52,6 @@ const DefaultTeamCloudNodes = 100
 // safety: a per-team cap past this is a typo, not a decision.
 const maxTeamRunnerCap = 10_000
 
-// safety: an operator's per-team cap wins, so one team can be raised past the
-// fleet-wide guard without raising every team.
-func teamRunnerCapTx(ctx context.Context, tx *storeTx, team Team, limits ComputeLimits) (int64, error) {
-	var own int64
-	if err := tx.QueryRowContext(ctx, `SELECT billing_runner_cap FROM teams WHERE name = ?`, string(team)).
-		Scan(&own); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-	switch {
-	case own > 0:
-		return own, nil
-	case limits.ConcurrentRunners > 0:
-		return limits.ConcurrentRunners, nil
-	}
-	return DefaultTeamCloudNodes, nil
-}
-
 // EventKindComputeLimitBlocked records work a compute guard refused, so a run
 // that is waiting or was cut short says which cap it met.
 const EventKindComputeLimitBlocked = "compute_limit_blocked"
@@ -279,8 +262,7 @@ func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err err
 // principal, and reports whether the count reached the alarm.
 func (o *Operator) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
 	out := ComputeUsage{ByPrincipal: map[string]int64{}}
-	rows, err := o.s.query(ctx, `SELECT claim_principal, COUNT(*) FROM nodes
-	  WHERE credit_charged_through > 0 GROUP BY claim_principal`)
+	rows, err := o.s.query(ctx, `SELECT c.subject_id, COUNT(*) FROM billing_awards a JOIN capabilities c ON c.team=a.team AND c.prefix=a.capability_prefix WHERE a.metered=1 AND a.unit_kind='node' AND a.settled_at IS NULL GROUP BY c.subject_id`)
 	if err != nil {
 		return ComputeUsage{}, err
 	}
@@ -303,84 +285,6 @@ func (o *Operator) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
 	}
 	out.AlarmReached = limits.RunnerAlarm > 0 && out.Runners >= limits.RunnerAlarm
 	return out, nil
-}
-
-// safety: the guards run inside the claim's own transaction, under the ledger
-// lock the reservation already holds, so two runners polling at once cannot
-// both read a count below the cap and both claim against it.
-func (s *Store) enforceClaimComputeLimitsTx(
-	ctx context.Context, tx *storeTx, team Team, limits ComputeLimits, claimant ClaimIdentity, runID string, now time.Time,
-) error {
-	if limits.GlobalRunners > 0 {
-		if err := globalRunnerRefusal(ctx, tx, limits.GlobalRunners); err != nil {
-			return err
-		}
-	}
-	// safety: the count is the team's across every token, so minting more
-	// tokens cannot multiply the concurrency a team's spend limits assume, and
-	// it always applies: an unset guard is the default, never unlimited.
-	teamCap, err := teamRunnerCapTx(ctx, tx, team, limits)
-	if err != nil {
-		return err
-	}
-	var held int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE team = ? AND credit_charged_through > 0`, team).Scan(&held); err != nil {
-		return err
-	}
-	if held >= teamCap {
-		return &ComputeLimitError{
-			Limit: ComputeLimitConcurrentRunners, Cap: teamCap,
-			Observed: held, Scope: "team " + string(team), Principal: claimant.Principal,
-		}
-	}
-	if limits.RunSeconds > 0 {
-		elapsed, err := runElapsedSecondsTx(ctx, tx, team, runID, now)
-		if err != nil {
-			return err
-		}
-		if elapsed > limits.RunSeconds {
-			return &ComputeLimitError{
-				Limit: ComputeLimitRunSeconds, Cap: limits.RunSeconds,
-				Observed: elapsed, Scope: "run " + runID, Principal: claimant.Principal,
-			}
-		}
-	}
-	return nil
-}
-
-func globalRunnerRefusal(ctx context.Context, q rowQuerier, limit int64) error {
-	var total int64
-	if err := q.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0`).Scan(&total); err != nil {
-		return err
-	}
-	if total >= limit {
-		return &ComputeLimitError{
-			Limit: ComputeLimitGlobalRunners, Cap: limit,
-			Observed: total, Scope: "controller",
-		}
-	}
-	return nil
-}
-
-func runElapsedSecondsTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) (int64, error) {
-	var started int64
-	err := tx.QueryRowContext(ctx, `SELECT started_at FROM runs WHERE team = ? AND id = ?`, string(team), runID).Scan(&started)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	if started <= 0 {
-		return 0, nil
-	}
-	elapsed := now.UnixNano() - started
-	if elapsed < 0 {
-		return 0, nil
-	}
-	return elapsed / int64(time.Second), nil
 }
 
 func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID string) error {

@@ -1,5 +1,30 @@
 # C1 data contract
 
+## Shared lease fences and sealed credential writes
+
+Ordinary claim, renewal, release, reaper, secret, source and metric transactions
+share the controller-owner fence with PostgreSQL `FOR KEY SHARE`. Acquiring,
+renewing and releasing singleton leases take `FOR UPDATE`. Lease checks read
+database time after lock waits. A database clock read failure refuses commit.
+Reaping commits each target independently, continues after a target fails, and
+returns committed recoveries alongside the joined errors. Run admission refuses
+commit unless exactly one tenant run-number counter advances.
+
+`Tenant.WriteSecret` takes `SealedSecret`. `Tenant.WriteGitCredential` takes
+`SealedGitCredential`. Construct them with `store.SealSecret` or
+`store.SealGitCredential`, the bound cipher, tenant and row. Their row accessors
+return copies. Zero values and values sealed for another tenant are refused.
+The credential writer still rechecks current administration inside its transaction.
+
+The raw Store and Tenant `CreateToken` and `CreateTokenWith` methods are removed,
+as are `FinalizeNodeCredits`, `TokenMetered`, their mutable node/trigger credit
+columns, and `storage_reservations` and `storage_commit_receipts`. Capability
+provisioning and immutable billing awards own issuance, charging and refunds.
+Compute usage counts live metered node awards. Unused raw token identity, scope
+and lease-limit declarations are removed. Controller fixtures issue current
+capabilities, and the browser fixture uses the bootstrap-capability gate.
+
+
 ## Tenant event append and deployment compute controls
 
 `Store.AppendEvent` is removed. Select a tenant and use `Tenant.AppendEvent`.

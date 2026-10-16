@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc/githuboidctest"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
@@ -39,7 +42,7 @@ func newGHFixture(t *testing.T) *ghFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, time.Now().UTC())
+	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,16 +194,14 @@ func TestGitHubRunnerCredentialsPerTeamAreBounded(t *testing.T) {
 	f := newGHFixture(t)
 	owner := f.user("o", "olga@example.com")
 	f.bind(owner, widgetsJob)
-	tn, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
-	if err != nil {
-		t.Fatal(err)
-	}
 	for i := range 20 {
-		if _, _, err := tn.CreateToken(context.Background(), "github:42:Acme/Widgets", store.TokenKindRunner,
-			[]string{"nodes.claim"}, time.Hour, time.Now()); err != nil {
-			t.Fatalf("mint %d: %v", i, err)
+		job := widgetsJob
+		job.RunID = fmt.Sprint(1000 + i)
+		if _, code := f.exchange(f.gh.Token(job, ghAudience), owner.team); code != http.StatusOK {
+			t.Fatalf("mint %d: HTTP %d", i, code)
 		}
 	}
+
 	if _, code := f.exchange(f.gh.Token(widgetsJob, ghAudience), owner.team); code != http.StatusTooManyRequests {
 		t.Fatalf("21st credential = %d, want 429", code)
 	}

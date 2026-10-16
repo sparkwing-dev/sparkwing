@@ -56,16 +56,6 @@ func (s *Store) forUpdate() string {
 	return ""
 }
 
-type storeExecer struct{ s *Store }
-
-func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	return e.s.exec(ctx, q, args...)
-}
-
-func (e storeExecer) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	return e.s.query(ctx, q, args...)
-}
-
 func rewritePh(dialect Dialect, q string) string {
 	if dialect != DialectPostgres {
 		return q
@@ -117,6 +107,8 @@ func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
 }
 
 type storeTx struct {
+	clockErr     error
+	ctx          context.Context
 	deletingTeam Team
 	tx           *sql.Tx
 	dialect      Dialect
@@ -133,10 +125,36 @@ func (s *Store) now() time.Time {
 }
 
 func (t *storeTx) now() time.Time {
-	if t.store != nil {
+	if t.dialect == DialectSQLite && t.store.clock != nil {
 		return t.store.now()
 	}
-	return time.Now().UTC()
+	if t.clockErr != nil {
+		return time.Time{}
+	}
+	var ns int64
+	t.clockErr = t.QueryRowContext(t.ctx, databaseTimeSQL(t.dialect)).Scan(&ns)
+	if t.clockErr != nil {
+		return time.Time{}
+	}
+	return time.Unix(0, ns).UTC()
+}
+
+func databaseTimeSQL(d Dialect) string {
+	if d == DialectPostgres {
+		return `SELECT (extract(epoch FROM clock_timestamp())*1000000000)::bigint`
+	}
+	return `SELECT CAST(strftime('%s','now') AS BIGINT)*1000000000+CAST(substr(strftime('%f','now'),4) AS BIGINT)*1000000`
+}
+
+func (s *Store) databaseNow(ctx context.Context) (time.Time, error) {
+	if s.dialect == DialectSQLite && s.clock != nil {
+		return s.now(), nil
+	}
+	var ns int64
+	if err := s.queryRow(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(0, ns).UTC(), nil
 }
 
 // safety: Postgres takes a fresh snapshot per statement unless the isolation
@@ -158,7 +176,7 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &storeTx{tx: tx, dialect: s.dialect, store: s, snapshotRead: true}, nil
+	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s, snapshotRead: true}, nil
 }
 
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
@@ -166,12 +184,19 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &storeTx{tx: tx, dialect: s.dialect, store: s}, nil
+	return &storeTx{tx: tx, ctx: ctx, dialect: s.dialect, store: s}, nil
 }
 
 func (t *storeTx) forUpdate() string {
 	if t.dialect == DialectPostgres && !t.snapshotRead {
 		return " FOR UPDATE"
+	}
+	return ""
+}
+
+func (t *storeTx) forKeyShare() string {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
+		return " FOR KEY SHARE"
 	}
 	return ""
 }
@@ -193,7 +218,13 @@ func (t *storeTx) forNoKeyUpdate() string {
 	return ""
 }
 
-func (t *storeTx) Commit() error   { return t.tx.Commit() }
+func (t *storeTx) Commit() error {
+	if t.clockErr != nil {
+		_ = t.tx.Rollback()
+		return t.clockErr
+	}
+	return t.tx.Commit()
+}
 func (t *storeTx) Rollback() error { return t.tx.Rollback() }
 
 func (t *storeTx) Exec(q string, args ...any) (sql.Result, error) {

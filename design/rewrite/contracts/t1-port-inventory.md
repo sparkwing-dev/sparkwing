@@ -1,3 +1,25 @@
+## W1 store review fixes
+
+The token-table mint and mutable node/trigger billing tests retire with their APIs.
+Current claims, immutable billing awards, refunds and financial retention remain
+covered through their real-store suites. `TestComputeUsageFollowsLiveBillingAwards`
+tracks a metered claim through release. The retired API and schema checks reject
+the removed public writers, credit columns and storage tables.
+
+`TestUnitClaimRenewReleaseCapacityContentionProperty` generates capacity boundaries
+and races claims and renewal/release across two store handles in SQLite and
+PostgreSQL. `TestUnitOperationsShareControllerFence` holds a PostgreSQL shared
+fence open across real claim, renewal, release and reaping calls. Singleton release
+has a PostgreSQL contention check. Clock skew has a PostgreSQL database-time test.
+These PostgreSQL branches skip without `SPARKWING_TEST_PG_URL`.
+
+The claim, release and renewal negative fixtures check their refusal type and
+reason. Revocation goes through the committing API rather than corrupting the
+capability projection. Sealed credential properties generate values, exercise
+actual encryption, refuse plaintext and foreign sealed writes, and preserve
+row binding through a copied accessor. Reap failure and run-counter refusal
+checks preserve committed work and transaction rollback respectively.
+
 ## W1 tenant event and compute-control continuation
 
 The concurrent append tests now select their tenant. The generated

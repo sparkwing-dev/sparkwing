@@ -30,7 +30,7 @@ func (c *authorizationConnection) BeginTx(ctx context.Context, options driver.Tx
 }
 
 func (c *authorizationConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	for _, suffix := range []string{" FOR NO KEY UPDATE", " FOR UPDATE", " FOR SHARE"} {
+	for _, suffix := range []string{" FOR NO KEY UPDATE", " FOR UPDATE", " FOR SHARE", " FOR KEY SHARE"} {
 		if strings.HasSuffix(query, suffix) {
 			if c.options.ReadOnly {
 				return nil, errors.New("row lock in read-only authorization transaction")
@@ -38,6 +38,9 @@ func (c *authorizationConnection) QueryContext(ctx context.Context, query string
 			c.locks++
 			query = strings.TrimSuffix(query, suffix)
 		}
+	}
+	if query == databaseTimeSQL(DialectPostgres) {
+		query = databaseTimeSQL(DialectSQLite)
 	}
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
 }

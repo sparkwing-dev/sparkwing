@@ -1083,9 +1083,6 @@ type Node struct {
 	PlacementReason   string     `json:"placement_reason,omitempty"`
 	PlacementHoldFrom *time.Time `json:"placement_hold_from,omitempty"`
 
-	CreditCPUClassCores       int64 `json:"credit_cpu_class_cores,omitempty"`
-	CreditCPUClassMemoryBytes int64 `json:"credit_cpu_class_memory_bytes,omitempty"`
-
 	NeedsLabels   []string `json:"needs_labels,omitempty"`
 	PrefersLabels []string `json:"prefers_labels,omitempty"`
 
@@ -1177,7 +1174,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 const nodeSelectColumns = `run_id,node_id,status,outcome,deps_json,error,started_at,finished_at,
  ready_at,claimed_by,lease_expires_at,needs_labels,prefers_labels,requested_cores,requested_memory_bytes,requested_slots,
  offer_started_at,status_detail,last_heartbeat,failure_reason,exit_code,annotations_json,summary,cpu_nanos,max_rss_bytes,process_wall_nanos,
- generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,credit_cpu_class,spec_hash,generated_json`
+ generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,spec_hash,generated_json`
 
 func scanNodeRow(rs rowScanner, n *Node) error {
 	var deps, labels, prefers, annotations, generated []byte
@@ -1188,7 +1185,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&ready, &holder, &lease, &labels, &prefers, &n.RequestedCores, &n.RequestedMemoryBytes, &n.RequestedSlots,
 		&offered, &n.StatusDetail, &heartbeat, &n.FailureReason, &exit, &annotations, &n.Summary, &n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
 		&n.ClaimGeneration, &n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executed, &n.AttemptsConsumed,
-		&n.PlacementReason, &hold, &n.CreditCPUClassCores, &n.SpecHash, &generated)
+		&n.PlacementReason, &hold, &n.SpecHash, &generated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("job", "")
 	}
@@ -1211,7 +1208,6 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	n.LeaseExpiresAt, n.OfferStartedAt, n.LastHeartbeat = stateTime(lease), stateTime(offered), stateTime(heartbeat)
 	n.ExecutionStartedAt, n.PlacementHoldFrom = stateTime(executed), stateTime(hold)
 	n.ClaimedBy, n.Claimed = holder.String, holder.Valid
-	n.CreditCPUClassMemoryBytes = CPUClassMemoryBytes(n.CreditCPUClassCores)
 	if exit.Valid {
 		code := int(exit.Int64)
 		n.ExitCode = &code
@@ -1507,23 +1503,8 @@ type Trigger struct {
 	RunnerPin        string            `json:"-"`
 }
 
-// DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
-// CPU-bound pauses; short enough to re-queue dead runners.
+// DefaultLeaseDuration is the configured runner claim lease TTL.
 const DefaultLeaseDuration = 3 * time.Minute
-
-// MaxLeaseDuration caps the lease a claimant may ask for. The claim is
-// an authorization window, so the claimant must not pick how long its
-// own access lasts; longer requests are clamped, not rejected, because
-// a heartbeat renews well inside the cap.
-const MaxLeaseDuration = 10 * time.Minute
-
-// ClaimIdentity is the token a node claim answers to. TokenPrefix is
-// unique per token and is what the ownership predicates match on;
-// Principal is the display label, which two tokens may share.
-type ClaimIdentity struct {
-	Principal   string
-	TokenPrefix string
-}
 
 func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
 	argsJSON, _ := json.Marshal(t.Args)
@@ -1794,12 +1775,6 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
 
 const triggerWebhookReplayKeyColumn = "webhook_replay_key"
-
-// TokenPrefixIndexName is the unique index enforcing one token row per
-// prefix.
-const TokenPrefixIndexName = "idx_tokens_prefix" // #nosec G101 -- an index name, not a credential
-
-const tokenPrefixColumn = "prefix"
 
 // safety: two Postgres openers of an empty database would both create the
 // baseline, so each takes this lock before looking.

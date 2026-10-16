@@ -28,7 +28,7 @@ func TestControllerPipelines_ListIsTheCallersTeamOnly(t *testing.T) {
 	f := newCronsFixture(t)
 	ctx := context.Background()
 	tenantB := teamTenant(t, f.store, teamB)
-	readerB := teamToken(t, tenantB, "runs.read")
+	readerB := teamToken(t, f.store, tenantB, "runs.read")
 	own, err := f.store.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {
 		t.Fatalf("ForTeam default: %v", err)

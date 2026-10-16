@@ -125,11 +125,7 @@ CREATE TABLE nodes (
     max_rss_bytes BIGINT NOT NULL DEFAULT 0,
     process_wall_nanos BIGINT NOT NULL DEFAULT 0,
     cpu_nanos BIGINT NOT NULL DEFAULT 0,
-    credit_charged_through BIGINT NOT NULL DEFAULT 0,
-    credit_exhausted_anchor BIGINT NOT NULL DEFAULT 0,
-    credit_cpu_class BIGINT NOT NULL DEFAULT 0,
     team TEXT NOT NULL REFERENCES teams(name),
-    credit_billing_from BIGINT NOT NULL DEFAULT 0,
     optional BIGINT NOT NULL DEFAULT 0,
     retry_budget BIGINT NOT NULL DEFAULT 0,
     retry_backoff_ms BIGINT NOT NULL DEFAULT 0,
@@ -208,10 +204,6 @@ CREATE TABLE triggers (
     webhook_delivery TEXT NOT NULL DEFAULT '',
     webhook_replay_key TEXT NOT NULL DEFAULT '',
     github_check_run_id BIGINT NOT NULL DEFAULT 0,
-    credit_reserved_at BIGINT NOT NULL DEFAULT 0,
-    credit_reservation_id TEXT NOT NULL DEFAULT '',
-    credit_paid_seconds BIGINT NOT NULL DEFAULT 0,
-    credit_paid_amount_micro BIGINT NOT NULL DEFAULT 0,
     UNIQUE(team,id),
     FOREIGN KEY(team,id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
@@ -741,15 +733,6 @@ CREATE TABLE team_storage (
     PRIMARY KEY (team, store)
 );
 
-CREATE TABLE storage_reservations (
-    id TEXT NOT NULL PRIMARY KEY,
-    team TEXT NOT NULL REFERENCES teams(name),
-    store TEXT NOT NULL,
-    bytes BIGINT NOT NULL,
-    created_at BIGINT NOT NULL,
-    expires_at BIGINT NOT NULL
-);
-
 CREATE TABLE team_download_day (
     team TEXT NOT NULL REFERENCES teams(name),
     period TEXT NOT NULL,
@@ -851,18 +834,6 @@ CREATE TABLE uploads (
 CREATE TABLE team_build_trust (
     team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
     trust_local_builds BIGINT NOT NULL DEFAULT 0
-);
-
-CREATE TABLE storage_commit_receipts (
-    team TEXT NOT NULL REFERENCES teams(name),
-    store TEXT NOT NULL,
-    id TEXT NOT NULL,
-    bytes BIGINT NOT NULL,
-    committed_at BIGINT NOT NULL,
-    renew_request BLOB,
-    renew_status TEXT NOT NULL DEFAULT '',
-    renew_result BLOB,
-    PRIMARY KEY (team, store, id)
 );
 
 -- safety: account audit events precede team creation, so this operator table permits no team.
@@ -1392,13 +1363,9 @@ CREATE INDEX idx_node_metrics_ts ON node_metrics(team,ts);
 
 CREATE INDEX idx_nodes_outstanding ON nodes(team,status, ready_at, claimed_by) WHERE status != 'done';
 
-CREATE INDEX idx_nodes_credit_window ON nodes(team,credit_charged_through) WHERE credit_charged_through != 0;
-
 CREATE INDEX idx_credit_grants_kind_amount ON credit_grants(team,kind, amount_micro);
 
 CREATE INDEX idx_credit_charges_kind_amount ON credit_charges(team,kind, amount_micro, seconds);
-
-CREATE INDEX idx_nodes_credit_principal ON nodes(team,claim_principal, credit_charged_through);
 
 CREATE INDEX idx_runs_created ON runs(team,created_at);
 
@@ -1456,10 +1423,6 @@ CREATE INDEX idx_credit_checkouts_session ON credit_checkouts(team,session_id);
 
 CREATE INDEX idx_credit_freezes_team ON credit_freezes(team, released_at);
 
-CREATE INDEX idx_storage_reservations_team ON storage_reservations(team, store, expires_at);
-
-CREATE INDEX idx_storage_reservations_expiry ON storage_reservations(team,expires_at);
-
 CREATE UNIQUE INDEX idx_git_credentials_team_host ON git_credentials(team, host);
 
 CREATE INDEX idx_git_credential_releases_team ON git_credential_releases(team, released_at);
@@ -1469,8 +1432,6 @@ CREATE INDEX idx_identity_unlinks_account ON identity_unlinks(account_id);
 CREATE INDEX idx_uploads_expiry ON uploads(team,expires_at);
 
 CREATE INDEX idx_cron_schedules_github_identity ON cron_schedules(team, github_installation_id, github_repository_id);
-
-CREATE INDEX idx_storage_commit_receipts_age ON storage_commit_receipts(team,committed_at);
 
 CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro);
 

@@ -81,7 +81,6 @@ type AcquireSlotResponse struct {
 	QueueLength int
 	Holders     []ConcurrencyHolder
 }
-func ActingKind(kind, principal string) string
 type Actor struct {
 	Result           *capability.RecordedResult
 	ConsoleProof     *capability.ConsoleProof
@@ -352,10 +351,6 @@ type ClaimAward struct {
 	Generation       int64
 	LeaseExpiresAt   time.Time
 }
-type ClaimIdentity struct {
-	Principal   string
-	TokenPrefix string
-}
 type ClaimPlacement struct {
 	Preferences []PlacementPreference
 	Liveness    time.Duration
@@ -506,17 +501,6 @@ type CreditCharge struct {
 }
 const CreditChargeRefund = "refund"
 const CreditChargeReservation = "reservation"
-type CreditChargeResult struct {
-	Charge *CreditCharge
-
-	BalanceMicro int64
-
-	ExhaustedFor time.Duration
-
-	Cancel bool
-
-	ForgivenSeconds int64
-}
 const CreditChargeStorage = "storage"
 const CreditChargeUsage = "usage"
 type CreditGrant struct {
@@ -637,7 +621,6 @@ type CreditState struct {
 	BurnMicro                 int64
 	ExhaustedAt               *time.Time
 }
-const CreditsGrantScope = "credits.grant"
 const CreditsPerDollar = 1_000
 type CronDeclaration struct {
 	Cron         string
@@ -843,7 +826,6 @@ type EgressUsage struct {
 }
 const EgressUsageRetentionMonths = 13
 var ErrAccountExists = errors.New("store: an account with this email already exists")
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, credits.grant, or claims.launch scope")
 var ErrAgentNameTaken = errors.New("store: another live machine token of this team carries that agent name; revoke it before minting a new one")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
@@ -1185,7 +1167,6 @@ type LastOwnerError struct {
 }
 func (e *LastOwnerError) Error() string
 func (e *LastOwnerError) Unwrap() error
-const LaunchScope = "claims.launch"
 type LauncherAward struct {
 	Claim                  UnitClaim
 	Capability             capability.Capability
@@ -1208,7 +1189,6 @@ type LogSegments struct {
 	IncompleteReason string
 }
 func LooksLikeEmail(email string) bool
-func MachineTokenScopes() []string
 const Materialize ReconcileKind = "materialize"
 type MaterializeSource struct {
 	Kind   SourcePolicy
@@ -1232,7 +1212,6 @@ const MaxGitHubRunnerBindings = 20
 const MaxGitHubRunnerCredentials = 20
 const MaxInvitationEmailsPerDay = 5
 const MaxInvitationsPerDay = 100
-const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeMetricMarkers = 8
 const MaxNodeMetricSamples = 10_000
 const MaxOpenInvitations = 50
@@ -1276,7 +1255,6 @@ const MicroCreditsPerCredit = 100_000
 const MinBillableSeconds = 60
 const MinCardChargeCents = 50
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
-const MinSuppliedTokenLen = 32
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 const NewDailyCapCents = 2_500
@@ -1319,9 +1297,6 @@ type Node struct {
 
 	PlacementReason   string
 	PlacementHoldFrom *time.Time
-
-	CreditCPUClassCores       int64
-	CreditCPUClassMemoryBytes int64
 
 	NeedsLabels   []string
 	PrefersLabels []string
@@ -1542,7 +1517,6 @@ func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation
 func (o *Operator) WarmCPUClassCores(ctx context.Context) (int64, error)
 func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error)
 const OperatorHoldPrefix = "operator-"
-const OperatorScope = "admin"
 type OperatorStore interface {
 	AcquireSingletonLease(context.Context, string, string, time.Duration) (SingletonLease, error)
 	RenewSingletonLease(context.Context, SingletonLease, time.Duration) (SingletonLease, error)
@@ -2088,10 +2062,8 @@ var SchemaTables = []SchemaTable{
 	{Name: "signup_admissions", Owner: SchemaOperator},
 	{Name: "signup_gate", Owner: SchemaOperator},
 	{Name: "sparkwing_schema_version", Owner: SchemaOperator},
-	{Name: "storage_commit_receipts", Owner: SchemaTenant},
 	{Name: "storage_month_usage", Owner: SchemaTenant},
 	{Name: "storage_quotas", Owner: SchemaTenant},
-	{Name: "storage_reservations", Owner: SchemaTenant},
 	{Name: "storage_run_usage", Owner: SchemaTenant},
 	{Name: "team_build_trust", Owner: SchemaTenant},
 	{Name: "team_counters", Owner: SchemaTenant},
@@ -2106,16 +2078,20 @@ var SchemaTables = []SchemaTable{
 const SchemaTenant SchemaOwner = "tenant"
 const ScopeApprovalsWrite = "approvals.write"
 const ScopeLogsRead = "logs.read"
-const ScopeNodesClaim = "nodes.claim"
 const ScopeRunsControl = "runs.control"
 const ScopeRunsRead = "runs.read"
-const ScopeRunsState = "runs.state"
 const ScopeRunsWrite = "runs.write"
-const ScopeSecretsRead = "secrets.read"
 const ScopeTeamAdmin = "team.admin"
-const ScopeTriggersClaim = "triggers.claim"
 const ScopeTriggersRead = "triggers.read"
 func ScopesForRole(role Role) []string
+func SealGitCredential(cipher SecretSealer, team Team, row GitCredential) (SealedGitCredential, error)
+func SealSecret(cipher SecretSealer, team Team, row Secret) (SealedSecret, error)
+type SealedGitCredential struct {
+}
+func (s SealedGitCredential) Row() GitCredential
+type SealedSecret struct {
+}
+func (s SealedSecret) Row() Secret
 type Secret struct {
 	Name      string
 	Value     string
@@ -2133,6 +2109,9 @@ type SecretPreflightError struct {
 func (e *SecretPreflightError) Detail() string
 func (e *SecretPreflightError) Error() string
 func (e *SecretPreflightError) Unwrap() error
+type SecretSealer interface {
+	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
+}
 type Segment struct {
 	Index       int64
 	Offset      int64
@@ -2419,10 +2398,6 @@ func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Tea
 func (s *Store) CreateAccountTeam(ctx context.Context, a capability.Authorized, input TeamInfo) (TeamInfo, error)
 func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
-func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
-func (s *Store) CreateTokenWith(
-	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
-) (string, *Token, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error)
@@ -2432,7 +2407,6 @@ func (s *Store) Dialect() Dialect
 func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.ProvisionSpec) (bool, error)
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExchangeCapability(ctx context.Context, spec capability.ExchangeSpec) (capability.Issued, error)
-func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error)
@@ -2476,7 +2450,6 @@ func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, 
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
-func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) UnlinkAccountIdentity(ctx context.Context, a capability.Authorized, provider string) (int64, error)
 func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
 type SummaryWrite struct {
@@ -2559,12 +2532,6 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateAuthorizedDebugPause(ctx context.Context, a capability.Authorized, job, reason string, expires time.Time, key string) error
 func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Authorized, email string, role Role, key string) (Invitation, error)
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
-func (t *Tenant) CreateToken(
-	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time,
-) (string, *Token, error)
-func (t *Tenant) CreateTokenWith(
-	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
-) (string, *Token, error)
 func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error
 func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error
 func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
@@ -2737,46 +2704,13 @@ func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installatio
 func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
 func (t *Tenant) WriteActivity(ctx context.Context, ref NodeRef, actor Actor, detail string) error
 func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error
-func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, row GitCredential) (GitCredential, error)
+func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, sealed SealedGitCredential) (GitCredential, error)
 func (t *Tenant) WriteMetric(ctx context.Context, a capability.Authorized, sample MetricSample) error
 func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, rules []PoolAccessRule) (bool, error)
-func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, row Secret) error
+func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, sealed SealedSecret) error
 func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error
 func (t *Tenant) WriteUsage(ctx context.Context, a capability.Authorized, usage NodeUsage) error
 func TierQuota(tier string) (StorageQuota, bool)
-type Token struct {
-	Hash   string
-	Prefix string
-
-	Team       Team
-	Principal  string
-	Kind       string
-	Scopes     []string
-	CreatedAt  time.Time
-	ExpiresAt  *time.Time
-	LastUsedAt *time.Time
-	RevokedAt  *time.Time
-	ReplacedBy string
-
-	Metered bool
-
-	CreatedBy string
-}
-func TokenKindFromPrefix(raw string) string
-const TokenKindRunner = "runner"
-const TokenKindService = "service"
-const TokenKindTeam = "team"
-const TokenKindUser = "user"
-type TokenOptions struct {
-	Metered bool
-
-	CreatedBy string
-}
-const TokenPrefixIndexName = "idx_tokens_prefix"
-const TokenPrefixRunner = "swr"
-const TokenPrefixService = "sws"
-const TokenPrefixTeam = "swt"
-const TokenPrefixUser = "swu"
 type TransitionCause string
 type TransitionExtra struct {
 	OwnerPolicy *OwnerPolicyResult
@@ -2896,7 +2830,6 @@ func ValidCreditGrantKind(kind string) bool
 func ValidRunnerName(name string) bool
 func ValidateEventKind(kind string) error
 func ValidateGitHubTagPatterns(patterns []string) error
-func ValidateRawToken(raw, kind string) error
 func ValidateRunInvocation(r Run) error
 func ValidateSlug(slug string) error
 type VerifiedRunDelivery struct {
@@ -2991,8 +2924,6 @@ func (sharedPlanContracts) CanonicalHash(value any) (runspec.Hash, error)
 func (sharedPlanContracts) ResolveExpansion(in settings.ExpansionInputs) (map[string]runspec.JobExecutionSettings, error)
 func (sharedPlanContracts) ValidatePlan(raw json.RawMessage, ctx nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
 func (sharedSourceReleaseContracts) AuthorizeSourceRelease(request capability.SourceReleaseRequest, now time.Time) (capability.SourceReleaseAudit, error)
-func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
-func (e storeExecer) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
 func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error
 func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error

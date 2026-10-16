@@ -160,12 +160,12 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request, 
 	default:
 		return invalidEngineBody("kind is ssh or https")
 	}
-	sealed, err := sealSecret(cipher, gitCredentialBinding(t.Team(), host), secret)
+	cred.Secret = secret
+	sealed, err := store.SealGitCredential(cipher, t.Team(), cred)
 	if err != nil {
 		return credentialWriteError(err)
 	}
-	cred.Secret = sealed
-	stored, err := t.WriteGitCredential(r.Context(), a, cred)
+	stored, err := t.WriteGitCredential(r.Context(), a, sealed)
 	if err != nil {
 		return credentialWriteError(err)
 	}

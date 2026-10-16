@@ -60,7 +60,7 @@ func TestCredentialInventoryHTTPUsesAuthorizedTenant(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), store.GitCredential{Host: string(team) + ".invalid", Kind: store.GitCredentialHTTPS, Secret: string(team) + "-git-secret"}); err != nil {
+		if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, s, team), teststore.SealGitCredential(t, tenant.Team(), store.GitCredential{Host: string(team) + ".invalid", Kind: store.GitCredentialHTTPS, Secret: string(team) + "-git-secret"})); err != nil {
 			t.Fatal(err)
 		}
 	}

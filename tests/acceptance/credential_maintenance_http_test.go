@@ -531,11 +531,11 @@ func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	if err := teststore.SeedSecret(f.store, tenant.Team(), row, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	gitValue, err := cipher.SealBound("team", "git-credential:git.example.test", "git-credential", false, true, "private key")
+	gitValue, err := store.SealGitCredential(cipher, "team", store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: "private key"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, f.store, "team"), store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: gitValue}); err != nil {
+	if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, f.store, "team"), gitValue); err != nil {
 		t.Fatal(err)
 	}
 	handler := f.server.Handler()

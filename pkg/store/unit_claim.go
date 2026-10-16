@@ -49,7 +49,7 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 
 func lockClaimControllerTx(ctx context.Context, tx *storeTx) error {
 	var holder string
-	err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forUpdate()).Scan(&holder)
+	err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

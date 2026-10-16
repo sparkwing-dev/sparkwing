@@ -16,9 +16,9 @@ import (
 // CredentialWriter rechecks live member authority and tenancy in each committing transaction.
 type CredentialWriter interface {
 	Team() store.Team
-	WriteSecret(context.Context, capability.Authorized, store.Secret) error
+	WriteSecret(context.Context, capability.Authorized, store.SealedSecret) error
 	RemoveSecret(context.Context, capability.Authorized, string, string) error
-	WriteGitCredential(context.Context, capability.Authorized, store.GitCredential) (store.GitCredential, error)
+	WriteGitCredential(context.Context, capability.Authorized, store.SealedGitCredential) (store.GitCredential, error)
 	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string) (store.GitCredential, error)
 	RemoveGitCredential(context.Context, capability.Authorized, string) error
 }

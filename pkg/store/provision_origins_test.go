@@ -43,7 +43,7 @@ func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capab
 		spec.RegistrationID = "service:launcher"
 	case capability.ProvisionActions:
 		rewriteSchemaExec(t, s.db, `INSERT INTO github_runner_bindings(team,repository_id,repository_owner_id,repository,repo_key,created_at) VALUES ('a',42,7,'acme/widgets','gh:42',1)`)
-		spec = actionsSpec(s, "a", "workflow")
+		spec = actionsSpec(t, s, "a", "workflow")
 	}
 	return s, spec
 }

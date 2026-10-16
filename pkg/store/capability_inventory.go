@@ -11,6 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+// PrefixLen is the length of a displayed credential lookup prefix.
+const PrefixLen = 12
+
 // Team reports the deployment scope.
 func (o *Operator) Team() Team { return "" }
 

@@ -67,6 +67,9 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 		return SingletonLease{}, err
 	}
 	defer rollbackOrLog(tx)
+	if _, err := tx.ExecContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
+		return SingletonLease{}, err
+	}
 	if err := assertSingletonLeaseTx(ctx, tx, lease, lease.Name, tx.now()); err != nil {
 		return SingletonLease{}, err
 	}

@@ -13,7 +13,7 @@ func assertSingletonLeaseTx(ctx context.Context, tx *storeTx, lease SingletonLea
 	}
 	var holder string
 	var generation, until int64
-	err := tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name = ?`+tx.forUpdate(), name).Scan(&holder, &generation, &until)
+	err := tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name = ?`+tx.forKeyShare(), name).Scan(&holder, &generation, &until)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrLockHeld
 	}
@@ -35,16 +35,21 @@ func (o *Operator) ReleaseSingletonLease(ctx context.Context, lease SingletonLea
 	if !validSingletonWork(lease.Name) || lease.Holder == "" || lease.Generation <= 0 {
 		return ErrLockHeld
 	}
-	result, err := o.s.exec(ctx, `UPDATE leases SET holder='',until=0 WHERE name=? AND holder=? AND generation=?`, lease.Name, lease.Holder, lease.Generation)
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return ErrLockHeld
-	}
-	return nil
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT holder FROM leases WHERE name=?`+tx.forUpdate(), lease.Name); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE leases SET holder='',until=0 WHERE name=? AND holder=? AND generation=?`, lease.Name, lease.Holder, lease.Generation)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return ErrLockHeld
+		}
+		return nil
+	})
 }

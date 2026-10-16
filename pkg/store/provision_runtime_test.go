@@ -105,7 +105,11 @@ func TestRootProvisioningRechecksAuthorizerAndScope(t *testing.T) {
 			case "pools":
 				spec.ReservedPools = []string{"trusted"}
 			case "expired":
-				spec.ExpiresAt = new(s.now())
+				now, err := s.databaseNow(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				spec.ExpiresAt = &now
 			case "revoked":
 				rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, member.Authority.ID)
 			}

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -122,9 +124,7 @@ func (f *tenancyFixture) claimRun(auth, runID, extraRunJSON string) int64 {
 func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		ctx := context.Background()
-		raw, _, err := f.teamB.CreateToken(ctx, "b-spawner", store.TokenKindRunner, []string{
-			"runs.write", "runs.state", "triggers.claim",
-		}, 0, time.Now())
+		raw, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*"}, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "b-spawner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(time.Now(), 0), RegistrationID: "runner:" + string(f.teamB.Team()) + ":" + "b-spawner"})
 		if err != nil {
 			t.Fatal(err)
 		}

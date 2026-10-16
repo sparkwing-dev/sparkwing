@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Require sealed credential write types and remove raw token minting and duplicate credit settlement. Lease checks use database time and shared owner fences. Reaping continues after target failures. See [migration guide](docs/migrations/_unreleased.md#shared-lease-fences-and-sealed-credential-writes).
+
 - **store (Breaking):** Require an explicit tenant for event appends and an Operator handle for deployment compute controls. Remove unused compute helpers and the duplicate ready-job count. Both queue gauges use one state snapshot. See [migration guide](docs/migrations/_unreleased.md#tenant-event-append-and-deployment-compute-controls).
 
 - **store (Breaking):** Commit account team selection, creation, invitation acceptance and identity unlinking through live direct-session transactions. Remove their raw account and team-switch APIs and unused store helpers. See [migration guide](docs/migrations/_unreleased.md#account-mutations-and-raw-team-switch-retirement).
