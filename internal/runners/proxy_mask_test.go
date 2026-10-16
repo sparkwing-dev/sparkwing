@@ -10,9 +10,9 @@ import (
 
 func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 	for _, tc := range []struct {
-		name, value string
-		logged      []string
-		secrets     []string
+		name, consumer, value string
+		logged                []string
+		secrets               []string
 	}{
 		{
 			name:    "an @ in the password",
@@ -27,28 +27,32 @@ func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 			secrets: []string{"schemeless-pass"},
 		},
 		{
-			name:    "a comma in the password",
-			value:   "https://reader:npm-prefix,npm-suffix@cache.invalid/npm",
-			logged:  []string{"https://reader:npm-prefix,npm-suffix@cache.invalid/npm", "https://reader:npm-prefix", "npm-suffix@cache.invalid/npm", "npm-prefix,npm-suffix"},
-			secrets: []string{"npm-prefix", "npm-suffix"},
+			name:     "a comma in the password",
+			consumer: "npm_config_registry",
+			value:    "https://reader:npm-prefix,npm-suffix@cache.invalid/npm",
+			logged:   []string{"https://reader:npm-prefix,npm-suffix@cache.invalid/npm", "reader:npm-prefix,npm-suffix", "npm-prefix,npm-suffix"},
+			secrets:  []string{"npm-prefix", "npm-suffix"},
 		},
 		{
-			name:    "a pipe in the password",
-			value:   "https://reader:npm-prefix|npm-suffix@cache.invalid/npm",
-			logged:  []string{"npm-prefix|npm-suffix", "reader:npm-prefix|npm-suffix"},
-			secrets: []string{"npm-prefix", "npm-suffix"},
+			name:     "a pipe in the password",
+			consumer: "PIP_INDEX_URL",
+			value:    "https://reader:npm-prefix|npm-suffix@cache.invalid/npm",
+			logged:   []string{"npm-prefix|npm-suffix", "reader:npm-prefix|npm-suffix"},
+			secrets:  []string{"npm-prefix", "npm-suffix"},
 		},
 		{
-			name:    "an @ and a comma in the password",
-			value:   "https://reader:safe@private-tail,comma-suffix@cache.invalid/npm",
-			logged:  []string{"safe@private-tail,comma-suffix", "reader:safe@private-tail,comma-suffix"},
-			secrets: []string{"private-tail", "comma-suffix"},
+			name:     "an @ and a comma in the password",
+			consumer: "npm_config_registry",
+			value:    "https://reader:safe@private-tail,comma-suffix@cache.invalid/npm",
+			logged:   []string{"safe@private-tail,comma-suffix", "reader:safe@private-tail,comma-suffix"},
+			secrets:  []string{"private-tail", "comma-suffix"},
 		},
 		{
-			name:    "an @ and a pipe in the password",
-			value:   "https://reader:safe@private-tail|pipe-suffix@cache.invalid/npm",
-			logged:  []string{"safe@private-tail|pipe-suffix", "reader:safe@private-tail|pipe-suffix"},
-			secrets: []string{"private-tail", "pipe-suffix"},
+			name:     "an @ and a pipe in the password",
+			consumer: "PIP_EXTRA_INDEX_URL",
+			value:    "https://reader:safe@private-tail|pipe-suffix@cache.invalid/npm",
+			logged:   []string{"safe@private-tail|pipe-suffix", "reader:safe@private-tail|pipe-suffix"},
+			secrets:  []string{"private-tail", "pipe-suffix"},
 		},
 		{
 			name:    "an encoded password",
@@ -65,7 +69,11 @@ func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := secrets.NewMasker()
-			if _, err := procenv.Build(procenv.Install, procenv.Base{Ambient: []string{"GOPROXY=" + tc.value}, SubmitEnvAllow: []string{"GOPROXY"}, Masker: m}, procenv.Runtime{}); err != nil {
+			consumer := tc.consumer
+			if consumer == "" {
+				consumer = "GOPROXY"
+			}
+			if _, err := procenv.Build(procenv.Install, procenv.Base{Ambient: []string{consumer + "=" + tc.value}, SubmitEnvAllow: []string{consumer}, Masker: m}, procenv.Runtime{}); err != nil {
 				t.Fatal(err)
 			}
 			for _, line := range tc.logged {

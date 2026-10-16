@@ -96,6 +96,20 @@ func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease 
 	claim, actor := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: claim.Team}
 	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunTransition{RunID: claim.RunID, To: RunSuccess, Cause: RunFinish, Actor: actor}}
+	if cloud {
+		before, err := tenant.ReadSnapshot(t.Context(), claim.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
+			t.Fatal("unaccepted planner finished successfully")
+		}
+		after, err := tenant.ReadSnapshot(t.Context(), claim.RunID)
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatalf("refused success changed the run: %v", err)
+		}
+		finish.Transition.To = RunFailed
+	}
 	for replay := range 2 {
 		applied, err := tenant.FinishRunAndUnit(t.Context(), finish)
 		if err != nil || applied.Replayed != (replay == 1) {
@@ -117,7 +131,7 @@ func checkRecoveredOwnerFinish(t *testing.T, s *Store, demand UnitDemand, lease 
 		t.Fatal("terminal run awarded again")
 	}
 	after, err := tenant.ReadSnapshot(t.Context(), claim.RunID)
-	if err != nil || !reflect.DeepEqual(before, after) || after.Run.State != RunSuccess {
+	if err != nil || !reflect.DeepEqual(before, after) || after.Run.State != finish.Transition.To {
 		t.Fatalf("terminal recovery changed the verdict: %v", err)
 	}
 	unitBillingTotal(t, s, charged, true)

@@ -85,7 +85,7 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 	if err := prepareStateActorTx(ctx, tx, t.team, runID, actor, now); err != nil {
 		return err
 	}
-	if err := checkOwnerTx(ctx, tx, t.team, actor, runID, now); err != nil {
+	if err := checkOwnerLeaseTx(ctx, tx, t.team, actor, runID, now); err != nil {
 		return err
 	}
 	if err := lockStateRunTx(ctx, tx, t.team, runID); err != nil {
@@ -96,7 +96,7 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 		return err
 	}
 	now = tx.now()
-	if err := checkOwnerTx(ctx, tx, t.team, actor, runID, now); err != nil {
+	if err := checkOwnerLeaseTx(ctx, tx, t.team, actor, runID, now); err != nil {
 		return err
 	}
 	if run.FinishedAt != nil {

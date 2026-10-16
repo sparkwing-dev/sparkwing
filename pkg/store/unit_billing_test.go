@@ -373,6 +373,9 @@ func TestMeteredUnitOwnerWaitBillingFollowsPlacement(t *testing.T) {
 				*now = now.Add(10 * time.Second)
 			}
 			finish := FinishRunRequest{Unit: actor.Owner, Transition: RunTransition{RunID: "run", To: RunSuccess, Cause: RunFinish, Actor: actor}}
+			if kind == capability.UnitPlan {
+				finish.Transition.To = RunFailed
+			}
 			for replay := range 2 {
 				applied, err := (&Tenant{s: s, team: "a"}).FinishRunAndUnit(t.Context(), finish)
 				if err != nil || applied.Replayed != (replay == 1) {

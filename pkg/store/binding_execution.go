@@ -91,7 +91,7 @@ func bindingPipelineReferenceTx(ctx context.Context, tx *storeTx, c capability.C
 	b := c.Binding
 	node := c.Unit == capability.UnitNode && b.Kind == capability.BindingNode && b.NodeID != ""
 	owner := c.Unit == capability.UnitTrigger && b.Kind == capability.BindingTrigger || c.Unit == capability.UnitPlan && b.Kind == capability.BindingRun
-	if (!node && !owner) || !slices.Contains(c.Grants, capability.RefsRead) || b.Expansion != nil || b.RunID == "" || target.RunID != "" && target.RunID != b.RunID || target.SourceGeneration != 0 || target.Pipeline == "" {
+	if (!node && !owner) || !slices.Contains(c.Grants, capability.RefsRead) || b.Expansion != nil || b.RunID == "" || target.RunID != "" || target.SourceGeneration != 0 || target.Pipeline == "" {
 		return bindingRefusal()
 	}
 	snapshot, err := readSnapshotTx(ctx, tx, Team(c.Team), b.RunID)

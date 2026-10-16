@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // RunState is both the persisted status and the logical state; terminal states never reopen.
@@ -155,7 +156,11 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 			return Applied{}, err
 		}
 		if principal.Capability.Unit == capability.UnitPlan {
-			if row.Spec != nil || change.Cause != RunFinish || change.To != RunFailed && change.To != RunCancelled || change.OwnerPolicy != nil {
+			accepted, err := planAcceptedTx(ctx, tx, team, row.ID)
+			if err != nil {
+				return Applied{}, err
+			}
+			if accepted || change.Cause != RunFinish || change.To != RunFailed && change.To != RunCancelled || change.OwnerPolicy != nil {
 				return Applied{}, holderRefusal()
 			}
 			change.Reason, change.MaskedError = string(apierr.PlanFailed), "run preparation failed"
@@ -286,12 +291,23 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 		return checkOwnerTx(ctx, tx, team, change.Actor, row.ID, now)
 	case RunFinish:
 		if row.CancelRequestedAt == nil || change.To != RunCancelled {
-			if err := checkOwnerTx(ctx, tx, team, change.Actor, row.ID, now); err != nil {
+			if err := checkOwnerLeaseTx(ctx, tx, team, change.Actor, row.ID, now); err != nil {
 				return err
 			}
 		} else if change.Actor.Kind != ActorReaper {
-			if err := checkOwnerTx(ctx, tx, team, change.Actor, row.ID, now); err != nil {
+			if err := checkOwnerLeaseTx(ctx, tx, team, change.Actor, row.ID, now); err != nil {
 				return err
+			}
+		}
+		if change.Actor.Kind == ActorRunHost {
+			principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
+			if err != nil {
+				return err
+			}
+			if principal.Capability.Unit == capability.UnitPlan {
+				if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, change.Reason, now); err != nil {
+					return err
+				}
 			}
 		}
 		return checkRunVerdictTx(ctx, tx, team, row, change.To)
@@ -367,7 +383,11 @@ func checkRunVerdictTx(ctx context.Context, tx *storeTx, team Team, row RunRow, 
 	if pending != 0 {
 		return errors.New("run has unsettled jobs or expansions")
 	}
-	if row.Spec != nil {
+	accepted, err := planAcceptedTx(ctx, tx, team, row.ID)
+	if err != nil {
+		return err
+	}
+	if row.Spec != nil && (row.Dispatch != string(runspec.DispatchController) || row.Request.Request.Mode == runspec.IntakePublish || accepted) {
 		snapshot, err := readSnapshotTx(ctx, tx, team, row.ID)
 		if err != nil {
 			return err
@@ -513,6 +533,7 @@ func startOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef,
 }
 
 func cancelRunNodesTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor, reason string, now time.Time) error {
+	actor.Result = nil
 	snapshot, err := readSnapshotTx(ctx, tx, team, runID)
 	if err != nil {
 		return err

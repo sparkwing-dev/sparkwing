@@ -32,6 +32,19 @@ func checkPublisherTx(ctx context.Context, tx *storeTx, team Team, actor Actor, 
 }
 
 func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string, now time.Time) error {
+	if actor.Owner.Kind != OwnerController {
+		principal, err := tx.ResolveAuthority(ctx, actor.Authority)
+		if err != nil {
+			return err
+		}
+		if principal.Capability.Unit == capability.UnitPlan {
+			return holderRefusal()
+		}
+	}
+	return checkOwnerLeaseTx(ctx, tx, team, actor, runID, now)
+}
+
+func checkOwnerLeaseTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string, now time.Time) error {
 	ref := actor.Owner
 	if ref.RunID != "" && ref.RunID != runID {
 		return holderRefusal()
@@ -62,11 +75,11 @@ func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runI
 		return holderRefusal()
 	}
 	if c.Unit == capability.UnitPlan {
-		var sealed bool
-		if err := tx.QueryRowContext(ctx, `SELECT spec_json IS NOT NULL FROM runs WHERE team=? AND id=?`, team, runID).Scan(&sealed); err != nil {
+		accepted, err := planAcceptedTx(ctx, tx, team, runID)
+		if err != nil {
 			return err
 		}
-		if sealed || c.Binding.Kind != capability.BindingRun || !slices.Contains(c.Grants, capability.NodeResult) {
+		if accepted || c.Binding.Kind != capability.BindingRun || !slices.Contains(c.Grants, capability.NodeResult) {
 			return holderRefusal()
 		}
 	}
@@ -114,7 +127,7 @@ func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor Actor
 	}
 	switch actor.Kind {
 	case ActorController, ActorRunHost:
-		return checkOwnerTx(ctx, tx, team, actor, runID, now)
+		return checkOwnerLeaseTx(ctx, tx, team, actor, runID, now)
 	case ActorReaper:
 		return checkReaperTx(ctx, tx, actor, now)
 	case ActorOperator:
@@ -177,4 +190,10 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 
 func deletionActor(tx *storeTx, team Team, actor Actor) bool {
 	return team != "" && tx.deletingTeam == team && actor == (Actor{Kind: ActorOperator})
+}
+
+func planAcceptedTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
+	var accepted bool
+	err := tx.QueryRowContext(ctx, `SELECT plan_accepted_generation>0 FROM runs WHERE team=? AND id=?`, team, runID).Scan(&accepted)
+	return accepted, err
 }

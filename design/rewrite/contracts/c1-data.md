@@ -357,7 +357,18 @@ expansion lease fences remain independent of the terminal source's node lease.
 
 An unaccepted plan owner can finish its own run as failed or cancelled under its
 current planning lease. The store refuses success, start, owner-policy verdicts
-and any run with an accepted spec. It replaces caller error text with the fixed
+and any run with a positive `plan_accepted_generation`. A retry may carry its
+source spec while that generation remains zero; only accepting the current
+invocation's plan transfers ownership to the controller. Pre-handoff failure
+cancels the carried plan's unreleased jobs atomically and does not derive the
+preparation-failure verdict from those unexecuted jobs. A plan capability cannot
+release, execute, materialize or decide copied jobs before that handoff; its
+node authority is limited to cancellation. Run-level concurrency slots remain
+available under the planning lease; copied-job slots require executable owner
+authority. Caller-selected actor kinds cannot turn a planning lease into that
+authority. Internal job cancellations retain
+the owner fence without reinterpreting the validated run HTTP proof as a node
+HTTP proof. It replaces caller error text with the fixed
 preparation-failure or cancellation stage, then closes the planning unit and run
 in the same transaction. Exact failure replay remains valid after closure.
 
@@ -3268,7 +3279,9 @@ Declared pipeline-reference reads accept a live trigger or plan owner as well as
 a live work claim. The source process narrows the owner's declarations to the
 job being evaluated. Reading a result from another run additionally requires a
 declared pipeline and job, a terminal producer run and a successful or memoized
-producer job. Every lookup remains inside the credential's team. Eval's fixed
+producer job. A pipeline selector carries no run ID; a concrete producer lookup supplies
+its run and job separately and verifies their terminal state before checking
+the declaration. Every lookup remains inside the credential's team. Eval's fixed
 grants still allow only its own source-output read.
 
 The security invariants are: source metadata cannot outlive or escape its source

@@ -51,7 +51,7 @@ func checkMetadataWriterTx(ctx context.Context, tx *storeTx, team Team, ref Node
 		if !slices.Contains(c.Grants, capability.NodeReport) || actor.Kind != ActorRunHost {
 			return NodeRow{}, holderRefusal()
 		}
-		err = checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.now())
+		err = checkOwnerLeaseTx(ctx, tx, team, actor, ref.RunID, tx.now())
 		if err == nil {
 			run, readErr := readRunTx(ctx, tx, team, ref.RunID)
 			if readErr != nil {

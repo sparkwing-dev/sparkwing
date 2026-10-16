@@ -615,7 +615,11 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 	for _, guard := range edge.Guards {
 		switch guard {
 		case GuardOwner:
-			if err := checkOwnerTx(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
+			check := checkOwnerTx
+			if change.Cause == CauseCancel {
+				check = checkOwnerLeaseTx
+			}
+			if err := check(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
 				return err
 			}
 			if change.To == NodeReady {

@@ -34,7 +34,7 @@ func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, fence cap
 	if b.RunID == "" || b.Generation < 0 {
 		return holderRefusal()
 	}
-	if err := checkOwnerTx(ctx, tx, team, fence.actor, b.RunID, tx.now()); err != nil {
+	if err := checkCapacityOwnerTx(ctx, tx, team, fence); err != nil {
 		return err
 	}
 	if err := lockStateRunTx(ctx, tx, team, b.RunID); err != nil {
@@ -203,7 +203,7 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 	if err := advisoryLockTx(ctx, tx, fmt.Sprintf("capacity-admission:%d:%s:%s", len(team), team, key)); err != nil {
 		return err
 	}
-	if err := checkOwnerTx(ctx, tx, team, fence.actor, fence.binding.RunID, tx.now()); err != nil {
+	if err := checkCapacityOwnerTx(ctx, tx, team, fence); err != nil {
 		return err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT run_id,node_id FROM concurrency_holders WHERE team=? AND key=?
@@ -243,4 +243,12 @@ UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, fence.binding.R
 		}
 	}
 	return checkCapacityFenceTx(ctx, tx, team, fence)
+}
+
+func checkCapacityOwnerTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {
+	check := checkOwnerTx
+	if fence.binding.NodeID == "" {
+		check = checkOwnerLeaseTx
+	}
+	return check(ctx, tx, team, fence.actor, fence.binding.RunID, tx.now())
 }

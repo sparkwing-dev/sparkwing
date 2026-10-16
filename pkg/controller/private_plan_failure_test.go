@@ -71,7 +71,7 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 		case 1:
 			body.Cause = store.RunStart
 		case 2:
-			engineSQL(t, e.Store, `UPDATE runs SET spec_json=?,spec_hash='accepted',plan_json=?,plan_hash='plan',sealed_at=1`, []byte(`{}`), []byte(`{"jobs":[]}`))
+			engineSQL(t, e.Store, `UPDATE runs SET spec_json=?,spec_hash='accepted',plan_json=?,plan_hash='plan',sealed_at=1,plan_accepted_generation=1`, []byte(`{}`), []byte(`{"jobs":[]}`))
 		case 3:
 			engineSQL(t, e.Store, `UPDATE triggers SET generation=generation+1`)
 		case 4:
@@ -113,4 +113,26 @@ func FuzzPlanFailureCannotEscapeUnacceptedLease(f *testing.F) {
 			t.Fatalf("refused plan changed run: %v", err)
 		}
 	})
+}
+
+func TestPrivateRetryPlanFailureClosesCopiedJobs(t *testing.T) {
+	e, tenant, raw := privatePlanFailureFixture(t)
+	engineSQL(t, e.Store, `UPDATE runs SET spec_json=?,spec_hash='carried',plan_json=?,plan_hash='plan',sealed_at=1,plan_accepted_generation=0`, []byte(`{}`), []byte(`{"jobs":[{"id":"job"}]}`))
+	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+	body, err := json.Marshal(localhostwire.LocalRunTransition{To: store.RunFailed, Cause: store.RunFinish, Reason: "untrusted-stage", MaskedError: "unmasked-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(e.Store, nil).Handler()
+	for range 2 {
+		engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/local-host/finish", string(body), http.StatusOK)
+	}
+	row, err := tenant.ReadSnapshot(t.Context(), "run")
+	if err != nil || row.Run.State != store.RunFailed || row.Run.Spec == nil || len(row.Nodes) != 1 {
+		t.Fatalf("retry preparation failure did not finish run: %+v, %v", row.Run, err)
+	}
+	node := row.Nodes[0]
+	if node.Status != store.StatusDone || node.Outcome != store.NodeCancelled || node.StateActor.Result != nil {
+		t.Fatalf("retry failure left copied job executable: %+v", node)
+	}
 }

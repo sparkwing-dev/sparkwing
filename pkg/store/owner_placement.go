@@ -47,7 +47,7 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 			continue
 		}
 		var body []byte
-		if err := tx.QueryRowContext(ctx, `SELECT claim_observation_json FROM capabilities WHERE prefix=?`, ancestor.principal.Capability.Prefix).Scan(&body); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT claim_observation_json FROM capabilities WHERE team=? AND prefix=?`, ancestor.principal.Capability.Team, ancestor.principal.Capability.Prefix).Scan(&body); err != nil {
 			return UnitDemand{}, err
 		}
 		if len(body) == 0 {

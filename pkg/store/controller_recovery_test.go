@@ -3,6 +3,9 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -379,6 +382,91 @@ func TestControllerReconcileRenewsOnlyContinuousCapacity(t *testing.T) {
 			}
 			if expires != want {
 				t.Fatalf("%s %s expiry: %d, want %d", table, id, expires, want)
+			}
+		}
+	}
+}
+
+func TestRetryPlannerFailureBeforeHandoffProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(83, 117))
+	for range 12 {
+		tenant, request, _ := planFixture(t, runspec.DispatchController)
+		accepted, err := tenant.AcceptPlan(t.Context(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		retry, err := tenant.AdmitRun(t.Context(), IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}, Request: runspec.Request{Pipeline: "p", Lineage: runspec.Lineage{RetryOf: request.RunID}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := authorityRoot("retry-launcher", "")
+		root.Subject.Kind = capability.SubjectService
+		root.Grants = []capability.Grant{capability.ClaimsLaunch}
+		authorityPersist(t, tenant.s, root)
+		generation := int64(random.IntN(1000) + 1)
+		rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET generation=? WHERE team=? AND id=?`, generation, tenant.team, retry.RunID)
+		demand := UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: retry.RunID}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+		fundUnitClaim(t, tenant.s)
+		prior, stale := meteredUnitClaim(t, tenant.s, demand)
+		if err := tenant.s.ReleaseUnit(t.Context(), prior, prior.Award.CapabilityPrefix); err != nil {
+			t.Fatal(err)
+		}
+		current, actor := meteredUnitClaim(t, tenant.s, demand)
+		if actor.Owner.Generation != generation+2 {
+			t.Fatalf("retry generation reset: %+v", actor.Owner)
+		}
+		for _, kind := range []ActorKind{ActorRunHost, ActorHolder, ActorOperator, ActorController} {
+			forged := actor
+			forged.Kind = kind
+			if _, err := tenant.AcquireCapacity(t.Context(), AcquireSlotRequest{Key: "global:retry", HolderID: "job-slot", RunID: retry.RunID, NodeID: "job", Capacity: 1, Cost: 1}, CapacityBinding{RunID: retry.RunID, NodeID: "job"}, forged); err == nil {
+				t.Fatalf("planner acquired copied job capacity as %s", kind)
+			}
+		}
+		if _, err := tenant.AcquireCapacity(t.Context(), AcquireSlotRequest{Key: "global:retry", HolderID: "run-slot", RunID: retry.RunID, Capacity: 1, Cost: 1}, CapacityBinding{RunID: retry.RunID, Generation: actor.Owner.Generation}, actor); err != nil {
+			t.Fatalf("live planner lost run capacity: %v", err)
+		}
+		before, err := tenant.ReadSnapshot(t.Context(), retry.RunID)
+		if err != nil || before.Run.Spec == nil || before.Run.Spec.Hash != accepted.Spec.Hash {
+			t.Fatalf("retry lost its carried seal: %+v, %v", before.Run, err)
+		}
+		for _, rejected := range []FinishRunRequest{
+			{Unit: stale.Owner, Transition: RunTransition{RunID: retry.RunID, To: RunFailed, Cause: RunFinish, Actor: stale}},
+			{Unit: actor.Owner, Transition: RunTransition{RunID: retry.RunID, To: RunSuccess, Cause: RunFinish, Actor: actor}},
+		} {
+			if _, err := tenant.FinishRunAndUnit(t.Context(), rejected); err == nil {
+				t.Fatalf("invalid planner finished retry: %+v", rejected)
+			}
+		}
+		for _, rejected := range []NodeTransition{
+			{To: NodeReady, Cause: CauseRelease},
+			{To: NodeSkipped, Cause: CauseDependency},
+			{To: NodeFailed, Cause: CauseOwnerPolicy, Extra: TransitionExtra{OwnerPolicy: &OwnerPolicyResult{Kind: PolicyAdmissionFail}, Result: &NodeResult{Outcome: NodeFailed}}},
+			{To: NodeApprovalPending, Cause: CauseApprovalOpen},
+		} {
+			rejected.Ref, rejected.Actor = NodeRef{retry.RunID, "job"}, actor
+			if _, err := tenant.TransitionNode(t.Context(), rejected); err == nil {
+				t.Fatalf("planner changed copied job before handoff: %+v", rejected)
+			}
+		}
+		after, err := tenant.ReadSnapshot(t.Context(), retry.RunID)
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatalf("refused finish changed retry: %v", err)
+		}
+		actor.Result = &capability.RecordedResult{Actor: actor.Authority, Method: "POST", Pattern: "/api/v1/runs/{run}/finish", RunID: retry.RunID, Generation: actor.Generation, Digest: strings.Repeat("a", 64)}
+		finish := FinishRunRequest{Unit: current.Owner, Transition: RunTransition{RunID: retry.RunID, To: RunFailed, Cause: RunFinish, Actor: actor, MaskedError: "untrusted planner text"}}
+		for replay := range 2 {
+			applied, err := tenant.FinishRunAndUnit(t.Context(), finish)
+			if err != nil || applied.Replayed != (replay == 1) {
+				t.Fatalf("retry preparation failure: %+v, %v", applied, err)
+			}
+		}
+		after, err = tenant.ReadSnapshot(t.Context(), retry.RunID)
+		if err != nil || after.Run.State != RunFailed || after.Run.Spec.Hash != accepted.Spec.Hash || after.Run.Owner == nil || after.Run.Owner.Generation != current.Owner.Generation {
+			t.Fatalf("retry finish lost its seal or fence: %+v, %v", after.Run, err)
+		}
+		for _, node := range after.Nodes {
+			if node.Status != StatusDone || node.Outcome != NodeCancelled || node.StateActor.Result != nil {
+				t.Fatalf("preparation failure did not close copied job internally: %+v", node)
 			}
 		}
 	}

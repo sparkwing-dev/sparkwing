@@ -3,7 +3,6 @@ package procenv
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"regexp"
 	"runtime"
 	"slices"
@@ -223,32 +222,11 @@ func registerMasks(masker *secrets.Masker, name, value string, remote bool) erro
 	if remote && len(value) >= limits.OperatorEnvMaskMinLength {
 		values = append(values, value)
 	}
-	for _, address := range proxyAddresses(name, value) {
-		if address == "direct" || address == "off" {
-			continue
-		}
-		endpoint := address
-		if !strings.Contains(endpoint, "://") {
-			endpoint = "http://" + strings.TrimPrefix(endpoint, "//")
-		}
-		parsed, err := url.Parse(endpoint)
-		if err != nil {
-			return fmt.Errorf("invalid proxy URL in %q", name)
-		}
-		if parsed.User == nil {
-			continue
-		}
-		password, _ := parsed.User.Password()
-		values = append(values, value, address, parsed.User.String(), parsed.User.Username(), password)
-		_, authority, _ := strings.Cut(endpoint, "://")
-		if end := strings.IndexAny(authority, "/?#"); end >= 0 {
-			authority = authority[:end]
-		}
-		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
-			username, password, _ := strings.Cut(authority[:at], ":")
-			values = append(values, authority[:at], username, password)
-		}
+	credentials, err := proxyCredentials(name, value)
+	if err != nil {
+		return err
 	}
+	values = append(values, credentials...)
 	for _, value := range values {
 		if value == "" {
 			continue
@@ -259,19 +237,6 @@ func registerMasks(masker *secrets.Masker, name, value string, remote bool) erro
 		masker.Register(value)
 	}
 	return nil
-}
-
-func proxyAddresses(name, value string) []string {
-	switch strings.ToUpper(name) {
-	case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "PIP_INDEX_URL", "PIP_PROXY", "NPM_CONFIG_REGISTRY", "NPM_CONFIG_PROXY", "NPM_CONFIG_HTTPS_PROXY":
-		return []string{value}
-	case "GOPROXY":
-		return strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '|' })
-	case "PIP_EXTRA_INDEX_URL":
-		return strings.Fields(value)
-	default:
-		return nil
-	}
 }
 
 func inheritAttempt(env []string, masker *secrets.Masker) ([]string, error) {

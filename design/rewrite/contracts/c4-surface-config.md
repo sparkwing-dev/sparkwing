@@ -25,6 +25,11 @@
   credential components for URL and scheme-less proxy forms, including GOPROXY and
   PIP_INDEX_URL. A mask of only the whole string is insufficient when tools print
   just the embedded credential. Other credential-shaped input stays excluded.
+  One procenv endpoint parser splits GOPROXY on commas and pipes, pip extra indexes
+  on whitespace, and npm registries and single proxy/index settings as one endpoint.
+  It parses each authority through net/url and registers only raw and decoded
+  userinfo components; host, path and public list members remain public. The
+  separate remote-input whole-value masking rule still applies.
 - Schedule inference chooses batch only when no explicit admission class wins.
   It is a default, not a request override above pipeline code. The final guard
   grammar uses where:local/controller. Shared parsing and YAML alias traversal
