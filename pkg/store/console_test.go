@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func consoleFixture(t *testing.T) (*Store, *Console, capability.Authorized) {
@@ -29,6 +30,10 @@ func TestConsoleCommittingAuthorityProperty(t *testing.T) {
 	authorityPersist(t, s, root)
 	rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id,capability_prefix) SELECT 'derived',principal,scopes,created_at,expires_at,team,account_id,'root' FROM sessions WHERE hash='operator'`)
 	writes := []func(capability.Authorized) error{
+		func(a capability.Authorized) error {
+			_, err := c.ConsoleRefund(t.Context(), a, controllerwire.OperatorRefund{PaymentID: "pi_test", RefundID: "re_test", AmountCents: 1, Reason: "support"}, "once")
+			return err
+		},
 		func(a capability.Authorized) error {
 			_, err := c.ConsoleGrantCredit(t.Context(), a, CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 1, Reference: "console:ref", CreatedBy: "forged", Reason: "test"})
 			return err

@@ -34,20 +34,22 @@ func TestAuthGuideGrantVocabularyMatchesCredentialContract(t *testing.T) {
 }
 
 func TestAuthGuideCLIExamplesUseFinalGrammar(t *testing.T) {
-	body, err := docs.ReadRaw("credentials")
-	if err != nil {
-		t.Fatal(err)
-	}
 	commands := 0
-	for _, unit := range codeUnits(strings.ReplaceAll(body, "\\\n", "")) {
-		if !strings.HasPrefix(unit, "sparkwing ") {
-			continue
+	for _, topic := range []string{"credentials", "auth"} {
+		body, err := docs.ReadRaw(topic)
+		if err != nil {
+			t.Fatal(err)
 		}
-		args := strings.Fields(unit)
-		if _, err := clisurface.Parse("sparkwing", args[1:]); err != nil {
-			t.Errorf("auth example %q: %v", unit, err)
+		for _, unit := range codeUnits(strings.ReplaceAll(body, "\\\n", "")) {
+			if !strings.HasPrefix(unit, "sparkwing ") {
+				continue
+			}
+			args := strings.Fields(unit)
+			if _, err := clisurface.Parse("sparkwing", args[1:]); err != nil {
+				t.Errorf("auth example %q: %v", unit, err)
+			}
+			commands++
 		}
-		commands++
 	}
 	if commands == 0 {
 		t.Fatal("auth guide contains no CLI examples")

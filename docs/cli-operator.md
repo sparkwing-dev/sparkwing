@@ -10,6 +10,7 @@ Manage deployment operations
 
 ### Subcommands
 
+- `teams` -- Create teams under operator authority
 - `limits` -- Manage deployment operational ceilings
 - `object-store` -- Operate the controller's object-store request budget
 - `tokens` -- Manage deployment service credentials
@@ -117,6 +118,43 @@ Show the controller's object-store request budget
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+
+## `sparkwing operator teams`
+
+Create teams under operator authority
+
+### Subcommands
+
+- `create` -- Create a team and issue its first administrator credential
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+
+## `sparkwing operator teams create`
+
+Create a team and issue its first administrator credential
+
+Create a new team and its first team-admin credential atomically under operator authority. Existing or retired team slugs are refused.
+
+JSON includes the one-time capability and account metadata. Plain and pretty print the capability once. This operation is never retried automatically.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--team SLUG` | team (required) |
+| `--display-name NAME` | display name |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 
 ## `sparkwing operator tokens`

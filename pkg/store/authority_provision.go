@@ -42,7 +42,7 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 			return capability.Capability{}, err
 		}
 	}
-	if spec.Kind != capability.ProvisionMember && !(tx.rotatingRoot != nil && spec.Kind == capability.ProvisionBootstrap) {
+	if spec.Kind != capability.ProvisionMember && spec.Kind != capability.ProvisionTeamAdmin && !(tx.rotatingRoot != nil && spec.Kind == capability.ProvisionBootstrap) {
 		enrollment := spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionService
 		if tx.store.provisions == nil && !enrollment && !(spec.Kind == capability.ProvisionBootstrap && spec.Seed != "") {
 			return capability.Capability{}, authorityError(apierr.Unavailable, "root origin verification is not configured")
@@ -98,6 +98,23 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	switch spec.Kind {
 	case capability.ProvisionMember:
 		return checkMemberProvision(ctx, tx, spec, p)
+	case capability.ProvisionTeamAdmin:
+		if tx.rotatingRoot != nil {
+			return checkMemberProvision(ctx, tx, spec, p)
+		}
+		if !deployment || tx.createdTeam == nil || spec.Team != string(tx.createdTeam.Slug) || spec.Subject != (capability.Subject{Kind: capability.SubjectAccount, ID: tx.createdTeam.CreatedBy}) || spec.Metered || spec.ExpiresAt != nil || len(spec.ReservedPools) != 0 || spec.Repositories != nil || spec.Binding != (capability.Binding{Kind: capability.BindingNone}) || spec.Data != nil || spec.RegistrationID != "" {
+			return bindingRefusal()
+		}
+		allowed := ScopesForRole(RoleOwner)
+		if len(spec.Grants) != len(allowed) {
+			return bindingRefusal()
+		}
+		for i, grant := range spec.Grants {
+			if string(grant) != allowed[i] {
+				return bindingRefusal()
+			}
+		}
+		return nil
 	case capability.ProvisionBootstrap:
 		if tx.rotatingRoot != nil {
 			if !deployment {

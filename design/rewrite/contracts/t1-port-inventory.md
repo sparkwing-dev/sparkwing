@@ -1215,7 +1215,7 @@ Keep the old golden as source evidence in Git. Do not copy its expected statuses
 | `/pipelines/{name}/profile`, `otherPipeline`, credentials `github`, `machine`, `machine+node`, `machine+trigger` are the four annotated gap cells | Reverse permission. The sizing route requires authority for the exact bound repo and pipeline. |
 | Trigger claim reaches every node in its run | Keep `runOfTrigger`, but a competing holder still blocks writes in the transaction. |
 | Admin/open bypasses concurrency slot binding | Reverse permission. `slotOfBoundNode` applies without an admin bypass. |
-| `claim/input` ignores the node named in the path | Reverse permission. Require `ownNode` for the path and operation. |
+| `claim/input` ignores the node named in the path | Retired with C1 claim-input resolution. `TestOwnJobInputAndSlotHaveNoAdminBypass` and `TestLocalNodeAuthorityW8SurvivesStart` cover the surviving own-job data-authority boundary. |
 | Here and GitHub credentials disagree on `/services` | Unresolved. Frozen §10/L72 records the disagreement but gives neither permission answer. The lead must resolve `U-SERVICES` in the route appendix. These cells block launch acceptance. Do not derive their expected answers from the production policy table. |
 | Deps route converts fence failures to 500 | Replace with the shared `lock_held` or `illegal_transition` error. |
 | Live trigger/plan/work claims get 401 on 339 disallowed routes each | Reverse status. Live credentials lacking grant or binding get 403. Dead credentials get 401. |

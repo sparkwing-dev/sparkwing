@@ -300,6 +300,8 @@ func dispatchCommand(args []string) error {
 			return runOperatorObjectStore(args[2:])
 		case "tokens":
 			return runTokenCommand(context.Background(), args[2:], true)
+		case "teams":
+			return runOperatorTeams(args[2:])
 		}
 	case "doctor":
 		return runDoctor(args[1:])

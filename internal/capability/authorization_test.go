@@ -126,7 +126,7 @@ func TestDelegateCannotWiden(t *testing.T) {
 
 func TestOwnJobInputAndSlotHaveNoAdminBypass(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
-		{"POST", "/api/v1/runs/{run}/jobs/{job}/claim/input"},
+		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority"},
 		{"GET", "/api/v1/queue/groups/{group}/holder"},
 	} {
 		t.Run(tc.path, func(t *testing.T) {

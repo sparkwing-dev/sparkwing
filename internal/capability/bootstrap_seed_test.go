@@ -11,7 +11,7 @@ import (
 func TestProvisionSeedOriginProperty(t *testing.T) {
 	property := func(secret [32]byte) bool {
 		raw := ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
-		for _, kind := range []ProvisionKind{ProvisionBootstrap, ProvisionMember, ProvisionMachine, ProvisionService, ProvisionActions, ""} {
+		for _, kind := range []ProvisionKind{ProvisionBootstrap, ProvisionMember, ProvisionTeamAdmin, ProvisionMachine, ProvisionService, ProvisionActions, ""} {
 			spec := ProvisionSpec{Kind: kind, Seed: raw}
 			if (ValidateProvisionSeed(spec) == nil) != (kind == ProvisionBootstrap) {
 				return false

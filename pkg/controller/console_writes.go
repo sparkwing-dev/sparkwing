@@ -4,11 +4,13 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // ConsoleWriter rechecks a direct operator session in every committing transaction.
 type ConsoleWriter interface {
+	ConsoleRefund(context.Context, capability.Authorized, controllerwire.OperatorRefund, string) (store.CreditReversal, error)
 	ConsoleGrantCredit(context.Context, capability.Authorized, store.CreditGrantRequest) (store.CreditGrantResult, error)
 	ConsoleSetBillingTrust(context.Context, capability.Authorized, store.BillingTrustChange) (store.BillingStanding, error)
 	ConsoleFreeze(context.Context, capability.Authorized, string) (store.TeamCreditFreeze, error)

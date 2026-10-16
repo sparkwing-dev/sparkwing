@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -101,6 +102,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 		method, path, body string
 		status             int
 	}{
+		{"POST", "/api/v1/operator/teams/customer/refunds", `{"payment_id":"pi_test","refund_id":"re_test","amount_cents":10,"reason":"support"}`, 200},
 		{"POST", "/api/v1/operator/teams/customer/grants", `{"amount_cents":100,"reason":"promotion","key":"once"}`, 201},
 		{"POST", "/api/v1/operator/teams/customer/trust", `{"trust":"granted","reason":"review"}`, 200},
 		{"POST", "/api/v1/operator/teams/customer/freeze", `{"reason":"review"}`, 200},
@@ -169,4 +171,8 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (f *consoleWritesFake) ConsoleRefund(_ context.Context, a capability.Authorized, req controllerwire.OperatorRefund, key string) (store.CreditReversal, error) {
+	return store.CreditReversal{}, f.record(a, req)
 }

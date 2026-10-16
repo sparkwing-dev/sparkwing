@@ -267,7 +267,7 @@ func Scenarios() []Scenario {
 			ID: "credentials-matrix-node-child-slot", Group: "credentials",
 			Sections: []string{"§5.1", "A68"}, Requires: []Area{C1, C2},
 			Placements: []Placement{RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"catalog", "identities", "store"},
-			Steps:      []string{"Request claim/input for the caller's job and a different path job, then exercise childOfBoundNode and slotOfBoundNode with own and foreign resources.", "Repeat mismatched slot requests using a deployment-admin credential and tokenless local mode."},
+			Steps:      []string{"Request data authority for the caller's job and a different path job, then exercise childOfBoundNode and slotOfBoundNode with own and foreign resources.", "Repeat mismatched slot requests using a deployment-admin credential and tokenless local mode."},
 			Assertions: []string{"The path job is enforced; only the bound job's child and slot are accessible with the required grants.", "Admin and tokenless mode do not bypass slot binding; denied requests neither mutate nor disclose foreign resources."},
 		},
 		{

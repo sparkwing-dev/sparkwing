@@ -9,6 +9,37 @@ root provisioning, credential inventory and rotation, and OIDC identity reads
 to concrete store implementations. See
 [Credential management](credentials.md) for the CLI surface.
 
+## Cloud operations and test environments
+
+An operator can create a team and its first administrator without OAuth:
+
+```bash
+sparkwing operator teams create --team support-test --display-name Support --profile deployment -o json
+```
+
+The profile must present a deployment credential with `operator.tokens`.
+The matching HTTP operation is `POST /api/v1/operator/teams`, with
+`{"slug":"support-test","display_name":"Support test"}`. A configured
+operator's direct browser session may also call it with its CSRF proof.
+
+One transaction creates the team, a dedicated account without a provider
+identity, its owner membership, the first team-admin capability and a
+`team.created` audit record naming the operator. The credential has the owner's
+team permissions and no deployment permissions. Its membership and revocation
+remain live authorization checks. Rotate and revoke it through the team token
+commands.
+
+JSON returns `team`, `account_id`, `capability`, `prefix` and `grants`.
+Plain and pretty output print the capability once. Store that credential in
+the recipient's private connection profile. The server persists its digest,
+not the bearer. The operation refuses an existing or retired team slug with
+`conflict` and makes no changes. It never retries automatically because a lost
+response cannot recover the one-time credential.
+
+This is the Cloud operations, support and test-environment path. Local mode
+uses its default team and OS-verified socket. Self-hosted controller onboarding
+is outside the launch offering.
+
 ## Controller authorization
 
 Embedded controllers supply `WithMetricWriter` for job metric and usage writes,
@@ -600,7 +631,7 @@ deployment profile. Console sessions retain their separate account gate.
 
 Operator-console sessions own trust changes, credit grants, freezes, refunds
 and account deletion. Deployment tokens manage operational limits, object-store
-settings and deployment service credentials through their separate routes.
+settings, deployment service credentials and new-team onboarding through their separate routes.
 They cannot exchange themselves for console powers.
 
 ### Break-glass

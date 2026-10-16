@@ -1,5 +1,20 @@
 # C1 data contract
 
+## Operator team creation (decision 114)
+
+Store.CreateOperatorTeam(ctx, Authorized, slug, displayName) returns one
+capability.Issued only after commit. It re-resolves the operator, creates a
+dedicated account and owner membership, and calls Store.Issue with the trusted
+ProvisionTeamAdmin origin. A transaction-local created-team record confines
+that origin to the exact new team and account. The complete owner grant table
+applies. Ordinary rotation rechecks current membership.
+
+The existing createTeamTx takes an explicit actor for team.created. Account
+creation paths pass their account ID. Operator onboarding passes the verified
+operator ID. The registry, account, membership, capability and audit are one
+transaction. Existing and tombstoned slugs fail without writes. No schema or
+financial grant changes. C2 records the route and full issuance boundary.
+
 ## Shared lease fences and sealed credential writes
 
 Ordinary claim, renewal, release, reaper, secret, source and metric transactions
@@ -3056,6 +3071,20 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 `Store.SetTokenMetered` is removed. Root capability metering uses C2's operator
 route. Legacy claim selection shares one private metering query until those
 claim APIs are retired.
+
+## Operator refund and output read integration
+
+Tenant.ReadJobOutput and ReadChildOutput share one current-authority snapshot
+and committed output-record selector. The controller verifies the selected
+physical bytes through its configured blob store. The obsolete claim-input
+policy is removed with the retired C1 reader.
+
+Console.ConsoleRefund accepts capability.Authorized, controllerwire.OperatorRefund
+and the request key, returning CreditReversal. It runs through consoleWrite,
+resolves the persisted paid grant before any reversal and checks its team
+against the path. Its reference matches verified refund settlement. A receipt
+in business_events retains the normalized request digest and result. The
+existing ledger lock serializes reads, replay, reversal and receipt commit.
 
 <!-- design:end -->
 

@@ -175,20 +175,13 @@ type ProvisionKind string
 const (
 	ProvisionBootstrap ProvisionKind = "operator_bootstrap"
 	ProvisionMember    ProvisionKind = "member_token"
+	ProvisionTeamAdmin ProvisionKind = "operator_team_admin"
 	ProvisionMachine   ProvisionKind = "machine_registration"
 	ProvisionService   ProvisionKind = "service_registration"
 	ProvisionActions   ProvisionKind = "github_actions_binding"
 )
 
-// ProvisionSpec is trusted issuer input, never decoded from a credential issuance HTTP body.
-// Issue rechecks the bootstrap gate, membership, registration or verified OIDC binding in its transaction.
-// The authority limits grants and pools; only operator authority sets Metered or service grants.
-// Trusted origins are: bootstrap gate for operator_bootstrap; current account
-// session and membership for member_token; authorized enrollment for
-// machine_registration; deployment operator authority for service_registration;
-// and verified repository/ref/SHA/workflow identity for github_actions_binding.
-// Authority records that authorizer; provisioned roots have no revocation parent.
-// Ordinary DelegateSpec cannot use this exception to detach from its parent.
+// ProvisionSpec is trusted root-issuance input whose origin Store.Issue rechecks in its transaction.
 type ProvisionSpec struct {
 	Seed           string `json:"-"`
 	Kind           ProvisionKind

@@ -78,18 +78,14 @@ func (c *NativeProcessClient) OIDC(ctx context.Context, audience string) (string
 
 // Output reads a persisted result under the controller's declared read relation.
 func (c *NativeProcessClient) Output(ctx context.Context, run, job string) (json.RawMessage, error) {
-	var result struct {
-		Output json.RawMessage `json:"output"`
-	}
+	var result controllerwire.JobOutput
 	err := c.transport.request(ctx, "GET", "/api/v1/runs/{run}/jobs/{job}/output", "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/output", "", nil, &result)
 	return result.Output, err
 }
 
 // ChildOutput reads a committed result through its creating job's child relation.
 func (c *NativeProcessClient) ChildOutput(ctx context.Context, run, job string) (json.RawMessage, error) {
-	var result struct {
-		Output json.RawMessage `json:"output"`
-	}
+	var result controllerwire.JobOutput
 	err := c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/output", "", nil, &result)
 	return result.Output, err
 }

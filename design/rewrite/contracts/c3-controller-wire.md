@@ -2,6 +2,17 @@
 
 <!-- design:begin -->
 
+## Operator team creation (decision 114)
+
+OperatorManager.CreateOperatorTeam(ctx, OperatorTeamCreate) returns
+OperatorTeamCreated through POST `/api/v1/operator/teams`. Input contains
+`slug` and optional `display_name`. Output contains `team`, `account_id`,
+`capability`, `prefix` and `grants`. The response carries the first admin's
+one-time credential. C2's RetryNever policy prevents transport and HTTP retries.
+A lost response cannot be recovered by repeating creation. Existing or retired
+team slugs return conflict. C2 and C1 specify operator checks and the atomic
+creation transaction.
+
 `ExecutionJob.output_record` and `manifest_record` carry C1's exact committed
 record keys on private reconciliation and expansion responses. Terminal results
 may carry selectors with attempt zero. `ReuseSource.result` carries their run,
@@ -831,6 +842,18 @@ W3's retained scheduler still uses `StateStoreOld`.
 The controller's step handler consumes `StepReportRequest` and returns
 `StepRecorded`. CLI execution reports steps under the independently awarded node
 bearer. Owner authority never substitutes for that node's reporting fence.
+
+## Output and console refund wire integration
+
+JobOutput returns an output JSON value from both the same-run/declared-ref and
+child output endpoints. The native process client consumes that shared shape.
+
+OperatorRefund carries payment_id, refund_id, amount_cents and reason.
+POST /api/v1/operator/teams/{team}/refunds requires an Idempotency-Key and a
+direct configured operator-console session with CSRF. It records an already
+completed provider refund and returns OperatorRefundRecorded with team,
+grant_id, paid_micro, reversed_micro, balance_micro and created. C1 commits its
+receipt with the reversal and operator audit. It does not call the provider.
 
 <!-- design:end -->
 

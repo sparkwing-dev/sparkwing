@@ -74,7 +74,7 @@ func (c *nodeClaims) principal(ctx context.Context, node string, generation, att
 }
 
 func (c *nodeClaims) authenticate(ctx context.Context, owner capability.Principal, award nodeClaim, node string, attempt int64) (capability.Principal, error) {
-	route, ok := capability.LookupRoute("POST", "/api/v1/runs/{run}/jobs/{job}/claim/input")
+	route, ok := capability.LookupRoute("GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority")
 	if !ok {
 		return capability.Principal{}, errors.New("local node input policy is unavailable")
 	}

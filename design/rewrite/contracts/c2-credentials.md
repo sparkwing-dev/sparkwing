@@ -4,6 +4,37 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Operator team creation (decision 114)
+
+POST `/api/v1/operator/teams` is a deployment-owned AuthCapability route with
+RetryNever. It accepts deployment `operator.tokens` or a direct configured
+console session with `operator.console` and CSRF. Team/member, machine,
+execution and local-peer authority cannot create a team through this operation.
+The CLI is `sparkwing operator teams create --team SLUG [--display-name NAME]
+[--profile NAME]`. Plain and pretty output emit the one-time capability.
+
+The strict OperatorTeamCreate wire object contains `slug` and optional
+`display_name`. OperatorTeamCreated returns `team`, `account_id`, `capability`,
+`prefix` and `grants`. OperatorManager.CreateOperatorTeam uses the shared
+transport and never retries. Server.New binds its route to the concrete
+Store.CreateOperatorTeam without an optional production adapter.
+
+The store re-resolves operator authority in its transaction, generates a
+dedicated account without an OAuth identity and creates its owner membership.
+It calls Store.Issue with the trusted ProvisionTeamAdmin (`operator_team_admin`)
+origin. That origin requires the exact team and account just created in the
+same transaction, the current operator and the complete owner grant table.
+Caller-selected subjects, grants, metering, scope and expiry are refused.
+Ordinary ProvisionCapability cannot use this origin to mint another admin for
+an existing team. Rotation retains the origin and uses member rotation rules.
+The root has no revocation parent and its created_by names the operator.
+
+Creation, membership, root issuance and the team.created business audit commit
+together. The audit's account is the new administrator and its actor is the
+operator. A used or retired slug returns conflict and rolls everything back.
+No schema, OAuth identity, verification claim or financial credit is added.
+The operation is the Cloud operations/support and test-environment path.
+
 ### Lead decisions: payment and bootstrap boundaries
 
 C2 extends PaymentEvent with verified non-checkout facts. The accepted provider
@@ -2843,6 +2874,46 @@ or a permissive local fallback.
 The implemented declarations now live in capability/authentication_types.go,
 capability/management.go and controller/policy.go, engine.go and data.go. Their
 former *_contract.go files are deleted. W9's client declarations are unchanged.
+
+## Output reads and retired claim input
+
+`GET /api/v1/runs/{run}/jobs/{job}/output` returns `JobOutput` with verified
+JSON bytes selected by `Tenant.ReadJobOutput`. The store reloads the complete
+live authority chain, membership, binding and selected record in one snapshot.
+Member reads require current runs.read. Claims require the declared dependency,
+recovery, generated-group, expansion-source or pipeline-reference relation in
+C1. Request hints cannot select a different relation. Child output uses the
+same record reader after checking its creating-job relation. Missing, expired,
+corrupt and unreadable records fail. Neither route returns a signed legacy
+output grant.
+
+C1 retired ResolveClaimInput and its wire types. The stale controller
+`POST /api/v1/runs/{run}/jobs/{job}/claim/input` policy is removed with them.
+The local node-credential probe now uses the existing
+`GET /api/v1/runs/{run}/local-host/nodes/{job}/data-authority` policy. It retains
+only data.read, ownNode and sensitive liveness. No transport alias remains.
+
+## Console refund records
+
+`POST /api/v1/operator/teams/{team}/refunds` records a completed provider refund.
+It accepts `OperatorRefund` with payment_id, refund_id, positive amount_cents
+and reason, plus an Idempotency-Key header. It requires a configured direct
+operator-console session and CSRF. It makes no provider request.
+
+`ConsoleWriter.ConsoleRefund` is implemented by `store.Console`. The committing
+transaction rechecks the direct session and configured account, resolves the
+payment's current-mode persisted paid grant and refuses a different path team.
+The existing reversePaymentTx owns prior reversals and the paid-total bound.
+Its reference is `refund:<mode>:<refund_id>`, shared with verified provider
+settlement, so later delivery cannot debit the same refund twice.
+
+The existing business_events table retains operator.refund_recorded with the
+operator, reason, normalized request digest and result. Its subject hashes the
+operator and request key, scoped by path team. Exact replay returns the receipt.
+Changed request or mode conflicts. Authority is rechecked even on replay.
+The ledger reversal, its existing audit and the request receipt commit together.
+OperatorRefundRecorded returns team, optional grant_id, paid_micro,
+reversed_micro, balance_micro and created. No schema change is needed.
 
 <!-- design:end -->
 
