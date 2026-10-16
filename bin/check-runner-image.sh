@@ -11,7 +11,7 @@ grep -v '^#' "${RUNNER_TOOLS:-/usr/local/share/sparkwing/runner-tools}" | while 
     fi
 done
 
-for tool in bash git ssh curl tar gzip xz make jq unzip go; do
+for tool in bash git ssh curl tar gzip xz make jq unzip go nc nsenter; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "runner image is missing $tool" >&2
         exit 1

@@ -29,20 +29,21 @@ import (
 
 // NativeConfig binds one authenticated award to shared state and authority services.
 type NativeConfig struct {
-	Local     func(store.NodeRow) bool
-	Home      string
-	Version   string
-	Store     nodehost.NativeHostStore
-	Parent    capability.AuthenticationReader
-	Bindings  capability.BindingChecker
-	Principal capability.Principal
-	Refresh   func(context.Context) (capability.Principal, error)
-	Renew     func(context.Context, string, bool) (store.LeaseBeat, error)
-	Source    source.Options
-	Services  func(context.Context, capability.Principal, nodeproto.JobSpec) (nodehost.ProcessServices, error)
-	Storage   func(context.Context, capability.Principal) (nodehost.StorageBinding, error)
-	Logs      func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
-	Evaluate  func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error)
+	Local          func(store.NodeRow) bool
+	Home           string
+	Version        string
+	Store          nodehost.NativeHostStore
+	Parent         capability.AuthenticationReader
+	Bindings       capability.BindingChecker
+	Principal      capability.Principal
+	Refresh        func(context.Context) (capability.Principal, error)
+	Renew          func(context.Context, string, bool) (store.LeaseBeat, error)
+	Source         source.Options
+	Services       func(context.Context, capability.Principal, nodeproto.JobSpec) (nodehost.ProcessServices, error)
+	Storage        func(context.Context, capability.Principal) (nodehost.StorageBinding, error)
+	Logs           func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
+	Evaluate       func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error)
+	ExpansionActor func(context.Context, nodehost.RunInput, store.NodeRow) (store.Actor, error)
 }
 
 // NativeServices constructs the shared host services without opening a state store.
@@ -65,7 +66,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	if _, err := current(ctx); err != nil {
 		return runners.NativeServices{}, err
 	}
-	if cfg.Principal.Capability.Unit != capability.UnitNode && cfg.Local == nil {
+	if cfg.Principal.Capability.Unit == capability.UnitTrigger && cfg.Local == nil {
 		return runners.NativeServices{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "owner hosting requires canonical placement eligibility"}
 	}
 	if cfg.Services == nil || cfg.Storage == nil || cfg.Logs == nil {
@@ -123,6 +124,8 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		if typescript {
 			sourceOptions.SDK = engine.TypeScriptSDK
 		}
+	} else {
+		sourceOptions.SDK = ""
 	}
 	authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: cfg.Parent, Bindings: cfg.Bindings})
 	if err != nil {
@@ -164,11 +167,11 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	}}
 	follower := nodehost.StateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	config := nodehost.NativeHostConfig{
-		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
+		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
 		Validation: nodeproto.ValidationContext{Placement: store.RequestPlacement(run.Run.Request.Request)},
 		Admission:  admission,
-		Owner:      nodehost.OwnerHost{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
+		Owner:      nodehost.OwnerHost{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt, ExpansionActor: cfg.ExpansionActor},
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},

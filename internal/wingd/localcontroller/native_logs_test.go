@@ -13,11 +13,62 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+type completingUnitStore struct {
+	nodehost.NativeHostStore
+	commit func() error
+}
+
+func (s completingUnitStore) AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error) {
+	return store.AcceptedPlan{}, s.commit()
+}
+
+func (s completingUnitStore) AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error) {
+	return store.AcceptedExpansion{}, s.commit()
+}
+
+func TestCloudUnitPublishesLogsBeforeRetiringItsLease(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval} {
+		t.Run(string(kind), func(t *testing.T) {
+			records := &nativeLogRecords{objects: map[string][]byte{}}
+			logs := &localLogs{run: "run", masker: secrets.NewMasker(), current: func(context.Context) (capability.Principal, error) {
+				b := capability.Binding{RunID: "run", Generation: 1}
+				if kind == capability.UnitEval {
+					b.NodeID = "source"
+					b.Expansion = &capability.LeaseRef{Kind: kind, ID: "unit", Holder: "eval", Generation: 7}
+				}
+				return capability.Principal{Capability: capability.Capability{Team: "team", Unit: kind, Binding: b}}, nil
+			}, upload: func(_ context.Context, _ capability.Principal, subject blob.LogSubject) (logseg.Uploader, error) {
+				records.view.Subject = subject
+				return records, nil
+			}}
+			if err := logs.write(t.Context(), "run", "", nodeproto.FrameLog{Message: "planning"}); err != nil {
+				t.Fatal(err)
+			}
+			state := logHostStore{NativeHostStore: completingUnitStore{commit: func() error {
+				if !records.view.Complete {
+					return errors.New("unit lease retired before log publication")
+				}
+				return nil
+			}}, logs: logs, unit: kind}
+			var err error
+			if kind == capability.UnitPlan {
+				_, err = state.AcceptPlan(t.Context(), store.PlanAcceptance{})
+			} else {
+				_, err = state.AcceptExpansion(t.Context(), store.ExpansionSubmission{})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 type nativeLogRecords struct {
 	view    store.LogSegments
@@ -37,13 +88,16 @@ func (r *nativeLogRecords) PutSegment(_ context.Context, segment logseg.Segment,
 	r.objects[key] = bytes.Clone(body)
 	return nil
 }
+
 func (r *nativeLogRecords) PutManifest(_ context.Context, manifest logseg.Manifest) error {
 	r.view.Complete = manifest.Status == logseg.StatusComplete
 	return nil
 }
+
 func (r *nativeLogRecords) ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error) {
 	return r.view, nil
 }
+
 func (r *nativeLogRecords) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(r.objects[key])), nil
 }

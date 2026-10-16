@@ -67,7 +67,7 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 			return store.ReconciledNode{}, errors.New("reconciliation returned an unfinished result")
 		}
 	case store.Dispatch:
-		if !request.MaterializeOnly || row.Status != store.StatusPending || row.Outcome != "" || row.ClaimedBy != "" {
+		if row.Status != store.StatusPending || row.Outcome != "" || row.ClaimedBy != "" || !request.MaterializeOnly && row.ReadyAt == nil {
 			return store.ReconciledNode{}, errors.New("reconciliation returned an invalid dispatch miss")
 		}
 	default:

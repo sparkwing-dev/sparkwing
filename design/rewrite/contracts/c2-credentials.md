@@ -3115,3 +3115,58 @@ Controller startup commits its validated `--payment-mode` through
 `Operator.SetPaymentMode` before serving requests. Verifier configuration and
 ledger configuration therefore share the operator's mode selection. Constructor
 proofs configure the ledger through that operator method instead of SQL seeding.
+
+## Runner integration amendment: source metadata and process auxiliaries
+
+`BindSourceReport` names a source job and generation under its independently
+live expansion owner or eval lease. Job annotation and summary routes accept
+`expansion.submit` with that relation. They use the same committing metadata
+writers as work reports. Step metadata and step lifecycle routes retain their
+work-attempt fence. Trigger and plan reporting continues to use `node.report`.
+The fixed Award grant tables are unchanged.
+
+The private local-host snapshot, authentication and binding routes accept plan
+`data.read` with `BindPlanOwner` and eval `expansion.submit` within its bound
+run. The store repeats eval source and lease authorization before returning the
+snapshot. These reads expose accepted state for reconstruction and do not grant
+node mutation. Root data-authority reads use `data.read` with the plan-owner or
+source-report relation.
+
+Node-host mask, annotation, summary and cleanup routes accept an eval process's
+`expansion.submit` under `BindSourceReport`. The process registry checks the exact
+registered process, captured source job and owned cleanup registry before checking
+its parent relation. Trigger and plan processes retain their own owner bindings.
+`FuzzOwnerProcessCannotOutliveItsAuthority` covers both output reads and auxiliary
+mask authorization after lease loss, cancellation, revocation and membership loss.
+
+Trigger-owner expansion submissions also use the existing expansion route under
+`expansion.submit` and `BindRunOfTrigger`. The controller narrows that persisted
+owner to the requested source generation before calling `AcceptExpansion`.
+The delegated capability retains the original owner lease and grants only
+`expansion.submit`. Its bearer stays inside the controller. The committing
+expansion transaction rechecks the owner chain and source identity, including
+on an identical replay.
+
+## Runner composition amendment: planning failure
+
+The private `POST /api/v1/runs/{run}/local-host/finish` route also accepts a
+plan award's existing `node.result` grant with `plan_owner` and result liveness.
+The controller and committing transaction restrict that authority to failure or
+cancellation before plan acceptance. Success and run scheduling remain outside
+the plan award. The store records a fixed masked stage and closes the plan lease
+with the run verdict. No execution grant is added to the frozen plan table.
+
+## W9 launcher preparation authority
+
+The existing launcher service `claims.launch` route may request preparation
+renewal for exact awarded lease fences through launcher sync. The controller
+revalidates root ancestry and the original bootstrap award in the store writer.
+It validates all Job observations before changing any lease. An invalid or
+ambiguous observation therefore cannot cause a renewal before its refusal.
+
+Bootstrap grants remain exactly `source.read` and `claim.exchange`. No bearer is
+returned by renewal, persisted in a canary or copied from the launcher into a Job.
+After exchange the launcher cannot renew the SDK-owned lease. Its preparation
+request receives no acknowledgement for that fence. Normal reconciliation still
+reports the exchanged live Job, while blocking publication treats a missing
+acknowledgement as `lock_held` and cancels its preparation context.

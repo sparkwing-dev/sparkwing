@@ -115,8 +115,14 @@ func decodeAwardUnit(kind capability.UnitKind, id string) (UnitRef, error) {
 	if err := json.Unmarshal([]byte(id), &unit); err != nil {
 		return unit, authorityError(apierr.BadRequest, "invalid award unit identity")
 	}
-	if unit.Kind != kind || unit.RunID == "" || unit.NodeID == "" || (kind == capability.UnitEval && unit.SourceGeneration <= 0) {
+	if unit.Kind != kind || unit.RunID == "" || unit.NodeID == "" || (kind == capability.UnitEval && unit.SourceGeneration < 0) {
 		return unit, authorityError(apierr.BadRequest, "invalid award unit identity")
+	}
+	if kind == capability.UnitEval {
+		var source struct{ SourceGeneration *int64 }
+		if err := json.Unmarshal([]byte(id), &source); err != nil || source.SourceGeneration == nil {
+			return unit, authorityError(apierr.BadRequest, "evaluation award requires an explicit source generation")
+		}
 	}
 	return unit, nil
 }

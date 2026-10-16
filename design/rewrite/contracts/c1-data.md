@@ -237,7 +237,7 @@ removal cover ownership, active refusal, financial retention and cleanup replay.
 
 The raw Store/Tenant plan, step, annotation, summary, activity and approval
 writers are removed. `AcceptPlan` and `AcceptExpansion` own declarations.
-`RecordStep`, `WriteAnnotation` and `WriteSummary` require the live holder and
+`RecordStep` and step metadata require the live holder and
 current attempt. `TransitionNode` closes running steps when their attempt ends,
 scoped by tenant, job, attempt and generation. Retry steps remain separate.
 Approval opening, decisions and timeouts use `TransitionNode`. The old approval
@@ -331,6 +331,35 @@ store-clock `observed_at`. Other credential activity cannot refresh that poll.
 Held claims leave the job, awards and event sequence unchanged. The removed
 `RunnerPresence` and caller-supplied `Live` list have no consumers. Liveness
 comes from accepted persisted polls.
+
+### Runner composition amendment: owner self-execution
+
+`ReadOwnerSnapshot` adds `NodeRow.OwnerExecution` only to an authenticated private
+trigger snapshot. The decision binds owner authority, team and generation to the
+node reference, generation and declaration hash. `OwnerCanExecute(principal)`
+checks those bindings before the host selects inline execution. Public snapshots
+and plan/eval snapshots carry no self-execution decision.
+
+The projection and transactional reconciliation use the shared matcher,
+resource checks and configured preference holds. Reconciliation returns Dispatch
+when current matching or capacity declines self-execution. It still performs
+the normal transactional claim checks before issuing any node award.
+
+Local hosts use their configured profile resolver. Remote trigger owners use
+the persisted poll of a current registered ancestor with the same machine
+subject. The live owner lease supplies self-claim liveness because its occupied
+slot can prevent another root poll. Zero or future observation times are refused.
+Other runners still need fresh root polls to hold work through preferences.
+
+Plan private snapshots require `data.read`, `plan_owner` and the live plan lease.
+Eval private snapshots require `data.read` and `source_report`, whose source and
+expansion lease fences remain independent of the terminal source's node lease.
+
+An unaccepted plan owner can finish its own run as failed or cancelled under its
+current planning lease. The store refuses success, start, owner-policy verdicts
+and any run with an accepted spec. It replaces caller error text with the fixed
+preparation-failure or cancellation stage, then closes the planning unit and run
+in the same transaction. Exact failure replay remains valid after closure.
 
 ## Seeded bootstrap and legacy execution retirement
 
@@ -3220,3 +3249,76 @@ ledger lock. Controller startup calls it from the same `--payment-mode` that
 constructs the verifier. Reservations and verified settlement read that stored
 mode. Mode changes retain prior rows and their mode tags. This supplies the
 missing production writer for the existing `payment_mode` setting.
+
+## Runner integration amendment: source reporting and declared references
+
+Source annotations and summaries retain their owner or eval lease independently
+of a work attempt. `WriteAnnotation` and `WriteSummary` use that authority only
+when `StepID` is empty. `RecordStep` and step metadata keep the live holder,
+positive attempt and attempt-writer checks.
+
+`BindSourceReport` binds an expansion evaluator to its source job and immutable
+source generation. Its committing check repeats expansion authority, including
+the trigger-owner lease or the eval lease and elected controller-owner fence.
+It refuses a cancelled or finished run and a source that is no longer successful
+at the captured generation. No synthetic attempt is stored. A trigger or plan
+owner can write job metadata under its current owner lease before work is awarded.
+
+Declared pipeline-reference reads accept a live trigger or plan owner as well as
+a live work claim. The source process narrows the owner's declarations to the
+job being evaluated. Reading a result from another run additionally requires a
+declared pipeline and job, a terminal producer run and a successful or memoized
+producer job. Every lookup remains inside the credential's team. Eval's fixed
+grants still allow only its own source-output read.
+
+The security invariants are: source metadata cannot outlive or escape its source
+lease, and a pipeline-reference read cannot escape its declared pipeline and job.
+`FuzzSourceMetadataCannotEscapeItsLease` and
+`FuzzDeclaredPipelineReferenceDoesNotEscapeItsJob` exercise those boundaries.
+
+A remote trigger owner submits expansion through the controller, which derives
+the same source-bound delegation used by an in-process owner. `AcceptExpansion`
+keeps its existing source, cancellation, owner-lease and replay checks.
+
+## Runner composition amendment: materialized eval source zero
+
+An eval source generation is nonnegative because memoized and materialized
+terminal jobs can finish before any work claim. The eval lease generation stays
+positive. Claim encoding includes an explicit `SourceGeneration`, including
+zero. Decoding refuses an omitted or null generation instead of treating it as
+materialized source zero.
+
+Claims, exchange, renewal, expansion authorization and tagged eval logs preserve
+these independent fences. Log subjects require a source object and use its
+generation in the physical namespace. A source at zero with eval lease one
+uses `s0-g1`, distinct from other source or lease generations. The final schema
+permits nonnegative source generations in eval units and log streams. No
+migration or backfill is introduced.
+
+`TestMemoizedSourceZeroClaimsRenewsAndPublishesEvalLog` drives the persisted
+boundaries. `FuzzZeroSourceEvalCannotBorrowAnotherFence` refuses changed source
+and lease identities without committing a log stream.
+
+## W9 launcher preparation renewal
+
+`Store.RenewLauncherPreparation` is a writer transaction authenticated by launcher
+root authority. It returns only the bootstrap fences it renewed. The original
+award must belong to that root and service subject. The current row must retain
+the requested unit, holder and generation, a live lease and unexchanged bootstrap.
+Root ancestry and unit deadlines remain bounds. Forged or foreign original awards
+refuse the request. Finished, cancelled, expired, replaced and exchanged own
+awards receive no renewal acknowledgement and do not block cleanup of other Jobs.
+
+Preparation uses the shared capacity renewal and Cloud financial functions.
+Its first renewal opens the held Cloud billing interval, matching ordinary Cloud
+renewal even when no unit execution has started. It never synthesizes a running
+transition. Accounting and existing credit grace continue during preparation.
+At grace expiry the transaction commits accounting and expires only the original
+bootstrap lease, so reconciliation can retire its Job and exchange cannot start
+work. No acknowledgement is returned. No new rate or grace policy is added.
+
+Invariant: launcher preparation cannot renew another launcher's award, revive an
+expired lease or renew the SDK's exchanged claim. Property coverage is
+`FuzzLauncherPreparationKeepsExactUnexchangedFence` and
+`FuzzLauncherPreparationBillingAndGrace`. Fake-clock tests cover plan/eval/node
+renewal through exchange and mixed live/ended preparation requests.

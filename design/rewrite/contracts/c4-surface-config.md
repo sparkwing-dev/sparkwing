@@ -824,3 +824,58 @@ This document is the new contract report. Existing files changed only for collid
 - `pkg/projectconfig/source.go`
 
 <!-- design:end -->
+
+
+## W9 runner composition integration amendments
+
+Invariant: a changed canary cannot authorize work, and probe cleanup cannot delete
+a Pod outside the exact namespace, reservation and observed instance UID.
+`FuzzProductionBoundaryRefusesChangedCanary` and
+`FuzzProductionBoundaryCleanupReservationFence` exercise these boundaries.
+
+`cluster.productionLauncher` loads the standard Kubernetes context and composes
+`launcher.NewLauncher` with `launcher.NewProductionBoundary`. Claim demand uses
+the linker version, plan/eval/node kinds and the operator's resource ceilings.
+Launcher authority remains confined to the controller transport.
+
+`KubernetesBoundary.StopProbes` is an optional reservation-scoped recovery callback.
+Release calls it after verifying the full node/reservation/namespace fence and
+before requiring container vacancy. It may delete only reservation-owned probe
+Pods and control policies, with UID preconditions. This permits recovery from a
+cancelled or crashed probe without treating an active workload as vacant. Clear
+still runs after vacancy. The production implementation uses the same probe
+cleanup for both callbacks. Workload emptyDir and container-state cleanup belongs
+to Kubernetes after Pod removal. Arbitrary host changes made through privileged
+DinD remain an accepted residual and require node reprovisioning.
+
+The production probe uses a readiness-confirmed listener and a control policy
+allowing ingress plus egress only to the listener. A separate witness Pod must
+connect to that listener before egress-denial evidence can be accepted. Its
+measurement Pod uses exact workload labels, root, privilege and host PID access
+for a node-network escape canary. Both pod and node contexts must reach the
+controller and refuse observed cluster API, DaemonSet TCP and kubelet endpoints.
+DaemonSet UDP ports are inventoried. DNS ports remain available. The policy,
+endpoint and node-reservation projections must stay unchanged through cleanup.
+Every probe and Pod lifetime is bounded by the persisted award deadline.
+
+Only the controller is a known required destination in this composition. Extra
+source/blob/provider destinations, UDP enforcement, native image and CNI behavior,
+and kubelet reclamation require deployment acceptance. These callback tests use
+the Kubernetes API fake and do not establish native cluster security evidence.
+No new flag, environment variable, policy destination configuration or workload
+limit is introduced. The chart grants namespaced Pod create/get/delete and
+NetworkPolicy list/create/delete, and the runner image requires nc and nsenter.
+
+## Runner integration amendment: Cloud endpoint classification
+
+DESIGN: endpoint classification. A required Cloud destination cannot also be
+classified as forbidden. The production boundary refuses a controller endpoint
+that overlaps the Kubernetes API, an inventoried non-DNS DaemonSet endpoint or
+a kubelet endpoint. TCP probes cannot distinguish services sharing one address
+and port, so silently preferring the required class would produce false escape
+proof. The integration lead authorized this rule within the existing Cloud
+boundary contract. It adds no grant, flag or configuration field.
+
+`FuzzProductionBoundaryRefusesConflictingDestinations` varies API, DaemonSet and
+kubelet collisions. Canary admission tests apply standard API readiness defaults
+to a cloned response. The authored probe includes those exact scalar defaults.

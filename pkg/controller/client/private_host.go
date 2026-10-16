@@ -36,11 +36,27 @@ func NewLocalHostClient(options EngineOptions, runID string) (*LocalHostClient, 
 	if runID == "" || options.Bearer == nil {
 		return nil, errors.New("local host requires a run and awarded bearer")
 	}
+	c := &LocalHostClient{run: runID, nodes: make(map[string]localNodeBearer)}
+	bearer := options.Bearer
+	options.Bearer = func(ctx context.Context) (string, error) {
+		if err := c.live(); err != nil {
+			return "", err
+		}
+		raw, err := bearer(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := c.live(); err != nil {
+			return "", err
+		}
+		return raw, nil
+	}
 	transport, err := newEngineClient(options)
 	if err != nil {
 		return nil, err
 	}
-	return &LocalHostClient{transport: transport, run: runID, nodes: make(map[string]localNodeBearer)}, nil
+	c.transport = transport
+	return c, nil
 }
 
 // NewNodeHostClient confines private state and authority reads to one awarded node.
@@ -197,10 +213,7 @@ func (c *LocalHostClient) Principal(ctx context.Context) (capability.Principal, 
 	if err != nil {
 		return capability.Principal{}, err
 	}
-	pattern := "/api/v1/runs/{run}/heartbeat"
-	if c.node != "" {
-		pattern = "/api/v1/runs/{run}/jobs/{job}/heartbeat"
-	}
+	pattern := "/api/v1/claims/{claim}/heartbeat"
 	route, ok := capability.LookupRoute("POST", pattern)
 	if !ok {
 		return capability.Principal{}, errors.New("owner heartbeat policy is unavailable")

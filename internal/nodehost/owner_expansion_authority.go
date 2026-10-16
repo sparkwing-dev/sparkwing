@@ -18,6 +18,9 @@ type OwnerDelegator interface {
 }
 
 func (h *OwnerHost) expansionActor(ctx context.Context, input RunInput, row store.NodeRow) (store.Actor, error) {
+	if h.ExpansionActor != nil {
+		return h.ExpansionActor(ctx, input, row)
+	}
 	owner := input.Owner
 	if h.Delegator == nil || owner.Kind != store.ActorRunHost || owner.Owner.Kind != store.OwnerTrigger || owner.Owner.RunID != input.RunID || row.Ref.RunID != input.RunID || row.Ref.NodeID == "" || row.Generation < 0 {
 		return store.Actor{}, errors.New("expansion requires source-bound owner delegation")

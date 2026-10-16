@@ -54,7 +54,8 @@ func (s *Server) localHostSnapshot(w http.ResponseWriter, r *http.Request, a cap
 	if err != nil {
 		return err
 	}
-	snapshot, err := tenant.ReadOwnerSnapshot(r.Context(), a.Principal.Authority, a.Target.RunID)
+	ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
+	snapshot, err := tenant.ReadOwnerSnapshot(ctx, a.Principal.Authority, a.Target.RunID)
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -68,7 +69,8 @@ func (s *Server) localHostNode(w http.ResponseWriter, r *http.Request, a capabil
 		return err
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger {
-		snapshot, err := tenant.ReadOwnerSnapshot(r.Context(), a.Principal.Authority, a.Target.RunID)
+		ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
+		snapshot, err := tenant.ReadOwnerSnapshot(ctx, a.Principal.Authority, a.Target.RunID)
 		if err != nil {
 			return engineLookupError(err)
 		}
@@ -103,6 +105,9 @@ func (s *Server) localHostRunEdge(w http.ResponseWriter, r *http.Request, a capa
 	}
 	if !finish && (body.Cause != store.RunStart || body.To != store.RunRunning) {
 		return invalidEngineBody("run transition requires start; terminal verdicts require atomic owner completion")
+	}
+	if a.Principal.Capability.Unit == capability.UnitPlan && (!finish || body.Cause != store.RunFinish || body.To != store.RunFailed && body.To != store.RunCancelled || body.OwnerPolicy != nil) {
+		return invalidEngineBody("plan completion requires a preparation failure or cancellation")
 	}
 	tenant, err := s.store.ForTeam(r.Context(), store.Team(a.Target.Team))
 	if err != nil {

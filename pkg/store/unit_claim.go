@@ -220,7 +220,7 @@ func validateClaimUnit(unit UnitRef) error {
 			return authorityError(apierr.BadRequest, "invalid job claim identity")
 		}
 	case capability.UnitEval:
-		if unit.NodeID == "" || unit.SourceGeneration <= 0 {
+		if unit.NodeID == "" || unit.SourceGeneration < 0 {
 			return authorityError(apierr.BadRequest, "invalid evaluation claim identity")
 		}
 	default:

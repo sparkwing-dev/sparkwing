@@ -76,7 +76,7 @@ func FuzzCloudAwardUnitBindingW8(f *testing.F) {
 		case launcher.CloudPlan:
 			valid = job == "" && source == "" && generation == 0
 		case launcher.CloudEval:
-			valid = job != "" && source == job && generation > 0
+			valid = job != "" && source == job && generation >= 0
 		case launcher.CloudWork:
 			valid = job != "" && source == "" && generation == 0
 		}

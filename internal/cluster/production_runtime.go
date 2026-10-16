@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -27,6 +28,7 @@ import (
 // ProductionRuntime composes installed commands with authenticated controller and native host services.
 func ProductionRuntime(version string) Runtime {
 	return Runtime{
+		Launcher: productionLauncher(version),
 		Runner: RunnerCLI{Factory: func(ctx context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
 			home, err := wingd.HomeDir("")
 			if err != nil {
@@ -58,7 +60,7 @@ func ProductionRuntime(version string) Runtime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: productionHosting(home, version, client.EngineOptions{URL: options.ControllerURL})}, nil, nil
+				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache)}, nil, nil
 			},
 		},
 	}
@@ -69,6 +71,10 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 }
 
 func productionHosting(home, version string, connection client.EngineOptions) runners.Hosting {
+	return productionHostingAt(home, version, connection, "", "")
+}
+
+func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string) runners.Hosting {
 	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services runners.NativeServices, principal capability.Principal, err error) {
 		options := connection
 		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
@@ -124,8 +130,8 @@ func productionHosting(home, version string, connection client.EngineOptions) ru
 			return services, principal, err
 		}
 		services, err = localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
-			Home: home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh,
-			Source: source.Options{Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, Base: procenv.Base{Ambient: os.Environ(), Masker: secrets.NewMasker()}},
+			Home: home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
+			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, Base: procenv.Base{Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
 			Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 				return state.RenewOwner(ctx, store.Actor{}, computing)
 			},
@@ -148,6 +154,20 @@ func productionHosting(home, version string, connection client.EngineOptions) ru
 		}
 		return services, principal, nil
 	}}
+}
+
+func runnerToolEnvironment(modules string) []string {
+	environment := os.Environ()
+	if modules == "" {
+		return environment
+	}
+	for i := 0; i < len(environment); i++ {
+		if strings.HasPrefix(environment[i], "GOMODCACHE=") {
+			environment = append(environment[:i], environment[i+1:]...)
+			i--
+		}
+	}
+	return append(environment, "GOMODCACHE="+modules)
 }
 
 type productionHost struct {

@@ -2,19 +2,19 @@ package capability
 
 // Routes is the authorization table for controller and node-host operations, including external proofs.
 var Routes = []RoutePolicy{
-	route("GET", "/api/v1/runs/{run}/local-host/data-authority", OwnerRun, RetrySafe, claim(DataRead, BindRunOfTrigger, LiveSensitive)),
+	route("GET", "/api/v1/runs/{run}/local-host/data-authority", OwnerRun, RetrySafe, claim(DataRead, BindRunOfTrigger, LiveSensitive), claim(DataRead, BindPlanOwner, LiveSensitive), claim(DataRead, BindSourceReport, LiveSensitive)),
 	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveSensitive)),
 	route("POST", "/api/v1/local/doctor", OwnerTeam, RetryNever, member(RunsControl)),
-	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}/snapshot", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting)),
-	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/authentication", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting)),
-	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/binding", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting)),
-	route("GET", "/api/v1/runs/{run}/local-host/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting)),
-	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting), claim(DataRead, BindOwnNode, LiveReporting)),
+	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}/snapshot", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting), claim(DataRead, BindPlanOwner, LiveReporting), AccessRule{CredentialEval, []Grant{ExpansionSubmit}, BindRun, LiveExpansion}),
+	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/authentication", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting), claim(DataRead, BindPlanOwner, LiveReporting), AccessRule{CredentialEval, []Grant{ExpansionSubmit}, BindRun, LiveExpansion}),
+	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/binding", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveReporting), claim(DataRead, BindPlanOwner, LiveReporting), AccessRule{CredentialEval, []Grant{ExpansionSubmit}, BindRun, LiveExpansion}),
+	route("GET", "/api/v1/runs/{run}/local-host/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting), claim(DataRead, BindPlanOwner, LiveReporting), AccessRule{CredentialEval, []Grant{ExpansionSubmit}, BindRun, LiveExpansion}),
+	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting), claim(DataRead, BindOwnNode, LiveReporting), claim(DataRead, BindPlanOwner, LiveReporting), AccessRule{CredentialEval, []Grant{ExpansionSubmit}, BindRun, LiveExpansion}),
 	route("POST", "/api/v1/runs/{run}/local-host/transition", OwnerRun, RetryExactBody, claim(RunsState, BindRunOfTrigger, LiveResult)),
-	route("POST", "/api/v1/runs/{run}/local-host/finish", OwnerRun, RetryExactBody, claim(RunsState, BindRunOfTrigger, LiveResult)),
+	route("POST", "/api/v1/runs/{run}/local-host/finish", OwnerRun, RetryExactBody, claim(RunsState, BindRunOfTrigger, LiveResult), claim(NodeResult, BindPlanOwner, LiveResult)),
 	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/transition", OwnerRun, RetryExactBody, claim(NodeResult, BindOwnNode, LiveResult), claim(NodeResult, BindRunOfTrigger, LiveResult)),
-	route("POST", "/api/v1/runs/{run}/local-host/authentication", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting)),
-	route("POST", "/api/v1/runs/{run}/local-host/binding", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting)),
+	route("POST", "/api/v1/runs/{run}/local-host/authentication", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting), claim(DataRead, BindPlanOwner, LiveReporting), AccessRule{CredentialEval, []Grant{ExpansionSubmit}, BindRun, LiveExpansion}),
+	route("POST", "/api/v1/runs/{run}/local-host/binding", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting), claim(DataRead, BindPlanOwner, LiveReporting), AccessRule{CredentialEval, []Grant{ExpansionSubmit}, BindRun, LiveExpansion}),
 	route("GET", "/api/v1/runs/{run}/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", OwnerRun, RetryNever, claim(NodesClaim, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs", OwnerTeam, RetryIdempotencyKey, intake(), claim(ChildrenStart, BindBodyNamesRun, LiveSensitive)),
@@ -59,13 +59,13 @@ var Routes = []RoutePolicy{
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/claim", OwnerRun, RetryNever, claim(NodesClaim, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/claim/input", OwnerRun, RetrySafe, claim(DataRead, BindOwnNode, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/heartbeat", OwnerRun, RetrySafe, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting)),
-	route("POST", "/api/v1/runs/{run}/jobs/{job}/expansion", OwnerRun, RetryExactBody, claim(ExpansionSubmit, BindExpansion, LiveExpansion)),
+	route("POST", "/api/v1/runs/{run}/jobs/{job}/expansion", OwnerRun, RetryExactBody, claim(ExpansionSubmit, BindExpansion, LiveExpansion), claim(ExpansionSubmit, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/logs", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/metrics", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/usage", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/activity", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
-	route("POST", "/api/v1/runs/{run}/jobs/{job}/annotations", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
-	route("POST", "/api/v1/runs/{run}/jobs/{job}/summary", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
+	route("POST", "/api/v1/runs/{run}/jobs/{job}/annotations", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), claim(NodeReport, BindPlanOwner, LiveReporting), claim(ExpansionSubmit, BindSourceReport, LiveExpansion), publisher()),
+	route("POST", "/api/v1/runs/{run}/jobs/{job}/summary", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), claim(NodeReport, BindPlanOwner, LiveReporting), claim(ExpansionSubmit, BindSourceReport, LiveExpansion), publisher()),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/steps/start", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/steps/finish", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/steps/skip", OwnerRun, RetryExactBody, claim(NodeReport, BindOwnNode, LiveReporting), claim(NodeReport, BindRunOfTrigger, LiveReporting), publisher()),
@@ -275,9 +275,13 @@ func nodeRoute(method, path string, grant Grant, binding BindingRule, retry Retr
 	if binding == BindOwnNode || binding == BindOwnCleanup {
 		ownerBinding = BindRunOfTrigger
 	}
+	access := []AccessRule{{CredentialNodeProcess, []Grant{grant}, binding, LiveProcess}, {CredentialOwnerProcess, []Grant{grant}, ownerBinding, LiveProcess}}
+	if grant == NodeReport {
+		access = append(access, AccessRule{CredentialOwnerProcess, []Grant{ExpansionSubmit}, BindSourceReport, LiveProcess}, AccessRule{CredentialOwnerProcess, []Grant{NodeReport}, BindPlanOwner, LiveProcess})
+	}
 	return RoutePolicy{
 		Method: method, Path: path, Audience: NodeHost, Owner: OwnerNodeHost, Authentication: AuthCapability,
-		Access: []AccessRule{{CredentialNodeProcess, []Grant{grant}, binding, LiveProcess}, {CredentialOwnerProcess, []Grant{grant}, ownerBinding, LiveProcess}}, Retry: retry,
+		Access: access, Retry: retry,
 	}
 }
 

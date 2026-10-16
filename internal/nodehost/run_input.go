@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -23,6 +24,9 @@ func NewRunInput(unit controllerwire.ClaimedUnit) (RunInput, error) {
 		Owner: store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
 			Kind: store.OwnerTrigger, RunID: unit.RunID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation,
 		}},
+	}
+	if unit.Unit == capability.UnitEval || unit.Unit == capability.UnitNode {
+		input.Owner = store.Actor{}
 	}
 	var err error
 	input.SealedRequest, err = json.Marshal(request.Request)

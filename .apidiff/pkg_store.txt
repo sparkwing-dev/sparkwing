@@ -1374,6 +1374,7 @@ type NodeRow struct {
 	SpecHash              string
 	OutputRecord          *blob.RecordKey
 	ManifestRecord        *blob.RecordKey
+	OwnerExecution        *OwnerExecution
 }
 const NodeRunning NodeState = "running"
 const NodeSkipped NodeState = "skipped"
@@ -1477,6 +1478,7 @@ func (o *Operator) SetComputeLimits(ctx context.Context, updates map[string]int6
 func (o *Operator) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error)
 func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error
 func (o *Operator) SetNodeAttention(ctx context.Context, updates []NodeAttention) error
+func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMode) error
 func (o *Operator) SetRunnerMetered(ctx context.Context, a capability.Authorized, prefix string, metered bool) error
 func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) error
 func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error)
@@ -1502,8 +1504,18 @@ type OutputRef struct {
 	Size   int64
 	SHA256 string
 }
+func OwnerCanExecute(owner capability.Principal) func(NodeRow) bool
 const OwnerController OwnerLeaseKind = "controller"
 const OwnerEval OwnerLeaseKind = "eval"
+type OwnerExecution struct {
+	Owner          capability.AuthorityRef
+	Team           Team
+	Generation     int64
+	Node           NodeRef
+	NodeGeneration int64
+	SpecHash       string
+	Allowed        bool
+}
 type OwnerLeaseKind string
 type OwnerLeaseRef struct {
 	Kind             OwnerLeaseKind
@@ -1959,6 +1971,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "approvals", Owner: SchemaTenant},
 	{Name: "billable_intervals", Owner: SchemaTenant},
 	{Name: "billing_awards", Owner: SchemaTenant},
+	{Name: "billing_pages", Owner: SchemaTenant},
 	{Name: "blob_members", Owner: SchemaTenant},
 	{Name: "blob_receipts", Owner: SchemaTenant},
 	{Name: "blob_records", Owner: SchemaTenant},
@@ -2383,6 +2396,7 @@ func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) 
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
+func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error)
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
@@ -2469,7 +2483,6 @@ func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, pa
 func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID, kind string, payload []byte) (int64, error)
 func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
-func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
 func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error)
 func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore
@@ -2480,6 +2493,7 @@ func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Auth
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCommit) (blob.Receipt, error)
 func (t *Tenant) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
+func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability.Authorized, page capability.BillingPage) error
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, fingerprint string) (GitCredential, error)
 func (t *Tenant) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
@@ -2503,7 +2517,6 @@ func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (t *Tenant) DeletePoolAccess(ctx context.Context, actor Actor, pool, id string) (bool, error)
 func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (bool, error)
-func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error)
 func (t *Tenant) EgressUsage(ctx context.Context, period string) (EgressUsage, error)
 func (t *Tenant) ExecutionActivity(ctx context.Context) (ExecutionActivity, error)
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
@@ -2567,7 +2580,7 @@ func (t *Tenant) LookupRecord(ctx context.Context, request blob.RecordLookup) (b
 func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) NodeIsAncestor(ctx context.Context, runID, ancestor, node string) (found bool, err error)
-func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error)
+func (t *Tenant) PrepareAuthorizedBillingPage(ctx context.Context, a capability.Authorized, kind capability.BillingPageKind, amount int64, key string) (capability.BillingPage, error)
 func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, actor Actor) (string, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (t *Tenant) PutAuthorizedGitHubAutomation(ctx context.Context, a capability.Authorized, row GitHubAppAutomation) error
@@ -2590,6 +2603,7 @@ func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (RunSnapshot, e
 func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64, limit int) ([]StateEvent, error)
 func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error)
 func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error)
+func (t *Tenant) RecordAuthorizedBillingPageFailure(ctx context.Context, a capability.Authorized, page capability.BillingPage) error
 func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
@@ -2629,6 +2643,7 @@ func (t *Tenant) RotateCapability(ctx context.Context, a capability.Authorized, 
 func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (string, error), git func(GitCredential) (string, error)) (int, int, error)
 func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Authorized, trust bool) error
 func (t *Tenant) SetAuthorizedGitHubExtraRepos(ctx context.Context, a capability.Authorized, repository string, extras []string, ids map[string]int64) ([]string, error)
+func (t *Tenant) SetAuthorizedSpendBudget(ctx context.Context, a capability.Authorized, cents int64) error
 func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
@@ -2637,13 +2652,11 @@ func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *ti
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capability.AuthorityRef, machine string, enabled bool) error
-func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error
 func (t *Tenant) SetStorageAllowance(ctx context.Context, bytes int64) (StorageQuota, error)
 func (t *Tenant) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error
 func (t *Tenant) SourceReleaseAudits(ctx context.Context, limit int) (_ []capability.SourceReleaseAudit, err error)
 func (t *Tenant) SpendStanding(ctx context.Context, now time.Time) (SpendStanding, error)
-func (t *Tenant) StartRecoveryAttempt(ctx context.Context, now time.Time) (_ CardChargeWork, err error)
 func (t *Tenant) StorageQuota(ctx context.Context) (StorageQuota, error)
 func (t *Tenant) StorageRetainedBytes(ctx context.Context) (int64, error)
 func (t *Tenant) StorageStanding(ctx context.Context) (_ StorageStanding, err error)

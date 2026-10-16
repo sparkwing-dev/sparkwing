@@ -15,12 +15,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // CloudControl supplies awarded bindings from the controller and checks their continued authority.
 // Sync must return exactly one decision for each supplied binding, including dead or cancelled claims.
 type CloudControl interface {
+	Prepare(context.Context, []capability.LeaseRef) error
 	Claim(context.Context) (*CloudJobAward, error)
 	Sync(context.Context, []CloudJobObservation) ([]CloudJobState, error)
 }
@@ -92,7 +94,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 }
 
 // LaunchOne persists a suspended Job, creates its bootstrap Secret, then permits execution.
-func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
+func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.validate(); err != nil {
 		return false, err
 	}
@@ -103,6 +105,18 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 	if err != nil || award == nil {
 		return false, err
 	}
+	prepared, stop, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
+	if err != nil {
+		return true, err
+	}
+	ctx = prepared
+	defer func() {
+		cause := context.Cause(ctx)
+		stop()
+		if cause != nil {
+			err = errors.Join(err, cause)
+		}
+	}()
 	r, err := BuildJob(ctx, time.Now(), l.Config, *award, l.Boundary)
 	if err != nil {
 		return true, err

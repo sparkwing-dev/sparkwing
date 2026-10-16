@@ -47,6 +47,7 @@ const (
 	BindPlanOwner          BindingRule = "planOwner"
 	BindOwnClaim           BindingRule = "ownClaim"
 	BindOwnEval            BindingRule = "ownEval"
+	BindSourceReport       BindingRule = "sourceReport"
 )
 
 // Liveness is checked during authentication, before grant or target refusal.
@@ -425,6 +426,9 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 		if c.Unit == UnitTrigger {
 			return (c.Purpose == PurposeTrigger || c.Purpose == PurposeHere) && c.Binding.Kind == BindingTrigger && c.Binding.NodeID == "" && c.Binding.Generation > 0 && c.Binding.Holder != "" && c.Binding.Attempt == 0 && c.Binding.Expansion == nil
 		}
+		if c.Unit == UnitPlan {
+			return c.Purpose == PurposePlan && c.Binding.Kind == BindingRun && c.Binding.NodeID == "" && c.Binding.Generation > 0 && c.Binding.Holder != "" && c.Binding.Attempt == 0 && c.Binding.Expansion == nil
+		}
 		return c.Unit == UnitEval && matchesCredential(p, CredentialEval)
 	case CredentialPublisher, CredentialRepoReader:
 		if c.Subject.Kind != SubjectAccount || c.Unit != "" || c.Purpose != "" || c.Data == nil || (p.Class != CredentialBearer && p.Class != CredentialSession) {
@@ -492,10 +496,13 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 			t.UnitSourceNodeID == b.NodeID && t.UnitSourceGeneration == b.Generation
 	case BindPlanOwner:
 		return run && (p.Capability.Unit == UnitPlan && b.Kind == BindingRun || p.Capability.Unit == UnitTrigger && b.Kind == BindingTrigger)
+	case BindSourceReport:
+		return run && b.Kind == BindingNode && b.Expansion != nil && b.NodeID != "" &&
+			(t.NodeID == "" || t.NodeID == b.NodeID) && b.Generation >= 0
 	case BindPipelineOfBoundRun:
 		return isClaim(p) && p.Capability.Delivery != DeliveryBootstrap && t.Pipeline != ""
 	case BindExpansion:
-		return run && b.NodeID != "" && b.NodeID == t.NodeID && b.Generation > 0 && b.Expansion != nil
+		return run && b.NodeID != "" && b.NodeID == t.NodeID && b.Generation >= 0 && b.Expansion != nil
 	case BindChildOfBoundNode, BindOwnCleanup:
 		return b.Kind == BindingNode && b.RunID != "" && b.NodeID != "" && (t.RunID == "" || run)
 	case BindDeclaredSecret, BindSource:
@@ -567,7 +574,7 @@ func validateRoutePolicy(route RoutePolicy) error {
 			!slices.Contains([]BindingRule{
 				BindNone, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
 				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindData, BindExpansion, BindClaimSelection, BindOwnToken, BindMachineOwner,
-				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval,
+				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval, BindSourceReport,
 			}, access.Binding) ||
 			!slices.ContainsFunc(LivenessPolicies, func(policy LivenessPolicy) bool { return policy.Class == access.Liveness }) {
 			return fmt.Errorf("invalid access policy")

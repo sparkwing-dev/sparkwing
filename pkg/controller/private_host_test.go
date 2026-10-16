@@ -11,11 +11,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -29,6 +31,43 @@ func (t localHostRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 	w := httptest.NewRecorder()
 	t.handler.ServeHTTP(w, r)
 	return w.Result(), nil
+}
+
+func FuzzLocalHostCloseRetiresProcessClients(f *testing.F) {
+	for operation := range uint8(8) {
+		f.Add(operation, "closed host")
+	}
+	f.Fuzz(func(t *testing.T, operation uint8, value string) {
+		_, host, _, principal := localHostFixture(t)
+		process, err := host.ProcessClient(t.Context(), principal, "job")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := host.Close(); err != nil {
+			t.Fatal(err)
+		}
+		switch operation % 8 {
+		case 0:
+			err = process.Annotation(t.Context(), nodeproto.AnnotationRequest{Level: "info", Message: value})
+		case 1:
+			err = process.Summary(t.Context(), nodeproto.SummaryRequest{Markdown: value})
+		case 2:
+			_, _, err = process.Secret(t.Context(), "secret")
+		case 3:
+			_, _, err = process.OIDC(t.Context(), value)
+		case 4:
+			_, err = process.Output(t.Context(), "run", "job")
+		case 5:
+			_, _, err = process.Latest(t.Context(), "ci", "job", time.Hour)
+		case 6:
+			_, err = process.StartChild(t.Context(), "ci", map[string]string{"value": value}, "", "")
+		case 7:
+			_, err = process.Child(t.Context(), "child", 0)
+		}
+		if err == nil || !strings.Contains(err.Error(), "local host client is closed") {
+			t.Fatalf("retained process operation %d reused a closed host: %v", operation%8, err)
+		}
+	})
 }
 
 func localHostFixture(t *testing.T) (*Server, *client.LocalHostClient, *store.Tenant, capability.Principal) {

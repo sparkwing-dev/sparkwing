@@ -64,7 +64,7 @@ func (s *Store) renewUnit(ctx context.Context, prefix string, executing bool) (L
 }
 
 func renewalActor(c capability.Capability) (UnitRef, Actor, error) {
-	if c.Audience != capability.Controller || c.Delivery != capability.DeliveryDirect || c.Team == "" || c.Binding.Holder == "" || c.Binding.Generation <= 0 {
+	if c.Audience != capability.Controller || c.Delivery != capability.DeliveryDirect || c.Team == "" || c.Binding.Holder == "" || c.Binding.Generation < 0 || c.Unit != capability.UnitEval && c.Binding.Generation == 0 {
 		return UnitRef{}, Actor{}, holderRefusal()
 	}
 	unit, err := decodeAwardUnit(c.Unit, c.UnitID)

@@ -23,6 +23,25 @@ type engineResolver struct {
 	calls    []string
 }
 
+func TestAcquireDetectsUnacceptedTypeScriptAfterCheckout(t *testing.T) {
+	directory, sha := sourcetest.Repository(t)
+	pipeline := filepath.Join(directory, ".sparkwing")
+	sourcetest.Write(t, filepath.Join(pipeline, "package.json"), `{"dependencies":{"@sparkwing/sdk":"1.2.3"}}`)
+	options, _, _ := acquisitionOptions(t, pipeline)
+	options.SDK = ""
+	reached := errors.New("TypeScript pin selected")
+	options.ReadPin = func(_ string, sdk engine.SDKKind) (engine.Pin, error) {
+		if sdk != engine.TypeScriptSDK {
+			return engine.Pin{}, errors.New("wrong SDK selected before checkout")
+		}
+		return engine.Pin{}, reached
+	}
+	_, err := source.Acquire(t.Context(), source.Spec{RepoKey: "local:" + directory, LocalCheckout: directory, SHA: sha}, options)
+	if !errors.Is(err, reached) {
+		t.Fatal(err)
+	}
+}
+
 func (r *engineResolver) Resolve(_ context.Context, pin engine.Pin, target releaseasset.Target) (engine.Resolved, error) {
 	r.calls = append(r.calls, "resolve")
 	if r.resolved.Identity.Pin != pin || r.resolved.Target != target {

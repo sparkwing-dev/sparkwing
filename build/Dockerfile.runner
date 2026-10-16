@@ -20,7 +20,7 @@ RUN test -n "${SPARKWING_IMAGE_REFRESH}" && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
       bash ca-certificates coreutils curl git git-lfs gzip jq lsof make netcat-openbsd openssh-client \
-      procps tar unzip xz-utils && \
+      procps tar unzip util-linux xz-utils && \
     rm -rf /var/lib/apt/lists/*
 # safety: OpenSSH aborts when the Kubernetes uid has no passwd entry.
 RUN echo "sparkwing:x:1000:1000::/tmp:/usr/sbin/nologin" >> /etc/passwd

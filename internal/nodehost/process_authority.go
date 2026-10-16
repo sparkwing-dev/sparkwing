@@ -85,9 +85,13 @@ func (a *ProcessAuthorities) Delegate(ctx context.Context, parent capability.Cre
 	if (principal.Capability.Unit == capability.UnitTrigger || principal.Capability.Unit == capability.UnitEval) && services.SourceBindings == nil {
 		return capability.Issued{}, nil, executorError(apierr.Forbidden, "evaluation delegation requires its source relations")
 	}
-	if spec.Binding.Kind == capability.BindingTrigger && principal.Capability.Unit == capability.UnitTrigger && spec.Binding.NodeID == "" {
+	if (spec.Binding.Kind == capability.BindingTrigger && principal.Capability.Unit == capability.UnitTrigger || spec.Binding.Kind == capability.BindingRun && principal.Capability.Unit == capability.UnitPlan) && spec.Binding.NodeID == "" {
 		target := capability.Target{Team: principal.Capability.Team, RunID: services.RunID, NodeID: services.Job.ID}
-		if err := a.deps.Bindings.CheckBinding(ctx, principal, capability.BindRunOfTrigger, target); err != nil {
+		rule := capability.BindRunOfTrigger
+		if principal.Capability.Unit == capability.UnitPlan {
+			rule = capability.BindPlanOwner
+		}
+		if err := a.deps.Bindings.CheckBinding(ctx, principal, rule, target); err != nil {
 			return capability.Issued{}, nil, err
 		}
 	} else if services.Job.ID != spec.Binding.NodeID {
@@ -237,6 +241,16 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 	switch rule {
 	case capability.BindRunOfTrigger:
 		if binding.Kind != capability.BindingTrigger || principal.Capability.Unit != capability.UnitTrigger || target.NodeID != "" && target.NodeID != service.Job.ID || target.CleanupID != "" && (service.Cleanups == nil || !service.Cleanups.contains(target.CleanupID)) {
+			return processBindingDenied()
+		}
+		target.NodeID = service.Job.ID
+	case capability.BindPlanOwner:
+		if principal.Capability.Unit != capability.UnitPlan || binding.Kind != capability.BindingRun || target.NodeID != "" && target.NodeID != service.Job.ID || target.CleanupID != "" && (service.Cleanups == nil || !service.Cleanups.contains(target.CleanupID)) {
+			return processBindingDenied()
+		}
+		target.NodeID = service.Job.ID
+	case capability.BindSourceReport:
+		if binding.Expansion == nil || binding.NodeID != service.Job.ID || target.NodeID != "" && target.NodeID != service.Job.ID || target.CleanupID != "" && (service.Cleanups == nil || !service.Cleanups.contains(target.CleanupID)) {
 			return processBindingDenied()
 		}
 		target.NodeID = service.Job.ID

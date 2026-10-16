@@ -203,3 +203,7 @@ func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.C
 	}
 	return restarted
 }
+
+func (c *cloudControlW8) Prepare(ctx context.Context, _ []capability.LeaseRef) error {
+	return context.Cause(ctx)
+}

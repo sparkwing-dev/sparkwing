@@ -129,8 +129,10 @@ shared environment builder masks unsplit proxy credentials and consumer-visible
 fragments before any process starts. `TestInstallSDKPreservesRegisteredSecretsProperty`
 and the runner environment ports cover the former install-output and allow-list
 regressions. The retired native fixture does not establish final native placement
-coverage. Production source authorization, service factories and Cloud plan/eval
-hosting remain integration work.
+coverage. Installed runner commands bind source authorization, private state,
+process services and storage to the awarded credential. Cloud plan units stop
+after acceptance. Eval units submit the awarded source expansion under their
+independent lease. Both share the native acquisition and SDK implementation.
 
 The shared host's orphan pod executor and row-polling dispatcher are removed.
 `OwnerHost`, `ClaimedNodeHost` and `NodeExecutor` supply the claim and execution
@@ -141,8 +143,8 @@ The error-masking property covers both outer layers and output publication.
 These use scripted process and store boundaries. The remote native-store and
 Cloud bootstrap components use the shared HTTP client, controller handlers and
 real store for renewal and exchange. A component transport invokes the handlers
-without sockets. They do not establish native Cloud plan/eval hosting or deployed
-placement.
+without sockets. Production entrypoint probes reach those adapters, while native
+SDK-process execution and deployed Cloud placement require the native environment.
 
 The orphan `GCWarmRoot` sweeper and orchestrator repository-admission helpers
 are removed. Source projection and machine admission consume sealed source

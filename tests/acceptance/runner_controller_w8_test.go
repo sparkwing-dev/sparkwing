@@ -76,6 +76,21 @@ func TestRunnerControllerW8Components(t *testing.T) {
 	}
 }
 
+func TestRunnerPlanAndEvalUseTheirAwardedUnitAuthority(t *testing.T) {
+	plan := runnerAuthorityAwardW8(capability.UnitTrigger)
+	plan.Unit, plan.Purpose, plan.Binding.Kind = capability.UnitPlan, capability.PurposePlan, capability.BindingRun
+	eval := runnerAuthorityAwardW8(capability.UnitNode)
+	eval.Unit, eval.Purpose, eval.SourceGeneration = capability.UnitEval, capability.PurposeEval, eval.Binding.Generation
+	eval.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: eval.UnitID, Holder: "evaluation", Generation: 7}
+	memoized := eval
+	memoized.Binding.Generation, memoized.SourceGeneration = 0, 0
+	for _, unit := range []controllerwire.ClaimedUnit{plan, eval, memoized} {
+		t.Run(string(unit.Unit), func(t *testing.T) { assertRunnerAuthorityW8(t, unit, true) })
+	}
+	eval.Binding.Expansion = nil
+	assertRunnerAuthorityW8(t, eval, false)
+}
+
 func TestRunnerMixedClaimsKeepControllerBindingsSeparateW8(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		awards := []controllerwire.ClaimedUnit{runnerAuthorityAwardW8(capability.UnitTrigger), runnerAuthorityAwardW8(capability.UnitNode)}

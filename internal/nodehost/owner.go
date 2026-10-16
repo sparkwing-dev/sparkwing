@@ -78,10 +78,11 @@ type OwnerHost struct {
 	Admit     func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error
 	Around    func(context.Context, AcceptedRun, func(context.Context) (RunCompletion, error)) (RunCompletion, error)
 	// AdoptClaim retains the private award for per-attempt process delegation.
-	AdoptClaim func(context.Context, store.ReconciledNode) error
-	Delegator  OwnerDelegator
-	Executor   NodeHost
-	Expand     func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
+	AdoptClaim     func(context.Context, store.ReconciledNode) error
+	Delegator      OwnerDelegator
+	ExpansionActor func(context.Context, RunInput, store.NodeRow) (store.Actor, error)
+	Executor       NodeHost
+	Expand         func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
 	// Mask shares the source and SDK secret registry and protects returned errors.
 	Mask func(string) string
 	// Masks serializes accepted identifiers with the shared process service registry.
@@ -239,7 +240,11 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 }
 
 func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor, computing func() bool) (context.Context, func()) {
-	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: actor.Owner.RunID, Holder: actor.Owner.Holder, Generation: actor.Owner.Generation}, computing) {
+	return h.keepUnit(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: actor.Owner.RunID, Holder: actor.Owner.Holder, Generation: actor.Owner.Generation}, actor, computing)
+}
+
+func (h *OwnerHost) keepUnit(parent context.Context, identity lease.Identity, actor store.Actor, computing func() bool) (context.Context, func()) {
+	if lease.Adopt(parent, identity, computing) {
 		return parent, func() {}
 	}
 	keeper := h.Lease

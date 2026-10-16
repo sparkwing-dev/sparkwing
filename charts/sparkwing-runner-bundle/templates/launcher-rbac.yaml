@@ -18,6 +18,12 @@ metadata:
   name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
   namespace: {{ .Release.Namespace }}
 rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["list", "create", "delete"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "list", "patch", "delete"]

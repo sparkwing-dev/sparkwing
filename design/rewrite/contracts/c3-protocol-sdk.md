@@ -896,9 +896,10 @@ Approval conditions need a pending-to-success edge when SkipIf returns true,
 because that bypass must release dependents. A skipped dependency would suppress
 them. Approval waiting also needs the persisted opening time and resolution ID
 in the read contract so a replacement owner retains the original deadline.
-Eval log identity must allow a materialized source at generation zero because
+Eval log identity accepts a materialized source at generation zero because
 `nodes.generation` starts at zero and unclaimed materialization needs no award.
-The `log_streams.source_generation > 0` constraint does not cover that source.
+C1 claim, renewal and log authorization preserve that source separately from
+the positive eval lease. The final schema permits `source_generation >= 0`.
 
 The amended ReconcileResponse and ExpandedJob.Current carry the persisted
 execution state, and the remote adapters preserve it. ScheduleSnapshot remains
@@ -1032,3 +1033,32 @@ only a selected failed entry, preserves its sanitized cause, and never supplies
 a planning function without complete declarations for the selected pipeline.
 Any failed entry keeps all describe-process output behind the secret gate.
 The CLI uses the same selected-entry refusal for help, plan and run preparation.
+
+## Integration amendment: awarded plan and eval hosts
+
+`OwnerHost.Plan` keeps the plan unit's lease through source acquisition, SDK
+describe, planning and atomic acceptance. It returns after acceptance transfers
+scheduling to the controller. It cannot start or finish the run as its owner.
+`OwnerHost.Evaluate` keeps an independent eval lease and submits only the awarded
+source's expansion or structured failure. Source generation zero is retained for
+memoized results. Neither path invents a node attempt. `Hosting` and `StoreHosting`
+dispatch all four unit kinds through these shared hosts after award validation.
+
+Private plan/eval reads use the existing local-host snapshot, authentication and
+binding transports. Eval snapshots include accepted declarations for code
+reconstruction. Their authority remains bound to the live source generation and
+eval/controller leases. Step and work writes still require a node award.
+
+`NativeConfig.ExpansionActor` binds remote owners to the existing expansion
+submission route. The controller derives a narrower source capability and C1
+rechecks it transactionally. Direct store hosts retain `OwnerDelegator`.
+The adapter uses the existing award and authenticated transport without another
+bearer route. Plan/eval log manifests close before acceptance retires their leases.
+
+`source.Options.PreparedCheckout` selects the host-owned init checkout. Acquisition
+verifies its origin, sealed commit, clean tracked files, absent untracked and
+ignored files, and contained pipeline
+directory before installing with the selected engine. It preserves that checkout
+when closing. Eval never needs a new source-fetch grant after bootstrap exchange.
+For unaccepted remote sources, acquisition detects the SDK from the acquired directory.
+Accepted sources retain the SDK in their sealed engine identity.

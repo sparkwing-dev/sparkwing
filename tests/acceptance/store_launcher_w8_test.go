@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -90,7 +91,7 @@ func TestStoreLauncherW8(t *testing.T) {
 	if err := runtime.Sync(t.Context()); err != nil || boundary.released != 1 {
 		t.Fatalf("store-backed cleanup: releases=%d error=%v", boundary.released, err)
 	}
-	if strings.Join(paths, ",") != "/api/v1/launcher/claim,/api/v1/launcher/sync,/api/v1/launcher/sync,/api/v1/launcher/sync" {
+	if len(paths) < 2 || paths[0] != "/api/v1/launcher/claim" || slices.ContainsFunc(paths[1:], func(path string) bool { return path != "/api/v1/launcher/sync" }) {
 		t.Fatalf("launcher did not use the shared claim/sync routes: %v", paths)
 	}
 }

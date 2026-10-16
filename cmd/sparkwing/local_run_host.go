@@ -63,7 +63,7 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	}
 	services, err := localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
 		Home: home, Version: installedVersion(), Store: state, Parent: private, Bindings: private,
-		Principal: principal, Refresh: refresh, Source: source, Local: func(store.NodeRow) bool { return true },
+		Principal: principal, Refresh: refresh, Source: source, Local: store.OwnerCanExecute(principal),
 		Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 			return state.RenewOwner(ctx, store.Actor{}, computing)
 		},

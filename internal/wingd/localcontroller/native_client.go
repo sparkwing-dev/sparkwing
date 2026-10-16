@@ -3,6 +3,7 @@ package localcontroller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -15,6 +16,19 @@ import (
 
 // WithClient binds native services to the authenticated controller's common transports.
 func WithClient(cfg NativeConfig, c *client.LocalHostClient) NativeConfig {
+	if _, remote := cfg.Store.(*nodehost.RemoteHostStore); remote {
+		cfg.ExpansionActor = func(ctx context.Context, input nodehost.RunInput, row store.NodeRow) (store.Actor, error) {
+			principal, err := cfg.Refresh(ctx)
+			if err != nil {
+				return store.Actor{}, err
+			}
+			binding := principal.Capability.Binding
+			if principal.Authority != cfg.Principal.Authority || input.Owner.Authority != principal.Authority || input.Owner.CapabilityPrefix != principal.Capability.Prefix || principal.Capability.Unit != capability.UnitTrigger || binding.Kind != capability.BindingTrigger || input.Owner.Owner.RunID != binding.RunID || input.Owner.Owner.Holder != binding.Holder || input.Owner.Owner.Generation != binding.Generation || row.Ref.RunID != input.RunID || row.Ref.NodeID == "" {
+				return store.Actor{}, errors.New("expansion source is outside the owner award")
+			}
+			return input.Owner, nil
+		}
+	}
 	cfg.Storage = func(ctx context.Context, p capability.Principal) (nodehost.StorageBinding, error) {
 		storage, err := c.BindStorage(ctx, p)
 		return nodehost.StorageBinding{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority}, err

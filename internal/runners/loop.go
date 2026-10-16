@@ -309,7 +309,7 @@ func (l *Loop) request() controllerwire.ClaimRequest {
 }
 
 func validateUnit(unit controllerwire.ClaimedUnit) error {
-	if unit.Unit != capability.UnitTrigger && unit.Unit != capability.UnitNode {
+	if unit.Unit != capability.UnitTrigger && unit.Unit != capability.UnitNode && unit.Unit != capability.UnitPlan && unit.Unit != capability.UnitEval {
 		return errors.New("controller awarded a unit this runner does not execute")
 	}
 	if unit.UnitID == "" || unit.RunID == "" || unit.Capability == "" {

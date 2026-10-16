@@ -1496,6 +1496,12 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.LauncherObservation'
               type: array
             - type: "null"
+        preparing:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.capability.LeaseRef'
+              type: array
+            - type: "null"
       required:
         - observed
       type: object
@@ -1507,6 +1513,12 @@ components:
           anyOf:
             - items:
                 $ref: '#/components/schemas/internal.controllerwire.ClaimedUnit'
+              type: array
+            - type: "null"
+        prepared:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.capability.LeaseRef'
               type: array
             - type: "null"
         remove:
@@ -9679,6 +9691,16 @@ paths:
               - node.report
             binding: runOfTrigger
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.report
+            binding: planOwner
+            liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - expansion.submit
+            binding: sourceReport
+            liveness: expansion
           - credential: local_run_publisher
             grants:
               - data.write
@@ -9959,6 +9981,11 @@ paths:
               - expansion.submit
             binding: expansion
             liveness: expansion
+          - credential: awarded_or_delegated_claim
+            grants:
+              - expansion.submit
+            binding: runOfTrigger
+            liveness: sensitive
         retry: exact_body
   /api/v1/runs/{run}/jobs/{job}/failure:
     get:
@@ -10941,6 +10968,16 @@ paths:
               - node.report
             binding: runOfTrigger
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.report
+            binding: planOwner
+            liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - expansion.submit
+            binding: sourceReport
+            liveness: expansion
           - credential: local_run_publisher
             grants:
               - data.write
@@ -11079,6 +11116,16 @@ paths:
               - trigger.host
             binding: runOfTrigger
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: planOwner
+            liveness: reporting
+          - credential: eval_unit
+            grants:
+              - expansion.submit
+            binding: run
+            liveness: expansion
         retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/binding:
@@ -11110,6 +11157,16 @@ paths:
               - trigger.host
             binding: runOfTrigger
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: planOwner
+            liveness: reporting
+          - credential: eval_unit
+            grants:
+              - expansion.submit
+            binding: run
+            liveness: expansion
         retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/data-authority:
@@ -11141,6 +11198,16 @@ paths:
               - data.read
             binding: runOfTrigger
             liveness: sensitive
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: planOwner
+            liveness: sensitive
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: sourceReport
+            liveness: sensitive
         retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/finish:
@@ -11171,6 +11238,11 @@ paths:
             grants:
               - runs.state
             binding: runOfTrigger
+            liveness: result
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.result
+            binding: planOwner
             liveness: result
         retry: exact_body
       x-sparkwing-wire: undocumented
@@ -11213,6 +11285,16 @@ paths:
               - data.read
             binding: ownNode
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: planOwner
+            liveness: reporting
+          - credential: eval_unit
+            grants:
+              - expansion.submit
+            binding: run
+            liveness: expansion
         retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/nodes/{job}/authentication:
@@ -11249,6 +11331,16 @@ paths:
               - data.read
             binding: ownNode
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: planOwner
+            liveness: reporting
+          - credential: eval_unit
+            grants:
+              - expansion.submit
+            binding: run
+            liveness: expansion
         retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/nodes/{job}/binding:
@@ -11285,6 +11377,16 @@ paths:
               - data.read
             binding: ownNode
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: planOwner
+            liveness: reporting
+          - credential: eval_unit
+            grants:
+              - expansion.submit
+            binding: run
+            liveness: expansion
         retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/nodes/{job}/data-authority:
@@ -11357,6 +11459,16 @@ paths:
               - data.read
             binding: ownNode
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: planOwner
+            liveness: reporting
+          - credential: eval_unit
+            grants:
+              - expansion.submit
+            binding: run
+            liveness: expansion
         retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/nodes/{job}/transition:
@@ -11429,6 +11541,16 @@ paths:
               - trigger.host
             binding: runOfTrigger
             liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: planOwner
+            liveness: reporting
+          - credential: eval_unit
+            grants:
+              - expansion.submit
+            binding: run
+            liveness: expansion
         retry: safe
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/transition:
@@ -14322,6 +14444,16 @@ paths:
               - node.report
             binding: runOfTrigger
             liveness: process
+          - credential: owner_process
+            grants:
+              - expansion.submit
+            binding: sourceReport
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: planOwner
+            liveness: process
         retry: never
   /node/v1/children:
     post:
@@ -14417,6 +14549,16 @@ paths:
               - node.report
             binding: runOfTrigger
             liveness: process
+          - credential: owner_process
+            grants:
+              - expansion.submit
+            binding: sourceReport
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: planOwner
+            liveness: process
         retry: never
       x-sparkwing-wire: undocumented
   /node/v1/cleanups/{cleanup}:
@@ -14452,6 +14594,16 @@ paths:
             grants:
               - node.report
             binding: runOfTrigger
+            liveness: process
+          - credential: owner_process
+            grants:
+              - expansion.submit
+            binding: sourceReport
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: planOwner
             liveness: process
         retry: never
       x-sparkwing-wire: undocumented
@@ -14529,6 +14681,16 @@ paths:
             grants:
               - node.report
             binding: runOfTrigger
+            liveness: process
+          - credential: owner_process
+            grants:
+              - expansion.submit
+            binding: sourceReport
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: planOwner
             liveness: process
         retry: exact_body
   /node/v1/oidc-token:
@@ -14671,6 +14833,16 @@ paths:
             grants:
               - node.report
             binding: runOfTrigger
+            liveness: process
+          - credential: owner_process
+            grants:
+              - expansion.submit
+            binding: sourceReport
+            liveness: process
+          - credential: owner_process
+            grants:
+              - node.report
+            binding: planOwner
             liveness: process
         retry: exact_body
   /webhooks/github-app:
