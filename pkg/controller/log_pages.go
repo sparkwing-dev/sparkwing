@@ -27,10 +27,11 @@ import (
 const logPageRecords = 500
 
 type logPageCursor struct {
-	Scope  string           `json:"scope"`
-	Since  time.Time        `json:"since"`
-	Lines  map[string]int64 `json:"lines"`
-	Events map[string]int64 `json:"events"`
+	Scope   string           `json:"scope"`
+	Since   time.Time        `json:"since"`
+	Lines   map[string]int64 `json:"lines"`
+	Events  map[string]int64 `json:"events"`
+	Matches map[string]int64 `json:"matches,omitempty"`
 }
 
 func parseLogPageQuery(r *http.Request, job string) (controllerwire.LogQuery, error) {
@@ -204,6 +205,10 @@ func (s *Server) readLogPage(ctx context.Context, tenant *store.Tenant, reader s
 }
 
 func appendSubjectPage(ctx context.Context, reader segmentLogs, subject blob.LogSubject, q controllerwire.LogQuery, pattern *regexp.Regexp, cursor *logPageCursor, page *controllerwire.LogPage) error {
+	return appendSubjectPageLimit(ctx, reader, subject, q, 0, pattern, cursor, page)
+}
+
+func appendSubjectPageLimit(ctx context.Context, reader segmentLogs, subject blob.LogSubject, q controllerwire.LogQuery, maxMatches int, pattern *regexp.Regexp, cursor *logPageCursor, page *controllerwire.LogPage) error {
 	var output bytes.Buffer
 	result, err := reader.read(ctx, subject, 0, &output)
 	if err != nil {
@@ -251,7 +256,7 @@ func appendSubjectPage(ctx context.Context, reader segmentLogs, subject blob.Log
 			}
 			record.Time = &at
 		}
-		selected := i+1 >= first && i+1 <= last && (pattern == nil || pattern.MatchString(line)) && (record.Time == nil || !record.Time.Before(cursor.Since))
+		selected := i+1 >= first && i+1 <= last && (pattern == nil || pattern.MatchString(line)) && (record.Time == nil || !record.Time.Before(cursor.Since)) && (maxMatches == 0 || cursor.Matches[string(key)] < int64(maxMatches))
 		if selected && len(page.Records) == logPageRecords {
 			page.Truncated = true
 			return nil
@@ -259,6 +264,9 @@ func appendSubjectPage(ctx context.Context, reader segmentLogs, subject blob.Log
 		cursor.Lines[string(key)] = number
 		if selected {
 			page.Records = append(page.Records, record)
+			if maxMatches > 0 {
+				cursor.Matches[string(key)]++
+			}
 		}
 	}
 	return nil

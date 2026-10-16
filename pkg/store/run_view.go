@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -17,6 +18,7 @@ type RunView struct {
 	Snapshot RunSnapshot
 	Attempts []NodeAttempt
 	Logs     []blob.LogSubject
+	Failures []string
 }
 
 // ReadRunView reads only this tenant's run, without exposing log storage locations.
@@ -26,20 +28,85 @@ func (t *Tenant) ReadRunView(ctx context.Context, runID string) (RunView, error)
 		return RunView{}, err
 	}
 	defer rollbackOrLog(tx)
-	var view RunView
-	if view.Snapshot, err = readSnapshotTx(ctx, tx, t.team, runID); err != nil {
-		return RunView{}, err
-	}
-	if view.Attempts, err = readRunAttemptsTx(ctx, tx, t.team, runID); err != nil {
-		return RunView{}, err
-	}
-	if view.Logs, err = readRunLogSubjectsTx(ctx, tx, t.team, runID); err != nil {
+	view, err := readRunViewTx(ctx, tx, t.team, runID)
+	if err != nil {
 		return RunView{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return RunView{}, err
 	}
 	return view, nil
+}
+
+func readRunViewTx(ctx context.Context, tx *storeTx, team Team, runID string) (RunView, error) {
+	var view RunView
+	var err error
+	if view.Snapshot, err = readSnapshotTx(ctx, tx, team, runID); err != nil {
+		return RunView{}, err
+	}
+	if view.Failures, err = readRunFailuresTx(ctx, tx, team, runID); err != nil {
+		return RunView{}, err
+	}
+	if view.Attempts, err = readRunAttemptsTx(ctx, tx, team, runID); err != nil {
+		return RunView{}, err
+	}
+	if view.Logs, err = readRunLogSubjectsTx(ctx, tx, team, runID); err != nil {
+		return RunView{}, err
+	}
+	return view, nil
+}
+
+func readRunFailuresTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT error FROM runs WHERE team=? AND id=? AND error<>'' UNION ALL SELECT error FROM nodes WHERE team=? AND run_id=? AND error<>''`, team, runID, team, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	failures := []string{}
+	for rows.Next() {
+		var failure string
+		if err := rows.Scan(&failure); err != nil {
+			return nil, err
+		}
+		failures = append(failures, failure)
+	}
+	return failures, errors.Join(rows.Err(), rows.Close())
+}
+
+// ListRunViews reads a bounded tenant page in descending number order within exclusive lower and inclusive upper bounds.
+func (t *Tenant) ListRunViews(ctx context.Context, after, through int64, limit int) ([]RunView, error) {
+	if after < 0 || through < after || limit < 1 {
+		return nil, fmt.Errorf("run page requires ordered nonnegative bounds and a positive limit")
+	}
+	tx, err := t.s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer rollbackOrLog(tx)
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM runs WHERE team=? AND number>? AND number<=? ORDER BY number DESC LIMIT ?`, t.team, after, through, limit)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		ids = append(ids, id)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	views := make([]RunView, 0, len(ids))
+	for _, id := range ids {
+		view, err := readRunViewTx(ctx, tx, t.team, id)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
+	return views, tx.Commit()
 }
 
 func readRunAttemptsTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]NodeAttempt, error) {

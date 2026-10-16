@@ -63,6 +63,12 @@ and progress for each subject. An idle follow poll returns no repeated output.
 Completion requires terminal state and final persisted segments. A cursor never
 replaces the store's authorization check for those segments.
 
+Cross-run log search uses the same persisted subjects and authorization. Run
+filters apply before the run limit. A page can contain no matches and still
+carry a continuation cursor. The cursor keeps the initial run-number boundary
+and any unfinished subject, so later runs cannot displace older candidates.
+`--max-matches` limits each subject. Zero returns all matches across pages.
+
 ### Who hosts the daemon
 
 The local controller is wingd. These commands inspect or hold its lifecycle:
