@@ -4,6 +4,10 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
+Intake and hosts derive plan placement from the sealed request. Local runs,
+local triggered runs, runner-hosted runs, launcher runs, `--runner here` and
+GitHub Actions use the same capability table for initial plans and expansions.
+
 If the pipeline's `go.mod` replaces the Go SDK, Sparkwing uses the installed CLI's
 engine and warns that engine pinning is off for that run. The shared installer
 builds the replacement locally.

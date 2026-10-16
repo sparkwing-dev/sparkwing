@@ -3,6 +3,7 @@ package localcontroller
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -103,6 +104,61 @@ func TestNativeServicesUsesSharedInterfacesAndCapturedEnvironment(t *testing.T) 
 	owner, claimed, evaluator, err := nodehost.NewNativeHost(services.Config)
 	if err != nil || owner == nil || claimed == nil || evaluator == nil {
 		t.Fatalf("shared native hosts cannot use the supplied interfaces: %v", err)
+	}
+}
+
+func TestNativeServicesValidatesPlansForEveryLaunchPlacement(t *testing.T) {
+	for _, test := range []struct {
+		placement nodeproto.Placement
+		origin    runspec.Origin
+		dispatch  runspec.Dispatch
+		here      bool
+		local     bool
+	}{
+		{nodeproto.PlacementLocal, runspec.OriginLocal, runspec.DispatchHost, false, true},
+		{nodeproto.PlacementLocalTriggered, runspec.OriginTrigger, runspec.DispatchHost, false, true},
+		{nodeproto.PlacementRunnerHosted, runspec.OriginTrigger, runspec.DispatchHost, false, false},
+		{nodeproto.PlacementLauncher, runspec.OriginTrigger, runspec.DispatchController, false, false},
+		{nodeproto.PlacementHere, runspec.OriginTrigger, runspec.DispatchHost, true, false},
+		{nodeproto.PlacementGitHubActions, runspec.OriginActions, runspec.DispatchHost, false, false},
+	} {
+		t.Run(string(test.placement), func(t *testing.T) {
+			cfg, state := nativeConfigFixture(t)
+			request := &state.snapshot.Run.Request.Request
+			request.Origin, request.Dispatch = test.origin, test.dispatch
+			if test.local {
+				root := t.TempDir()
+				request.Git.Repository.Key = runspec.RepoKey("local:" + root)
+				request.Source.Location = runspec.SourceLocation{LocalCheckout: root, PipelineDir: ".sparkwing"}
+			}
+			if test.here {
+				request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+			}
+			listener := &processListener{closed: make(chan struct{})}
+			services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := services.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			owner, _, _, err := nodehost.NewNativeHost(services.Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			planning := nodehost.PlanningInput{Disabled: true, Validation: owner.Planning.Validation}
+			planned, err := nodehost.PlanInitial(t.Context(), planning, nodehost.PlanningFunctions{Plan: func(context.Context) (json.RawMessage, error) {
+				return json.RawMessage(`{"jobs":[{"id":"generate","closures":{"generate":["children"]},"steps":[{"id":"run"}]},{"id":"approve","approval":{},"closures":{"skip_if":["condition"]}}],"concurrency":[{"group":"g","scope":"box","capacity":1,"cost":1,"on_limit":"queue"}]}`), nil
+			}})
+			if err != nil || len(planned.Plan.Jobs) != 2 {
+				t.Fatalf("native planning: %+v, %v", planned, err)
+			}
+			if got := owner.Planning.Validation.Placement; got != test.placement || got != store.RequestPlacement(*request) {
+				t.Fatalf("native placement = %q, request placement = %q, want %q", got, store.RequestPlacement(*request), test.placement)
+			}
+		})
 	}
 }
 

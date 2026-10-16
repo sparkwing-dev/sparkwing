@@ -159,8 +159,9 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	config := nodehost.NativeHostConfig{
 		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
-		Admission: admission,
-		Owner:     nodehost.OwnerHost{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
+		Validation: nodeproto.ValidationContext{Placement: store.RequestPlacement(run.Run.Request.Request)},
+		Admission:  admission,
+		Owner:      nodehost.OwnerHost{Renew: localOwnerRenew(current, cfg.Renew), Local: cfg.Local, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},
