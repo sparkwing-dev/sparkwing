@@ -53,6 +53,9 @@ func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.Creden
 	if err != nil {
 		return capability.AuthenticationSnapshot{}, err
 	}
+	if err := authenticationResultTx(ctx, tx, chain[0].principal.Capability, evidence, &out.Binding); err != nil {
+		return capability.AuthenticationSnapshot{}, err
+	}
 	out.Now = tx.now()
 	if err := tx.Commit(); err != nil {
 		return capability.AuthenticationSnapshot{}, err

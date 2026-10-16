@@ -99,6 +99,8 @@ type OwnerLeaseRef struct {
 // transaction. CapabilityPrefix is a separate claim fence and never substitutes
 // for a session, console or peer authority reference.
 type Actor struct {
+	Result           *capability.RecordedResult
+	ConsoleProof     *capability.ConsoleProof
 	Authority        capability.AuthorityRef
 	Kind             ActorKind
 	CapabilityPrefix string
@@ -419,6 +421,9 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	now = tx.now()
 	row, err := readNodeTx(ctx, tx, team, change.Ref)
 	if err != nil {
+		return Applied{}, err
+	}
+	if err := validateResultProofTx(ctx, tx, team, change.Actor, change.Ref, row.Attempt); err != nil {
 		return Applied{}, err
 	}
 	from, err := nodeState(row)

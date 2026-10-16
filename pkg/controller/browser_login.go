@@ -94,7 +94,6 @@ func safeNext(next string) string {
 	return next
 }
 
-// safety: a single-team controller offers no provider, so its sign-in page offers the operator token alone.
 func (s *Server) withSignInProviders(data loginPageData) loginPageData {
 	providers := s.signInProviders()
 	data.Google = slices.Contains(providers, store.ProviderGoogle)

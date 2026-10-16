@@ -45,15 +45,15 @@ func (s *Server) WithDataController(data *DataController) *Server {
 
 func (s *Server) dataEndpoints() []Endpoint {
 	return []Endpoint{
-		{Method: "POST", Pattern: "/api/v1/data/upload", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataUpload},
-		{Method: "POST", Pattern: "/api/v1/data/commit", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataCommit},
-		{Method: "POST", Pattern: "/api/v1/data/records", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataRecordCommit},
-		{Method: "GET", Pattern: "/api/v1/data/records", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataRecordLookup},
-		{Method: "POST", Pattern: "/api/v1/data/download", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataDownload},
-		{Method: "POST", Pattern: "/api/v1/data/has-many", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataPresence},
-		{Method: "POST", Pattern: "/api/v1/data/memo/lookup", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataMemo},
-		{Method: "POST", Pattern: "/api/v1/data/depcache/lookup", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataDepcache},
-		{Method: "POST", Pattern: "/api/v1/data/memo/copy", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataMemo},
+		{Method: "POST", Pattern: "/api/v1/data/upload", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataUpload},
+		{Method: "POST", Pattern: "/api/v1/data/commit", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataCommit},
+		{Method: "POST", Pattern: "/api/v1/data/records", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataRecordCommit},
+		{Method: "GET", Pattern: "/api/v1/data/records", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataRecordLookup},
+		{Method: "POST", Pattern: "/api/v1/data/download", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataDownload},
+		{Method: "POST", Pattern: "/api/v1/data/has-many", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataPresence},
+		{Method: "POST", Pattern: "/api/v1/data/memo/lookup", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataMemo},
+		{Method: "POST", Pattern: "/api/v1/data/depcache/lookup", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataDepcache},
+		{Method: "POST", Pattern: "/api/v1/data/memo/copy", Authentication: capability.AuthCapability, Decode: decodeDataTarget, ResolveTarget: resolveDataTarget, Handle: s.handleDataMemo},
 	}
 }
 

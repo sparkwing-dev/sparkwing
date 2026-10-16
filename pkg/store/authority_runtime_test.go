@@ -24,7 +24,7 @@ func authorityRoot(id, team string) capability.Capability {
 		Digest: sha256.Sum256([]byte(id)), Prefix: id, Team: team,
 		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: id}, Audience: capability.Controller,
 		Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone},
-		Issuance: capability.Delegate, IssuedAt: time.Unix(1, 0).UTC(), ReservedPools: []string{}, Repositories: []string{},
+		Issuance: capability.Delegate, IssuedAt: time.Unix(1, 0).UTC(), ReservedPools: []string{}, Repositories: nil,
 	}
 }
 

@@ -62,7 +62,7 @@ func (s *Server) oidcReader(ctx context.Context, team string) (OIDCReader, error
 	} else if s.store != nil {
 		var tenant *store.Tenant
 		tenant, err = s.store.ForTeam(ctx, store.Team(team))
-		reader, _ = any(tenant).(OIDCReader)
+		reader = tenant
 	}
 	if err != nil {
 		return nil, engineLookupError(err)
@@ -122,8 +122,10 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 	if end := a.Binding.Deadline; end != nil && end.Before(ceiling) {
 		ceiling = *end
 	}
-	claims := oidcissuer.Claims{Audience: body.Audience, Team: facts.Team, RunID: facts.RunID, Pipeline: facts.Pipeline,
-		Trigger: facts.Trigger, RunnerKind: facts.RunnerKind, Ref: facts.Ref, SHA: facts.SHA, Repository: facts.Repository, RepositoryID: facts.RepositoryID}
+	claims := oidcissuer.Claims{
+		Audience: body.Audience, Team: facts.Team, RunID: facts.RunID, Pipeline: facts.Pipeline,
+		Trigger: facts.Trigger, RunnerKind: facts.RunnerKind, Ref: facts.Ref, SHA: facts.SHA, Repository: facts.Repository, RepositoryID: facts.RepositoryID,
+	}
 	if _, err := claims.Subject(); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "run identity cannot form an OIDC subject"}
 	}
@@ -142,3 +144,5 @@ func (s *Server) handleOIDCToken(w http.ResponseWriter, r *http.Request, a capab
 	writeJSON(w, http.StatusOK, OIDCTokenResponse{Token: token, ExpiresAt: expires.UTC()})
 	return nil
 }
+
+var _ OIDCReader = (*store.Tenant)(nil)

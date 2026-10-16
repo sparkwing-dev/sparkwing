@@ -249,10 +249,20 @@ func TestActionsIssuanceHTTPCallerFieldsCannotSelectAuthority(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
 		t.Fatal(err)
 	}
-	for _, method := range []string{"GET", "HEAD", "PUT", "DELETE"} {
-		w := f.request(t, method, token, "team", nil)
-		assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+	for _, method := range []string{"GET", "HEAD", "PUT"} {
+		t.Run(method, func(t *testing.T) {
+			w := f.request(t, method, token, "team", nil)
+			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
+		})
 	}
+	session := newSessionFlow(t)
+	if _, err := session.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	session.server.Handler().ServeHTTP(w, session.request("DELETE", "/api/v1/runners/github/exchange", ""))
+	assertEngineError(t, w, 400, apierr.BadRequest)
+
 }
 
 func TestActionsIssuanceHTTPMalformedBodyCannotReachOrigin(t *testing.T) {
@@ -322,19 +332,9 @@ func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		HTTP: &http.Client{Transport: reportTransport{http.HandlerFunc(f.signer.ServeKeys)}},
 	})
 	w := f.request(t, "POST", f.token(t), "team", nil)
-	assertEngineError(t, w, 503, apierr.Unavailable)
-	calls := 0
-	st.SetProvisionPolicy(actionsProvisionPolicy(func(spec capability.ProvisionSpec) error {
-		calls++
-		if spec.Kind != capability.ProvisionActions || spec.Team != "team" || spec.RegistrationID != "github:42:7" || spec.Binding.Push == nil || spec.Binding.Push.RepositoryKey != "gh:42" {
-			t.Fatalf("origin policy received %+v", spec)
-		}
-		return nil
-	}))
-	w = f.request(t, "POST", f.token(t), "team", nil)
 	var result struct{ Token string }
-	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Token == "" || calls != 1 {
-		t.Fatalf("HTTP %d %s policy calls=%d", w.Code, w.Body.String(), calls)
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Token == "" {
+		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	principal, err := st.LookupCapability(t.Context(), sha256.Sum256([]byte(result.Token)))
 	if err != nil || principal.Capability.Parent != nil || principal.Capability.Binding.Push == nil || principal.Capability.Binding.Push.RepositoryKey != "gh:42" || principal.Capability.Binding.Push.WorkflowRunID != "1000" || principal.Capability.Subject.ID != "github:42:7:1000" || principal.Capability.ExpiresAt == nil || principal.Capability.ExpiresAt.Sub(principal.Capability.IssuedAt) <= 0 || principal.Capability.ExpiresAt.Sub(principal.Capability.IssuedAt) > time.Hour || !reflect.DeepEqual(principal.Capability.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
@@ -353,9 +353,9 @@ func TestActionsIssuanceHTTPCommitsThroughSoleIssuer(t *testing.T) {
 	if err := st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE team='team' AND bind_kind='push'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("capabilities=%d err=%v", count, err)
 	}
-	st.SetProvisionPolicy(actionsProvisionPolicy(func(capability.ProvisionSpec) error {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "binding removed"}
-	}))
+	if _, err := st.DB().ExecContext(t.Context(), `DELETE FROM github_runner_bindings WHERE team='team' AND repository_id=42`); err != nil {
+		t.Fatal(err)
+	}
 	w = f.request(t, "POST", f.token(t), "team", nil)
 	assertEngineError(t, w, 403, apierr.Forbidden)
 	if err := st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil || count != 1 {

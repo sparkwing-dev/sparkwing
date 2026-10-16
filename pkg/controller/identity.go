@@ -374,7 +374,7 @@ type teamJSON struct {
 
 func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if !s.MultiTeam() {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "creating a team requires a multi-team license"}
+		return apierr.Authorization(apierr.ReasonMissingGrant, "creating a team requires a multi-team license")
 	}
 	var req createTeamReq
 	if err := decodeEngineRequest(r, &req); err != nil {

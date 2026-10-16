@@ -98,7 +98,7 @@ func (s *Server) verifyIdentityLinkStart(r *http.Request) error {
 	}
 	if len(r.PostForm) != 1 || len(r.PostForm["csrf_token"]) != 1 || len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 ||
 		!validFormCSRF(r, s.cookiesSecure()) || !constantTimeEqual(r.PostForm.Get("csrf_token"), session.CSRFToken) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	if err := s.admitIdentityLink(session); err != nil {
 		return err

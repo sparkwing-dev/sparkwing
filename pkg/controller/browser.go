@@ -20,9 +20,7 @@ import (
 // API on the same listener: the dashboard pages, browser sign-in and the
 // session cookies that authenticate the page's own API calls.
 type Dashboard struct {
-	// Local serves one machine's own user, who authenticates some other way
-	// (the local dashboard's serve token): no sign-in pages and no session
-	// cookies.
+	// Local uses verified peer transport without browser sign-in.
 	Local bool
 
 	// HSTS asserts that browsers reach this controller over TLS even though
@@ -64,8 +62,6 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	d := s.dashboard
 	pages := web.Pages(d.Bundle)
 	browser := newRegisteredMux()
-	// safety: the page reaches the API on its own origin with its session cookie or the local serve token, so no
-	// credential rides this script.
 	browser.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local))
 	top := http.NewServeMux()
 	if d.Local {

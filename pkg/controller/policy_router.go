@@ -188,6 +188,10 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return err
 	}
+	if evidence := presentation.Evidence; evidence.ResultDigest != "" {
+		b := authorized.Binding
+		authorized.Result = &capability.RecordedResult{Actor: authorized.Principal.Authority, Method: r.Method, Pattern: route.Path, RunID: evidence.Target.RunID, NodeID: evidence.Target.NodeID, ClaimID: evidence.Target.ClaimID, Generation: b.Generation, Attempt: b.Attempt, Digest: evidence.ResultDigest}
+	}
 	return endpoint.Handle(w, r, authorized)
 }
 

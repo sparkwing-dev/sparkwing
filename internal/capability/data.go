@@ -65,6 +65,7 @@ var DataPolicies = []DataPolicy{
 
 // DataTarget carries selectors for C1's read-set and receipt checks, not asserted provenance.
 type DataTarget struct {
+	Digests     []string
 	Operation   DataOperation
 	Digest      string
 	UploadID    string

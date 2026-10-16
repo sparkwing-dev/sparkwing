@@ -125,5 +125,5 @@ func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, 
 }
 
 func actionsExchangeRefusal() error {
-	return &apierr.Error{Code: apierr.Forbidden, Message: "GitHub Actions repository binding refused", Details: map[string]any{"reason": apierr.ReasonRepositoryUnauthorized}}
+	return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "GitHub Actions repository binding refused")
 }

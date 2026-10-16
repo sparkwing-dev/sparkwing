@@ -116,7 +116,10 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
 		result, err = sealRunSpecTx(ctx, tx, t.team, request, tx.now())
-		return err
+		if err != nil {
+			return err
+		}
+		return persistPlanResultProofTx(ctx, tx, t.team, request)
 	})
 	if err != nil {
 		var refused *SecretPreflightError
@@ -430,7 +433,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 	if err != nil {
 		return AcceptedPlan{}, err
 	}
-	if run.CancelRequestedAt != nil || run.FinishedAt != nil && run.Spec == nil {
+	if run.Spec == nil && (run.CancelRequestedAt != nil || run.FinishedAt != nil) {
 		return AcceptedPlan{}, authorityError(apierr.IllegalTransition, "run is no longer accepting plans")
 	}
 	spec, body, err := preparePlanSealTx(ctx, tx, team, request, run)
@@ -444,7 +447,7 @@ func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcce
 	if err = planAuthorityTx(ctx, tx, team, request); err != nil {
 		return AcceptedPlan{}, err
 	}
-	if replay && run.FinishedAt != nil {
+	if replay && (run.FinishedAt != nil || request.Actor.Result != nil) {
 		return AcceptedPlan{Spec: *run.Spec, Plan: run.Plan, PlanHash: run.PlanHash, Owner: run.Owner, Replayed: true}, nil
 	}
 	if run.Request.Request.Mode == runspec.IntakeExecute && dispatch == string(runspec.DispatchController) && controller == nil {

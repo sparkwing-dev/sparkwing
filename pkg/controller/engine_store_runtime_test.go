@@ -103,7 +103,7 @@ func engineRuntimeClaim(t *testing.T, server *EngineController, kind capability.
 	t.Helper()
 	s := server.Store
 	digest := sha256.Sum256([]byte("runner-secret"))
-	root := capability.Capability{Prefix: "runner", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{}, IssuedAt: time.Unix(0, 1).UTC()}
+	root := capability.Capability{Prefix: "runner", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: nil, IssuedAt: time.Unix(0, 1).UTC()}
 	envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: root})
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func engineRuntimeClaim(t *testing.T, server *EngineController, kind capability.
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineSQL(t, s, `INSERT INTO capabilities(digest,prefix,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,'runner','a','machine','runner','controller',?,'delegate',1,?,'none',?,?,1,'runner')`, hex.EncodeToString(digest[:]), grants, envelope, []byte(`[]`), []byte(`[]`))
+	engineSQL(t, s, `INSERT INTO capabilities(digest,prefix,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,'runner','a','machine','runner','controller',?,'delegate',1,?,'none',?,?,1,'runner')`, hex.EncodeToString(digest[:]), grants, envelope, []byte(`[]`), []byte(`null`))
 	target := &store.UnitRef{Kind: kind, RunID: "run"}
 	if kind == capability.UnitNode {
 		target.NodeID = "job"

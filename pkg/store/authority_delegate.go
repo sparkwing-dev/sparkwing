@@ -12,23 +12,18 @@ type delegationContracts interface {
 	ValidateDelegation(capability.Principal, capability.DelegateSpec, time.Time) error
 }
 
-type sharedDelegationContracts struct{}
-
-func (sharedDelegationContracts) ValidateDelegation(parent capability.Principal, child capability.DelegateSpec, now time.Time) error {
-	return capability.ValidateDelegation(parent, child, now)
-}
-
 func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.DelegateSpec) (capability.Capability, error) {
 	parent, err := tx.ResolveAuthority(ctx, spec.Parent)
 	if err != nil {
 		return capability.Capability{}, err
 	}
-	validator := tx.store.delegation
-	if validator == nil {
-		validator = sharedDelegationContracts{}
-	}
-	if err := validator.ValidateDelegation(parent, spec, tx.now()); err != nil {
+	if err := capability.ValidateDelegation(parent, spec, tx.now()); err != nil {
 		return capability.Capability{}, err
+	}
+	if tx.store.delegation != nil {
+		if err := tx.store.delegation.ValidateDelegation(parent, spec, tx.now()); err != nil {
+			return capability.Capability{}, err
+		}
 	}
 	parent, err = tx.ResolveAuthority(ctx, spec.Parent)
 	if err != nil {

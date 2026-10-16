@@ -53,7 +53,13 @@ func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Au
 			return checkBlobSelectionTx(ctx, tx, team, input, target)
 		}
 		fallthrough
-	case capability.DataDownload, capability.DataHasMany:
+	case capability.DataHasMany:
+		if target.Digests != nil {
+			_, err := resolveBlobAuthorityTx(ctx, tx, team, input, capability.DataRead)
+			return err
+		}
+		fallthrough
+	case capability.DataDownload:
 		presence, err := readableBlobsTx(ctx, tx, team, blob.HasManyRequest{Authority: input, Digests: []blob.Digest{blob.Digest(target.Digest)}})
 		if err != nil {
 			return err
@@ -99,6 +105,13 @@ func checkBlobDataWriteTx(ctx context.Context, tx *storeTx, team Team, input blo
 			return blob.ErrDigestNotReadable
 		}
 		return requireBlobMemoTx(ctx, tx, resolved)
+	}
+	if target.Operation == capability.DataCommit && target.UploadID != "" {
+		u, err := readBlobUploadTx(ctx, tx, team, target.UploadID)
+		if err != nil {
+			return err
+		}
+		return checkBlobUploadTx(ctx, tx, team, resolved, &u, true)
 	}
 	if !validBlobDigest(blob.Digest(target.Digest)) {
 		return authorityError(apierr.BadRequest, "invalid blob digest")

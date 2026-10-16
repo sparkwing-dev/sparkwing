@@ -46,11 +46,11 @@ func (s *Server) capabilityManager(ctx context.Context, team string) (Capability
 		manager, err = s.resolveCapabilityManager(ctx, store.Team(team))
 	} else if s.store != nil {
 		if team == "" {
-			manager, _ = any(s.store.AsOperator()).(CapabilityManager)
+			manager = s.store.AsOperator()
 		} else {
 			var tenant *store.Tenant
 			tenant, err = s.store.ForTeam(ctx, store.Team(team))
-			manager, _ = any(tenant).(CapabilityManager)
+			manager = tenant
 		}
 	}
 	if err != nil {
@@ -155,8 +155,7 @@ func validCapabilityMetadata(a capability.Authorized, row capability.Metadata) b
 	if row.Subject.Kind != capability.SubjectAccount && row.Subject.Kind != capability.SubjectMachine {
 		return false
 	}
-	p := a.Principal.Capability
-	return slices.Contains(p.Grants, capability.TeamAdmin) || row.CreatedBy == p.Subject.ID || row.Subject == p.Subject
+	return capability.OwnsToken(a.Principal, row)
 }
 
 func (s *Server) handleRotateCapability(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -223,3 +222,8 @@ func validCapabilityRotation(a capability.Authorized, r capability.Rotation) boo
 	}
 	return !r.RevokesAt.Before(next.IssuedAt) && (next.ExpiresAt == nil || next.ExpiresAt.After(next.IssuedAt))
 }
+
+var (
+	_ CapabilityManager = (*store.Tenant)(nil)
+	_ CapabilityManager = (*store.Operator)(nil)
+)

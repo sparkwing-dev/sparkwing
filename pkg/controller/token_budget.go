@@ -8,25 +8,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
-// TokenRequestBudget bounds ordinary authenticated requests and signed-data
-// requests, and names the controller-wide rate an operator wants to hear about.
-// Signed-up teams share a bucket; the operator's team uses a bucket per token.
-// The per-runner budgets in [RequestBudget] size a cooperating runner's loops;
-// this budget still bounds a caller varying the runner it claims to be.
-//
-// Zero in either field leaves that guard off, which is what a controller
-// starts with.
+// TokenRequestBudget bounds authorized capability requests and their aggregate rate.
 type TokenRequestBudget struct {
-	// PerTokenMinute caps requests from one signed-up team or operator token
-	// per rolling minute, including signed-data requests made with claim grants.
-	// Past it a request is answered 429 with a Retry-After naming the refill
-	// delay. A caller carrying no token uses its client address.
+	// PerTokenMinute caps authorized requests per team or operator token.
 	PerTokenMinute int
 
-	// AlarmPerMinute is the request rate, counted across every caller, past
-	// which the controller logs at warn and counts an alarm. It refuses
-	// nothing: it is the operator's notice that one pod is serving more than
-	// it was sized for.
+	// AlarmPerMinute triggers operator warnings for the aggregate authorized request rate.
 	AlarmPerMinute int
 }
 

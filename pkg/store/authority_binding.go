@@ -57,7 +57,7 @@ func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Princi
 }
 
 func bindingRefusal() error {
-	return authorityError(apierr.Forbidden, "resource is outside the authorized binding")
+	return apierr.Authorization(apierr.ReasonBinding, "resource is outside the authorized binding")
 }
 
 func bindingRunExistsTx(ctx context.Context, tx *storeTx, team, run string) error {
@@ -225,15 +225,14 @@ func bindingTokenTx(ctx context.Context, tx *storeTx, c capability.Capability, t
 	if target.TokenPrefix == "" {
 		return bindingRefusal()
 	}
-	var kind capability.SubjectKind
-	var subject, creator string
-	if err := tx.QueryRowContext(ctx, `SELECT subject_kind,subject_id,created_by FROM capabilities WHERE team=? AND prefix=?`, c.Team, target.TokenPrefix).Scan(&kind, &subject, &creator); err != nil {
+	metadata, err := capabilityMetadataTx(ctx, tx, target.TokenPrefix)
+	if err != nil {
 		return err
 	}
-	owned := c.Subject.Kind == capability.SubjectAccount && (kind == capability.SubjectAccount && subject == c.Subject.ID || creator == c.Subject.ID)
-	if !slices.Contains(c.Grants, capability.TeamAdmin) && !owned {
+	if !capability.OwnsToken(capability.Principal{Capability: c, Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}}, metadata) {
 		return bindingRefusal()
 	}
+
 	return nil
 }
 

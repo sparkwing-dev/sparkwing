@@ -163,10 +163,6 @@ func (s *Server) runTeamDeletions(ctx context.Context, interval time.Duration) {
 
 var teamPurgeDelay = 2 * tenantCacheTTL
 
-// safety: a cache grant or log upload URL issued before the deletion is
-// verified by its signature alone and writes into the team's storage until it
-// expires, so the cache tree and logs are deleted once more after the
-// longest-lived of them has lapsed.
 const teamRecheckDelay = limits.LogUploadURLTTL + time.Hour
 
 // safety: A stopped replica keeps a deletion lease only until another can resume it.
@@ -175,7 +171,7 @@ const teamDeletionLease = 5 * time.Minute
 // ProcessTeamDeletions does, as of now, the work every team deletion has
 // due. A pending deletion requested at least teamPurgeDelay earlier has its
 // stored objects, then its rows, removed; a finished one whose recheck is due
-// has its cache tree and rows swept once more. Each deletion is taken under a
+// has its stored objects and rows swept once more. Each deletion is taken under a
 // lease, renewed before every step that leaves the database, so one replica
 // works on it at a time. A step that fails leaves the deletion as it was with
 // the failure recorded, and the next pass retries it from the start, because
