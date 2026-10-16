@@ -398,13 +398,6 @@ func isTerminalRunStatus(s string) bool {
 	return s == "success" || s == "failed" || s == "cancelled"
 }
 
-func normalizeRunID(id string) string {
-	if id == "" || strings.HasPrefix(id, "run-") {
-		return id
-	}
-	return "run-" + id
-}
-
 func statusExitCode(status string) error {
 	if status == "success" {
 		return nil

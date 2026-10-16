@@ -1,5 +1,8 @@
 # W9 continuation: local integration and runner transport
 
+Latest continuation: [W9-PRUNE-SELECTOR-CONTINUATION.md](W9-PRUNE-SELECTOR-CONTINUATION.md)
+closes prune acknowledgement and CLI numeric-selector rewriting.
+
 The next continuation fixes background queue service binding and log finalization.
 See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.
 

@@ -2382,18 +2382,6 @@ components:
         - record
       type: object
       x-sparkwing-go-type: controllerwire.ReuseSource
-    internal.controllerwire.RunDeletion:
-      additionalProperties: true
-      properties:
-        deleted:
-          type: boolean
-        run_id:
-          type: string
-      required:
-        - run_id
-        - deleted
-      type: object
-      x-sparkwing-go-type: controllerwire.RunDeletion
     internal.controllerwire.RunDetail:
       additionalProperties: true
       properties:
@@ -8840,12 +8828,8 @@ paths:
           schema:
             type: string
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.RunDeletion'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:

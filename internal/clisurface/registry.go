@@ -331,7 +331,13 @@ func Registry() []Command {
 			{Name: "all-repos"},
 			{Name: "yes"},
 		}},
-		{Path: "sparkwing run", PipelineArgument: true, PipelineArgsAfterSeparator: true, Rules: []string{"Always executes locally, including detached work on the local controller. --profile is refused.", "Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.", "Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.", "--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection."}, Flags: []Flag{
+		{Path: "sparkwing run", PipelineArgument: true, PipelineArgsAfterSeparator: true, Rules: []string{
+			"Always executes locally, including detached work on the local controller. --profile is refused.",
+			"Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.",
+			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
+			"--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.",
+			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry.",
+		}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
 			{Name: "sw-cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
 			{Name: "sw-pause-before", Argument: "JOB", Repeatable: true, CommaList: true},
@@ -510,7 +516,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing runs prune", Rules: []string{
 			"Select --run, including --run - for IDs on stdin, or --older-than. Age selection reads every page and includes only terminal runs started before the cutoff. A failed selection deletes nothing.",
-			"--dry-run prints the selected IDs without deleting. The controller enforces retention pins. JSON retains deletion results and structured failures. Plain emits run IDs.",
+			"--dry-run prints the selected IDs without deleting. The controller enforces retention pins. JSON reports the selected run and any structured failure. Plain emits acknowledged run IDs.",
 		}, Flags: []Flag{
 			{Name: "older-than", Argument: "DURATION"},
 			{Name: "run", Argument: "RUN_ID"},

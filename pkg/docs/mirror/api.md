@@ -168,6 +168,13 @@ its stage. The error-only result field is removed.
 
 ## Run detail
 
+`RunPruner.DeleteRun` uses the authorized `DELETE /api/v1/runs/{run}` route.
+It succeeds after an empty HTTP 204 acknowledgement, including log cleanup.
+The client returns only an error. Prune output identifies the selected run and
+any structured failure. It does not report a removed-row count or replay state.
+Cancel, retry and prune preserve numeric run selectors and stable IDs from flags
+or stdin. The authenticated controller resolves them within the current team.
+
 `GET /api/v1/runs/{run}` returns the shared run status object with `inputs`,
 `jobs`, `attempts`, `logs` and `notices`. Job and attempt status excludes raw
 declarations, holder identities and capability prefixes. Log subjects preserve

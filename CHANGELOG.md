@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **cli:** Preserve numeric run selectors and stable IDs on cancel, retry and prune, including stdin. The CLI no longer prepends `run-` before the controller resolves the selected run.
+
+- **cli (Breaking):** Accept committed run deletions through the shared client. `RunPruner.DeleteRun` returns only an error after the controller's HTTP 204 acknowledgement. `runs prune` drops its unsupported deletion receipt. See [migration guide](docs/migrations/_unreleased.md#run-deletion-acknowledgement).
+
 - **cli (Breaking):** Accept committed annotation writes through the shared client and team-local numeric run selectors for annotations and summaries. `RunReview.AppendAnnotation` returns only an error, and `runs annotations add` drops its unsupported `applied` result. See [migration guide](docs/migrations/_unreleased.md#job-reporting).
 
 - **api:** Accept the controller's verified default-ref selection in shared record reads while preserving the other record selectors. Malformed record-query escaping returns `bad_request`.
@@ -223,7 +227,7 @@ unlock.
   Run listing, status, logs, summaries and timelines use the CLI's shared controller projections. The obsolete standalone-store merge path, warm-cache sweep, `Client.ListRuns`, `Client.ListApprovalsForRun`, `backend.ClientBackend` and `storeurl.OpenStateStoreFromSpec` are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 
 - **cli + controller/client (Breaking):** Repository pipeline history uses the local controller's public run projection, and unused launcher, source-credential and unpositioned log-write client APIs are removed
-  History reads follow pagination and fail loudly. Here hosting preserves the controller-awarded runner identity. Run deletion uses `NewRunPruner` and its persistence receipt. The unused CLI supervisor-stop path and duplicate parsers/renderers are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
+  History reads follow pagination and fail loudly. Here hosting preserves the controller-awarded runner identity. Run deletion uses `NewRunPruner` and the controller's empty acknowledgement. The unused CLI supervisor-stop path and duplicate parsers/renderers are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 - **runner enrollment (Breaking):** `NewRunnerTokenManager` replaces `Client.EnrollRunner`, and service issuance uses `NewTokenManager` instead of `Client.CreateServiceToken`. Enrollment uses the shared authenticated transport without replaying one-time credentials. `runners add --reserved-for` forwards pool proposals to team-admin registration. See [migration guide](docs/migrations/_unreleased.md#root-provisioning).
 - **Breaking:** Pipeline trigger submits the sealed run request through the shared controller client. The old trigger request builder and separate here-host loop are removed. Here reasons, source bundles and captured environment delivery still require their native intake bindings.
 - **Breaking:** Local and detached runs, standalone hosting, schedules, debug resume and repository history use the final controller/host boundaries. The CLI's direct store writers, resident consumer, duplicate supervisor command and obsolete client helpers are removed. Native factories and missing local schedule/release/publication contracts still block those operations before effects.

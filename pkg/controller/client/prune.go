@@ -19,14 +19,9 @@ func NewRunPruner(options EngineOptions) (controllerwire.RunPruner, error) {
 	return c, nil
 }
 
-func (c *engineClient) DeleteRun(ctx context.Context, run string) (controllerwire.RunDeletion, error) {
-	var result controllerwire.RunDeletion
+func (c *engineClient) DeleteRun(ctx context.Context, run string) error {
 	if !validSelector(run) {
-		return result, &apierr.Error{Code: apierr.BadRequest, Message: "invalid run selector"}
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid run selector"}
 	}
-	err := c.request(ctx, "DELETE", "/api/v1/runs/{run}", "/api/v1/runs/"+url.PathEscape(run), "", nil, &result)
-	if err == nil && result.RunID == "" {
-		err = &apierr.Error{Code: apierr.ProtocolError, Message: "controller deletion is missing its run identity"}
-	}
-	return result, err
+	return c.request(ctx, "DELETE", "/api/v1/runs/{run}", "/api/v1/runs/"+url.PathEscape(run), "", nil, nil)
 }

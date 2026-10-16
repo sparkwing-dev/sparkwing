@@ -38,7 +38,7 @@ func wireOperations() map[string]wireOperation {
 		"POST /api/v1/runs":                                    operation("Create a run", wire.CreateRunRequest{}, wire.CreateRunResponse{}),
 		"GET /api/v1/runs":                                     operation("List runs", nil, wire.RunPage{}),
 		"GET /api/v1/runs/{run}":                               operation("Read public run detail", nil, wire.RunDetail{}),
-		"DELETE /api/v1/runs/{run}":                            operation("Delete a run", nil, wire.RunDeletion{}),
+		"DELETE /api/v1/runs/{run}":                            operation("Delete a run", nil, nil),
 		"GET /api/v1/runs/{run}/snapshot":                      operation("Read private scheduling state", nil, wire.ScheduleSnapshot{}),
 		"GET /api/v1/runs/{run}/receipt":                       operation("Read a run receipt", nil, wire.Receipt{}),
 		"GET /api/v1/runs/{run}/steps":                         operation("Read run steps", nil, wire.RunSteps{}),

@@ -508,7 +508,7 @@ transport, and `Bearer` supplies the credential without exposing it in a URL.
 | Approvals and annotations | `NewRunReview` |
 | Secret values, metadata, writes, deletion and rotation | `NewSecretManager` |
 | Authorized object transfers and records | `NewDataClient` |
-| Run deletion with a persistence receipt | `NewRunPruner` |
+| Run deletion with an empty HTTP 204 acknowledgement | `NewRunPruner` |
 
 Intake uses the sealed `CreateRunRequest`. Hosts accept plans and expansions
 atomically and report fenced job transitions and typed step observations. The old
@@ -528,13 +528,21 @@ The old orchestrator readers, SQLite/profile factories, `HostTriggerRun`,
 `RunLocalTriggerConsumer` and `ServeConsumer` are removed. Their state, logging,
 admission, submission-environment and child-dispatch backends and the old
 `pkg/localws` server are also removed. Captured environments use the shared host
-snapshot contract. W3's retained `StateStoreOld` scheduler still needs retirement.
+snapshot contract.
 
 Local lifecycle uses `wingd.LocalRuntime`. Foreground construction receives the
 parsed `--home` before election. Lifecycle, managed units and logs share that
-home. The elected controller factory, detached startup and native execution
-composition remain unfinished. Typed step reports also require the controller's
-matching request decoder and persistence acknowledgement.
+home. The elected controller supplies admission, private execution transport,
+storage and process services. Typed step reports commit under the observed
+attempt before the controller acknowledges persistence.
+
+## Run deletion acknowledgement
+
+`RunPruner.DeleteRun(ctx, run)` returns only an error. An empty HTTP 204 response
+acknowledges deletion and log cleanup. The former `RunDeletion` type is removed
+because the controller does not return a deleted-row or replay result.
+`runs prune -o json` emits `run_id`, optional `dry_run` and any structured `error`.
+The former `result` field is removed. Plain output emits the acknowledged selector.
 
 ## Sealed step selections
 

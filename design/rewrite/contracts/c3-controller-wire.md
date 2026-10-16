@@ -423,12 +423,16 @@ not repeat inputs, jobs, attempts or log subjects. A `kind: page` record carries
 metadata to stderr. Pipeline totals consume every matching page. Failure groups
 use job IDs or job/step IDs and count distinct runs in the selected page.
 
-`RunPruner.DeleteRun` uses `DELETE /api/v1/runs/{run}` and returns `RunDeletion`
-with canonical `run_id` and `deleted`. False means already absent. Retention pins
-must fail with a structured error rather than report a successful no-op. The
-server owns deletion authorization and financial retention. Age-based CLI prune
+`RunPruner.DeleteRun` uses `DELETE /api/v1/runs/{run}` and returns only an error.
+Success requires the server's empty HTTP 204 acknowledgement after deletion and
+log cleanup. The client reports the selected run without guessing whether a row
+was removed or already absent. The server owns deletion authorization, retention
+and financial records. Age-based CLI prune
 collects all terminal runs strictly before its cutoff before deleting any row,
 so deletion cannot invalidate selection cursors. A failed selection deletes none.
+Cancel, retry and prune preserve the supplied stable IDs and numeric selectors
+through flags and stdin. The CLI never prepends a run ID prefix or resolves a
+number outside the authenticated controller.
 
 `LogReader` reads `/runs/{run}/logs`, `/runs/{run}/jobs/{job}/logs`,
 `/runs/{run}/logs/search` and `/runs/grep` under `/api/v1`. `LogQuery` carries
