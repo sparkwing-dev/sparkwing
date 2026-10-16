@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // safety: the baseline filter is what an alias path defeats, so a fixture
@@ -38,9 +36,7 @@ func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 	worktree := filepath.Join(root, "linked")
 	runTestGit(t, origin, "worktree", "add", "-b", "finding", worktree, "HEAD")
 
-	previous := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(worktree)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	t.Chdir(worktree)
 	t.Cleanup(func() { _ = os.RemoveAll(pipelineCacheDir("golangci-lint")) })
 
 	writeGoFile(t, filepath.Join(worktree, "internal", "negative_control.go"),

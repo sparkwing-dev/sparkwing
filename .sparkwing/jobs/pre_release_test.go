@@ -38,9 +38,7 @@ func TestActionlintAcceptsTheReleasePublicationQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	t.Chdir(root)
 	if err := runActionlint(t.Context()); err != nil {
 		t.Fatal(err)
 	}

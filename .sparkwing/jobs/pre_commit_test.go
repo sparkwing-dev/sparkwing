@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 func stepIDs(t *testing.T, p interface {
@@ -17,22 +19,19 @@ func stepIDs(t *testing.T, p interface {
 },
 ) []string {
 	t.Helper()
-	w := sparkwing.NewWork()
-	if _, err := p.Work(w); err != nil {
-		t.Fatal(err)
-	}
+	w := inspectWork(t, p)
 	var ids []string
-	for _, s := range w.Steps() {
-		ids = append(ids, s.ID())
+	for _, s := range w.Steps {
+		ids = append(ids, s.ID)
 	}
 	slices.Sort(ids)
 	return ids
 }
 
-func nodeIDs(nodes []*sparkwing.JobNode) []string {
+func nodeIDs(nodes []jobDocument) []string {
 	ids := make([]string, len(nodes))
 	for i, node := range nodes {
-		ids[i] = node.ID()
+		ids[i] = node.ID
 	}
 	return ids
 }
@@ -60,37 +59,32 @@ func TestPreCommitRunsNothingThatCompilesLinksOrLeavesTheCheckout(t *testing.T) 
 }
 
 func TestPreCommitStepsAllRunInParallel(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&PreCommit{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
-	if w.ParallelFailurePolicy() != sparkwing.FailFast {
+	w := inspectWork(t, &PreCommit{})
+	if w.FailurePolicy != sparkwing.FailFast {
 		t.Error("pre-commit must fail fast: the author is holding a commit open")
 	}
-	for _, s := range w.Steps() {
-		if s.ID() == budgetStepID {
+	for _, s := range w.Steps {
+		if s.ID == budgetStepID {
 			continue
 		}
-		if deps := s.DepIDs(); len(deps) != 0 {
-			t.Errorf("step %q waits on %v; every step here is sub-second, so serializing them only delays the verdict", s.ID(), deps)
+		if deps := s.Needs; len(deps) != 0 {
+			t.Errorf("step %q waits on %v; every step here is sub-second, so serializing them only delays the verdict", s.ID, deps)
 		}
 	}
 }
 
 func TestPreCommitAdmitsAheadOfTheBroadGate(t *testing.T) {
-	precommit := sparkwing.NewPlan()
-	if err := (&PreCommit{}).Plan(t.Context(), precommit, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-commit"}); err != nil {
-		t.Fatal(err)
-	}
-	gate := sparkwing.NewPlan()
-	if err := (&Gate{}).Plan(t.Context(), gate, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"}); err != nil {
-		t.Fatal(err)
-	}
-	if precommit.PriorityValue() <= gate.PriorityValue() {
+	precommit := inspectPlan(t, func(precommit *sparkwing.Plan) error {
+		return (&PreCommit{}).Plan(t.Context(), precommit, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-commit"})
+	})
+	gate := inspectPlan(t, func(gate *sparkwing.Plan) error {
+		return (&Gate{}).Plan(t.Context(), gate, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+	})
+	if precommit.Priority <= gate.Priority {
 		t.Fatalf("pre-commit priority %d, gate priority %d: a ten-second tier queued behind a ten-minute one is not a ten-second tier",
-			precommit.PriorityValue(), gate.PriorityValue())
+			precommit.Priority, gate.Priority)
 	}
-	hints := precommit.ResourceHints()
+	hints := precommit.Resources
 	if hints == nil || hints.Cores <= 0 || hints.Cores > 1 {
 		t.Fatalf("pre-commit reserved cores = %#v, want a pin of at most one so it fits beside a running gate", hints)
 	}
@@ -164,15 +158,15 @@ func TestEachGitHookTierIsDeclaredExactlyOnce(t *testing.T) {
 }
 
 func TestEveryDeclaredPipelineResolvesToARegisteredName(t *testing.T) {
+	t.Chdir(sourceTreeRoot())
+	host := newTestHost(t, sparkwingtest.Options{})
 	for _, p := range readPipelineConfig(t).Pipelines {
-		if _, ok := sparkwing.Lookup(p.Name); !ok {
-			t.Errorf("%s is declared in sparkwing.yaml but no job registers it", p.Name)
+		if _, err := host.Plan(t.Context(), p.Name, nil); err != nil && strings.Contains(err.Error(), "pipeline is not registered") {
+			t.Errorf("%s is declared but unregistered: %v", p.Name, err)
 		}
 	}
-	for _, gone := range []string{"push-checks"} {
-		if _, ok := sparkwing.Lookup(gone); ok {
-			t.Errorf("%q is still registered; the tiers are pre-commit, pre-push, gate and pre-release, and a surviving alias keeps the old meaning alive", gone)
-		}
+	if _, err := host.Plan(t.Context(), "push-checks", nil); err == nil || !strings.Contains(err.Error(), "pipeline is not registered") {
+		t.Fatalf("removed push-checks registration: %v", err)
 	}
 }
 

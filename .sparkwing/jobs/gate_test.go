@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -26,28 +27,25 @@ func gateFixtureRepo(t *testing.T) string {
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"),
 		"package pipelines\n\nfunc Jobs() int { return 1 }\n")
 	gitAddAll(t, root)
-	prev := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
+	t.Chdir(root)
 	return root
 }
 
 func TestGateReservesAndBoundsItsCPU(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	if err := (&Gate{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"}); err != nil {
-		t.Fatal(err)
-	}
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (&Gate{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+	})
 
-	hints := plan.ResourceHints()
+	hints := plan.Resources
 	wantCores := gateCoreReservation(runtime.NumCPU())
 	if hints == nil || hints.Cores != wantCores {
 		t.Fatalf("reserved cores = %#v, want %v", hints, wantCores)
 	}
-	nodes := plan.Nodes()
+	nodes := plan.Jobs
 	if len(nodes) != 1 {
 		t.Fatalf("gate plan nodes = %d, want one", len(nodes))
 	}
-	if got := nodes[0].TimeoutDuration(); got != gateRunTimeout {
+	if got := time.Duration(nodes[0].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
 		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
 	}
 	for _, tc := range []struct {
@@ -96,33 +94,27 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 
 func TestGateOverlapsTestAndRaceOnlyOnFourCPUs(t *testing.T) {
 	for _, cpus := range []int{3, 8} {
-		w := sparkwing.NewWork()
-		if _, err := (&Gate{}).workForCPU(w, cpus); err != nil {
-			t.Fatal(err)
-		}
-		if got := w.StepByID("race-touched").DepIDs(); !slices.Equal(got, []string{"test"}) {
+		w := inspectWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) { return (&Gate{}).workForCPU(w, cpus) }))
+		if got := findStep(w, "race-touched").Needs; !slices.Equal(got, []string{"test"}) {
 			t.Errorf("race dependencies on %d CPUs = %v, want [test]", cpus, got)
 		}
 		for _, id := range []string{"lint", "store-postgres"} {
-			if got := w.StepByID(id).DepIDs(); !slices.Equal(got, []string{"test"}) {
+			if got := findStep(w, id).Needs; !slices.Equal(got, []string{"test"}) {
 				t.Errorf("%s dependencies on %d CPUs = %v, want [test]", id, cpus, got)
 			}
 		}
 	}
 
-	w := sparkwing.NewWork()
-	if _, err := (&Gate{}).workForCPU(w, 4); err != nil {
-		t.Fatal(err)
-	}
+	w := inspectWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) { return (&Gate{}).workForCPU(w, 4) }))
 	for _, id := range []string{"test", "race-touched"} {
-		if got := w.StepByID(id).DepIDs(); !slices.Equal(got, []string{"build"}) {
+		if got := findStep(w, id).Needs; !slices.Equal(got, []string{"build"}) {
 			t.Errorf("%s dependencies on four CPUs = %v, want [build]", id, got)
 		}
 	}
-	if got := w.StepByID("lint").DepIDs(); !slices.Equal(got, []string{"test", "race-touched"}) {
+	if got := findStep(w, "lint").Needs; !slices.Equal(got, []string{"test", "race-touched"}) {
 		t.Errorf("lint dependencies on four CPUs = %v, want [test race-touched]", got)
 	}
-	if got := w.StepByID("store-postgres").DepIDs(); !slices.Equal(got, []string{"test"}) {
+	if got := findStep(w, "store-postgres").Needs; !slices.Equal(got, []string{"test"}) {
 		t.Errorf("store-postgres dependencies on four CPUs = %v, want [test]", got)
 	}
 }
@@ -338,13 +330,10 @@ func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 }
 
 func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&Gate{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
+	w := inspectWork(t, &Gate{})
 	chain := []string{"gofmt", "formatters", "vet", "build", "test", "lint"}
 	for i := 1; i < len(chain); i++ {
-		if w.StepByID(chain[i]) == nil {
+		if findStep(w, chain[i]) == nil {
 			t.Errorf("the gate must run step %q", chain[i])
 			continue
 		}
@@ -355,44 +344,35 @@ func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
 }
 
 func TestGateRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&Gate{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
-	step := w.StepByID("frontend-unit")
+	w := inspectWork(t, &Gate{})
+	step := findStep(w, "frontend-unit")
 	if step == nil {
 		t.Fatal("pre-commit does not run frontend-unit")
 	}
-	if deps := step.DepIDs(); len(deps) != 0 {
+	if deps := step.Needs; len(deps) != 0 {
 		t.Fatalf("frontend-unit dependencies = %v, want an independent fast check", deps)
 	}
 }
 
 func TestGateRunsTheTypeScriptSDKSuiteAsAnIndependentStep(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&Gate{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
-	step := w.StepByID("sdk-typescript")
+	w := inspectWork(t, &Gate{})
+	step := findStep(w, "sdk-typescript")
 	if step == nil {
 		t.Fatal("gate does not run sdk-typescript")
 	}
-	if deps := step.DepIDs(); len(deps) != 0 {
+	if deps := step.Needs; len(deps) != 0 {
 		t.Fatalf("sdk-typescript dependencies = %v, want an independent fast check", deps)
 	}
 }
 
 func TestGateRunsFrontendChecksBeforeBrowserSmoke(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&Gate{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
+	w := inspectWork(t, &Gate{})
 	for _, id := range []string{"frontend-lint", "frontend-build", "frontend-browser"} {
-		if w.StepByID(id) == nil {
+		if findStep(w, id) == nil {
 			t.Fatalf("pre-commit does not run %s", id)
 		}
 	}
-	if deps := w.StepByID("frontend-lint").DepIDs(); len(deps) != 0 {
+	if deps := findStep(w, "frontend-lint").Needs; len(deps) != 0 {
 		t.Fatalf("frontend-lint dependencies = %v, want an independent fast check", deps)
 	}
 	if !stepWaitsOn(w, "frontend-build", "frontend-unit") {
@@ -416,9 +396,7 @@ func TestFrontendUnitSuitePropagatesTheNPMVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	packageJSON := filepath.Join(web, "package.json")
-	previous := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	t.Chdir(root)
 
 	writeGoFile(t, packageJSON, `{"scripts":{"test":"node -e \"process.exit(1)\""}}`)
 	err := runFrontendUnit(context.Background())
@@ -488,9 +466,7 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 			if err := os.MkdirAll(web, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			previous := sparkwing.WorkDir()
-			sparkwing.SetWorkDir(root)
-			t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+			t.Chdir(root)
 
 			writeGoFile(t, filepath.Join(web, "package.json"), fmt.Sprintf(`{"scripts":{"%s":"node -e \"process.exit(1)\""}}`, tc.script))
 			err := tc.run(context.Background())
@@ -511,9 +487,7 @@ func TestFrontendLintPropagatesVerdictWithoutInstallingDependencies(t *testing.T
 		t.Fatal(err)
 	}
 	packageJSON := filepath.Join(web, "package.json")
-	previous := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	t.Chdir(root)
 
 	writeGoFile(t, packageJSON, `{"scripts":{"lint":"node -e \"process.exit(1)\""}}`)
 	err := runFrontendLint(context.Background())
@@ -544,9 +518,7 @@ func TestFrontendBrowserMarksOnlyFailedRunsForHostedArtifacts(t *testing.T) {
 	if err := os.MkdirAll(web, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	previous := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	t.Chdir(root)
 	marker := filepath.Join(web, "test-results", ".sparkwing-browser-failed")
 
 	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
@@ -579,9 +551,7 @@ func TestFrontendBrowserClearsReportDirectoriesOnlyWhenTheSuitePasses(t *testing
 	if err := os.MkdirAll(web, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	previous := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	t.Chdir(root)
 	report := filepath.Join(web, "playwright-report")
 	results := filepath.Join(web, "test-results")
 
@@ -860,12 +830,12 @@ func requireGolangciLint(t *testing.T) {
 	}
 }
 
-func stepWaitsOn(w *sparkwing.Work, step, dep string) bool {
-	s := w.StepByID(step)
+func stepWaitsOn(w jobDocument, step, dep string) bool {
+	s := findStep(w, step)
 	if s == nil {
 		return false
 	}
-	for _, id := range s.DepIDs() {
+	for _, id := range s.Needs {
 		if id == dep || stepWaitsOn(w, id, dep) {
 			return true
 		}

@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 var productDirs = []string{"cmd", "internal", "pkg", "sparkwing"}
@@ -41,9 +39,7 @@ func lintFixtureRepo(t *testing.T) string {
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/"+gateBaselineRef, "HEAD")
 
-	prev := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
+	t.Chdir(root)
 	return root
 }
 

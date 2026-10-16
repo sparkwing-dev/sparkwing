@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 var wholeTreeGates = []struct {
@@ -28,9 +26,7 @@ func TestThisRepoSatisfiesItsOwnWholeTreeGates(t *testing.T) {
 			"if this package moved, check sourceTreeRoot's markers")
 	}
 
-	prev := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
+	t.Chdir(root)
 
 	start := time.Now()
 	for _, g := range wholeTreeGates {

@@ -35,37 +35,32 @@ func TestPrePushRunsNothingThatJudgesTheWholeTree(t *testing.T) {
 }
 
 func TestPrePushStepsAllRunInParallel(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&PrePush{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
-	if w.ParallelFailurePolicy() != sparkwing.FailFast {
+	w := inspectWork(t, &PrePush{})
+	if w.FailurePolicy != sparkwing.FailFast {
 		t.Error("pre-push must fail fast: the author is holding a push open")
 	}
-	for _, s := range w.Steps() {
-		if s.ID() == budgetStepID {
+	for _, s := range w.Steps {
+		if s.ID == budgetStepID {
 			continue
 		}
-		if deps := s.DepIDs(); len(deps) != 0 {
-			t.Errorf("step %q waits on %v; every step here answers in about a second, so serializing them only delays the verdict", s.ID(), deps)
+		if deps := s.Needs; len(deps) != 0 {
+			t.Errorf("step %q waits on %v; every step here answers in about a second, so serializing them only delays the verdict", s.ID, deps)
 		}
 	}
 }
 
 func TestPrePushAdmitsAheadOfTheBroadGate(t *testing.T) {
-	prepush := sparkwing.NewPlan()
-	if err := (&PrePush{}).Plan(t.Context(), prepush, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"}); err != nil {
-		t.Fatal(err)
-	}
-	gate := sparkwing.NewPlan()
-	if err := (&Gate{}).Plan(t.Context(), gate, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"}); err != nil {
-		t.Fatal(err)
-	}
-	if prepush.PriorityValue() <= gate.PriorityValue() {
+	prepush := inspectPlan(t, func(prepush *sparkwing.Plan) error {
+		return (&PrePush{}).Plan(t.Context(), prepush, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-push"})
+	})
+	gate := inspectPlan(t, func(gate *sparkwing.Plan) error {
+		return (&Gate{}).Plan(t.Context(), gate, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "gate"})
+	})
+	if prepush.Priority <= gate.Priority {
 		t.Fatalf("pre-push priority %d, gate priority %d: a tier a human waits on, queued behind a ten-minute one, is not a fast tier",
-			prepush.PriorityValue(), gate.PriorityValue())
+			prepush.Priority, gate.Priority)
 	}
-	hints := prepush.ResourceHints()
+	hints := prepush.Resources
 	if hints == nil || hints.Cores != float64(prePushReservationCores(runtime.NumCPU())) {
 		t.Fatalf("pre-push reserved cores = %#v, want %v for its three concurrent compiler tasks",
 			hints, float64(prePushReservationCores(runtime.NumCPU())))

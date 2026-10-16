@@ -93,22 +93,19 @@ func TestBudgetTimesEveryStepTheTierDeclares(t *testing.T) {
 		"pre-push":    &PrePush{},
 		"release cut": &releaseCutChecksJob{},
 	} {
-		w := sparkwing.NewWork()
-		if _, err := work.Work(w); err != nil {
-			t.Fatal(err)
-		}
-		verdict := w.StepByID(budgetStepID)
+		w := inspectWork(t, work)
+		verdict := findStep(w, budgetStepID)
 		if verdict == nil {
 			t.Errorf("%s declares no %q step, so nothing fails when the tier outgrows its class", tier, budgetStepID)
 			continue
 		}
 		var checks []string
-		for _, s := range w.Steps() {
-			if s.ID() != budgetStepID {
-				checks = append(checks, s.ID())
+		for _, s := range w.Steps {
+			if s.ID != budgetStepID {
+				checks = append(checks, s.ID)
 			}
 		}
-		timed := verdict.DepIDs()
+		timed := verdict.Needs
 		slices.Sort(checks)
 		slices.Sort(timed)
 		if !slices.Equal(checks, timed) {
@@ -119,65 +116,52 @@ func TestBudgetTimesEveryStepTheTierDeclares(t *testing.T) {
 
 func TestBudgetRecordsACompletedStep(t *testing.T) {
 	b := newTierBudget("probe", 3*time.Second)
-	w := sparkwing.NewWork()
-	b.step(w, "cheap", func(context.Context) error { return nil })
-	if _, err := sparkwing.RunWork(t.Context(), w); err != nil {
+	host, plan, _ := prepareWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+		b.step(w, "cheap", func(context.Context) error { return nil })
+		return nil, nil
+	}))
+	if _, err := host.RunStep(t.Context(), plan, "job", "cheap"); err != nil {
 		t.Fatal(err)
 	}
 	if len(b.steps) != 1 || b.steps[0].id != "cheap" || b.steps[0].took < 0 {
-		t.Fatalf("completed step timing = %+v, want one nonnegative duration for cheap", b.steps)
+		t.Fatalf("completed step timing = %+v", b.steps)
 	}
 }
 
 func TestBudgetFailsTheTierWhenItsRecordedStepsOverrun(t *testing.T) {
-	b := recordedOverrun()
-	w := sparkwing.NewWork()
-	b.verdict(w)
-
-	_, err := sparkwing.RunWork(t.Context(), w)
-	if err == nil {
-		t.Fatal("a tier past its budget passed; nothing stops a class from regrowing")
-	}
-	if !strings.Contains(err.Error(), "slow") {
-		t.Errorf("the failure does not name the slowest step: %v", err)
+	err := runBudgetVerdict(t, recordedOverrun())
+	if err == nil || !strings.Contains(err.Error(), "slow") {
+		t.Fatalf("overrun = %v, want slow step failure", err)
 	}
 }
 
 func TestBudgetReportsAfterAFailedStepWithoutOverridingIt(t *testing.T) {
 	reported := false
-	b := newTierBudget("probe", 3*time.Second).over(
-		func(context.Context, string, func([]string) []string) ([]string, string, error) {
-			reported = true
-			return nil, "no Go files", nil
-		})
-	w := sparkwing.NewWork()
-	w.FailurePolicy(sparkwing.FailFast)
-	started := make(chan struct{})
-	b.step(w, "red", func(context.Context) error {
-		<-started
-		return errors.New("the check found something")
+	b := newTierBudget("probe", 3*time.Second).over(func(context.Context, string, func([]string) []string) ([]string, string, error) {
+		reported = true
+		return nil, "no Go files", nil
 	})
-	b.step(w, "cancelled", func(ctx context.Context) error {
-		close(started)
-		<-ctx.Done()
-		return ctx.Err()
-	})
-	b.verdict(w)
-
-	_, err := sparkwing.RunWork(t.Context(), w)
-	if err == nil {
-		t.Fatal("a failed check passed")
+	host, plan, doc := prepareWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+		w.FailurePolicy(sparkwing.FailFast)
+		b.step(w, "red", func(context.Context) error { return errors.New("the check found something") })
+		b.verdict(w)
+		return nil, nil
+	}))
+	verdict := findStep(doc, budgetStepID)
+	if verdict == nil || !verdict.Finally || !slices.Equal(verdict.Needs, []string{"red"}) {
+		t.Fatalf("budget declaration = %+v", verdict)
 	}
-	if !strings.Contains(err.Error(), "the check found something") {
-		t.Errorf("the budget replaced the check's own verdict: %v", err)
+	if _, err := host.RunStep(t.Context(), plan, "job", "red"); err == nil || !strings.Contains(err.Error(), "the check found something") {
+		t.Fatalf("check verdict = %v", err)
+	}
+	if _, err := host.RunStep(t.Context(), plan, "job", budgetStepID); err != nil {
+		t.Fatalf("budget replaced check failure: %v", err)
 	}
 	if !reported {
-		t.Error("the budget verdict did not run after fail-fast cancelled a sibling step")
+		t.Fatal("budget did not report after failed check")
 	}
 }
 
-// safety: the fileset the waiver reads is the tier's own scope, so a stub
-// scope is what puts a test on either side of the threshold.
 func filesetOf(count int) scopeFunc {
 	return func(context.Context, string, func([]string) []string) ([]string, string, error) {
 		files := make([]string, count)
@@ -190,10 +174,13 @@ func filesetOf(count int) scopeFunc {
 
 func overrunWithFileset(t *testing.T, count int) error {
 	t.Helper()
-	b := recordedOverrun().over(filesetOf(count))
-	w := sparkwing.NewWork()
-	b.verdict(w)
-	_, err := sparkwing.RunWork(t.Context(), w)
+	return runBudgetVerdict(t, recordedOverrun().over(filesetOf(count)))
+}
+
+func runBudgetVerdict(t *testing.T, b *tierBudget) error {
+	t.Helper()
+	host, plan, _ := prepareWork(t, testJob(func(w *sparkwing.Work) (*sparkwing.WorkStep, error) { b.verdict(w); return nil, nil }))
+	_, err := host.RunStep(t.Context(), plan, "job", budgetStepID)
 	return err
 }
 
@@ -238,10 +225,7 @@ func TestBudgetEnforcesWhenTheFilesetCannotBeRead(t *testing.T) {
 		func(context.Context, string, func([]string) []string) ([]string, string, error) {
 			return nil, "", errors.New("no baseline")
 		})
-	w := sparkwing.NewWork()
-	b.verdict(w)
-
-	if _, err := sparkwing.RunWork(t.Context(), w); err == nil {
+	if err := runBudgetVerdict(t, b); err == nil {
 		t.Fatal("a tier that cannot size its change stopped keeping its promise")
 	}
 }
@@ -251,16 +235,13 @@ func TestReleaseCutRunsStateChecksAndTheFastBuildClass(t *testing.T) {
 	if got := stepIDs(t, &releaseCutChecksJob{}); !slices.Equal(got, want) {
 		t.Fatalf("release cut steps = %v, want %v", got, want)
 	}
-	w := sparkwing.NewWork()
-	if _, err := (&releaseCutChecksJob{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range w.Steps() {
-		if s.ID() == budgetStepID {
+	w := inspectWork(t, &releaseCutChecksJob{})
+	for _, s := range w.Steps {
+		if s.ID == budgetStepID {
 			continue
 		}
-		if deps := s.DepIDs(); len(deps) != 0 {
-			t.Errorf("step %q waits on %v; the class is budgeted at its parallel cost, not the sum of its members", s.ID(), deps)
+		if deps := s.Needs; len(deps) != 0 {
+			t.Errorf("step %q waits on %v; the class is budgeted at its parallel cost, not the sum of its members", s.ID, deps)
 		}
 	}
 }

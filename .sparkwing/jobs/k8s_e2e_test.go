@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,24 +9,15 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestKubernetesE2EPipelineIsRegisteredAndBounded(t *testing.T) {
-	registration, ok := sparkwing.Lookup("k8s-e2e")
-	if !ok {
-		t.Fatal("k8s-e2e is not registered")
-	}
-	plan, err := registration.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "k8s-e2e"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	nodes := plan.Nodes()
-	if len(nodes) != 1 || nodes[0].ID() != "k8s-e2e" {
+	plan := inspectPipeline(t, "k8s-e2e", nil)
+	nodes := plan.Jobs
+	if len(nodes) != 1 || nodes[0].ID != "k8s-e2e" {
 		t.Fatalf("k8s-e2e nodes = %v, want [k8s-e2e]", nodeIDs(nodes))
 	}
-	if got := nodes[0].TimeoutDuration(); got != 40*time.Minute {
+	if got := time.Duration(nodes[0].TimeoutMS) * time.Millisecond; got != 40*time.Minute {
 		t.Fatalf("k8s-e2e timeout = %s, want 40m", got)
 	}
 }

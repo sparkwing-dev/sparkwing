@@ -48,70 +48,63 @@ func TestAdmissionStressProfilesHaveExpectedShapes(t *testing.T) {
 }
 
 func TestAdmissionStressPlanPinsResourcesAndClass(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	err := (AdmissionStress{workload: stressMediumFanIn}).Plan(context.Background(), plan, AdmissionStressArgs{
-		Class: string(sparkwing.AdmissionInteractive),
-	}, sparkwing.RunContext{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := plan.AdmissionClassValue(); got != sparkwing.AdmissionInteractive {
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (AdmissionStress{workload: stressMediumFanIn}).Plan(t.Context(), plan, AdmissionStressArgs{Class: string(sparkwing.AdmissionInteractive)}, sparkwing.RunContext{})
+	})
+	if got := plan.AdmissionClass; got != sparkwing.AdmissionInteractive {
 		t.Fatalf("class = %q, want interactive", got)
 	}
-	for _, node := range plan.Nodes() {
-		hints := node.ResourceHints()
+	for _, node := range plan.Jobs {
+		hints := node.Resources
 		if hints == nil || hints.Cores <= 0 || hints.MemoryBytes <= 0 {
-			t.Fatalf("%s resources = %#v, want explicit CPU and memory", node.ID(), hints)
+			t.Fatalf("%s resources = %#v, want explicit CPU and memory", node.ID, hints)
 		}
 	}
 
-	var join *sparkwing.JobNode
-	for _, node := range plan.Nodes() {
-		if node.ID() == "join" {
-			join = node
+	var join *jobDocument
+	for _, node := range plan.Jobs {
+		if node.ID == "join" {
+			join = &node
 			break
 		}
 	}
 	if join == nil {
 		t.Fatal("join node is missing")
 	}
-	if got := join.DepIDs(); !slices.Equal(got, []string{"compute-1", "compute-2", "compute-3", "compute-4"}) {
+	if got := join.Needs; !slices.Equal(got, []string{"compute-1", "compute-2", "compute-3", "compute-4"}) {
 		t.Fatalf("join dependencies = %v", got)
 	}
 }
 
 func TestAdmissionStressDefaultsToBatchMatrix(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	if err := (AdmissionStress{workload: stressMatrix}).Plan(context.Background(), plan, AdmissionStressArgs{}, sparkwing.RunContext{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := plan.AdmissionClassValue(); got != sparkwing.AdmissionBatch {
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (AdmissionStress{workload: stressMatrix}).Plan(context.Background(), plan, AdmissionStressArgs{}, sparkwing.RunContext{})
+	})
+	if got := plan.AdmissionClass; got != sparkwing.AdmissionBatch {
 		t.Fatalf("class = %q, want batch", got)
 	}
-	if got := len(plan.Nodes()); got != 27 {
+	if got := len(plan.Jobs); got != 27 {
 		t.Fatalf("nodes = %d, want 27", got)
 	}
 }
 
 func TestAdmissionStressCPUHeavyProfileDoesNotPinMemory(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	if err := (AdmissionStress{workload: stressCPUHeavy}).Plan(context.Background(), plan, AdmissionStressArgs{}, sparkwing.RunContext{}); err != nil {
-		t.Fatal(err)
-	}
-	for _, node := range plan.Nodes() {
-		hints := node.ResourceHints()
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (AdmissionStress{workload: stressCPUHeavy}).Plan(context.Background(), plan, AdmissionStressArgs{}, sparkwing.RunContext{})
+	})
+	for _, node := range plan.Jobs {
+		hints := node.Resources
 		if hints == nil || hints.Cores != 2 || hints.MemoryBytes != 0 {
-			t.Fatalf("%s resources = %#v, want 2 CPU cores and unpinned memory", node.ID(), hints)
+			t.Fatalf("%s resources = %#v, want 2 CPU cores and unpinned memory", node.ID, hints)
 		}
 	}
 }
 
 func TestAdmissionStressLightSequentialPinsTheWholeShortRun(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	if err := (AdmissionStress{workload: stressLightSequential}).Plan(context.Background(), plan, AdmissionStressArgs{}, sparkwing.RunContext{}); err != nil {
-		t.Fatal(err)
-	}
-	hints := plan.ResourceHints()
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (AdmissionStress{workload: stressLightSequential}).Plan(context.Background(), plan, AdmissionStressArgs{}, sparkwing.RunContext{})
+	})
+	hints := plan.Resources
 	if hints == nil || hints.Cores != 0.2 || hints.MemoryBytes != 0 {
 		t.Fatalf("plan resources = %#v, want 0.2 cores and unpinned memory", hints)
 	}

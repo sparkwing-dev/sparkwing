@@ -4,10 +4,9 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
 func TestOrdinaryTestStepsReusePassingResults(t *testing.T) {
@@ -37,13 +36,17 @@ func TestTemporaryFiles(t *testing.T) {
 `)
 			gitAddAll(t, root)
 			for attempt := range 2 {
-				log := &testCacheLog{}
-				ctx := context.WithValue(context.Background(), sparkwing.RuntimePlumbing.Keys.Logger, log)
+				host := newTestHost(t, sparkwingtest.Options{})
+				ctx := host.Context(t.Context())
 				if err := run(ctx); err != nil {
 					t.Fatalf("attempt %d: %v", attempt+1, err)
 				}
-				if attempt == 1 && !strings.Contains(log.output(), "(cached)") {
-					t.Fatalf("unchanged tests ran again instead of using cached results:\n%s", log.output())
+				var output strings.Builder
+				for _, record := range host.Records() {
+					output.WriteString(record.Msg)
+				}
+				if attempt == 1 && !strings.Contains(output.String(), "(cached)") {
+					t.Fatalf("unchanged tests ran again:\n%s", output.String())
 				}
 			}
 			writeGoFile(t, source, `package internal
@@ -55,25 +58,4 @@ func TestTemporaryFiles(t *testing.T) { t.Fatal("changed test must run") }
 			}
 		})
 	}
-}
-
-type testCacheLog struct {
-	mu    sync.Mutex
-	lines []string
-}
-
-func (l *testCacheLog) Log(_, message string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.lines = append(l.lines, message)
-}
-
-func (l *testCacheLog) Emit(record sparkwing.LogRecord) {
-	l.Log(record.Level, record.Msg)
-}
-
-func (l *testCacheLog) output() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return strings.Join(l.lines, "\n")
 }

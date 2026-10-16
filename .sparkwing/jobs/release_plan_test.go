@@ -27,35 +27,38 @@ var releaseRecipe = []string{
 	"validate-version",
 }
 
-func releasePlan(t *testing.T) *sparkwing.Plan {
+func releasePlan(t *testing.T) pipelineDocument {
 	t.Helper()
 	dir := t.TempDir()
-	prev := sparkwing.CurrentRuntime().WorkDir
-	sparkwing.SetWorkDir(dir)
-	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
+	t.Chdir(dir)
 
-	plan := sparkwing.NewPlan()
-	if err := (&Release{}).Plan(context.Background(), plan, ReleaseArgs{Version: "v0.99.0"}, sparkwing.RunContext{}); err != nil {
-		t.Fatalf("build release plan: %v", err)
-	}
+	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
+		return (&Release{}).Plan(context.Background(), plan, ReleaseArgs{Version: "v0.99.0"}, sparkwing.RunContext{})
+	})
 	return plan
 }
 
-func mustNode(t *testing.T, plan *sparkwing.Plan, id string) *sparkwing.JobNode {
+func mustNode(t *testing.T, plan pipelineDocument, id string) *jobDocument {
 	t.Helper()
-	n := plan.Job(id)
+	var n *jobDocument
+	for _, job := range plan.Jobs {
+		if job.ID == id {
+			n = &job
+			break
+		}
+	}
 	if n == nil {
 		t.Fatalf("release plan has no node %q", id)
 	}
 	return n
 }
 
-func ancestors(t *testing.T, plan *sparkwing.Plan, id string) map[string]bool {
+func ancestors(t *testing.T, plan pipelineDocument, id string) map[string]bool {
 	t.Helper()
 	seen := map[string]bool{}
 	var walk func(string)
 	walk = func(cur string) {
-		for _, dep := range mustNode(t, plan, cur).DepIDs() {
+		for _, dep := range mustNode(t, plan, cur).Needs {
 			if seen[dep] {
 				continue
 			}
@@ -78,8 +81,8 @@ func TestReleasePlanIsTheTagRecipeAndNothingElse(t *testing.T) {
 	plan := releasePlan(t)
 
 	var got []string
-	for _, n := range plan.Nodes() {
-		got = append(got, n.ID())
+	for _, n := range plan.Jobs {
+		got = append(got, n.ID)
 	}
 	sort.Strings(got)
 	if !slices.Equal(got, releaseRecipe) {
@@ -96,7 +99,7 @@ func TestReleasePlanTagsOnlyAfterTheChangelogCommit(t *testing.T) {
 			t.Errorf("push-tag must depend on %s; the tag has to land on the tree that already carries the release notes", need)
 		}
 		n := mustNode(t, plan, need)
-		if n.IsContinueOnError() || n.IsOptional() {
+		if n.ContinueOnError || n.Optional {
 			t.Errorf("%s must block push-tag on failure, but is marked ContinueOnError/Optional", need)
 		}
 	}
