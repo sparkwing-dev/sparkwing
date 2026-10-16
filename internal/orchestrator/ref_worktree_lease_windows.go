@@ -13,6 +13,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
+// hack: the run's host is not handed the lease on Windows, so there the lease
+// ends with the consumer rather than with the run.
+func inheritableLease([]*os.File) []*os.File {
+	return nil
+}
+
+// KeepInheritedLease does nothing on Windows, where no lease is inherited.
+func KeepInheritedLease() error {
+	return nil
+}
+
 func openRefWorktreeLease(path string) (*os.File, error) {
 	initial, err := fssecure.OpenFile(path, os.O_CREATE|os.O_RDWR)
 	if err != nil {

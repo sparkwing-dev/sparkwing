@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 func TestConsumerRefusesUncapturedRetriesBeforeDispatch(t *testing.T) {
 	original := dispatchLocalTriggerFn
 	t.Cleanup(func() { dispatchLocalTriggerFn = original })
-	dispatchLocalTriggerFn = func(context.Context, *store.Trigger, string, *localCompileCache, *slog.Logger, []string) error {
+	dispatchLocalTriggerFn = func(context.Context, *store.Trigger, string, *localCompileCache, *slog.Logger, []string, ...*os.File) error {
 		t.Error("retry reached dispatch without its execution environment")
 		return nil
 	}

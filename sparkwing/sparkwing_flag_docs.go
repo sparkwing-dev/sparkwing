@@ -41,7 +41,8 @@ type SparkwingFlagDoc struct {
 
 var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-ref", Argument: "REF", Desc: "Run the pipeline at REF (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},
-	{Name: "sw-pipeline-ref", Argument: "REF", Desc: "Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref", Group: "System"},
+	{Name: "sw-ref-worktree", Argument: "NAME", Desc: "Detached only, with --sw-ref: execute in the named worktree, reused across runs so build output Git ignores stays warm; a run holding it makes the next one wait", Group: "System"},
+	{Name: "sw-pipeline-ref", Argument: "REF", Desc: "Compile the pipeline at REF and execute it in this checkout; combines with --sw-ref only alongside --sw-ref-worktree", Group: "System"},
 	{Name: "sw-detached", Desc: "Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal", Group: "System", Hot: true},
 	{Name: "sw-idempotency-key", Argument: "KEY", Desc: "Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one", Group: "System"},
 	{Name: "sw-request-id", Argument: "ID", Desc: "Detached only: tracing identifier recorded on the run; never affects deduplication", Group: "System"},
