@@ -9,11 +9,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-func TestStartLocalControllerUsesCapturedLifecycle(t *testing.T) {
+func TestEnsureLocalControllerUsesCapturedLifecycle(t *testing.T) {
 	home := t.TempDir()
-	lifecycle := &daemonLifecycleFake{}
+	lifecycle := &daemonLifecycleFake{status: wingd.LocalStatus{PID: 17}}
 	options := wingd.LocalStartOptions{Home: home, Executable: "/captured/sparkwing", Version: "v0.71.0", Stay: true}
-	err := startLocalController(t.Context(), filepath.Join(home, "."), func(context.Context) (dashboardServices, error) {
+	_, err := ensureLocalController(t.Context(), filepath.Join(home, "."), func(context.Context) (dashboardServices, error) {
 		return dashboardServices{lifecycle: lifecycle, options: options}, nil
 	})
 	if err != nil || len(lifecycle.calls) != 1 || lifecycle.calls[0] != "start" || lifecycle.options != options {
@@ -21,12 +21,12 @@ func TestStartLocalControllerUsesCapturedLifecycle(t *testing.T) {
 	}
 }
 
-func TestStartLocalControllerPreservesFailures(t *testing.T) {
+func TestEnsureLocalControllerPreservesFailures(t *testing.T) {
 	failure := errors.New("controller startup failed")
-	for _, mode := range []string{"resolve", "missing", "home", "start", "stopped", "cancelled"} {
+	for _, mode := range []string{"resolve", "missing", "home", "start", "stopped", "pid", "version", "cancelled"} {
 		t.Run(mode, func(t *testing.T) {
 			home := t.TempDir()
-			lifecycle := &daemonLifecycleFake{}
+			lifecycle := &daemonLifecycleFake{status: wingd.LocalStatus{PID: 17}}
 			services := dashboardServices{lifecycle: lifecycle, options: wingd.LocalStartOptions{Home: home}}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -39,11 +39,15 @@ func TestStartLocalControllerPreservesFailures(t *testing.T) {
 				lifecycle.failAt, lifecycle.err = "start", failure
 			case "stopped":
 				lifecycle.started = &wingd.LocalStatus{}
+			case "pid":
+				lifecycle.started = &wingd.LocalStatus{Running: true, Version: "test"}
+			case "version":
+				lifecycle.started = &wingd.LocalStatus{Running: true, PID: 17}
 			case "cancelled":
 				cancel()
 			}
 			resolved := false
-			err := startLocalController(ctx, home, func(context.Context) (dashboardServices, error) {
+			_, err := ensureLocalController(ctx, home, func(context.Context) (dashboardServices, error) {
 				resolved = true
 				if mode == "resolve" {
 					return dashboardServices{}, failure

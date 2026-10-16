@@ -51,7 +51,11 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	if err != nil {
 		return localRunRuntime{}, err
 	}
-	transport, cleanup, err := controllerOptions(ctx, "")
+	socket, err := wingd.APISocketPath(home)
+	if err != nil {
+		return localRunRuntime{}, err
+	}
+	transport, cleanup, err := controllerSocketOptions(socket)
 	if err != nil {
 		return localRunRuntime{}, err
 	}
@@ -62,7 +66,13 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	}
 	return localRunRuntime{
 		controller: controller,
-		close:      func() error { cleanup(); return nil },
+		ensureController: func(ctx context.Context) error {
+			_, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
+				return resolveLocalServicesAt(ctx, home)
+			})
+			return err
+		},
+		close: func() error { cleanup(); return nil },
 		prepare: func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
 			return prepareNativeLocalRun(ctx, home, directory, pipeline, seal, captured, snapshots)
 		},

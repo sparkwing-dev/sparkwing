@@ -57,6 +57,10 @@ execute work through protocol v2. They do not open the controller's database.
 
 Startup reconciles orphaned work and starts the private API before consumers.
 Readiness does not wait for pipeline compilation or source preparation.
+The CLI starts or waits for the controller immediately before submitting a run,
+after source preparation. Other local API commands, doctor and schedule timers
+use the same startup operation. A startup failure reports why the local
+controller could not start before any request is submitted.
 
 The controller is the only writer of the shared store. Reads, cancellation,
 retry and doctor use its API too. The controller's route policy and wire

@@ -29,11 +29,12 @@ type localRunOptions struct {
 }
 
 type localRunRuntime struct {
-	controller  controllerwire.Controller
-	prepare     func(context.Context, string, runFlags) (localRunPreparation, error)
-	bind        func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error)
-	close       func() error
-	remoteCache blob.RemoteCache
+	controller       controllerwire.Controller
+	ensureController func(context.Context) error
+	prepare          func(context.Context, string, runFlags) (localRunPreparation, error)
+	bind             func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error)
+	close            func() error
+	remoteCache      blob.RemoteCache
 }
 
 type localRunDependencies struct {
@@ -109,6 +110,11 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	}
 	if request.Request.Options.Publish.Value != "" {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "run: publication requires the controller's authorized result and log publisher before intake"}
+	}
+	if runtime.ensureController != nil {
+		if err := runtime.ensureController(ctx); err != nil {
+			return err
+		}
 	}
 	response, err := runtime.controller.CreateRun(ctx, request)
 	masker.Register(response.HereBearer)
