@@ -647,3 +647,8 @@ The lead ran `go test -tags rewrite_integration ./cmd/sparkwing/` natively (real
 - `/local_controller` passed.
 - `TestReviewPublicDoctorSweepsAndWarnsForPrunedRun`: "public doctor did not sweep: 1 records, error <nil>" and the report has no unrecorded-cleanup finding. Public doctor reaches the lifecycle but performs no stray-session sweep.
 Test daemons from the run were left running and had to be killed by the lead: tests that start a daemon must stop it and its children in t.Cleanup.
+
+## Lead decisions 10:10 (Korey decision 111 and answers)
+
+- **SDK replacement pins are allowed (decision 111).** A pipeline whose `.sparkwing/go.mod` replaces the SDK runs with the installed CLI's engine and prints a clear warning that engine pinning is off for that run. W9 (integrator) implements it in the pin reader with minimal edits in `internal/engine`, then local run must pass natively.
+- **M4 approved:** Cloud plan and eval pods are charged from their first renewal, as nodes are; the holder's `executing` flag no longer decides whether a Cloud interval opens. W1b implements it.
