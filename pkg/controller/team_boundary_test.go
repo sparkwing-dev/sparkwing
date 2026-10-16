@@ -113,7 +113,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now); err != nil {
+	if _, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)}); err != nil {
 		t.Fatal(err)
 	}
 	raw, pub := multiTeamLicense(t)
@@ -133,14 +133,12 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	f.readerA = f.member(alice, "carol", store.RoleReader)
 	f.editorA = f.member(alice, "dave", store.RoleEditor)
 
-	raw, _, err := f.teamB.CreateToken(ctx, "b-everything", store.TokenKindUser, everyScope, 0, now)
+	raw, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "b-everything"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants(everyScope), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.everyScopeB = "Bearer " + raw
-	raw, _, err = f.teamB.CreateToken(ctx, "b-runner", store.TokenKindRunner, []string{
-		"runs.state", "nodes.claim", "triggers.claim",
-	}, 0, now)
+	raw, _, err = teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*"}, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "b-runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(now, 0), RegistrationID: "runner:" + string(f.teamB.Team()) + ":" + "b-runner"})
 	if err != nil {
 		t.Fatal(err)
 	}

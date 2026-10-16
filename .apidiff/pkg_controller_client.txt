@@ -63,6 +63,7 @@ type NativeStorage struct {
 	Authority blob.Authority
 }
 func NewDataClient(options EngineOptions) (blob.DataSigner, blob.RecordStore, error)
+func NewDebugControl(options EngineOptions) (controllerwire.DebugControl, error)
 func NewDebugReader(options EngineOptions) (controllerwire.DebugReader, error)
 func NewEngineClient(options EngineOptions) (controllerwire.Controller, error)
 func NewLocalHostClient(options EngineOptions, runID string) (*LocalHostClient, error)
@@ -151,6 +152,7 @@ func (c *engineClient) ResetObjectStoreBreaker(ctx context.Context, key string) 
 func (c *engineClient) ResetSchedule(ctx context.Context, name string) (controllerwire.ScheduleView, error)
 func (c *engineClient) ResetSizing(context.Context, controllerwire.SizingReset) (controllerwire.SizingResetSummary, error)
 func (c *engineClient) ResolveApproval(ctx context.Context, run, job string, input controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
+func (c *engineClient) ResumeDebugPause(ctx context.Context, run, job string) error
 func (c *engineClient) Retry(ctx context.Context, run string, input controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
 func (c *engineClient) RotateSecrets(ctx context.Context, input controllerwire.SecretRotationRequest) (controllerwire.SecretRotation, error)
 func (c *engineClient) RunSchedule(ctx context.Context, name, key string) (controllerwire.ScheduleRun, error)

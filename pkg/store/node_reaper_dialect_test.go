@@ -2,12 +2,35 @@ package store_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
+
+func TestUnitReaperContinuesAfterTargetFailure(t *testing.T) {
+	st := storetest.NewSQLite(t).Open(t)
+	tenant := tenantFor(t, st, "acme")
+	seedExpiredUnitNode(t, st, "acme", "bad", 1, 0)
+	seedExpiredUnitNode(t, st, "acme", "good", 2, 0)
+	if _, err := st.DB().Exec(`CREATE TRIGGER refuse_reap BEFORE UPDATE ON nodes WHEN OLD.run_id='bad' BEGIN SELECT RAISE(ABORT,'target refused'); END`); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := st.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := st.ReapUnits(t.Context(), lease, 10)
+	if err == nil || !strings.Contains(err.Error(), "target refused") || len(page) != 1 || page[0].RunID != "good" {
+		t.Fatalf("reap results=%+v, error=%v", page, err)
+	}
+	bad, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "bad", NodeID: "job"})
+	if err != nil || bad.Status != store.StatusRunning || bad.Disruptions != 0 {
+		t.Fatalf("failed target changed: %+v, %v", bad, err)
+	}
+}
 
 func seedExpiredUnitNode(t *testing.T, st *store.Store, team store.Team, runID string, number, disruptions int) {
 	t.Helper()

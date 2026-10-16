@@ -1507,23 +1507,8 @@ type Trigger struct {
 	RunnerPin        string            `json:"-"`
 }
 
-// DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
-// CPU-bound pauses; short enough to re-queue dead runners.
+// DefaultLeaseDuration is the configured runner claim lease TTL.
 const DefaultLeaseDuration = 3 * time.Minute
-
-// MaxLeaseDuration caps the lease a claimant may ask for. The claim is
-// an authorization window, so the claimant must not pick how long its
-// own access lasts; longer requests are clamped, not rejected, because
-// a heartbeat renews well inside the cap.
-const MaxLeaseDuration = 10 * time.Minute
-
-// ClaimIdentity is the token a node claim answers to. TokenPrefix is
-// unique per token and is what the ownership predicates match on;
-// Principal is the display label, which two tokens may share.
-type ClaimIdentity struct {
-	Principal   string
-	TokenPrefix string
-}
 
 func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
 	argsJSON, _ := json.Marshal(t.Args)
@@ -1794,12 +1779,6 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
 
 const triggerWebhookReplayKeyColumn = "webhook_replay_key"
-
-// TokenPrefixIndexName is the unique index enforcing one token row per
-// prefix.
-const TokenPrefixIndexName = "idx_tokens_prefix" // #nosec G101 -- an index name, not a credential
-
-const tokenPrefixColumn = "prefix"
 
 // safety: two Postgres openers of an empty database would both create the
 // baseline, so each takes this lock before looking.

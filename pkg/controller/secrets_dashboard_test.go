@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -180,13 +182,12 @@ func secretsRequest(t *testing.T, f *tenancyFixture, method, path, auth string, 
 func TestSecrets_MaskedValuesReachOnlyTheOperatorBearer(t *testing.T) {
 	f := newTenancyFixture(t, openSQLiteStore(t))
 	now := time.Now().UTC()
-	ownerRaw, _, err := f.teamA.CreateToken(context.Background(), "a-owner", store.TokenKindUser,
-		[]string{"runs.read", "team.admin"}, 0, now)
+	ownerRaw, _, err := teststore.ProvisionCredential(context.Background(), f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(f.teamA.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "a-owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.read", "team.admin"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ownerToken := "Bearer " + ownerRaw
-	adminRaw, _, err := f.st.CreateToken("ops", store.TokenKindUser, []string{"admin"}, 0, now)
+	adminRaw, _, err := teststore.ProvisionCredential(context.Background(), f.st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "ops"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatal(err)
 	}

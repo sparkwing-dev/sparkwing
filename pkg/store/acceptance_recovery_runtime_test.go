@@ -91,7 +91,11 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 }
 
 func (f storeRecoveryFixture) expireHolder(ctx context.Context) error {
-	_, err := f.s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, time.Now().UnixNano(), f.tenant.Team(), f.ref.RunID, f.ref.NodeID)
+	now, err := f.s.TestOnlyDatabaseTime(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = f.s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, now.UnixNano(), f.tenant.Team(), f.ref.RunID, f.ref.NodeID)
 	return err
 }
 

@@ -144,8 +144,16 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if _, err = intakeAuthorityTx(ctx, tx, team, request); err != nil {
 		return AdmissionResult{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE teams SET next_run_number=next_run_number+1 WHERE name=? AND next_run_number=?`, team, number); err != nil {
+	counter, err := tx.ExecContext(ctx, `UPDATE teams SET next_run_number=next_run_number+1 WHERE name=? AND next_run_number=?`, team, number)
+	if err != nil {
 		return AdmissionResult{}, err
+	}
+	changed, err := counter.RowsAffected()
+	if err != nil {
+		return AdmissionResult{}, err
+	}
+	if changed != 1 {
+		return AdmissionResult{}, authorityError(apierr.Conflict, "run number allocation changed")
 	}
 	if err = writeRunEffectsTx(ctx, tx, team, id, RunPending, now); err != nil {
 		return AdmissionResult{}, err

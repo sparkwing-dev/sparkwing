@@ -62,7 +62,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
 	"reportCardRefundTx":              "a provider refund names its payment identity before its persisted team is known",
 	"(*Operator).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
-	"globalRunnerRefusal":             "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":        "the global hourly cap counts runs from every team",
 	"runOwnerTx":                      "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
@@ -109,7 +108,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +
 		"through that team's handle; an answer scoped to the asker is no answer",
-
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",

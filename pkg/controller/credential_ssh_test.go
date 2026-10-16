@@ -29,7 +29,8 @@ type credentialPutCapture struct {
 
 func (*credentialPutCapture) Team() store.Team { return "team" }
 
-func (c *credentialPutCapture) WriteGitCredential(_ context.Context, a capability.Authorized, row store.GitCredential) (store.GitCredential, error) {
+func (c *credentialPutCapture) WriteGitCredential(_ context.Context, a capability.Authorized, sealed store.SealedGitCredential) (store.GitCredential, error) {
+	row := sealed.Row()
 	c.row, c.actor = row, a
 	c.calls++
 	return row, nil

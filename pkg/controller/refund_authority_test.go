@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -17,8 +20,7 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, _, err := tenant.CreateToken(ctx, "private-runner", store.TokenKindRunner,
-		[]string{"nodes.claim", "runs.state", "secrets.read"}, 0, time.Now())
+	runner, _, err := teststore.ProvisionCredential(ctx, f.store, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*"}, Team: string(tenant.Team()), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "private-runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(time.Now(), 0), RegistrationID: "runner:" + string(tenant.Team()) + ":" + "private-runner"})
 	if err != nil {
 		t.Fatal(err)
 	}

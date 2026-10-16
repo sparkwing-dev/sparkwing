@@ -21,7 +21,20 @@ func unitClaimFixture(t *testing.T) (*Store, UnitDemand) {
 
 func unitClaimFixtureStore(t *testing.T, s *Store) (*Store, UnitDemand) {
 	t.Helper()
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := s.exec(t.Context(), query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
 	now := time.Unix(1700000000, 0).UTC()
+	if s.dialect == DialectPostgres {
+		var err error
+		now, err = s.databaseNow(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	s.clock = func() time.Time { return now }
 	root := authorityRoot("runner", "a")
 	root.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
@@ -30,14 +43,14 @@ func unitClaimFixtureStore(t *testing.T, s *Store) (*Store, UnitDemand) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','host','execute',?,'account',1,'r30',30)`, request, []byte(`[]`))
-	rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','trigger',1,1,?,?,?)`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
+	exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','https://github.com/acme/repo','host','execute',?,'account',1,'r30',30)`, request, []byte(`[]`))
+	exec(`INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','trigger',1,1,?,?,?)`, now.Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
 	execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Value: runspec.Resources{Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Value: 4, Set: true}}}, Set: true}}}
 	body, err := json.Marshal(execution)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), body)
+	exec(`INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), body)
 	return s, UnitDemand{CapabilityPrefix: root.Prefix, Target: &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
 }
 
@@ -106,8 +119,17 @@ func TestClaimUnitRejectsForeignAndMissingRequirements(t *testing.T) {
 				authorityPersist(t, s, root)
 				demand.CapabilityPrefix = root.Prefix
 			}
-			if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
-				t.Fatal("invalid claimant acquired job")
+			_, err := s.ClaimUnit(t.Context(), demand)
+			if test == "expired" {
+				var refused *ErrIllegalTransition
+				if !errors.As(err, &refused) || refused.Reason != ReasonHolderRights {
+					t.Fatalf("claim refusal = %v", err)
+				}
+			} else {
+				var refused *apierr.Error
+				if !errors.As(err, &refused) || refused.Code != apierr.Forbidden {
+					t.Fatalf("claim refusal = %v", err)
+				}
 			}
 			rewriteSchemaCount(t, s.db, "billing_awards", 0)
 			var sequence int64

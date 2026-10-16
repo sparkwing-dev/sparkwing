@@ -17,7 +17,7 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 	now := time.Unix(1700000000, 123456789).UTC()
 	tenant.s.clock = func() time.Time { return now }
 	sec := Secret{Name: "KEY", Value: "sealed", Pipeline: "build", Masked: true}
-	if err := tenant.WriteSecret(t.Context(), a, sec); err != nil {
+	if err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, sec)); err != nil {
 		t.Fatal(err)
 	}
 	first, err := tenant.GetSecretRow(sec.Name, sec.Pipeline)
@@ -28,14 +28,14 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 	sec.Value = "replacement"
 	replacement := a
 	replacement.Principal.Authority = authorityMember(t, tenant.s, "replacement-author", RoleOwner).Authority
-	if err := tenant.WriteSecret(t.Context(), replacement, sec); err != nil {
+	if err := tenant.WriteSecret(t.Context(), replacement, sealedSecretFixture(t, tenant, sec)); err != nil {
 		t.Fatal(err)
 	}
 	second, err := tenant.GetSecretRow(sec.Name, sec.Pipeline)
-	if err != nil || second.Value != "replacement" || second.Principal != "replacement-author" || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.Equal(now) {
+	if err != nil || openSecretFixture(t, tenant, second) != "replacement" || second.Principal != "replacement-author" || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.Equal(now) {
 		t.Fatalf("replacement: %+v %v", second, err)
 	}
-	c, err := tenant.WriteGitCredential(t.Context(), a, GitCredential{Host: "git.test", Kind: GitCredentialSSH, Secret: "sealed", Fingerprint: "SHA256:key"})
+	c, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{Host: "git.test", Kind: GitCredentialSSH, Secret: "sealed", Fingerprint: "SHA256:key"}))
 	if err != nil || c.ID == "" || c.Team != tenant.team || c.CreatedBy != "owner" || c.ConfirmedAt != nil || !c.CreatedAt.Equal(now) {
 		t.Fatalf("git: %+v %v", c, err)
 	}
@@ -47,12 +47,12 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 		t.Fatalf("confirmation: %+v %v", c, err)
 	}
 	now = now.Add(time.Second)
-	c, err = tenant.WriteGitCredential(t.Context(), a, c)
+	c, err = tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, c))
 	if err != nil || c.ConfirmedAt == nil || !c.ConfirmedAt.Equal(now.Add(-time.Second)) {
 		t.Fatalf("same-key replacement: %+v %v", c, err)
 	}
 	c.Fingerprint = "SHA256:new"
-	c, err = tenant.WriteGitCredential(t.Context(), a, c)
+	c, err = tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, c))
 	if err != nil || c.ConfirmedAt != nil {
 		t.Fatalf("changed-key replacement: %+v %v", c, err)
 	}
@@ -96,10 +96,10 @@ func TestCredentialMutationsAuthorityProperty(t *testing.T) {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE sessions SET revoked_at=1 WHERE hash='owner'`)
 		}
 		name := fmt.Sprintf("KEY_%d", i)
-		if err := target.WriteSecret(t.Context(), a, Secret{Name: name, Value: "sealed"}); err == nil {
+		if err := target.WriteSecret(t.Context(), a, sealedSecretFixture(t, &target, Secret{Name: name, Value: "sealed"})); err == nil {
 			t.Fatalf("write %d passed invalid authority", i)
 		}
-		row, err := target.WriteGitCredential(t.Context(), a, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "sealed"})
+		row, err := target.WriteGitCredential(t.Context(), a, sealedGitFixture(t, &target, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "sealed"}))
 		if err == nil || row.ID != "" {
 			t.Fatalf("git write %d returned a row: %+v %v", i, row, err)
 		}
@@ -118,12 +118,12 @@ func TestCredentialMutationsAuthorityProperty(t *testing.T) {
 
 func TestCredentialMutationsFailedReplacementPreservesPreviousRow(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
-	before, err := tenant.WriteGitCredential(t.Context(), a, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "old"})
+	before, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "old"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_credential BEFORE INSERT ON git_credentials BEGIN SELECT RAISE(ABORT,'refused'); END`)
-	if row, err := tenant.WriteGitCredential(t.Context(), a, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "new"}); err == nil || row.ID != "" {
+	if row, err := tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "new"})); err == nil || row.ID != "" {
 		t.Fatalf("failed replacement: %+v %v", row, err)
 	}
 	after, err := tenant.GitCredentialForHost(t.Context(), before.Host)
@@ -139,10 +139,10 @@ func TestCredentialMutationsRecheckAuthorityAfterWriting(t *testing.T) {
 			rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER end_admin AFTER INSERT ON `+resource+` BEGIN UPDATE memberships SET role='reader' WHERE account_id='owner'; END`)
 			var err error
 			if resource == "secrets" {
-				err = tenant.WriteSecret(t.Context(), a, Secret{Name: "KEY", Value: "sealed"})
+				err = tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: "KEY", Value: "sealed"}))
 			} else {
 				var row GitCredential
-				row, err = tenant.WriteGitCredential(t.Context(), a, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "sealed"})
+				row, err = tenant.WriteGitCredential(t.Context(), a, sealedGitFixture(t, tenant, GitCredential{Host: "git.test", Kind: GitCredentialHTTPS, Secret: "sealed"}))
 				if row.ID != "" {
 					t.Fatal("failed commit returned credential")
 				}
@@ -158,7 +158,7 @@ func TestCredentialMutationsRecheckAuthorityAfterWriting(t *testing.T) {
 func TestCredentialMutationsSerializeExistingSecretLimit(t *testing.T) {
 	tenant, a := credentialMaintenanceFixture(t)
 	for i := range MaxSecretsPerTeam - 1 {
-		if err := tenant.WriteSecret(t.Context(), a, Secret{Name: fmt.Sprintf("KEY_%d", i), Value: "sealed"}); err != nil {
+		if err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: fmt.Sprintf("KEY_%d", i), Value: "sealed"})); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -166,7 +166,7 @@ func TestCredentialMutationsSerializeExistingSecretLimit(t *testing.T) {
 	results := make(chan error, 8)
 	for i := range 8 {
 		wg.Go(func() {
-			results <- tenant.WriteSecret(t.Context(), a, Secret{Name: fmt.Sprintf("CONCURRENT_%d", i), Value: "sealed"})
+			results <- tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: fmt.Sprintf("CONCURRENT_%d", i), Value: "sealed"}))
 		})
 	}
 	wg.Wait()
@@ -182,7 +182,7 @@ func TestCredentialMutationsSerializeExistingSecretLimit(t *testing.T) {
 	if accepted != 1 {
 		t.Fatalf("accepted %d secrets at one remaining slot", accepted)
 	}
-	if err := tenant.WriteSecret(t.Context(), a, Secret{Name: "KEY_0", Value: "replacement"}); err != nil {
+	if err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: "KEY_0", Value: "replacement"})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -198,21 +198,21 @@ func TestCredentialMutationsSecretLimitsPreserveExistingValues(t *testing.T) {
 				tenant.team, a.Target.Team = team, string(team)
 			}
 			for i := range MaxSecretsPerTeam {
-				if err := tenant.WriteSecret(t.Context(), a, Secret{Name: fmt.Sprintf("KEY_%d", i), Value: "original"}); err != nil {
+				if err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: fmt.Sprintf("KEY_%d", i), Value: "original"})); err != nil {
 					t.Fatal(err)
 				}
 			}
 			for _, row := range []Secret{{Name: "EXTRA", Value: "extra"}, {Name: "KEY_0", Value: strings.Repeat("x", MaxSecretValueBytes+1)}} {
-				err := tenant.WriteSecret(t.Context(), a, row)
+				err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, row))
 				if team == DefaultTeam && err != nil || team != DefaultTeam && !errors.Is(err, ErrSecretLimit) {
 					t.Fatalf("secret %s: %v", row.Name, err)
 				}
 			}
 			row, err := tenant.GetSecretRow("KEY_0", "")
-			if err != nil || team != DefaultTeam && row.Value != "original" || team == DefaultTeam && len(row.Value) != MaxSecretValueBytes+1 {
+			if err != nil || team != DefaultTeam && openSecretFixture(t, tenant, row) != "original" || team == DefaultTeam && len(openSecretFixture(t, tenant, row)) != MaxSecretValueBytes+1 {
 				t.Fatalf("size refusal: %+v, %v", row, err)
 			}
-			if err := tenant.WriteSecret(t.Context(), a, Secret{Name: "KEY_0", Value: "replacement"}); err != nil {
+			if err := tenant.WriteSecret(t.Context(), a, sealedSecretFixture(t, tenant, Secret{Name: "KEY_0", Value: "replacement"})); err != nil {
 				t.Fatal(err)
 			}
 			rows, err := tenant.ListSecrets()
@@ -249,7 +249,7 @@ func TestCredentialMutationsDeletionPreservesOtherScopesProperty(t *testing.T) {
 			a      capability.Authorized
 		}{{tenant, a}, {foreign, b}} {
 			for _, p := range []string{"", pipeline} {
-				if err := scope.tenant.WriteSecret(t.Context(), scope.a, Secret{Name: name, Pipeline: p, Value: string(scope.tenant.team) + p}); err != nil {
+				if err := scope.tenant.WriteSecret(t.Context(), scope.a, sealedSecretFixture(t, scope.tenant, Secret{Name: name, Pipeline: p, Value: string(scope.tenant.team) + p})); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -268,7 +268,7 @@ func TestCredentialMutationsDeletionPreservesOtherScopesProperty(t *testing.T) {
 			pipeline string
 		}{{tenant, ""}, {foreign, ""}, {foreign, pipeline}} {
 			row, err := want.tenant.GetSecretRow(name, want.pipeline)
-			if err != nil || row.Value != string(want.tenant.team)+want.pipeline {
+			if err != nil || openSecretFixture(t, want.tenant, row) != string(want.tenant.team)+want.pipeline {
 				t.Fatalf("another scope changed: %+v, %v", row, err)
 			}
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -26,12 +27,13 @@ func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) 
 		return nil, err
 	}
 	var out []ReapedUnit
+	var failures error
 	for _, target := range targets {
 		var result *ReapedUnit
 		err := s.inTx(ctx, func(tx *storeTx) error {
 			now := tx.now()
 			var holder string
-			if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forUpdate()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if err := tx.QueryRowContext(ctx, `SELECT holder FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
 			if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", now); err != nil {
@@ -49,13 +51,14 @@ func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) 
 			return err
 		})
 		if err != nil {
-			return out, err
+			failures = errors.Join(failures, fmt.Errorf("reap %s/%s/%s: %w", target.team, target.ref.RunID, target.ref.NodeID, err))
+			continue
 		}
 		if result != nil {
 			out = append(out, *result)
 		}
 	}
-	return out, nil
+	return out, failures
 }
 
 type expiredUnit struct {
@@ -66,7 +69,11 @@ type expiredUnit struct {
 }
 
 func (s *Store) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, error) {
-	now := s.now().UnixNano()
+	current, err := s.databaseNow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := current.UnixNano()
 	rows, err := s.query(ctx, `SELECT team,run_id,node_id,kind,source_generation FROM (
 	 SELECT team,run_id,node_id,'node' AS kind,0 AS source_generation,lease_expires_at AS due FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at<=? AND status<>'done'

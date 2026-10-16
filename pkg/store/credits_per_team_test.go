@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -23,44 +21,6 @@ func teamHandle(t *testing.T, s *store.Store, team store.Team) *store.Tenant {
 		t.Fatalf("handle for %s: %v", team, err)
 	}
 	return tenant
-}
-
-// safety: the node is created through the unscoped surface because the nodes
-// family is not ported yet; the ledger reads the team off the run, which is.
-func readyTeamNode(t *testing.T, s *store.Store, tenant *store.Tenant, runID, nodeID string) {
-	t.Helper()
-	ctx := context.Background()
-	if err := tenant.TestOnlySeedRun(ctx, store.Run{
-		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("create run for %s: %v", tenant.Team(), err)
-	}
-	if err := teststore.SeedNode(s, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := teststore.SeedNodeReady(s, ctx, runID, nodeID); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-}
-
-func teamExhaustedAt(t *testing.T, s *store.Store, team store.Team) int64 {
-	t.Helper()
-	var at int64
-	if err := s.DB().QueryRow(storetest.Rebind(s,
-		`SELECT credit_exhausted_at FROM teams WHERE name = ?`), string(team)).Scan(&at); err != nil {
-		t.Fatalf("read %s's exhaustion stamp: %v", team, err)
-	}
-	return at
-}
-
-func meteredTeamClaimant(t *testing.T, tenant *store.Tenant, principal string) store.ClaimIdentity {
-	t.Helper()
-	_, tok, err := tenant.CreateTokenWith(context.Background(), principal, store.TokenKindRunner,
-		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{Metered: true})
-	if err != nil {
-		t.Fatalf("mint %s's metered token: %v", tenant.Team(), err)
-	}
-	return store.ClaimIdentity{Principal: principal, TokenPrefix: tok.Prefix}
 }
 
 func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {

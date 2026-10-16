@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -28,10 +30,9 @@ func teamTenant(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	return tenant
 }
 
-func teamToken(t *testing.T, tenant *store.Tenant, scopes ...string) string {
+func teamToken(t *testing.T, st *store.Store, tenant *store.Tenant, scopes ...string) string {
 	t.Helper()
-	raw, _, err := tenant.CreateToken(context.Background(), "member-of-"+string(tenant.Team()),
-		store.TokenKindUser, scopes, 0, time.Now().UTC())
+	raw, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(tenant.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member-of-" + string(tenant.Team())}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants(scopes), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
 	if err != nil {
 		t.Fatalf("CreateToken for %s: %v", tenant.Team(), err)
 	}
@@ -45,7 +46,7 @@ func teamToken(t *testing.T, tenant *store.Tenant, scopes ...string) string {
 func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
-	writerB := teamToken(t, tenantB, "runs.read", "runs.control")
+	writerB := teamToken(t, f.store, tenantB, "runs.read", "runs.control")
 
 	var pushed map[string]any
 	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, &pushed)
@@ -135,7 +136,7 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
-	writerB := teamToken(t, tenantB, "runs.read", "runs.control")
+	writerB := teamToken(t, f.store, tenantB, "runs.read", "runs.control")
 	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, nil)
 
 	var launched controllerwire.ScheduleRun
@@ -156,7 +157,7 @@ func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 
 func TestControllerCrons_ATeamsSchedulesAreCapped(t *testing.T) {
 	f := newCronsFixture(t)
-	writerB := teamToken(t, teamTenant(t, f.store, teamB), "runs.read", "runs.control")
+	writerB := teamToken(t, f.store, teamTenant(t, f.store, teamB), "runs.read", "runs.control")
 
 	many := cronPushBody()
 	var entries []map[string]any

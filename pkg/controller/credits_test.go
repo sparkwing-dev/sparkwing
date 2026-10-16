@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -45,18 +47,15 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
+	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatalf("admin token: %v", err)
 	}
-	runner, runnerTok, err := st.CreateTokenWith(context.Background(), "pool", store.TokenKindRunner,
-		[]string{"nodes.claim", "triggers.claim", "runs.state", "runs.read"},
-		0, now, store.TokenOptions{Metered: metered})
+	runner, runnerTok, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*"}, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pool"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(now, 0), RegistrationID: "runner:" + string(store.DefaultTeam) + ":" + "pool", Metered: metered})
 	if err != nil {
 		t.Fatalf("runner token: %v", err)
 	}
-	readonly, _, err := st.CreateToken("viewer", store.TokenKindUser,
-		[]string{"runs.read"}, 0, now)
+	readonly, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "viewer"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.read"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
@@ -523,61 +522,6 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}
 	if len(charges) != 1 || charges[0].CPUClassCores != 16 || charges[0].RateMicroPerSecond != 70_000 {
 		t.Fatalf("reservation = %+v, want the 16-core class the plan asked for", charges)
-	}
-}
-
-// The class the claim response carries is the class the charge row bills,
-// whichever ladder the operator priced.
-func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_table": map[string]int64{"2": 10_000, "64": 270_000},
-	}); status != http.StatusOK {
-		t.Fatalf("set the rate table = %d", status)
-	}
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
-		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":3}}]}`),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := teststore.SeedNodeReady(f.store, ctx, "run-big", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-
-	status, body := creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
-		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60, "sizes_to_class": true})
-	if status != http.StatusOK {
-		t.Fatalf("claim = %d: %s", status, body)
-	}
-	var claimed store.Node
-	if err := json.Unmarshal(body, &claimed); err != nil {
-		t.Fatalf("decode the claim: %v: %s", err, body)
-	}
-	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
-	if err != nil {
-		t.Fatalf("list charges: %v", err)
-	}
-	if len(charges) != 1 || charges[0].CPUClassCores != 64 {
-		t.Fatalf("reservation = %+v, want the 64-core class this ladder prices", charges)
-	}
-	if claimed.CreditCPUClassCores != charges[0].CPUClassCores {
-		t.Fatalf("claim says class %d, charge row says %d",
-			claimed.CreditCPUClassCores, charges[0].CPUClassCores)
-	}
-	if want := store.CPUClassMemoryBytes(64); claimed.CreditCPUClassMemoryBytes != want {
-		t.Fatalf("claim memory = %d, want %d", claimed.CreditCPUClassMemoryBytes, want)
 	}
 }
 

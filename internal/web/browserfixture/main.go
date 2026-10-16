@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,6 +16,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -126,11 +130,17 @@ func main() {
 			log.Printf("browser fixture store close: %v", err)
 		}
 	}()
-	now := time.Now().UTC()
-	token, _, err := st.CreateToken("browser-fixture", store.TokenKindUser, []string{"admin"}, 0, now)
-	if err != nil {
+	entropy := make([]byte, 32)
+	if _, err := rand.Read(entropy); err != nil {
 		log.Fatal(err)
 	}
+	token := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(entropy)
+	if _, err := st.EnsureBootstrapCapability(context.Background(), capability.ProvisionSpec{
+		Kind: capability.ProvisionBootstrap, Seed: token, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore},
+	}); err != nil {
+		log.Fatal(err)
+	}
+
 	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{
 		Bundle:  os.DirFS(config.webOut),
 		Version: "auth-browser-fixture",

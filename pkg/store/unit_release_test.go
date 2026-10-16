@@ -182,10 +182,24 @@ func TestReleaseUnitRefusesForgedStartedAndCancelledClaims(t *testing.T) {
 			case "expired":
 				rewriteSchemaExec(t, s.db, `UPDATE nodes SET lease_expires_at=1 WHERE run_id='run'`)
 			case "revoked_parent":
-				rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='machine'`)
+				revokeClaimRoot(t, s, "machine", "a")
 			}
-			if err := s.ReleaseUnit(t.Context(), claim, prefix); err == nil {
-				t.Fatal("invalid release accepted")
+			err := s.ReleaseUnit(t.Context(), claim, prefix)
+			if problem == "cancelled" {
+				var refused *apierr.Error
+				if !errors.As(err, &refused) || refused.Code != apierr.LockHeld {
+					t.Fatalf("cancellation refusal = %v", err)
+				}
+			} else if problem == "revoked_parent" {
+				var refused *apierr.Error
+				if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated {
+					t.Fatalf("revocation refusal = %v", err)
+				}
+			} else {
+				var refused *ErrIllegalTransition
+				if !errors.As(err, &refused) || refused.Reason != ReasonHolderRights {
+					t.Fatalf("release refusal = %v", err)
+				}
 			}
 			var holder string
 			if err := s.db.QueryRow(`SELECT claimed_by FROM nodes WHERE run_id='run'`).Scan(&holder); err != nil || holder != "machine" {

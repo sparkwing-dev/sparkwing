@@ -39,7 +39,7 @@ func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string
 	}
 	var holder string
 	var generation, until int64
-	err = tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name='controller.owner'`+tx.forUpdate()).Scan(&holder, &generation, &until)
+	err = tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name='controller.owner'`+tx.forKeyShare()).Scan(&holder, &generation, &until)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
