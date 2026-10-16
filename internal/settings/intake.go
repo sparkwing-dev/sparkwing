@@ -10,6 +10,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
+// ResolveIntake resolves captured request preferences against trusted controller inputs.
+func ResolveIntake(options runspec.Options, operator OperatorInputs, ctx Context) (runspec.Options, error) {
+	for _, origin := range intakeOrigins(options) {
+		switch origin.Layer {
+		case "", runspec.LayerFlag, runspec.LayerEnv, runspec.LayerSealed, runspec.LayerMachine, runspec.LayerDefault:
+		default:
+			return runspec.Options{}, invalid(origin.Key, Origin{Source: Run, Key: origin.Key}, "request setting has an invalid intake origin")
+		}
+	}
+	return ResolveRequest(Inputs{Sealed: unprojectOptions(options), Operator: operator, Context: ctx})
+}
+
 func resolveValue[T any](in Inputs, key string, resolver func(Inputs) (T, Origin, error), field **T, origins map[string]Origin) error {
 	value, origin, err := resolver(in)
 	if err != nil {
@@ -352,4 +364,49 @@ func distributeOperator(values OperatorValues) OperatorInputs {
 		}
 	}
 	return out
+}
+
+func intakeOrigins(options runspec.Options) []runspec.SettingOrigin {
+	origins := []runspec.SettingOrigin{
+		options.Runner.Origin,
+		options.Priority.Origin,
+		options.AdmissionClass.Origin,
+		options.ClaimWait.Origin,
+		options.OwnerExecutionTimeout.Origin,
+		options.Workers.Origin,
+		options.Output.Origin,
+		options.StartAt.Origin,
+		options.StopAt.Origin,
+		options.Only.Origin,
+		options.DryRun.Origin,
+		options.NoMemo.Origin,
+		options.PauseTimeout.Origin,
+		options.Debug.Origin,
+		options.Publish.Origin,
+		options.CacheFrom.Origin,
+		options.RepoLocation.Origin,
+		options.Profile.Origin,
+		options.JobDefaults.Timeout.Origin,
+		options.JobDefaults.NoProgressTimeout.Origin,
+		options.JobDefaults.ApprovalWait.Origin,
+		options.JobDefaults.Retry.Origin,
+		options.JobDefaults.RetryBackoff.Origin,
+		options.JobDefaults.MemoTTL.Origin,
+		options.Requires.Origin,
+		options.Prefers.Origin,
+		options.AllowRisk.Origin,
+		options.SubmitEnvAllow.Origin,
+		options.Resources.Origin,
+		options.Resources.Value.Cores.Origin,
+		options.Resources.Value.MemoryBytes.Origin,
+		options.Pause.Origin,
+		options.Pause.Value.Before.Origin,
+		options.Pause.Value.After.Origin,
+		options.Pause.Value.OnFailure.Origin,
+		options.Checkout.Origin,
+	}
+	for _, origin := range options.Checkout.Value.Origins {
+		origins = append(origins, origin)
+	}
+	return origins
 }

@@ -52,6 +52,20 @@ It opens the optional Jev secret through the same store-bound cipher used by
 the HTTP server. The production factory test reconciles a fresh home, checks
 both HTTP handlers and verifies closure without a socket.
 
+Both controllers construct their server with `controller.New`, which installs
+the transactional intake resolver before handlers are built. It resolves captured
+preferences with deployment ceilings and seals log retention. Local execution
+keeps its unbounded owner duration. The store installs its native provision
+policy when opened. Capability inventory uses the server's tenant/operator
+adapters when no replacement resolver is supplied.
+
+`TestProductionLocalControllerAdmitsRun` opens the real local controller and uses
+`ServeAPI` over in-memory connections with peer identity. It exercises admission,
+replay, signed owner admission, plan acceptance, node claims and result reporting,
+output upload/readback, durable log upload/readback, and atomic run completion.
+The test supplies signed release metadata and reports execution results through
+the API. Pipeline spawning and machine admission remain native-host checks.
+
 `NewClaimant` captures the process's kernel account. Its bearer provider uses
 shared peer authentication and credential delegation. Its enrollment resolver
 accepts only that authenticated local account in `DefaultTeam`, and supplies

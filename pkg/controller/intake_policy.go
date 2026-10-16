@@ -1,0 +1,93 @@
+package controller
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"path/filepath"
+	"runtime"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+// ResolveIntake resolves captured preferences and trusted deployment policy before sealing.
+func (s *Server) ResolveIntake(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
+	principal, err := resolver.ResolveAuthority(ctx, request.Authority)
+	if err != nil {
+		return store.IntakePolicyFacts{}, err
+	}
+	team := store.Team(principal.Capability.Team)
+	guards, funded, err := store.IntakeSettings(ctx, resolver, team)
+	if err != nil {
+		return store.IntakePolicyFacts{}, err
+	}
+	operator := settings.OperatorInputs{}
+	if guards.RunSeconds > 0 {
+		if guards.RunSeconds > math.MaxInt64/int64(time.Second) {
+			return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.Unavailable, Message: "operator run duration is not representable"}
+		}
+		duration := time.Duration(guards.RunSeconds) * time.Second
+		operator.Global = settings.OperatorValues{OwnerExecution: &duration, Origins: map[string]settings.Origin{"operator.owner_execution": {Source: settings.GlobalDB, Key: store.ComputeLimitRunSeconds}}}
+	}
+	values, err := settings.ControllerCeilings(operator)
+	if err != nil {
+		return store.IntakePolicyFacts{}, err
+	}
+	ceilings, err := settings.ProjectCeilings(values)
+	if err != nil {
+		return store.IntakePolicyFacts{}, err
+	}
+	localPeer := principal.Capability.Subject.Kind == capability.SubjectLocal
+	published := request.Request.Mode == runspec.IntakePublish
+	if !localPeer && !published && request.Request.Origin == runspec.OriginLocal {
+		return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.Forbidden, Message: "executable local origin requires local peer authority"}
+	}
+	placement := store.RequestPlacement(request.Request)
+	options, err := settings.ResolveIntake(request.Request.Options, operator, settings.Context{Origin: request.Request.Origin, Local: placement == nodeproto.PlacementLocal, ControllerOwned: request.Request.Dispatch == runspec.DispatchController, Cloud: !localPeer, NumCPU: runtime.NumCPU()})
+	if err != nil {
+		return store.IntakePolicyFacts{}, err
+	}
+	days := int(limits.FreeLogRetention / (24 * time.Hour))
+	if funded {
+		days = int(limits.FundedLogRetention / (24 * time.Hour))
+	}
+	if override := s.logRetention[team]; override > 0 {
+		days = override
+	}
+	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
+	if request.VerifiedDeliveryID != "" {
+		return facts, &apierr.Error{Code: apierr.Unavailable, Message: "verified App delivery facts are unavailable"}
+	}
+	location := request.Request.Source.Location
+	if location == (runspec.SourceLocation{}) {
+		return facts, nil
+	}
+	if location.PipelineDir != "" && !filepath.IsLocal(location.PipelineDir) {
+		return facts, &apierr.Error{Code: apierr.BadRequest, Message: "pipeline directory must stay within the checkout"}
+	}
+	if location.RemoteURL != "" {
+		if _, err := parseIntakeRemote(location.RemoteURL); err != nil {
+			return facts, err
+		}
+	}
+	if localPeer {
+		facts.SourceLocation = &location
+		return facts, nil
+	}
+	if location.LocalCheckout != "" {
+		return facts, &apierr.Error{Code: apierr.Forbidden, Message: "remote intake cannot name a local checkout"}
+	}
+	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: location.RemoteURL})
+	if err != nil || repository.Key != request.Request.Git.Repository.Key {
+		return facts, &apierr.Error{Code: apierr.Unavailable, Message: "verified source location is unavailable"}
+	}
+	facts.SourceLocation = &location
+	return facts, nil
+}
