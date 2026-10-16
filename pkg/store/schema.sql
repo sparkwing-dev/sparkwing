@@ -11,18 +11,15 @@ CREATE TABLE teams (
     created_by TEXT NOT NULL DEFAULT '',
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',
-    billing_purchase_limit_cents BIGINT NOT NULL DEFAULT 0,
     billing_trust TEXT NOT NULL DEFAULT '' CHECK(billing_trust IN ('','granted','revoked')),
     billing_trust_by TEXT NOT NULL DEFAULT '',
-    billing_runner_cap BIGINT NOT NULL DEFAULT 0,
     card_customer TEXT NOT NULL DEFAULT '',
     card_payment_method TEXT NOT NULL DEFAULT '',
     card_fingerprint TEXT NOT NULL DEFAULT '',
     card_brand TEXT NOT NULL DEFAULT '',
     card_added_at BIGINT NOT NULL DEFAULT 0,
     card_owed_since BIGINT NOT NULL DEFAULT 0,
-    billing_rung_cents BIGINT NOT NULL DEFAULT 0,
-    billing_daily_cap_cents BIGINT NOT NULL DEFAULT 0,
+    billing_rung_index BIGINT NOT NULL DEFAULT 0 CHECK(billing_rung_index BETWEEN 0 AND 6),
     card_last4 TEXT NOT NULL DEFAULT '',
     billing_budget_cents BIGINT NOT NULL DEFAULT 0,
     next_run_number BIGINT NOT NULL DEFAULT 1 CHECK(next_run_number > 0)
@@ -697,6 +694,17 @@ CREATE TABLE payment_events (
 
 CREATE INDEX idx_payment_events_object ON payment_events(payment_mode,object_id);
 
+CREATE TABLE billing_pages (
+    id TEXT NOT NULL PRIMARY KEY,
+    team TEXT NOT NULL REFERENCES teams(name),
+    account_id TEXT NOT NULL,
+    request_key TEXT NOT NULL CHECK(request_key <> ''),
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    page_json BLOB NOT NULL,
+    failed_at BIGINT,
+    UNIQUE(team,account_id,request_key)
+);
+
 CREATE TABLE payment_correlations (
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     provider_id TEXT NOT NULL CHECK(provider_id <> ''),
@@ -859,7 +867,7 @@ CREATE TABLE card_charges (
     id TEXT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),
     amount_micro BIGINT NOT NULL,
-    cause TEXT NOT NULL CHECK(cause IN ('settle','rung','month_end')),
+    cause TEXT NOT NULL CHECK(cause IN ('settle','rung','month_end','first_week')),
     state TEXT NOT NULL CHECK(state IN ('open','paid')),
     failures BIGINT NOT NULL DEFAULT 0,
     decline_code TEXT NOT NULL DEFAULT '',
@@ -900,12 +908,7 @@ CREATE TABLE team_spend_days (
     PRIMARY KEY (team, day)
 );
 
-CREATE TABLE card_spend_days (
-    fingerprint TEXT NOT NULL,
-    day BIGINT NOT NULL,
-    amount_micro BIGINT NOT NULL,
-    PRIMARY KEY (fingerprint, day)
-);
+
 
 CREATE TABLE payment_warnings (
     warning_id TEXT NOT NULL PRIMARY KEY,

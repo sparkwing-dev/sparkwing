@@ -25,7 +25,6 @@ import {
   fmtRate,
   fmtRateUSD,
   fmtUSD,
-  fmtUSDShort,
   getBilling,
   grantLabel,
   limitReason,
@@ -34,7 +33,6 @@ import {
   parseDollars,
   priceRows,
   purchaseProblem,
-  purchaseRemainingCents,
   startCheckout,
   storagePrice,
 } from "@/lib/billing";
@@ -127,7 +125,7 @@ function BillingRoute() {
           <BalancePanel billing={billing} />
           <CardPanel billing={billing} />
           <LimitsPanel billing={billing} reload={load} />
-          {billing.checkout_enabled && !billing.card_billed ? (
+          {billing.checkout_enabled ? (
             <BuyPanel billing={billing} />
           ) : null}
           <PricesPanel billing={billing} />
@@ -168,9 +166,7 @@ function BalancePanel({ billing }: { billing: Billing }) {
           </span>
         </div>
         <div className="text-sm text-[var(--muted)] mt-1">
-          {fmtUSD(balanceUSD(billing.balance_micro, billing))} · a team balance
-          holds up to{" "}
-          {fmtUSDShort(balanceUSD(billing.balance_cap_micro, billing))}
+          {fmtUSD(balanceUSD(billing.balance_micro, billing))} prepaid
         </div>
       </div>
     </Panel>
@@ -194,7 +190,7 @@ function BuyPanel({ billing }: { billing: Billing }) {
     setBusy(true);
     setSubmitError("");
     try {
-      window.location.assign(await startCheckout(cents, billing));
+      window.location.assign(await startCheckout(cents));
     } catch (err) {
       setSubmitError(errorText(err));
       setBusy(false);
@@ -203,8 +199,8 @@ function BuyPanel({ billing }: { billing: Billing }) {
 
   return (
     <Panel
-      title="Buy credits"
-      hint={`Minimum purchase ${fmtCents(billing.purchase_min_cents)}, up to ${fmtCents(billing.purchase_max_cents)} at a time. Paid with Stripe.`}
+      title="Add funds"
+      hint={`Minimum purchase ${fmtCents(billing.purchase_min_cents)}. Usage draws prepaid funds before card billing resumes.`}
     >
       <form onSubmit={submit} className="p-4 space-y-2">
         {owner ? null : (
@@ -238,7 +234,7 @@ function BuyPanel({ billing }: { billing: Billing }) {
               className={buttonClass}
               disabled={problem !== null}
             >
-              {busy ? "Opening checkout…" : "Buy credits"}
+              {busy ? "Opening checkout…" : "Add funds"}
             </button>
           </div>
         </fieldset>
@@ -257,13 +253,6 @@ function BuyPanel({ billing }: { billing: Billing }) {
             {submitError}
           </p>
         ) : null}
-        <p className="text-xs text-[var(--muted)]">
-          This team can buy {fmtCents(billing.purchase_limit_cents)} every 30
-          days; {fmtUSD(purchaseRemainingCents(billing) / 100)} remains.
-          {billing.trusted
-            ? null
-            : " The limit rises once a purchase is 30 days old and the team has spent $50."}
-        </p>
         <p className="text-xs text-[var(--muted)]">
           Purchases are final. Credits never expire.
         </p>
@@ -480,8 +469,7 @@ function CardPanel({ billing }: { billing: Billing }) {
           </p>
         ) : (
           <p className="text-[var(--muted)]">
-            This team is trusted. Add a card and usage is charged to it
-            automatically, instead of buying credits in advance.
+            Add a card for automatic usage billing. You can also add prepaid funds.
           </p>
         )}
         {charge && charge.failures > 0 ? (
@@ -562,7 +550,7 @@ function LimitsPanel({
   return (
     <Panel
       title="Spend limits"
-      hint="Limits stop new Cloud work; running jobs finish within about a minute."
+      hint="Standing limits new Cloud admissions and each job’s duration. Running work finishes during card collection."
     >
       <div className="p-4 space-y-2 text-sm">
         {waiting ? (
@@ -571,9 +559,8 @@ function LimitsPanel({
           </p>
         ) : null}
         <p>
-          Last 30 days: {fmtCents(l.spent_30d_cents)} of{" "}
-          {fmtCents(l.ceiling_cents)}. Today: {fmtCents(l.spent_today_cents)} of{" "}
-          {fmtCents(l.daily_cap_cents)}.
+          {l.standing} standing: {l.cloud_vcpu} concurrent Cloud vCPU and {l.max_job_seconds / 3600} hours per job.
+          Last 30 days: {fmtCents(l.spent_30d_cents)}. Today: {fmtCents(l.spent_today_cents)}.
         </p>
         <form onSubmit={save} className="flex flex-wrap items-center gap-2">
           <label htmlFor="budget" className={labelClass}>
@@ -594,8 +581,7 @@ function LimitsPanel({
           ) : null}
         </form>
         <p className="text-xs text-[var(--muted)]">
-          Owners are emailed at 50, 80 and 100% of the budget. Zero sets it to
-          the 30-day limit.
+          Owners are emailed at 50, 80 and 100% of the budget. Zero removes the owner budget.
         </p>
         {error ? (
           <p role="alert" className="text-red-300">

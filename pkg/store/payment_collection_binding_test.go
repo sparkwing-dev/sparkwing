@@ -116,7 +116,11 @@ func TestCollectionBindingCannotChangePayerProperty(t *testing.T) {
 		case 7:
 			column, value, customer = "team", string(work.Team), fmt.Sprintf("other-%d", seed)
 		}
-		rewriteSchemaExec(t, s.db, "UPDATE payment_correlations SET "+column+"=? WHERE payment_mode='test' AND provider_id='payment'", value)
+		assignment := column + "=?"
+		if field%8 == 3 {
+			assignment += ",currency='',attempt_id='',charge_id=''"
+		}
+		rewriteSchemaExec(t, s.db, "UPDATE payment_correlations SET "+assignment+" WHERE payment_mode='test' AND provider_id='payment'", value)
 		defer rewriteSchemaExec(t, s.db, `UPDATE payment_correlations SET team=?,attempt_id=?,charge_id=?,kind='collection',currency='usd' WHERE payment_mode='test' AND provider_id='payment'`, work.Team, work.AttemptID, work.ChargeID)
 		err := s.AsOperator().RecordAttemptIntent(t.Context(), work.AttemptID, payment, customer, now.Add(time.Second))
 		var count int

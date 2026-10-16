@@ -314,10 +314,7 @@ function TeamView({ slug }: { slug: string }) {
           <Fact label="Balance">
             {fmtCents(balanceCents(team.balance_micro))}
           </Fact>
-          <Fact label="Bought in 30 days">
-            {fmtCents(b.purchased_30d_cents)} of{" "}
-            {fmtCents(b.purchase_limit_cents)}
-          </Fact>
+          <Fact label="Standing">{b.standing}: {b.cloud_vcpu} Cloud vCPU, {b.max_job_seconds / 3600} hours per job</Fact>
           <Fact label="Trust">
             {b.trust} ({b.trusted ? "trusted" : "not trusted"})
             {b.trust_by ? (
@@ -329,9 +326,6 @@ function TeamView({ slug }: { slug: string }) {
                 : {b.trust_reason}
               </span>
             ) : null}
-          </Fact>
-          <Fact label="Overrides">
-            {overrides(b) || "none"}
           </Fact>
           <Fact label="Frozen">
             {team.frozen ? `yes: ${team.holds.join(", ")}` : "no"}
@@ -362,16 +356,6 @@ function TeamView({ slug }: { slug: string }) {
       </Panel>
     </>
   );
-}
-
-function overrides(b: OperatorTeam["billing"]): string {
-  const parts: string[] = [];
-  if (b.limit_override_cents)
-    parts.push(`${fmtCents(b.limit_override_cents)} per 30 days`);
-  if (b.daily_cap_cents) parts.push(`${fmtCents(b.daily_cap_cents)} a day`);
-  if (b.rung_cents) parts.push(`card charged at ${fmtCents(b.rung_cents)}`);
-  if (b.runner_cap) parts.push(`${b.runner_cap} Cloud nodes`);
-  return parts.join(", ");
 }
 
 function Fact({
@@ -483,27 +467,6 @@ function ActionForm({
             </label>
           ) : null}
         </div>
-        {current === "set-limit" ? (
-          <div className="flex gap-3">
-            {(
-              [
-                ["daily", "Daily cap in US dollars (optional)"],
-                ["rung", "Card charge rung in US dollars (optional)"],
-                ["runners", "Cloud node cap (optional)"],
-              ] as const
-            ).map(([field, label]) => (
-              <label key={field} className="flex-1">
-                <span className={labelClass}>{label}</span>
-                <input
-                  className={`${inputClass} w-full`}
-                  value={extra[field] ?? ""}
-                  disabled={key !== ""}
-                  onChange={(e) => setField(field)(e.target.value)}
-                />
-              </label>
-            ))}
-          </div>
-        ) : null}
         <label className="block">
           <span className={labelClass}>Reason</span>
           <textarea

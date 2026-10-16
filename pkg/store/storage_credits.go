@@ -118,7 +118,7 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 		c.Seconds, c.AmountMicro, c.Bytes, c.NowNS, card); err != nil {
 		return nil, fmt.Errorf("credits: insert storage charge: %w", err)
 	}
-	if err := addSpendTx(ctx, tx, c.Team, card, c.NowNS, c.AmountMicro); err != nil {
+	if err := addSpendTx(ctx, tx, c.Team, c.NowNS, c.AmountMicro); err != nil {
 		return nil, err
 	}
 	return &CreditCharge{

@@ -1,104 +1,159 @@
-# W1b store-data review fixes
+# W1b decision 112 production composition
 
-Scope: the assigned Opus findings B1, M1, M2, the billing part of M5, award
-uniqueness, card settlement, attempt metadata, and the GC test. No Git writes.
-M4 is unchanged. M3 and M6 remain W1-owned.
+Decision 112 now reaches the production controller constructor. `Tenant`
+implements `BillingWriter`, and `New(...).Handler()` resolves it without an
+injected writer. Checkout, saved-card setup, pay-now and owner budgets use
+current member authority inside their committing transactions. Hosted-page
+reservations persist before provider delivery. Completion saves the page and
+provider correlation atomically. Replays reuse the reservation and saved URL.
+An ambiguous delivery retains its provider key. An authority change during the
+provider call prevents completion.
 
-## Findings and invariants
+The production-route tests use real account sessions, CSRF, provider signature
+verification, payment correlation and ledger settlement. They cover setup,
+prepay raising standing, a declined automatic collection moving the team to
+Held, and pay-now clearing that hold after successful collection. Repeated
+requests and signed events retain one financial effect. External checkout and
+Stripe HTTP transports are the only fakes in those flows.
 
-- B1 complete. Every non-final metered checkpoint checks current headroom.
-  An exhausted metered unit's renewal requests cancellation at the grace
-  boundary. Real renewal tests cover jobs, plans, evals and hosts, restoration,
-  and a grant that leaves a spend cap binding. They failed at the deadline before
-  the fix. `DefaultCreditGraceSeconds = 10 * 60` is the single named placeholder.
-  Korey still owns the final grace decision. Saved legacy grace settings do not
-  override this placeholder.
-- M1 complete. A pending upload protects its tenant's digest while object copying
-  can precede the receipt commit. Reservation takes the digest lock and clears
-  its tombstone. Live tickets root the reachability graph. The initial test
-  failed on the uncleared tombstone. Shared-ticket generated cases also pass.
-- M2 complete. Failed upload commits leave possible copied bytes discoverable
-  by leased GC. Abort and expiry register a tombstoned blob before releasing
-  quota. Tests first reproduced leaks after abort, expiry, prior admission
-  releasing quota, and run deletion. Upload metadata survives run deletion so
-  maintenance retains the digest. Repeated cleanup never recreates collected
-  bytes. Conservative abandoned rows count as retained bytes but create neither
-  receipt nor successful-upload usage.
-- M5 billing complete. The award ledger is the sole owner of compute billing.
-  Deleted FinalizeNodeCredits, legacy trigger/node reservation and settlement
-  helpers, token metering reads, eight credit-window columns and two indexes.
-  Schema tests first exposed the old columns and zero active-award usage.
-  Node price and compute usage now project awards and reservation charges.
-  W1 still owns the separate tokens.go APIs named in M5.
-- Award uniqueness complete. A capability and a unit generation each identify
-  at most one award. Both duplicate inserts succeeded before the unique indexes.
-- Card settlement complete. A payment changes only its attempt team's charge,
-  and success requires one changed attempt and charge. Foreign-team and ignored
-  update tests failed before the fix. A generated foreign-debt property checks
-  exact refusal and unchanged financial state.
-- Attempt metadata complete. Each new attempt starts with empty job summary and
-  annotations. The real retry test exposed carried metadata and now passes twice
-  under the same claim. Reset occurs at attempt allocation, including resumed
-  starts.
-- GC test complete. Reachability and object metadata stay within one team.
-  The generated root/member matrix varies protected teams and per-team sizes.
-  Removing the recursive team join makes all six cases fail. The correct query
-  is restored.
+Generated store tests refuse stale authority and changed financial facts.
+Concurrent requests reserve once. A failed page write rolls back its provider
+binding. Payment-mode changes refuse replay. Account removal and tenant purge
+handle the financial replay rows. Existing standing capacity, hard deadline,
+monthly/weekly collection, signup cap and running-work completion proofs remain.
+No native Stripe or PostgreSQL acceptance cell is promoted.
+
+## Contract changes made
+
+C1 records the tenant-owned `billing_pages` table and its unique caller/team/key
+identity, immutable reservation facts, failed-delivery state and bounded expiry.
+It records the account-removal and tenant-purge behavior. C1 and C2 replace the
+obsolete purchase-cap/trust gate wording with decision 112's funding rules.
+
+C2 and `BillingPage` add `IntentID` separately from the hosted-session
+`ProviderID`. Card setup responses supply `id`, `url`, `customer` and
+`setup_intent`. Recovery responses supply `id`, `url` and `payment_intent`.
+A returned recovery customer must match the reservation. Credits retain `id`,
+`url` and optional `expires_at`. Provider identities correlate signed callbacks
+without trusting webhook metadata. The checkout service must persist `key` and
+`setup_id` idempotently. A webhook delivered before completion retries after the
+correlation transaction commits.
+
+`PaymentConfig.HTTPTransport` supplies an optional external HTTP transport.
+Provider URL, credential validation, signature verification, timeout and
+redirect policy remain owned by the verifier. Production-constructor tests use
+this seam instead of replacing the verifier or the billing writer.
+
+The raw `OpenCreditCheckout`, `AttachCreditCheckout`, `DropCreditCheckout`,
+`SetSpendBudget` and `StartRecoveryAttempt` methods are removed. Package ledger
+tests use test-only transaction fixtures. The controller's existing prepay proof
+now uses the authorized writer. The unattached-checkout abort test retires
+because ambiguous delivery must preserve the financial reservation. Its
+replacement is `TestBillingPagesFailureRetainsReservationAndProviderBinding`.
+No contract change remains blocked on another worker.
+
+`Operator.SetPaymentMode` supplies the missing production writer for the existing
+mode setting. Controller startup calls it from its validated `--payment-mode`
+flag before serving. The constructor proofs configure it through this operator
+method. Invalid values leave the persisted mode unchanged.
+
+## Size and deletion
+
+Against the session starting point `b0b8331c7`, store production Go is **288
+added, 148 deleted, net +140**. The shared billing/capability production changes
+are **39 added, 6 deleted, net +33**. Removed raw APIs account for 96 production
+lines relative to the intermediate controller-writer commit. There are no
+compatibility aliases or production test-fixture entrypoints.
+
+Combined W1+W1b store production Go against main is **21,679 added, 25,849
+deleted, net -4,170**, measured using the lead's exclusions for tests, testdata,
+acceptance harnesses and paths containing `contract`.
+
+Budget justification: this is **80 lines over the -4,250 budget**. The missing
+production hosted-page implementation requires durable reservation/replay facts,
+atomic provider correlation and startup mode persistence, which the frozen line
+estimate did not size.
+The implementation shares existing team authority, checkout, recovery and
+collection transaction owners. A controller-only wrapper cannot provide atomic
+replay or recheck authority after provider delivery. Removing the raw APIs cut
+96 lines. The remaining overage needs the lead's budget ratification.
 
 ## Verification
 
-The full store command is `go test -p 4 -json ./pkg/store/...` with GOWORK=off,
-GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache and GOTMPDIR under
-/tmp/sw-astra-W1b. Top-level failing test count fell from **15 to 4**. Failure
-records including subtests fell from 19 to 8. No new failure remains. The four
-inherited failures are:
+All Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache`,
+`GOMAXPROCS=4`, `TMPDIR=/tmp/sw-astra-W1b` and
+`GOTMPDIR=/tmp/sw-astra-W1b`. Test concurrency is at most `-p 4`.
 
-- TestCollectionBindingCannotChangePayerProperty
-- TestTenantWriters_EveryTenantTableHasAWriterThatSetsTheKey
-- TestAWarnedCardRepaysTheDebtOnPayNow
-- FuzzStorageStandingTenantInventory
+- Repository-wide `go build ./...` passes.
+- `go vet ./pkg/store ./pkg/controller ./internal/capability ./cmd/sparkwing-controller` passes.
+- Store billing-model, hosted-page, retained-billing and retired-API proofs pass.
+  The table classification and tenant-column guards pass.
+- Controller billing-model and HTTP page authority/replay proofs pass, including
+  all three new production-constructor tests.
+- Collection, payment, card and metered controller checks pass with the socket
+  budget fixture excluded. Provider capability tests pass.
+- Race checks pass for hosted pages, collection binding and production
+  constructor flows. The final mode-configuration and production-constructor
+  race rerun passes too.
+- `TestPaymentConfiguration` passes in `cmd/sparkwing-controller`.
+- Documentation policy/mirror/migration checks and commentcheck against main
+  pass. `git diff --check` passes.
 
-The final broad store run took 230.96 seconds. Focused follow-ups cover the last
-constant update, schema checks, generated card cases and dialect contention.
-SQLite contention passes. PostgreSQL skips because SPARKWING_TEST_PG_URL is
-unset. No database concurrency claim is made from SQLite evidence.
+Reproduce the production billing proofs with:
 
-Repository-wide build and vet pass. Commentcheck passes. Focused controller
-native-data and filesystem/result tests pass. The broader controller credit
-selection retains five legacy fixture failures inserting into the deleted
-tokens table. No controller production file changed. No new acceptance cell is
-claimed. The pricing/refund behavior ports are recorded in t1-port-inventory.
+```sh
+go -C /home/bombuntu/.xwing/envs/1088/sparkwing test -p 4 ./pkg/store ./pkg/controller -run '^TestBillingPages|^TestBillingModel|^TestBillingPaymentMode|^TestStoreBilling|^TestBillingPageHTTPAuthorityAndReplayProperty' -count=1
+```
 
-## Contract changes and shared files
+Race selection is `^TestBillingPages|^TestBillingModelProduction|^TestCollectionBinding`,
+with `-race -p 2`. The additional mode-property selection is
+`^TestBillingPaymentMode|^TestBillingModelProduction`. Existing SQLite acceptance
+proofs `TestStoreBillingStartAwardVersusStart` and `TestStoreBillingRetention`
+pass. No native acceptance registry or cell is changed.
 
-C1-local schema changes add nullable uploads.abandoned_at and remove upload
-run/job cascading foreign keys. The marker makes abandonment idempotent because
-an expiry sweep otherwise recreates blobs after collection. Retaining the ticket
-preserves cleanup facts after run deletion. Removing those changes reopens M2.
-No foreign-area interface change is needed.
+## Shared files and caller migrations
 
-Files outside pkg/store: `.apidiff/pkg_store.txt`,
-`design/rewrite/contracts/c1-data.md` and
-`design/rewrite/contracts/t1-port-inventory.md` only.
+Production: `internal/capability/billing_pages.go`,
+`internal/capability/payment.go`, `cmd/sparkwing-controller/main.go`,
+`pkg/controller/billing_checkout.go`,
+`pkg/controller/billing_routes.go`, `pkg/store/team_mutations.go` and the store
+billing/schema owners. `tenant_sql_scope_guard_test.go` follows the shared
+collection helper's new name without widening its existing scope exception.
 
-Shared W1 implementation files touched within pkg/store: schema.sql, store.go,
-compute_limits.go, node_state.go, unit_billing.go, state_renewal.go and
-unit_renewal.go. Shared schema/scope/standing/publication/crash fixtures were
-updated for the enforced identities and conservative orphan accounting.
-Lead-owned handoffs.md and amendments files are unchanged.
+Tests: `pkg/controller/billing_native_test.go`,
+`pkg/controller/billing_model_fixture_test.go`,
+`pkg/controller/billing_model_internal_test.go`,
+`pkg/controller/deletion_review_test.go` and
+`pkg/controller/team_write_routes_test.go`. Raw caller migrations also touch
+`pkg/store/billing_model_test.go`, `card_billing_test.go`,
+`credit_exhaustion_runtime_test.go`, `deletion_billing_test.go`,
+`deletion_test.go`, `operator_card_billing_test.go`,
+`payment_checkout_caps_test.go`, `payment_checkout_test.go`,
+`store_billing_boundary_test.go` and `team_mutations_test.go`.
 
-## Volume and limits
+Docs: C1 and C2 contracts, the proof inventory, `docs/billing.md`,
+`docs/migrations/_unreleased.md` and their embedded mirrors. Lead-owned
+`handoffs.md` and `amendments-*.md` remain unchanged.
 
-Session production Go delta: **114 added, 742 deleted, net -628 lines**.
-The combined store delta against main is **-3,822**, which is **428 lines over**
-the -4,250 area target using the lead's exclusions. This session removes 628
-lines. Completing the whole-area budget needs further W1-owned legacy cuts.
-The 114 added lines supply the required transactional cleanup, cancellation and
-scoped settlement checks. There is no area-budget waiver or launch-readiness
-claim in this scoped completion.
+## Friction and remaining real integration
 
-The final grace duration and treatment of the legacy writable grace setting
-still need Korey's decision. PostgreSQL execution needs a database URL. Scratch
-under /tmp/sw-astra-W1b is removed after checks; the shared cache is retained.
+The shared checkout advanced to `89da585fa` while this continuation was running.
+An overlapping cleanup pass retired the raw billing APIs and migrated fixtures.
+One intermediate check saw a temporary fixture compile error. A later race run
+caught a test fixture changing an event timestamp between duplicate deliveries.
+The fixture now retains the event creation time while signing each delivery.
+The corrected race run passes. Final checks use
+the combined implementation. No Git writes were made by this worker.
+
+The native socket fixtures `TestCardBilling_OwnerSetsABudget` and
+`TestBillingTrust_OperatorGrantsAndRevokes` cannot run inside the sandbox.
+Owner-budget behavior is covered by the socket-free production
+constructor test with real session authentication. Live Stripe/test-key checkout
+service delivery, PostgreSQL and native full pipelines remain lead-owned
+execution evidence. The external checkout service source is outside this repo.
+Its response and idempotency contract is explicit above and exercised through
+transport doubles. No controller or store billing composition remains stubbed.
+
+Scratch `/tmp/sw-astra-W1b` is removed after checks. `/tmp/sw-gocache` is retained.
 
 STATUS: COMPLETE

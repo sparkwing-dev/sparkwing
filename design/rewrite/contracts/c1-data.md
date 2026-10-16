@@ -3155,3 +3155,68 @@ executing flag, as Cloud job intervals do.
 Upload tickets retain their run and job identifiers without cascading foreign
 keys. They survive run deletion because leased expiry still needs the digest to
 collect possible copied bytes and release every quota dimension.
+
+## Decision 112 billing cut
+
+The billing implementation uses `billing_policy.go` as its ladder and standing
+table. `BillingStanding` carries `Tier`, `CloudVCPU`, `MaxJobDuration` and the
+operator decision. `SpendStanding` keeps the owner budget, balance, current rung
+and collection state. Purchase-window and dollar-cap APIs and override fields
+are removed. The final schema replaces `billing_rung_cents` with `billing_rung_index` and
+removes shared-card spend buckets. Standing is enforced inside Cloud issuance
+under the ledger lock. The award captures the hard deadline. See
+`docs/billing.md` for the decision's policy table.
+
+Queue eligibility reads the same standing capacity rule without taking the
+ledger lock ahead of claim locks. Issuance rechecks it under the ledger lock.
+Full teams and oversized jobs do not block other eligible teams. A lost dispute
+reverses its payment while retaining the hold. Won and warning-closed disputes
+release their hold. The existing named operator release remains available.
+
+Each declined collection attempt owns a separate hold. Replayed declines retain
+operator releases. A later declined retry creates a new hold. Successful
+collection releases every decline hold on that team.
+
+
+## Decision 112 production hosted pages
+
+`Tenant` implements C2's `BillingWriter` directly. Billing writes lock the ledger
+before the team and recheck current member authority at commit. `billing_pages`
+is a tenant table with the reservation ID, caller account ID, request key,
+payment mode, immutable page facts and failed-delivery time. Its unique key is
+`(team, account_id, request_key)`. Changing kind or requested amount conflicts.
+Account removal preserves financial replay facts. Tenant purge removes them.
+
+Prepare commits a prepaid checkout or recovery attempt with the page reservation.
+Card setup reserves a new setup identity. Delivery failure retains the reservation
+and provider key. Completion binds the prepaid session, setup intent or recovery
+payment intent and saves the URL in the same transaction. It cannot extend expiry
+or change reserved amount, payer or attempt facts. A completed replay uses its
+saved URL after rechecking authority and payment mode. The existing 35-minute
+checkout/recovery hold bounds page expiry. An expired key conflicts rather than
+creating another payment operation.
+
+`BillingPage.IntentID` carries the provider's setup/payment intent separately
+from its hosted-session `ProviderID`. The checkout service response supplies
+`customer` and `setup_intent` for card setup, and `payment_intent` for recovery.
+These identities bind the signed provider event to the persisted payer without
+trusting webhook metadata. Credit-page responses retain `id`, `url` and optional
+`expires_at`. Completion refuses absent required correlation facts.
+
+Decision 112 replaces the prior purchase-cap/trust gate wording. Adding funds
+and saving a card require current team administration, valid payment amounts
+and a team not pending deletion. Cloud standing and owner budgets are enforced
+at Cloud admission. They do not prevent funding or debt recovery.
+
+The production tenant surface has no raw `OpenCreditCheckout`,
+`AttachCreditCheckout`, `DropCreditCheckout`, `SetSpendBudget` or
+`StartRecoveryAttempt`. Authorized page and budget writers own those mutations.
+Store fixtures reach transaction helpers through test-only methods. The unused
+unattached-checkout abort path and its legacy-only test are deleted. Ambiguous
+provider failures retain their reservation and replay identity.
+
+`Operator.SetPaymentMode` persists validated `test`/`live` configuration under the
+ledger lock. Controller startup calls it from the same `--payment-mode` that
+constructs the verifier. Reservations and verified settlement read that stored
+mode. Mode changes retain prior rows and their mode tags. This supplies the
+missing production writer for the existing `payment_mode` setting.

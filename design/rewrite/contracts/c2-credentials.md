@@ -3080,3 +3080,38 @@ Pod bootstraps require the bootstrap credential class before any ordinary route
 alternative. Only source acquisition and the one-time exchange declare that
 class. Signed filesystem errors use the canonical API envelope. An unsupported
 method returns method_not_allowed and Allow before signature validation.
+
+
+## Decision 112 billing composition amendment
+
+C1's `Tenant` now implements `BillingWriter`. `Server.New` reaches it through
+its native tenant resolver. The controller asserts conformance at compile time.
+`WithBillingWriter` remains the contract test seam. No extra runtime resolver
+configuration is needed for checkout, card, pay-now or owner budgets.
+
+`BillingPage.IntentID` distinguishes the callback's setup/payment intent from
+the hosted-session `ProviderID`. Card setup responses contain `id`, `url`,
+`customer` and `setup_intent`. Recovery responses contain `id`, `url` and
+`payment_intent`, with an optional customer that must match the reservation.
+Credit responses contain `id` and `url`. Optional `expires_at` can shorten the
+reserved expiry. Provider service idempotency uses the persisted reservation ID
+as `key`, and also as `setup_id` for card setup. These facts commit before any
+signed callback may change the ledger. Webhook delivery before completion must
+retry after correlation has committed.
+
+`PaymentConfig.HTTPTransport` optionally supplies the external provider
+transport. The verifier keeps its provider URL, credential files, request
+validation, deadline and redirect policy. Tests use this seam for provider GETs
+while keeping signature verification and store settlement real.
+
+Decision 112 supersedes purchase-window and purchase-cap gates in the earlier
+billing-page paragraph. Current member authority, amount validation and deletion
+guards govern funding. Cloud admissions own standing and budget enforcement.
+`TestBillingModelProductionPagesAndBudget` and
+`TestBillingModelProductionCardPrepayAndRecoverySettlement` exercise construction,
+real sessions and CSRF, page commits, provider delivery and signed settlement.
+
+Controller startup commits its validated `--payment-mode` through
+`Operator.SetPaymentMode` before serving requests. Verifier configuration and
+ledger configuration therefore share the operator's mode selection. Constructor
+proofs configure the ledger through that operator method instead of SQL seeding.

@@ -52,7 +52,7 @@ func TestMeteredUnitGrantsCannotRestartGraceUnderSpendCap(t *testing.T) {
 	s, demand, now := meteredUnitFixture(t, true)
 	claim, _ := meteredUnitClaim(t, s, demand)
 	tenant := &Tenant{s: s, team: claim.Team}
-	if err := tenant.SetSpendBudget(t.Context(), 1); err != nil {
+	if err := tenant.TestOnlySetSpendBudget(t.Context(), 1); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE team_spend_days SET amount_micro=? WHERE team='a'", MicroCreditsPerCent)

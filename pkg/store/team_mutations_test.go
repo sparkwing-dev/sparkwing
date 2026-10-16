@@ -162,7 +162,7 @@ func TestTeamDeletionRetainsCheckoutAndHoldGuardsOnStoreClock(t *testing.T) {
 	now := time.Unix(1800000000, 123).UTC()
 	s.clock = func() time.Time { return now }
 	a := teamAuthorization(t, s, actor, "a", "DELETE", "/api/v1/team")
-	if _, err := tenant.OpenCreditCheckout(t.Context(), 100*MicroCreditsPerCent, now, time.Hour); err != nil {
+	if _, err := tenant.TestOnlyOpenCreditCheckout(t.Context(), 100*MicroCreditsPerCent, now, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.DeleteAuthorizedTeam(t.Context(), a); !errors.Is(err, ErrOpenCheckout) {

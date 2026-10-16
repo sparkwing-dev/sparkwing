@@ -10,11 +10,10 @@ const acme = {
     team: "acme",
     trust: "revoked",
     trusted: false,
+    standing:"Held",cloud_vcpu:0,max_job_seconds:0,
     trust_by: "korey@example.com",
     trust_at: 1_790_000_000,
     trust_reason: "chargeback",
-    purchase_limit_cents: 5_000,
-    purchased_30d_cents: 2_500,
   },
   frozen: false,
   holds: [],
@@ -116,18 +115,18 @@ test("an action is sent only after its confirmation names the team and effect", 
   await expect.poll(seen.reads).toBeGreaterThan(readsBefore);
 });
 
-test("the operator releases a dispute hold and sets a trusted team's overrides", async ({
+test("the operator releases a dispute hold", async ({
   page,
 }) => {
   const held = {
     ...acme,
-    billing: { ...acme.billing, trust: "granted", trusted: true, runner_cap: 120 },
+    billing: { ...acme.billing, trust: "granted", trusted: false },
     frozen: true,
     holds: ["dp_1"],
   };
   const seen = await mockOperator(page, held);
   await page.goto("/operator?team=acme");
-  await expect(page.getByText("120 Cloud nodes")).toBeVisible();
+  await expect(page.getByText("Held: 0 Cloud vCPU, 0 hours per job")).toBeVisible();
 
   await page.getByLabel("Action").selectOption({ label: "Release a dispute hold" });
   await page.getByLabel("Reason").fill("dispute won");
@@ -144,25 +143,7 @@ test("the operator releases a dispute hold and sets a trusted team's overrides",
     body: { reason: "dispute won", hold: "dp_1" },
   });
 
-  await page.getByLabel("Action").selectOption({ label: "Set limit override" });
-  await page.getByLabel("Amount in US dollars").fill("2500");
-  await page.getByLabel("Daily cap in US dollars (optional)").fill("300");
-  await page.getByLabel("Cloud node cap (optional)").fill("250");
-  await page.getByLabel("Reason").fill("enterprise");
-  await review.click();
-  await expect(dialog).toContainText("holds up to 250 Cloud nodes at once");
-  await dialog.getByRole("button", { name: "Confirm" }).click();
-  await expect(dialog).toBeHidden();
-  expect(seen.posts[1]).toEqual({
-    path: "/api/v1/operator/teams/acme/trust",
-    body: {
-      trust: "granted",
-      reason: "enterprise",
-      limit_cents: 250_000,
-      daily_cap_cents: 30_000,
-      runner_cap: 250,
-    },
-  });
+
 });
 
 function waiting(n: number) {

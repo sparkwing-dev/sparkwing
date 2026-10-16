@@ -153,36 +153,21 @@ func Argon2Concurrency(budget int64) int
 const Argon2HashBytes = int64(argonMemory) << 10
 func Argon2Shed() int64
 func Argon2Slots() int
-const AutoTrustPaymentAge = 30 * 24 * time.Hour
 type BillingStanding struct {
-	Trust              string
-	TrustBy            string
-	TrustAt            time.Time
-	TrustReason        string
-	LimitOverrideCents int64
-
-	DailyCapOverrideCents int64
-	RungOverrideCents     int64
-	RunnerCapOverride     int64
-
-	Trusted    bool
-	LimitMicro int64
-
-	PurchasedMicro int64
+	Tier           string
+	CloudVCPU      int64
+	MaxJobDuration time.Duration
+	Trust          string
+	TrustBy        string
+	TrustAt        time.Time
+	TrustReason    string
+	Trusted        bool
 }
-func (b BillingStanding) PurchaseMaxCents() int64
 const BillingTrustAutomatic = ""
 type BillingTrustChange struct {
 	Trust  string
 	Actor  string
 	Reason string
-
-	LimitCents int64
-
-	DailyCapCents int64
-	RungCents     int64
-
-	RunnerCap int64
 }
 const BillingTrustGranted = "granted"
 const BillingTrustRevoked = "revoked"
@@ -225,7 +210,6 @@ const BusinessEventCheckoutPaid = "checkout.paid"
 const BusinessEventCreditGranted = "credit.granted"
 const BusinessEventCreditReversed = "credit.reversed"
 const BusinessEventFirstRunSucceeded = "run.first_succeeded"
-const BusinessEventPurchaseLimitRefused = "checkout.purchase_limit_refused"
 const BusinessEventTeamCreated = "team.created"
 const BusinessEventTeamFrozen = "team.frozen"
 const BusinessEventTeamUnfrozen = "team.unfrozen"
@@ -344,7 +328,6 @@ const CauseReport TransitionCause = "report"
 const CauseRetry TransitionCause = "retry"
 const CauseRevoke TransitionCause = "revoke"
 const CauseStart TransitionCause = "start"
-const CheckoutSettleWindow = 72 * time.Hour
 type ClaimAward struct {
 	CapabilityPrefix string
 	Holder           string
@@ -471,14 +454,6 @@ const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
 const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
-type CreditBalanceCapError struct {
-	BalanceMicro int64
-	OpenMicro    int64
-	AmountMicro  int64
-	CapMicro     int64
-}
-func (e *CreditBalanceCapError) Error() string
-func (e *CreditBalanceCapError) Unwrap() error
 type CreditCharge struct {
 	ID string
 
@@ -550,8 +525,6 @@ type CreditLedgerTotals struct {
 
 	SettledSeconds int64
 }
-const CreditPurchaseMaxCents = 50_000
-const CreditPurchaseMinCents = 1_000
 type CreditRate struct {
 	Cores          int64
 	MicroPerSecond int64
@@ -759,7 +732,6 @@ const DefaultSignUpHourlyLimit = 50
 const DefaultSignUpHourlyWarn = 20
 func DefaultSignUpLimits() SignUpLimits
 const DefaultTeam Team = "default"
-const DefaultTeamCloudNodes = limits.TeamCloudJobs
 const DefaultWarmCPUClassCores = 2
 const DeletedUserLabel = "deleted user"
 type DesiredRunEffect struct {
@@ -834,7 +806,6 @@ var ErrBindingLimit = errors.New("store: this team binds as many repositories as
 var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
-var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
 var ErrDeletionLeaseLost = errors.New("store: this purger no longer holds the team deletion's lease")
@@ -883,7 +854,6 @@ var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progr
 	"wait for the checkout to expire or complete, then delete the team")
 var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
-var ErrPurchaseLimit = errors.New("credits: the 30-day purchase limit refuses this amount")
 var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tokens as a team may")
@@ -1168,6 +1138,7 @@ type LastOwnerError struct {
 }
 func (e *LastOwnerError) Error() string
 func (e *LastOwnerError) Unwrap() error
+const LaunchAccountLimit = 100
 type LauncherAward struct {
 	Claim                  UnitClaim
 	Capability             capability.Capability
@@ -1217,13 +1188,11 @@ const MaxNodeMetricMarkers = 8
 const MaxNodeMetricSamples = limits.MaxMetricSamples
 const MaxOpenInvitations = 50
 const MaxPlanBytes = 4 << 20
-const MaxPurchaseLimitCents = MaxTeamBalanceMicro / MicroCreditsPerCent
 const MaxRunListLimit = 1000
 const MaxRunnerTokensPerTeam = 100
 const MaxSecretValueBytes = 128 << 10
 const MaxSecretsPerTeam = 100
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
-const MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
 type Membership struct {
 	Team        Team
 	DisplayName string
@@ -1258,10 +1227,6 @@ const MinCardChargeCents = 50
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
-const NewDailyCapCents = 2_500
-const NewPurchaseLimitCents = 5_000
-const NewPurchaseMaxCents = 5_000
-const NewSpendCeilingCents = 5_000
 type Node struct {
 	RunID      string
 	NodeID     string
@@ -1702,15 +1667,6 @@ const ProviderGoogle = "google"
 type ProvisionPolicy interface {
 	AuthorizeProvision(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error
 }
-type PurchaseLimitError struct {
-	Trusted        bool
-	LimitMicro     int64
-	PurchasedMicro int64
-	AmountMicro    int64
-}
-func (e *PurchaseLimitError) Error() string
-func (e *PurchaseLimitError) Unwrap() error
-const PurchaseLimitWindow = 30 * 24 * time.Hour
 const QueueStateApprovalPending = "approval_pending"
 const QueueStateClaimed = "claimed"
 const QueueStateReady = "ready"
@@ -2013,7 +1969,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "card_attempts", Owner: SchemaTenant},
 	{Name: "card_charges", Owner: SchemaTenant},
 	{Name: "card_refunds", Owner: SchemaTenant},
-	{Name: "card_spend_days", Owner: SchemaOperator},
 	{Name: "concurrency_entries", Owner: SchemaTenant},
 	{Name: "concurrency_holders", Owner: SchemaTenant},
 	{Name: "concurrency_waiters", Owner: SchemaTenant},
@@ -2183,6 +2138,7 @@ type SignUpConditions struct {
 	FreeTierUnreadable bool
 }
 type SignUpCounts struct {
+	Admitted   int
 	LastHour   int
 	LastDay    int
 	Waitlisted int
@@ -2250,25 +2206,17 @@ type SpawnedChild struct {
 }
 const SpendLimitBalance = "balance"
 const SpendLimitBudget = "budget"
-const SpendLimitCardCeiling = "card_ceiling"
-const SpendLimitCardDailyCap = "card_daily_cap"
-const SpendLimitCeiling = "ceiling"
 const SpendLimitChargeFailed = "charge_failed"
-const SpendLimitDailyCap = "daily_cap"
+const SpendLimitChargePending = "charge_pending"
 type SpendStanding struct {
-	Billing             BillingStanding
-	Card                Card
-	OpenCharge          *CardCharge
-	BalanceMicro        int64
-	CreditLimitMicro    int64
-	RungMicro           int64
-	CeilingMicro        int64
-	DailyCapMicro       int64
-	BudgetMicro         int64
-	Spent30dMicro       int64
-	SpentTodayMicro     int64
-	CardSpent30dMicro   int64
-	CardSpentTodayMicro int64
+	Billing         BillingStanding
+	Card            Card
+	OpenCharge      *CardCharge
+	BalanceMicro    int64
+	RungMicro       int64
+	BudgetMicro     int64
+	Spent30dMicro   int64
+	SpentTodayMicro int64
 }
 func (s SpendStanding) CardBilled() bool
 func (s SpendStanding) ChargeFailed() bool
@@ -2771,10 +2719,6 @@ type TriggerFilter struct {
 }
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
-const TrustedDailyCapCents = 20_000
-const TrustedPurchaseLimitCents = 50_000
-const TrustedRungCents = 10_000
-const TrustedSpendCeilingCents = 50_000
 type UnitClaim struct {
 	Team             Team
 	Kind             capability.UnitKind
@@ -2893,6 +2837,7 @@ const WaitlistReasonFreeTier = "free_tier_closed"
 const WaitlistReasonFreeTierUnreadable = "free_tier_unreadable"
 const WaitlistReasonGitHubAge = "github_account_age"
 const WaitlistReasonHourly = "hourly_signups"
+const WaitlistReasonLaunchCapacity = "launch_capacity"
 const WaitlistReasonOperator = "operator"
 func WaitlistReasons() []string
 type WaitlistedAccount struct {

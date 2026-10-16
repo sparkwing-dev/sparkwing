@@ -62,11 +62,7 @@ func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
 	f := newDeletionFixture(t)
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")
-	acme, err := f.store.ForTeam(context.Background(), "acme")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := acme.OpenCreditCheckout(context.Background(), store.MicroCreditsPerCredit, time.Now(), time.Hour); err != nil {
+	if _, err := f.store.DB().ExecContext(t.Context(), `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('pending','acme','pending','test','usd',100,?,1,?)`, store.MicroCreditsPerCredit, time.Now().Add(time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	var refused struct {

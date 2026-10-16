@@ -20,6 +20,8 @@ type BillingWriter interface {
 	SetAuthorizedSpendBudget(context.Context, capability.Authorized, int64) error
 }
 
+var _ BillingWriter = (*store.Tenant)(nil)
+
 // WithBillingWriter supplies tenant billing transactions before Handler is constructed.
 func (s *Server) WithBillingWriter(resolve func(context.Context, store.Team) (BillingWriter, error)) *Server {
 	s.resolveBillingWriter = resolve
@@ -37,7 +39,7 @@ func (s *Server) billingWriter(r *http.Request, a capability.Authorized) (Billin
 	} else if s.store != nil {
 		var tenant *store.Tenant
 		tenant, err = s.reportingTenant(r, a)
-		writer, _ = any(tenant).(BillingWriter)
+		writer = tenant
 	}
 	if err != nil {
 		return nil, engineLookupError(err)
@@ -96,13 +98,7 @@ func (s *Server) openBillingPage(w http.ResponseWriter, r *http.Request, a capab
 }
 
 func billingMutationError(err error) error {
-	var capErr *store.CreditBalanceCapError
-	var limitErr *store.PurchaseLimitError
 	switch {
-	case errors.As(err, &capErr):
-		return &apierr.Error{Code: apierr.Conflict, Message: capErr.Error(), Details: map[string]any{"reason": BalanceCapCode, "balance_micro": capErr.BalanceMicro, "open_micro": capErr.OpenMicro, "cap_micro": capErr.CapMicro, "amount_micro": capErr.AmountMicro}}
-	case errors.As(err, &limitErr):
-		return &apierr.Error{Code: apierr.Conflict, Message: limitErr.Error(), Details: map[string]any{"reason": PurchaseLimitCode, "trusted": limitErr.Trusted, "limit_cents": limitErr.LimitMicro / store.MicroCreditsPerCent, "purchased_cents": limitErr.PurchasedMicro / store.MicroCreditsPerCent, "amount_cents": limitErr.AmountMicro / store.MicroCreditsPerCent}}
 	case errors.Is(err, store.ErrNoPayableCharge):
 		return &apierr.Error{Code: apierr.Conflict, Message: err.Error(), Details: map[string]any{"reason": NoPayableChargeCode}}
 	case moneyInFlight(err):

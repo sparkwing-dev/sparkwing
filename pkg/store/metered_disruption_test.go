@@ -232,7 +232,7 @@ func checkMeteredDisruptionLedger(t *testing.T, s *Store, price CreditRate, awar
 	if err := s.db.QueryRow("SELECT COALESCE(SUM(CASE WHEN day=0 THEN amount_micro ELSE 0 END),0),COALESCE(SUM(CASE WHEN day=2 THEN amount_micro ELSE 0 END),0) FROM team_spend_days WHERE team='a'").Scan(&originalSpend, &laterSpend); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.QueryRow("SELECT COALESCE(SUM(amount_micro),0) FROM card_spend_days WHERE fingerprint='original'").Scan(&cardSpend); err != nil {
+	if err := s.db.QueryRow("SELECT COALESCE(SUM(amount_micro),0) FROM credit_charges WHERE card_fingerprint='original'").Scan(&cardSpend); err != nil {
 		t.Fatal(err)
 	}
 	if changedCard != 0 || originalSpend != min(wantSeconds, 60)*price.MicroPerSecond || laterSpend != max(wantSeconds-60, 0)*price.MicroPerSecond || cardSpend != amount {

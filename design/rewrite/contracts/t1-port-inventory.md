@@ -2797,3 +2797,64 @@ the shared validator through the real HTTP router. Refused requests create no
 run. `TestRetryActionRechecksAuthorityBeforeReplay` covers revocation and
 membership loss after a committed retry. No native placement cell is newly
 claimed by these ports.
+
+## Decision 112 billing policy
+
+The dollar-ceiling, daily-cap, purchase-window, shared-card bucket and operator
+cap-override tests retire with those APIs. `billing_model_test.go` and
+`billing_signup_test.go` cover the replacement through claims, renewal, real
+settlement, collection, sign-in and explicit operator admission. Generated
+admissions and independent SQLite clients pin the standing capacity invariant.
+`billing_model_internal_test.go` carries the controller claim, signup, status and
+card-prepay read paths through the real store. It also drives signed checkout
+and lost-dispute webhooks through verification and settlement to Cloud
+admission, renewal and completion. Queue proofs cover full teams and oversized
+jobs ahead of eligible work. The identity provider and runner profile are
+external contract fakes. Generated dispute delivery orders preserve Held after
+a chargeback until an operator releases its hold. `billing_docs_test.go` checks
+the policy table against the source documentation. Existing immutable-price, refund,
+retention and payment replay proofs remain. No native Stripe or PostgreSQL cell
+is promoted by these SQLite and controller-handler proofs.
+
+`TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish`
+creates debt through a real Cloud award, runs the controller's collection worker
+against a provider transport fake, and delivers a signed decline webhook twice.
+Pending collection and Held standing both refuse queued admissions while the
+running holder renews and completes. This proof uses the real verifier, collection
+binding, store ledger and claim handlers. Only the external payment transport is
+faked. The retired credit-limit field is removed from the old billing fixture.
+
+The same controller proof releases the first decline hold, replays its signed
+event, then declines a new retry. The released event stays released and the
+new attempt restores Held without stopping the running job.
+`TestBillingModelEveryDeclinedAttemptHoldsUntilReleasedProperty` generates retry
+counts and duplicate deliveries against real settlement and operator release.
+Each distinct decline holds the team. Replays preserve a released hold.
+
+The raw checkout open/bind/abort, budget and recovery APIs retire after the
+authorized billing writer cutover. Existing ledger and collection fixtures use
+test-only adapters to the transaction helpers. The controller prepay/chargeback
+proof opens and completes its checkout through the authorized writer. The
+unattached-checkout abort proof retires because ambiguous delivery now retains
+the reservation. `TestBillingPagesFailureRetainsReservationAndProviderBinding`
+covers that replacement. `TestStoreRetiresTokenMeteredBilling` also checks that
+the raw billing mutation methods are absent. The unrelated deletion HTTP
+fixture seeds a pending checkout directly. No native cell is promoted by this
+API retirement.
+
+`billing_native_test.go` verifies `New(...).Handler()` with real sessions and
+CSRF for checkout, card setup, pay-now and owner budgets. Signed setup, prepaid,
+decline and recovery events settle through the production verifier and store.
+Repeated page requests reuse their provider delivery and repeated callbacks have
+one ledger effect. An ambiguous delivery retains its reservation. Authority
+removed during provider delivery prevents completion. Only external provider
+transports are faked.
+
+`billing_pages_test.go` generates stale authority and altered financial facts
+against the real store, checks concurrent reservation replay, preserves payment
+mode isolation, rolls provider binding back with failed page persistence, and
+checks account removal followed by tenant purge. These are ordinary package
+tests. No native Stripe or PostgreSQL cell is promoted.
+`TestBillingPaymentModeRefusesInvalidConfigurationProperty` checks that generated
+invalid modes leave operator configuration unchanged. Production constructor
+proofs use the same operator mode setter as controller startup.

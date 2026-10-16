@@ -269,6 +269,36 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		c.Binding.Generation = unit.SourceGeneration
 		c.Binding.Expansion = &capability.LeaseRef{Kind: spec.Unit, ID: spec.UnitID, Generation: row.generation, Holder: row.holder}
 	}
+	if launcher {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return capability.Capability{}, err
+		}
+		standing, err := trustStandingTx(ctx, tx, Team(row.team), tx.now())
+		if err != nil {
+			return capability.Capability{}, err
+		}
+		if standing.MaxJobDuration > 0 {
+			began := tx.now()
+			if c.Unit == capability.UnitNode {
+				var awarded sql.NullInt64
+				if err := tx.QueryRowContext(ctx, `SELECT MIN(awarded_at) FROM billing_awards WHERE team=? AND run_id=? AND node_id=? AND unit_kind=? AND executor_class='cloud'`, row.team, row.run, row.node, c.Unit).Scan(&awarded); err != nil {
+					return capability.Capability{}, err
+				}
+				if awarded.Valid {
+					began = time.Unix(0, awarded.Int64)
+				}
+			}
+			deadline := began.Add(standing.MaxJobDuration)
+			if !deadline.After(tx.now()) {
+				return capability.Capability{}, authorityError(apierr.BadRequest, "job reached "+standing.Tier+" standing maximum duration")
+			}
+
+			if c.ExpiresAt == nil || deadline.Before(*c.ExpiresAt) {
+				c.Binding.Deadline = &deadline
+				c.ExpiresAt = &deadline
+			}
+		}
+	}
 	c.Data = awardDataScope(row, c)
 	if spec.Delivery == capability.DeliveryBootstrap {
 		c.Grants = slices.Clone(capability.BootstrapGrants)

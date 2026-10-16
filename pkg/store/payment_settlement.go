@@ -12,6 +12,24 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+// SetPaymentMode configures the provider mode used for new reservations and settlement.
+func (o *Operator) SetPaymentMode(ctx context.Context, mode capability.PaymentMode) error {
+	if mode != capability.PaymentTest && mode != capability.PaymentLive {
+		return ErrInvalidInput
+	}
+	return o.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return err
+		}
+		data, err := json.Marshal(mode)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES ('payment_mode',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, data)
+		return err
+	})
+}
+
 // PaymentSettlement reports committed credit without accepting caller-selected credits.
 type PaymentSettlement struct {
 	Team        Team

@@ -34,7 +34,6 @@ type AgentHeadroom struct {
 type AuthorityRevoker interface {
 	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
 }
-const BalanceCapCode = "balance_cap"
 type BillingWriter interface {
 	Team() store.Team
 	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
@@ -385,7 +384,6 @@ func (router *PolicyRouter) Registrations() []string
 func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (router *PolicyRouter) Validate() error
 func PullRequestForTrigger(env map[string]string) *sparkwing.PullRequest
-const PurchaseLimitCode = "purchase_limit"
 type QueuePriorityWriter interface {
 	Team() store.Team
 	SetAuthorizedGroupPriority(context.Context, capability.Authorized, string, controllerwire.QueuePriorityWrite) (controllerwire.QueuePriorityResult, error)

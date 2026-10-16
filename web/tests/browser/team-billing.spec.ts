@@ -4,15 +4,11 @@ import { expect, test } from "./fixtures";
 const billing = {
   team: "acme",
   balance_micro: 123_000_000,
-  balance_cap_micro: 500_000_000_000,
   micro_per_credit: 100_000,
   credits_per_dollar: 1_000,
   min_billable_seconds: 60,
-  purchase_min_cents: 1_000,
-  purchase_max_cents: 50_000,
+  purchase_min_cents: 50,
   trusted: true,
-  purchase_limit_cents: 500_000,
-  purchased_30d_cents: 0,
   rate_table: [
     { cores: 2, micro_per_second: 9_000 },
     { cores: 4, micro_per_second: 18_000 },
@@ -34,11 +30,9 @@ const billing = {
   card_billed: false,
   can_add_card: false,
   limits: {
-    ceiling_cents: 50_000,
-    daily_cap_cents: 20_000,
+ standing:"New",cloud_vcpu:8,max_job_seconds:14400,
     budget_cents: 50_000,
     rung_cents: 10_000,
-    credit_limit_cents: 0,
     spent_30d_cents: 1_200,
     spent_today_cents: 300,
     headroom_cents: 12,
@@ -140,25 +134,14 @@ test("an owner sees prices from the controller and starts a checkout", async ({
       exact: true,
     }),
   ).toBeVisible();
-  await expect(
-    page.getByText(
-      "This team can buy $5,000 every 30 days; $5,000.00 remains.",
-    ),
-  ).toBeVisible();
-
   const amount = page.getByLabel("Amount in US dollars");
-  const buy = page.getByRole("button", { name: "Buy credits" });
-  await expect(
-    page.getByText("Minimum purchase $10, up to $500 at a time."),
-  ).toBeVisible();
-  await amount.fill("9.99");
-  await expect(page.getByText("Minimum purchase $10.")).toBeVisible();
+  const buy = page.getByRole("button", { name: "Add funds" });
+  await expect(page.getByText("Minimum purchase $0.50. Usage draws prepaid funds before card billing resumes.")).toBeVisible();
+  await amount.fill("0.49");
+  await expect(page.getByText("Minimum purchase $0.50.",{exact:true})).toBeVisible();
   await expect(buy).toBeDisabled();
-  await amount.fill("501");
-  await expect(
-    page.getByText("Enter an amount from $10 to $500."),
-  ).toBeVisible();
-  await expect(buy).toBeDisabled();
+  await amount.fill("6000");
+  await expect(buy).toBeEnabled();
 
   await amount.fill("25");
   await expect(page.getByText("Buys 25,000 credits.")).toBeVisible();
@@ -169,26 +152,6 @@ test("an owner sees prices from the controller and starts a checkout", async ({
   ]);
 });
 
-test("a refused checkout states the cap and the balance", async ({ page }) => {
-  await mockController(page, {
-    checkout: {
-      status: 409,
-      json: {
-        error: "over cap",
-        code: "balance_cap",
-        balance_micro: 499_500_000_000,
-        cap_micro: 500_000_000_000,
-        amount_micro: 1_000_000_000,
-      },
-    },
-  });
-  await page.goto("/team/billing");
-  await page.getByLabel("Amount in US dollars").fill("10");
-  await page.getByRole("button", { name: "Buy credits" }).click();
-  await expect(page.locator("p[role=alert]")).toContainText(
-    "capped at $5,000. The balance is $4,995.00 (4,995,000 credits)",
-  );
-});
 
 test("a reader cannot buy and a returning payment reloads the balance", async ({
   page,
@@ -208,7 +171,7 @@ test("a reader cannot buy and a returning payment reloads the balance", async ({
   ).toBeVisible();
   await expect(page.getByLabel("Amount in US dollars")).toBeDisabled();
   await expect(
-    page.getByRole("button", { name: "Buy credits" }),
+    page.getByRole("button", { name: "Add funds" }),
   ).toBeDisabled();
   await expect(page.getByText("No runs have been charged yet.")).toBeVisible();
   await expect(page.getByText("No history yet.")).toBeVisible();
@@ -226,7 +189,7 @@ test("checkout stays hidden when the controller has no checkout service", async 
     page.getByText("Checkout was cancelled. Nothing was charged."),
   ).toBeVisible();
   await expect(page.getByText("1,230 credits", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Buy credits" })).toHaveCount(
+  await expect(page.getByRole("button", { name: "Add funds" })).toHaveCount(
     0,
   );
 });
@@ -267,7 +230,7 @@ test("a card-billed team with a failed charge pays it by hand and buys no credit
   await expect(
     page.getByRole("button", { name: "Pay $150 now" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Buy credits" })).toHaveCount(
+  await expect(page.getByRole("button", { name: "Add funds" })).toHaveCount(
     0,
   );
 });

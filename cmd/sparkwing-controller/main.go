@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
@@ -402,6 +403,11 @@ func run(args []string) error {
 		return fmt.Errorf("open state db: %w", serr)
 	}
 	defer func() { _ = st.Close() }()
+	if paymentVerifier != nil {
+		if err := st.AsOperator().SetPaymentMode(context.Background(), capability.PaymentMode(*paymentMode)); err != nil {
+			return fmt.Errorf("persist payment configuration: %w", err)
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

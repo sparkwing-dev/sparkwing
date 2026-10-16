@@ -18,24 +18,28 @@ import (
 
 func (t *Tenant) teamMutationTx(ctx context.Context, a capability.Authorized, write func(*storeTx, capability.Principal) error) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
-		if a.Target.RunID != "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
-			return bindingRefusal()
-		}
-		if err := t.lockTeamTx(ctx, tx); err != nil {
-			return err
-		}
-		if err := t.credentialAdminTx(ctx, tx, a); err != nil {
-			return err
-		}
-		p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
-		if err != nil {
-			return err
-		}
-		if err := write(tx, p); err != nil {
-			return err
-		}
-		return t.credentialAdminTx(ctx, tx, a)
+		return t.teamMutationInTx(ctx, tx, a, write)
 	})
+}
+
+func (t *Tenant) teamMutationInTx(ctx context.Context, tx *storeTx, a capability.Authorized, write func(*storeTx, capability.Principal) error) error {
+	if a.Target.RunID != "" || a.Target.NodeID != "" || a.ResultReplay || a.LogTailAttempt != 0 {
+		return bindingRefusal()
+	}
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return err
+	}
+	if err := t.credentialAdminTx(ctx, tx, a); err != nil {
+		return err
+	}
+	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	if err != nil {
+		return err
+	}
+	if err := write(tx, p); err != nil {
+		return err
+	}
+	return t.credentialAdminTx(ctx, tx, a)
 }
 
 // RenameAuthorizedTeam changes the display name under current team administration.

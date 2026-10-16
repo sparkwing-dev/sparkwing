@@ -33,9 +33,10 @@ func ParseSignUpMode(raw string) (SignUpMode, error) {
 // Why a new account landed on the waitlist. Each is a fixed word, so a metric
 // label or an operator's filter can branch on it.
 const (
-	WaitlistReasonDeployment = "deployment"
-	WaitlistReasonOperator   = "operator"
-	WaitlistReasonFreeTier   = "free_tier_closed"
+	WaitlistReasonDeployment     = "deployment"
+	WaitlistReasonLaunchCapacity = "launch_capacity"
+	WaitlistReasonOperator       = "operator"
+	WaitlistReasonFreeTier       = "free_tier_closed"
 	// WaitlistReasonFreeTierUnreadable is a free-tier report that failed, which
 	// the gate treats as closed.
 	WaitlistReasonFreeTierUnreadable = "free_tier_unreadable"
@@ -47,7 +48,7 @@ const (
 // WaitlistReasons lists every reason a new account can be waitlisted for.
 func WaitlistReasons() []string {
 	return []string{
-		WaitlistReasonDeployment, WaitlistReasonOperator, WaitlistReasonFreeTier,
+		WaitlistReasonDeployment, WaitlistReasonLaunchCapacity, WaitlistReasonOperator, WaitlistReasonFreeTier,
 		WaitlistReasonFreeTierUnreadable, WaitlistReasonHourly, WaitlistReasonDaily, WaitlistReasonGitHubAge,
 	}
 }
@@ -121,6 +122,7 @@ type SignUpConditions struct {
 // SignUpCounts are the accounts created over the two windows the gate reads,
 // and the accounts waiting on the list now.
 type SignUpCounts struct {
+	Admitted   int
 	LastHour   int
 	LastDay    int
 	Waitlisted int
@@ -254,9 +256,10 @@ func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, 
 		SELECT
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
 			(SELECT COUNT(*) FROM accounts WHERE created_at > ?),
-			(SELECT COUNT(*) FROM accounts WHERE waitlisted_at <> 0)`,
+			(SELECT COUNT(*) FROM accounts WHERE waitlisted_at <> 0),
+ (SELECT COUNT(*) FROM accounts WHERE waitlisted_at = 0)`,
 		at-int64(time.Hour), at-int64(24*time.Hour)).
-		Scan(&c.LastHour, &c.LastDay, &c.Waitlisted)
+		Scan(&c.LastHour, &c.LastDay, &c.Waitlisted, &c.Admitted)
 	return c, err
 }
 
@@ -354,6 +357,13 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 		return signUpDecision{reason: WaitlistReasonFreeTier}, nil
 	case c.FreeTierUnreadable:
 		return signUpDecision{reason: WaitlistReasonFreeTierUnreadable}, nil
+	}
+	var admitted int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts WHERE waitlisted_at=0`).Scan(&admitted); err != nil {
+		return signUpDecision{}, err
+	}
+	if admitted >= LaunchAccountLimit {
+		return signUpDecision{reason: WaitlistReasonLaunchCapacity}, nil
 	}
 	tripped, err := tripVelocityTx(ctx, tx, g, now)
 	if err != nil {

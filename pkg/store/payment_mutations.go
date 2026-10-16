@@ -278,6 +278,9 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 	if err := requireOneRow(result, "card attempt settlement"); err != nil {
 		return false, nil, err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_rung_index=CASE WHEN billing_rung_index<? THEN billing_rung_index+1 ELSE billing_rung_index END WHERE name=?`, len(billingPolicy)-1, team); err != nil {
+		return false, nil, err
+	}
 	result, err = tx.ExecContext(ctx, `UPDATE card_charges SET state = ?, payment_intent = ?, closed_at = ?
      WHERE team = ? AND id = ? AND state = ?`, CardChargePaid, p.PaymentIntent, nowNS, team, p.ChargeID, CardChargeOpen)
 	if err != nil {
@@ -345,8 +348,11 @@ func failCardAttemptTx(ctx context.Context, tx *storeTx, attemptID, paymentInten
 	    next_attempt_at = ? WHERE id = ?`, declineCode, next, chargeID); err != nil {
 		return "", false, err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_rung_index=CASE WHEN billing_rung_index>0 THEN billing_rung_index-1 ELSE 0 END WHERE name=?`, name); err != nil {
+		return "", false, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)
-	    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (dispute_id) DO NOTHING`, "decline-"+chargeID, name, paymentIntent,
+	    VALUES (?, ?, ?, ?, ?, ?)`, "decline-"+attemptID, name, paymentIntent,
 		"card charge declined: "+declineCode, FreezeCauseDecline, nowNS); err != nil {
 		return "", false, err
 	}

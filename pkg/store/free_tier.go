@@ -105,7 +105,7 @@ func teamFundedTx(ctx context.Context, tx *storeTx, team Team) (bool, error) {
 	// safety: a card-billed team is funded by its card's credit, not only by
 	// what it prepaid; a spent limit pauses its work but not its tier.
 	st, err := spendStandingTx(ctx, tx, team, tx.now())
-	if err != nil || st.BalanceMicro+st.CreditLimitMicro <= 0 {
+	if err != nil || st.BalanceMicro <= 0 && !st.CardBilled() {
 		return false, err
 	}
 	// safety: a team held over a disputed payment may not keep what that

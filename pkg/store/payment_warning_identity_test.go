@@ -242,7 +242,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 				}
 				ids[tenant.team] = freeze.Disputes[0]
 				standing, err := tenant.SpendStanding(t.Context(), now)
-				if err != nil || standing.Billing.Trusted || standing.CreditLimitMicro != 0 {
+				if err != nil || standing.Billing.Trusted || standing.Billing.Tier != "Held" {
 					t.Fatalf("%s standing: %+v, %v", tenant.team, standing, err)
 				}
 				want := int64(-10000 * MicroCreditsPerCent)

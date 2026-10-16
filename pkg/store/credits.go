@@ -102,14 +102,8 @@ func (e *InsufficientCreditsError) Error() string {
 		return "credits frozen: this team's cloud usage is held while a payment dispute is open; contact support"
 	}
 	switch e.Limit {
-	case SpendLimitCeiling:
-		return "spend limit: this team reached its 30-day spend ceiling; new work waits until older spend leaves the window"
-	case SpendLimitDailyCap:
-		return "spend limit: this team reached its daily spend cap; new work waits until the next UTC day"
-	case SpendLimitCardCeiling:
-		return "spend limit: the card this team pays with reached its 30-day spend ceiling across its teams"
-	case SpendLimitCardDailyCap:
-		return "spend limit: the card this team pays with reached its daily spend cap across its teams"
+	case SpendLimitChargePending:
+		return "Cloud work waits while the pending card charge completes"
 	case SpendLimitBudget:
 		return "spend limit: this team reached the budget its owner set; an owner can raise it on the billing page"
 	}
@@ -332,11 +326,6 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 		if already-req.AmountMicro > reversed.AmountMicro {
 			return CreditGrantResult{}, fmt.Errorf("%w: %q paid %d micro-credits, %d are already reversed, not %d more",
 				ErrReversalExceedsPayment, req.Reverses, reversed.AmountMicro, already, -req.AmountMicro)
-		}
-	}
-	if req.Kind == CreditGrantFree {
-		if err := refuseAboveBalanceCapTx(ctx, tx, team, req.AmountMicro, now.UnixNano()); err != nil {
-			return CreditGrantResult{}, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `

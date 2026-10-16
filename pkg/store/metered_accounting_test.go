@@ -309,7 +309,6 @@ func TestStoreDataUnmeteredSettlementNeedsNoCalculator(t *testing.T) {
 				rewriteSchemaCount(t, s.db, "credit_charges", 0)
 				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
 				rewriteSchemaCount(t, s.db, "team_spend_days", 0)
-				rewriteSchemaCount(t, s.db, "card_spend_days", 0)
 			})
 		}
 	}

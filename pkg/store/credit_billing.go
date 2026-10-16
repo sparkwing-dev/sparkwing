@@ -2,72 +2,8 @@ package store
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"time"
 )
-
-const (
-	CreditPurchaseMinCents = 1_000
-	CreditPurchaseMaxCents = 50_000
-
-	// MaxTeamBalanceMicro is the most a team's balance may hold, five thousand dollars.
-	MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
-)
-
-// ErrCreditBalanceCap is returned when a checkout, or an operator's free grant, would lift a team's balance above [MaxTeamBalanceMicro].
-var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
-
-// CreditBalanceCapError refuses an amount that would take a team's balance past the cap and says what the team holds, what its open checkouts may still add, what it asked for, and the cap.
-type CreditBalanceCapError struct {
-	BalanceMicro int64
-	OpenMicro    int64
-	AmountMicro  int64
-	CapMicro     int64
-}
-
-func (e *CreditBalanceCapError) Error() string {
-	room := max(e.CapMicro-e.BalanceMicro-e.OpenMicro, 0)
-	held := fmt.Sprintf("this team holds $%s", microDollars(e.BalanceMicro))
-	if e.OpenMicro > 0 {
-		held += fmt.Sprintf(" and has $%s in open checkouts", microDollars(e.OpenMicro))
-	}
-	return fmt.Sprintf("a team holds at most $%s of credit; %s, so at most $%s more fits, not $%s",
-		microDollars(e.CapMicro), held, microDollars(room), microDollars(e.AmountMicro))
-}
-
-// Unwrap reports [ErrCreditBalanceCap].
-func (e *CreditBalanceCapError) Unwrap() error { return ErrCreditBalanceCap }
-
-func microDollars(micro int64) string {
-	cents := micro / MicroCreditsPerCent
-	sign := ""
-	if cents < 0 {
-		sign, cents = "-", -cents
-	}
-	return fmt.Sprintf("%s%d.%02d", sign, cents/100, cents%100)
-}
-
-// safety: the check runs under the ledger lock its caller holds, with the
-// balance and the checkouts still open, so two amounts racing for the last
-// room below the cap cannot both pass it and a free grant cannot fill the room
-// an open payment needs.
-func refuseAboveBalanceCapTx(ctx context.Context, tx *storeTx, team Team, amount, nowNS int64) error {
-	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil {
-		return err
-	}
-	open, err := openCheckoutMicroTx(ctx, tx, team, nowNS)
-	if err != nil {
-		return err
-	}
-	if balance+open+amount <= MaxTeamBalanceMicro {
-		return nil
-	}
-	return &CreditBalanceCapError{
-		BalanceMicro: balance, OpenMicro: open, AmountMicro: amount, CapMicro: MaxTeamBalanceMicro,
-	}
-}
 
 // RunCreditUsage is what one run cost a team in runner time: its nodes and its trigger step, reservations, usage and refunds netted together.
 type RunCreditUsage struct {

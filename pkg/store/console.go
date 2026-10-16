@@ -83,7 +83,7 @@ func (c *Console) ConsoleGrantCredit(ctx context.Context, a capability.Authorize
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
-		if req.Kind != CreditGrantFree || !strings.HasPrefix(req.Reference, "console:") || len(req.Reference) <= len("console:") || req.Reverses != "" || req.AmountMicro <= 0 || req.AmountMicro > MaxPurchaseLimitCents*MicroCreditsPerCent {
+		if req.Kind != CreditGrantFree || !strings.HasPrefix(req.Reference, "console:") || len(req.Reference) <= len("console:") || req.Reverses != "" || req.AmountMicro <= 0 || req.AmountMicro > MaxCreditGrantMicro {
 			return CreditGrantResult{}, ErrInvalidInput
 		}
 		req.Reason, err = consoleReason(req.Reason)

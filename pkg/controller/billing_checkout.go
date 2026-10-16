@@ -62,9 +62,12 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, page *capability
 		return missingEndpointPolicy()
 	}
 	var out struct {
-		URL       string `json:"url"`
-		ID        string `json:"id"`
-		ExpiresAt int64  `json:"expires_at"`
+		URL           string `json:"url"`
+		ID            string `json:"id"`
+		Customer      string `json:"customer"`
+		SetupIntent   string `json:"setup_intent"`
+		PaymentIntent string `json:"payment_intent"`
+		ExpiresAt     int64  `json:"expires_at"`
 	}
 	if err := c.post(ctx, path, body, &out); err != nil {
 		return err
@@ -72,10 +75,25 @@ func (c *billingCheckout) openReservedPage(ctx context.Context, page *capability
 	if !validBillingPageURL(out.URL) {
 		return fmt.Errorf("%w: non-https payment page", errCheckoutRefused)
 	}
-	if page.Kind == capability.BillingPageCredits && out.ID == "" {
+	if out.ID == "" {
 		return fmt.Errorf("%w: missing session id", errCheckoutRefused)
 	}
 	page.URL, page.ProviderID = out.URL, out.ID
+	if out.Customer != "" {
+		if page.Customer != "" && page.Customer != out.Customer {
+			return fmt.Errorf("%w: customer changed", errCheckoutRefused)
+		}
+		page.Customer = out.Customer
+	}
+	if page.Kind == capability.BillingPageCard {
+		page.IntentID = out.SetupIntent
+	}
+	if page.Kind == capability.BillingPageRecovery {
+		page.IntentID = out.PaymentIntent
+	}
+	if page.Kind != capability.BillingPageCredits && (page.Customer == "" || page.IntentID == "") {
+		return fmt.Errorf("%w: missing customer or intent identity", errCheckoutRefused)
+	}
 	if out.ExpiresAt > 0 {
 		expires := time.Unix(out.ExpiresAt, 0)
 		if page.ExpiresAt.IsZero() || expires.Before(page.ExpiresAt) {

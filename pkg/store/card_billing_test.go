@@ -37,17 +37,15 @@ func spentOn(t *testing.T, s *store.Store, team string, day time.Time, cents int
 	}
 }
 
-// A held team's card is not charged, and revoking trust bills what is owed
-// at once, under the rung.
 func TestHoldsAndRevocation(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
 	acme := teamHandle(t, s, "acme")
 	trustWithCard(t, acme, now)
-	spend(t, s, "acme", "ch_1", 2_000)
+	spend(t, s, "acme", "ch_1", 200)
 	if work, _, err := s.AsOperator().DueCardCharges(ctx, now); err != nil || len(work) != 0 {
-		t.Fatalf("a $20 debt while trusted = %+v, %v; want none", work, err)
+		t.Fatalf("a $2 debt while trusted = %+v, %v; want none", work, err)
 	}
 	if _, _, err := acme.SetBillingTrust(ctx, store.BillingTrustChange{
 		Trust: store.BillingTrustRevoked, Actor: "korey", Reason: "revoked",
@@ -63,9 +61,9 @@ func TestHoldsAndRevocation(t *testing.T) {
 	if _, err := acme.ReleaseOperatorHolds(ctx, "korey", "done", now); err != nil {
 		t.Fatal(err)
 	}
-	work, _, err := s.AsOperator().DueCardCharges(ctx, now)
-	if err != nil || len(work) != 1 || work[0].AmountCents != 2_000 {
-		t.Fatalf("revoked with debt = %+v, %v; want the $20 charged", work, err)
+	work, _, err := s.AsOperator().DueCardCharges(ctx, now.AddDate(0, 1, 0))
+	if err != nil || len(work) != 1 || work[0].AmountCents != 200 {
+		t.Fatalf("revoked with debt = %+v, %v; want the $2 charged", work, err)
 	}
 	if _, _, err := s.AsOperator().RequestTeamDeletion(ctx, "acme", now); !errors.Is(err, store.ErrTeamOwes) {
 		t.Fatalf("deleting a team with a charge open = %v, want ErrTeamOwes", err)
@@ -80,7 +78,7 @@ func TestMonthEndBillsASmallDebt(t *testing.T) {
 	start := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	acme := teamHandle(t, s, "acme")
 	trustWithCard(t, acme, start)
-	spend(t, s, "acme", "ch_1", 1_234)
+	spend(t, s, "acme", "ch_1", 123)
 	if work, _, err := s.AsOperator().DueCardCharges(ctx, start); err != nil || len(work) != 0 {
 		t.Fatalf("mid-month = %+v, %v", work, err)
 	}
@@ -88,8 +86,8 @@ func TestMonthEndBillsASmallDebt(t *testing.T) {
 		t.Fatalf("the last day of the month = %+v, %v", work, err)
 	}
 	work, _, err := s.AsOperator().DueCardCharges(ctx, time.Date(2026, 10, 1, 0, 1, 0, 0, time.UTC))
-	if err != nil || len(work) != 1 || work[0].AmountCents != 1_234 {
-		t.Fatalf("the first of the month = %+v, %v; want $12.34", work, err)
+	if err != nil || len(work) != 1 || work[0].AmountCents != 123 {
+		t.Fatalf("the first of the month = %+v, %v; want $1.23", work, err)
 	}
 }
 
@@ -117,7 +115,7 @@ func TestABudgetAlertsOnceWithoutACard(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	acme := teamHandle(t, s, "acme")
-	if err := acme.SetSpendBudget(ctx, 2_000); err != nil {
+	if err := acme.TestOnlySetSpendBudget(ctx, 2_000); err != nil {
 		t.Fatal(err)
 	}
 	spend(t, s, "acme", "ch_1", 1_700)
@@ -199,7 +197,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 		}, now); err != nil {
 			t.Fatal(err)
 		}
-		rec, err := acme.StartRecoveryAttempt(ctx, now)
+		rec, err := acme.TestOnlyStartRecoveryAttempt(ctx, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -281,7 +279,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, acme, rec := recovery(t, "pi_elsewhere")
 			if _, err := s.DB().Exec(fmt.Sprintf(
-				`INSERT INTO credit_charges (id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at, team)
+				`INSERT INTO credit_charges (id, run_id, node_id, capability_prefix, kind, seconds, amount_micro, charged_at, team)
 				 VALUES ('refund_1', 'run-x', 'build', 'pfx', '%s', -60, %d, %d, 'acme')`,
 				store.CreditChargeRefund, -tc.refundedCents*store.MicroCreditsPerCent, now.UnixNano())); err != nil {
 				t.Fatalf("seed a reservation refund: %v", err)
@@ -305,7 +303,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 			if n := count(t, s, `SELECT COUNT(*) FROM card_charges WHERE id = ? AND state = 'paid'`, rec.ChargeID); n != 1 {
 				t.Fatalf("charge not paid; a later pay-now would charge the cleared debt again")
 			}
-			if _, err := acme.StartRecoveryAttempt(ctx, now); !errors.Is(err, store.ErrNoPayableCharge) {
+			if _, err := acme.TestOnlyStartRecoveryAttempt(ctx, now); !errors.Is(err, store.ErrNoPayableCharge) {
 				t.Fatalf("pay-now after settlement = %v, want ErrNoPayableCharge", err)
 			}
 			for range 2 {
@@ -399,7 +397,7 @@ func TestBillingWritersShareOneLockOrder(t *testing.T) {
 	}
 	writers := []func(i int){
 		func(i int) {
-			_, err := acme.OpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
+			_, err := acme.TestOnlyOpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
 			note(err)
 		},
 		func(i int) {
@@ -493,7 +491,7 @@ func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	rec, err := acme.StartRecoveryAttempt(ctx, now)
+	rec, err := acme.TestOnlyStartRecoveryAttempt(ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}

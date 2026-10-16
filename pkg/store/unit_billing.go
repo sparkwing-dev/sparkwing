@@ -41,6 +41,11 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		if err != nil {
 			return err
 		}
+		if c.Billing.ExecutorClass == "cloud" {
+			if err := admitCloudTx(ctx, tx, Team(c.Team), price.Cores); err != nil {
+				return err
+			}
+		}
 		reservedSeconds = MinBillableSeconds
 	}
 	return recordBillingAwardTx(ctx, tx, c, price, reservedSeconds)
@@ -63,23 +68,37 @@ func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources ExecutorReso
 	return table.ClassForResource(resources)
 }
 
-func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, resources ExecutorResource) error {
+func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, resources ExecutorResource, cloud bool) (bool, error) {
 	price, err := unitBillingPriceTx(ctx, tx, resources)
 	if err != nil {
-		return err
+		return false, err
+	}
+	if cloud {
+		err = checkCloudCapacityTx(ctx, tx, team, price.Cores)
+		var refused *apierr.Error
+		if errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) || errors.Is(err, ErrInsufficientCredits) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
 	}
 	amount, err := billingProduct(MinBillableSeconds, price.MicroPerSecond)
 	if err != nil {
-		return err
+		return false, err
 	}
 	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := refuseFrozenTeamTx(ctx, tx, team, balance, amount, unit.RunID, unit.NodeID); err != nil {
-		return err
+	err = refuseFrozenTeamTx(ctx, tx, team, balance, amount, unit.RunID, unit.NodeID)
+	if err == nil {
+		err = refuseAboveHeadroomTx(ctx, tx, team, amount, tx.now(), unit.RunID, unit.NodeID)
 	}
-	return refuseAboveHeadroomTx(ctx, tx, team, amount, tx.now(), unit.RunID, unit.NodeID)
+	if errors.Is(err, ErrInsufficientCredits) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func unitBillingAwardTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, generation int64) (*billingAward, error) {
@@ -162,6 +181,16 @@ func applyBillingCancellationTx(ctx context.Context, tx *storeTx, team Team, uni
 	a, err := unitBillingAwardTx(ctx, tx, team, unit, generation)
 	if err != nil || a == nil || !a.provenance.Metered {
 		return err
+	}
+	if a.provenance.ExecutorClass == "cloud" {
+		st, err := spendStandingTx(ctx, tx, team, tx.now())
+		if err != nil {
+			return err
+		}
+		_, limit := st.Headroom()
+		if limit == SpendLimitChargePending || limit == SpendLimitChargeFailed {
+			return nil
+		}
 	}
 	exhausted, err := teamCreditExhaustedAtTx(ctx, tx, team)
 	if err != nil {

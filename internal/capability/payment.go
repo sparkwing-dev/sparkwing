@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type PaymentConfig struct {
 	Mode              PaymentMode
 	APIKeyFile        string
 	WebhookSecretFile string
+	HTTPTransport     http.RoundTripper
 }
 
 // PaymentEventKind identifies a verified provider outcome.
@@ -141,7 +143,11 @@ func NewPaymentAuthenticator(config PaymentConfig) (PaymentAuthenticator, error)
 	if !strings.HasPrefix(secret, "whsec_") || len(secret) == len("whsec_") {
 		return nil, errors.New("invalid payment webhook secret")
 	}
-	return &paymentAuthenticator{mode: config.Mode, secret: []byte(secret), now: time.Now, provider: newPaymentProvider(key)}, nil
+	provider := newPaymentProvider(key)
+	if config.HTTPTransport != nil {
+		provider.client.Transport = config.HTTPTransport
+	}
+	return &paymentAuthenticator{mode: config.Mode, secret: []byte(secret), now: time.Now, provider: provider}, nil
 }
 
 func readPaymentSecret(path string) (string, error) {
