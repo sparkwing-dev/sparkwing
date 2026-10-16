@@ -2,9 +2,7 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -27,15 +25,11 @@ type logSearchCursor struct {
 func newLogSearchCursor(team string, q controllerwire.LogSearchQuery) (logSearchCursor, error) {
 	raw := q.Runs.Cursor
 	q.Runs.Cursor = ""
-	selection, err := json.Marshal(struct {
-		Team  string
-		Query controllerwire.LogSearchQuery
-	}{team, q})
+	scope, err := selectionFingerprint(team, q)
 	if err != nil {
 		return logSearchCursor{}, err
 	}
-	digest := sha256.Sum256(selection)
-	cursor := logSearchCursor{Scope: hex.EncodeToString(digest[:]), Snapshot: math.MaxInt64, Through: math.MaxInt64}
+	cursor := logSearchCursor{Scope: scope, Snapshot: math.MaxInt64, Through: math.MaxInt64}
 	if raw != "" {
 		body, err := base64.RawURLEncoding.DecodeString(raw)
 		var decoded logSearchCursor

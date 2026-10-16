@@ -57,6 +57,11 @@ contract also apply to `api.sock`. A transport retries only operations the
 registered route marks safe to replay. A lost one-time award is never replayed
 automatically.
 
+Run listing uses the same public details as single-run status. Filters apply
+before the page limit. Continuation cursors retain the filters and the initial
+run-number boundary, so runs created between pages do not displace older runs.
+Each page checks current authorization and reads signed engine policy notices.
+
 Run and job log reads return tagged JSON pages to the CLI. Each output record
 names its persisted attempt or owner unit. Resume cursors retain the selection
 and progress for each subject. An idle follow poll returns no repeated output.

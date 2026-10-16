@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +13,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func selectionFingerprint(team string, query any) (string, error) {
+	body, err := json.Marshal(struct {
+		Team  string
+		Query any
+	}{team, query})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(body)
+	return hex.EncodeToString(digest[:]), nil
+}
 
 func parseRunSelection(r *http.Request) (controllerwire.RunQuery, error) {
 	v := r.URL.Query()

@@ -21,6 +21,16 @@ import (
 
 func memberLogSearchReader(t *testing.T, st *store.Store, objects blob.ObjectBackend) (controllerwire.LogReader, string) {
 	t.Helper()
+	options, prefix, _ := memberObservationOptions(t, st, objects)
+	reader, err := client.NewLogReader(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reader, prefix
+}
+
+func memberObservationOptions(t *testing.T, st *store.Store, objects blob.ObjectBackend) (client.EngineOptions, string, *Server) {
+	t.Helper()
 	engineSQL(t, st, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
 	engineSQL(t, st, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
 	session := "private-search-session"
@@ -36,11 +46,7 @@ func memberLogSearchReader(t *testing.T, st *store.Store, objects blob.ObjectBac
 	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &issued) != nil {
 		t.Fatalf("member authority: %d %s", w.Code, w.Body)
 	}
-	reader, err := client.NewLogReader(client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}}, Bearer: func(context.Context) (string, error) { return issued.Capability, nil }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return reader, issued.Prefix
+	return client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: localHostRoundTripper{server.Handler()}}, Bearer: func(context.Context) (string, error) { return issued.Capability, nil }}, issued.Prefix, server
 }
 
 func TestPersistedLogSearchPagesAdvanceThroughCandidateRuns(t *testing.T) {
