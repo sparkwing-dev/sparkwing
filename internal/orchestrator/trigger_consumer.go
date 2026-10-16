@@ -276,6 +276,11 @@ func consumeLocalTriggers(
 	} else if n > 0 {
 		logger.Info("reclaimed ref worktrees whose runs had ended", "count", n)
 	}
+	if n, err := sweepNamedRefWorktrees(Paths{Root: rt.home}, logger); err != nil {
+		logger.Warn("could not sweep named worktrees whose repositories are gone", "error", err)
+	} else if n > 0 {
+		logger.Info("reclaimed named worktrees whose repositories are gone", "count", n)
+	}
 
 	ticker := time.NewTicker(consumerPollInterval)
 	defer ticker.Stop()
@@ -415,8 +420,49 @@ func runClaimedTrigger(
 		return
 	}
 	env = submissionExecutionEnvironment(env, home)
-	err := dispatchLocalTriggerFn(dispatchCtx, trig, "", "", cache, logger, env)
+	release, err := holdNamedRefWorktreeFor(dispatchCtx, p, trig, logger)
+	if err != nil {
+		settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
+		return
+	}
+	defer release()
+	err = dispatchLocalTriggerFn(dispatchCtx, trig, "", "", cache, logger, env)
 	settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
+}
+
+// safety: the hold spans the whole dispatch, so no other run switches the tree
+// while this one reads it.
+func holdNamedRefWorktreeFor(
+	ctx context.Context, p Paths, trig *store.Trigger, logger *slog.Logger,
+) (func(), error) {
+	repo := strings.TrimSpace(trig.TriggerEnv[NamedRefWorktreeRepoKey])
+	if repo == "" {
+		return func() {}, nil
+	}
+	w := NamedRefWorktree{Dir: strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey]), Repo: repo}
+	commit := Commit(strings.TrimSpace(trig.TriggerEnv[RefWorktreeRevKey]))
+	if !withinNamedRefWorktrees(p, w.Dir) {
+		return nil, fmt.Errorf("trigger %s names worktree %s, which is not a named worktree under %s; resubmit",
+			trig.ID, w.Dir, p.NamedRefWorktreesDir())
+	}
+	if !gitObjectRE.MatchString(string(commit)) {
+		return nil, fmt.Errorf("trigger %s names no commit for worktree %s; resubmit", trig.ID, w.Dir)
+	}
+	logger = logger.With("trigger_id", trig.ID)
+	hold, err := waitNamedRefWorktree(ctx, w, logger)
+	if err != nil {
+		return nil, err
+	}
+	release := func() {
+		if rerr := ReleaseRefWorktree(hold); rerr != nil {
+			logger.Warn("release named worktree", "dir", w.Dir, "error", rerr)
+		}
+	}
+	if err := checkoutNamedRefWorktree(ctx, w, commit, logger); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
 }
 
 func submittedWorktreeDir(trig *store.Trigger) string {

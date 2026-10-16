@@ -229,6 +229,20 @@ any tree an earlier one died holding as it starts. `--sw-priority` stays
 unresolved on the trigger, so `front` and `back` are measured against the
 queue the run actually joins when the consumer launches it.
 
+`--sw-ref-worktree NAME` keeps that tree instead. The run executes in a
+worktree of that name under the sparkwing home, one per repository, which
+the consumer switches to each run's commit in place: tracked files,
+`.sparkwing`, `go.work` and `go.work.sum` match the commit, while other
+files Git ignores (build output, dependency caches) and unchanged files'
+modification times carry over, so path-keyed caches stay warm. The pipeline is still gated at
+launch, in a tree of the run's own at the commit, or at the pipeline ref
+with `--sw-pipeline-ref`. The consumer holds the named worktree from before
+planning until the run's last node ends, and a run naming a held worktree
+waits for it while keeping its claim; cancelling a waiting run ends the
+wait. A named worktree is removed only once its repository is gone. With
+`--sw-pipeline-ref`, the pipeline compiles from that ref and executes in
+the named worktree.
+
 Detaching is local-only. To hand a run to a cluster, use
 `sparkwing pipeline trigger --profile <p> --detach`.
 

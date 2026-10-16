@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+- **cli:** `sparkwing run --sw-detached --sw-ref REF --sw-ref-worktree NAME` runs the commit in a named worktree reused across runs
+  The consumer switches the worktree to each run's commit in place, so files Git ignores outside `.sparkwing`, `go.work` and `go.work.sum` and unchanged files' modification times carry over and caches keyed on paths stay warm. A run holds the worktree until it ends, and the next run naming it waits. It combines with `--sw-pipeline-ref`. A consumer removes a named worktree once its repository is gone. See [Local execution](docs/local-execution.md).
+
+### Fixed
+- **cache:** Two worktrees of one commit share a pipeline binary cache key; a linked worktree's `.git` file, which names the worktree's own path, no longer enters the key
+- **orchestrator:** Removing a `--sw-ref` worktree made from a bare clone also removes its git registration, so a later worktree can take the path
+
 ## [v0.66.5] - 2026-10-03
 - **Runner images:** include `lsof` so pipelines can inspect local processes and listeners.
 

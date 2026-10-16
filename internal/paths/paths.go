@@ -98,6 +98,11 @@ func (p Paths) RefWorktreeDir(runID string) string {
 	return filepath.Join(p.RefWorktreesDir(), runID)
 }
 
+// NamedRefWorktreesDir holds the worktrees `run --sw-detached --sw-ref-worktree`
+// reuses across runs, one directory per repository. It sits outside
+// [Paths.RefWorktreesDir], whose sweep removes every worktree without a live run.
+func (p Paths) NamedRefWorktreesDir() string { return filepath.Join(p.Root, "named-ref-worktrees") }
+
 // StandaloneDir holds the runs stores written by pipeline binaries that could
 // not reach the admission daemon. The read verbs merge these with
 // [Paths.StateDB]; [Paths.StandaloneStores] enumerates them.
