@@ -24,6 +24,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -652,7 +653,7 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	// safety: lock order across this store is executor eligibility first, then
 	// a guard or ledger advisory lock; taking them the other way around here
 	// deadlocks against a claim that holds the executor lock.
-	if err := enforceRunsPerHourTx(ctx, tx, team, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
+	if err := enforceRunsPerHourTx(ctx, tx, team, r.ID, capability.Subject{ID: creatingPrincipal(ctx)}, time.Now()); err != nil {
 		return err
 	}
 	// safety: the team is in the conflict guard, not the conflict target,

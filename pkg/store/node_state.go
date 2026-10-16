@@ -891,6 +891,7 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 		return errors.New("approval already resolved")
 	}
 	resolution := ""
+	approver := change.Actor.Owner.Holder
 	if change.Cause == CauseApprovalTimeout {
 		if timeout <= 0 || time.Unix(0, requested).Add(time.Duration(timeout)*time.Millisecond).After(now) {
 			return errors.New("approval deadline not reached")
@@ -915,6 +916,7 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 		if change.Extra.Approval == nil {
 			return errors.New("approval decision missing")
 		}
+		approver = principal.Capability.Subject.ID
 		resolution = change.Extra.Approval.Decision
 		if (resolution != "approved" && resolution != "denied") || (resolution == "approved") != (change.To == NodeSuccess) {
 			return errors.New("approval decision mismatch")
@@ -923,10 +925,6 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 	comment := ""
 	if change.Extra.Approval != nil {
 		comment = change.Extra.Approval.Comment
-	}
-	approver := change.Actor.Authority.ID
-	if change.Actor.Kind == ActorReaper {
-		approver = change.Actor.Owner.Holder
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE approvals SET resolved_at=?,resolution=?,approver=?,comment=? WHERE team=? AND run_id=? AND node_id=? AND resolved_at IS NULL`, now.UnixNano(), resolution, approver, comment, team, row.Ref.RunID, row.Ref.NodeID)
 	return err

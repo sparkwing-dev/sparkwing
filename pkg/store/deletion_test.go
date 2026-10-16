@@ -37,11 +37,7 @@ func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID st
 	if _, err := tn.InviteForTest(t, ctx, ownerID, "guest-"+runID+"@example.com", store.RoleReader, now); err != nil {
 		t.Fatalf("seed invitation: %v", err)
 	}
-	_, tok, err := tn.CreateTokenWith(ctx, "agent:"+runID, store.TokenKindTeam, []string{"nodes.claim"}, store.RunnerTokenLifetime, now, store.TokenOptions{CreatedBy: ownerID})
-	if err != nil {
-		t.Fatalf("seed token: %v", err)
-	}
-	return tok.Prefix
+	return tn.MemberCapabilityForTest(t, ownerID, now).Capability.Prefix
 }
 
 func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
@@ -73,7 +69,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	// safety: billing rows are tenant-owned, so an expired checkout and a
 	// released dispute hold go with the team rather than outliving it; open
 	// ones refuse the deletion, see TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds.
-	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now.Add(-2*time.Hour), time.Hour); err != nil {
+	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.ForTeam(t, st, "acme").TestOnlyHoldForDispute(ctx, "dp_acme", "", "dispute opened", now); err != nil {
@@ -108,20 +104,20 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if n := countWhere(t, st, "memberships", "team = 'acme'"); n != 0 {
 		t.Fatalf("%d memberships left in a team being deleted", n)
 	}
-	if n := countWhere(t, st, "tokens", "team = 'acme' AND revoked_at IS NULL"); n != 0 {
+	if n := countWhere(t, st, "capabilities", "team = 'acme' AND revoked_at IS NULL"); n != 0 {
 		t.Fatalf("%d live tokens left in a team being deleted", n)
 	}
 	if n := countWhere(t, st, "invitations", "team = 'acme' AND withdrawn_at IS NULL AND accepted_at IS NULL"); n != 0 {
 		t.Fatalf("%d open invitations left in a team being deleted", n)
 	}
-	if n := countWhere(t, st, "runs", "team = 'acme' AND status = 'cancelled'"); n != 1 {
-		t.Fatalf("queued run not cancelled: %d cancelled", n)
+	if n := countWhere(t, st, "runs", "team = 'acme' AND cancel_requested_at IS NOT NULL"); n != 1 {
+		t.Fatalf("queued run has no cancellation request: %d requested", n)
 	}
 	sess, err := st.LookupSession(t.Context(), memberSession)
 	if err != nil || sess.Team != member.PersonalTeam {
 		t.Fatalf("member session = %+v, %v; want moved to %s", sess, err, member.PersonalTeam)
 	}
-	if n := countWhere(t, st, "tokens", fmt.Sprintf("prefix = '%s' AND revoked_at IS NULL", keepToken)); n != 1 {
+	if n := countWhere(t, st, "capabilities", fmt.Sprintf("prefix = '%s' AND revoked_at IS NULL", keepToken)); n != 1 {
 		t.Fatal("deleting acme revoked another team's token")
 	}
 
@@ -141,7 +137,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if n := countWhere(t, st, "teams", "name = 'acme'"); n != 0 {
 		t.Fatal("the purge left the team registered")
 	}
-	for _, table := range []string{"runs", "secrets", "tokens", "memberships", "invitations"} {
+	for _, table := range []string{"runs", "secrets", "capabilities", "memberships", "invitations"} {
 		if n := countWhere(t, st, table, "team = 'keep'"); n == 0 {
 			t.Errorf("the purge removed keep's %s", table)
 		}
@@ -227,10 +223,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cliTok, err := shared.CreateTokenWith(ctx, "leaver@example.com", store.TokenKindTeam, []string{"runs.read"}, store.CLITokenLifetime, now, store.TokenOptions{CreatedBy: leaver.Account.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	cliTok := shared.MemberCapabilityForTest(t, leaver.Account.ID, now).Capability
 	runCtx := store.WithCreatingPrincipal(ctx, "leaver@example.com")
 	if err := shared.TestOnlySeedTriggerWithRun(runCtx,
 		store.Trigger{ID: "run-l", Pipeline: "build", CreatedAt: now, TriggerUser: "leaver@example.com"},
@@ -255,12 +248,11 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 		t.Fatal("the deleted account's session still authenticates")
 	}
 	for table, where := range map[string]string{
-		"identities":  fmt.Sprintf("account_id = '%s'", leaver.Account.ID),
-		"memberships": fmt.Sprintf("account_id = '%s'", leaver.Account.ID),
-		"invitations": "email = 'leaver@example.com'",
-		"runs":        "created_principal = 'leaver@example.com'",
-		"triggers":    "trigger_user = 'leaver@example.com'",
-		"tokens":      "principal = 'leaver@example.com'",
+		"identities":   fmt.Sprintf("account_id = '%s'", leaver.Account.ID),
+		"memberships":  fmt.Sprintf("account_id = '%s'", leaver.Account.ID),
+		"invitations":  "email = 'leaver@example.com'",
+		"runs":         "created_principal = 'leaver@example.com'",
+		"capabilities": "subject_kind = 'account' AND subject_id = '" + leaver.Account.ID + "' AND revoked_at IS NULL",
 	} {
 		if n := countWhere(t, st, table, where); n != 0 {
 			t.Errorf("%s still names the deleted account (%d rows where %s)", table, n, where)

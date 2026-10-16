@@ -262,6 +262,19 @@ CREATE TABLE sessions (
     CHECK(team IS NOT NULL OR (account_id <> '' AND capability_prefix = ''))
 );
 
+CREATE TABLE run_control_requests (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    subject_kind TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK(operation IN ('pause','approval')),
+    request_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    result_json BLOB NOT NULL,
+    PRIMARY KEY(team,run_id,subject_kind,subject_id,operation,request_key),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+);
+
 CREATE TABLE debug_pauses (
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,

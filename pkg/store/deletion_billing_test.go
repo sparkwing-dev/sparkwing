@@ -28,7 +28,7 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	}
 
 	acme := tenant(t, st, "acme")
-	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now, time.Hour); err != nil {
+	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := acme.DeleteTeamForTest(t, ctx, owner.Account.ID, now)
@@ -72,13 +72,13 @@ func TestACheckoutCannotOpenOnceTheTeamIsBeingDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := tenant(t, st, "acme")
-	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now.Add(-2*time.Hour), time.Hour); err != nil {
+	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatalf("a checkout before the deletion = %v", err)
 	}
 	if _, _, err := stale.DeleteTeamForTest(t, ctx, owner.Account.ID, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now, time.Hour); !errors.Is(err, store.ErrTeamBeingDeleted) {
+	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCent, now, time.Hour); !errors.Is(err, store.ErrTeamBeingDeleted) {
 		t.Fatalf("a checkout on a team being deleted = %v, want ErrTeamBeingDeleted", err)
 	}
 	if n := countWhere(t, st, "credit_checkouts", fmt.Sprintf("team = 'acme' AND opened_at >= %d", now.UnixNano())); n != 0 {

@@ -76,8 +76,8 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		}
 	}
 	if paid := got[store.BusinessEventCheckoutPaid]; len(paid) == 1 &&
-		(paid[0].Actor != "checkout" || paid[0].Attrs["reference"] != "pi_1") {
-		t.Errorf("paid event = %+v, want actor checkout and its payment", paid[0])
+		(paid[0].Actor != "payment_provider" || paid[0].Attrs["reference"] != "payment:test:fixture-row:pi_1") {
+		t.Errorf("paid event = %+v, want the verified provider and committed payment", paid[0])
 	}
 	if ev := got[store.BusinessEventTeamFrozen]; len(ev) == 1 && ev[0].Attrs["reason"] != nil {
 		t.Errorf("frozen event copies the free-form reason: %+v", ev[0])
@@ -101,7 +101,7 @@ func TestBusinessEventsFollowAccountAndTeamDeletion(t *testing.T) {
 	if n := countWhere(t, st, "business_events", "account = '"+leaver.Account.ID+"' OR actor = '"+leaver.Account.ID+"'"); n != 0 {
 		t.Fatalf("events still naming the deleted account = %d", n)
 	}
-	if n := countWhere(t, st, "business_events", "account = '"+owner.Account.ID+"' AND team = ''"); n != 1 {
+	if n := countWhere(t, st, "business_events", "account = '"+owner.Account.ID+"' AND team IS NULL"); n != 1 {
 		t.Fatalf("the remaining account's admission = %d, want 1", n)
 	}
 	deleteAndPurge(t, st, "acme", now)

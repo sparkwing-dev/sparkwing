@@ -552,6 +552,7 @@ func (s *Store) deleteAccountTx(ctx context.Context, tx *storeTx, accountID stri
 		args []any
 	}{
 		{`UPDATE capabilities SET created_by='' WHERE created_by=?`, []any{accountID}},
+		{`DELETE FROM run_control_requests WHERE subject_kind='account' AND subject_id=?`, []any{accountID}},
 		{`DELETE FROM sessions WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identities WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identity_unlinks WHERE account_id = ?`, []any{accountID}},

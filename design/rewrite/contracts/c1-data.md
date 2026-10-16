@@ -2952,3 +2952,37 @@ SetGitHubAppExtraRepos and SetGitHubAppExtraRepoIDs are removed. Trusted provide
 uninstall still uses Operator and its existing transaction helper. Automatic
 schedule/App run admission still needs the committing origin contract described
 in the earlier intake handoff.
+
+
+## Run-control transactions and sealed intake rate guards
+
+Tenant implements C2's RunControlWriter. Debug-pause creation and approval
+resolution recheck the canonical route's current member/local authority in the
+committing transaction. Targets stay in one tenant and run. Pause creation
+requires a live job and derives its timestamp and default expiry from the store
+clock. Approval resolution uses the existing terminal transition, persists the
+account subject as approver and never accepts a public timeout decision.
+
+The C1-local `run_control_requests` table stores private replay receipts keyed by
+`(team,run_id,subject_kind,subject_id,operation,request_key)`. Its request hash
+covers the exact submitted body, including the selected job. A repeated key
+returns the committed result after current authority checks. A changed body
+conflicts even when masking would make both public strings equal. The receipt,
+state, public events and masked approval result commit together. The table
+references its run with cascading deletion. Tenant purge removes it too. Account
+deletion drops that account's private receipts after ending its authority, while
+other subjects' replay records remain.
+
+Public control text uses the shared secrets masker over the store-selected
+masked pipeline/shared secrets and classified sealed arguments. Before describe,
+unknown argument classification masks every requested value. The existing
+PlanSecretOpener supplies decryption. A decryption or final authority failure
+rolls back the receipt and all state. This adds no runtime-mask propagation.
+
+AdmitRun applies the configured hourly guards after idempotent and App replay
+selection, before inserting either the run or its owner. The single per-principal
+guard uses the authenticated subject kind and ID within its tenant, including
+unmetered members. An account and machine sharing an ID have separate budgets. The global guard covers every team. Both read committed run admissions
+under the shared store serialization, never summed usage counters. Refusals preserve ErrComputeLimit and expose canonical rate_limited with the
+existing five-second retry delay. Replay spends no second slot. Raw pending-run attribution and token metering are not intake
+inputs. The unused OldestWaitingReadyNodeForPrincipal diagnostic is removed.

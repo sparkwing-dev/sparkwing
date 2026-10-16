@@ -2589,3 +2589,29 @@ queue, capacity cost and cancellation tests continue against current columns.
 The new generated properties check bucket-measurement successor fencing and
 execution-activity tenant isolation against the store clock. Existing random
 capacity tests now generate retained policies and seed live owner/job rows.
+
+
+## Sealed intake rate and deletion ports
+
+The eleven legacy run-rate/raw-attribution/oldest-ready tests in
+compute_limits_test.go are replaced by TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain,
+TestSealedIntakeRateCountsOnlyTheAuthenticatedTeam and
+TestConcurrentSealedIntakeNeverPassesTheHourlyGuard. They exercise AdmitRun,
+check every concurrent error, count both run and owner rows, reject a spent
+principal and permit replay without charging another slot. TestSealedIntakeRateKeepsPrincipalKindsSeparateProperty generates account/machine
+ID collisions against the committed actor kind. Token-metered-only intake, pending-row re-attribution and the uncalled oldest-ready diagnostic are
+retired. Matcher selection and claim eligibility retain their separate tests.
+
+Deletion fixtures provision real member roots through current account sessions.
+They verify capability revocation, cooperative run cancellation, foreign-tenant
+preservation, account-subject relabeling and whole-cent checkout guards. The
+removed storage-watermark test now checks both replica storage-usage rows and
+preserves another tenant's rows. The recheck test first proves the foreign key
+refuses a post-purge tenant write. Business-event expectations use the verified
+payment-provider actor and nullable deployment team.
+
+Run-control property tests cover live membership, exact tenant/run/job selectors,
+encoded secret masking, changed-body replay conflicts and rollback of state,
+events and receipts. TestRunControlHTTPUsesStoreTransactions drives the canonical
+controller routes through the concrete Tenant adapter with real member issuance.
+No acceptance registry or native-platform cell is added.

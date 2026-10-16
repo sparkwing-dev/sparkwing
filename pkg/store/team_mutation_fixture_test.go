@@ -84,3 +84,14 @@ func (t *Tenant) RemoveRunForTest(ctx context.Context, id string) error {
 		return credentialRowChanged(result, err)
 	})
 }
+
+// MemberCapabilityForTest provisions an account root through its live session.
+func (t *Tenant) MemberCapabilityForTest(test testing.TB, actor string, at time.Time) capability.Issued {
+	test.Helper()
+	a := t.mutationFixtureAuthority(test, actor, capability.RunsWrite, at)
+	issued, err := t.s.ProvisionCapability(test.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &a.Principal.Authority, Team: string(t.team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: actor}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite}})
+	if err != nil {
+		test.Fatal(err)
+	}
+	return issued
+}

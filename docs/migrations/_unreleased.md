@@ -2422,3 +2422,19 @@ GitHub commit reports select the tenant's canonical numeric repository key
 and exact SHA. Repository renames preserve the reports. A different repository
 with the old name inherits none. The unused child-invocation table is removed
 because sealed run intake already owns child lineage and request replay.
+
+
+## Sealed intake rate guards and run control
+
+`Tenant.AdmitRun` applies the configured hourly run guards before creating a run
+and its owner. `max_runs_per_hour` is the single per-principal guard and includes
+unmetered member submissions within their tenant. Repeated sealed intake requests
+return their first admission without spending another slot. The unused
+`Tenant.OldestWaitingReadyNodeForPrincipal` lookup is removed.
+
+The canonical debug-pause and approval routes now use Tenant's run-control
+transactions. Both require an Idempotency-Key and current member authority.
+Reusing a key with a changed body returns conflict. Public text masks classified
+arguments and masked team secrets before state, events and the private replay
+receipt commit together. Approval history records the authenticated account
+subject. Pauses and decisions cannot be created for terminal or cancelling work.
