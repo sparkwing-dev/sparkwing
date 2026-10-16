@@ -312,6 +312,10 @@ An awarded host retains its selected controller transport for private execution
 state, source credentials and storage. These controller API calls use the award's capability.
 The runner's reusable claim credential stays with the claim loop.
 
+The controller logs each HTTP server failure once with its request ID and masked
+cause. Match the response’s `X-Request-Id` to the controller log to investigate a
+generic client error.
+
 ### The laptop boundary
 
 The local controller authenticates its OS account. Unix sockets require private

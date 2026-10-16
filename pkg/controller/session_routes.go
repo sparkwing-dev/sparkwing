@@ -110,7 +110,7 @@ func (s *Server) validateSessionFlow(session *store.Session) error {
 	}
 	if s.sessionExpired(session.CreatedAt, time.Now().UTC()) {
 		if err := s.store.DeleteSession(session.ID); err != nil {
-			return &apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}
+			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 		}
 		return &apierr.Error{Code: apierr.Unauthenticated, Message: errSessionLifetimeExceeded.Error()}
 	}
@@ -151,7 +151,7 @@ func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) erro
 		return missingEndpointPolicy()
 	}
 	if err := s.store.DeleteSession(proof.session.ID); err != nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	clearSessionCookies(w, s.cookiesSecure())
 	return nil
@@ -163,7 +163,7 @@ func sessionUnavailable() error {
 
 func sessionFlowError(err error) error {
 	if errors.Is(err, store.ErrSessionBackend) {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	return sessionUnavailable()
 }

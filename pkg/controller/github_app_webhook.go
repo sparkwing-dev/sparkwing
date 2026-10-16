@@ -966,7 +966,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 	// installation_repositories delivery has reached this replica for yet.
 	gh, covered, err := s.githubApp.liveCoveringInstallation(ctx, repo)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
+		writeError(w, http.StatusBadGateway, fmt.Errorf("GitHub installation lookup: %w", err))
 		return
 	}
 	if !covered || gh.ID != env.Installation.ID || gh.SuspendedAt != nil {

@@ -27,7 +27,7 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 		if errors.As(err, &failure) {
 			return capability.AuthenticationSnapshot{}, err
 		}
-		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Unavailable, Message: "authentication service unavailable"}
+		return capability.AuthenticationSnapshot{}, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "authentication service unavailable"}, err)
 	}
 	for _, authority := range snapshot.Authorities {
 		p := authority.Principal
@@ -64,6 +64,7 @@ func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation
 	if capability.DeploymentAuthority(authenticated.Principal) && !a.server.deploymentBearerEligible() && slices.ContainsFunc(route.Access, func(rule capability.AccessRule) bool { return rule.Credential == capability.CredentialDeployment }) {
 		return capability.Authenticated{}, sessionUnavailable()
 	}
+	a.server.masker.Register(presentation.Raw)
 	return authenticated, nil
 }
 
@@ -113,7 +114,7 @@ func (s *Server) checkSessionCSRF(r *http.Request, p capability.Principal) error
 	}
 	session, err := s.store.LookupSession(r.Context(), raw)
 	if errors.Is(err, store.ErrSessionBackend) {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}, err)
 	}
 	if err != nil || session.Team != store.Team(p.Capability.Team) || session.AccountID != p.Capability.Subject.ID {
 		return &apierr.Error{Code: apierr.Unauthenticated, Message: "session is unavailable"}

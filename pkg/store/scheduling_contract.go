@@ -381,9 +381,6 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 		projection.rows[row.Ref.NodeID] = row
 	}
 	for _, job := range plan.Jobs {
-		if len(job.Groups) != 0 {
-			return ScheduleSnapshot{}, fmt.Errorf("initial job %q has generated membership", job.ID)
-		}
 		if err := projection.add(job); err != nil {
 			return ScheduleSnapshot{}, err
 		}

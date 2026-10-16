@@ -73,7 +73,7 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 		if errors.As(err, &failure) {
 			return err
 		}
-		return &apierr.Error{Code: apierr.Unavailable, Message: "sign-in service unavailable"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "sign-in service unavailable"}, err)
 	}
 	notePolicyPrincipal(r.Context(), p)
 	*r = *r.WithContext(context.WithValue(r.Context(), loginProofKey{}, loginProof{raw: raw, session: session}))

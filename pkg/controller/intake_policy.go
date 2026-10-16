@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -86,7 +87,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	}
 	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: location.RemoteURL})
 	if err != nil || repository.Key != request.Request.Git.Repository.Key {
-		return facts, &apierr.Error{Code: apierr.Unavailable, Message: "verified source location is unavailable"}
+		return facts, errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "verified source location is unavailable"}, err)
 	}
 	facts.SourceLocation = &location
 	return facts, nil

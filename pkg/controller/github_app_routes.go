@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -68,7 +69,7 @@ func githubAppRequestError(status int, err error) error {
 	case http.StatusNotFound:
 		code = apierr.NotFound
 	case http.StatusBadGateway:
-		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository discovery is unavailable"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub repository discovery is unavailable"}, err)
 	}
 	return &apierr.Error{Code: code, Message: err.Error()}
 }

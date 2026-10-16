@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -36,6 +37,7 @@ type Server struct {
 	resolveQueuePriorityWriter func(context.Context, store.Team) (QueuePriorityWriter, error)
 	store                      *store.Store
 	logger                     *slog.Logger
+	masker                     *secrets.Masker
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
@@ -166,6 +168,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		store:              st,
 		operatorSettings:   storeOperatorSettings{Store: st, Operator: st.AsOperator()},
 		logger:             logger,
+		masker:             secrets.NewMasker(),
 		loginLimit:         newLoginLimiter(),
 		queueTimeout:       15 * time.Minute,
 		sessionMaxLifetime: DefaultSessionMaxLifetime,
@@ -294,7 +297,7 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	if s.store != nil {
 		var opener store.PlanSecretOpener
 		if c != nil {
-			opener = planSecretCipher{cipher: c}
+			opener = planSecretCipher{cipher: c, masker: s.masker}
 		}
 		s.store.SetPlanSecretOpener(opener)
 		bound, _ := c.(store.SessionKeyCipher)
@@ -348,7 +351,7 @@ func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(labels...), func(r *http.Request) string {
 			return ratelimit.ClientIP(r)
-		})))
+		}, s.masker)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.Metering() {
 			r = r.WithContext(store.WithoutCreditMetering(r.Context()))
@@ -720,6 +723,7 @@ func (s *Server) sampleCreditLedger(ctx context.Context) {
 
 func withRequestLog(
 	next http.Handler, logger *slog.Logger, routeLabel, clientIP func(*http.Request) string,
+	masker *secrets.Masker,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := requestID(r)
@@ -734,6 +738,13 @@ func withRequestLog(
 		start := time.Now()
 		finish := func(status int) {
 			elapsed := time.Since(start)
+			if status >= http.StatusInternalServerError {
+				cause := rw.cause
+				if cause == nil {
+					cause = errors.New(http.StatusText(status))
+				}
+				logger.ErrorContext(ctx, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))
+			}
 			observeHTTPRequest(rec.route, r.Method, status, elapsed)
 			logRequest(ctx, logger, r, rec, status, elapsed, clientIP(r))
 		}
@@ -745,8 +756,11 @@ func withRequestLog(
 				if p == http.ErrAbortHandler { //nolint:errorlint // net/http compares the sentinel itself
 					status = rw.status
 				}
+				if status >= http.StatusInternalServerError {
+					rw.cause = fmt.Errorf("handler panic: %v", p)
+				}
 				finish(status)
-				panic(p) //nolint:forbidigo // re-raise so net/http still sees the handler's panic
+				panic(http.ErrAbortHandler) //nolint:forbidigo // net/http closes the connection without logging the unmasked panic
 			}
 		}()
 		next.ServeHTTP(writer, r)
@@ -757,6 +771,13 @@ func withRequestLog(
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	cause  error
+}
+
+func (r *statusRecorder) responseError(err error) {
+	if r.cause == nil {
+		r.cause = err
+	}
 }
 
 func (r *statusRecorder) WriteHeader(code int) {

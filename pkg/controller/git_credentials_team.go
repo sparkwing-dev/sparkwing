@@ -135,7 +135,7 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request, 
 		}
 		key, err := s.scanHostKey(r.Context(), host, port)
 		if err != nil {
-			return &apierr.Error{Code: apierr.Unavailable, Message: "could not read the ssh host key"}
+			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "could not read the ssh host key"}, err)
 		}
 		addr := host
 		if port != 22 {

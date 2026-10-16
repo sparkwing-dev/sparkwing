@@ -441,8 +441,6 @@ func (s *Server) githubAppConnectFinish(ctx context.Context, p capability.Author
 }
 
 func (s *Server) githubAppConnectRefusal(p capability.Authorized, installation int64, err error) error {
-	s.logger.Info("github app connect refused", "team", string(p.Target.Team), "account", p.Principal.Capability.Subject.ID,
-		"installation_id", installation, "reason", err.Error())
 	switch {
 	case errors.Is(err, githubapp.ErrNotInstalled):
 		return refuse(http.StatusNotFound, "", "GitHub reports no installation of the App by that id")
@@ -451,8 +449,7 @@ func (s *Server) githubAppConnectRefusal(p capability.Authorized, installation i
 	case errors.Is(err, errGitHubInstallationAccess), errors.Is(err, errGitHubUserMismatch):
 		return refuse(http.StatusForbidden, "", err.Error())
 	default:
-		s.logger.Warn("github app connect failed", "err", err.Error())
-		return refuse(http.StatusBadGateway, "", "GitHub could not be reached to finish connecting")
+		return errors.Join(refuse(http.StatusBadGateway, "", "GitHub could not be reached to finish connecting"), err)
 	}
 }
 
@@ -552,8 +549,7 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 	// safety: a list cut at GitHub's listing bound only displays; nothing is
 	// refused or withdrawn for a repository missing from it.
 	if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
-		s.logger.Warn("github app repositories", "installation_id", id, "err", err.Error())
-		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub could not list the installation's repositories"}
+		return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "GitHub could not list the installation's repositories"}, err)
 	}
 	out := []githubAppRepositoryJSON{}
 	for _, repo := range repos {
@@ -671,8 +667,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 	repo, _ := store.ParseGitHubRepo(slug)
 	inst, found, err := s.teamInstallationFor(r.Context(), t, repo)
 	if err != nil {
-		s.logger.Warn("github app trigger lookup", "repository", slug, "err", err.Error())
-		return githubAppRequestError(http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
+		return githubAppRequestError(http.StatusBadGateway, fmt.Errorf("GitHub installation lookup: %w", err))
 	}
 	if !found {
 		return githubAppRequestError(http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
@@ -680,7 +675,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), inst.InstallationID)
 	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
 	if err != nil && !truncated {
-		return githubAppRequestError(http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
+		return githubAppRequestError(http.StatusBadGateway, fmt.Errorf("GitHub installation repositories: %w", err))
 	}
 	var match *githubapp.Repository
 	for i := range repos {

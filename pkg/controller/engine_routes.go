@@ -272,7 +272,7 @@ func engineLookupError(err error) error {
 	if errors.As(err, &sqlErr) {
 		switch sqlErr.SQLState() {
 		case "40001", "40P01", "55P03":
-			return &apierr.Error{Code: apierr.Unavailable, Message: "transaction is temporarily unavailable", Details: map[string]any{"retry_after_ms": 1000}}
+			return errors.Join(&apierr.Error{Code: apierr.Unavailable, Message: "transaction is temporarily unavailable", Details: map[string]any{"retry_after_ms": 1000}}, err)
 		}
 	}
 	var transition *store.ErrIllegalTransition

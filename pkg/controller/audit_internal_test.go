@@ -18,7 +18,7 @@ func auditHarness(t *testing.T, route string, h http.HandlerFunc) (http.Handler,
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	return withRequestLog(h, logger, func(*http.Request) string { return route },
-		func(*http.Request) string { return "192.0.2.1" }), &logs
+		func(*http.Request) string { return "192.0.2.1" }, nil), &logs
 }
 
 func auditLines(t *testing.T, logs *bytes.Buffer, msg string) []map[string]any {
@@ -83,10 +83,10 @@ func TestInternalErrorLogNamesTheRouteNotThePath(t *testing.T) {
 	s := New(nil, slog.New(slog.NewJSONHandler(&logs, nil)))
 	h := withRequestLog(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "read secret", errors.New("disk gone"))
-	}), slog.New(slog.DiscardHandler), func(*http.Request) string { return "/api/v1/secrets/{name}" },
-		func(*http.Request) string { return "" })
+	}), s.logger, func(*http.Request) string { return "/api/v1/secrets/{name}" },
+		func(*http.Request) string { return "" }, s.masker)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/secrets/PROD_DB_PASSWORD", nil))
-	records := auditLines(t, &logs, "read secret")
+	records := auditLines(t, &logs, "http request failed")
 	if len(records) != 1 || records[0]["route"] != "/api/v1/secrets/{name}" || records[0]["request_id"] == "" {
 		t.Fatalf("error log = %v, want the route and request id", records)
 	}

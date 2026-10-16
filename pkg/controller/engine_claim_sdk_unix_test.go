@@ -3,8 +3,12 @@
 package controller_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,9 +24,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
@@ -91,5 +100,103 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	var plan nodeproto.PlanDoc
 	if err := json.Unmarshal(raw, &plan); err != nil || len(plan.Jobs) == 0 || plan.Jobs[0].ID != "configure" {
 		t.Fatalf("repository example plan: %s: %v", raw, err)
+	}
+	acceptLocalExample(t, root, raw, selected)
+}
+
+func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.Resolved) {
+	t.Helper()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	claimant, err := localcontroller.NewClaimant(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := claimant.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	st.SetClaimProfileResolver(claimant)
+	e := &controller.EngineController{Store: st, RunnerPolicy: &controller.SignedRunnerAdmission{BuildVersion: "development"}}
+	server := controller.New(st, nil).WithEngineController(e).WithPeerIdentity(func(*http.Request) capability.Subject {
+		return capability.Subject{Kind: capability.SubjectLocal, ID: fmt.Sprintf("local:%d", os.Getuid())}
+	})
+	handler := server.Handler()
+	repository, err := runspec.CanonicalRepository(runspec.RepoInput{AbsolutePath: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := runspec.Request{
+		Version: 1, Team: string(store.DefaultTeam), Pipeline: "example", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
+		Git: runspec.Git{Repository: repository}, Source: runspec.Source{Entrypoint: "Example", Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: ".sparkwing"}},
+	}
+	input, err := json.Marshal(controllerwire.CreateRunRequest{Request: request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := controller.EngineClaimHTTP(t, handler, "", "POST", "/api/v1/runs", string(input), http.StatusCreated)
+	var admitted controllerwire.CreateRunResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &admitted); err != nil {
+		t.Fatal(err)
+	}
+	claimBody := fmt.Sprintf(`{"runner_version":"development","kinds":["trigger"],"run_id":%q,"available_cores":%d}`, admitted.RunID, runtime.NumCPU())
+	response = controller.EngineClaimHTTP(t, handler, "", "POST", "/api/v1/runners/claim", claimBody, http.StatusOK)
+	var award controllerwire.ClaimResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
+		t.Fatalf("local claim: %s: %v", response.Body, err)
+	}
+	project, err := os.ReadFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := settings.ProjectCheckoutDeclarations(project, ".sparkwing/sparkwing.yaml", "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan nodeproto.PlanDoc
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submission := controllerwire.PlanSubmission{Declarations: declarations, Plan: raw, Resolved: runspec.Resolved{Engine: selected.Identity, Entrypoint: "Example", Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}
+	body, err := json.Marshal(submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/"+admitted.RunID+"/plan", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+award.Claim.Capability)
+	out := httptest.NewRecorder()
+	handler.ServeHTTP(out, req)
+	if out.Code != http.StatusOK {
+		t.Fatalf("local example plan: HTTP %d %s", out.Code, out.Body)
+	}
+
+	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := tenant.ReadSnapshot(t.Context(), admitted.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduling, err := snapshot.Scheduling()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := store.Decide(scheduling)
+	if snapshot.Run.Spec == nil || len(snapshot.Nodes) != len(plan.Jobs) || len(decision.Nodes) != 1 || decision.Nodes[0].NodeID != "configure" || decision.Nodes[0].Kind != store.DecisionReady {
+		t.Fatalf("accepted example cannot schedule configure: %+v", decision)
 	}
 }

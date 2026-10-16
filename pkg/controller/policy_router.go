@@ -232,8 +232,18 @@ func writePolicyError(w http.ResponseWriter, err error) {
 		failure = &apierr.Error{Code: apierr.Internal, Message: "request failed"}
 	}
 	var encoded bytes.Buffer
-	if err := apierr.WriteJSON(&encoded, failure); err != nil {
+	if encodeErr := apierr.WriteJSON(&encoded, failure); encodeErr != nil {
+		err = errors.Join(err, encodeErr)
 		failure = &apierr.Error{Code: apierr.Internal, Message: "request failed"}
+	}
+	if apierr.Status(failure.Code) >= http.StatusInternalServerError {
+		noteResponseError(w, err)
+		safe := &apierr.Error{Code: failure.Code, Message: "request failed"}
+		switch delay := failure.Details["retry_after_ms"].(type) {
+		case int, int64, float64:
+			safe.Details = map[string]any{"retry_after_ms": delay}
+		}
+		failure = safe
 	}
 	if err := apierr.WriteHTTP(w, failure); err != nil {
 		// safety: internal errors may contain credentials; log only the safe code.
