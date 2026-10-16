@@ -2986,3 +2986,31 @@ unmetered members. An account and machine sharing an ID have separate budgets. T
 under the shared store serialization, never summed usage counters. Refusals preserve ErrComputeLimit and expose canonical rate_limited with the
 existing five-second retry delay. Replay spends no second slot. Raw pending-run attribution and token metering are not intake
 inputs. The unused OldestWaitingReadyNodeForPrincipal diagnostic is removed.
+
+## Runner inventory and accepted liveness
+
+`Tenant.ReadRunners(context.Context) (capability.RunnerSnapshot, error)` implements
+C2's `RunnerInventoryReader`. It resolves live machine ancestry, accepted polls
+and current owner, job and eval awards in one store-clock snapshot. Roots remain
+distinct by their persisted authority. Cloud awards use their immutable billing
+reservation across exchange. Here jobs group under their original here award,
+separately from a requesting machine's registration. Names and holders never join
+unrelated authority.
+
+The single issuance transaction records accepted award liveness. Node and owner
+renewal transactions and eval renewal record liveness after validating the current
+fence and accounting. An observation failure rolls the transaction back. Renewal
+updates `capabilities.last_used_at` without changing `claim_observation_json` or
+advertised labels. Placement still requires a fresh accepted poll timestamp.
+
+Only current same-team awards contribute activity. Revoked ancestry, expired
+leases, finished work and replaced generations do not contribute. Cancellation
+keeps a live draining holder visible. Eval activity also requires its current
+source generation, expected expansion and controller lease. Corrupt observation
+facts refuse the whole snapshot.
+
+No additional table or foreign signature is added. Maximum concurrency has no
+enrollment field in the current provisioning contract. Queue depth has no claim
+observation field in the wire contract. Both remain zero until their owners
+supply those inputs. Missing capacity measurements stay absent. W1 does not
+derive concurrency or queue depth from CPU counts or leases.

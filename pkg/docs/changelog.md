@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store:** Runner lists, queue headroom and runner metrics use the tenant's committed inventory. Claim renewals update liveness without replacing the last capacity observation.
+
 - **store (Breaking):** Enforce hourly admission guards in sealed intake and remove the unused oldest-ready principal lookup. Debug pauses and approval decisions commit with current authority, masked text and private replay receipts. See [migration guide](docs/migrations/_unreleased.md#sealed-intake-rate-guards-and-run-control).
 
 - **store (Breaking):** Replace raw GitHub App configuration writes with transactions that recheck current administration and installation ownership. Extra repository names and numeric IDs commit together. Launcher reservation cleanup proves the original bootstrap award's ownership after expiry or exchange. See [migration guide](docs/migrations/_unreleased.md#authorized-github-app-configuration-and-launcher-reservations).

@@ -388,7 +388,7 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 		t.Run(map[bool]string{false: "within window", true: "after window"}[late], func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
 			root := authorityRoot("requester", "a")
-			root.Grants = []capability.Grant{capability.RunsWrite}
+			root.Grants = []capability.Grant{capability.RunsWrite, capability.TriggersClaim}
 			authorityPersist(t, s, root)
 			rewriteSchemaExec(t, s.db, `UPDATE triggers SET created_at=?`, s.now().UnixNano())
 			var here capability.Issued
@@ -415,6 +415,19 @@ func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			inventory := readRunnerInventory(t, s, "a")
+			if len(inventory.Runners) != 3 {
+				t.Fatalf("here and machine identities merged: %+v", inventory)
+			}
+			for _, row := range inventory.Runners {
+				if row.Runner.Type == "here" {
+					if row.Runner.Name != "requester" || len(row.ActiveJobs) != 1 || row.ActiveJobs[0] != "run" {
+						t.Fatalf("here identity: %+v", row)
+					}
+				} else if len(row.ActiveJobs) != 0 {
+					t.Fatalf("here activity attached to machine registration: %+v", row)
+				}
 			}
 			if err = s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
 				t.Fatal(err)

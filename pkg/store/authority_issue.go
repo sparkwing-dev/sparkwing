@@ -92,6 +92,9 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 		if err := persistUnitBillingTx(ctx, tx, c); err != nil {
 			return capability.Issued{}, err
 		}
+		if err := observeUnitTx(ctx, tx, c.Prefix); err != nil {
+			return capability.Issued{}, err
+		}
 	}
 	return issued, nil
 }

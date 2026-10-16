@@ -59,6 +59,7 @@ type RegisteredAgent struct {
 	// Profile combines enrollment and granted identity with last observed labels.
 	Profile  match.Profile
 	LastSeen time.Time
+	poll     *runnerPoll
 }
 
 // ListRegisteredAgents reads this tenant's live machine claimants and observed labels.
@@ -68,15 +69,25 @@ func (t *Tenant) ListRegisteredAgents(ctx context.Context) ([]RegisteredAgent, e
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	agents, err := registeredAgentObservationsTx(ctx, tx, t.team)
+	out, err := registeredAgentsTx(ctx, tx, t.team)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func registeredAgentsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
+	agents, err := registeredAgentObservationsTx(ctx, tx, team)
 	if err != nil {
 		return nil, err
 	}
 	var out []RegisteredAgent
 	for _, observed := range agents {
-		agent, err := registeredAgentTx(ctx, tx, t.team, observed)
-		var denied *apierr.Error
-		if errors.As(err, &denied) && denied.Code == apierr.Unauthenticated {
+		agent, err := registeredAgentTx(ctx, tx, team, observed)
+		if unavailableRunner(err) {
 			continue
 		}
 		if err != nil {
@@ -86,11 +97,11 @@ func (t *Tenant) ListRegisteredAgents(ctx context.Context) ([]RegisteredAgent, e
 			out = append(out, *agent)
 		}
 	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) ([]RegisteredAgent, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at FROM capabilities
+	rows, err := tx.QueryContext(ctx, `SELECT prefix,advertised_labels_json,last_used_at,claim_observation_json FROM capabilities
  WHERE team=? AND subject_kind='machine' AND audience='controller' AND bind_kind='none'
  AND (revoked_at IS NULL OR revoked_at>?) AND (expires_at IS NULL OR expires_at>?) ORDER BY prefix`, team, tx.now().UnixNano(), tx.now().UnixNano())
 	if err != nil {
@@ -100,9 +111,9 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 	var observations []RegisteredAgent
 	for rows.Next() {
 		var a RegisteredAgent
-		var advertised []byte
+		var advertised, body []byte
 		var used sql.NullInt64
-		if err := rows.Scan(&a.CapabilityPrefix, &advertised, &used); err != nil {
+		if err := rows.Scan(&a.CapabilityPrefix, &advertised, &used, &body); err != nil {
 			return nil, err
 		}
 		if len(advertised) > 0 {
@@ -113,6 +124,15 @@ func registeredAgentObservationsTx(ctx context.Context, tx *storeTx, team Team) 
 		}
 		if used.Int64 > 0 {
 			a.LastSeen = time.Unix(0, used.Int64).UTC()
+		}
+		if len(body) > 0 {
+			a.poll = &runnerPoll{}
+			if err := json.Unmarshal(body, a.poll); err != nil {
+				return nil, err
+			}
+			if !validMatchingResources(a.poll.Capacity) || !validMatchingResources(a.poll.Available) || a.poll.ObservedAt.IsZero() || a.poll.ObservedAt.After(tx.now()) {
+				return nil, authorityError(apierr.IntegrityFailure, "invalid runner capacity observation")
+			}
 		}
 		observations = append(observations, a)
 	}

@@ -2615,3 +2615,24 @@ encoded secret masking, changed-body replay conflicts and rollback of state,
 events and receipts. TestRunControlHTTPUsesStoreTransactions drives the canonical
 controller routes through the concrete Tenant adapter with real member issuance.
 No acceptance registry or native-platform cell is added.
+
+
+## Committed runner inventory
+
+`Tenant.ReadRunners` now supplies C2's production `RunnerInventoryReader`.
+`TestRunnerInventoryWithSealedAdmissionAndEnrollment` uses storetest's isolated
+store through the real admission, plan, enrollment, claim and renewal paths.
+`TestRunnerInventoryHTTPUsesStoreSnapshot` drives the real default HTTP adapter.
+The fake-reader HTTP checks stay because they cover malformed foreign results
+and missing dependency refusals. The missing-reader case now explicitly injects
+an absent reader instead of assuming Tenant cannot implement the contract.
+
+`TestRunnerInventoryAttributesOnlyCurrentSameTenantAuthorityProperty` generates
+same-name roots, foreign tenants, revoked ancestry and leaf authority, expired
+leases, superseded generations, holder changes and cancellation. Only exact
+current same-team authority contributes activity. The liveness/headroom test
+checks that accepted renewal changes only last-seen. Cloud, local and here tests
+check immutable placement identity and separation from machine registrations.
+Observation-write failures prove award and renewal rollback. Corrupt observations
+return no partial snapshot. These are component and SQLite proofs. They do not
+claim a native placement cell or missing concurrency/queue-depth ingestion.

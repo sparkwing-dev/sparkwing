@@ -58,7 +58,10 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref NodeRef,
 			return err
 		}
 	}
-	return accountUnitBillingTx(ctx, tx, t.team, unit, row.Generation, tx.now(), false)
+	if err := accountUnitBillingTx(ctx, tx, t.team, unit, row.Generation, tx.now(), false); err != nil {
+		return err
+	}
+	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 }
 
 // RenewOwner renews owner-bound jobs and capacity within the owner lease transaction.
@@ -133,7 +136,10 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 		return err
 	}
 	if actor.Owner.Kind == OwnerTrigger {
-		return accountOwnerBillingTx(ctx, tx, t.team, runID, actor.Owner.Generation, now, false)
+		if err := accountOwnerBillingTx(ctx, tx, t.team, runID, actor.Owner.Generation, now, false); err != nil {
+			return err
+		}
+		return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 	}
 	return nil
 }

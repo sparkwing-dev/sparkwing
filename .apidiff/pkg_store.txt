@@ -2679,6 +2679,7 @@ func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.Aut
 func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[string][]string, error)
 func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error)
 func (t *Tenant) ReadRunView(ctx context.Context, runID string) (RunView, error)
+func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, error)
 func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secret, error)
 func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (RunSnapshot, error)
 func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64, limit int) ([]StateEvent, error)

@@ -377,6 +377,15 @@ observation times remain separate. Runner metrics read the same snapshots.
 The snapshot, observation and headroom types live in `internal/capability`,
 so the store adapter can implement the reader without a controller import.
 
+`Tenant.ReadRunners` implements the default adapter. It reads live authority,
+accepted polls and current award fences in one store snapshot. Claims and
+renewals update liveness in their committing transactions. A renewal preserves
+the last accepted capacity measurement. Revoked ancestry, expired leases and
+replaced awards contribute no activity. A cancelled holder remains visible
+while its live lease drains. Cloud and `here` identities come from their awards.
+Maximum concurrency and queue depth need enrollment and observation inputs
+before the inventory can report them.
+
 ## Reporting credential routes
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
