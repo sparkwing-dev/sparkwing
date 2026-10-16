@@ -2762,3 +2762,16 @@ still binds. `upload_concurrency_dialect_test.go` runs commit/abort contention
 through independent SQLite clients and through storetest.NewPostgres when a
 server URL is configured. Upload GC properties cover pending tickets, abort,
 expiry, prior quota release, run deletion and cross-team manifest graphs.
+
+## W9 public retry history port
+
+`TestRetry_ListAttempts` is replaced by
+`TestRetryHistoryUsesPublicProjectionForEverySelector`. It reads the real
+controller and SQLite through stable IDs and numeric selectors for the root,
+siblings and descendants. `TestRetryHistoryRechecksEachRunBinding` and
+`FuzzRetryHistoryKeepsPrivateInputsAndTeams` cover run-scoped owner refusals,
+revocation, lost membership, hostile selectors, cross-team lineage pointers and
+private input projection. No native placement cell is newly claimed.
+`TestRetryHistoryTraversesLongChainsAndCycles` covers a 274-run tree through root,
+leaf and numeric selectors, including a cycle back to the leaf.
+`TestRetryHistoryOrdersEqualTimestampsByRunNumber` pins deterministic order.

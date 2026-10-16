@@ -9037,7 +9037,6 @@ paths:
         retry: idempotency_key
   /api/v1/runs/{run}/attempts:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -9045,13 +9044,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.RunPage'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/attempts
+      summary: Read public retry history
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/attempts
@@ -9075,7 +9080,6 @@ paths:
             binding: run
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/cancel:
     post:
       parameters:

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { type Run, getRunAttempts } from "@/lib/api";
+import { type RunHistoryEntry, getRunAttempts } from "@/lib/api";
 import { fmtDateTime } from "@/lib/timeFormat";
 
 const SELECT_RUN_EVENT = "sparkwing:select-run";
@@ -15,7 +15,7 @@ export default function AttemptsDropdown({
   dense?: boolean;
   refreshKey?: number;
 }) {
-  const [attempts, setAttempts] = useState<Run[]>([]);
+  const [attempts, setAttempts] = useState<RunHistoryEntry[]>([]);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
 
@@ -97,7 +97,6 @@ export default function AttemptsDropdown({
           </div>
           {attempts.map((a, i) => {
             const isCurrent = a.id === currentRunID;
-            const mode = attemptMode(a);
             return (
               <button
                 key={a.id}
@@ -126,18 +125,12 @@ export default function AttemptsDropdown({
                 <span className="text-[var(--muted)] truncate flex-1">
                   {fmtAttemptTime(a)}
                 </span>
-                {mode && (
+                {!a.inputs.lineage.retry_of && (
                   <span
-                    className={`text-[9px] uppercase font-mono px-1 py-px rounded border shrink-0 ${
-                      mode === "full"
-                        ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                        : mode === "failed"
-                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                          : "border-[var(--border)] bg-[var(--surface-raised)] text-[var(--muted)]"
-                    }`}
-                    title={modeTooltip(mode)}
+                    className="text-[9px] uppercase font-mono px-1 py-px rounded border shrink-0 border-[var(--border)] bg-[var(--surface-raised)] text-[var(--muted)]"
+                    title="Original run"
                   >
-                    {modeLabel(mode)}
+                    original
                   </span>
                 )}
                 {isCurrent && (
@@ -169,38 +162,7 @@ function statusDot(status: string): string {
   }
 }
 
-type AttemptMode = "original" | "full" | "failed";
-
-function attemptMode(r: Run): AttemptMode | null {
-  if (!r.retry_of) return "original";
-  const flags = r.invocation?.flags;
-  if (!flags) return null;
-  return flags.full === true ? "full" : "failed";
-}
-
-function modeLabel(m: AttemptMode): string {
-  switch (m) {
-    case "original":
-      return "original";
-    case "full":
-      return "all";
-    case "failed":
-      return "from failed";
-  }
-}
-
-function modeTooltip(m: AttemptMode): string {
-  switch (m) {
-    case "original":
-      return "Original run -- not a retry.";
-    case "full":
-      return "Rerun all: every node re-executed from scratch.";
-    case "failed":
-      return "Rerun from failed: passed nodes were reused; only failed/unreached nodes re-executed.";
-  }
-}
-
-function fmtAttemptTime(r: Run): string {
+function fmtAttemptTime(r: RunHistoryEntry): string {
   if (!r.started_at) return r.id;
   return fmtDateTime(r.started_at);
 }

@@ -168,6 +168,16 @@ its stage. The error-only result field is removed.
 
 ## Run detail
 
+`GET /api/v1/runs/{run}/attempts` returns the complete retry history as a
+`RunPage`, oldest first, with no cursor or truncation. Stable IDs and team-local
+numbers select the same history. Each entry uses the shared public `RunDetail`
+projection, including redacted inputs and current `inputs.lineage`. Invocation
+metadata, execution seals, environment digests and checkout paths are omitted.
+Every returned run must pass the caller's binding. A denied or invalid member
+fails the response before any history is sent.
+Equal creation timestamps sort by run number. Long chains are complete, and
+cycles cannot repeat entries or prevent traversal from finishing.
+
 `RunPruner.DeleteRun` uses the authorized `DELETE /api/v1/runs/{run}` route.
 It succeeds after an empty HTTP 204 acknowledgement, including log cleanup.
 The client returns only an error. Prune output identifies the selected run and

@@ -352,7 +352,15 @@ export async function getControllerQueueState(): Promise<ControllerQueueState | 
   return res?.ok ? res.json() : null;
 }
 
-export async function getRunAttempts(runID: string): Promise<Run[]> {
+export interface RunHistoryEntry {
+  id: string;
+  status: string;
+  started_at?: string;
+  finished_at?: string;
+  inputs: { lineage: { retry_of: string } };
+}
+
+export async function getRunAttempts(runID: string): Promise<RunHistoryEntry[]> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/attempts`, {
     cache: "no-store",
   }).catch(() => null);

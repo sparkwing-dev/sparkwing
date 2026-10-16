@@ -544,6 +544,14 @@ because the controller does not return a deleted-row or replay result.
 `runs prune -o json` emits `run_id`, optional `dry_run` and any structured `error`.
 The former `result` field is removed. Plain output emits the acknowledged selector.
 
+## Public retry history
+
+`GET /api/v1/runs/{run}/attempts` returns a complete `RunPage` of shared public
+`RunDetail` values. Consumers read pipeline and retry lineage from `inputs`.
+The former raw reporting row and its `invocation` field are removed. History
+checks the caller's binding for every entry and fails before writing a partial
+response if an entry is outside that binding.
+
 ## Sealed step selections
 
 `--sw-start-at`, `--sw-stop-at` and `--sw-only` enter the request seal as

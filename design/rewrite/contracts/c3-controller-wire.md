@@ -372,13 +372,23 @@ for CLI status views. `ReadRun` retains one `RunDetail` for local and remote
 connections. Its optional `steps` field carries `StepDetail` values when a client
 requests step history. No execution seal or raw store row enters these views.
 
-The W9 observation types complete three existing C2 GET routes:
+The W9 observation types complete these existing C2 GET routes:
 
 | Route | Request | Response |
 | --- | --- | --- |
 | `/api/v1/runs` | positive `limit`, opaque `cursor`, optional exact `parent_run_id` | `RunPage` with `runs`, `next_cursor`, `truncated` |
 | `/api/v1/runs/{run}/steps` | stable ID or team number | `RunSteps` with `steps` |
 | `/api/v1/runs/{run}/receipt` | stable ID or team number | `Receipt` |
+| `/api/v1/runs/{run}/attempts` | stable ID or team number | complete `RunPage` of public retry history, oldest first |
+
+Retry history uses the same `RunDetail` projection as run status. It includes
+the root, siblings and descendants within the authenticated team. Every returned
+run must pass the caller's binding. A denied or invalid member fails the complete
+response. The page has no cursor and is not truncated. Current retry lineage
+comes from each execution row, while its inputs retain the original request and
+spec seals. Raw reporting rows and invocation metadata never enter this response.
+Equal creation timestamps sort by run number. Traversal detects cycles by
+visited identity and imposes no retry-chain depth limit.
 
 Pages contain public run details. A truncated page supplies a new nonempty
 cursor. A final page has an empty cursor. The parent filter selects direct

@@ -354,53 +354,6 @@ func TestRetry_FullQueryParam(t *testing.T) {
 	}
 }
 
-func TestRetry_ListAttempts(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	ctx := context.Background()
-	t0 := time.Now().Add(-3 * time.Hour)
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID: "root", Pipeline: "p", Status: "failed", CreatedAt: t0, StartedAt: t0,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID: "second", Pipeline: "p", Status: "failed",
-		RetryOf: "root", CreatedAt: t0.Add(time.Hour), StartedAt: t0.Add(time.Hour),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL + "/api/v1/runs/root/attempts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d want 200", resp.StatusCode)
-	}
-	var body struct {
-		Runs []map[string]any `json:"runs"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(body.Runs) != 2 {
-		t.Fatalf("runs=%d want 2", len(body.Runs))
-	}
-	if body.Runs[0]["id"] != "root" || body.Runs[1]["id"] != "second" {
-		t.Errorf("order=[%v,%v] want [root,second]", body.Runs[0]["id"], body.Runs[1]["id"])
-	}
-}
-
 func TestRetry_UnknownRunReturns404(t *testing.T) {
 	dir := t.TempDir()
 	st, _ := teststore.Open(filepath.Join(dir, "s.db"))
