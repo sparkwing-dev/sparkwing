@@ -87,6 +87,16 @@ func nativeStoreAwardW8(t *testing.T, kind capability.UnitKind) (*store.Store, c
 
 type nativeStoreEnginesW8 struct{}
 
+type finishingStoreW9 struct {
+	nodehost.NativeHostStore
+	finished *bool
+}
+
+func (s finishingStoreW9) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
+	*s.finished = true
+	return s.NativeHostStore.FinishRunAndUnit(ctx, request)
+}
+
 func (nativeStoreEnginesW8) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("unexpected engine resolution")
 }
@@ -121,7 +131,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	defer cancel()
 	renewed := make(chan struct{})
 	var renewals atomic.Int64
-	bound, acquired, closed := false, false, false
+	bound, acquired, closed, finishedThroughServices := false, false, false, false
 	done := make(chan struct{})
 	bind := func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 		bound = true
@@ -139,6 +149,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			unit.Accepted.Plan[0] = '['
 		}
 		cfg := nodehost.NativeHostConfig{
+			Store: finishingStoreW9{NativeHostStore: binding.Tenant, finished: &finishedThroughServices},
 			Lease: lease.Keeper{Lease: time.Minute, Interval: time.Second}, Source: source.Options{Engines: nativeStoreEnginesW8{}},
 			Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), Router: router,
 			Processes: &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error { return nil }},
@@ -284,6 +295,9 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	}
 	if executionErr != nil && !(mode == "remote_cancel" && errors.Is(executionErr, context.Canceled)) {
 		t.Fatal(executionErr)
+	}
+	if (mode == "embedded_queue" || mode == "local_controller" || mode == "award_snapshot") && !finishedThroughServices {
+		t.Fatal("embedded host discarded the service's pre-completion storage binding")
 	}
 
 	tenant, err := s.ForTeam(t.Context(), store.DefaultTeam)

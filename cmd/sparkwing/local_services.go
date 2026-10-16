@@ -23,6 +23,7 @@ import (
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func resolveLocalServices(ctx context.Context) (dashboardServices, error) {
@@ -148,15 +149,23 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 	server.WithLocalSchedules(schedules, func(ctx context.Context, root, pipeline string, environment []string) (crons.Proof, error) {
 		return proveLocalSchedule(ctx, b.Home, root, pipeline, environment)
 	}, snapshots)
+	socket, err := wingd.APISocketPath(b.Home)
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	transport := wingdclient.NewAPIClient(socket)
 	return localcontroller.Services{
-		State: state, HTTP: server.HTTP(), Close: func() error { return errors.Join(claimant.Close(), objects.Close()) },
+		State: state, HTTP: server.HTTP(), Close: func() error {
+			transport.CloseIdleConnections()
+			return errors.Join(claimant.Close(), objects.Close())
+		},
 		Maintain: server.MaintainStorage,
 		Runner: runners.StoreRunnerConfig{
 			Bearer:          claimant.Bearer,
 			Loop:            runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
 			RequestCapacity: func() (float64, int64) { return float64(runtime.NumCPU()), 0 },
 			Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
-				return newLocalNativeServices(ctx, b.Home, b.Store, binding)
+				return newLocalNativeServices(ctx, b.Home, b.Store, binding, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport})
 			},
 		},
 	}, nil

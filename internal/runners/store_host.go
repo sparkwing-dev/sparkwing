@@ -19,6 +19,7 @@ type StoreBinding struct {
 	Tenant    *store.Tenant
 	Principal capability.Principal
 	Refresh   func(context.Context) (capability.Principal, error)
+	Bearer    func(context.Context) (string, error)
 }
 
 // NativeServices supplies the per-award host services and their joined cleanup.
@@ -60,11 +61,27 @@ func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUn
 	if err != nil {
 		return NativeServices{}, inputs, err
 	}
+	lifetime, retire := context.WithCancel(context.WithoutCancel(ctx))
 	binding := StoreBinding{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
 		return h.authenticate(ctx, unit)
+	}, Bearer: func(request context.Context) (string, error) {
+		if err := errors.Join(context.Cause(lifetime), context.Cause(request)); err != nil {
+			return "", err
+		}
+		return unit.Capability, nil
 	}}
 	services, err := h.Bind(ctx, binding)
-	services.Config.Store = tenant
+	closeServices := services.Close
+	services.Close = func() error {
+		defer retire()
+		if closeServices != nil {
+			return closeServices()
+		}
+		return nil
+	}
+	if services.Config.Store == nil {
+		services.Config.Store = tenant
+	}
 	return services, inputs, err
 }
 

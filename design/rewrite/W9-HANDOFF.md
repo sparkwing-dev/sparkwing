@@ -1,5 +1,8 @@
 # W9 continuation: local integration and runner transport
 
+The next continuation fixes background queue service binding and log finalization.
+See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.
+
 Base: `9129db2e9`. Priorities (1)-(3) are implemented. Native execution remains
 with the lead. The area remains CONTINUE because the additional owner/eval and
 launcher assignments need the contracts listed below.
