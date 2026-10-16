@@ -196,11 +196,11 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 	if err := recordGrantEventTx(tx, CreditGrant{ID: grant, Team: checkout.result.Team, Kind: CreditGrantPaid, AmountMicro: checkout.result.AmountMicro, Reference: "payment:" + string(event.Mode) + ":" + checkout.result.CheckoutID, CreatedBy: "payment_provider", CreatedAt: tx.now()}, event.CheckoutID, ""); err != nil {
 		return err
 	}
-	balance, err := creditBalanceTx(ctx, tx, checkout.result.Team)
+	room, err := headroomTx(ctx, tx, checkout.result.Team, tx.now())
 	if err != nil {
 		return err
 	}
-	if balance > 0 {
+	if room > 0 {
 		return clearTeamCreditExhaustedTx(ctx, tx, checkout.result.Team, now)
 	}
 	return nil

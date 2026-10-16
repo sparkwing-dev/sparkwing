@@ -506,17 +506,6 @@ type CreditCharge struct {
 }
 const CreditChargeRefund = "refund"
 const CreditChargeReservation = "reservation"
-type CreditChargeResult struct {
-	Charge *CreditCharge
-
-	BalanceMicro int64
-
-	ExhaustedFor time.Duration
-
-	Cancel bool
-
-	ForgivenSeconds int64
-}
 const CreditChargeStorage = "storage"
 const CreditChargeUsage = "usage"
 type CreditGrant struct {
@@ -761,7 +750,7 @@ const DefaultArgon2MemoryBudget = int64(256) << 20
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
-const DefaultCreditGraceSeconds = 60
+const DefaultCreditGraceSeconds = 10 * 60
 const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 18_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
@@ -2432,7 +2421,6 @@ func (s *Store) Dialect() Dialect
 func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.ProvisionSpec) (bool, error)
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExchangeCapability(ctx context.Context, spec capability.ExchangeSpec) (capability.Issued, error)
-func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error)
@@ -2476,7 +2464,6 @@ func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, 
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
-func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) UnlinkAccountIdentity(ctx context.Context, a capability.Authorized, provider string) (int64, error)
 func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
 type SummaryWrite struct {

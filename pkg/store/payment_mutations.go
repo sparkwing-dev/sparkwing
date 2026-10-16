@@ -228,7 +228,7 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 	}
 	var state string
 	var frozenAmount int64
-	if err := tx.QueryRowContext(ctx, `SELECT state, amount_micro FROM card_charges WHERE id = ?`, p.ChargeID).
+	if err := tx.QueryRowContext(ctx, `SELECT state, amount_micro FROM card_charges WHERE team = ? AND id = ?`+tx.forUpdate(), team, p.ChargeID).
 		Scan(&state, &frozenAmount); err != nil {
 		return false, nil, err
 	}
@@ -270,12 +270,20 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 		}
 		return true, nil, nil
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, updated_at = ?
-	    WHERE id = ?`, CardAttemptPaid, p.PaymentIntent, nowNS, p.AttemptID); err != nil {
+	result, err := tx.ExecContext(ctx, `UPDATE card_attempts SET status = ?, payment_intent = ?, updated_at = ?
+     WHERE team = ? AND id = ? AND charge_id = ? AND status = ?`, CardAttemptPaid, p.PaymentIntent, nowNS, team, p.AttemptID, p.ChargeID, CardAttemptLive)
+	if err != nil {
 		return false, nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE card_charges SET state = ?, payment_intent = ?, closed_at = ?
-	    WHERE id = ?`, CardChargePaid, p.PaymentIntent, nowNS, p.ChargeID); err != nil {
+	if err := requireOneRow(result, "card attempt settlement"); err != nil {
+		return false, nil, err
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE card_charges SET state = ?, payment_intent = ?, closed_at = ?
+     WHERE team = ? AND id = ? AND state = ?`, CardChargePaid, p.PaymentIntent, nowNS, team, p.ChargeID, CardChargeOpen)
+	if err != nil {
+		return false, nil, err
+	}
+	if err := requireOneRow(result, "card charge settlement"); err != nil {
 		return false, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE credit_freezes SET released_at = ?
@@ -288,11 +296,11 @@ func settleCardPaymentTx(ctx context.Context, tx *storeTx, p CardPayment, now ti
 	}); err != nil {
 		return false, nil, err
 	}
-	balance, err := creditBalanceTx(ctx, tx, team)
+	room, err := headroomTx(ctx, tx, team, tx.now())
 	if err != nil {
 		return false, nil, err
 	}
-	if balance > 0 {
+	if room > 0 {
 		if err := clearTeamCreditExhaustedTx(ctx, tx, team, nowNS); err != nil {
 			return false, nil, err
 		}

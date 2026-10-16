@@ -193,3 +193,25 @@ func TestResultFinalLogsUseExactWriterAndBoundedGrace(t *testing.T) {
 		})
 	}
 }
+
+func TestResultJobMetadataStartsEmptyOnEveryAttempt(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(`{"retry":{"set":true,"value":2}}`))
+	ref := NodeRef{attempt.RunID, attempt.NodeID}
+	for retry := range 2 {
+		if err := tenant.WriteSummary(t.Context(), SummaryWrite{Ref: ref, Actor: actor, Markdown: "old result"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tenant.WriteAnnotation(t.Context(), AnnotationWrite{Ref: ref, Actor: actor, Level: "warning", Message: "old annotation"}); err != nil {
+			t.Fatal(err)
+		}
+		applied, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(attempt.Attempt + int64(retry)), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		node, err := tenant.GetNode(t.Context(), ref.RunID, ref.NodeID)
+		if err != nil || node.Summary != "" || len(node.Annotations) != 0 || int64(node.AttemptsConsumed) != applied.Attempt {
+			t.Fatalf("new attempt inherited metadata: %+v, %v", node, err)
+		}
+	}
+}

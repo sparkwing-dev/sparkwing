@@ -1,7 +1,10 @@
 package store
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"math/rand"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -411,7 +415,7 @@ func TestBlobUploadLeasedGCReleasesExpiredTicketsAfterRunDeletion(t *testing.T) 
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
-	rewriteSchemaCount(t, s.db, "uploads", 0)
+	rewriteSchemaCount(t, s.db, "uploads", 2)
 	now := request.ExpiresAt
 	s.clock = func() time.Time { return now }
 	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "replica", time.Hour)
@@ -538,6 +542,126 @@ func TestBlobUploadPublicationTicketsKeepImportedAttempt(t *testing.T) {
 					t.Fatal("run publication manufactured job output")
 				}
 			}
+		})
+	}
+}
+
+func TestBlobUploadReservationProtectsBytesDuringCopy(t *testing.T) {
+	s, tenant, request := uploadFixture(t)
+	now := s.now()
+	s.clock = func() time.Time { return now }
+	rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,3,1)", request.Intent.Digest)
+	rewriteSchemaExec(t, s.db, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES ('a',?,1)", request.Intent.Digest)
+	ticket, err := tenant.ReserveBlobUpload(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaCount(t, s.db, "blob_tombstones", 0)
+	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil || n != 0 {
+		t.Fatalf("pending upload marked: %d, %v", n, err)
+	}
+	rewriteSchemaExec(t, s.db, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES ('a',?,1)", request.Intent.Digest)
+	deleted := false
+	deleter := blobDeleteFunc(func(_ context.Context, _ blob.Blob) error { deleted = true; return nil })
+	if n, err := s.AsOperator().CollectBlobTombstones(t.Context(), lease, 10, deleter); err != nil || n != 0 || deleted {
+		t.Fatalf("pending upload collected: %d, %v, deleted=%v", n, err, deleted)
+	}
+	if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(ticket, request.Intent.Authority)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBlobUploadRejectedCommitLeavesCollectableBytes(t *testing.T) {
+	for _, end := range []string{"abort", "expiry", "expiry_after_admission", "run_deleted"} {
+		t.Run(end, func(t *testing.T) {
+			s, tenant, request := uploadFixture(t)
+			now := s.now()
+			s.clock = func() time.Time { return now }
+			request.ExpiresAt = now.Add(time.Second)
+			ticket, err := tenant.ReserveBlobUpload(t.Context(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if end == "abort" {
+				if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, ticket.ID); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				now = request.ExpiresAt
+				if end == "expiry_after_admission" {
+					other := request
+					other.ID = "next"
+					other.Intent.Digest = blob.Digest(strings.Repeat("b", 64))
+					other.ExpiresAt = now.Add(4 * limits.BlobGCGrace)
+					if _, err := tenant.ReserveBlobUpload(t.Context(), other); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if end == "run_deleted" {
+				rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
+			} else if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(ticket, request.Intent.Authority)); !errors.Is(err, ErrLockHeld) {
+				t.Fatalf("rejected commit: %v", err)
+			}
+			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", 3*limits.BlobGCGrace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(limits.BlobGCGrace)
+			var deleted []blob.Blob
+			n, err := s.AsOperator().CollectBlobTombstones(t.Context(), lease, 10, blobDeleteFunc(func(_ context.Context, b blob.Blob) error { deleted = append(deleted, b); return nil }))
+			if err != nil || n != 1 || len(deleted) != 1 || deleted[0].Digest != ticket.Blob.Digest || deleted[0].Size != ticket.Blob.Size {
+				t.Fatalf("orphan escaped collection: %d, %+v, %v", n, deleted, err)
+			}
+			if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil || n != 0 {
+				t.Fatalf("repeated orphan: %d, %v", n, err)
+			}
+			rewriteSchemaCount(t, s.db, "blobs", 0)
+		})
+	}
+}
+
+func TestBlobUploadLiveTicketsProtectSharedDigestProperty(t *testing.T) {
+	random := rand.New(rand.NewSource(1839))
+	for sample := range 20 {
+		t.Run(fmt.Sprint(sample), func(t *testing.T) {
+			s, tenant, request := uploadFixture(t)
+			request.Intent.Digest = blob.Digest(fmt.Sprintf("%064x", random.Uint64()))
+			request.Intent.Size = int64(1 + random.Intn(10))
+			count := 2 + random.Intn(4)
+			var last UploadReservation
+			for i := range count {
+				request.ID = fmt.Sprintf("ticket_%d", i)
+				var err error
+				last, err = tenant.ReserveBlobUpload(t.Context(), request)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := range count - 1 {
+				if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, fmt.Sprintf("ticket_%d", i)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "maintenance", "gc", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n, err := s.AsOperator().MarkBlobTombstones(t.Context(), lease, 10); err != nil || n != 0 {
+				t.Fatalf("live upload marked: %d, %v", n, err)
+			}
+			if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(last, request.Intent.Authority)); err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaCount(t, s.db, "blob_tombstones", 0)
+			rewriteSchemaCount(t, s.db, "blob_receipts", 1)
 		})
 	}
 }
