@@ -46,7 +46,7 @@ func TestProfilesAddRetainsConnectionAddedDuringProbe(t *testing.T) {
 			}
 			return 200, `{"status":"ok","auth":"enabled"}`
 		}
-		return 200, `{"runs":[],"next_cursor":"","truncated":false}`
+		return 200, `{"principal":"person","kind":"account"}`
 	})
 	captureStdout(t, func() {
 		if err := runProfiles([]string{"add", "--profile", "prod", "--controller", "https://api.example", "--token-stdin"}); err != nil {
@@ -70,7 +70,7 @@ func TestProfilesAddRechecksReplacementAfterProbe(t *testing.T) {
 			}
 			return 200, `{"status":"ok","auth":"enabled"}`
 		}
-		return 200, `{"runs":[],"next_cursor":"","truncated":false}`
+		return 200, `{"principal":"person","kind":"account"}`
 	})
 	err := runProfiles([]string{"add", "--profile", "prod", "--controller", "https://api.example", "--token-stdin"})
 	if err == nil || !strings.Contains(err.Error(), "--force") {

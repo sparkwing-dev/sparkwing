@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func TestSurfaceErrorsUseSharedEnvelope(t *testing.T) {
@@ -61,5 +64,60 @@ func TestSurfaceErrorExitCodes(t *testing.T) {
 		if exitCodeFor(err) != code {
 			t.Fatalf("exit %d became %d", code, exitCodeFor(err))
 		}
+	}
+}
+
+func TestSurfaceConfigErrorIsBadRequest(t *testing.T) {
+	inv, err := clisurface.Parse("sparkwing", []string{"profiles", "list", "-o", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err = writeInvocationError(&out, &invocationError{inv: inv, cause: userconfig.Invalid("profiles", "invalid configuration")}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(apierr.Envelope{Error: e}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got apierr.Envelope
+	if json.Unmarshal(out.Bytes(), &got) != nil || got.Error.Code != apierr.BadRequest {
+		t.Fatalf("error: %s", &out)
+	}
+}
+
+func TestSurfaceConfigErrorsThroughProfiles(t *testing.T) {
+	path := profilesFixturePath(t)
+	if err := os.WriteFile(path, []byte("profiles: wrong\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := clisurface.Parse("sparkwing", []string{"profiles", "list", "-o=json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := runProfiles([]string{"list", "-o=json"})
+	if failure == nil {
+		t.Fatal("invalid config accepted")
+	}
+	var out bytes.Buffer
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(apierr.Envelope{Error: e}) }); err != nil {
+		t.Fatal(err)
+	}
+	var got apierr.Envelope
+	if json.Unmarshal(out.Bytes(), &got) != nil || got.Error.Code != apierr.BadRequest {
+		t.Fatalf("config error: %s", &out)
+	}
+}
+
+func TestSurfaceOperatorCeilingErrorKeepsCanonicalCode(t *testing.T) {
+	inv, err := clisurface.Parse("sparkwing", []string{"profiles", "list", "-o=json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := &settings.Error{Key: "duration", CeilingFrom: &settings.Origin{}, Reason: "above ceiling"}
+	var out bytes.Buffer
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, func(w io.Writer, e *apierr.Error) error { return json.NewEncoder(w).Encode(apierr.Envelope{Error: e}) }); err != nil {
+		t.Fatal(err)
+	}
+	var got apierr.Envelope
+	if json.Unmarshal(out.Bytes(), &got) != nil || got.Error.Code != apierr.LimitExceeded {
+		t.Fatalf("ceiling error: %s", &out)
 	}
 }

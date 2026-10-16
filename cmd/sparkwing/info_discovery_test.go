@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
 func TestInfoDiscoveryIsEphemeralAndVersioned(t *testing.T) {
@@ -80,5 +82,30 @@ func TestRepositoryAgentGuidanceIsStandalone(t *testing.T) {
 	}
 	if string(claude) != "@AGENTS.md\n" {
 		t.Errorf("CLAUDE.md = %q, want the exact AGENTS.md pointer", claude)
+	}
+}
+
+func TestAgentSearchExamplesMatchTheRegistry(t *testing.T) {
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, example := range []struct {
+		prefix string
+		args   []string
+	}{
+		{"sparkwing commands --search", []string{"commands", "--search", "status"}},
+		{"sparkwing docs search --search", []string{"docs", "search", "--search", "status"}},
+	} {
+		if !strings.Contains(string(agents), example.prefix) || !strings.Contains(agentBlockBody, example.prefix) {
+			t.Fatalf("search spelling drift: %s", example.prefix)
+		}
+		if _, err := clisurface.Parse("sparkwing", example.args); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

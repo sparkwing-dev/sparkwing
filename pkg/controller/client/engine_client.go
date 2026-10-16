@@ -2,12 +2,12 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
@@ -47,7 +47,7 @@ func NewRunReader(options EngineOptions) (controllerwire.RunReader, error) {
 func newEngineClient(options EngineOptions) (*engineClient, error) {
 	base, err := url.Parse(options.URL)
 	if err != nil || base == nil || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-		return nil, fmt.Errorf("controller URL must be an HTTP(S) base URL without credentials, query or fragment")
+		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "controller URL must be an HTTP(S) base URL without credentials, query or fragment"}
 	}
 	hc := http.Client{Timeout: 30 * time.Second}
 	if options.HTTP != nil {

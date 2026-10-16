@@ -640,8 +640,8 @@ func Registry() []Command {
 			{Name: "only-on", Argument: "POOL"},
 		}},
 		{Path: "sparkwing tokens", Flags: []Flag{}},
-		{Path: "sparkwing tokens create", Authority: TeamCredential, Rules: []string{"Create a member or runner credential through the team token route. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
-			{Name: "type", Argument: "KIND", Values: []string{"member", "runner"}},
+		{Path: "sparkwing tokens create", Authority: TeamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
+			{Name: "type", Argument: "KIND", Values: []string{"member"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "ttl", Argument: "DURATION"},

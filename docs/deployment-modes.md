@@ -89,14 +89,27 @@ profiles:
   prod:
     controller:
       url: https://api.example.dev
-      token: swu_xxx
+      token: swk_xxx
     # state is implied by the controller; reads go through it.
 ```
 
+The controller authenticates private routes immediately. A mounted
+`bootstrap-admin-token` provisions deployment administration only. Creating a
+team and its first team-admin credential through operator onboarding is pending
+Korey's decision. The seed cannot create team credentials or enroll runners.
+See [Self-hosting](self-hosting.md#first-shared-deployment).
+
+For an existing team, use `profiles add --token-stdin` with its member credential,
+then enroll machines with `runners add`. The profile probe calls authenticated
+`/api/v1/auth/whoami`, so an operator can verify its connection without gaining
+team access. When `SPARKWING_HOME` isolates state, set `SPARKWING_CONFIG` too
+before saving a profile.
+
 A profile with a `controller:` block points commands at that controller
 over HTTP; the nested `token:` authenticates. `sparkwing pipeline trigger
-<pipeline> --profile prod` runs a pipeline there, and `--working-tree` runs
-uncommitted changes from an uploaded snapshot. Register or edit
+<pipeline> --profile prod` submits the selected committed source.
+`--working-tree` currently refuses before intake because production source-bundle
+staging is not wired yet. Register or edit
 profiles with `sparkwing profiles`. See
 [Self-hosting](self-hosting.md) for the supported local and controller
 deployment paths.

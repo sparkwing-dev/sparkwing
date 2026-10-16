@@ -90,7 +90,7 @@ func TestInterpretHealthBody(t *testing.T) {
 	}
 }
 
-func TestProbeAuthChecksFinalRunsRoute(t *testing.T) {
+func TestProbeAuthChecksIdentityRoute(t *testing.T) {
 	for _, tc := range []struct {
 		status int
 		want   string
@@ -99,10 +99,10 @@ func TestProbeAuthChecksFinalRunsRoute(t *testing.T) {
 			calls := 0
 			profileHTTPFixture(t, func(req *http.Request) (int, string) {
 				calls++
-				if req.Method != "GET" || req.URL.Path != "/api/v1/runs" || req.URL.Query().Get("limit") != "1" || req.Header.Get("Authorization") != "Bearer private-credential" {
+				if req.Method != "GET" || req.URL.Path != "/api/v1/auth/whoami" || req.Header.Get("Authorization") != "Bearer private-credential" {
 					t.Fatalf("auth probe: %s %s", req.Method, req.URL)
 				}
-				return tc.status, `{"runs":[],"next_cursor":"","truncated":false}`
+				return tc.status, `{"principal":"person","kind":"account","scopes":[]}`
 			})
 			result := probeAuth(t.Context(), connectionFixture("", "https://controller.example", "private-credential"))
 			if result.Status != tc.want || calls != 1 {
@@ -125,7 +125,7 @@ func TestProbeAuthRefusesRedirectsAndMalformedSuccess(t *testing.T) {
 			calls := 0
 			http.DefaultTransport = profileTransport(func(req *http.Request) (*http.Response, error) {
 				calls++
-				if req.URL.Path != "/api/v1/runs" {
+				if req.URL.Path != "/api/v1/auth/whoami" {
 					t.Fatal("probe forwarded a reusable credential through a redirect")
 				}
 				return &http.Response{StatusCode: tc.status, Header: http.Header{"Location": []string{"https://controller.example/redirect"}}, Body: io.NopCloser(strings.NewReader(tc.body))}, nil

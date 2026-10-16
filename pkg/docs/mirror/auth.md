@@ -556,25 +556,31 @@ Service credentials cannot submit provider outcomes or grant team credit.
 
 ## Deployment bootstrap
 
-The mounted `bootstrap-admin-token` must be a `swk_` controller capability.
-Startup supplies it to the once-only bootstrap transaction before opening the
-listener. That transaction stores only its digest and issues operational
-limits, object-store and token administration grants. The gate refuses a second
-administrator and cannot revive a revoked seed. It grants no operator-console
-or claim authority.
+Mount `bootstrap-admin-token` in the controller's `--credentials-dir`. Its value
+is `swk_` followed by the unpadded base64url encoding of 32 random bytes. Startup
+passes it to the once-only bootstrap transaction before opening the listener.
+The store keeps its digest and grants `operator.limits`, `operator.object_store`
+and `operator.tokens`. It grants no team membership, `runs.read`, `runs.write`,
+runner enrollment or operator-console authority.
 
-Creating the first real administrator issues its credential, revokes the seed
-and its descendants, and advances revocation generation in one locked transaction. Existing seed descendants become unusable. Presenting that seed
-at startup after setup returns an already-used error. Remove the mounted seed
-after creating the real administrator. A restart during unfinished setup can
-reuse the same live seed without issuing it again.
+A live seed can be reused while setup is unfinished. Issuing the first real
+deployment administrator closes the gate, revokes the seed and its descendants,
+and advances revocation generation in one transaction. Remove the mounted seed
+after that handoff. An empty input provisions nothing. Private routes require
+live credentials even on an empty store. `--require-auth` also refuses startup
+without a live deployment administrator capability.
 
-The native store implements the seeded bootstrap transaction. An empty file
-input provisions no credential.
-Startup enables authentication even before credentials exist. An empty or
-unreadable token table cannot open private routes. `--require-auth` additionally
-requires a live deployment administrator capability and refuses startup when
-that capability read is unavailable. Local access uses verified peer identity.
+The operator route that creates a team and its first team-admin credential is
+pending Korey's decision. A bootstrap seed cannot use the team token route to
+perform that step. The removed unauthenticated `POST /api/v1/tokens` flow is not
+supported. Existing team administrators issue member credentials through the
+team namespace and enroll machines through `sparkwing runners add`.
+
+`profiles add` probes `/api/v1/health` and authenticates through
+`/api/v1/auth/whoami`, which every live credential may call. Passing this probe
+does not grant access to team runs. Set `SPARKWING_CONFIG` as well as
+`SPARKWING_HOME` when saving profiles in an isolated CLI home. See
+[Self-hosting](self-hosting.md#first-shared-deployment) for commands.
 
 Licensed self-hosted controllers refuse deployment-admin bearers. Hosted
 controllers select Cloud eligibility through the `cloud` or `cloud-free`

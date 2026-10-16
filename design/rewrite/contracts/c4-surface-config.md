@@ -884,3 +884,18 @@ boundary contract. It adds no grant, flag or configuration field.
 `FuzzProductionBoundaryRefusesConflictingDestinations` varies API, DaemonSet and
 kubelet collisions. Canary admission tests apply standard API readiness defaults
 to a cloned response. The authored probe includes those exact scalar defaults.
+
+## W9 native QA surface corrections (2026-10-16)
+
+Team `tokens create --type` accepts only `member`. `runner` remains an inventory
+filter and is issued only through `runners add`. Profile verification uses
+public health followed by authenticated identity, rather than team run reads.
+Canonical controller refusals survive the CLI envelope. Configuration field
+errors map to `bad_request`, and operator-ceiling errors to `limit_exceeded`.
+
+The controller executable accepts flags and its explicit `admin` command.
+`help`, `--help` and `-h` print usage without opening state or credentials.
+Unexpected positional arguments refuse with usage before startup.
+
+`SPARKWING_HOME` isolates runtime state but does not relocate machine config.
+An isolated `profiles add` also supplies `SPARKWING_CONFIG` to the write guard.

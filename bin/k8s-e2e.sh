@@ -529,12 +529,7 @@ for _ in {1..100}; do
   sleep 0.2
 done
 
-token_response="$(curl --fail --silent --show-error --max-time 10 \
-  -H 'Content-Type: application/json' \
-  --data '{"kind":"user","principal":"k8s-e2e-admin","scopes":["admin"]}' \
-  "http://127.0.0.1:${controller_port}/api/v1/tokens")"
-admin_token="$(jq -er '.token' <<<"$token_response")"
-[[ "$admin_token" == sw* ]] || die "controller returned an invalid bootstrap token"
+admin_token="$(die "PENDING operator onboarding: the rewritten controller has no team plus first team-admin provisioning route yet. Resume this step when that route is approved and implemented; bootstrap-admin-token only grants deployment operations.")"
 
 create_owned_secret sparkwing-token \
   --from-literal="token=$admin_token"

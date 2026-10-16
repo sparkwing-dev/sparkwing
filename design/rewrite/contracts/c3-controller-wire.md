@@ -920,3 +920,21 @@ Jobs so one slow publication cannot strand another Job's source init. Its contex
 is passed to the blocking operations and the keeper is cancelled and joined on
 every return. The normal launcher loop owns preparation after activation until
 bootstrap exchange transfers lease ownership to the executing host.
+
+## W9 native QA corrections (2026-10-16)
+
+`GET /api/v1/runners` emits the shared `Runners` object and `RunnerDetail`
+rows. The old `agents` array, label map and encoded active-job strings are
+removed from this response. Active jobs retain separate run and job IDs. An empty location is an unknown
+observation, like zero capacity, and does not invalidate a live enrolled runner.
+
+`client.CheckIdentity` authenticates profile connections through
+`GET /api/v1/auth/whoami`. It requires a nonempty principal and subject kind,
+uses the shared transport and preserves canonical refusals. It requires no
+team read grant. A successful operator probe does not authorize team commands.
+
+Team `tokens create` accepts only `member`. Runner inventory, rotation and
+revocation still accept `runner`, while creation uses `runners add` enrollment.
+The production trigger identity resolver calls GitHub's repository API for a
+positive numeric ID. Private lookup accepts captured `GH_TOKEN` or
+`GITHUB_TOKEN`. Redirects are refused and provider bodies are not diagnostics.

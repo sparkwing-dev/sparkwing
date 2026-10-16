@@ -46,7 +46,9 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (controllerwi
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: checkout, pipeline: flags.pipeline, ref: flags.ref, pipelineRef: flags.pipelineRef, environment: captured})
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: checkout, pipeline: flags.pipeline, ref: flags.ref, pipelineRef: flags.pipelineRef, environment: captured, githubID: func(ctx context.Context, remote string) (int64, error) {
+		return lookupTriggerGitHubID(ctx, remote, captured)
+	}})
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
