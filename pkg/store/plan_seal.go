@@ -47,10 +47,27 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 	if err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind=?`+tx.forUpdate(), team, request.RunID, expected).Scan(&status, &holder, &prefix, &generation, &lease, &cancelled); err != nil {
 		return err
 	}
-	if generation != owner.Generation || cancelled.Valid {
+	if generation != owner.Generation {
 		return holderRefusal()
 	}
-	if status == "done" && expected == capability.UnitPlan && accepted == generation {
+	if accepted == generation {
+		if proof := request.Actor.Result; proof != nil && proof.Pattern == "/api/v1/runs/{run}/plan" {
+			var digest string
+			if err := tx.QueryRowContext(ctx, `SELECT result_digest FROM capabilities WHERE team=? AND prefix=?`, team, c.Prefix).Scan(&digest); err != nil {
+				return err
+			}
+			if digest != "" {
+				if digest != proof.Digest {
+					return authorityError(apierr.IllegalTransition, "accepted plan payload differs")
+				}
+				return validateResultProofTx(ctx, tx, team, request.Actor, NodeRef{RunID: request.RunID}, 0)
+			}
+		}
+	}
+	if cancelled.Valid {
+		return holderRefusal()
+	}
+	if status == "done" && expected == capability.UnitPlan && accepted == generation && request.Actor.Result == nil {
 		return nil
 	}
 	if status != "claimed" || holder != owner.Holder || prefix != c.Prefix || !lease.Valid || lease.Int64 <= tx.now().UnixNano() {

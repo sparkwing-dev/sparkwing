@@ -16,8 +16,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -29,6 +31,7 @@ import (
 
 // Server serves controller HTTP requests.
 type Server struct {
+	cloudDeployment            bool
 	resolveQueuePriorityWriter func(context.Context, store.Team) (QueuePriorityWriter, error)
 	store                      *store.Store
 	logger                     *slog.Logger
@@ -141,9 +144,12 @@ type Server struct {
 	operators       atomic.Pointer[map[string]bool]
 	consoleWrites   ConsoleWriter
 
-	dashboard     *Dashboard
-	localHTTPOnce sync.Once
-	localHTTP     wingd.LocalHTTP
+	dashboard                 *Dashboard
+	localHTTPOnce             sync.Once
+	localHTTP                 wingd.LocalHTTP
+	localSchedules            *crons.Service
+	localScheduleProver       LocalScheduleProver
+	localScheduleEnvironments LocalScheduleEnvironments
 }
 
 // New constructs a Server bound to the given store. A trigger it accepts is
@@ -170,9 +176,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	}
 	if st != nil {
 		srv.credentialIssuer = st
-		st.SetConsolePolicy(func(p capability.Principal, now time.Time) bool {
-			return srv.MultiTeam() && srv.consoleAccount(p) && !srv.sessionExpired(p.Capability.IssuedAt, now)
-		})
+		st.SetConsolePolicy(srv.consoleAuthority)
 	}
 	srv.authorization = srv.storeRouteAuthorization()
 	srv.recordQueueActivity(time.Now())
@@ -295,10 +299,7 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	return s
 }
 
-// WithTrustedProxyAddr serves the same API on a second address whose
-// requests key login throttling, the bearer failure budget and the
-// request log on their X-Real-IP. Only a proxy that overwrites that
-// header may reach addr.
+// WithTrustedProxyAddr keys login throttling and request logs on a trusted proxy's X-Real-IP.
 func (s *Server) WithTrustedProxyAddr(addr string) *Server {
 	s.trustedProxyAddr = addr
 	return s
@@ -389,7 +390,14 @@ func (s *Server) registeredRouters() *registeredMux {
 	if s.dataController != nil {
 		if objects, ok := s.dataController.Objects.(*blob.Filesystem); ok {
 			router.Handle("PUT /api/v1/data/uploads/{upload}", objects)
-			router.Handle("GET /api/v1/data/objects/{key...}", objects)
+			router.HandleFunc("GET /api/v1/data/objects/{key...}", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					w.Header().Set("Allow", http.MethodGet)
+					writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
+					return
+				}
+				objects.ServeHTTP(w, r)
+			})
 			router.Handle("PUT /api/v1/log-segments/{key...}", objects)
 		}
 	}

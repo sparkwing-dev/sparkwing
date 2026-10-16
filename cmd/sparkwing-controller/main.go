@@ -434,6 +434,7 @@ func run(args []string) error {
 	}
 
 	srv := controller.New(st, nil).
+		WithCloudDeployment(*limitsProfile == controller.LimitsProfileCloud || *limitsProfile == controller.LimitsProfileCloudFree).
 		WithTrustedProxyAddr(*trustedProxyAddr).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithDashboardURL(*dashboardURL).

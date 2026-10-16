@@ -18,7 +18,7 @@ func createRetryRunAndReadyNode(t *testing.T, s *store.Store, runID string, retr
 		"pipeline": "p", "run_id": runID,
 		"nodes": []any{map[string]any{"id": "build", "deps": []string{}, "modifiers": map[string]any{"retry": retries}}},
 	})
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(context.Background(), store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
 		ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now(), PlanSnapshot: plan,
 		RepoURL: "https://example.com/acme/repo.git", GitSHA: strings.Repeat("a", 40),
 	}); err != nil {
@@ -44,12 +44,12 @@ func seedSubmittedRun(t *testing.T, s *store.Store, id, pipeline string) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedTrigger(ctx, store.Trigger{
 		ID: id, Pipeline: pipeline, CreatedAt: now, TriggerSource: "runs-submit",
 	}); err != nil {
 		t.Fatalf("seed trigger %s: %v", id, err)
 	}
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: id, Pipeline: pipeline, Status: "pending",
 		TriggerSource: "runs-submit", CreatedAt: now, StartedAt: now,
 	}); err != nil {

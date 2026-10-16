@@ -65,7 +65,7 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 	}
 	p, c := auth.Principal, auth.Principal.Capability
 	if p.Class != capability.CredentialBearer || c.Subject.Kind != capability.SubjectAccount || c.Audience != capability.Controller || c.Team == "" || c.Unit != "" || c.Purpose != "" || c.Binding.Kind != capability.BindingNone || c.Data != nil {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "sign-in requires an unbound account access token without data scope"}
+		return apierr.Authorization(apierr.ReasonBinding, "sign-in requires an unbound account access token without data scope")
 	}
 	raw, session, err := s.store.CreateCapabilitySession(r.Context(), c.Prefix, s.sessionInitialTTL())
 	if err != nil {
@@ -88,14 +88,14 @@ func (s *Server) readLoginForm(r *http.Request) error {
 		return sessionUnavailable()
 	}
 	if !sameOriginRequest(r) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	r.Body = http.MaxBytesReader(nil, r.Body, maxFormBody)
 	if err := r.ParseForm(); err != nil {
 		return invalidEngineBody("invalid sign-in form")
 	}
 	if len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 || len(r.PostForm["csrf_token"]) != 1 || !validFormCSRF(r, s.cookiesSecure()) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+		return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	for key, values := range r.PostForm {
 		if key != "token" && key != "next" && key != "csrf_token" || len(values) != 1 {

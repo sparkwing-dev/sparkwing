@@ -26,6 +26,8 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+    if err:=tenant.TestOnlySeedRun(ctx,Run{ID:"r1",Pipeline:"p",Status:"running"});err!=nil{t.Fatal(err)}
+    if _,err:=seed.db.ExecContext(ctx,`INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,generation) VALUES ('default','r1','n1','pending','{}','{}',1)`);err!=nil{t.Fatal(err)}
 	if _, err := tenant.AcquireConcurrencySlot(ctx, AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: OnLimitQueue,

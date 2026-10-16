@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -57,7 +60,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 	for i, pipeline := range []string{"build", "deploy", "nightly"} {
 		runID := fmt.Sprintf("drill-run-%d", i)
 		finished := start.Add(time.Duration(i+1) * time.Minute)
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID:            runID,
 			Pipeline:      pipeline,
 			Status:        "success",
@@ -109,19 +112,24 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		}
 	}
 
-	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 5_000_000, Reference: "drill-invoice-1", CreatedBy: "operator"}); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 5_000_000, Reference: "drill-invoice-1", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant credits: %v", err)
 	}
-	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 2_500_000, Reference: "drill-invoice-2", CreatedBy: "operator"}); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 3_000_000, Reference: "drill-invoice-2", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant credits: %v", err)
 	}
 
-	if _, _, err := st.CreateToken("runner-1", store.TokenKindRunner, []string{"nodes.claim"}, 0, start); err != nil {
-		t.Fatalf("create runner token: %v", err)
+	secret := [32]byte{17}
+	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
+	spec := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Seed: seed, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "bootstrap:admin"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}}
+	if created, err := st.EnsureBootstrapCapability(ctx, spec); err != nil || !created {
+		t.Fatalf("seed admin: %v %v", created, err)
 	}
-	if _, _, err := st.CreateToken("operator", store.TokenKindUser, []string{"admin"}, 0, start); err != nil {
-		t.Fatalf("create admin token: %v", err)
+	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: seed[:16]}
+	if _, err := st.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &authority, Team: string(store.DefaultTeam), Repositories: []string{"example.com/acme/repo"}, RegistrationID: "runner:default:runner-1", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner-1"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}}); err != nil {
+		t.Fatalf("enroll runner: %v", err)
 	}
+
 }
 
 func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) installFingerprint {
@@ -179,7 +187,7 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		f.Grants = append(f.Grants, fmt.Sprintf("%s/%s/%d", g.Kind, g.Reference, g.AmountMicro))
 	}
 
-	rows, err := st.DB().QueryContext(ctx, `SELECT prefix, principal, kind FROM tokens`)
+	rows, err := st.DB().QueryContext(ctx, `SELECT prefix,subject_id,subject_kind FROM capabilities`)
 	if err != nil {
 		t.Fatal(err)
 	}

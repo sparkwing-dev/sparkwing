@@ -16,6 +16,7 @@ import (
 func cancellationFixture(t *testing.T, kind capability.UnitKind) (*Store, *Tenant, UnitDemand, RunTransition) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
+	fundUnitClaim(t, s)
 	rewriteSchemaExec(t, s.db, `DELETE FROM nodes`)
 	rewriteSchemaExec(t, s.db, `UPDATE runs SET status='pending'`)
 	rewriteSchemaExec(t, s.db, `UPDATE triggers SET unit_kind=?`, kind)

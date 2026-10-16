@@ -3,7 +3,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -15,26 +17,37 @@ import (
 )
 
 func TestReviewProductionExecutionBindings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Run("local run", func(t *testing.T) {
-		err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, nil, io.Discard,
-			localRunDependencies{resolve: resolveLocalRunRuntime, version: "v1.2.3"})
+		err := runLocalCommand(t.Context(), "ci", runFlags{}, nil, io.Discard,
+			localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
 		if err != nil {
 			t.Fatalf("public local run cannot reach a concrete owner: %v", err)
 		}
 	})
 	t.Run("local controller", func(t *testing.T) {
-		controller, err := openLocalController(t.Context(), t.TempDir())
-		if controller != nil {
-			t.Cleanup(func() {
-				if err := controller.Close(); err != nil {
-					t.Error(err)
-				}
-			})
+		services, err := resolveLocalServicesAt(t.Context(), t.TempDir())
+		if err != nil {
+			t.Fatal(err)
 		}
-		if err != nil || controller == nil {
-			t.Fatalf("production controller constructor has no concrete owner: %v", err)
+		ctx, cancel := context.WithCancelCause(t.Context())
+		done := make(chan error, 1)
+		go func() {
+			err := services.runtime.Run(ctx, services.options)
+			done <- err
+			cancel(err)
+		}()
+		status, err := services.runtime.AwaitReady(ctx)
+		cancel(context.Canceled)
+		joined := <-done
+		if err != nil {
+			t.Fatalf("production controller cannot establish readiness: %v", errors.Join(err, joined))
+		}
+		if !status.Running || joined != nil && !errors.Is(joined, context.Canceled) {
+			t.Fatalf("production controller did not join: %+v, %v", status, joined)
 		}
 	})
 	t.Run("local schedules", func(t *testing.T) {

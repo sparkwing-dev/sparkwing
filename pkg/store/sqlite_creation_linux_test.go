@@ -52,7 +52,7 @@ func TestOpenSQLiteWithoutHardLinks(t *testing.T) {
 	if err := os.Link(path, path+"-link"); !errors.Is(err, unix.EOPNOTSUPP) {
 		t.Fatalf("hard-link denial: %v", err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(t.Context(), store.Run{ID: "no-links", Pipeline: "sample", Status: "running"}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(t.Context(), store.Run{ID: "no-links", Pipeline: "sample", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.GetRun(t.Context(), "no-links"); err != nil {

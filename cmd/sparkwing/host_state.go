@@ -23,6 +23,7 @@ type cliHostState struct {
 	controller controllerwire.Controller
 	unit       string
 	executing  func() bool
+	finish     func(context.Context, store.FinishRunRequest) (store.Applied, error)
 }
 
 func newCLIHostState(controller controllerwire.Controller, private privateHostState, unit string, executing func() bool) (*cliHostState, error) {
@@ -49,7 +50,17 @@ func (s *cliHostState) AcceptPlan(ctx context.Context, request store.PlanAccepta
 }
 
 func (s *cliHostState) RecordStep(ctx context.Context, report store.StepReport) error {
-	return s.controller.RecordStep(ctx, report.Attempt.RunID, report.Attempt.NodeID, controllerwire.StepReportRequest{
+	controller := s.controller
+	if nodes, ok := s.privateHostState.(interface {
+		NodeController(context.Context, store.NodeRef) (controllerwire.Controller, error)
+	}); ok {
+		var err error
+		controller, err = nodes.NodeController(ctx, store.NodeRef{RunID: report.Attempt.RunID, NodeID: report.Attempt.NodeID})
+		if err != nil {
+			return err
+		}
+	}
+	return controller.RecordStep(ctx, report.Attempt.RunID, report.Attempt.NodeID, controllerwire.StepReportRequest{
 		StepID: report.StepID, State: report.State, SourceAttempt: report.Attempt.Attempt,
 		MaskedError: report.MaskedError, StartedAt: report.StartedAt, FinishedAt: report.FinishedAt,
 	})
@@ -57,9 +68,15 @@ func (s *cliHostState) RecordStep(ctx context.Context, report store.StepReport) 
 
 func (s *cliHostState) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
 	change := request.Transition
-	if request.Unit != change.Actor.Owner || change.Cause != store.RunFinish ||
+	if request.Unit != change.Actor.Owner ||
 		(change.To != store.RunSuccess && change.To != store.RunFailed && change.To != store.RunCancelled) {
 		return store.Applied{}, errors.New("host finish requires its owner and terminal verdict")
+	}
+	if s.finish != nil {
+		return s.finish(ctx, request)
+	}
+	if change.Cause != store.RunFinish {
+		return store.Applied{}, errors.New("host finish requires a supported terminal cause")
 	}
 	body := controllerwire.FinishRequest{Outcome: string(change.To), Reason: change.Reason}
 	if change.MaskedError != "" {

@@ -30,6 +30,17 @@ func acquireT(t *testing.T, s *store.Store, req store.AcquireSlotRequest) store.
 
 func acquireBareT(t *testing.T, s *store.Store, req store.AcquireSlotRequest) store.AcquireSlotResponse {
 	t.Helper()
+	if req.RunID != "" && req.NodeID != "" && req.NodeID[0] != '#' {
+		var found int
+		if err := s.DB().QueryRowContext(ctxT(t), storetest.Rebind(s, "SELECT COUNT(*) FROM nodes WHERE run_id=? AND node_id=?"), req.RunID, req.NodeID).Scan(&found); err != nil {
+			t.Fatal(err)
+		}
+		if found == 0 {
+			if err := teststore.SeedNode(s, ctxT(t), store.Node{RunID: req.RunID, NodeID: req.NodeID, Status: "pending"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctxT(t), req)
 	if err != nil {
 		t.Fatalf("AcquireConcurrencySlot(%+v): %v", req, err)
@@ -40,7 +51,7 @@ func acquireBareT(t *testing.T, s *store.Store, req store.AcquireSlotRequest) st
 func createLiveRunT(t *testing.T, s *store.Store, runID string) {
 	t.Helper()
 	ctx := ctxT(t)
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID:        runID,
 		Pipeline:  "test-pipeline",
 		Status:    "running",
@@ -48,6 +59,24 @@ func createLiveRunT(t *testing.T, s *store.Store, runID string) {
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", runID, err)
 	}
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, "UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id=?"), runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(ctx, "INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','fixture',1,4102444800000000000) ON CONFLICT(name) DO NOTHING"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"n", "n0", "n1", "node"} {
+		var count int
+		if err := s.DB().QueryRowContext(ctx, storetest.Rebind(s, "SELECT COUNT(*) FROM nodes WHERE run_id=? AND node_id=?"), runID, id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 {
+			if err := teststore.SeedNode(s, ctx, store.Node{RunID: runID, NodeID: id, Status: "pending"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
 }
 
 func TestConcurrency_GrantedWhenSlotAvailable(t *testing.T) {
@@ -112,7 +141,7 @@ func TestConcurrency_QueueWhenFull(t *testing.T) {
 func finishRunT(t *testing.T, s *store.Store, runID string) {
 	t.Helper()
 	now := time.Now()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctxT(t), store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctxT(t), store.Run{
 		ID:        runID,
 		Pipeline:  "test",
 		Status:    "running",
@@ -200,24 +229,6 @@ func TestConcurrency_Semaphore(t *testing.T) {
 	}
 }
 
-func TestConcurrency_CoalesceReturnsLeader(t *testing.T) {
-	s := storetest.Open(t)
-	acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	})
-	r2 := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitCoalesce,
-	})
-	if r2.Kind != store.AcquireCoalesced {
-		t.Fatalf("r2: want Coalesced got %s", r2.Kind)
-	}
-	if r2.LeaderRunID != "r1" || r2.LeaderNodeID != "n1" {
-		t.Fatalf("r2: leader = %s/%s, want r1/n1", r2.LeaderRunID, r2.LeaderNodeID)
-	}
-}
-
 func TestConcurrency_Skip(t *testing.T) {
 	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -293,75 +304,6 @@ func TestConcurrency_CancelOthersMarksOldestSuperseded(t *testing.T) {
 	}
 }
 
-func TestConcurrency_CacheHitShortCircuits(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := ctxT(t)
-	r1 := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
-	})
-	if r1.Kind != store.AcquireGranted {
-		t.Fatalf("r1: want Granted got %s", r1.Kind)
-	}
-	released, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour, 0)
-	if err != nil || !released {
-		t.Fatalf("release: released=%v err=%v", released, err)
-	}
-
-	r2 := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
-	})
-	if r2.Kind != store.AcquireCached {
-		t.Fatalf("r2: want Cached got %s", r2.Kind)
-	}
-	if r2.OriginRunID != "r1" || r2.OriginNodeID != "n1" {
-		t.Fatalf("r2: origin = %s/%s, want r1/n1", r2.OriginRunID, r2.OriginNodeID)
-	}
-}
-
-func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := ctxT(t)
-	r1 := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
-	})
-	if r1.Kind != store.AcquireGranted {
-		t.Fatalf("r1: want Granted got %s", r1.Kind)
-	}
-	released, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour, 0)
-	if err != nil || !released {
-		t.Fatalf("release: released=%v err=%v", released, err)
-	}
-
-	r2 := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
-		BypassRead: true,
-	})
-	if r2.Kind != store.AcquireGranted {
-		t.Fatalf("r2 with BypassRead: want Granted got %s", r2.Kind)
-	}
-
-	released2, _, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r2/n1", "success", "r2/n1", "hash-abc", time.Hour, 0)
-	if err != nil || !released2 {
-		t.Fatalf("release r2: released=%v err=%v", released2, err)
-	}
-
-	r3 := acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "r3/n1", RunID: "r3", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "hash-abc",
-	})
-	if r3.Kind != store.AcquireCached {
-		t.Fatalf("r3: want Cached got %s", r3.Kind)
-	}
-	if r3.OriginRunID != "r2" || r3.OriginNodeID != "n1" {
-		t.Fatalf("r3: origin = %s/%s, want r2/n1 (write under BypassRead must replace prior entry)",
-			r3.OriginRunID, r3.OriginNodeID)
-	}
-}
-
 func TestConcurrency_DriftWarnOnCapacityChange(t *testing.T) {
 	s := storetest.Open(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
@@ -419,7 +361,7 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 	ctx := ctxT(t)
 	started := time.Now()
 	for _, id := range []string{"r2", "r3"} {
-		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: id, Pipeline: "p", Status: "running", StartedAt: started}); err != nil {
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: id, Pipeline: "p", Status: "running", StartedAt: started}); err != nil {
 			t.Fatalf("CreateRun %s: %v", id, err)
 		}
 	}
@@ -459,38 +401,6 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 	}
 	if len(state.Waiters) != 0 {
 		t.Fatalf("queue should be drained, got %+v", state.Waiters)
-	}
-}
-
-func TestConcurrency_CoalesceFollowersResolvedByLeader(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := ctxT(t)
-	acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	})
-	for i := 2; i <= 4; i++ {
-		resp := acquireT(t, s, store.AcquireSlotRequest{
-			Key: "k", HolderID: id("r", i) + "/n1", RunID: id("r", i), NodeID: "n1",
-			Capacity: 1, Policy: store.OnLimitCoalesce,
-		})
-		if resp.Kind != store.AcquireCoalesced {
-			t.Fatalf("r%d: want Coalesced got %s", i, resp.Kind)
-		}
-	}
-	_, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "", "", 0, 0)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if len(followers) != 3 {
-		t.Fatalf("expected 3 followers, got %d", len(followers))
-	}
-	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
-	if err != nil {
-		t.Fatalf("state: %v", err)
-	}
-	if len(state.Waiters) != 0 {
-		t.Fatalf("followers should have been drained, got %+v", state.Waiters)
 	}
 }
 

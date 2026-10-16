@@ -20,7 +20,7 @@ func TestReopeningStorePreservesLiveSQLiteFiles(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(t.Context(), store.Run{ID: "other-process", Pipeline: "sample", Status: "running"}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(t.Context(), store.Run{ID: "other-process", Pipeline: "sample", Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.Close(); err != nil {

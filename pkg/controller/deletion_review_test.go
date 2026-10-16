@@ -10,9 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Another replica may still accept a revoked token from its cache, so the
-// purge waits out at least twice that cache's lifetime.
-func TestTeamPurgeWaitsOutTheTokenCache(t *testing.T) {
+func TestTeamPurgeWaitsForDeletionDelay(t *testing.T) {
 	f := newDeletionFixture(t)
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")

@@ -25,7 +25,8 @@ const PinnedBinaryName = "pipeline"
 // Proof is what compiling a repository's pipelines produced: the binary that
 // answers for the pipeline.
 type Proof struct {
-	Binary string
+	Binary  string
+	Release func() error
 }
 
 // Prover compiles a repository's pipelines and reports the binary that carries
@@ -97,6 +98,10 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, opts ArmOptions) (Ar
 	if err != nil {
 		return ArmReport{}, err
 	}
+	return s.armDeclared(ctx, root, declared, opts, true, nil)
+}
+
+func (s *Service) armDeclared(ctx context.Context, root string, declared []Declared, opts ArmOptions, replace bool, beforeArm func(Declared) error) (_ ArmReport, err error) {
 	selected, err := selectDeclared(declared, opts.Only, root)
 	if err != nil {
 		return ArmReport{}, err
@@ -116,6 +121,7 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, opts ArmOptions) (Ar
 	if err != nil {
 		return ArmReport{}, err
 	}
+	defer func() { err = errors.Join(err, releaseProofs(proofs)) }()
 	head := ""
 	if !opts.Follow && len(proofs) > 0 {
 		head = readCheckout(ctx, root).head
@@ -133,6 +139,11 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, opts ArmOptions) (Ar
 		row, rerr := scheduleRow(d, lock, s.ArmedBy, now)
 		if rerr != nil {
 			return report, fmt.Errorf("%s: %w", d.DisplayName(), rerr)
+		}
+		if beforeArm != nil {
+			if err := beforeArm(d); err != nil {
+				return report, err
+			}
 		}
 		hadPin := s.pinnedBefore(ctx, d.ID())
 		stored, created, aerr := s.Schedules.ArmCronSchedule(ctx, row, now)
@@ -160,8 +171,10 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, opts ArmOptions) (Ar
 		report.Schedules = append(report.Schedules, stored)
 	}
 
-	if err := s.withdrawUndeclared(ctx, root, declared, now, &report); err != nil {
-		return report, err
+	if replace {
+		if err := s.withdrawUndeclared(ctx, root, declared, now, &report); err != nil {
+			return report, err
+		}
 	}
 	sort.Strings(report.Withdrawals)
 	return report, nil
@@ -217,6 +230,10 @@ func (s *Service) proveAll(ctx context.Context, root string, locals []Declared, 
 		}
 		proof, err := prove(ctx, root, d.Pipeline)
 		if err != nil {
+			if proof.Release != nil {
+				err = errors.Join(err, proof.Release())
+			}
+			err = errors.Join(err, releaseProofs(proofs))
 			return nil, fmt.Errorf("%s does not compile, so nothing in %s was armed: %w",
 				d.Pipeline, root, err)
 		}
@@ -449,7 +466,7 @@ func (s *Service) DisarmRepo(ctx context.Context, repoRoot string) (int, error) 
 // through prove, copies that binary under [Service.PinRoot], and records the
 // checkout's HEAD. The schedule then runs that binary until it is re-pinned or
 // unlocked, whatever the checkout does afterward.
-func (s *Service) Lock(ctx context.Context, id string, prove Prover) (store.CronSchedule, error) {
+func (s *Service) Lock(ctx context.Context, id string, prove Prover) (_ store.CronSchedule, err error) {
 	sched, err := s.Schedules.GetCronSchedule(ctx, id)
 	if err != nil {
 		return store.CronSchedule{}, err
@@ -459,6 +476,9 @@ func (s *Service) Lock(ctx context.Context, id string, prove Prover) (store.Cron
 			DisplayName(sched))
 	}
 	proof, err := prove(ctx, sched.RepoPath, sched.Pipeline)
+	if proof.Release != nil {
+		defer func() { err = errors.Join(err, proof.Release()) }()
+	}
 	if err != nil {
 		return store.CronSchedule{}, fmt.Errorf("%s: %w", DisplayName(sched), err)
 	}
@@ -638,4 +658,13 @@ func (s *Service) declaredSchedules(root string) ([]Declared, error) {
 		declared[i].Team = s.team()
 	}
 	return declared, err
+}
+
+func releaseProofs(proofs map[string]Proof) (err error) {
+	for _, proof := range proofs {
+		if proof.Release != nil {
+			err = errors.Join(err, proof.Release())
+		}
+	}
+	return err
 }

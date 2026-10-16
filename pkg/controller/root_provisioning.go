@@ -95,7 +95,7 @@ func (s *Server) handleIssueServiceCredential(w http.ResponseWriter, r *http.Req
 		return err
 	}
 	return s.provisionRoot(w, r, capability.ProvisionSpec{
-		Kind: capability.ProvisionService, Authority: &a.Principal.Authority, RegistrationID: "service:" + request.Name,
+		Kind: capability.ProvisionService, ConsoleProof: capability.ProofForConsole(a.Principal), Authority: &a.Principal.Authority, RegistrationID: "service:" + request.Name,
 		Subject: capability.Subject{Kind: capability.SubjectService, ID: request.Name},
 		Grants:  request.Grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: expires,
 	})

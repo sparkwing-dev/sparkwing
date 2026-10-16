@@ -202,7 +202,7 @@ func TestEngineReportingAuthorities(t *testing.T) {
 				if actor.Kind != kind || actor.Generation != generation || actor.Authority != b.snapshot.Authorities[0].Principal.Authority {
 					t.Fatalf("actor = %+v", actor)
 				}
-				if authority == "owner" && (actor.Owner.Name != "trigger" || actor.Owner.Generation != 4 || actor.Owner.RunID != "run") {
+				if authority == "owner" && actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "runner", Generation: 4}) {
 					t.Fatalf("owner = %+v", actor.Owner)
 				}
 			})

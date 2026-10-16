@@ -124,6 +124,10 @@ func (s *Server) cronService() *crons.Service {
 // armed a schedule owns the runs it fires, so the per-principal guards measure
 // it rather than leaving cron launches unowned.
 func (s *Server) cronServiceFor(tenant *store.Tenant, principal string) *crons.Service {
+	if s.localSchedules != nil && tenant != nil && tenant.Team() == store.DefaultTeam {
+		return s.localSchedules
+	}
+
 	svc := &crons.Service{
 		Store:    s.store,
 		Launcher: cronLauncher{server: s},

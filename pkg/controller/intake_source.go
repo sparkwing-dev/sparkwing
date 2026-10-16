@@ -57,7 +57,7 @@ func (s *Server) resolveIntakeSource(ctx context.Context, team string, request *
 		return invalidEngineBody("source repository identity is invalid")
 	}
 	if key := request.Git.Repository.Key; key != "" && key != canonical.Key {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "source does not match repository identity"}
+		return apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "source does not match repository identity")
 	}
 	request.Git.Repository = canonical
 	return nil
@@ -74,7 +74,7 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		}
 		_, repo, err := s.resolveGitHubAppRepository(ctx, tenant, slug)
 		if errors.Is(err, store.ErrNotFound) {
-			return 0, &apierr.Error{Code: apierr.Forbidden, Message: "GitHub installation does not cover the source repository"}
+			return 0, apierr.Authorization(apierr.ReasonRepositoryUnauthorized, "GitHub installation does not cover the source repository")
 		}
 		if err != nil {
 			return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity could not be verified"}

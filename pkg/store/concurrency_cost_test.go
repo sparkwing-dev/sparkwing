@@ -295,7 +295,7 @@ func TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders(t *testing.T)
 func createRunningRunT(t *testing.T, s *store.Store, runID string) {
 	t.Helper()
 	now := time.Now()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctxT(t), store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctxT(t), store.Run{
 		ID:        runID,
 		Pipeline:  "test",
 		Status:    "running",

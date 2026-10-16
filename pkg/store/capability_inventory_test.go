@@ -461,7 +461,7 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 			tenant := &Tenant{s: s, team: "a"}
 			expires := new(s.now().Add(2 * time.Hour))
 			if problem == "parent_expiry" {
-				old, err = s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}, Audience: capability.Controller, Grants: old.Capability.Grants, Binding: old.Capability.Binding, ExpiresAt: old.Capability.ExpiresAt})
+				old, err = s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: old.Capability.Prefix}, Audience: capability.Controller, Grants: old.Capability.Grants, Binding: old.Capability.Binding, ExpiresAt: old.Capability.ExpiresAt, Repositories: old.Capability.Repositories})
 				if err != nil {
 					t.Fatal(err)
 				}

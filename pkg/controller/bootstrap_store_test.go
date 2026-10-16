@@ -23,7 +23,7 @@ func TestBootstrapSeedStoreOnceProperty(t *testing.T) {
 		}
 		raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
 		created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, raw)
-		if i == 0 && (err != nil || !created) || i > 0 && (err == nil || created) {
+		if (err != nil) != (i != 0) || created != (i == 0) {
 			t.Fatalf("bootstrap %d: created=%v err=%v", i, created, err)
 		}
 		if i != 0 {

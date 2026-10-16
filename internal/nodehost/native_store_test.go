@@ -105,7 +105,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		binding.Attempt = input.Attempt
 		grant, err := processes.Delegate(ctx, lookup, capability.DelegateSpec{
 			Parent: principal.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport},
-			Binding: binding, ExpiresAt: principal.Capability.ExpiresAt,
+			Binding: binding, Repositories: principal.Capability.Repositories, ExpiresAt: principal.Capability.ExpiresAt,
 		}, ProcessServices{RunID: input.Accepted.RunID, Job: input.Accepted.Plan.Jobs[0]})
 		if err != nil {
 			return grant, err

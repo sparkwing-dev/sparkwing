@@ -3029,3 +3029,54 @@ The transaction owns current authority, stable run/number resolution, rank and
 position selection, exact retry identity and unchanged holder leases. C1 has
 not declared persisted integer priority or an ordering transaction. The HTTP
 property uses a fake for that boundary and claims no persisted ranking evidence.
+
+## Native data binding and persisted result proofs
+
+Every data endpoint decodes its operation and selectors before authorization.
+The authenticated data scope supplies the run, job, attempt and generation.
+Commit binding checks the selected upload ticket against its current uploader.
+Has-many binding checks live read authority before the handler filters each
+requested digest through the read set. Account data opt-ins retain only the
+read or publication grant allowed by their current membership role.
+
+`Authorized.Result` carries the exact HTTP-body SHA-256, authenticated actor,
+route, resource and fence into `Actor.Result`. Node and run transitions persist
+that proof in their existing terminal `state_actor` value. Plan acceptance
+persists its body digest in the issuing capability's existing `result_digest`
+column in the acceptance transaction. These records have separate owners, so
+finishing a run retains its accepted plan proof. Authentication reads the proof
+in the same snapshot as current ancestry and binding state. A terminal replay
+requires the same actor, route, resource, generation, attempt and body digest.
+
+The native controller tests cover all nine data endpoints, including a signed
+filesystem upload, committed receipt, result record and download. Native result
+tests cover node completion, plan acceptance and run finish through the unchanged
+server constructor. Generated cases reject changed result bytes, actor and fence
+proofs, request authority hints and reads after membership removal.
+
+
+## Shared credential authority owners
+
+The bootstrap setup transaction locks the seed gate before resolving its actor.
+Issuing the first non-bootstrap deployment administrator revokes the seed and
+ends all descendant authority through its ancestry generation in that transaction.
+A still-live identical seed can survive an unfinished setup restart. A consumed
+or different seed is refused as already used.
+
+Deployment authority uses the same predicate in root issuance, readiness and
+route policy. Console management carries `ConsoleProof` naming its direct
+session. Native transactions resolve it again and check the configured account
+and session lifetime. Inventory, rotation and revocation share `OwnsToken`.
+Native ProvisionPolicy, CapabilityManager and OIDCReader implementations are
+composed by the production store and controller constructors and checked at compile time.
+
+`Repositories == nil` is unrestricted. A nonnil empty list authorizes nothing.
+RepositoryPattern and RepositoryIdentity distinguish path patterns from canonical
+keys. RepositoryAllowed and RepositoryScopeNarrows own matching and narrowing.
+The award boundary and claim admission both intersect every ancestor's scope.
+Delegation and owner expansion preserve that distinction.
+
+Pod bootstraps require the bootstrap credential class before any ordinary route
+alternative. Only source acquisition and the one-time exchange declare that
+class. Signed filesystem errors use the canonical API envelope. An unsupported
+method returns method_not_allowed and Allow before signature validation.

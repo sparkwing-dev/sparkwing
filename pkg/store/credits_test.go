@@ -23,7 +23,7 @@ var unpinnedNodeRateMicro = store.DefaultCreditRateTable(store.DefaultCreditRate
 func seedClaimedNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -122,7 +122,7 @@ func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testi
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-never-started", "build")
 	granted := int64(100 * store.MicroCreditsPerCent)
-	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: granted, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: granted, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	// safety: a dispatcher's claim whose pod never renewed it is a machine that
@@ -165,13 +165,13 @@ func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	pool := meteredClaimant(t, s, "runner:shared-pool")
-	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_attribution", CreatedBy: "admin"}); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_attribution", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	create := func(principal, runID string) {
 		t.Helper()
 		created := store.WithCreatingPrincipal(ctx, principal)
-		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(created, store.Run{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(created, store.Run{
 			ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)

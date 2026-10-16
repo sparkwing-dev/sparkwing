@@ -16,6 +16,9 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"revokeSetupAuthorityTx":     "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
+	"launcherReservationAwardTx": "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
+
 	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
 	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
 	"revokeSelectedCapabilitiesTx":               "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",

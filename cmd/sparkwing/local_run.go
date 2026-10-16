@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
@@ -50,27 +51,25 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	if err != nil {
 		return localRunRuntime{}, err
 	}
-	controller, cleanup, err := resolveEngineController(ctx, "")
+	transport, cleanup, err := controllerOptions(ctx, "")
 	if err != nil {
+		return localRunRuntime{}, err
+	}
+	controller, err := client.NewEngineClient(transport)
+	if err != nil {
+		cleanup()
 		return localRunRuntime{}, err
 	}
 	return localRunRuntime{
 		controller: controller,
 		close:      func() error { cleanup(); return nil },
 		prepare: func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
-			if !flags.detached {
-				return localRunPreparation{}, localForegroundBindingMissing()
-			}
 			return prepareNativeLocalRun(ctx, home, directory, pipeline, seal, captured, snapshots)
 		},
-		bind: func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error) {
-			return hereHostSession{}, localForegroundBindingMissing()
+		bind: func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
+			return bindLocalRunHost(ctx, home, transport, award)
 		},
 	}, nil
-}
-
-func localForegroundBindingMissing() error {
-	return &apierr.Error{Code: apierr.Unavailable, Message: "local foreground hosting requires the shared host's remote state binding"}
 }
 
 func localSourceOptions(home string, captured []string, masker *secrets.Masker) (source.Options, error) {
@@ -82,9 +81,11 @@ func localSourceOptions(home string, captured []string, masker *secrets.Masker) 
 	if err != nil {
 		return source.Options{}, err
 	}
-	return source.Options{Engines: engines, SDK: engine.GoSDK,
+	return source.Options{
+		Engines: engines, SDK: engine.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: true, Captured: captured, Masker: masker}}, nil
+		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: true, Captured: captured, Masker: masker},
+	}, nil
 }
 
 func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, seal runspec.EnvSnapshot, captured []string, snapshots *nodehost.FileEnvironmentSnapshots) (_ localRunPreparation, err error) {
@@ -129,21 +130,26 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		return localRunPreparation{}, err
 	}
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base, Snapshots: snapshots}}
-	planner := nodehost.SDKPlanner{Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: masker,
+	planner := nodehost.SDKPlanner{
+		Start: processes.StartPlanning, EnsureEngine: options.Engines.Ensure, Masker: masker,
 		Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			if err := context.Cause(ctx); err != nil {
 				return err
 			}
 			_, err := fmt.Fprintln(os.Stderr, frame.Message)
 			return err
-		}}
-	prepared, err := planner.Prepare(ctx, nodehost.PlanningProcessInput{Entry: entry, Entrypoint: identity.Entrypoint,
+		},
+	}
+	prepared, err := planner.Prepare(ctx, nodehost.PlanningProcessInput{
+		Entry: entry, Entrypoint: identity.Entrypoint,
 		Environment: seal, Args: map[string]string{}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
-		Run: nodeproto.RunContext{RunID: rand.Text(), Pipeline: pipeline}}, nodehost.PlanningInput{})
+		Run: nodeproto.RunContext{RunID: rand.Text(), Pipeline: pipeline},
+	}, nodehost.PlanningInput{})
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	return localRunPreparation{identity: identity, described: []nodeproto.PipelineDescription{prepared.Description},
+	return localRunPreparation{
+		identity: identity, described: []nodeproto.PipelineDescription{prepared.Description},
 		git:         runspec.Git{Repository: repository, SHA: entry.SHA},
 		source:      runspec.Source{Ref: entry.SHA, Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: filepath.Base(directory)}},
 		environment: seal, machine: machine, machineFile: configFile,

@@ -34,12 +34,24 @@ func (a *authenticator) Authenticate(ctx context.Context, presentation Presentat
 	if err != nil {
 		return Authenticated{}, err
 	}
-	principal, err := ValidateAuthority(snapshot.Authorities, snapshot.Now)
+	auth, err := AuthenticateSnapshot(snapshot, route, evidence)
 	if err != nil {
 		return Authenticated{}, err
 	}
-	if !matchesLookup(principal, lookup) {
+	if !matchesLookup(auth.Principal, lookup) {
 		return Authenticated{}, unauthenticated()
+	}
+	return auth, nil
+}
+
+// AuthenticateSnapshot validates persisted ancestry and route liveness under its store clock.
+func AuthenticateSnapshot(snapshot AuthenticationSnapshot, route RoutePolicy, evidence RequestEvidence) (Authenticated, error) {
+	if validateRoutePolicy(route) != nil || route.Authentication != AuthCapability {
+		return Authenticated{}, policyFailure()
+	}
+	principal, err := ValidateAuthority(snapshot.Authorities, snapshot.Now)
+	if err != nil {
+		return Authenticated{}, err
 	}
 	principal = currentControllerAttempt(principal, snapshot.Binding)
 	auth := Authenticated{Principal: principal, Method: route.Method, Pattern: route.Path}

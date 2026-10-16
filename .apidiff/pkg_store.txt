@@ -83,6 +83,8 @@ type AcquireSlotResponse struct {
 }
 func ActingKind(kind, principal string) string
 type Actor struct {
+	Result           *capability.RecordedResult
+	ConsoleProof     *capability.ConsoleProof
 	Authority        capability.AuthorityRef
 	Kind             ActorKind
 	CapabilityPrefix string
@@ -943,6 +945,7 @@ type EventLimits struct {
 	MaxEventsPerRun  int64
 }
 const Execute ReconcileKind = "execute"
+type ExecutionActivity struct{ Runs, QueuedTriggers, HeldLeases int }
 type ExecutionAttempt struct {
 	RunID             string
 	NodeID            string
@@ -1524,6 +1527,7 @@ func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
 func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (o *Operator) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
+func (o *Operator) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (bool, error)
 func (o *Operator) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error)
 func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonLease, limit int) (int64, error)
@@ -2467,7 +2471,6 @@ func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPref
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
-func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
 func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error
@@ -2596,6 +2599,7 @@ func (t *Tenant) DeletePoolAccess(ctx context.Context, actor Actor, pool, id str
 func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (bool, error)
 func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error)
 func (t *Tenant) EgressUsage(ctx context.Context, period string) (EgressUsage, error)
+func (t *Tenant) ExecutionActivity(ctx context.Context) (ExecutionActivity, error)
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey string) (*Trigger, error)
 func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) (Applied, error)
@@ -2671,6 +2675,7 @@ func (t *Tenant) ReadDataBlob(ctx context.Context, authority blob.Authority, dig
 func (t *Tenant) ReadFailure(ctx context.Context, source NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error)
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error)
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
+func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authorized) (capability.OIDCFacts, error)
 func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string) (RunSnapshot, error)
 func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[string][]string, error)
 func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error)
@@ -2997,8 +3002,8 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error)
 func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)
 func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error)
+func (nativeProvisionPolicy) AuthorizeProvision(ctx context.Context, resolver capability.AuthorityResolver, spec capability.ProvisionSpec) error
 func (values planSecretValues) ContainsSecret(identifier string) bool
-func (sharedDelegationContracts) ValidateDelegation(parent capability.Principal, child capability.DelegateSpec, now time.Time) error
 func (sharedIntakeContracts) CarryRetry(input runspec.RetryInput) (runspec.RetrySnapshot, error)
 func (sharedIntakeContracts) ResolvePlan(input settings.PlanInputs) (runspec.ExecutionSettings, error)
 func (sharedIntakeContracts) SealRequest(request runspec.Request, facts runspec.IntakeFacts) (runspec.SealedRequest, error)

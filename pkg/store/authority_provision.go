@@ -12,6 +12,11 @@ import (
 )
 
 func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) (capability.Capability, error) {
+	if spec.Kind == capability.ProvisionService {
+		if err := advisoryLockTx(ctx, tx, bootstrapUsedKey); err != nil {
+			return capability.Capability{}, err
+		}
+	}
 	if err := capability.ValidateProvisionSeed(spec); err != nil {
 		return capability.Capability{}, err
 	}
@@ -71,13 +76,13 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	var p capability.Principal
 	if spec.Authority != nil {
 		var err error
-		p, err = tx.ResolveAuthority(ctx, *spec.Authority)
+		p, err = resolveProvisionAuthorityTx(ctx, tx, *spec.Authority, spec.ConsoleProof)
 		if err != nil {
 			return err
 		}
 	}
 	c := p.Capability
-	deployment := spec.Authority != nil && c.Team == "" && c.Binding.Kind == capability.BindingNone && c.Audience == capability.Controller && (c.Subject.Kind == capability.SubjectOperator || c.Subject.Kind == capability.SubjectService) && slices.Contains(c.Grants, capability.OperatorTokens)
+	deployment := spec.Authority != nil && (capability.DeploymentAuthority(p) && slices.Contains(c.Grants, capability.OperatorTokens) || p.Class == capability.CredentialConsole && slices.Contains(c.Grants, capability.OperatorConsole))
 	if spec.Authority != nil && !deployment && c.Team != spec.Team {
 		return bindingRefusal()
 	}
@@ -185,7 +190,7 @@ func recordProvisionCreatorTx(ctx context.Context, tx *storeTx, spec capability.
 	if spec.Authority == nil {
 		return nil
 	}
-	p, err := tx.ResolveAuthority(ctx, *spec.Authority)
+	p, err := resolveProvisionAuthorityTx(ctx, tx, *spec.Authority, spec.ConsoleProof)
 	if err != nil {
 		return err
 	}

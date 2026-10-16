@@ -13,7 +13,7 @@ import (
 
 func pendingTrigger(t *testing.T, st *store.Store, id string) {
 	t.Helper()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(context.Background(), store.Trigger{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedTrigger(context.Background(), store.Trigger{
 		ID: id, Pipeline: "build", Status: "pending", CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

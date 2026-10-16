@@ -31,14 +31,14 @@ func TestTenantListPipelines_OneTeamsPipelinesNewestFirst(t *testing.T) {
 		{ID: "run-build-2", Pipeline: "build", Status: "failed", StartedAt: base.Add(10 * time.Minute), FinishedAt: ptrTime(base.Add(11 * time.Minute))},
 		{ID: "run-lint-1", Pipeline: "lint", Status: "success", StartedAt: base.Add(5 * time.Minute), FinishedAt: ptrTime(base.Add(6 * time.Minute))},
 	} {
-		if err := alpha.CreateRun(ctx, r); err != nil {
+		if err := alpha.TestOnlySeedRun(ctx, r); err != nil {
 			t.Fatalf("CreateRun %s: %v", r.ID, err)
 		}
 	}
-	if err := alpha.CreateTrigger(ctx, store.Trigger{ID: "trg-deploy", Pipeline: "deploy", CreatedAt: base.Add(20 * time.Minute)}); err != nil {
+	if err := alpha.TestOnlySeedTrigger(ctx, store.Trigger{ID: "trg-deploy", Pipeline: "deploy", CreatedAt: base.Add(20 * time.Minute)}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	if err := bravo.CreateRun(ctx, store.Run{ID: "run-bravo", Pipeline: "bravo-only", Status: "success", StartedAt: base.Add(30 * time.Minute)}); err != nil {
+	if err := bravo.TestOnlySeedRun(ctx, store.Run{ID: "run-bravo", Pipeline: "bravo-only", Status: "success", StartedAt: base.Add(30 * time.Minute)}); err != nil {
 		t.Fatalf("CreateRun bravo: %v", err)
 	}
 

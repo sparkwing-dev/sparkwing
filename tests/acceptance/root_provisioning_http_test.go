@@ -3,6 +3,7 @@ package acceptance_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -293,12 +294,13 @@ func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 		t.Fatalf("root=%+v err=%v", p, err)
 	}
 	for _, status := range []int{403, 201} {
-		f.store.SetProvisionPolicy(actionsProvisionPolicy(func(spec capability.ProvisionSpec) error {
-			if status == 403 {
-				return &apierr.Error{Code: apierr.Forbidden, Message: "registration refused"}
-			}
-			return nil
-		}))
+		role := "reader"
+		if status == 201 {
+			role = "owner"
+		}
+		if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role=?`, role); err != nil {
+			t.Fatal(err)
+		}
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, f.request("POST", "/api/v1/runners", `{"name":"second","repos":["github.com/acme/*"]}`))
 		if status == 403 {
@@ -337,18 +339,15 @@ func TestRootProvisioningHTTPMethodsAndRetry(t *testing.T) {
 
 func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
 	f := newSessionFlow(t)
-	f.store.SetProvisionPolicy(actionsProvisionPolicy(func(capability.ProvisionSpec) error { return nil }))
-	root, err := f.store.ProvisionCapability(t.Context(), capability.ProvisionSpec{
-		Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
-		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens},
-	})
-	if err != nil {
-		t.Fatal(err)
+	f.server.WithCloudDeployment(true)
+	secret := sha256.Sum256([]byte(t.Name()))
+	seed := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
+	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), f.store, seed); err != nil || !created {
+		t.Fatalf("bootstrap: %v %v", created, err)
 	}
-	f.store.SetProvisionPolicy(nil)
 	h := f.server.Handler()
 	r := httptest.NewRequest("POST", "/api/v1/operator/tokens", strings.NewReader(`{"name":"launcher","grants":["claims.launch"]}`))
-	r.Header.Set("Authorization", "Bearer "+root.Raw)
+	r.Header.Set("Authorization", "Bearer "+seed)
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -360,7 +359,7 @@ func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
 	if err != nil || p.Capability.Prefix != got.Prefix || p.Capability.Parent != nil || p.Capability.Team != "" || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectService, ID: "launcher"}) || !reflect.DeepEqual(p.Capability.Grants, []capability.Grant{capability.ClaimsLaunch}) {
 		t.Fatalf("root=%+v err=%v", p, err)
 	}
-	if strings.Contains(f.logs.String(), got.Capability) || strings.Contains(f.logs.String(), root.Raw) {
+	if strings.Contains(f.logs.String(), got.Capability) || strings.Contains(f.logs.String(), seed) {
 		t.Fatal("service bearer entered audit")
 	}
 }

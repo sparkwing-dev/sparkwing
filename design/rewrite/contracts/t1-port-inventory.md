@@ -2570,3 +2570,22 @@ bootstrap evidence across expiry, exchange, replacement and delegated launcher
 presentations. `TestStoreLauncherReservationW8` and
 `FuzzStoreLauncherReservationFenceW8` run the actual store/controller/launcher
 path with a fake Kubernetes boundary. They add no native Kubernetes claim.
+
+## W1 store fixture and measurement continuation
+
+Reporting fixtures now seed sealed request columns and current owner projections.
+They do not grant execution authority. Bootstrap exchange uses ClaimUnit instead
+of awarding onto an already-running row. Paid funding fixtures settle a committed
+provider checkout. The shared storetest opener configures its session cipher and
+test payment mode. Cloud lifecycle fixtures carry funds, and delegated fixtures
+retain repository scope.
+
+Removed tests target deleted invocation columns, token-table minting, independent
+run/trigger IDs, raw run upserts, the separate sweep claim, the trigger-filter scan
+horizon, concurrency_cache and on_limit=coalesce. Current record/materialization
+and fenced capacity tests retain those execution invariants. Retained reporting,
+queue, capacity cost and cancellation tests continue against current columns.
+
+The new generated properties check bucket-measurement successor fencing and
+execution-activity tenant isolation against the store clock. Existing random
+capacity tests now generate retained policies and seed live owner/job rows.

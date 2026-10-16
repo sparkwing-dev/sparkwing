@@ -279,7 +279,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	if _, err := st.AcceptInvitation(ctx, leaver.Account.ID, inv.ID, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := shared.CreateTriggerWithRun(ctx,
+	if err := shared.TestOnlySeedTriggerWithRun(ctx,
 		store.Trigger{ID: "run-l", Pipeline: "build", CreatedAt: now},
 		store.Run{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)

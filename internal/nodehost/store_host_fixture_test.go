@@ -151,14 +151,14 @@ func newStoreOwnerFixture(t *testing.T, database *store.Store, request runspec.R
 	root := "host-fixture-root"
 	if _, err := database.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}); err != nil {
 		now, until := time.Now(), time.Now().Add(time.Hour)
-		credential := capability.Capability{Prefix: root, Digest: sha256.Sum256([]byte(root)), Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"}, Audience: capability.Controller, Grants: []capability.Grant{capability.RunsWrite, capability.TriggersClaim, capability.NodesClaim, capability.ApprovalsWrite, capability.RunsControl}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, IssuedAt: now, ExpiresAt: &until, Repositories: []string{}, ReservedPools: []string{}}
+		credential := capability.Capability{Prefix: root, Digest: sha256.Sum256([]byte(root)), Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"}, Audience: capability.Controller, Grants: []capability.Grant{capability.RunsWrite, capability.TriggersClaim, capability.NodesClaim, capability.ApprovalsWrite, capability.RunsControl}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, IssuedAt: now, ExpiresAt: &until, Repositories: nil, ReservedPools: []string{}}
 		record := store.CapabilityRecord{Version: 1, Value: credential}
 		if err := record.Validate(); err != nil {
 			t.Fatal(err)
 		}
 		body, _ := json.Marshal(record)
 		grants, _ := json.Marshal(credential.Grants)
-		_, err = database.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,created_at,created_by,expires_at,repo_scope) VALUES (?,?,?,'machine','host','controller',?,'delegate',1,?,'none','[]',?,'fixture',?,'[]')`, root, hex.EncodeToString(credential.Digest[:]), store.DefaultTeam, grants, body, now.UnixNano(), until.UnixNano())
+		_, err = database.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,created_at,created_by,expires_at,repo_scope) VALUES (?,?,?,'machine','host','controller',?,'delegate',1,?,'none','[]',?,'fixture',?,'null')`, root, hex.EncodeToString(credential.Digest[:]), store.DefaultTeam, grants, body, now.UnixNano(), until.UnixNano())
 		if err != nil {
 			t.Fatal(err)
 		}

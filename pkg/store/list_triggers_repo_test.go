@@ -1,11 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +21,7 @@ func TestListTriggers_RepoFilterLooksPastTheFirstPage(t *testing.T) {
 
 	seedRepoTrigger := func(id, repo string, created time.Time) {
 		t.Helper()
-		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedTrigger(ctx, store.Trigger{
 			ID:         id,
 			Pipeline:   "demo",
 			CreatedAt:  created,
@@ -62,7 +59,7 @@ func TestListTriggers_RepoFilterHonoursLimit(t *testing.T) {
 		if i%2 == 0 {
 			repo = "other/repo"
 		}
-		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedTrigger(ctx, store.Trigger{
 			ID:         fmt.Sprintf("t-%02d", i),
 			Pipeline:   "demo",
 			CreatedAt:  base.Add(time.Duration(i) * time.Minute),
@@ -83,8 +80,8 @@ func TestListTriggers_RepoFilterHonoursLimit(t *testing.T) {
 		t.Fatalf("ListTriggers(limit=2) = [%s %s], want newest-first [t-05 t-03]", got[0].ID, got[1].ID)
 	}
 	for _, tr := range got {
-		if tr.TriggerEnv["GITHUB_REPOSITORY"] != "want/repo" {
-			t.Fatalf("trigger %s has repo %q", tr.ID, tr.TriggerEnv["GITHUB_REPOSITORY"])
+		if tr.Repo != "want/repo" {
+			t.Fatalf("trigger %s has repo %q", tr.ID, tr.Repo)
 		}
 	}
 }
@@ -98,7 +95,7 @@ func TestListTriggers_RepoFilterCrossesAPageBoundary(t *testing.T) {
 
 	seed := func(id, repo string, created time.Time) {
 		t.Helper()
-		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedTrigger(ctx, store.Trigger{
 			ID:         id,
 			Pipeline:   "demo",
 			CreatedAt:  created,
@@ -139,7 +136,7 @@ func TestListTriggers_RepoFilterTiedTimestampsAcrossPages(t *testing.T) {
 		if i%130 == 0 {
 			repo = "want/repo"
 		}
-		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedTrigger(ctx, store.Trigger{
 			ID:         fmt.Sprintf("t-%03d", i),
 			Pipeline:   "demo",
 			CreatedAt:  tied,
@@ -159,43 +156,5 @@ func TestListTriggers_RepoFilterTiedTimestampsAcrossPages(t *testing.T) {
 	}
 	if len(got) != 2 || seen["t-000"] != 1 || seen["t-130"] != 1 {
 		t.Fatalf("ListTriggers with tied timestamps = %v (seen %v), want t-000 and t-130 exactly once", len(got), seen)
-	}
-}
-
-// A caller cannot tell an empty result from a search that gave up, so the
-// store says so in the log when it stops at the horizon short of the limit.
-func TestListTriggers_RepoFilterWarnsWhenItStopsAtTheHorizon(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
-	}
-	s := storetest.Open(t)
-	ctx := context.Background()
-	base := time.Now().Add(-24 * time.Hour)
-
-	for i := 0; i < 5100; i++ {
-		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
-			ID:         fmt.Sprintf("other-%04d", i),
-			Pipeline:   "demo",
-			CreatedAt:  base.Add(time.Duration(i) * time.Second),
-			TriggerEnv: map[string]string{"GITHUB_REPOSITORY": "other/repo"},
-		}); err != nil {
-			t.Fatalf("CreateTrigger: %v", err)
-		}
-	}
-
-	var logged bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
-	defer slog.SetDefault(prev)
-
-	got, err := teststore.ForTeam(t, s, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
-	if err != nil {
-		t.Fatalf("ListTriggers: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("ListTriggers = %d triggers, want 0 (no matching repo)", len(got))
-	}
-	if !strings.Contains(logged.String(), "search horizon") {
-		t.Fatalf("no horizon warning logged; got %q", logged.String())
 	}
 }

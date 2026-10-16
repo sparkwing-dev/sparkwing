@@ -30,7 +30,7 @@ func teamHandle(t *testing.T, s *store.Store, team store.Team) *store.Tenant {
 func readyTeamNode(t *testing.T, s *store.Store, tenant *store.Tenant, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := tenant.CreateRun(ctx, store.Run{
+	if err := tenant.TestOnlySeedRun(ctx, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run for %s: %v", tenant.Team(), err)
@@ -110,10 +110,10 @@ func TestCreditsGrantReferenceCannotCrossTeams(t *testing.T) {
 	globex := teamHandle(t, s, "globex")
 
 	amount := int64(10 * store.MicroCreditsPerCent)
-	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); err != nil {
+	if _, err := acme.TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("acme grant: %v", err)
 	}
-	if _, err := globex.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); !errors.Is(
+	if _, err := globex.TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); !errors.Is(
 		err, store.ErrCreditGrantConflict) {
 		t.Fatalf("globex replaying acme's payment = %v, want ErrCreditGrantConflict", err)
 	}

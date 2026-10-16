@@ -113,6 +113,9 @@ func (r CapabilityRecord) Validate() error {
 }
 
 func authorityError(code apierr.Code, message string) error {
+	if code == apierr.Forbidden {
+		return apierr.Authorization(apierr.ReasonMissingGrant, message)
+	}
 	return &apierr.Error{Code: code, Message: message}
 }
 
@@ -350,6 +353,14 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		}
 		if c.Unit == "" {
 			allowed := ScopesForRole(role)
+			if c.Data != nil {
+				if c.Data.Use == capability.DataRemoteCache && slices.Contains(allowed, ScopeRunsRead) {
+					allowed = append(allowed, string(capability.DataRead))
+				}
+				if c.Data.Use == capability.DataPublish && slices.Contains(allowed, ScopeRunsWrite) {
+					allowed = append(allowed, string(capability.DataWrite))
+				}
+			}
 			if node.principal.Class == capability.CredentialSession {
 				for _, scope := range allowed {
 					node.principal.Capability.Grants = append(node.principal.Capability.Grants, capability.Grant(scope))
@@ -445,7 +456,7 @@ func resolveActorTx(ctx context.Context, tx *storeTx, actor Actor) (capability.P
 	if (actor.Authority.Kind == capability.AuthoritySession && actor.CapabilityPrefix != "") || (actor.Authority.Kind == capability.AuthorityCapability && actor.CapabilityPrefix != "" && actor.CapabilityPrefix != actor.Authority.ID) {
 		return capability.Principal{}, authorityError(apierr.Forbidden, "actor authority and fence disagree")
 	}
-	return tx.ResolveAuthority(ctx, actor.Authority)
+	return resolveProvisionAuthorityTx(ctx, tx, actor.Authority, actor.ConsoleProof)
 }
 
 // RevokeAuthority revokes a member's own authority or a tenant administrator's target.
@@ -494,7 +505,7 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capa
 	if err != nil {
 		return err
 	}
-	if p.Capability.Team != "" || p.Capability.Binding.Kind != capability.BindingNone || !slices.Contains(p.Capability.Grants, capability.OperatorTokens) {
+	if !(capability.DeploymentAuthority(p) && slices.Contains(p.Capability.Grants, capability.OperatorTokens)) && !(p.Class == capability.CredentialConsole && slices.Contains(p.Capability.Grants, capability.OperatorConsole)) {
 		return authorityError(apierr.Forbidden, "deployment token authority is required")
 	}
 	node, err := readAuthorityTx(ctx, tx, target, true)

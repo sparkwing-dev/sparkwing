@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -34,8 +36,8 @@ func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup c
 		}
 	}
 	if console {
-		if len(snapshot.Authorities) != 1 || !reader.server.consoleAccount(snapshot.Authorities[0].Principal) {
-			return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Forbidden, Message: "operator console requires the operator's own signed-in account"}
+		if len(snapshot.Authorities) != 1 || !reader.server.consoleAuthority(snapshot.Authorities[0].Principal, snapshot.Now) {
+			return capability.AuthenticationSnapshot{}, apierr.Authorization(apierr.ReasonMissingGrant, "operator console requires the operator's own signed-in account")
 		}
 		p := &snapshot.Authorities[0].Principal
 		p.Class, p.Capability.Subject.Kind = capability.CredentialConsole, capability.SubjectOperator
@@ -55,14 +57,26 @@ func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation
 			}
 		}
 	}
-	return capability.NewAuthenticator(policyStoreReader{a.server}).Authenticate(ctx, presentation, route)
+	authenticated, err := capability.NewAuthenticator(policyStoreReader{a.server}).Authenticate(ctx, presentation, route)
+	if err != nil {
+		return capability.Authenticated{}, err
+	}
+	if capability.DeploymentAuthority(authenticated.Principal) && !a.server.deploymentBearerEligible() && slices.ContainsFunc(route.Access, func(rule capability.AccessRule) bool { return rule.Credential == capability.CredentialDeployment }) {
+		return capability.Authenticated{}, sessionUnavailable()
+	}
+	return authenticated, nil
 }
 
 func (s *Server) consoleAccount(p capability.Principal) bool {
-	c := p.Capability
-	return p.Class == capability.CredentialSession && p.Authority.Kind == capability.AuthoritySession &&
-		c.Subject.Kind == capability.SubjectAccount && c.Parent == nil && c.Unit == "" && c.Binding.Kind == capability.BindingNone &&
-		s.operatorAccount(c.Subject.ID)
+	return s.consoleAuthority(p, time.Now())
+}
+
+func (s *Server) consoleAuthority(p capability.Principal, now time.Time) bool {
+	return capability.ConsoleAuthority(p, s.MultiTeam() && s.operatorAccount(p.Capability.Subject.ID), now, s.sessionMaxLifetime)
+}
+
+func (s *Server) deploymentBearerEligible() bool {
+	return s.identity.license == nil || s.cloudDeployment
 }
 
 type policyStoreBindings struct{ server *Server }
@@ -108,7 +122,10 @@ func (s *Server) checkSessionCSRF(r *http.Request, p capability.Principal) error
 		return err
 	}
 	if !validAPIRequestCSRF(r, session.CSRFToken, s.cookiesSecure()) {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+		return apierr.Authorization(apierr.ReasonBinding, "invalid CSRF token")
 	}
 	return nil
 }
+
+// WithCloudDeployment selects hosted deployment credential eligibility.
+func (s *Server) WithCloudDeployment(cloud bool) *Server { s.cloudDeployment = cloud; return s }

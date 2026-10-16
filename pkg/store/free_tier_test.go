@@ -23,12 +23,12 @@ func setFreeAllowance(t *testing.T, st *store.Store, bytes int64) {
 }
 
 func startRun(tenant *store.Tenant, id string) error {
-	return tenant.CreateTrigger(context.Background(), store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()})
+	return tenant.TestOnlySeedTrigger(context.Background(), store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()})
 }
 
 func fund(t *testing.T, tenant *store.Tenant) {
 	t.Helper()
-	if _, err := tenant.RecordCreditGrant(context.Background(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCredit, Reference: "pay-" + string(tenant.Team()), CreatedBy: "admin"}); err != nil {
+	if _, err := tenant.TestOnlySettlePaidCredit(context.Background(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCent, Reference: "pay-" + string(tenant.Team()), CreatedBy: "admin"}); err != nil {
 		t.Fatalf("fund %s: %v", tenant.Team(), err)
 	}
 }
@@ -78,7 +78,7 @@ func appendBytes(tenant *store.Tenant, runID string, n int) error {
 
 func teamRun(t *testing.T, tenant *store.Tenant, runID string) {
 	t.Helper()
-	if err := tenant.CreateRun(context.Background(), store.Run{
+	if err := tenant.TestOnlySeedRun(context.Background(), store.Run{
 		ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run %s for %s: %v", runID, tenant.Team(), err)

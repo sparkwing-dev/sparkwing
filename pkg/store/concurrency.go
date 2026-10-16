@@ -1682,7 +1682,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	).Scan(&holderID, &leaseNS, &superInt)
 	switch {
 	case err == nil && superInt == 0 && leaseNS > nowNS:
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
@@ -1699,7 +1699,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		return WaiterResolution{}, err
 	}
 	if hit != nil {
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
@@ -1724,7 +1724,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
 				return WaiterResolution{}, err
 			}
-			if err := tx.Commit(); err != nil {
+			if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 				return WaiterResolution{}, err
 			}
 			return WaiterResolution{Status: WaiterExpired}, nil
@@ -1828,7 +1828,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		if e != nil {
 			return WaiterResolution{}, e
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{Status: WaiterStillWaiting, Position: position, QueueLength: queueLength, Holders: holders}, nil
@@ -1843,12 +1843,12 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 			return WaiterResolution{}, err
 		}
 		if !found || !coalesceFollowersCanInherit(leaderOutcome) {
-			if err := tx.Commit(); err != nil {
+			if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 				return WaiterResolution{}, err
 			}
 			return WaiterResolution{Status: WaiterCancelled}, nil
 		}
-		if err := tx.Commit(); err != nil {
+		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
@@ -1860,7 +1860,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		}, nil
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
 		return WaiterResolution{}, err
 	}
 	return WaiterResolution{Status: WaiterCancelled}, nil

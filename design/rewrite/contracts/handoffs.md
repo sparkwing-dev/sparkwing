@@ -635,3 +635,15 @@ The full W8 review against main (`review/areas/W8-full-review-1792104216-final.m
 ## Lead decision 18:40 (Korey decision 109): bootstrap seed revoked on first real admin
 
 **W2:** in the transaction that creates the first real deployment administrator, revoke the seeded bootstrap credential and its descendants. A seed presented after that is refused as already used. Add a real-store test: seed, create an admin, then the seed's sessions and children are refused. W2 does this in its next fix pass.
+
+## Lead decision 20:45 (Korey decision 110): cross-host runtime-mask authority is not built
+
+W3 review finding 2's remaining piece is closed as an accepted residual. Do not add a run-scoped central mask authority or persist runtime mask values. Decision 90 stays enforced for declared and sealed secrets on every host and for `sw.Mask` values on the registering host. W9: state the residual in `docs/sdk.md` under "Secrets and masking" in one sentence (declare a secret if it may end up in an identifier).
+
+## Lead native run 23:05: local end-to-end probes (W9)
+
+The lead ran `go test -tags rewrite_integration ./cmd/sparkwing/` natively (real sockets, isolated HOME) at 18c9bc053:
+- `TestReviewProductionExecutionBindings/local_run` and `/local_schedules`: "could not reach the admission daemon: daemon did not become reachable after 1 start attempt: context deadline exceeded" after 60 s. The daemon log shows it was still creating and compiling the test pipeline (`go mod tidy`, go build) when the deadline passed. Invariant: the local controller answers its socket before, and independently of, any pipeline compilation; a cold first run reports progress instead of timing out. Fix the startup ordering (readiness first, compile on demand) rather than raising the deadline.
+- `/local_controller` passed.
+- `TestReviewPublicDoctorSweepsAndWarnsForPrunedRun`: "public doctor did not sweep: 1 records, error <nil>" and the report has no unrecorded-cleanup finding. Public doctor reaches the lifecycle but performs no stray-session sweep.
+Test daemons from the run were left running and had to be killed by the lead: tests that start a daemon must stop it and its children in t.Cleanup.

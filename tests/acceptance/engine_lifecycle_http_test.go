@@ -42,9 +42,11 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 		for _, name := range []string{"success", "revoked", "wrong grant", "bad body", "body actor", "trailing body", "store race", "private error"} {
 			t.Run(operation+"/"+name, func(t *testing.T) {
 				b := newCredentialBoundary()
-				f := &engineTransactions{applied: store.Applied{Replayed: true, CancelRequested: true, StateSeq: 8, Generation: 4, Attempt: 2},
+				f := &engineTransactions{
+					applied:  store.Applied{Replayed: true, CancelRequested: true, StateSeq: 8, Generation: 4, Attempt: 2},
 					beat:     store.LeaseBeat{ExpiresAt: b.snapshot.Now.Add(time.Minute), CancelRequested: true, CancelReason: "requested", Watched: true, WatchedNodes: []string{"job"}},
-					admitted: store.AdmissionResult{RunID: "retry", Replayed: true}}
+					admitted: store.AdmissionResult{RunID: "retry", Replayed: true},
+				}
 				path, body := "/api/v1/runs/run/jobs/job/transition", `{"to":"failed","cause":"report","source_attempt":0,"result":{"outcome":"failed","reason":"exit","failure":{"job":"job","stage":"body","error":{"code":"sdk_error","message":"masked"}},"exit_code":1}}`
 				switch operation {
 				case "owner finish":
@@ -106,7 +108,7 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 					}
 				case "owner finish":
 					finish := f.finish
-					if finish.Unit != finish.Transition.Actor.Owner || finish.Unit.Name != "trigger" || finish.Unit.Generation != 4 || finish.Transition.Actor.Authority != p.Authority || finish.Transition.Cause != store.RunFinish {
+					if finish.Unit != finish.Transition.Actor.Owner || finish.Unit != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "runner", Generation: 4}) || finish.Transition.Actor.Authority != p.Authority || finish.Transition.Cause != store.RunFinish {
 						t.Fatalf("finish = %+v", finish)
 					}
 				case "published finish":
@@ -166,8 +168,10 @@ func TestEngineResultReplayHTTP(t *testing.T) {
 				finished := b.snapshot.Now.Add(-time.Second)
 				b.snapshot.Binding.FinishedAt = &finished
 				digest := sha256.Sum256([]byte(body))
-				b.snapshot.Binding.Result = &capability.RecordedResult{Actor: b.snapshot.Authorities[0].Principal.Authority,
-					Method: "POST", Pattern: pattern, RunID: "run", NodeID: node, Generation: 4, Attempt: 2, Digest: hex.EncodeToString(digest[:])}
+				b.snapshot.Binding.Result = &capability.RecordedResult{
+					Actor:  b.snapshot.Authorities[0].Principal.Authority,
+					Method: "POST", Pattern: pattern, RunID: "run", NodeID: node, Generation: 4, Attempt: 2, Digest: hex.EncodeToString(digest[:]),
+				}
 				switch name {
 				case "changed body":
 					body += " "
@@ -203,8 +207,10 @@ func TestEngineTypedTransitionRefusals(t *testing.T) {
 		reason store.IllegalTransitionReason
 		code   apierr.Code
 	}{
-		{store.ReasonHolderRights, apierr.LockHeld}, {store.ReasonStaleGeneration, apierr.LockHeld},
-		{store.ReasonIllegalEdge, apierr.IllegalTransition}, {store.ReasonTerminal, apierr.IllegalTransition},
+		{store.ReasonHolderRights, apierr.LockHeld},
+		{store.ReasonStaleGeneration, apierr.LockHeld},
+		{store.ReasonIllegalEdge, apierr.IllegalTransition},
+		{store.ReasonTerminal, apierr.IllegalTransition},
 	} {
 		t.Run(string(tc.reason), func(t *testing.T) {
 			f := &engineTransactions{err: &store.ErrIllegalTransition{Reason: tc.reason}}

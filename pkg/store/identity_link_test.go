@@ -543,7 +543,7 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 	}
 	space := tenant(t, st, holder.PersonalTeam)
 	runCtx := store.WithCreatingPrincipal(ctx, "holder@example.com")
-	if err := space.CreateTriggerWithRun(runCtx,
+	if err := space.TestOnlySeedTriggerWithRun(runCtx,
 		store.Trigger{ID: "run-h", Pipeline: "build", CreatedAt: now, TriggerUser: "holder@example.com"},
 		store.Run{ID: "run-h", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)

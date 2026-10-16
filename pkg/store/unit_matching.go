@@ -53,10 +53,13 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if err = json.Unmarshal(requestBody, &requestSeal); err != nil {
 		return profile, match.Demand{}, err
 	}
-	git := requestSeal.Request.Git
-	if err := checkClaimRepositoryScope(chain, repo, git.Repository.Display); err != nil {
+	if display == "" {
+		display = requestSeal.Request.Git.Repository.Display
+	}
+	if err := checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: repo, Display: display}); err != nil {
 		return profile, match.Demand{}, err
 	}
+	git := requestSeal.Request.Git
 	if err := checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); err != nil {
 		return profile, match.Demand{}, err
 	}
@@ -133,18 +136,9 @@ func validMatchingResources(v match.Resources) bool {
 	return v.Cores >= 0 && !math.IsNaN(v.Cores) && !math.IsInf(v.Cores, 0) && v.MemoryBytes >= 0
 }
 
-func checkClaimRepositoryScope(chain []authorityNode, key, display string) error {
-	for _, node := range chain {
-		repositories := node.principal.Capability.Repositories
-		if len(repositories) == 0 || slices.Contains(repositories, key) {
-			continue
-		}
-		allow, err := match.ParseAccept(repositories)
-		if err != nil {
-			return authorityError(apierr.Forbidden, "claimant repository scope excludes work")
-		}
-		named, admitted := allow.AdmitsRepository(display, "", "", "")
-		if !named || !admitted {
+func checkRepositoryClaimScope(chain []authorityNode, repository capability.RepositoryIdentity) error {
+	for _, ancestor := range chain {
+		if !capability.RepositoryAllowed(ancestor.principal.Capability.Repositories, repository) {
 			return authorityError(apierr.Forbidden, "claimant repository scope excludes work")
 		}
 	}

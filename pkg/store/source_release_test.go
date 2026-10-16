@@ -43,6 +43,7 @@ func sourceReleaseFixture(t *testing.T) (*Tenant, capability.Authorized, *source
 func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, capability.Authorized, *sourcePolicyFake) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
+	fundUnitClaim(t, s)
 	demand.Target = &UnitRef{Kind: kind, RunID: "run"}
 	if kind == capability.UnitNode {
 		demand.Target.NodeID = "job"

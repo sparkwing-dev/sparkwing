@@ -26,7 +26,7 @@ func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID st
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	if err := tn.CreateTriggerWithRun(ctx,
+	if err := tn.TestOnlySeedTriggerWithRun(ctx,
 		store.Trigger{ID: runID, Pipeline: "build", CreatedAt: now},
 		store.Run{ID: runID, Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -232,7 +232,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	runCtx := store.WithCreatingPrincipal(ctx, "leaver@example.com")
-	if err := shared.CreateTriggerWithRun(runCtx,
+	if err := shared.TestOnlySeedTriggerWithRun(runCtx,
 		store.Trigger{ID: "run-l", Pipeline: "build", CreatedAt: now, TriggerUser: "leaver@example.com"},
 		store.Run{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)

@@ -37,7 +37,7 @@ func (h *OwnerHost) expansionActor(ctx context.Context, input RunInput, row stor
 	if err != nil {
 		return store.Actor{}, err
 	}
-	issued, err := h.Delegator.DelegateCapability(ctx, capability.DelegateSpec{Parent: owner.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit}, Binding: binding, ExpiresAt: parent.Capability.ExpiresAt})
+	issued, err := h.Delegator.DelegateCapability(ctx, capability.DelegateSpec{Parent: owner.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit}, Binding: binding, Repositories: parent.Capability.Repositories, ExpiresAt: parent.Capability.ExpiresAt})
 	if err != nil {
 		return store.Actor{}, err
 	}

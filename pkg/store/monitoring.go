@@ -18,7 +18,7 @@ type RunTrend struct {
 }
 
 // ListRunTrends returns every run in the requested window and whether all of
-// its nodes completed from cached or already-satisfied work.
+// its jobs completed from memoized results.
 func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error) {
 	query := `
 SELECT id, pipeline, status, created_at, started_at, finished_at
@@ -28,7 +28,7 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
                 SELECT 1
                   FROM nodes
                  WHERE nodes.team = runs.team AND nodes.run_id = runs.id
-                   AND COALESCE(nodes.outcome, '') NOT IN ('cached', 'satisfied')
+                   AND COALESCE(nodes.outcome, '') <> 'memoized'
               )
          THEN 1 ELSE 0
        END AS all_cached

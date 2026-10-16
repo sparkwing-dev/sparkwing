@@ -57,28 +57,15 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if err != nil {
 		return capability.Issued{}, err
 	}
-	var secret [32]byte
-	if _, err = rand.Read(secret[:]); err != nil {
-		return capability.Issued{}, err
-	}
-	prefix := capability.ControllerPrefix
-	if c.Audience == capability.NodeHost {
-		prefix = capability.NodeHostPrefix
-	}
-	raw := prefix + base64.RawURLEncoding.EncodeToString(secret[:])
-	if request.Provision != nil && request.Provision.Seed != "" {
-		raw = request.Provision.Seed
-	}
-	c.Prefix = raw[:16]
-	c.Digest = sha256.Sum256([]byte(raw))
-	c.IssuedAt = tx.now()
-	var origin *CapabilityOrigin
+	seed := ""
 	if request.Provision != nil {
-		origin = &CapabilityOrigin{Kind: request.Provision.Kind, RegistrationID: request.Provision.RegistrationID}
+		seed = request.Provision.Seed
 	}
-	if err := persistCapabilityTx(ctx, tx, c, origin); err != nil {
+	issued, err := persistIssuedCapabilityTx(ctx, tx, c, seed, request.Provision)
+	if err != nil {
 		return capability.Issued{}, err
 	}
+	c = issued.Capability
 	if request.Provision != nil {
 		if err := recordProvisionCreatorTx(ctx, tx, *request.Provision, c); err != nil {
 			return capability.Issued{}, err
@@ -92,6 +79,9 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 				return capability.Issued{}, err
 			}
 		}
+		if err := finishBootstrapSetupTx(ctx, tx, c); err != nil {
+			return capability.Issued{}, err
+		}
 	}
 	if request.Exchange != nil {
 		if err := bindExchangedUnitTx(ctx, tx, c, request.Exchange.BootstrapPrefix); err != nil {
@@ -103,7 +93,7 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 			return capability.Issued{}, err
 		}
 	}
-	return capability.Issued{Raw: raw, Capability: c}, nil
+	return issued, nil
 }
 
 func encodeAwardUnit(unit UnitRef) (string, error) {
@@ -129,10 +119,10 @@ func decodeAwardUnit(kind capability.UnitKind, id string) (UnitRef, error) {
 }
 
 type awardRow struct {
-	team, run, node, holder, prefix, repo, ref, sha string
-	generation, attempt, created                    int64
-	expiry, lease, cancel                           sql.NullInt64
-	request                                         []byte
+	team, run, node, holder, prefix, repo, display, ref, sha string
+	generation, attempt, created                             int64
+	expiry, lease, cancel                                    sql.NullInt64
+	request                                                  []byte
 }
 
 func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec) (awardRow, error) {
@@ -156,7 +146,7 @@ func loadAwardRowTx(ctx context.Context, tx *storeTx, spec capability.AwardSpec)
 	}
 	var status string
 	var runCancel sql.NullInt64
-	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,git_branch,git_sha,request_json FROM runs WHERE team = ? AND id = ?"+tx.forShare(), row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.ref, &row.sha, &row.request)
+	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,repo_display,git_branch,git_sha,request_json FROM runs WHERE team = ? AND id = ?"+tx.forShare(), row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.display, &row.ref, &row.sha, &row.request)
 	if err != nil {
 		return row, err
 	}
@@ -197,6 +187,16 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	}
 	row, err := loadAwardRowTx(ctx, tx, spec)
 	if err != nil {
+		return capability.Capability{}, err
+	}
+	if row.display == "" {
+		var sealed runspec.SealedRequest
+		if err := json.Unmarshal(row.request, &sealed); err != nil {
+			return capability.Capability{}, err
+		}
+		row.display = sealed.Request.Git.Repository.Display
+	}
+	if err := checkRepositoryClaimScope(chain, capability.RepositoryIdentity{Key: row.repo, Display: row.display}); err != nil {
 		return capability.Capability{}, err
 	}
 	if err := checkPushClaimScope(chain, row.repo, row.ref, row.sha); err != nil {
@@ -364,4 +364,30 @@ func bindExchangedUnitTx(ctx context.Context, tx *storeTx, c capability.Capabili
 		return authorityError(apierr.LockHeld, "bootstrap claim changed during exchange")
 	}
 	return nil
+}
+
+func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, seed string, provision ...*capability.ProvisionSpec) (capability.Issued, error) {
+	var secret [32]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		return capability.Issued{}, err
+	}
+	prefix := capability.ControllerPrefix
+	if c.Audience == capability.NodeHost {
+		prefix = capability.NodeHostPrefix
+	}
+	raw := prefix + base64.RawURLEncoding.EncodeToString(secret[:])
+	if seed != "" {
+		raw = seed
+	}
+	c.Prefix = raw[:16]
+	c.Digest = sha256.Sum256([]byte(raw))
+	c.IssuedAt = tx.now()
+	var origin *CapabilityOrigin
+	if len(provision) > 0 && provision[0] != nil {
+		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID}
+	}
+	if err := persistCapabilityTx(ctx, tx, c, origin); err != nil {
+		return capability.Issued{}, err
+	}
+	return capability.Issued{Raw: raw, Capability: c}, nil
 }

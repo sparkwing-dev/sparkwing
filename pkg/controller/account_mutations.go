@@ -43,10 +43,10 @@ func accountMutationError(err error) error {
 	case errors.Is(err, store.ErrSlugTaken), errors.Is(err, store.ErrAlreadyMember), errors.Is(err, store.ErrInvitationOpen):
 		return &apierr.Error{Code: apierr.Conflict, Message: "account resource already exists"}
 	case errors.Is(err, store.ErrTeamLimit):
-		return &apierr.Error{Code: apierr.Forbidden, Message: fmt.Sprintf("one account may create at most %d teams, including its personal team", store.MaxCreatedTeams)}
+		return apierr.Authorization(apierr.ReasonMissingGrant, fmt.Sprintf("one account may create at most %d teams, including its personal team", store.MaxCreatedTeams))
 	case errors.Is(err, store.ErrLastOwner), errors.Is(err, store.ErrRoleAboveOwn), errors.Is(err, store.ErrEmailMismatch),
 		errors.Is(err, store.ErrTeamFull), errors.Is(err, store.ErrWaitlisted):
-		return &apierr.Error{Code: apierr.Forbidden, Message: "account change refused"}
+		return apierr.Authorization(apierr.ReasonMissingGrant, "account change refused")
 	case errors.Is(err, store.ErrInvitationClosed):
 		return &apierr.Error{Code: apierr.Conflict, Message: "invitation is no longer open"}
 	case errors.Is(err, store.ErrLastSignInMethod):

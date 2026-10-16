@@ -41,14 +41,14 @@ func consoleWrite[T any](ctx context.Context, c *Console, a capability.Authorize
 	if err != nil {
 		return zero, err
 	}
-	if !p.DirectAccountSession() || p.Capability.Audience != capability.Controller || p.Capability.Subject.ID != a.Principal.Capability.Subject.ID || !c.allowed(p.Capability.Subject.ID) {
+	if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), tx.now(), 0) || p.Capability.Subject.ID != a.Principal.Capability.Subject.ID || c.s.consolePolicy != nil && !c.s.consolePolicy(p, tx.now()) {
 		return zero, authorityError(apierr.Forbidden, "direct operator session required")
 	}
 	out, err := write(tx, p.Capability.Subject.ID)
 	if err != nil {
 		return zero, err
 	}
-	if !c.allowed(p.Capability.Subject.ID) {
+	if !capability.ConsoleAuthority(p, c.allowed(p.Capability.Subject.ID), tx.now(), 0) || c.s.consolePolicy != nil && !c.s.consolePolicy(p, tx.now()) {
 		return zero, authorityError(apierr.Forbidden, "operator account was removed")
 	}
 	if err := tx.Commit(); err != nil {

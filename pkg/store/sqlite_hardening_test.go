@@ -50,6 +50,7 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 			}
 			defer func() { _ = s.Close() }()
 
+			createLiveRunT(t,s,fmt.Sprintf("r-%d",i))
 			<-start
 			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 				Key: key, HolderID: fmt.Sprintf("h-%d", i),
@@ -122,6 +123,7 @@ func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 			}
 			defer func() { _ = s.Close() }()
 
+			createLiveRunT(t,s,fmt.Sprintf("r-%d",i))
 			<-start
 			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 				Key: key, HolderID: fmt.Sprintf("h-%d", i),
@@ -171,7 +173,7 @@ func TestOpenReadOnly_RejectsWrites(t *testing.T) {
 	}
 	defer func() { _ = ro.Close() }()
 
-	err = teststore.ForTeam(t, ro, store.DefaultTeam).CreateRun(context.Background(), store.Run{
+	err = teststore.ForTeam(t, ro, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
 		ID: "r1", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 	})
 	if err == nil {
@@ -186,7 +188,7 @@ func TestOpenReadOnly_DoesNotBlockWriter(t *testing.T) {
 		t.Fatalf("open rw: %v", err)
 	}
 	defer func() { _ = rw.Close() }()
-	if err := teststore.ForTeam(t, rw, store.DefaultTeam).CreateRun(context.Background(), store.Run{
+	if err := teststore.ForTeam(t, rw, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
 		ID: "seed", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -210,7 +212,7 @@ func TestOpenReadOnly_DoesNotBlockWriter(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- teststore.ForTeam(t, rw, store.DefaultTeam).CreateRun(context.Background(), store.Run{
+		done <- teststore.ForTeam(t, rw, store.DefaultTeam).TestOnlySeedRun(context.Background(), store.Run{
 			ID: "w1", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 		})
 	}()

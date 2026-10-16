@@ -23,7 +23,7 @@ func TestListRuns_CursorWalksRunsSharingAnInstantExactlyOnce(t *testing.T) {
 	const runs = 12
 	instant := time.Unix(1700000000, 0)
 	for i := range runs {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID:        "run-tie-" + strconv.Itoa(i),
 			Pipeline:  "checks",
 			Status:    "success",
@@ -71,7 +71,7 @@ func TestCountRuns_IgnoresLimitAndHonoursTheCursor(t *testing.T) {
 	ctx := context.Background()
 	const runs = 30
 	for i := range runs {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID:        "run-count-" + strconv.Itoa(i),
 			Pipeline:  "checks",
 			Status:    "success",
@@ -111,7 +111,7 @@ func TestListRuns_CursorResumesAfterARunAtTheEpoch(t *testing.T) {
 
 	ctx := context.Background()
 	for i := range 4 {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID:        "run-epoch-" + strconv.Itoa(i),
 			Pipeline:  "checks",
 			Status:    "success",
@@ -152,7 +152,7 @@ func TestListRuns_CursorWalksPastNeverStartedRuns(t *testing.T) {
 	ctx := context.Background()
 	const started, queued = 3, 5
 	for i := range started {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID: "run-live-" + strconv.Itoa(i), Pipeline: "checks", Status: "success",
 			StartedAt: time.Unix(int64(1700000000+i), 0),
 		}); err != nil {
@@ -160,7 +160,7 @@ func TestListRuns_CursorWalksPastNeverStartedRuns(t *testing.T) {
 		}
 	}
 	for i := range queued {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID: "run-queued-" + strconv.Itoa(i), Pipeline: "checks", Status: "pending",
 		}); err != nil {
 			t.Fatal(err)

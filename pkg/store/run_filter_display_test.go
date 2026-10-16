@@ -17,7 +17,7 @@ func displayFilterRuns() []store.Run {
 	finished := func(sec int) *time.Time { t := base.Add(time.Duration(sec) * time.Second); return &t }
 	return []store.Run{
 		{ID: "r-push-main", Pipeline: "build", Status: "success", TriggerSource: "push", GitBranch: "main", GitSHA: "aaaaaaa111", DeclaredRepo: "acme/web", StartedAt: base.Add(1 * time.Second), FinishedAt: finished(5)},
-		{ID: "r-cron-main", Pipeline: "nightly", Status: "failed", TriggerSource: "cron", GitBranch: "main", GitSHA: "bbbbbbb222", GithubRepo: "acme/api", StartedAt: base.Add(2 * time.Second), FinishedAt: finished(9)},
+		{ID: "r-cron-main", Pipeline: "nightly", Status: "failed", TriggerSource: "cron", GitBranch: "main", GitSHA: "bbbbbbb222", DeclaredRepo: "acme/api", StartedAt: base.Add(2 * time.Second), FinishedAt: finished(9)},
 		{ID: "r-manual-feat", Pipeline: "build", Status: "running", TriggerSource: "manual", GitBranch: "feat/x", GitSHA: "ccccccc333", DeclaredRepo: "web", StartedAt: base.Add(3 * time.Second)},
 		{ID: "r-norepo", Pipeline: "deploy", Status: "cancelled", GitBranch: "main", GitSHA: "aaaaaaa999", StartedAt: base.Add(4 * time.Second), FinishedAt: finished(20)},
 		{ID: "r-pct_literal", Pipeline: "deploy", Status: "success", TriggerSource: "push", DeclaredRepo: "100%_done", StartedAt: base.Add(5 * time.Second), FinishedAt: finished(30)},
@@ -31,12 +31,12 @@ func TestListRuns_DisplayFiltersSelectAcrossTheWholeStore(t *testing.T) {
 	beta := tenantFor(t, st, "beta")
 	runs := displayFilterRuns()
 	for _, r := range runs {
-		if err := alpha.CreateRun(ctx, r); err != nil {
+		if err := alpha.TestOnlySeedRun(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 		other := r
 		other.ID = "beta-" + r.ID
-		if err := beta.CreateRun(ctx, other); err != nil {
+		if err := beta.TestOnlySeedRun(ctx, other); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -53,7 +53,7 @@ func TestListRuns_DisplayFiltersSelectAcrossTheWholeStore(t *testing.T) {
 		{"exclude branch", store.RunFilter{ExcludeGitBranches: []string{"main"}}, []string{"r-pct_literal", "r-manual-feat"}},
 		{"exclude sha prefix", store.RunFilter{ExcludeGitSHAPrefixes: []string{"AAAAAAA"}}, []string{"r-pct_literal", "r-manual-feat", "r-cron-main"}},
 		{"repo name is the last segment", store.RunFilter{RepoNames: []string{"web"}}, []string{"r-manual-feat", "r-push-main"}},
-		{"repo name falls back to the GitHub repository", store.RunFilter{RepoNames: []string{"api"}}, []string{"r-cron-main"}},
+		{"repo name uses the sealed repository display", store.RunFilter{RepoNames: []string{"api"}}, []string{"r-cron-main"}},
 		{"repo name of a run without one", store.RunFilter{RepoNames: []string{"unknown"}}, []string{"r-norepo"}},
 		{"repo name wildcards are literal", store.RunFilter{RepoNames: []string{"100%_done"}}, []string{"r-pct_literal"}},
 		{"exclude repo name", store.RunFilter{ExcludeRepoNames: []string{"web", "unknown"}}, []string{"r-pct_literal", "r-cron-main"}},
@@ -89,12 +89,12 @@ func TestListRuns_BeforeCursorWalksBackToTheNewestRunExactlyOnce(t *testing.T) {
 	instant := time.Unix(1700000000, 0)
 	for i := range total {
 		r := store.Run{ID: "run-" + strconv.Itoa(100+i), Pipeline: "build", Status: "success", StartedAt: instant.Add(time.Duration(i/3) * time.Second)}
-		if err := alpha.CreateRun(ctx, r); err != nil {
+		if err := alpha.TestOnlySeedRun(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 		other := r
 		other.ID = "beta-" + r.ID
-		if err := beta.CreateRun(ctx, other); err != nil {
+		if err := beta.TestOnlySeedRun(ctx, other); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -203,7 +203,7 @@ func TestListRuns_RepoNamesMatchCaseSensitively(t *testing.T) {
 		{ID: "bare", Pipeline: "build", Status: "success", DeclaredRepo: "Web", StartedAt: base.Add(2 * time.Second)},
 	}
 	for _, r := range runs {
-		if err := alpha.CreateRun(context.Background(), r); err != nil {
+		if err := alpha.TestOnlySeedRun(context.Background(), r); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -222,7 +222,7 @@ func TestListRuns_TextFoldsASCIICaseOnly(t *testing.T) {
 		{ID: "plain", Pipeline: "build", Status: "success", GitBranch: "etape", StartedAt: base.Add(time.Second)},
 	}
 	for _, r := range runs {
-		if err := alpha.CreateRun(context.Background(), r); err != nil {
+		if err := alpha.TestOnlySeedRun(context.Background(), r); err != nil {
 			t.Fatal(err)
 		}
 	}

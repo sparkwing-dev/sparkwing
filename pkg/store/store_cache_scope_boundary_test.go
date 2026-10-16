@@ -40,8 +40,8 @@ func TestStoreCacheScope(t *testing.T) {
 					t.Fatalf("presence=%+v, allowed=%v: %v", presence, test.allowed, err)
 				}
 				a := intent.Identity.Attempt.Value
-				principal := capability.Principal{Capability: capability.Capability{Prefix: intent.Authority.CapabilityRef, Team: a.Team}}
-				for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataRecord} {
+				principal := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, Capability: capability.Capability{Prefix: intent.Authority.CapabilityRef, Team: a.Team}}
+				for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataLookup} {
 					target := capability.DataTarget{Operation: operation, Digest: string(intent.Digest), RunID: a.RunID, NodeID: a.NodeID, Attempt: a.Attempt, Generation: a.Generation}
 					err := records.tenant.CheckDataAccess(t.Context(), capability.Authorized{Principal: principal}, target)
 					if test.allowed && err != nil || !test.allowed && !errors.Is(err, blob.ErrDigestNotReadable) {

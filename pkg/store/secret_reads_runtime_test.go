@@ -214,7 +214,7 @@ func TestSecretReadJobClaimRetainsAccessAfterStart(t *testing.T) {
 	}
 	bound := p.Capability.Binding
 	bound.Attempt = 1
-	child, err := tenant.s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Binding: bound, Grants: []capability.Grant{capability.SecretsRelease}, ExpiresAt: p.Capability.ExpiresAt})
+	child, err := tenant.s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: p.Authority, Audience: capability.Controller, Binding: bound, Grants: []capability.Grant{capability.SecretsRelease}, ExpiresAt: p.Capability.ExpiresAt, Repositories: p.Capability.Repositories})
 	if err != nil {
 		t.Fatal(err)
 	}

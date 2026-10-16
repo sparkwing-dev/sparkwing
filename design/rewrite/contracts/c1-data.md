@@ -1,5 +1,19 @@
 # C1 data contract
 
+## Measurement leases and executable activity
+
+`Operator.RunBucketMeasureLeased` uses the `bucket.measure` singleton and a
+store-clock success stamp in `settings`. Cron and measurement callbacks share
+one fenced window owner. A failed callback releases its captured lease without
+stamping success. A stale callback cannot stamp or release a successor. The
+Store method and the `sparkwing_meta` sweep-window implementation are removed.
+
+`Tenant.ExecutionActivity` reads executable run, pending owner and live holder
+counts in one tenant-scoped snapshot. Lease expiration uses the store clock.
+The local controller consumes that projection and no longer reads concurrency
+tables directly. Run trends recognize the final `memoized` verdict. Pipeline
+inventory joins owner rows to runs for their sealed pipeline metadata.
+
 ## Sealed reporting and raw job-finish retirement
 
 Reporting run and trigger readers use C4's display projections, including

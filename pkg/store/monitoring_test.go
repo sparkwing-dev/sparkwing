@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -18,15 +19,15 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 		id, pipeline string
 		outcomes     []string
 	}{
-		{id: "cached-run", pipeline: "alpha", outcomes: []string{"cached", "satisfied"}},
-		{id: "mixed-run", pipeline: "alpha", outcomes: []string{"cached", "success"}},
-		{id: "other-run", pipeline: "beta", outcomes: []string{"cached"}},
+		{id: "cached-run", pipeline: "alpha", outcomes: []string{"memoized", "memoized"}},
+		{id: "mixed-run", pipeline: "alpha", outcomes: []string{"memoized", "success"}},
+		{id: "other-run", pipeline: "beta", outcomes: []string{"memoized"}},
 	} {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}); err != nil {
 			t.Fatal(err)
 		}
-		for _, outcome := range run.outcomes {
-			nodeID := "work-" + outcome
+		for i, outcome := range run.outcomes {
+			nodeID := fmt.Sprintf("work-%d", i)
 			if err := teststore.SeedNode(st, ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
@@ -38,7 +39,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	tenant, err := st.ForTeam(ctx, store.DefaultTeam)

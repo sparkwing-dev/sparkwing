@@ -4,8 +4,9 @@ A connection chooses the controller. A credential identifies the caller and its
 exact authority. A claim confines execution to the work the controller awarded.
 
 The controller enforces the shared capability policy through store-backed
-authentication and transactional authorization. Native runner and deployment
-verification remain separate from client transport tests. See
+authentication and transactional authorization. The production constructor wires
+root provisioning, credential inventory and rotation, and OIDC identity reads
+to concrete store implementations. See
 [Credential management](credentials.md) for the CLI surface.
 
 ## Controller authorization
@@ -153,7 +154,9 @@ The old `/profile` paths are removed.
 Token revocation and member updates use the same policy router. A team token is
 revoked at `DELETE /api/v1/tokens/{token}`. Deployment service/operator roots use
 `DELETE /api/v1/operator/tokens/{token}` with `operator.tokens` or an operator
-console session. Team routes derive their active team from the committed
+console session. Readers and editors may revoke tokens they own or created.
+Console credential operations recheck the direct session, lifetime and current
+operator configuration in their committing transaction. Team routes derive their active team from the committed
 credential. Header and query hints cannot select another team.
 
 `GET /api/v1/team/members` returns the active team's member directory and
@@ -428,6 +431,14 @@ credentials carry the operation grants and exact binding needed by their unit.
 Run-host ownership and job ownership remain separate. A member's management
 rights do not bypass a competing execution holder.
 
+### Repository authority
+
+A missing repository scope (`null`) is unrestricted. An explicit empty scope
+(`[]`) grants no repository access. Delegation cannot widen that distinction.
+Claim admission checks every ancestor against the same repository evaluator.
+Canonical repository keys and enrollment path patterns remain separate types.
+Patterns are checked against the work's persisted repository location.
+
 ### Claim tokens
 
 The issuer has three operations:
@@ -450,8 +461,9 @@ filtered environment does not isolate hostile processes sharing an OS account.
 Cloud jobs use root and privileged Docker on team-dedicated nodes. Those are
 accepted deployment boundaries, separate from the claim's API authority.
 
-A bootstrap has only source-read and exchange grants. Source initialization can
-use it before exchange. Exchange revokes it and retains its unit, binding and
+A pod bootstrap has only source-read and exchange authority. A bootstrap-specific
+policy class admits it only to source acquisition and exchange. It cannot read
+run metadata, events or approvals. Source initialization can use it before exchange. Exchange revokes it and retains its unit, binding and
 billing provenance. The job receives no runner root credential.
 
 Sensitive reads require a live claim. A terminal job has only its bounded window
@@ -551,13 +563,22 @@ limits, object-store and token administration grants. The gate refuses a second
 administrator and cannot revive a revoked seed. It grants no operator-console
 or claim authority.
 
-The gate and capability commit together through `Store.Issue`. Repeating the
-live seed is a no-op. Revoking or expiring it, rotating it, or pruning its ended
-row never reopens the gate. An empty file input provisions no credential.
+Creating the first real administrator issues its credential, revokes the seed
+and its descendants, and advances revocation generation in one locked transaction. Existing seed descendants become unusable. Presenting that seed
+at startup after setup returns an already-used error. Remove the mounted seed
+after creating the real administrator. A restart during unfinished setup can
+reuse the same live seed without issuing it again.
+
+The native store implements the seeded bootstrap transaction. An empty file
+input provisions no credential.
 Startup enables authentication even before credentials exist. An empty or
 unreadable token table cannot open private routes. `--require-auth` additionally
 requires a live deployment administrator capability and refuses startup when
 that capability read is unavailable. Local access uses verified peer identity.
+
+Licensed self-hosted controllers refuse deployment-admin bearers. Hosted
+controllers select Cloud eligibility through the `cloud` or `cloud-free`
+deployment profile. Console sessions retain their separate account gate.
 
 ## Operator console
 

@@ -60,7 +60,7 @@ func (s *Server) verifySessionFlow(r *http.Request) error {
 	var role store.Role
 	if unsafeMethod(r.Method) {
 		if !validAPIRequestCSRF(r, session.CSRFToken, s.cookiesSecure()) {
-			return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
+			return apierr.Authorization(apierr.ReasonReauthRequired, "invalid CSRF token")
 		}
 	} else {
 		raw, err := s.sessionPresentation(r)

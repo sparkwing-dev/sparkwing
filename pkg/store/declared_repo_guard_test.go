@@ -13,20 +13,11 @@ import (
 // authorization may read it. Every file naming the field is listed with its
 // reason, because a new reader has to be argued for in a diff.
 var declaredRepoReaders = map[string]string{
-	"pkg/store/store.go":                     "the column's own persistence: schema, insert, scan, and the list filter",
-	"pkg/store/runfilter_http.go":            "parses the ?repo= list filter off a request",
-	"pkg/store/run_filter_display.go":        "matches the run list's repository name and text filters, in SQL and in memory",
-	"pkg/controller/handlers.go":             "copies the trigger's repository onto the run row for display",
-	"pkg/controller/github_app_webhook.go":   "copies the installation's repository onto the pending run row for display",
-	"pkg/controller/client/client.go":        "sends the ?repo= list filter",
-	"internal/nodehost/scheduler.go":         "records the repository the run was started from",
-	"internal/orchestrator/backends.go":      "copies a parent run's repository onto a child trigger",
-	"internal/orchestrator/pod_node_host.go": "hands the repository to plan code in the run context",
-	"internal/orchestrator/trigger_host.go":  "hands plan code the repository the run row records, as every node host of the run reads it",
-	"internal/orchestrator/runs_page.go":     "passes the operator's runs list --repo filter through",
-	"cmd/sparkwing/repos.go":                 "groups runs by repository for display",
-	"cmd/sparkwing/repos_info.go":            "matches runs to a repository for display",
-	"cmd/sparkwing/run_detached.go":          "records the repository a detached run was started from",
+	"pkg/controller/github_app_webhook.go": "reporting displays the stored repository metadata without authorizing work",
+	"pkg/controller/handlers.go":           "reporting displays the stored repository metadata without authorizing work",
+	"pkg/store/latest_run.go":              "the tenant reporting query filters the sealed repository projection",
+	"pkg/store/runfilter_http.go":          "the HTTP filter parser selects repository display metadata",
+	"pkg/store/store.go":                   "the sealed run reporting projection exposes repository metadata without granting authority",
 }
 
 var declaredRepoPattern = regexp.MustCompile(`\bDeclaredRepos?\b|\bdeclared_repo\b`)

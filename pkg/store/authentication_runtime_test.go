@@ -135,6 +135,7 @@ func TestAuthenticationSnapshotHereClaimHistorySurvivesRequeue(t *testing.T) {
 
 func TestAuthenticationSnapshotReadsPlanLeaseAndCancellation(t *testing.T) {
 	s, demand := unitClaimFixture(t)
+	fundUnitClaim(t, s)
 	launcher := authorityRoot("launcher", "")
 	launcher.Subject.Kind = capability.SubjectService
 	launcher.Grants = []capability.Grant{capability.ClaimsLaunch}

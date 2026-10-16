@@ -148,6 +148,9 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 	if err != nil {
 		return Applied{}, err
 	}
+	if err := validateResultProofTx(ctx, tx, team, change.Actor, NodeRef{RunID: change.RunID}, 0); err != nil {
+		return Applied{}, err
+	}
 	digest, err := stateHash(change)
 	if err != nil {
 		return Applied{}, err

@@ -252,6 +252,7 @@ func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
 			launcher.Subject.Kind = capability.SubjectService
 			launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
 			authorityPersist(t, s, launcher)
+			fundUnitClaim(t, s)
 			claim, err := s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: launcher.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: request.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 			if err != nil {
 				t.Fatal(err)

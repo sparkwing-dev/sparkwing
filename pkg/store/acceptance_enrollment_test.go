@@ -78,7 +78,7 @@ func checkStoreEnrolledClaims(t *testing.T) (err error) {
 		if err != nil {
 			return err
 		}
-		if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET repo_key='gh:42',request_json=?`, body); err != nil {
+		if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET repo_key='gh:42',request_json=?,repo_display=?`, body, request.Request.Git.Repository.Display); err != nil {
 			return err
 		}
 		claim, err := s.ClaimUnit(ctx, demand)

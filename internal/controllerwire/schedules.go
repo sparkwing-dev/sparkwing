@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // TimerStateView is the OS timer that calls the tick. A controller reports its
@@ -284,4 +285,22 @@ type ScheduleRepoDeletion struct {
 type ScheduleRepositoryManager interface {
 	WriteSchedules(context.Context, ScheduleRepoRequest) (ScheduleRepoWritten, error)
 	DeleteSchedulesForRepo(context.Context, string) (ScheduleRepoDeletion, error)
+}
+
+// LocalScheduleRegistration selects checkout declarations and host-captured inputs.
+type LocalScheduleRegistration struct {
+	Mode        ScheduleWriteMode     `json:"mode"`
+	RepoPath    string                `json:"repo_path"`
+	Project     *projectconfig.Config `json:"project"`
+	Schedules   []ScheduleDeclaration `json:"schedules"`
+	Environment []string              `json:"environment"`
+	Follow      bool                  `json:"follow"`
+	Prove       bool                  `json:"prove"`
+}
+
+// LocalScheduleManager controls schedules on a verified local connection.
+type LocalScheduleManager interface {
+	RegisterLocalSchedules(context.Context, LocalScheduleRegistration) (ScheduleRepoWritten, error)
+	SetLocalSchedulePinned(context.Context, string, bool) (ScheduleView, error)
+	TickLocalSchedules(context.Context, bool) (TickView, error)
 }

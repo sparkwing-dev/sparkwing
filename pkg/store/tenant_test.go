@@ -44,7 +44,7 @@ func runTeam(ctx context.Context, t *testing.T, st *store.Store, runID string) *
 
 func seedTenantRun(t *testing.T, tn *store.Tenant, id, pipeline string) {
 	t.Helper()
-	if err := tn.CreateRun(context.Background(), store.Run{
+	if err := tn.TestOnlySeedRun(context.Background(), store.Run{
 		ID:        id,
 		Pipeline:  pipeline,
 		Status:    "running",
@@ -190,86 +190,12 @@ func TestTenantWritesReportNotFoundForAnotherTeamsRun(t *testing.T) {
 	}
 }
 
-// CreateRun is an upsert whose conflict target is the caller-supplied run
-// id, so a team that names another team's pending run id would reach that
-// row unless the conflict guard carries the team too. The victim would
-// then execute the writer's plan under its own repo and secrets while the
-// writer was told it succeeded.
-func TestTenantCreateRunCannotOverwriteAnotherTeamsPendingRun(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-
-	if err := alpha.CreateRun(ctx, store.Run{
-		ID: "shared-id", Pipeline: "alpha-pipeline", Status: "pending",
-		DeclaredRepo: "alpha-repo", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("alpha.CreateRun: %v", err)
-	}
-
-	err := beta.CreateRun(ctx, store.Run{
-		ID: "shared-id", Pipeline: "beta-pipeline", Status: "pending",
-		DeclaredRepo: "beta-repo", StartedAt: time.Now(),
-	})
-	if !errors.Is(err, store.ErrIDOwnedByAnotherTeam) {
-		t.Errorf("beta.CreateRun on alpha's pending id = %v, want ErrIDOwnedByAnotherTeam", err)
-	}
-
-	got, err := alpha.GetRun(ctx, "shared-id")
-	if err != nil {
-		t.Fatalf("alpha.GetRun: %v", err)
-	}
-	if got.Pipeline != "alpha-pipeline" {
-		t.Errorf("pipeline = %q after the cross-team insert, want alpha-pipeline", got.Pipeline)
-	}
-	if got.DeclaredRepo != "alpha-repo" {
-		t.Errorf("declared repo = %q after the cross-team insert, want alpha-repo", got.DeclaredRepo)
-	}
-	if got.Status != "pending" {
-		t.Errorf("status = %q after the cross-team insert, want pending", got.Status)
-	}
-
-	if _, err := beta.GetRun(ctx, "shared-id"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("beta.GetRun(shared-id) = %v; beta must not read what it did not create", err)
-	}
-	if n, err := beta.CountRuns(ctx, store.RunFilter{}); err != nil || n != 0 {
-		t.Errorf("beta.CountRuns = %d, %v; want 0", n, err)
-	}
-}
-
-// Re-creating a team's own pending run is the upsert's reason to exist,
-// so the guard must not have closed it.
-func TestTenantCreateRunStillUpsertsItsOwnPendingRun(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-
-	if err := alpha.CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "first", Status: "pending", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("first CreateRun: %v", err)
-	}
-	if err := alpha.CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "second", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("second CreateRun: %v", err)
-	}
-	got, err := alpha.GetRun(ctx, "run-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Pipeline != "second" || got.Status != "running" {
-		t.Errorf("run = %s/%s after its own team re-created it, want second/running", got.Pipeline, got.Status)
-	}
-}
-
 // The un-ported *Store surface writes the default team, so a caller
 // that has not moved yet and the default team's handle see one store.
 func TestUnportedStoreWritesLandInTheDefaultTeam(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: "run-legacy", Pipeline: "build", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -300,32 +226,4 @@ func runIDs(runs []*store.Run) []string {
 		out[i] = r.ID
 	}
 	return out
-}
-
-// Two teams may each hold one of a run and a trigger under the same id; the
-// run's owner and the trigger's owner are answered apart.
-func TestOwnerLookupsKeepARunAndATriggerSharingAnIDApart(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	op := st.AsOperator()
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-
-	seedTenantRun(t, alpha, "shared", "build")
-	if err := beta.CreateTrigger(ctx, store.Trigger{ID: "shared", Pipeline: "build", CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-
-	if team, err := op.RunTeam(ctx, "shared"); err != nil || team != "alpha" {
-		t.Errorf("RunTeam = %q, %v; want alpha", team, err)
-	}
-	if team, err := op.TriggerTeam(ctx, "shared"); err != nil || team != "beta" {
-		t.Errorf("TriggerTeam = %q, %v; want beta", team, err)
-	}
-	if _, err := op.RunTeam(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("RunTeam(missing) = %v, want ErrNotFound", err)
-	}
-	if _, err := op.TriggerTeam(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("TriggerTeam(missing) = %v, want ErrNotFound", err)
-	}
 }

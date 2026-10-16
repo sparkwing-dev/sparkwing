@@ -54,7 +54,7 @@ func checkStoreGeneratedDependencies(t *testing.T) (err error) {
 	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: plan.RunID, Holder: plan.Actor.Owner.Holder, Generation: plan.Actor.Owner.Generation}
 	expander, err := s.DelegateCapability(ctx, capability.DelegateSpec{
 		Parent: plan.Actor.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit},
-		Binding: binding, ExpiresAt: owner.Capability.ExpiresAt,
+		Binding: binding, ExpiresAt: owner.Capability.ExpiresAt, Repositories: owner.Capability.Repositories,
 	})
 	if err != nil {
 		return err

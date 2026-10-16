@@ -59,7 +59,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 			request.ExpiresAt = p.Capability.ExpiresAt
 		}
 		issued, err = s.credentialIssuer.DelegateCapability(r.Context(), capability.DelegateSpec{
-			Parent: p.Authority, Audience: capability.Controller, Grants: request.Grants,
+			Parent: p.Authority, Repositories: p.Capability.Repositories, Audience: capability.Controller, Grants: request.Grants,
 			Binding: p.Capability.Binding, ExpiresAt: request.ExpiresAt,
 		})
 	}

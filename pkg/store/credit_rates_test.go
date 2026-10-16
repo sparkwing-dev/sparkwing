@@ -41,7 +41,7 @@ func readyNodePinned(t *testing.T, s *store.Store, runID, nodeID string, cores f
 	ctx := context.Background()
 	plan := []byte(fmt.Sprintf(`{"nodes":[{"id":%q,"modifiers":{"res_cores":%g,"res_memory_bytes":%d}}]}`,
 		nodeID, cores, memoryBytes))
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(), PlanSnapshot: plan,
 	}); err != nil {
 		t.Fatalf("create run: %v", err)

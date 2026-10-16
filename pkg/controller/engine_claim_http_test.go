@@ -35,7 +35,7 @@ func engineHTTPRoot(t *testing.T, e *EngineController, team, prefix string, gran
 	c := capability.Capability{
 		Prefix: prefix, Team: team, Subject: capability.Subject{Kind: kind, ID: prefix},
 		Audience: capability.Controller, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},
-		Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{}, IssuedAt: time.Unix(0, 1).UTC(),
+		Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: nil, IssuedAt: time.Unix(0, 1).UTC(),
 	}
 	envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: c})
 	if err != nil {
@@ -50,7 +50,7 @@ func engineHTTPRoot(t *testing.T, e *EngineController, team, prefix string, gran
 		storedTeam = team
 	}
 	engineSQL(t, e.Store, `INSERT INTO capabilities(digest,prefix,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,?,?,?,?,'controller',?,'delegate',1,?,'none',?,?,1,?)`,
-		hex.EncodeToString(digest[:]), prefix, storedTeam, kind, prefix, encodedGrants, envelope, []byte(`[]`), []byte(`[]`), prefix)
+		hex.EncodeToString(digest[:]), prefix, storedTeam, kind, prefix, encodedGrants, envelope, []byte(`[]`), []byte(`null`), prefix)
 	return raw
 }
 

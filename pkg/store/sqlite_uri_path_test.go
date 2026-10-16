@@ -56,7 +56,7 @@ func TestOpenWritesTheStatDatabaseWhenPathHasURIMetacharacters(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
-			if err := st.defaultTenant().CreateRun(t.Context(), Run{
+			if err := st.defaultTenant().TestOnlySeedRun(t.Context(), Run{
 				ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 			}); err != nil {
 				_ = st.Close()

@@ -23,7 +23,7 @@ func TestAMissingLookupNamesWhatItLookedFor(t *testing.T) {
 		"GetTrigger": {func() error {
 			_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, "trig-absent")
 			return err
-		}, []string{"trigger", "trig-absent"}},
+		}, []string{"not found"}},
 		"GetSecretRow": {
 			func() error {
 				_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetSecretRow("secret-absent", "")

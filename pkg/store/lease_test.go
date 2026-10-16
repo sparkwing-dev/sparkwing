@@ -12,7 +12,7 @@ import (
 
 func seedPending(t *testing.T, s *store.Store, id string) {
 	t.Helper()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(context.Background(), store.Trigger{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).TestOnlySeedTrigger(context.Background(), store.Trigger{
 		ID:        id,
 		Pipeline:  "demo",
 		CreatedAt: time.Now(),

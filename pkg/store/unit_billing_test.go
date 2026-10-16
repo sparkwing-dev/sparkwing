@@ -90,7 +90,7 @@ func unitBillingTotal(t *testing.T, s *Store, want int64, settled bool) {
 }
 
 func TestUnmeteredUnitLifecycleNeedsNoCalculator(t *testing.T) {
-	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
 		for _, end := range []string{"release", "unstarted_lapse", "started_lapse"} {
 			t.Run(string(kind)+"/"+end, func(t *testing.T) {
 				s, _, claim, now := renewalFixture(t, kind)

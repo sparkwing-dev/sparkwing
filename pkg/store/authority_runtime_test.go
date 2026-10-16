@@ -24,7 +24,7 @@ func authorityRoot(id, team string) capability.Capability {
 		Digest: sha256.Sum256([]byte(id)), Prefix: id, Team: team,
 		Subject: capability.Subject{Kind: capability.SubjectMachine, ID: id}, Audience: capability.Controller,
 		Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone},
-		Issuance: capability.Delegate, IssuedAt: time.Unix(1, 0).UTC(), ReservedPools: []string{}, Repositories: []string{},
+		Issuance: capability.Delegate, IssuedAt: time.Unix(1, 0).UTC(), ReservedPools: []string{}, Repositories: nil,
 	}
 }
 
@@ -211,26 +211,8 @@ func TestAuthorityAwardDerivesBindingAndBilling(t *testing.T) {
 }
 
 func TestAuthorityBootstrapExchangeIsAtomicAndSingleUse(t *testing.T) {
-	s := authorityStore(t)
-	root := authorityRoot("launcher", "")
-	root.Subject.Kind = capability.SubjectService
-	root.Grants = []capability.Grant{capability.ClaimsLaunch}
-	spec := authorityClaimFixture(t, s, root)
-	spec.Delivery = capability.DeliveryBootstrap
+	s, bootstrap := adapterBootstrap(t)
 	tx, err := s.beginTx(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	bootstrap, err := s.Issue(t.Context(), tx, capability.IssueRequest{Kind: capability.Award, Award: &spec})
-	if err != nil {
-		rollbackOrLog(tx)
-		t.Fatal(err)
-	}
-	rewriteSchemaExec(t, tx, "UPDATE nodes SET capability_prefix = ? WHERE team = 'a' AND run_id = 'run' AND node_id = 'job'", bootstrap.Capability.Prefix)
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	tx, err = s.beginTx(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

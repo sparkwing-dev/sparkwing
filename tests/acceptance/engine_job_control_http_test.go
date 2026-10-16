@@ -73,7 +73,7 @@ func TestEngineJobCancelHTTP(t *testing.T) {
 				if change.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) || change.To != store.NodeCancelled || change.Cause != store.CauseCancel || change.Actor.Kind != kind || change.Actor.Authority != p.Authority || !reflect.DeepEqual(change.Extra.Result, &store.NodeResult{Outcome: store.NodeCancelled, Reason: "user requested"}) {
 					t.Fatalf("change=%+v", change)
 				}
-				if identity == "owner" && (change.Actor.Holder != p.Capability.Binding.Holder || change.Actor.Generation != p.Capability.Binding.Generation || change.Actor.Owner.Name != p.Capability.UnitID) {
+				if identity == "owner" && (change.Actor.Holder != p.Capability.Binding.Holder || change.Actor.Generation != p.Capability.Binding.Generation || change.Actor.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: p.Capability.Binding.Holder, Generation: p.Capability.Binding.Generation})) {
 					t.Fatalf("owner fence=%+v", change.Actor)
 				}
 			})

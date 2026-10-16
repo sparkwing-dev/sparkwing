@@ -30,7 +30,7 @@ func TestPostgresOpenAndMigrate(t *testing.T) {
 		Status:    "running",
 		StartedAt: time.Now(),
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, r); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	got, err := st.GetRun(ctx, r.ID)
@@ -51,7 +51,7 @@ func TestPostgresAcquireConcurrencySlot_Serializes(t *testing.T) {
 
 	for i := 0; i < n; i++ {
 		runID := fmt.Sprintf("r-%d", i)
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).TestOnlySeedRun(ctx, store.Run{
 			ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now(),
 		}); err != nil {
 			t.Fatalf("CreateRun %s: %v", runID, err)

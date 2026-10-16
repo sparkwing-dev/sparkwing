@@ -713,7 +713,9 @@ The ceiling is the controller's alone; no other process takes one.
 
 Three properties keep the measurement from becoming the cost it bounds.
 One replica measures per window: the controllers claim a store-wide
-lease, so N replicas cost one listing rather than N. The measurement's
+lease, so N replicas cost one listing rather than N. A completed measurement
+advances the window only while its captured lease is live. An expired worker
+cannot overwrite a successor's window. The measurement's
 requests sit outside the object-store request budget, because totalling
 a million-object bucket spends twice the per-minute list budget in one
 pass and would otherwise leave every other reader refused for the rest

@@ -35,7 +35,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	}
 	signIn(t, st, "ev-owner", "ev@example.com")
 
-	if _, err := tn.RecordCreditGrant(ctx, store.CreditGrantRequest{
+	if _, err := tn.TestOnlySettlePaidCredit(ctx, store.CreditGrantRequest{
 		Kind: store.CreditGrantPaid, AmountMicro: 10 * store.MicroCreditsPerCredit,
 		Reference: "pi_1", CreatedBy: "checkout",
 	}); err != nil {

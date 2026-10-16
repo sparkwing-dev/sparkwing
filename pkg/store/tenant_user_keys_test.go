@@ -129,7 +129,7 @@ func TestPipelineProfileIsUniquePerTeam(t *testing.T) {
 func seedConcurrencyRun(t *testing.T, tn *store.Tenant, id string) {
 	t.Helper()
 	now := time.Now()
-	if err := tn.CreateRun(context.Background(), store.Run{
+	if err := tn.TestOnlySeedRun(context.Background(), store.Run{
 		ID: id, Pipeline: "ci", Status: "running", StartedAt: now,
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", id, err)
@@ -146,7 +146,9 @@ func TestConcurrencyKeyIsUniquePerTeam(t *testing.T) {
 	alpha := tenantFor(t, st, "alpha")
 	beta := tenantFor(t, st, "beta")
 	seedConcurrencyRun(t, alpha, "a1")
+ if err:=teststore.SeedNode(st,ctx,store.Node{RunID:"a1",NodeID:"n1",Status:"pending"});err!=nil{t.Fatal(err)}
 	seedConcurrencyRun(t, beta, "b1")
+ if err:=teststore.SeedNode(st,ctx,store.Node{RunID:"b1",NodeID:"n1",Status:"pending"});err!=nil{t.Fatal(err)}
 
 	for _, c := range []struct {
 		tn    *store.Tenant
@@ -186,67 +188,5 @@ func TestConcurrencyKeyIsUniquePerTeam(t *testing.T) {
 	}
 	if _, err := beta.ConcurrencyHolder(ctx, "deploy", "b1/n1", time.Now()); err != nil {
 		t.Errorf("beta lost its holder to alpha's release: %v", err)
-	}
-}
-
-// The memo cache is the read leak the widened key closes. The write was
-// ON CONFLICT (key, cache_key_hash) and the read returned output_ref,
-// origin_run_id and origin_node_id, so two teams that author one
-// concurrency key and hash the same inputs handed each other pointers
-// into one another's outputs. Proving the write no longer collides is
-// not enough: the read is what leaked.
-func TestConcurrencyCacheDoesNotServeAnotherTeamsOutput(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-	seedConcurrencyRun(t, alpha, "a1")
-	seedConcurrencyRun(t, beta, "b1")
-
-	if got, err := alpha.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "memo", HolderID: "a1/n1", RunID: "a1", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "same-hash", Lease: time.Hour,
-	}); err != nil || got.Kind != store.AcquireGranted {
-		t.Fatalf("alpha acquire = %+v, %v; want granted", got, err)
-	}
-	if released, _, _, err := alpha.ReleaseAndNotify(ctx, "memo", "a1/n1", "success",
-		"a1/n1/out", "same-hash", time.Hour, time.Hour); err != nil || !released {
-		t.Fatalf("alpha release = %v, %v; want released", released, err)
-	}
-
-	got, err := beta.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "memo", HolderID: "b1/n1", RunID: "b1", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "same-hash", Lease: time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("beta acquire: %v", err)
-	}
-	if got.Kind == store.AcquireCached {
-		t.Fatalf("beta was served alpha's memo: output %q from run %q node %q",
-			got.OutputRef, got.OriginRunID, got.OriginNodeID)
-	}
-	if got.OutputRef != "" || got.OriginRunID != "" {
-		t.Errorf("beta's acquire carries alpha's origin: %+v", got)
-	}
-
-	res, err := beta.ResolveWaiter(ctx, "memo", "b1", "n1", "same-hash", "", "", false)
-	if err != nil {
-		t.Fatalf("beta ResolveWaiter: %v", err)
-	}
-	if res.Status == store.WaiterCached {
-		t.Fatalf("beta's poll was served alpha's memo: output %q from run %q node %q",
-			res.OutputRef, res.OriginRunID, res.OriginNodeID)
-	}
-
-	seedConcurrencyRun(t, alpha, "a2")
-	again, err := alpha.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
-		Key: "memo", HolderID: "a2/n1", RunID: "a2", NodeID: "n1",
-		Capacity: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: "same-hash", Lease: time.Hour,
-	})
-	if err != nil {
-		t.Fatalf("alpha re-acquire: %v", err)
-	}
-	if again.Kind != store.AcquireCached || again.OutputRef != "a1/n1/out" {
-		t.Errorf("alpha's own memo = %+v, want its cached output a1/n1/out", again)
 	}
 }

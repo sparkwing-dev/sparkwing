@@ -212,7 +212,7 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Audience: capability.Controller, Binding: spec.Binding, Grants: spec.Grants, ExpiresAt: spec.ExpiresAt})
+	child, err := s.DelegateCapability(t.Context(), capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Audience: capability.Controller, Binding: spec.Binding, Grants: spec.Grants, ExpiresAt: spec.ExpiresAt, Repositories: spec.Repositories})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestEnrolledClaimRepositoryAncestryProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?`, request)
+		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,repo_display=?`, request, "https://github.com/"+owner+fmt.Sprintf("/repo-%d", suffix))
 		demand.CapabilityPrefix = root.Capability.Prefix
 		if delegated {
 			demand.CapabilityPrefix = child.Capability.Prefix
