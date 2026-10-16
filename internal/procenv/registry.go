@@ -18,7 +18,7 @@ var Registry = []Var{
 	{Name: "SPARKWING_RUNNER_TYPE", Prefix: false, Class: RuntimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_RUNNER_LABELS", Prefix: false, Class: RuntimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_DRY_RUN", Prefix: false, Class: RuntimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
-	{Name: "SPARKWING_GATE_INDEX", Prefix: false, Class: RuntimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
+	{Name: "SPARKWING_GATE_INDEX", Prefix: false, Class: RuntimeClass, Owner: "engine", Doc: "Hook index file path from the verified machine-local environment snapshot."},
 	{Name: "CI", Prefix: false, Class: RuntimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_BRANCH", Prefix: false, Class: RuntimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},
 	{Name: "SPARKWING_COMMIT", Prefix: false, Class: RuntimeClass, Owner: "engine", Doc: "Composed from the sealed run and granted runner identity."},

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // Event size limits, named so a refusal says which one it hit.
@@ -23,9 +25,10 @@ const MaxEventKindBytes = 128
 // [MaxEventKindBytes], or holds a byte outside [A-Za-z0-9_.:-].
 var ErrInvalidEventKind = errors.New("invalid event kind")
 
-// DefaultEventLimits bounds what a run can store as events when the
-// operator sets nothing: 256 KiB per event, 64 MiB and 50,000 events per run.
-var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
+// DefaultEventLimits returns the shared default event caps.
+func DefaultEventLimits() EventLimits {
+	return EventLimits{MaxBytesPerEvent: limits.EventBytes, MaxBytesPerRun: limits.RunEventBytes, MaxEventsPerRun: int64(limits.MaxEvents)}
+}
 
 // EventLimits caps what a run stores as events. An event's bytes are its
 // kind plus its payload. The caps hold whether or not a storage quota tier is
@@ -101,15 +104,16 @@ func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err err
 }
 
 func eventLimitsTx(ctx context.Context, tx *storeTx) (EventLimits, error) {
-	perEvent, err := creditSettingTx(ctx, tx, metaKeyEventMaxBytes, DefaultEventLimits.MaxBytesPerEvent)
+	defaults := DefaultEventLimits()
+	perEvent, err := creditSettingTx(ctx, tx, metaKeyEventMaxBytes, defaults.MaxBytesPerEvent)
 	if err != nil {
 		return EventLimits{}, err
 	}
-	perRun, err := creditSettingTx(ctx, tx, metaKeyEventMaxBytesPerRun, DefaultEventLimits.MaxBytesPerRun)
+	perRun, err := creditSettingTx(ctx, tx, metaKeyEventMaxBytesPerRun, defaults.MaxBytesPerRun)
 	if err != nil {
 		return EventLimits{}, err
 	}
-	events, err := creditSettingTx(ctx, tx, metaKeyEventMaxEventsPerRun, DefaultEventLimits.MaxEventsPerRun)
+	events, err := creditSettingTx(ctx, tx, metaKeyEventMaxEventsPerRun, defaults.MaxEventsPerRun)
 	if err != nil {
 		return EventLimits{}, err
 	}

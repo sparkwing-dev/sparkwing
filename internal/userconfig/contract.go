@@ -113,24 +113,3 @@ type RunConfig struct {
 	SubmitEnvAllow []string `yaml:"submit_env_allow,omitempty" json:"submit_env_allow,omitempty"`
 	CacheFrom      *string  `yaml:"cache_from,omitempty" json:"cache_from,omitempty"`
 }
-
-// Decode validates the whole file with file/key/line errors before a section is
-// used. Unknown keys include agent, logs, dispatch_wait, gitcache and profile
-// backend settings. Decoding does not fill defaults or resolve precedence.
-func Decode(path string, raw []byte) (Config, error) {
-	return decodeConfig(path, raw)
-}
-
-// ReadConfig verifies the owner-only regular file with fssecure on Unix and
-// Windows, then calls Decode; no migration or legacy fallback runs.
-func ReadConfig(path string) (Config, error) {
-	raw, err := readFile(path)
-	if err != nil {
-		return Config{}, err
-	}
-	return Decode(path, raw)
-}
-
-// ValidateConfig applies the same key, enum and explicit-zero checks to callers
-// that already have typed data. It does not echo credentials in its errors.
-func ValidateConfig(cfg Config) error { return validateConfig(cfg) }

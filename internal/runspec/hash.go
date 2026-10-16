@@ -121,10 +121,14 @@ func EnvironmentDigest(values map[string]string) (EnvSnapshot, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	entries := make([][]byte, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, []byte(name+"="+values[name]))
+	}
 	hash, err := CanonicalHash(struct {
-		Version int               `json:"version"`
-		Values  map[string]string `json:"values"`
-	}{1, values})
+		Version int      `json:"version"`
+		Entries [][]byte `json:"entries"`
+	}{2, entries})
 	return EnvSnapshot{Names: names, Digest: hash}, err
 }
 

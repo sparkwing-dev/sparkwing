@@ -3,7 +3,10 @@
 package repos
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -81,6 +84,71 @@ func TestDescribeReportsAnExitWithoutAReply(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "exited without answering describe") || !strings.Contains(err.Error(), "registry init failed") {
 		t.Fatalf("err = %v, want the exit and its stderr", err)
 	}
+}
+
+func TestDescribeFiltersCredentialsAndMasksDiagnostics(t *testing.T) {
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "describe-aws-secret")
+	t.Setenv("GH_TOKEN", "describe-gh-secret")
+	t.Setenv("CUSTOM_API_TOKEN", "describe-custom-secret")
+	t.Setenv("HTTPS_PROXY", "https://alice:proxy-private-password@proxy.example")
+	bin, _ := fakeSDK(t, `printf '%s|%s|%s|%s\n' "$AWS_SECRET_ACCESS_KEY" "$GH_TOKEN" "$CUSTOM_API_TOKEN" "$HTTPS_PROXY" >&2; exit 3`)
+	_, err := Describe(t.Context(), pipelineentry.Binary(bin), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "|||***") {
+		t.Fatalf("describe did not filter and mask pipeline output: %v", err)
+	}
+	for _, value := range []string{"describe-aws-secret", "describe-gh-secret", "describe-custom-secret", "proxy-private-password"} {
+		if strings.Contains(err.Error(), value) {
+			t.Errorf("credential reached diagnostics: %s", value)
+		}
+	}
+}
+
+func TestDescribeMasksProtocolErrors(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "https://alice:proxy-private-password@proxy.example")
+	for _, message := range []string{"proxy-private-password", "a safe message"} {
+		bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":false,"error":{"code":"plan_failed","message":"`+message+`","hint":"proxy-private-password","details":{"secret":"proxy-private-password"}}}\n' >&4`)
+		_, err := Describe(t.Context(), pipelineentry.Binary(bin), t.TempDir())
+		var typed *apierr.Error
+		if err == nil || strings.Contains(err.Error(), "proxy-private-password") || !errors.As(err, &typed) || typed.Code != apierr.PlanFailed {
+			t.Fatalf("protocol error was not masked with its type retained: %v", err)
+		}
+		var output bytes.Buffer
+		if err := apierr.WriteJSON(&output, typed); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(output.String(), "proxy-private-password") {
+			t.Fatalf("typed error exposed credential: %s", output.String())
+		}
+	}
+}
+
+func FuzzDescribeErrorsNeverExposeProxyCredentials(f *testing.F) {
+	f.Add([]byte("private-password"))
+	f.Fuzz(func(t *testing.T, input []byte) {
+		if len(input) == 0 || len(input) > 64 {
+			t.Skip()
+		}
+		password := hex.EncodeToString(input)
+		t.Setenv("HTTPS_PROXY", "https://alice:"+password+"@proxy.example")
+		failure := &apierr.Error{Code: apierr.PlanFailed, Message: password, Hint: password, Details: map[string]any{password: []any{password}}}
+		body, err := json.Marshal(map[string]any{"reply": "2", "ok": false, "error": failure})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bin, _ := fakeSDK(t, "printf '%s\\n' '"+string(body)+"' >&4")
+		_, err = Describe(t.Context(), pipelineentry.Binary(bin), t.TempDir())
+		var typed *apierr.Error
+		if err == nil || !errors.As(err, &typed) {
+			t.Fatalf("missing typed failure: %v", err)
+		}
+		var output bytes.Buffer
+		if err := apierr.WriteJSON(&output, typed); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(output.String(), password) || strings.Contains(err.Error(), password) {
+			t.Fatal("process error exposed a registered credential")
+		}
+	})
 }
 
 func TestDescribeFailsAProtocolViolationAtOnce(t *testing.T) {

@@ -45,20 +45,14 @@ func Home(in Inputs) (string, Origin, error) {
 
 // Profile resolves profile from its permitted sources.
 func Profile(in Inputs) (string, Origin, error) {
-	fallback := ""
-
-	value, origin, err := pick(in, "profile", func(v Values) *string { return v.Profile }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	return value, origin, err
+	return pickRun(in, "profile", func(v runspec.Options) runspec.Setting[string] { return v.Profile }, "")
 }
 
 // Workers resolves workers from its permitted sources.
 func Workers(in Inputs) (int, Origin, error) {
 	fallback := in.Context.NumCPU
 
-	value, origin, err := pick(in, "workers", func(v Values) *int { return v.Workers }, fallback)
+	value, origin, err := pickRun(in, "workers", func(v runspec.Options) runspec.Setting[int] { return v.Workers }, fallback)
 	if err != nil {
 		return value, origin, err
 	}
@@ -77,7 +71,7 @@ func Output(in Inputs) (string, Origin, error) {
 	if in.Context.Terminal {
 		fallback = "pretty"
 	}
-	value, origin, err := pick(in, "output", func(v Values) *string { return v.Output }, fallback)
+	value, origin, err := pickRun(in, "output", func(v runspec.Options) runspec.Setting[string] { return v.Output }, fallback)
 	if err != nil {
 		return value, origin, err
 	}
@@ -94,7 +88,7 @@ func AdmissionClass(in Inputs) (string, Origin, error) {
 		fallback = "batch"
 	}
 
-	value, origin, err := pick(in, "admission_class", func(v Values) *string { return v.AdmissionClass }, fallback)
+	value, origin, err := pickRun(in, "admission_class", func(v runspec.Options) runspec.Setting[string] { return v.AdmissionClass }, fallback)
 	if err != nil {
 		return value, origin, err
 	}
@@ -104,11 +98,11 @@ func AdmissionClass(in Inputs) (string, Origin, error) {
 	if !in.Context.Submitter {
 		return value, origin, err
 	}
-	op, e := ControllerCeilings(in.Operator)
+	op, e := operatorCeilings(in)
 	if e != nil {
 		return value, origin, e
 	}
-	if op.AllowedAdmissionClasses != nil && !slices.Contains(op.AllowedAdmissionClasses, value) {
+	if op.AllowedAdmissionClasses.Set && !slices.Contains(op.AllowedAdmissionClasses.Value, value) {
 		err = invalid("admission_class", origin, "not permitted by operator admission classes")
 	}
 	return value, origin, err
@@ -118,19 +112,19 @@ func AdmissionClass(in Inputs) (string, Origin, error) {
 func Priority(in Inputs) (int, Origin, error) {
 	fallback := 0
 
-	value, origin, err := pick(in, "priority", func(v Values) *int { return v.Priority }, fallback)
+	value, origin, err := pickRun(in, "priority", func(v runspec.Options) runspec.Setting[int] { return v.Priority }, fallback)
 	if err != nil {
 		return value, origin, err
 	}
 	if !in.Context.Submitter {
 		return value, origin, err
 	}
-	op, e := ControllerCeilings(in.Operator)
+	op, e := operatorCeilings(in)
 	if e != nil {
 		return value, origin, e
 	}
-	if op.MaxPriority != nil && value > *op.MaxPriority {
-		err = above("priority", origin, value, *op.MaxPriority, op.Origins["operator.max_priority"])
+	if op.Priority.Set && value > op.Priority.Value {
+		err = above("priority", origin, value, op.Priority.Value, fromOrigin(op.Priority.Origin))
 	}
 	return value, origin, err
 }
@@ -165,79 +159,49 @@ func BoxID(in Inputs) (string, Origin, error) {
 
 // Publish resolves publish from its permitted sources.
 func Publish(in Inputs) (string, Origin, error) {
-	fallback := ""
-
-	value, origin, err := pick(in, "publish", func(v Values) *string { return v.Publish }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	return value, origin, err
+	return pickRun(in, "publish", func(v runspec.Options) runspec.Setting[string] { return v.Publish }, "")
 }
 
 // CacheFrom resolves cache_from from its permitted sources.
 func CacheFrom(in Inputs) (string, Origin, error) {
-	fallback := ""
-
-	value, origin, err := pick(in, "cache_from", func(v Values) *string { return v.CacheFrom }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	return value, origin, err
+	return pickRun(in, "cache_from", func(v runspec.Options) runspec.Setting[string] { return v.CacheFrom }, "")
 }
 
 // StartAt resolves start_at from the intake selection.
 func StartAt(in Inputs) (string, Origin, error) {
-	return pick(in, "start_at", func(v Values) *string { return v.StartAt }, "")
+	return pickRun(in, "start_at", func(v runspec.Options) runspec.Setting[string] { return v.StartAt }, "")
 }
 
 // StopAt resolves stop_at from the intake selection.
 func StopAt(in Inputs) (string, Origin, error) {
-	return pick(in, "stop_at", func(v Values) *string { return v.StopAt }, "")
+	return pickRun(in, "stop_at", func(v runspec.Options) runspec.Setting[string] { return v.StopAt }, "")
 }
 
 // Only resolves only from the intake selection.
 func Only(in Inputs) (string, Origin, error) {
-	return pick(in, "only", func(v Values) *string { return v.Only }, "")
+	return pickRun(in, "only", func(v runspec.Options) runspec.Setting[string] { return v.Only }, "")
 }
 
 // DryRun resolves dry_run from its permitted sources.
 func DryRun(in Inputs) (bool, Origin, error) {
-	fallback := false
-
-	value, origin, err := pick(in, "dry_run", func(v Values) *bool { return v.DryRun }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	return value, origin, err
+	return pickRun(in, "dry_run", func(v runspec.Options) runspec.Setting[bool] { return v.DryRun }, false)
 }
 
 // NoMemo resolves no_memo from its permitted sources.
 func NoMemo(in Inputs) (bool, Origin, error) {
-	fallback := false
-
-	value, origin, err := pick(in, "no_memo", func(v Values) *bool { return v.NoMemo }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	return value, origin, err
+	return pickRun(in, "no_memo", func(v runspec.Options) runspec.Setting[bool] { return v.NoMemo }, false)
 }
 
 // Debug resolves debug from its permitted sources.
 func Debug(in Inputs) (bool, Origin, error) {
-	fallback := false
-
-	value, origin, err := pick(in, "debug", func(v Values) *bool { return v.Debug }, fallback)
-	if err != nil {
-		return value, origin, err
-	}
-	return value, origin, err
+	return pickRun(in, "debug", func(v runspec.Options) runspec.Setting[bool] { return v.Debug }, false)
 }
 
 // Retry resolves job.retry from its permitted sources.
 func Retry(in Inputs) (int, Origin, error) {
 	fallback := 0
 
-	value, origin, err := pick(in, "job.retry", func(v Values) *int { return v.Retry }, fallback)
+	value, origin, err := pickRun(in, "job.retry", func(v runspec.Options) runspec.Setting[int] { return v.JobDefaults.Retry }, fallback)
 	if err != nil {
 		return value, origin, err
 	}
@@ -249,7 +213,7 @@ func Retry(in Inputs) (int, Origin, error) {
 
 // Requires preserves an explicit empty list.
 func Requires(in Inputs) ([]string, Origin, error) {
-	value, origin, err := pickList(in, "requires", func(v Values) []string { return v.Requires })
+	value, origin, err := pickRunList(in, "requires", func(v runspec.Options) runspec.Setting[[]string] { return v.Requires })
 	if err == nil {
 		err = validNames("requires", value, origin)
 	}
@@ -258,7 +222,7 @@ func Requires(in Inputs) ([]string, Origin, error) {
 
 // Prefers preserves an explicit empty list.
 func Prefers(in Inputs) ([]string, Origin, error) {
-	value, origin, err := pickList(in, "prefers", func(v Values) []string { return v.Prefers })
+	value, origin, err := pickRunList(in, "prefers", func(v runspec.Options) runspec.Setting[[]string] { return v.Prefers })
 	if err == nil {
 		err = validNames("prefers", value, origin)
 	}
@@ -267,7 +231,7 @@ func Prefers(in Inputs) ([]string, Origin, error) {
 
 // AllowRisk preserves an explicit empty list.
 func AllowRisk(in Inputs) ([]string, Origin, error) {
-	value, origin, err := pickList(in, "allow_risk", func(v Values) []string { return v.AllowRisk })
+	value, origin, err := pickRunList(in, "allow_risk", func(v runspec.Options) runspec.Setting[[]string] { return v.AllowRisk })
 	if err == nil {
 		err = validNames("allow_risk", value, origin)
 	}
@@ -276,7 +240,7 @@ func AllowRisk(in Inputs) ([]string, Origin, error) {
 
 // SubmitEnvAllow preserves an explicit empty list.
 func SubmitEnvAllow(in Inputs) ([]string, Origin, error) {
-	value, origin, err := pickList(in, "run.submit_env_allow", func(v Values) []string { return v.SubmitEnvAllow })
+	value, origin, err := pickRunList(in, "run.submit_env_allow", func(v runspec.Options) runspec.Setting[[]string] { return v.SubmitEnvAllow })
 	if err == nil {
 		if validation := procenv.ValidateSubmitEnvAllow(value); validation != nil {
 			err = invalid("run.submit_env_allow", origin, "use literal environment names or terminal _* prefixes")
@@ -287,7 +251,7 @@ func SubmitEnvAllow(in Inputs) ([]string, Origin, error) {
 
 // PauseTimeout validates its independent duration bound.
 func PauseTimeout(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "debug.pause_timeout", func(v Values) *time.Duration { return v.PauseTimeout }, limits.DebugPause)
+	value, origin, err := pickRun(in, "debug.pause_timeout", func(v runspec.Options) runspec.Setting[time.Duration] { return v.PauseTimeout }, limits.DebugPause)
 	if err == nil && value < 1 {
 		err = invalid("debug.pause_timeout", origin, "duration is below the permitted minimum")
 	}
@@ -308,7 +272,7 @@ func CatchUp(in Inputs) (time.Duration, Origin, error) {
 
 // MemoTTL validates its independent duration bound.
 func MemoTTL(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "job.memo_ttl", func(v Values) *time.Duration { return v.MemoTTL }, limits.MemoDefaultTTL)
+	value, origin, err := pickRun(in, "job.memo_ttl", func(v runspec.Options) runspec.Setting[time.Duration] { return v.JobDefaults.MemoTTL }, limits.MemoDefaultTTL)
 	if err == nil && value < 1 {
 		err = invalid("job.memo_ttl", origin, "duration is below the permitted minimum")
 	}
@@ -320,26 +284,26 @@ func MemoTTL(in Inputs) (time.Duration, Origin, error) {
 
 // ClaimWait validates its independent duration bound.
 func ClaimWait(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "claim_wait", func(v Values) *time.Duration { return v.ClaimWait }, limits.ClaimWait)
+	value, origin, err := pickRun(in, "claim_wait", func(v runspec.Options) runspec.Setting[time.Duration] { return v.ClaimWait }, limits.ClaimWait)
 	if err == nil && value < 1 {
 		err = invalid("claim_wait", origin, "duration is below the permitted minimum")
 	}
 	if !in.Context.Submitter {
 		return value, origin, err
 	}
-	op, e := ControllerCeilings(in.Operator)
+	op, e := operatorCeilings(in)
 	if e != nil {
 		return value, origin, e
 	}
-	if err == nil && op.MaxClaimWait != nil && value > *op.MaxClaimWait {
-		err = above("claim_wait", origin, value, *op.MaxClaimWait, op.Origins["operator.max_claim_wait"])
+	if err == nil && op.ClaimWait.Set && value > op.ClaimWait.Value {
+		err = above("claim_wait", origin, value, op.ClaimWait.Value, fromOrigin(op.ClaimWait.Origin))
 	}
 	return value, origin, err
 }
 
 // ApprovalWait validates its independent duration bound.
 func ApprovalWait(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "approval.wait", func(v Values) *time.Duration { return v.ApprovalWait }, time.Duration(0))
+	value, origin, err := pickRun(in, "approval.wait", func(v runspec.Options) runspec.Setting[time.Duration] { return v.JobDefaults.ApprovalWait }, time.Duration(0))
 	if err == nil && value < 0 {
 		err = invalid("approval.wait", origin, "duration is below the permitted minimum")
 	}
@@ -348,7 +312,7 @@ func ApprovalWait(in Inputs) (time.Duration, Origin, error) {
 
 // NoProgressTimeout validates its independent duration bound.
 func NoProgressTimeout(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "job.no_progress_timeout", func(v Values) *time.Duration { return v.NoProgressTimeout }, time.Duration(0))
+	value, origin, err := pickRun(in, "job.no_progress_timeout", func(v runspec.Options) runspec.Setting[time.Duration] { return v.JobDefaults.NoProgressTimeout }, time.Duration(0))
 	if err == nil && value < 0 {
 		err = invalid("job.no_progress_timeout", origin, "duration is below the permitted minimum")
 	}
@@ -357,9 +321,9 @@ func NoProgressTimeout(in Inputs) (time.Duration, Origin, error) {
 
 // RetryBackoff validates its independent duration bound.
 func RetryBackoff(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "job.retry_backoff", func(v Values) *time.Duration { return v.RetryBackoff }, time.Duration(0))
-	if err == nil && value < 0 {
-		err = invalid("job.retry_backoff", origin, "duration is below the permitted minimum")
+	value, origin, err := pickRun(in, "job.retry_backoff", func(v runspec.Options) runspec.Setting[time.Duration] { return v.JobDefaults.RetryBackoff }, time.Duration(0))
+	if err == nil && (value < 0 || value > limits.RetryBackoff) {
+		err = invalid("job.retry_backoff", origin, "duration is outside the permitted bounds")
 	}
 	return value, origin, err
 }
@@ -401,7 +365,7 @@ func Guards(in Inputs) (projectconfig.Guards, Origin, error) {
 
 // RunnerSelection validates routing without granting pool authority.
 func RunnerSelection(in Inputs) (runspec.RunnerSelection, Origin, error) {
-	value, origin, err := pick(in, "runner", func(v Values) *runspec.RunnerSelection { return v.RunnerSelection }, runspec.RunnerSelection{Kind: runspec.RunnerAny})
+	value, origin, err := pickRun(in, "runner", func(v runspec.Options) runspec.Setting[runspec.RunnerSelection] { return v.Runner }, runspec.RunnerSelection{Kind: runspec.RunnerAny})
 	switch value.Kind {
 	case runspec.RunnerAny, runspec.RunnerHere:
 		if value.Value != "" {
@@ -420,31 +384,35 @@ func RunnerSelection(in Inputs) (runspec.RunnerSelection, Origin, error) {
 // OwnerExecution leaves local execution unbounded and applies the remote operator ceiling.
 func OwnerExecution(in Inputs) (time.Duration, Origin, error) {
 	if !in.Context.Submitter {
-		return pick(in, "owner_execution", func(v Values) *time.Duration { return v.OwnerExecution }, time.Duration(0))
+		return pickRun(in, "owner_execution", func(v runspec.Options) runspec.Setting[time.Duration] { return v.OwnerExecutionTimeout }, time.Duration(0))
 	}
 	if in.Context.Local {
 		return 0, Origin{Source: Default, Key: "owner_execution"}, nil
 	}
-	op, err := ControllerCeilings(in.Operator)
+	op, err := operatorCeilings(in)
 	if err != nil {
 		return 0, Origin{}, err
 	}
-	value, origin, err := pick(in, "owner_execution", func(v Values) *time.Duration { return v.OwnerExecution }, *op.OwnerExecution)
+	ceiling := op.OwnerExecutionTimeout
+	if !ceiling.Set {
+		ceiling = declaration(limits.RunDeadline, runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "operator.owner_execution"})
+	}
+	value, origin, err := pickRun(in, "owner_execution", func(v runspec.Options) runspec.Setting[time.Duration] { return v.OwnerExecutionTimeout }, ceiling.Value)
 	if origin.Source == Default {
-		origin = op.Origins["operator.owner_execution"]
+		origin = fromOrigin(ceiling.Origin)
 	}
 	if err == nil && value <= 0 {
 		err = invalid("owner_execution", origin, "remote owner duration must be positive")
 	}
-	if err == nil && value > *op.OwnerExecution {
-		err = above("owner_execution", origin, value, *op.OwnerExecution, op.Origins["operator.owner_execution"])
+	if err == nil && value > ceiling.Value {
+		err = above("owner_execution", origin, value, ceiling.Value, fromOrigin(ceiling.Origin))
 	}
 	return value, origin, err
 }
 
 // JobTimeout refuses an author bound above the owner's independent execution ceiling.
 func JobTimeout(in Inputs) (time.Duration, Origin, error) {
-	value, origin, err := pick(in, "job.timeout", func(v Values) *time.Duration { return v.JobTimeout }, time.Duration(0))
+	value, origin, err := pickRun(in, "job.timeout", func(v runspec.Options) runspec.Setting[time.Duration] { return v.JobDefaults.Timeout }, time.Duration(0))
 	if err != nil {
 		return value, origin, err
 	}
@@ -469,6 +437,6 @@ func JobTimeout(in Inputs) (time.Duration, Origin, error) {
 
 // Checkout combines each policy field without changing acquisition identity.
 func Checkout(in Inputs) (nodeproto.SourceSpec, Origin, error) {
-	value, _, origin, err := checkout(in)
-	return value, origin, err
+	value, err := checkoutSetting(in)
+	return value.Value.Policy, fromOrigin(value.Origin), err
 }

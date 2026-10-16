@@ -58,17 +58,22 @@ func Path() (string, error) {
 	return fssecure.ConfigFile(Filename)
 }
 
-// Read decodes section of the settings file at path into out, which must be a
-// pointer. Fields out already holds survive when the section leaves them
-// unset, so a caller seeds defaults before the call. Read reports false, and
-// leaves out alone, when the file or the section is absent. A key out does not
-// declare, an unknown section, or a second YAML document is an error.
+// Read validates the machine file and decodes section into out, preserving defaults and returning false for absence.
 func Read(path, section string, out any) (bool, error) {
 	data, err := readFile(path)
 	if err != nil || data == nil {
 		return false, err
 	}
 	return decodeSection(path, data, section, out)
+}
+
+// ReadConfig reads and validates an owner-only machine file.
+func ReadConfig(path string) (Config, error) {
+	raw, err := readFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+	return Decode(path, raw)
 }
 
 // ReadDefault is [Read] on the file [Path] reports, which it returns so a

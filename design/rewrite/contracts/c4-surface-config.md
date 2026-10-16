@@ -18,6 +18,9 @@
   daemon's current environment. W3/W4/W8 consume procenv, startup/body splitting,
   guard results and shared deadlines. Startup settings cannot change declarations.
   Execution and inactivity budgets remain distinct.
+- `procenv.Runtime.GateIndex` is an optional string path, projected only from
+  a verified local snapshot. The path remains in private snapshot storage,
+  never a wire field; remote ambient input cannot bind a hook index.
 - Network proxy settings are the existing passed-and-masked exception. Register
   credential components for URL and scheme-less proxy forms, including GOPROXY and
   PIP_INDEX_URL. A mask of only the whole string is insufficient when tools print
@@ -148,6 +151,8 @@ cycle and unknown-field refusals before typed decoding.
 - Local runs use their captured snapshot, children inherit that snapshot, and
   schedules capture at install. A daemon's ambient env never replaces it. Private
   snapshots use `fssecure`; the run spec carries names, digest and snapshot identity.
+  Capture and verification hash the same sorted, byte-preserving assignments,
+  including native bytes that are not valid UTF-8.
 - Remote input is the registry's minimal/network/CA base plus `run.submit_env_allow`.
   Credential-class and credential-shaped names are dropped even when explicitly
   allowed. `envredact.CredentialName` remains the shared shape classifier; procenv
@@ -216,10 +221,11 @@ cycle and unknown-field refusals before typed decoding.
 
 ### Settings across the seal points
 
-`ResolveRequest` returns `runspec.Options`. `ProjectRequest` defines the typed
-conversion from `Values`, and `RequestProjection` names every run-owned field.
-Pointers and nil collections retain absence. Explicit false, zero and empty
-collections stay present. Nested resources, pause controls and checkout fields
+`ResolveRequest` returns `runspec.Options` with resolved winners stored directly
+as `runspec.Setting[T]`. `ResolveIntake` validates captured request origins and
+resolves them against trusted controller inputs. `Values` embeds those native
+options. Startup, argument and guard inputs keep their separate source metadata.
+Explicit false, zero and empty collections stay present. Nested resources, pause controls and checkout fields
 retain separate origins. `OriginLayers` maps every C4 source to C1, including the
 three operator sources. File, key and line survive the conversion. A captured
 winner keeps its original origin when another host consumes the sealed request.
@@ -266,9 +272,9 @@ Each generated node stores its `JobExecutionSettings` beside its declarative
 `JobSpec` and spec hash. Initial and generated declarations stay unchanged for
 code-reconstruction drift checks. Expansions do not rewrite the run's seals.
 
-`Values.Checkout` and the checkout resolver use `nodeproto.SourceSpec` for full
-history, depth, tags, submodules and LFS. `Options.Checkout` seals the winning
-policy plus each field's origin. `runspec.Source` and project YAML's source string
+`Values.Options.Checkout` and the checkout resolver use
+`runspec.Setting[runspec.CheckoutPolicy]` for full history, depth, tags, submodules
+and LFS. The policy retains each field's origin. `runspec.Source` and project YAML's source string
 retain acquisition identity. They never stand in for checkout policy.
 `source.ForRequest` supplies the policy available for initial planning acquisition.
 `source.ForExecution` consumes the policy finalized at acceptance.
@@ -450,7 +456,7 @@ lands. There is no behavioral changelog claim in this contract-only change.
 | This contract | Other area/type | Required agreement |
 | --- | --- | --- |
 | settings.ProjectCheckoutDeclarations/ValidateCheckoutDeclarations | C1 CheckoutDeclarations/Spec.Declarations; C3 wire PlanSubmission | Preserve separate author-only layers in transport and seal; re-resolve using server-owned intake overrides/ceilings |
-| settings.ProjectRequest/ProjectOrigin/ProjectCeilings | C1 runspec.Options/Ceilings | Preserve presence and every original source/file/key/line; store owns both immutable seals |
+| settings.ResolveRequest/ProjectOrigin/ProjectCeilings | C1 runspec.Options/Ceilings | Preserve presence and every original source/file/key/line; store owns both immutable seals |
 | settings.ResolvePlan/ResolveExpansion | C1 Resolved.Settings/NodeRow.Execution; C3 NodeInput.Execution | Persist job-ID winners separately from declarations/hashes; execute winners and reconstruct code from declarations |
 | settings.Checkout | C3 SourceSpec; C1 Options.Checkout; source.ForExecution | Seal typed checkout policy at acceptance separately from acquisition identity |
 | procenv.Base/Runtime | C1 runspec env snapshot identity; C3 RunHost/NodeHost | Captured env identity survives retry/children; source facts and granted runner identity supplied explicitly |
@@ -561,15 +567,13 @@ family files and complete tables; temporary Old implementations are excluded.
 | [`Class`](../../../internal/procenv/contracts.go#L7) | Class distinguishes variable authority from the process allowed to consume it. |
 | [`Kind`](../../../internal/procenv/contracts.go#L20) | Kind identifies the process boundary at which Build applies policy. |
 | [`Var`](../../../internal/procenv/contracts.go#L42) | Var is a registry row; Prefix matches a family, and engine ownership forbids inheritance. |
-| [`Policy`](../../../internal/procenv/contracts.go#L53) | Policy declares every class's delivery rule for a process kind; credentials use files or memory only. |
-| [`Policies`](../../../internal/procenv/contracts.go#L59) | Policies returns the complete process policy, including service and subprocess boundaries. |
 | [`Base`](../../../internal/procenv/contracts.go#L80) | Base makes inherited input explicit; local children reuse Captured, never the daemon's ambient environment. |
 | [`RunnerInfo`](../../../internal/procenv/contracts.go#L89) | RunnerInfo carries the claim's granted identity rather than the host process's ambient identity. |
 | [`Runtime`](../../../internal/procenv/contracts.go#L95) | Runtime supplies sealed values and an attempt's already-built environment for tools and cleanups. |
 | [`Assignment`](../../../internal/procenv/contracts.go#L106) | Assignment preserves the author's startup marker until host and SDK split job environment delivery. |
 | [`JobEnv`](../../../internal/procenv/contracts.go#L112) | JobEnv separates pre-start interpreter settings from values applied by the SDK after planning. |
 | [`SplitJobEnv`](../../../internal/procenv/contracts.go#L117) | SplitJobEnv validates names and rejects engine-owned or credential transport names. |
-| [`Build`](../../../internal/procenv/contracts.go#L125) | Build excludes credential-class values from both local snapshots and remote inputs under Policies. |
+| [`Build`](../../../internal/procenv/contracts.go#L125) | Build excludes credential-class values from both local snapshots and remote inputs under the shared process policy. |
 | [`Lookup`](../../../internal/procenv/contracts.go#L128) | Lookup uses exact rows before prefixes, case-insensitively on Windows; unknown names remain user-owned. |
 | [`Validate`](../../../internal/procenv/contracts.go#L131) | Validate refuses invalid names and engine-owned assignments without exposing secret values in its errors. |
 | [`Registry`](../../../internal/procenv/registry.go#L5) | Registry is the single classification table for environment generation and reference documentation. |
@@ -601,9 +605,7 @@ family files and complete tables; temporary Old implementations are excluded.
 | [`Origin`](../../../internal/settings/contract.go) | keeps source, file, key and line when a value moves into the sealed run spec. |
 | [`Phase`](../../../internal/settings/contract.go) | prevents project and code settings from being frozen before planning. |
 | [`Rule`](../../../internal/settings/contract.go) | is the precedence-document and conformance-test source for one setting. |
-| [`Resources`](../../../internal/settings/contract.go) | uses native units so hosts cannot disagree through unit conversion. |
-| [`PauseSelection`](../../../internal/settings/contract.go) | is sealed request data instead of inherited debug env. |
-| [`Values`](../../../internal/settings/contract.go) | retains presence until acceptance. |
+| [`Values`](../../../internal/settings/contract.go) | Embeds native run settings and retains raw startup inputs separately. |
 | [`KeyInput`](../../../internal/settings/contract.go) | is consumed in the parent process; diagnostics may show only presence. |
 | [`RetentionValues`](../../../internal/settings/contract.go) | keeps metric and run retention separate from fixed blob/log rules. |
 | [`OperatorValues`](../../../internal/settings/contract.go) | uses pointers because zero disables a documented guard; it never means missing. |
@@ -611,6 +613,7 @@ family files and complete tables; temporary Old implementations are excluded.
 | [`Context`](../../../internal/settings/contract.go) | carries facts used for defaults without reading process-global state. |
 | [`Inputs`](../../../internal/settings/contract.go) | has a fixed field for each source, rather than caller-ordered layers. |
 | [`Error`](../../../internal/settings/contract.go) | names invalid or conflicting input without echoing secrets. |
+| [`ResolveIntake`](../../../internal/settings/intake.go) | Resolves captured request settings against trusted controller policy. |
 | [`ResolveRequest`](../../../internal/settings/contract.go) | resolves only intake inputs; project and code fields remain unset and their winning request overrides remain distinguishable from defaults. |
 | [`PlanInputs`](../../../internal/settings/contract.go) | permits only captured request inputs and checkout-derived declarations. |
 | [`ResolvePlan`](../../../internal/settings/contract.go) | returns every job winner keyed by declared job ID after C3 validation. |
@@ -618,13 +621,10 @@ family files and complete tables; temporary Old implementations are excluded.
 | [`ResolveExpansion`](../../../internal/settings/contract.go) | resolves generated declarations against the accepted run settings and original ceilings. |
 | [`ProjectCheckoutDeclarations`](../../../internal/settings/contract.go) | Captures validated project pipeline/default layers with presence and file positions. |
 | [`ValidateCheckoutDeclarations`](../../../internal/settings/contract.go) | Rejects wrong format, unsupported field sources and forged origin layers. |
-| [`ProjectRequest`](../../../internal/settings/contract.go) | preserves presence and original origins when values enter C1. |
 | [`ProjectCeilings`](../../../internal/settings/contract.go) | preserves operator origins and adds C4's fixed retry/memo bounds. |
 | [`ProjectOrigin`](../../../internal/settings/contract.go) | retains file, key and line and rejects unknown source values. |
 | [`OriginLayers`](../../../internal/settings/contract.go) | is the complete C4-to-C1 mapping; operator sources remain distinguishable. |
 | [`ControllerCeilings`](../../../internal/settings/contract.go) | resolves each operator key with OperatorPrecedence. |
-| [`ProjectionField`](../../../internal/settings/contract.go) | names a complete request-field mapping without reimplementing precedence. |
-| [`RequestProjection`](../../../internal/settings/contract.go) | excludes startup inputs and separately resolved args/guards/schedules. |
 | [`ConfigPath`](../../../internal/settings/resolvers.go) | resolves config_path with its Table rule, preserving origin for refusal. |
 | [`Home`](../../../internal/settings/resolvers.go) | resolves home with its Table rule, preserving origin for refusal. |
 | [`Profile`](../../../internal/settings/resolvers.go) | resolves profile with its Table rule, preserving origin for refusal. |
@@ -672,7 +672,7 @@ family files and complete tables; temporary Old implementations are excluded.
 
 The restricted declaration types live in `internal/runspec` to avoid a settings
 import cycle. `CheckoutDeclarations` carries the version, file and two layers.
-`CheckoutLayer` holds author values with presence and origins. `GuardDeclarations`
+`CheckoutLayer` holds only args, guards, requirements, preferences and pipeline profile with presence and origins. `GuardDeclarations`
 holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 
 ### internal/clisurface
@@ -706,10 +706,10 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`Schedule`](../../../pkg/projectconfig/contract.go#L65) | Schedule identifies a durable schedule separately from any run it starts. |
 | [`Hook`](../../../pkg/projectconfig/contract.go#L76) | Hook requires an empty mapping so misspelled hook settings cannot be ignored. |
 | [`Spark`](../../../pkg/projectconfig/contract.go#L79) | Spark pins a library independently of the controller connection. |
-| [`Parse`](../../../pkg/projectconfig/contract.go#L88) | Parse refuses unknown keys, duplicate keys, null values, multiple documents, malformed enums and duplicate pipeline or schedule names. |
-| [`Load`](../../../pkg/projectconfig/contract.go#L91) | Load preserves absence as nil; invalid or unreadable files fail with their path. |
-| [`Discover`](../../../pkg/projectconfig/contract.go#L95) | Discover searches from a checkout for its project file without reading machine connections or resolving run settings before the checkout has been acquired. |
-| [`Validate`](../../../pkg/projectconfig/contract.go#L101) | Validate is shared by file parsing and server-side seal-point validation. |
+| [`Parse`](../../../pkg/projectconfig/projectconfig.go#L22) | Parse validates checkout declarations and preserves explicit empty values. |
+| [`Load`](../../../pkg/projectconfig/projectconfig.go#L35) | Load returns nil when the project file is absent. |
+| [`Discover`](../../../pkg/projectconfig/projectconfig.go#L51) | Discover searches upward for checkout declarations without reading machine settings. |
+| [`Validate`](../../../pkg/projectconfig/validate.go#L20) | Validate validates typed checkout declarations for seal-point consumers. |
 | [`Config.Registry`](../../../pkg/projectconfig/registry.go) | Projects validated declarations into dispatch metadata with explicit empty guards and requirements preserved. |
 
 ### internal/userconfig
@@ -730,9 +730,9 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`MachineConfig`](../../../internal/userconfig/contract.go#L101) | MachineConfig preserves an explicit box identity when the hostname changes. |
 | [`DebugConfig`](../../../internal/userconfig/contract.go#L106) | DebugConfig bounds pauses without putting debug controls into child env. |
 | [`RunConfig`](../../../internal/userconfig/contract.go#L112) | RunConfig grants no authority: allowed env still passes procenv filtering, and cache reads still require the user's repo-bound data.read capability. |
-| [`Decode`](../../../internal/userconfig/contract.go#L120) | Decode validates the whole file with file/key/line errors before a section is used. |
-| [`ReadConfig`](../../../internal/userconfig/contract.go#L126) | ReadConfig verifies the owner-only regular file with fssecure on Unix and Windows, then calls Decode; no migration or legacy fallback runs. |
-| [`ValidateConfig`](../../../internal/userconfig/contract.go#L130) | ValidateConfig applies the same key, enum and explicit-zero checks to callers that already have typed data. |
+| [`Decode`](../../../internal/userconfig/validate.go#L15) | Decode validates the complete machine schema without filling defaults. |
+| [`ReadConfig`](../../../internal/userconfig/userconfig.go#L71) | ReadConfig reads and validates an owner-only machine file. |
+| [`ValidateConfig`](../../../internal/userconfig/validate.go#L28) | ValidateConfig validates typed machine settings without echoing credentials. |
 
 ### internal/wingd
 

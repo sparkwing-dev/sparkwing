@@ -98,14 +98,14 @@ func preparePlanSealTx(ctx context.Context, tx *storeTx, team Team, request Plan
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
-	plan, err := tx.store.planServices().ValidatePlan(input.Plan, nodeproto.ValidationContext{Placement: planPlacement(run), Secrets: secrets})
+	plan, err := tx.store.planServices().ValidatePlan(input.Plan, nodeproto.ValidationContext{Placement: RequestPlacement(run.Request.Request), Secrets: secrets})
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
 	if plan.Jobs == nil {
 		return runspec.Spec{}, nil, authorityError(apierr.PlanInvalid, "plan requires an explicit jobs array")
 	}
-	resolved, err := tx.store.intakeServices().ResolvePlan(settings.PlanInputs{Request: run.Request, Declarations: input.Declarations, Plan: plan, Context: settings.Context{Local: planPlacement(run) == nodeproto.PlacementLocal, ControllerOwned: run.Dispatch == string(runspec.DispatchController)}})
+	resolved, err := tx.store.intakeServices().ResolvePlan(settings.PlanInputs{Request: run.Request, Declarations: input.Declarations, Plan: plan, Context: settings.Context{Local: RequestPlacement(run.Request.Request) == nodeproto.PlacementLocal, ControllerOwned: run.Dispatch == string(runspec.DispatchController)}})
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}

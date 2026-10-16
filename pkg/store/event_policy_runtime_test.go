@@ -10,10 +10,10 @@ import (
 
 func TestStoreDataEventsCapsCountKindAndUnchargedEvents(t *testing.T) {
 	s, tenant, _, _ := resultFixture(t)
-	if got, err := s.EventLimits(t.Context()); err != nil || got != DefaultEventLimits {
+	if got, err := s.EventLimits(t.Context()); err != nil || got != DefaultEventLimits() {
 		t.Fatalf("default caps=%+v: %v", got, err)
 	}
-	if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "k", make([]byte, DefaultEventLimits.MaxBytesPerEvent)); !errors.Is(err, ErrStorageQuota) {
+	if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "k", make([]byte, DefaultEventLimits().MaxBytesPerEvent)); !errors.Is(err, ErrStorageQuota) {
 		t.Fatalf("event kind escaped cap: %v", err)
 	}
 	if err := s.SetEventLimits(t.Context(), EventLimits{MaxBytesPerEvent: 5, MaxBytesPerRun: 10, MaxEventsPerRun: 3}); err != nil {
@@ -129,5 +129,18 @@ func TestStoreDataEventsPricedStorageRequiresCreditWithOrWithoutQuota(t *testing
 		if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "job", "k", nil); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestEventDefaultsAreValuesAndPoliciesAreStoreLocal(t *testing.T) {
+	defaults := DefaultEventLimits()
+	defaults.MaxBytesPerEvent = 1
+	s, _, _, _ := resultFixture(t)
+	other, _, _, _ := resultFixture(t)
+	if err := s.SetEventLimits(t.Context(), defaults); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := other.EventLimits(t.Context()); err != nil || got != DefaultEventLimits() || got.MaxBytesPerEvent == 1 {
+		t.Fatalf("another store inherited event policy: %+v, %v", got, err)
 	}
 }

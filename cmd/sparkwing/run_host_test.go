@@ -257,7 +257,7 @@ func TestLocalPreparationRetainsC4PresenceAndMachineDefaults(t *testing.T) {
 	input := localTestPreparation(t, localTestAward(t))
 	input.machineFile = "/captured/config.yaml"
 	input.machine.Run = &userconfig.RunConfig{CacheFrom: new("ci-cache")}
-	input.settings.Environment = settings.Values{NoMemo: new(true), Output: new("plain")}
+	input.settings.Environment = settings.Values{Options: runspec.Options{NoMemo: runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "plain"}}}}
 	flags, args := parseRunFlags([]string{"--publish", "history", "--sw-start-at", "build/compile", "--sw-stop-at", "test/verify", "--sw-only", "build*", "--sw-no-memo=false", "--sw-workers", "2", "--sw-priority=0", "--sw-pause-before", "build,test", "--sw-pause-on-failure=false", "--", "--password", "private-value"})
 	if flags.parseErr != nil {
 		t.Fatal(flags.parseErr)

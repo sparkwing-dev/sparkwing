@@ -13,6 +13,8 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
+func present[T any](v T) runspec.Setting[T] { return declaration(v, runspec.SettingOrigin{}) }
+
 func TestAdmissionClassInferenceAtPlanSeal(t *testing.T) {
 	options, err := ResolveRequest(Inputs{Context: Context{Submitter: true, Local: true, NumCPU: 4}})
 	if err != nil {
@@ -58,7 +60,7 @@ func TestAdmissionClassInferenceAtPlanSeal(t *testing.T) {
 }
 
 func TestRequestOverridesSurvivePlan(t *testing.T) {
-	request, err := ResolveRequest(Inputs{Context: Context{Submitter: true, Local: true, NumCPU: 8}, Flags: Values{Priority: ptr(0), Requires: []string{}, DryRun: ptr(false), StartAt: ptr("build/compile"), StopAt: ptr("test/verify"), Only: ptr("build*")}})
+	request, err := ResolveRequest(Inputs{Context: Context{Submitter: true, Local: true, NumCPU: 8}, Flags: Values{Options: runspec.Options{Priority: present(0), Requires: present([]string{}), DryRun: present(false), StartAt: present("build/compile"), StopAt: present("test/verify"), Only: present("build*")}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +96,48 @@ func TestRequestOverridesSurvivePlan(t *testing.T) {
 	}
 }
 
+func TestPlanResolutionDoesNotAliasCapturedRequest(t *testing.T) {
+	options, err := ResolveRequest(Inputs{Context: Context{Local: true, NumCPU: 2}, Flags: Values{Options: runspec.Options{AllowRisk: present([]string{"prod"})}}, Sealed: Values{Options: runspec.Options{Pause: present(runspec.PauseSelection{Before: present([]string{"job"})}), SubmitEnvAllow: present([]string{"APP_*"})}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolvePlan(PlanInputs{Request: runspec.SealedRequest{Request: runspec.Request{Options: options}}, Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Context: Context{Local: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved.Options.AllowRisk.Value[0] = "changed"
+	resolved.Options.Pause.Value.Before.Value[0] = "changed"
+	resolved.Options.SubmitEnvAllow.Value[0] = "CHANGED_*"
+	if options.AllowRisk.Value[0] != "prod" || options.Pause.Value.Before.Value[0] != "job" || options.SubmitEnvAllow.Value[0] != "APP_*" {
+		t.Fatal("plan winners alias the immutable request")
+	}
+}
+
+func TestNativeCompoundSettingsRetainParentAndLeafOrigins(t *testing.T) {
+	parent := runspec.SettingOrigin{Layer: runspec.LayerFlag, File: "captured", Key: "resources", Line: 11}
+	leaf := runspec.SettingOrigin{Layer: runspec.LayerEnv, File: "environment", Key: "memory", Line: 22}
+	options := runspec.Options{
+		Resources: declaration(runspec.Resources{Cores: present(0.5), MemoryBytes: declaration(int64(1024), leaf)}, parent),
+		Pause:     declaration(runspec.PauseSelection{Before: present([]string{"job"})}, parent),
+	}
+	resolved, err := ResolveRequest(Inputs{Sealed: Values{Options: options}, Context: Context{Local: true, NumCPU: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cores := resolved.Resources.Value.Cores.Origin
+	pause := resolved.Pause.Value.Before.Origin
+	if cores.Layer != parent.Layer || cores.File != parent.File || cores.Line != parent.Line || cores.Key != "resources.cores" || resolved.Resources.Value.MemoryBytes.Origin != leaf || pause.Layer != parent.Layer || pause.Line != parent.Line || pause.Key != "debug.pause.before" {
+		t.Fatalf("compound provenance lost: resources=%+v pause=%+v", resolved.Resources, resolved.Pause)
+	}
+}
+
+func TestPlanWithEmptySealedCeilingsUsesShippedOwnerBound(t *testing.T) {
+	resolved, err := ResolvePlan(PlanInputs{Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", TimeoutMS: ptr(int64(60000))}}}})
+	if err != nil || resolved.Jobs["job"].Timeout.Value != time.Minute {
+		t.Fatalf("empty sealed ceilings rejected a bounded job: %+v, %v", resolved, err)
+	}
+}
+
 func TestDefaultsApplyWithoutPipelineAndExpansionUsesSameLayers(t *testing.T) {
 	d, err := ProjectCheckoutDeclarations([]byte("defaults:\n  requires: [linux]\n  prefers: []\n  args: {mode: test}\n"), "sparkwing.yaml", "absent")
 	if err != nil {
@@ -116,7 +160,7 @@ func TestDefaultsApplyWithoutPipelineAndExpansionUsesSameLayers(t *testing.T) {
 }
 
 func TestSealedHostIgnoresAmbientPreferences(t *testing.T) {
-	in := Inputs{Flags: Values{Output: ptr("invalid")}, Environment: Values{Output: ptr("invalid")}, Machine: Values{Workers: ptr(-1)}, Sealed: Values{Output: ptr("plain"), Workers: ptr(3)}}
+	in := Inputs{Flags: Values{Options: runspec.Options{Output: present("invalid")}}, Environment: Values{Options: runspec.Options{Output: present("invalid")}}, Machine: Values{Options: runspec.Options{Workers: present(-1)}}, Sealed: Values{Options: runspec.Options{Output: present("plain"), Workers: present(3)}}}
 	if value, _, err := Output(in); err != nil || value != "plain" {
 		t.Fatalf("output %q: %v", value, err)
 	}
@@ -129,7 +173,7 @@ func TestSealedHostIgnoresAmbientPreferences(t *testing.T) {
 }
 
 func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
-	in := Inputs{Context: Context{Local: true}, Sealed: Values{OwnerExecution: ptr(12 * time.Hour), JobTimeout: ptr(8 * time.Hour), Priority: ptr(9), ClaimWait: ptr(2 * time.Hour), Resources: &Resources{Cores: ptr(4.5)}, AdmissionClass: ptr("batch"), Checkout: &nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(1), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}}, Operator: OperatorInputs{Flags: OperatorValues{OwnerExecution: ptr(time.Hour), MaxPriority: ptr(1), MaxClaimWait: ptr(time.Minute), MaxCores: ptr(1.0), AllowedAdmissionClasses: []string{}, AllowedSources: []nodeproto.SourceSpec{}}}}
+	in := Inputs{Context: Context{Local: true}, Sealed: Values{Options: runspec.Options{OwnerExecutionTimeout: present(12 * time.Hour), Priority: present(9), ClaimWait: present(2 * time.Hour), Resources: present(runspec.Resources{Cores: present(4.5)}), AdmissionClass: present("batch"), Checkout: sourceSetting(nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(1), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Timeout: present(8 * time.Hour)}}}, Operator: OperatorInputs{Flags: OperatorValues{OwnerExecution: ptr(time.Hour), MaxPriority: ptr(1), MaxClaimWait: ptr(time.Minute), MaxCores: ptr(1.0), AllowedAdmissionClasses: []string{}, AllowedSources: []nodeproto.SourceSpec{}}}}
 	if v, _, err := OwnerExecution(in); err != nil || v != 12*time.Hour {
 		t.Fatalf("owner %v: %v", v, err)
 	}
@@ -142,7 +186,7 @@ func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
 	if v, _, err := ClaimWait(in); err != nil || v != 2*time.Hour {
 		t.Fatalf("queue %v: %v", v, err)
 	}
-	if v, _, err := ResourceLimits(in); err != nil || v.Cores == nil || *v.Cores != 4.5 {
+	if v, _, err := ResourceLimits(in); err != nil || !v.Cores.Set || v.Cores.Value != 4.5 {
 		t.Fatalf("resources %+v: %v", v, err)
 	}
 	if v, _, err := AdmissionClass(in); err != nil || v != "batch" {
@@ -154,7 +198,7 @@ func TestAcceptedSettingsIgnoreOperatorAndLocalHost(t *testing.T) {
 }
 
 func TestIntakePreservesExplicitRequestSettings(t *testing.T) {
-	values := Values{Retry: ptr(0), ClaimWait: ptr(time.Hour), Resources: &Resources{Cores: ptr(0.5)}, AdmissionClass: ptr("batch"), Checkout: &nodeproto.SourceSpec{Tags: ptr(true)}, JobTimeout: ptr(time.Minute), MemoTTL: ptr(time.Hour), ApprovalWait: ptr(time.Duration(0)), NoProgressTimeout: ptr(time.Duration(0)), RetryBackoff: ptr(time.Duration(0))}
+	values := Values{Options: runspec.Options{ClaimWait: present(time.Hour), Resources: present(runspec.Resources{Cores: present(0.5)}), AdmissionClass: present("batch"), Checkout: sourceSetting(nodeproto.SourceSpec{Tags: ptr(true)}, Origin{}), JobDefaults: runspec.JobExecutionSettings{Retry: present(0), Timeout: present(time.Minute), MemoTTL: present(time.Hour), ApprovalWait: present(time.Duration(0)), NoProgressTimeout: present(time.Duration(0)), RetryBackoff: present(time.Duration(0))}}}
 	options, err := ResolveRequest(Inputs{Context: Context{Submitter: true, NumCPU: 4, Local: true}, Sealed: values})
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +210,7 @@ func TestIntakePreservesExplicitRequestSettings(t *testing.T) {
 
 func TestCeilingsRefuseWithoutClamping(t *testing.T) {
 	for _, local := range []bool{false, true} {
-		in := Inputs{Context: Context{Submitter: true, Local: local}, Code: Values{Retry: ptr(11), MemoTTL: ptr(31 * 24 * time.Hour), Resources: &Resources{Cores: ptr(1.5)}}, Operator: OperatorInputs{Flags: OperatorValues{MaxCores: ptr(1.25)}}}
+		in := Inputs{Context: Context{Submitter: true, Local: local}, Code: Values{Options: runspec.Options{Resources: present(runspec.Resources{Cores: present(1.5)}), JobDefaults: runspec.JobExecutionSettings{Retry: present(11), MemoTTL: present(31 * 24 * time.Hour)}}}, Operator: OperatorInputs{Flags: OperatorValues{MaxCores: ptr(1.25)}}}
 		if _, _, err := Retry(in); err == nil {
 			t.Fatal("excess retry accepted")
 		}
@@ -191,12 +235,12 @@ func TestOperatorZeroWinsAndOriginsSurvive(t *testing.T) {
 		t.Fatalf("operator: %+v", v)
 	}
 	o := Origin{Source: Flag, File: "request", Key: "resources.cores", Line: 12}
-	projected, err := ProjectRequest(Values{Resources: &Resources{Cores: ptr(0.5)}, Origins: map[string]Origin{"resources": o, "resources.cores": o}})
+	projected, err := ProjectCeilings(OperatorValues{MaxCores: ptr(0.5), Origins: map[string]Origin{"operator.max_cores": o}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if projected.Resources.Value.Cores.Value != 0.5 || projected.Resources.Value.Cores.Origin.Line != 12 {
-		t.Fatalf("resource projection: %+v", projected.Resources)
+		t.Fatalf("resource projection: %+v", projected)
 	}
 }
 
@@ -227,7 +271,7 @@ func TestIndependentDeadlineSettings(t *testing.T) {
 	if v, _, err := ClaimWait(in); err != nil || v != 24*time.Hour {
 		t.Fatalf("queue %v: %v", v, err)
 	}
-	in.Code.JobTimeout = ptr(13 * time.Hour)
+	in.Code.JobDefaults.Timeout = present(13 * time.Hour)
 	if _, _, err := JobTimeout(in); err == nil {
 		t.Fatal("timeout above ceiling accepted")
 	}
@@ -248,6 +292,19 @@ func TestOutputDefaultsFollowTerminal(t *testing.T) {
 		value, _, err := Output(Inputs{Context: Context{Submitter: true, Terminal: tc.terminal}})
 		if err != nil || value != tc.want {
 			t.Fatalf("terminal %v: %q, %v", tc.terminal, value, err)
+		}
+	}
+}
+
+func TestRetryBackoffRefusesValuesAboveExecutionBound(t *testing.T) {
+	for _, duration := range []time.Duration{5*time.Minute + time.Nanosecond, 6 * time.Minute} {
+		if _, _, err := RetryBackoff(Inputs{Code: Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{RetryBackoff: present(duration)}}}, Context: Context{Submitter: true}}); err == nil {
+			t.Errorf("accepted %v", duration)
+		}
+	}
+	for _, duration := range []time.Duration{0, 5 * time.Minute} {
+		if got, _, err := RetryBackoff(Inputs{Code: Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{RetryBackoff: present(duration)}}}, Context: Context{Submitter: true}}); err != nil || got != duration {
+			t.Fatalf("%v: %v %v", duration, got, err)
 		}
 	}
 }

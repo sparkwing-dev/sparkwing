@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os/exec"
 	"path"
@@ -44,6 +45,7 @@ type preparedTriggerSource struct {
 type triggerCheckout struct {
 	directory   string
 	environment []string
+	diagnostics io.Writer
 }
 
 func (s preparedTriggerSource) sdk(ctx context.Context) (engine.SDKKind, error) {
@@ -72,6 +74,7 @@ func (c triggerCheckout) read(ctx context.Context, args ...string) (string, erro
 	}
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", c.directory}, args...)...)
 	cmd.Env = c.environment
+	cmd.Stderr = c.diagnostics
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("inspect trigger checkout: %w", errors.Join(ctx.Err(), err))

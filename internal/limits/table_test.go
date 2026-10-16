@@ -42,3 +42,22 @@ func TestTableHasTypedUniqueDocumentedBounds(t *testing.T) {
 		t.Fatal("introduced an unapproved default wait or wall-time cap")
 	}
 }
+
+func TestTableDocumentsStorageEnforcement(t *testing.T) {
+	want := map[string]string{
+		"JobScratchBytes":       "Account for fixed Job storage; evict the Job when exhausted.",
+		"LocalBinaryCacheBytes": "Prune oldest eligible entries.",
+		"MemoMaxTTL":            "Refuse author values above the bound.",
+	}
+	for _, row := range Table() {
+		if behavior, ok := want[row.Name]; ok {
+			if row.Refusal != behavior {
+				t.Errorf("%s behavior = %q, want %q", row.Name, row.Refusal, behavior)
+			}
+			delete(want, row.Name)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing documented storage limits: %v", want)
+	}
+}

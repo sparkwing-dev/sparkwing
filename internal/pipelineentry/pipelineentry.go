@@ -18,7 +18,8 @@ import (
 	"runtime"
 	"slices"
 
-	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // ProtocolArg is the one argument a host appends to an entry's command.
@@ -135,19 +136,46 @@ func TypeScript(sparkwingDir string) (Command, error) {
 	return Node(node, entry), nil
 }
 
-// InstallTypeScript runs npm ci in sparkwingDir with env, less the engine's
-// own variables, writing npm's output to out.
+// InstallTypeScript runs npm ci with filtered captured inputs and masked output.
 func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string, out io.Writer) error {
+	masker := secrets.NewMasker()
+	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: env, Masker: masker}, procenv.Runtime{})
+	if err != nil {
+		return err
+	}
 	cmd, err := NPMCommand(ctx, runtime.GOOS, exec.LookPath, "ci", "--no-audit", "--no-fund")
 	if err != nil {
 		return fmt.Errorf("install the TypeScript pipeline's dependencies: %w", err)
 	}
-	cmd.Dir, cmd.Env = sparkwingDir, engineenv.Strip(env)
-	cmd.Stdout, cmd.Stderr = out, out
-	if err := cmd.Run(); err != nil {
+	cmd.Dir, cmd.Env = sparkwingDir, environment
+	masked := &installOutput{out: out, stream: masker.Stream()}
+	cmd.Stdout, cmd.Stderr = masked, masked
+	if err := errors.Join(cmd.Run(), masked.flush()); err != nil {
 		return fmt.Errorf("npm ci in %s: %w", sparkwingDir, err)
 	}
 	return nil
+}
+
+type installOutput struct {
+	out    io.Writer
+	stream *secrets.Stream
+}
+
+func (w *installOutput) Write(body []byte) (int, error) {
+	text := w.stream.Mask(string(body), false)
+	n, err := io.WriteString(w.out, text)
+	if err == nil && n != len(text) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		return 0, err
+	}
+	return len(body), nil
+}
+
+func (w *installOutput) flush() error {
+	_, err := io.WriteString(w.out, w.stream.Mask("", true))
+	return err
 }
 
 // Prepare returns the command for sparkwingDir's TypeScript pipeline,

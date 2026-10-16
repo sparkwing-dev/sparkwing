@@ -1,12 +1,4 @@
-// Package agentconfig owns the agent section of config.yaml: the settings a
-// remote machine's sparkwing-runner reads its controller, credential and
-// capacity ceilings from. It sits below both the runner that executes against
-// the section and the CLI that writes one, so neither has to import the other.
-//
-// The section describes claim mode, the mode that executes work: the runner
-// polls the controller's claim route and runs what it is awarded. A section
-// that still carries the removed enrolled-mode keys fails to load with
-// [EnrolledModeRemoved].
+// Package agentconfig reads machine runner settings and private credentials.
 package agentconfig
 
 import (
@@ -15,8 +7,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -50,25 +40,8 @@ type Config struct {
 	LocalReserve string `yaml:"keep_free"`
 }
 
-// EnrolledModeRemoved is the whole message a configuration carrying the
-// removed enrolled-mode keys fails to load with.
-const EnrolledModeRemoved = "enrolled mode has been removed; " +
-	"delete name and coordinators from the agent section of config.yaml to run in claim mode, which executes work"
-
-// Load reads the agent section of the config.yaml at path. The file carries a
-// credential, so it must be an owner-only regular file; an unknown field is an
-// error rather than something silently ignored. A file without the section
-// fails with an error that wraps [os.ErrNotExist].
+// Load validates the machine file and reads runner settings and their private credential.
 func Load(path string) (*Config, error) {
-	// safety: the unknown-field error names the key without naming the mode it
-	// used to select, so the removed keys are answered before the ordinary parse.
-	section, err := userconfig.Node(path, userconfig.Runner)
-	if err != nil {
-		return nil, err
-	}
-	if carriesEnrolledKey(section, 0) {
-		return nil, fmt.Errorf("parse %s: %s", path, EnrolledModeRemoved)
-	}
 	var cfg Config
 	found, err := userconfig.Read(path, userconfig.Runner, &cfg)
 	if err != nil {
@@ -91,41 +64,6 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	return &cfg, nil
-}
-
-// safety: a merge key hides the removed keys behind an alias and YAML admits a
-// key in any case, so both reach the removal message instead of an
-// unknown-field error that names neither the mode nor the key that selected it.
-func carriesEnrolledKey(node *yaml.Node, depth int) bool {
-	const maxMergeDepth = 8
-	if node == nil || depth > maxMergeDepth {
-		return false
-	}
-	switch node.Kind {
-	case yaml.AliasNode:
-		return carriesEnrolledKey(node.Alias, depth+1)
-	case yaml.SequenceNode:
-		for _, item := range node.Content {
-			if carriesEnrolledKey(item, depth+1) {
-				return true
-			}
-		}
-		return false
-	case yaml.MappingNode:
-	default:
-		return false
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		switch strings.ToLower(strings.TrimSpace(node.Content[i].Value)) {
-		case "name", "coordinators":
-			return true
-		case "<<":
-			if carriesEnrolledKey(node.Content[i+1], depth+1) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // Validate fills in the defaults a loaded Config leaves empty and rejects the

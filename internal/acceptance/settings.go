@@ -44,8 +44,12 @@ func CheckSettingsBoundary(id string) error {
 
 func boundaryPointer[T any](value T) *T { return &value }
 
+func boundarySetting[T any](value T) runspec.Setting[T] {
+	return runspec.Setting[T]{Optional: runspec.Optional[T]{Set: true, Value: value}}
+}
+
 func acceptedSettings() (runspec.Spec, json.RawMessage, error) {
-	options, err := settings.ResolveRequest(settings.Inputs{Context: settings.Context{Submitter: true, Local: true, NumCPU: 4}, Flags: settings.Values{Priority: boundaryPointer(0), DryRun: boundaryPointer(false)}})
+	options, err := settings.ResolveRequest(settings.Inputs{Context: settings.Context{Submitter: true, Local: true, NumCPU: 4}, Flags: settings.Values{Options: runspec.Options{Priority: boundarySetting(0), DryRun: boundarySetting(false)}}})
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
@@ -114,7 +118,7 @@ func independentRunBounds() error {
 		if err != nil || queue != 24*time.Hour {
 			return errors.New("queue limit coupled to owner timeout")
 		}
-		in.Code.JobTimeout = boundaryPointer(owner + time.Second)
+		in.Code.JobDefaults.Timeout = boundarySetting(owner + time.Second)
 		if _, _, err := settings.JobTimeout(in); err == nil {
 			return errors.New("excess author timeout accepted")
 		}
@@ -132,7 +136,7 @@ func independentRunBounds() error {
 }
 
 func authorBounds() error {
-	in := settings.Inputs{Context: settings.Context{Submitter: true}, Code: settings.Values{Retry: boundaryPointer(10), MemoTTL: boundaryPointer(30 * 24 * time.Hour)}, Flags: settings.Values{CatchUp: boundaryPointer(24 * time.Hour)}}
+	in := settings.Inputs{Context: settings.Context{Submitter: true}, Code: settings.Values{Options: runspec.Options{JobDefaults: runspec.JobExecutionSettings{Retry: boundarySetting(10), MemoTTL: boundarySetting(30 * 24 * time.Hour)}}}, Flags: settings.Values{CatchUp: boundaryPointer(24 * time.Hour)}}
 	if value, _, err := settings.Retry(in); err != nil || value != 10 {
 		return errors.New("retry boundary refused or clamped")
 	}
@@ -142,8 +146,8 @@ func authorBounds() error {
 	if value, _, err := settings.CatchUp(in); err != nil || value != 24*time.Hour {
 		return errors.New("catch-up boundary refused or clamped")
 	}
-	in.Code.Retry = boundaryPointer(11)
-	in.Code.MemoTTL = boundaryPointer(30*24*time.Hour + time.Nanosecond)
+	in.Code.JobDefaults.Retry = boundarySetting(11)
+	in.Code.JobDefaults.MemoTTL = boundarySetting(30*24*time.Hour + time.Nanosecond)
 	in.Flags.CatchUp = boundaryPointer(24*time.Hour + time.Nanosecond)
 	if _, _, err := settings.Retry(in); err == nil {
 		return errors.New("excess retry accepted")

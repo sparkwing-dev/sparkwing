@@ -1097,11 +1097,6 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool) string 
 	}
 	if len(pipes) > 0 {
 		b.WriteString("export SPARKWING_LOG_FORMAT=\"${SPARKWING_LOG_FORMAT:-quiet}\"\n")
-		if hookName == "pre-commit" || hookName == "pre-push" {
-			b.WriteString("export SPARKWING_ADMISSION_CLASS=interactive\n")
-		} else {
-			b.WriteString("export SPARKWING_ADMISSION_CLASS=batch\n")
-		}
 	}
 	if blocking {
 		b.WriteString("set -e\n")

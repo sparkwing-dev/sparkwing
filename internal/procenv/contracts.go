@@ -50,34 +50,6 @@ type Var struct {
 	Startup    bool
 }
 
-// Policy declares every class's delivery rule for a process kind; credentials use files or memory only.
-type Policy struct {
-	Kind                                                  Kind
-	User, Runtime, Protocol, Credential, Diagnostic, Tool string
-}
-
-// Policies returns the complete process policy, including service and subprocess boundaries.
-func Policies() []Policy {
-	return []Policy{
-		{CLI, "documented CLI names", "none", "toolchain marker and test markers", "own key input only", "debug and output format", "ambient tool settings"},
-		{DaemonSpawn, "arguments", "none", "arguments", "key file", "output format argument", "minimal and XDG"},
-		{Controller, "flags", "none", "arguments", "credentials directory", "flags", "AWS, OTEL, KUBECONFIG, proxies and CA"},
-		{Runner, "flags", "none", "arguments", "credentials directory", "flags", "AWS, OTEL, KUBECONFIG, proxies and CA"},
-		{Launcher, "flags", "none", "arguments", "credentials directory", "flags", "AWS, OTEL, KUBECONFIG, proxies and CA"},
-		{RunHost, "none", "compose from sealed values", "arguments and frames", "memory", "none", "none"},
-		{NodeHost, "none", "compose from sealed values", "arguments and frames", "memory", "none", "none"},
-		{JobContainer, "none", "none", "arguments and bootstrap file", "file exchanged once", "none", "HOME, caches, proxies and CA"},
-		{Plan, "local captured or remote allow list", "run, runner, dry run, source and hook", "none", "none", "debug", "base"},
-		{Attempt, "local captured or remote allow list", "plan plus job", "none", "none", "debug", "base plus startup; body after plan"},
-		{Eval, "local captured or remote allow list", "plan plus job", "none", "none", "debug", "base plus startup; body after plan"},
-		{StepTool, "inherit attempt", "inherit attempt", "none", "none", "inherit attempt", "inherit attempt including body"},
-		{Cleanup, "inherit attempt", "inherit attempt", "none", "none", "inherit attempt", "inherit attempt including body"},
-		{Install, "base only", "none", "none", "none", "none", "base; output masked"},
-		{HostChild, "captured snapshot", "none", "arguments", "none", "none", "captured snapshot; host binary via argument"},
-		{Git, "filtered base", "none", "explicit argv and private config files", "private file only", "none", "base without inherited git control variables"},
-	}
-}
-
 // Base makes inherited input explicit; local children reuse Captured, never the daemon's ambient environment.
 type Base struct {
 	Local          bool
@@ -99,7 +71,7 @@ type Runtime struct {
 	Runner                              RunnerInfo
 	DryRun                              bool
 	Branch, Commit, Repo, TriggerSource string
-	GateIndex                           *int
+	GateIndex                           string
 	Startup                             []Assignment
 	AttemptEnv                          []string
 }

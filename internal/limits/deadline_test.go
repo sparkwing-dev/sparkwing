@@ -3,7 +3,6 @@ package limits
 import (
 	"context"
 	"errors"
-	"math"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -76,40 +75,6 @@ func TestChildContextPreservesCancellation(t *testing.T) {
 	}
 }
 
-func TestRenewalStrictBoundary(t *testing.T) {
-	if Renew(10*time.Second) != 10*time.Second/3 {
-		t.Fatal("wrong cadence")
-	}
-	for _, tc := range []struct {
-		every, ttl time.Duration
-		good       bool
-	}{{1, 3, true}, {1, 2, false}, {0, 3, false}, {1, 0, false}, {-1, 3, false}, {time.Duration(math.MaxInt64), time.Duration(math.MaxInt64), false}, {time.Duration(math.MaxInt64 / 3), time.Duration(math.MaxInt64), true}} {
-		if err := CheckRenewal(tc.every, tc.ttl); (err == nil) != tc.good {
-			t.Fatalf("%+v: %v", tc, err)
-		}
-	}
-}
-
-func TestJobDeadline(t *testing.T) {
-	now := time.Unix(1000, 0)
-	for _, tc := range []struct {
-		owner, attempt, want time.Time
-		bad                  bool
-	}{
-		{time.Time{}, time.Time{}, time.Time{}, false},
-		{now.Add(time.Hour), time.Time{}, now.Add(time.Hour), false},
-		{time.Time{}, now.Add(time.Minute), now.Add(time.Minute + JobSlack), false},
-		{now.Add(time.Minute), now.Add(time.Minute), now.Add(time.Minute), false},
-		{now, now.Add(time.Minute), time.Time{}, true},
-		{now.Add(time.Hour), now, time.Time{}, true},
-	} {
-		got, err := JobDeadline(now, tc.owner, tc.attempt)
-		if (err != nil) != tc.bad || !got.Equal(tc.want) {
-			t.Fatalf("%+v: %v %v", tc, got, err)
-		}
-	}
-}
-
 func TestBoundedText(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -117,7 +82,10 @@ func TestBoundedText(t *testing.T) {
 		fn    func(string) string
 	}{{"error", int(ErrorBytes), Error}, {"record", int(AnnotationBytes), Record}} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, n := range []int{tc.bound - 1, tc.bound, tc.bound + 1} {
+			if text := "summary: [MASKED] ✓"; tc.fn(text) != text {
+				t.Fatal("changed in-budget UTF-8 text")
+			}
+			for _, n := range []int{0, tc.bound - 1, tc.bound, tc.bound + 1} {
 				s := strings.Repeat("x", n)
 				got := tc.fn(s)
 				if len(got) > tc.bound || !utf8.ValidString(got) {
@@ -127,10 +95,12 @@ func TestBoundedText(t *testing.T) {
 					t.Fatal("changed in-budget text")
 				}
 			}
-			s := "HEAD" + strings.Repeat("😀", tc.bound) + "TAIL"
-			got := tc.fn(s)
-			if len(got) > tc.bound || !utf8.ValidString(got) || !strings.HasPrefix(got, "HEAD") || !strings.HasSuffix(got, "TAIL") || !strings.Contains(got, "elided") {
-				t.Fatal("lost head/tail or invalid UTF-8")
+			for _, unit := range []string{"x", "é", "界", "🐦"} {
+				s := "HEAD [MASKED]" + strings.Repeat(unit, tc.bound) + "TAIL [MASKED]"
+				got := tc.fn(s)
+				if len(got) > tc.bound || !utf8.ValidString(got) || !strings.HasPrefix(got, "HEAD [MASKED]") || !strings.HasSuffix(got, "TAIL [MASKED]") || !strings.Contains(got, "elided") {
+					t.Fatal("lost head/tail or invalid UTF-8")
+				}
 			}
 		})
 	}

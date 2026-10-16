@@ -86,7 +86,7 @@ func TestCleanupRunsWithTheNodesEnvironmentNotTheHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var log bytes.Buffer
-	scope := nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv("NODE_VAR=node-value", "SPARKWING_NODE_TOKEN=node-token")}
+	scope := nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv("NODE_VAR=node-value")}
 	if err := cleanups.Run(cleanupContext(t), scope); err != nil {
 		t.Fatal(err)
 	}

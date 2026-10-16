@@ -13,7 +13,15 @@ import (
 type sourceProbe func(Inputs) (any, Origin, error)
 
 func probe[T any](fn func(Inputs) (T, Origin, error)) sourceProbe {
-	return func(in Inputs) (any, Origin, error) { v, o, e := fn(in); return v, o, e }
+	return func(in Inputs) (any, Origin, error) {
+		v, o, e := fn(in)
+		if resources, ok := any(v).(runspec.Resources); ok {
+			resources.Cores.Origin = runspec.SettingOrigin{}
+			resources.MemoryBytes.Origin = runspec.SettingOrigin{}
+			return resources, o, e
+		}
+		return v, o, e
+	}
 }
 
 func inputLayer(in *Inputs, s Source) *Values {
@@ -72,7 +80,7 @@ func TestRunSettingSourcePairs(t *testing.T) {
 		{"debug", "Debug", []Source{Env, Run}, false, true, probe(Debug)},
 		{"publish", "Publish", []Source{Flag, Run}, "near", "far", probe(Publish)},
 		{"cache_from", "CacheFrom", []Source{Flag, Run, Machine}, "near", "far", probe(CacheFrom)},
-		{"resources", "Resources", []Source{Run, Code}, Resources{Cores: ptr(0.5)}, Resources{Cores: ptr(2.5)}, probe(ResourceLimits)},
+		{"resources", "Resources", []Source{Run, Code}, runspec.Resources{Cores: present(0.5)}, runspec.Resources{Cores: present(2.5)}, probe(ResourceLimits)},
 		{"source", "Checkout", []Source{Run, ProjectPipeline, Code}, nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(2), Tags: ptr(false), Submodules: ptr(false), LFS: ptr(false)}, nodeproto.SourceSpec{FullHistory: ptr(false), Depth: ptr(3), Tags: ptr(true), Submodules: ptr(true), LFS: ptr(true)}, probe(Checkout)},
 		{"run.submit_env_allow", "SubmitEnvAllow", []Source{Run, Machine}, []string{}, []string{"APP_*"}, probe(SubmitEnvAllow)},
 	}
@@ -99,9 +107,25 @@ func TestRunSettingSourcePairs(t *testing.T) {
 }
 
 func setFixture(values *Values, field string, value any) {
-	target := reflect.ValueOf(values).Elem().FieldByName(field)
+	if field == "Checkout" {
+		values.Checkout = sourceSetting(value.(nodeproto.SourceSpec), Origin{})
+		return
+	}
+	names := map[string]string{"RunnerSelection": "Runner", "OwnerExecution": "OwnerExecutionTimeout", "JobTimeout": "Timeout"}
+	if renamed, ok := names[field]; ok {
+		field = renamed
+	}
+	root := reflect.ValueOf(values).Elem()
+	switch field {
+	case "Timeout", "NoProgressTimeout", "RetryBackoff", "ApprovalWait", "Retry", "MemoTTL":
+		root = root.FieldByName("JobDefaults")
+	}
+	target := root.FieldByName(field)
 	v := reflect.ValueOf(value)
-	if target.Kind() == reflect.Pointer {
+	if target.Kind() == reflect.Struct && target.FieldByName("Set").IsValid() {
+		target.FieldByName("Set").SetBool(true)
+		target.FieldByName("Value").Set(v)
+	} else if target.Kind() == reflect.Pointer {
 		p := reflect.New(v.Type())
 		p.Elem().Set(v)
 		target.Set(p)

@@ -25,8 +25,13 @@ func ResolveConcurrency(declarations []nodeproto.ConcurrencySpec) ([]runspec.Con
 		if declaration.OnLimit != nil {
 			group.OnLimit = *declaration.OnLimit
 		}
-		if group.Group == "" || seen[group.Group] || group.Capacity < 1 || group.Cost < 1 || group.Cost > group.Capacity || group.Scope != "global" && group.Scope != "run" && group.Scope != "box" || group.OnLimit != "queue" && group.OnLimit != "skip" && group.OnLimit != "fail" && group.OnLimit != "cancel_others" || group.QueueTimeoutMS != nil && *group.QueueTimeoutMS < 0 || group.CancelTimeoutMS != nil && *group.CancelTimeoutMS < 0 {
+		if group.Group == "" || seen[group.Group] || group.Capacity < 1 || group.Cost < 1 || group.Cost > group.Capacity || group.Scope != "global" && group.Scope != "run" && group.Scope != "box" || group.OnLimit != "queue" && group.OnLimit != "skip" && group.OnLimit != "fail" && group.OnLimit != "cancel_others" {
 			return nil, fmt.Errorf("concurrency[%d]: invalid group policy", i)
+		}
+		for _, timeout := range []*int64{group.QueueTimeoutMS, group.CancelTimeoutMS} {
+			if _, err := milliseconds(timeout, "concurrency"); err != nil {
+				return nil, err
+			}
 		}
 		seen[group.Group] = true
 		result = append(result, group)

@@ -3,18 +3,15 @@ package settings
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestDeclarationsRejectUnsetUnsupportedPayloads(t *testing.T) {
 	for _, mutate := range []func(*runspec.CheckoutLayer){
-		func(l *runspec.CheckoutLayer) { l.ClaimWait.Value = time.Minute },
-		func(l *runspec.CheckoutLayer) { l.AdmissionClass.Value = "secret-value" },
-		func(l *runspec.CheckoutLayer) { l.Checkout.Origin = runspec.SettingOrigin{Layer: runspec.LayerFlag} },
-		func(l *runspec.CheckoutLayer) { l.JobDefaults.Retry.Value = 1 },
-		func(l *runspec.CheckoutLayer) { l.Resources.Value.Cores.Value = 1 },
+		func(l *runspec.CheckoutLayer) { l.Profile.Value = "secret-value" },
+		func(l *runspec.CheckoutLayer) { l.Requires.Value = []string{"secret-value"} },
+		func(l *runspec.CheckoutLayer) { l.Guards.Origin = runspec.SettingOrigin{Layer: runspec.LayerFlag} },
 	} {
 		d := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion, File: ".sparkwing/sparkwing.yaml"}
 		mutate(&d.Defaults)

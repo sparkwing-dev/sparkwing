@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -125,6 +126,15 @@ func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runsp
 	base, err := capturedBase(ctx, e.Base, e.Snapshots, seal)
 	if err != nil {
 		return nil, err
+	}
+	runtime.GateIndex = ""
+	if base.Local {
+		for _, entry := range base.Captured {
+			name, value, _ := strings.Cut(entry, "=")
+			if name == "SPARKWING_GATE_INDEX" {
+				runtime.GateIndex = value
+			}
+		}
 	}
 	if e.Masks != nil {
 		build = e.Masks.environment(build)

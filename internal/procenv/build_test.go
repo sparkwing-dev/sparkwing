@@ -20,8 +20,8 @@ func envMap(env []string) map[string]string {
 }
 
 func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
-	gate := 2
-	rt := Runtime{RunID: "run", JobID: "job", Runner: RunnerInfo{Name: "granted", Type: "runner", Labels: []string{"linux", "pool=build"}}, Branch: "trunk", Commit: "abc", Repo: "repo", TriggerSource: "push", DryRun: true, GateIndex: &gate}
+	gate := "/private/hook-index"
+	rt := Runtime{RunID: "run", JobID: "job", Runner: RunnerInfo{Name: "granted", Type: "runner", Labels: []string{"linux", "pool=build"}}, Branch: "trunk", Commit: "abc", Repo: "repo", TriggerSource: "push", DryRun: true, GateIndex: gate}
 	b := Base{Local: true, Captured: []string{"PATH=/bin", "CUSTOM=captured", "SPARKWING_CUSTOM=yes", "SPARKWING_RUNNER_NAME=forged", "CI=no", "SPARKWING_NODE_TOKEN=secret", "AWS_ACCESS_KEY_ID=secret", "MY_API_TOKEN=secret", "SPARKWING_NODE_URL=http://old"}, Ambient: []string{"CUSTOM=daemon"}}
 	for _, kind := range []Kind{Plan, Attempt, Eval} {
 		env, err := Build(kind, b, rt)
@@ -29,7 +29,7 @@ func TestCapturedEnvironmentAndClaimIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := envMap(env)
-		for name, want := range map[string]string{"CUSTOM": "captured", "SPARKWING_CUSTOM": "yes", "SPARKWING_RUNNER_NAME": "granted", "CI": "true", "SPARKWING_RUN_ID": "run", "SPARKWING_BRANCH": "trunk", "SPARKWING_COMMIT": "abc", "SPARKWING_DRY_RUN": "true", "SPARKWING_GATE_INDEX": "2"} {
+		for name, want := range map[string]string{"CUSTOM": "captured", "SPARKWING_CUSTOM": "yes", "SPARKWING_RUNNER_NAME": "granted", "CI": "true", "SPARKWING_RUN_ID": "run", "SPARKWING_BRANCH": "trunk", "SPARKWING_COMMIT": "abc", "SPARKWING_DRY_RUN": "true", "SPARKWING_GATE_INDEX": gate} {
 			if got[name] != want {
 				t.Errorf("kind %d %s=%q want %q", kind, name, got[name], want)
 			}
@@ -340,6 +340,10 @@ func TestProxyCredentialsMaskedInConsumerSpellings(t *testing.T) {
 		{"PIP_EXTRA_INDEX_URL", "https://public.example/simple https://alice:private-password@proxy.example/simple"},
 		{"npm_config_registry", "https://alice:private-password@proxy.example"},
 		{"HTTPS_PROXY", "http://alice:private%2Dpassword@proxy.example"},
+		{"HTTPS_PROXY", "http://alice:private-password@proxy.example/simple/@scope?next=@other"},
+		{"GOPROXY", "https://alice:private-password@proxy.example/@scope,https://bob:second-password@next.example|direct"},
+		{"PIP_EXTRA_INDEX_URL", "https://public.example/@scope https://alice:private-password@proxy.example/simple/@scope"},
+		{"npm_config_registry", "https://alice:private-password@proxy.example/@scope"},
 	} {
 		for _, local := range []bool{true, false} {
 			t.Run(tc.name+"/"+tc.value+"/local="+strconv.FormatBool(local), func(t *testing.T) {

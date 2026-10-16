@@ -334,7 +334,7 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 		idempotencyKey: "retained",
 		source:         preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
 		described:      []nodeproto.PipelineDescription{{Name: "Deploy"}},
-		settings:       settings.Inputs{Flags: settings.Values{Priority: &priority, Output: &output, RunnerSelection: &runner}, Context: settings.Context{NumCPU: 4}},
+		settings:       settings.Inputs{Flags: settings.Values{Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: priority}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: output}}, Runner: runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runner}}}}, Context: settings.Context{NumCPU: 4}},
 		env:            map[string]string{"DEPLOY_REGION": "private-region"},
 	})
 	if err != nil {

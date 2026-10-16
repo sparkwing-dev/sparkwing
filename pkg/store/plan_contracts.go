@@ -91,11 +91,14 @@ func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spe
 	return values, rows.Err()
 }
 
-func planPlacement(run RunRow) nodeproto.Placement {
-	if run.Dispatch == string(runspec.DispatchController) {
+// RequestPlacement classifies execution consistently at intake and plan acceptance.
+func RequestPlacement(request runspec.Request) nodeproto.Placement {
+	if request.Mode == runspec.IntakePublish {
+		return nodeproto.PlacementLocal
+	}
+	if request.Dispatch == runspec.DispatchController {
 		return nodeproto.PlacementLauncher
 	}
-	request := run.Request.Request
 	if request.Options.Runner.Set && request.Options.Runner.Value.Kind == runspec.RunnerHere {
 		return nodeproto.PlacementHere
 	}

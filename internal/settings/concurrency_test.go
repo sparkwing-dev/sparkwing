@@ -1,8 +1,10 @@
 package settings
 
 import (
+	"math"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -51,5 +53,21 @@ func TestResolvePlanAndExpansionPreserveConcurrency(t *testing.T) {
 	plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Capacity: new(3)}}
 	if _, err := ResolvePlan(PlanInputs{Declarations: declarations, Plan: plan}); err == nil {
 		t.Fatal("job changed plan capacity")
+	}
+}
+
+func TestConcurrencyTimeoutsMustFitDuration(t *testing.T) {
+	for _, timeout := range []int64{math.MaxInt64, int64(math.MaxInt64/time.Millisecond) + 1} {
+		for _, declaration := range []nodeproto.ConcurrencySpec{
+			{Group: "db", QueueTimeoutMS: &timeout}, {Group: "db", CancelTimeoutMS: &timeout},
+		} {
+			if _, err := ResolveConcurrency([]nodeproto.ConcurrencySpec{declaration}); err == nil {
+				t.Errorf("accepted overflowing timeout: %+v", declaration)
+			}
+		}
+	}
+	bound := int64(math.MaxInt64 / time.Millisecond)
+	if _, err := ResolveConcurrency([]nodeproto.ConcurrencySpec{{Group: "db", QueueTimeoutMS: &bound, CancelTimeoutMS: new(int64(0))}}); err != nil {
+		t.Fatal(err)
 	}
 }
