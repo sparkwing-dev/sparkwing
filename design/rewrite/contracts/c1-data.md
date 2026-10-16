@@ -24,9 +24,16 @@ identity readers, the waitlist projection and signup window counts use the same
 unit. Identity unlinking requires a direct session issued within ten minutes on
 the store clock. It retains the selected hashed session, ends the account's other
 sessions and preserves the last sign-in method and App installation bindings.
-The old raw methods remain only where fixture callers still need migration.
-`SetActiveTeam` and `SwitchSessionTeam` are removed. Their retained tests use
-`SelectAccountTeam`, including roleless selection and stale-team refusal.
+`Store.CreateTeam`, `AcceptInvitation`, `UnlinkIdentity`, `SetActiveTeam` and
+`SwitchSessionTeam` are removed. Account fixtures authenticate through
+`storetest.AccountAuthority` or `SessionAuthority` before calling the final
+writers. Roleless fixtures use their linked provider identity. Invitation expiry
+tests advance the store clock and keep the accepting session live.
+
+Team creation and invitation helpers leave account selection to
+`selectAccountTeamTx`, which commits the account and session once. Identity
+unlinking selects only the provider subject needed for the deletion and unlink
+record. It returns the ended-session count.
 
 The unused `AccountIdentity`, `GitHubRepo.CanonicalURL`, `MetricSample.OneShot`,
 `IsBusyErr` and `Tenant.CacheExcludedCounts` APIs are removed. The latter's

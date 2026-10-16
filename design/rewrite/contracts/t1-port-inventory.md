@@ -2684,7 +2684,28 @@ winner across two sessions. `TestAccountMutationsHTTPUseCommittedStoreAdapter`
 checks all four concrete defaults through socket-free HTTP and asserts C2
 interface conformance. `TestAccountMutationsKeepNanosecondTimestamps` checks
 public account/identity times, raw membership/update/unlink facts and signup
-window cutoffs without losing subsecond precision. Existing raw account fixture methods still need caller migration.
+window cutoffs without losing subsecond precision.
 
 `TestCacheExcludedCounts_CountsCacheDominantRunsPerPipeline` retires with its
 unused API and SQL. The profile-folding suites retain memoized-job exclusion.
+
+## Raw account writer retirement
+
+The remaining creation, invitation and unlink fixtures now call
+`CreateAccountTeam`, `AcceptAccountInvitation` and `UnlinkAccountIdentity`
+through fresh authenticated direct sessions. `storetest.AccountAuthority`
+supports member and roleless accounts. `SessionAuthority` preserves an existing
+session when a test checks unlink revocation.
+
+`TestIdentityInvitationLifetime` retains the seven-day lifetime assertion.
+`TestAccountInvitationExpiresOnStoreClock` checks refusal and unchanged rows
+at the exact expiry and one second later while the accepting session remains
+live. The PostgreSQL unlink contention fixtures create their authority before
+acquiring database gates. Concurrent unlink requests share the session they
+retain. Those native tests still require PostgreSQL execution.
+
+`TestLogTreeTraversesEveryTenantDescendantProperty` exercises the retained
+tenant run listing through the real HTTP log reader. Generated trees cross the
+100-row internal page, contain a nested descendant and a cycle, and include a
+foreign tenant's child naming the same parent. Every selected descendant appears
+once and foreign events stay absent.

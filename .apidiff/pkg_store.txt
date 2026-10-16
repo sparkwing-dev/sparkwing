@@ -1970,6 +1970,7 @@ type RunView struct {
 	Snapshot RunSnapshot
 	Attempts []NodeAttempt
 	Logs     []blob.LogSubject
+	Failures []string
 }
 const RunnerIdentityHeader = "X-Sparkwing-Runner"
 const RunnerTokenLifetime = 90 * 24 * time.Hour
@@ -2396,7 +2397,6 @@ type StorageUsage struct {
 type Store struct {
 }
 func (s *Store) AcceptAccountInvitation(ctx context.Context, a capability.Authorized, id string) (InvitationAcceptance, error)
-func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
 func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error)
@@ -2421,7 +2421,6 @@ func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Tea
 func (s *Store) CreateAccountTeam(ctx context.Context, a capability.Authorized, input TeamInfo) (TeamInfo, error)
 func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
-func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) CreateTokenWith(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
@@ -2483,7 +2482,6 @@ func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) 
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) UnlinkAccountIdentity(ctx context.Context, a capability.Authorized, provider string) (int64, error)
-func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
 type SummaryWrite struct {
 	Ref      NodeRef
@@ -2638,6 +2636,7 @@ func (t *Tenant) ListPipelines(ctx context.Context, limit int) ([]PipelineSummar
 func (t *Tenant) ListRegisteredAgents(ctx context.Context) ([]RegisteredAgent, error)
 func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error)
 func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error)
+func (t *Tenant) ListRunViews(ctx context.Context, after, through int64, limit int) ([]RunView, error)
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
 func (t *Tenant) ListSecrets() ([]Secret, error)
 func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)

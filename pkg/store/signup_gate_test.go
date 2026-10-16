@@ -89,7 +89,7 @@ func TestOperatorWaitlistGatesOnlyNewAccounts(t *testing.T) {
 	if returning.NewAccount || returning.PersonalTeam != "" || !returning.Account.Waitlisted {
 		t.Fatalf("a waitlisted account signing in again = %+v", returning)
 	}
-	if _, err := st.CreateTeam(ctx, returning.Account.ID, "new-team", "", time.Now()); !errors.Is(err, store.ErrWaitlisted) {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, returning.Account.ID), store.TeamInfo{Slug: "new-team", DisplayName: ""}); !errors.Is(err, store.ErrWaitlisted) {
 		t.Fatalf("waitlisted CreateTeam = %v, want ErrWaitlisted", err)
 	}
 
@@ -115,7 +115,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acc, err := st.AcceptInvitation(ctx, waiting.Account.ID, inv.ID, time.Now())
+	acc, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, waiting.Account.ID), inv.ID)
 	if err != nil || acc.Team != owner.Account.ActiveTeam || !acc.Admitted {
 		t.Fatalf("AcceptInvitation = %+v, %v", acc, err)
 	}
@@ -123,7 +123,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 	if err != nil || acct.ActiveTeam != owner.Account.ActiveTeam || !acct.Waitlisted {
 		t.Fatalf("account after accepting = %+v, %v", acct, err)
 	}
-	if _, err := st.CreateTeam(ctx, acct.ID, "own-team", "", time.Now()); !errors.Is(err, store.ErrWaitlisted) {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, acct.ID), store.TeamInfo{Slug: "own-team", DisplayName: ""}); !errors.Is(err, store.ErrWaitlisted) {
 		t.Fatalf("CreateTeam after accepting = %v, want ErrWaitlisted", err)
 	}
 
@@ -299,7 +299,7 @@ func TestApprovingTheOldestAdmitsInArrivalOrder(t *testing.T) {
 		if a.Waitlisted || a.ActiveTeam == "" {
 			t.Fatalf("approved account = %+v, want a personal space", a)
 		}
-		if _, err := st.CreateTeam(ctx, a.ID, store.Team("t-"+a.ID[:8]), "", time.Now()); err != nil {
+		if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, a.ID), store.TeamInfo{Slug: store.Team("t-" + a.ID[:8]), DisplayName: ""}); err != nil {
 			t.Fatalf("an approved account cannot create a team: %v", err)
 		}
 	}
@@ -419,7 +419,7 @@ func TestWaitlistedInvitationAcceptsCountAsAdmissions(t *testing.T) {
 	owner := signUpAt(t, st, googleProfile("o", "o@example.com"), store.SignUpConditions{}, now)
 	// safety: an admitted account joining a team is no new admission, the negative control.
 	member := signUpAt(t, st, googleProfile("m", "m@example.com"), store.SignUpConditions{}, now)
-	if _, err := st.AcceptInvitation(ctx, member.Account.ID, invite(t, st, owner, "m@example.com").ID, now); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), invite(t, st, owner, "m@example.com").ID); err != nil {
 		t.Fatal(err)
 	}
 	bots := make([]store.SignInResult, 2)
@@ -428,11 +428,11 @@ func TestWaitlistedInvitationAcceptsCountAsAdmissions(t *testing.T) {
 			store.SignUpConditions{}, now)
 		requireWaitlisted(t, bots[i], store.WaitlistReasonGitHubAge)
 	}
-	first, err := st.AcceptInvitation(ctx, bots[0].Account.ID, invite(t, st, owner, "bot0@example.com").ID, now)
+	first, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, bots[0].Account.ID), invite(t, st, owner, "bot0@example.com").ID)
 	if err != nil || !first.Admitted || first.GateClosed != nil {
 		t.Fatalf("the third admission against a limit of 3 = %+v, %v; want it counted and the gate open", first, err)
 	}
-	second, err := st.AcceptInvitation(ctx, bots[1].Account.ID, invite(t, st, owner, "bot1@example.com").ID, now)
+	second, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, bots[1].Account.ID), invite(t, st, owner, "bot1@example.com").ID)
 	if err != nil || second.GateClosed == nil || second.GateClosed.Source != store.WaitlistReasonHourly {
 		t.Fatalf("the accept past the limit = %+v, %v; want it to close the gate", second, err)
 	}
@@ -449,7 +449,7 @@ func TestAFreeTeamHoldsAtMostTheMemberLimit(t *testing.T) {
 	owner := signIn(t, st, "o", "o@example.com")
 	join := func(sub, email string) error {
 		acct := signIn(t, st, sub, email)
-		_, err := st.AcceptInvitation(context.Background(), acct.Account.ID, invite(t, st, owner, email).ID, time.Now())
+		_, err := st.AcceptAccountInvitation(context.Background(), storetest.AccountAuthority(t, st, acct.Account.ID), invite(t, st, owner, email).ID)
 		return err
 	}
 	for i := range 2 {

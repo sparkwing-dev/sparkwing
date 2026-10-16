@@ -201,7 +201,7 @@ func (f *tenancyFixture) member(owner store.Account, name string, role store.Rol
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.st.AcceptInvitation(ctx, acct.ID, inv.ID, time.Now().UTC()); err != nil {
+	if _, err := f.st.AcceptAccountInvitation(ctx, fixtureAccountAuthority(f.t, f.st, acct), inv.ID); err != nil {
 		f.t.Fatal(err)
 	}
 	return session(f.t, f.st, acct, f.teamA.Team())
@@ -764,4 +764,19 @@ func fixtureInvitation(t *testing.T, st *store.Store, tenant *store.Tenant, acto
 		return store.Invitation{}, err
 	}
 	return tenant.CreateAuthorizedInvitation(t.Context(), a, email, role, email)
+}
+
+func fixtureAccountAuthority(t *testing.T, st *store.Store, account store.Account) capability.Authorized {
+	t.Helper()
+	raw := strings.TrimPrefix(session(t, st, account, account.ActiveTeam), "Session ")
+	route, _ := capability.LookupRoute("POST", "/api/v1/me/active-team")
+	auth, err := capability.NewAuthenticator(st).Authenticate(t.Context(), capability.Presentation{Raw: raw, Class: capability.CredentialSession}, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := capability.Authorize(t.Context(), st, route, auth, capability.Target{AccountID: account.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
 }

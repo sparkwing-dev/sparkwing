@@ -97,7 +97,7 @@ func TestIdentityLastOwnerCannotLeaveAndAMemberKeepsTheirTeams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, joiner.Account.ID, inv.ID, time.Now()); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, joiner.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant(t, st, joiner.PersonalTeam).UpdateMembership(ctx, membershipActor(t, st, joiner.Account.ID, tenant(t, st, joiner.PersonalTeam).Team()), store.MembershipUpdate{AccountID: joiner.Account.ID}); !errors.Is(err, store.ErrLastOwner) {
@@ -122,14 +122,14 @@ func TestIdentityInvitationNeedsTheInvitedVerifiedEmail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, y.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrEmailMismatch) {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, y.Account.ID), inv.ID); !errors.Is(err, store.ErrEmailMismatch) {
 		t.Fatalf("y accepting x's invitation = %v, want ErrEmailMismatch", err)
 	}
-	acc, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now())
+	acc, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID)
 	if err != nil || acc.Team != owner.PersonalTeam || acc.Admitted {
 		t.Fatalf("x accepting = %+v, %v", acc, err)
 	}
-	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrInvitationClosed) {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID); !errors.Is(err, store.ErrInvitationClosed) {
 		t.Fatalf("second accept = %v, want ErrInvitationClosed", err)
 	}
 	role, err := tenant(t, st, owner.PersonalTeam).MemberRole(ctx, x.Account.ID)
@@ -138,23 +138,16 @@ func TestIdentityInvitationNeedsTheInvitedVerifiedEmail(t *testing.T) {
 	}
 }
 
-func TestIdentityInvitationExpires(t *testing.T) {
+func TestIdentityInvitationLifetime(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	owner := signIn(t, st, "o", "owner@example.com")
-	x := signIn(t, st, "x", "x@example.com")
 	inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "x@example.com", store.RoleReader, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := inv.ExpiresAt.Sub(inv.CreatedAt); got != 7*24*time.Hour {
 		t.Fatalf("invitation lives %s, want 7 days", got)
-	}
-	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, inv.ExpiresAt); !errors.Is(err, store.ErrInvitationClosed) {
-		t.Fatalf("accepting at the expiry instant = %v, want ErrInvitationClosed", err)
-	}
-	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, inv.ExpiresAt.Add(time.Second)); !errors.Is(err, store.ErrInvitationClosed) {
-		t.Fatalf("accepting after expiry = %v, want ErrInvitationClosed", err)
 	}
 }
 
@@ -168,7 +161,7 @@ func TestIdentityRolesCannotEscalateOrOrphanATeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, ed.Account.ID, inv.ID, time.Now()); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, ed.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := tn.UpdateMembership(ctx, membershipActor(t, st, ed.Account.ID, tn.Team()), store.MembershipUpdate{AccountID: ed.Account.ID, Role: rolePointer(store.RoleOwner)}); err == nil {
@@ -234,7 +227,7 @@ func TestIdentitySessionSwitchNamesTheTeamItLeaves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateTeam(ctx, a.Account.ID, "second", "Second", time.Now()); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, a.Account.ID), store.TeamInfo{Slug: "second", DisplayName: "Second"}); err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(raw))
@@ -302,7 +295,7 @@ func TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, first.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrEmailMismatch) {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, first.Account.ID), inv.ID); !errors.Is(err, store.ErrEmailMismatch) {
 		t.Fatalf("the account that lost the address accepted its invitation: %v", err)
 	}
 }
@@ -338,11 +331,11 @@ func TestIdentityTeamCreationIsCapped(t *testing.T) {
 	ctx := context.Background()
 	u := signIn(t, st, "s", "busy@example.com")
 	for i := 2; i <= 3; i++ {
-		if _, err := st.CreateTeam(ctx, u.Account.ID, store.Team(fmt.Sprintf("busy-team-%d", i)), "", time.Now()); err != nil {
+		if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, u.Account.ID), store.TeamInfo{Slug: store.Team(fmt.Sprintf("busy-team-%d", i)), DisplayName: ""}); err != nil {
 			t.Fatalf("team %d: %v", i, err)
 		}
 	}
-	_, err := st.CreateTeam(ctx, u.Account.ID, "one-too-many", "", time.Now())
+	_, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, u.Account.ID), store.TeamInfo{Slug: "one-too-many", DisplayName: ""})
 	if !errors.Is(err, store.ErrTeamLimit) {
 		t.Fatalf("fourth team = %v, want ErrTeamLimit", err)
 	}
@@ -433,7 +426,7 @@ func TestIdentityWithdrawnInvitationCannotBeAccepted(t *testing.T) {
 	if err := tn.WithdrawInvitationForTest(t, ctx, inv.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrInvitationClosed) {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID); !errors.Is(err, store.ErrInvitationClosed) {
 		t.Fatalf("accepting a withdrawn invitation = %v, want ErrInvitationClosed", err)
 	}
 	if err := tn.WithdrawInvitationForTest(t, ctx, inv.ID, time.Now()); !errors.Is(err, store.ErrNotFound) {

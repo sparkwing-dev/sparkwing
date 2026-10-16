@@ -152,7 +152,17 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 		t.Fatalf("invitation persistence: created=%d expires=%d emailed=%d sent=%d", created, expires, emailed, sent)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,email_verified,created_at,updated_at) VALUES ('invited',?,1,1,1)`, invitation.Email)
-	accepted, err := s.AcceptInvitation(t.Context(), "invited", invitation.ID, *now)
+	rewriteSchemaExec(t, s.db, `INSERT INTO identities(provider,subject,account_id,email,created_at) VALUES ('google','invited','invited',?,1)`, invitation.Email)
+	raw, _, _, err := s.CreateIdentityAccountSession(t.Context(), Account{ID: "invited"}, "", ProviderGoogle, "invited", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthoritySession, ID: sessionDigest(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, _ := capability.LookupRoute("POST", "/api/v1/invitations/{invitation}/accept")
+	accepted, err := s.AcceptAccountInvitation(t.Context(), capability.Authorized{Principal: p, Access: route.Access[0]}, invitation.ID)
 	if err != nil || accepted.Team != tenant.team {
 		t.Fatalf("invitation acceptance: %+v %v", accepted, err)
 	}

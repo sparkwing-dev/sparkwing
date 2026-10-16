@@ -42,7 +42,7 @@ func checkStoreSessions(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	if _, err := s.AcceptInvitation(ctx, memberAccount.ID, invitation.ID, time.Now()); err != nil {
+	if _, err := s.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, s, memberAccount.ID), invitation.ID); err != nil {
 		return err
 	}
 	raw, csrf, session, err := s.CreateAccountSession(ctx, store.Account{ID: memberAccount.ID, Email: "forged@example.test"}, team, time.Hour)

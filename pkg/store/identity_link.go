@@ -129,82 +129,54 @@ func (s *Store) linkIdentityOnce(ctx context.Context, accountID string, p SignIn
 	}, nil
 }
 
-// UnlinkIdentity detaches accountID's sign-in from provider and returns it.
-// An account keeps at least one sign-in method ([ErrLastSignInMethod]), and
-// a provider it has no sign-in from is [ErrNotFound]. The account's email
-// stays what it was.
-//
-// The provider account then signs in as a stranger: the email rule no longer
-// attaches it to accountID, even on the account's own verified address. Every
-// session of accountID other than keepSession, a raw session id, ends,
-// because one of them may have been opened with the sign-in just removed.
-func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return Identity{}, 0, err
-	}
-	defer rollbackOrLog(tx)
-	id, ended, err := unlinkAccountIdentityTx(ctx, tx, accountID, provider, sessionDigest(keepSession), now)
-	if err != nil {
-		return Identity{}, 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Identity{}, 0, err
-	}
-	return id, ended, nil
-}
-
-func unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, accountID, provider, keepHash string, now time.Time) (Identity, int64, error) {
+func unlinkAccountIdentityTx(ctx context.Context, tx *storeTx, accountID, provider, keepHash string, now time.Time) (int64, error) {
 	if err := lockAccountTx(ctx, tx, accountID); err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
-	var id Identity
-	var linked int
-	var created int64
-	err := tx.QueryRowContext(ctx, `SELECT provider, subject, email, linked, created_at FROM identities
+	var subject string
+	err := tx.QueryRowContext(ctx, `SELECT subject FROM identities
 		WHERE account_id = ? AND provider = ? ORDER BY created_at LIMIT 1`, accountID, provider).
-		Scan(&id.Provider, &id.Subject, &id.Email, &linked, &created)
+		Scan(&subject)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Identity{}, 0, ErrNotFound
+		return 0, ErrNotFound
 	}
 	if err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
-	id.Linked, id.CreatedAt = linked == 1, time.Unix(0, created).UTC()
 	var methods int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM identities WHERE account_id = ?`, accountID).Scan(&methods); err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
 	if methods <= 1 {
-		return Identity{}, 0, ErrLastSignInMethod
+		return 0, ErrLastSignInMethod
 	}
 	at := now.UTC().UnixNano()
 	for _, stmt := range []struct {
 		sql  string
 		args []any
 	}{
-		{`DELETE FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`, []any{id.Provider, id.Subject, accountID}},
-		{`DELETE FROM identity_unlinks WHERE provider = ? AND subject = ? AND account_id = ?`, []any{id.Provider, id.Subject, accountID}},
+		{`DELETE FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`, []any{provider, subject, accountID}},
+		{`DELETE FROM identity_unlinks WHERE provider = ? AND subject = ? AND account_id = ?`, []any{provider, subject, accountID}},
 		{
 			`INSERT INTO identity_unlinks (provider, subject, account_id, unlinked_at) VALUES (?, ?, ?, ?)`,
-			[]any{id.Provider, id.Subject, accountID, at},
+			[]any{provider, subject, accountID, at},
 		},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
-			return Identity{}, 0, err
+			return 0, err
 		}
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE account_id = ? AND hash <> ?`,
 		accountID, keepHash)
 	if err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
 	ended, err := res.RowsAffected()
 	if err != nil {
-		return Identity{}, 0, err
+		return 0, err
 	}
-	return id, ended, nil
+	return ended, nil
 }
 
 func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {

@@ -46,10 +46,10 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	member := signIn(t, st, "m", "member@example.com")
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "Acme", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: "Acme"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "keep", "Keep", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "keep", DisplayName: "Keep"}); err != nil {
 		t.Fatal(err)
 	}
 	acme := tenant(t, st, "acme")
@@ -57,7 +57,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, member.Account.ID, inv.ID, now); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	memberSession, _, _, err := st.CreateAccountSession(ctx, member.Account, "acme", time.Hour)
@@ -192,7 +192,7 @@ func TestAccountDeletionRefusesALastOwnerWithMembersAndNamesTheTeams(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, member.Account.ID, inv.ID, now); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	_, err = st.DeleteAccount(ctx, owner.Account.ID, now)
@@ -216,7 +216,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AcceptInvitation(ctx, leaver.Account.ID, inv.ID, now); err != nil {
+	if _, err := st.AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
 		t.Fatal(err)
 	}
 	session, _, _, err := st.CreateAccountSession(ctx, leaver.Account, owner.PersonalTeam, time.Hour)

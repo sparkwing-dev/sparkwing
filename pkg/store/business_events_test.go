@@ -92,7 +92,7 @@ func TestBusinessEventsFollowAccountAndTeamDeletion(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	leaver := signIn(t, st, "l", "leaver@example.com")
-	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "", now); err != nil {
+	if _, err := st.CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, owner.Account.ID), store.TeamInfo{Slug: "acme", DisplayName: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.DeleteAccount(ctx, leaver.Account.ID, now); err != nil {

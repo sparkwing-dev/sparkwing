@@ -587,26 +587,6 @@ func (s *Store) Account(ctx context.Context, id string) (Account, error) {
 	return scanAccount(s.queryRow(ctx, accountSelect+` WHERE id = ?`, id))
 }
 
-// CreateTeam registers a team with its creator as owner and makes it the
-// creator's active team. The registry row, the membership and the switch are
-// one transaction, because a team with no owner is a team nobody can
-// administer.
-func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return TeamInfo{}, err
-	}
-	defer rollbackOrLog(tx)
-	out, err := createAccountTeamTx(ctx, tx, accountID, slug, displayName, now)
-	if err != nil {
-		return TeamInfo{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return TeamInfo{}, err
-	}
-	return out, nil
-}
-
 func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error) {
 	slug = NormalizeTeam(slug)
 	if err := ValidateSlug(string(slug)); err != nil {
@@ -637,10 +617,6 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 			ErrTeamLimit, MaxCreatedTeams, created)
 	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, now); err != nil {
-		return TeamInfo{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`,
-		string(slug), now.UTC().UnixNano(), accountID); err != nil {
 		return TeamInfo{}, err
 	}
 	return TeamInfo{Slug: slug, DisplayName: displayName, CreatedBy: accountID}, nil
@@ -770,32 +746,6 @@ type InvitationAcceptance struct {
 	GateClosed *SignUpGate
 }
 
-// AcceptInvitation turns an invitation into a membership and makes its team
-// the account's active one. The account's verified email must be the address
-// the invitation names: the invitation id is a bearer secret anyone it was
-// forwarded to holds, and the verified email is what proves the person
-// accepting is the person invited.
-//
-// A team that has bought no credits holds at most the gate's FreeTeamMembers,
-// and a waitlisted account that joins counts as an admission, because one
-// admitted account could otherwise invite a farm of waitlisted ones into
-// team scopes while the gate holds them back.
-func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return InvitationAcceptance{}, err
-	}
-	defer rollbackOrLog(tx)
-	out, err := acceptAccountInvitationTx(ctx, tx, accountID, invitationID, now)
-	if err != nil {
-		return InvitationAcceptance{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return InvitationAcceptance{}, err
-	}
-	return out, nil
-}
-
 func acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
 	var none InvitationAcceptance
 	at := now.UTC().UnixNano()
@@ -851,10 +801,6 @@ func acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invi
 		if isUniqueViolation(err) {
 			return none, ErrAlreadyMember
 		}
-		return none, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`, team, at, accountID); err != nil {
 		return none, err
 	}
 	out := InvitationAcceptance{Team: Team(team)}

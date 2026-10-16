@@ -129,7 +129,7 @@ func (s *Store) UnlinkAccountIdentity(ctx context.Context, a capability.Authoriz
 		if tx.now().Before(p.Capability.IssuedAt) || tx.now().Sub(p.Capability.IssuedAt) > 10*time.Minute {
 			return apierr.Authorization(apierr.ReasonReauthRequired, "sign in again before changing sign-in methods")
 		}
-		_, ended, err = unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now())
+		ended, err = unlinkAccountIdentityTx(ctx, tx, p.Capability.Subject.ID, provider, p.Authority.ID, tx.now())
 		return err
 	})
 	if err != nil {

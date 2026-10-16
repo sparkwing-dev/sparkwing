@@ -10,8 +10,10 @@ uses these store transactions by default. Unlinking requires sign-in within ten
 minutes and preserves the selected session. Account, membership and identity
 timestamps use the final schema's nanosecond unit.
 
-`Store.SetActiveTeam` and `Store.SwitchSessionTeam` are removed. Use
-`SelectAccountTeam` for an authenticated selection. The unused
+`Store.CreateTeam`, `Store.AcceptInvitation`, `Store.UnlinkIdentity`,
+`Store.SetActiveTeam` and `Store.SwitchSessionTeam` are removed. Use the
+authenticated account writers above. The store clock supplies mutation and
+expiry times. The unused
 `Store.AccountIdentity`, `GitHubRepo.CanonicalURL`, `MetricSample.OneShot`,
 `IsBusyErr` and `Tenant.CacheExcludedCounts` helpers are removed too.
 

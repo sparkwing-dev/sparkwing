@@ -260,6 +260,21 @@ func TestAccountInvitationHasOneWinnerAcrossSessions(t *testing.T) {
 	}
 }
 
+func TestAccountInvitationExpiresOnStoreClock(t *testing.T) {
+	for _, elapsed := range []time.Duration{0, time.Second} {
+		t.Run(elapsed.String(), func(t *testing.T) {
+			s, a, _, now := accountMutationFixture(t)
+			invitation := accountMutationInvitation(t, s, *now)
+			*now = invitation.ExpiresAt.Add(elapsed)
+			rewriteSchemaExec(t, s.db, `UPDATE sessions SET expires_at=? WHERE hash=?`, now.Add(time.Hour).UnixNano(), a.Principal.Authority.ID)
+			before := accountMutationRows(t, s)
+			if _, err := s.AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrInvitationClosed) || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
+				t.Fatalf("acceptance at %s: %v", elapsed, err)
+			}
+		})
+	}
+}
+
 func TestAccountMutationsKeepNanosecondTimestamps(t *testing.T) {
 	s, a, _, now := accountMutationFixture(t)
 	id := a.Principal.Capability.Subject.ID
