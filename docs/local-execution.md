@@ -19,6 +19,12 @@ the live owner lease. It keeps the evaluated job separate from that lease and
 creates no work attempt. Each service call rechecks that job's persisted source
 fence and declared output edges. A separately awarded eval process uses its own
 eval lease.
+
+The controller claims each executable local job through the shared claim matcher.
+Each job process receives a fresh credential from its own store-issued node award.
+The private API preserves the owner and node claim identities so the host can
+check their relation before starting the process.
+
 Native execution evidence remains with the integration suite. See [rewrite integration](architecture.md).
 
 The old `pkg/localws` server, trigger-consumer election and `RunHosted` entrypoint

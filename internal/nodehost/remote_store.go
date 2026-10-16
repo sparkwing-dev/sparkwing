@@ -115,7 +115,7 @@ func executionRow(runID string, job controllerwire.ExecutionJob) (store.NodeRow,
 	}
 	return store.NodeRow{
 		Ref: store.NodeRef{RunID: runID, NodeID: job.ID}, Status: store.NodeStatus(job.Status), Outcome: store.NodeState(job.Outcome), StatusDetail: job.StatusDetail,
-		ClaimedBy: job.ClaimedBy, CapabilityPrefix: job.CapabilityPrefix, Generation: job.Generation, Attempt: job.Attempt, ApplicationRetries: job.ApplicationRetries, Disruptions: job.Disruptions,
+		ClaimedBy: job.ClaimedBy, CapabilityPrefix: job.CapabilityPrefix, OwnerCapabilityPrefix: job.OwnerCapabilityPrefix, Generation: job.Generation, Attempt: job.Attempt, ApplicationRetries: job.ApplicationRetries, Disruptions: job.Disruptions,
 		ReadyAt: job.ReadyAt, LeaseExpiresAt: job.LeaseExpiresAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, CancelRequestedAt: job.CancelRequestedAt,
 		OutputRecord: job.OutputRecord, ManifestRecord: job.ManifestRecord,
 		StateSeq: job.StateSeq, Expansion: store.ExpansionState(job.Expansion), ExpansionDigest: job.ExpansionDigest, Spec: slices.Clone(job.Spec), SpecHash: job.SpecHash, Execution: job.Execution,

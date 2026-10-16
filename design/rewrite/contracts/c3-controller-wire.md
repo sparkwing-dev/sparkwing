@@ -858,6 +858,11 @@ available while a current holder drains cancellation. Node credentials use
 node-scoped snapshot, authentication and binding endpoints. Their snapshots
 contain only the awarded node.
 
+Private reconciliation also preserves `owner_capability_prefix` beside the node
+claim prefix. The local host checks the persisted owner relation before adopting
+the store-issued node award. Each job process delegates from that node award.
+Owner evaluation retains its separate owner or eval authority.
+
 `client.NewLocalHostClient` implements private state reads, transitions,
 authentication and relational binding checks without opening the store. The
 controller derives mutation actors and fences from the authenticated bearer.
