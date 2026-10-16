@@ -29,8 +29,9 @@ With `-o json`, attach first emits the execution target, then streams shell outp
 in `{"kind":"debug_output","text":"..."}` records. Use `-o plain` for raw shell
 output. Child stderr remains on stderr. Attachment errors return a failed exit.
 
-`debug resume` uses the observed stable run/job identity and requires an authorized
-controller release operation. This rewrite checkout has no final release policy
-or writer binding, so it fails before opening local state. The old direct-store
-and legacy client release paths are removed. A successful bound operation emits
-one JSON receipt, one run/job value in plain mode, or a confirmation in pretty mode.
+`debug resume --run RUN_ID --job JOB` reads the selected pause and asks the same
+controller to release it. Use `--profile NAME` for a remote controller. Without a
+profile, the command uses the local controller. The controller checks current
+`runs.control` authority when it commits the release. Repeating a release leaves
+the job's lifecycle and execution fence unchanged. A successful release emits one
+JSON receipt, one run/job value in plain mode, or a confirmation in pretty mode.

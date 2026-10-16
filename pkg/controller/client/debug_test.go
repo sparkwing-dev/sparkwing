@@ -3,9 +3,11 @@ package client
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -130,6 +132,81 @@ func FuzzDebugReadsDropPrivateAdditiveFields(f *testing.F) {
 		_, err = c.ReadDebugJob(t.Context(), job.RunID, selector)
 		if !validSelector(selector) && (err == nil || calls != 1) {
 			t.Fatal("invalid selector reached transport")
+		}
+	})
+}
+
+func TestDebugResumeRequiresControllerAcknowledgement(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		body   string
+		ok     bool
+	}{
+		{204, "", true},
+		{200, `{}`, false},
+		{202, `{}`, false},
+		{204, `{}`, false},
+		{403, `{"error":{"code":"forbidden","message":"scope missing"}}`, false},
+	} {
+		calls := 0
+		c := testEngine(t, func(r *http.Request) (*http.Response, error) {
+			calls++
+			body, err := io.ReadAll(r.Body)
+			if err != nil || r.Method != "POST" || r.URL.Path != "/api/v1/runs/run-1/jobs/build/resume" || r.Header.Get("Authorization") != "Bearer private-capability" || string(body) != "{}" {
+				t.Fatalf("release request: %s %s %s %v", r.Method, r.URL, body, err)
+			}
+			return engineResponse(tc.status, tc.body), nil
+		})
+		err := c.ResumeDebugPause(t.Context(), "run-1", "build")
+		if (err == nil) != tc.ok || calls != 1 {
+			t.Fatalf("HTTP %d body %s: calls=%d err=%v", tc.status, tc.body, calls, err)
+		}
+	}
+}
+
+func TestDebugResumeReplaysOnlyTheSelectedEmptyRelease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		c := testEngine(t, func(r *http.Request) (*http.Response, error) {
+			calls++
+			body, err := io.ReadAll(r.Body)
+			if err != nil || r.URL.Path != "/api/v1/runs/run-1/jobs/build/resume" || string(body) != "{}" {
+				t.Fatalf("changed release: %s %s %v", r.URL, body, err)
+			}
+			if calls == 1 {
+				resp := engineResponse(503, `{"error":{"code":"unavailable","message":"retry"}}`)
+				resp.Header.Set("Retry-After", "1")
+				return resp, nil
+			}
+			return engineResponse(204, ""), nil
+		})
+		if err := c.ResumeDebugPause(t.Context(), "run-1", "build"); err != nil || calls != 2 {
+			t.Fatalf("replay: calls=%d err=%v", calls, err)
+		}
+	})
+}
+
+func FuzzDebugResumeSelectorsStayInTheMatchedRoute(f *testing.F) {
+	f.Add("run-1", "build")
+	f.Add("run/other?token=value", "../resume#fragment")
+	f.Add("", "build")
+	f.Fuzz(func(t *testing.T, run, job string) {
+		calls := 0
+		c := testEngine(t, func(r *http.Request) (*http.Response, error) {
+			calls++
+			body, err := io.ReadAll(r.Body)
+			if err != nil || string(body) != "{}" || r.URL.EscapedPath() != "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/resume" || r.URL.RawQuery != "" || r.URL.Fragment != "" {
+				t.Fatalf("selectors escaped the operation: %s %s %v", r.URL, body, err)
+			}
+			return engineResponse(204, ""), nil
+		})
+		err := c.ResumeDebugPause(t.Context(), run, job)
+		if !validSelector(run) || !validSelector(job) {
+			if err == nil || calls != 0 {
+				t.Fatal("invalid selector reached release transport")
+			}
+		} else if err != nil || calls != 1 {
+			t.Fatalf("valid selector: calls=%d err=%v", calls, err)
 		}
 	})
 }

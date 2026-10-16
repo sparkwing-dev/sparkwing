@@ -11,16 +11,28 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type debugResumer struct {
-	reader controllerwire.DebugReader
-	resume func(context.Context, string, string) error
-	close  func() error
+	control controllerwire.DebugControl
+	close   func() error
 }
 
-func resolveDebugResumer(context.Context, string) (debugResumer, error) {
-	return debugResumer{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "debug resume requires a registered controller pause-release policy"}
+func resolveDebugResumer(ctx context.Context, profile string) (debugResumer, error) {
+	options, closeTransport, err := controllerOptions(ctx, profile)
+	if err != nil {
+		return debugResumer{}, err
+	}
+	control, err := client.NewDebugControl(options)
+	if err != nil {
+		closeTransport()
+		return debugResumer{}, err
+	}
+	return debugResumer{control: control, close: func() error {
+		closeTransport()
+		return nil
+	}}, nil
 }
 
 func runDebugResume(ctx context.Context, args []string, out io.Writer, resolve func(context.Context, string) (debugResumer, error)) (resultErr error) {
@@ -42,27 +54,27 @@ func runDebugResume(ctx context.Context, args []string, out io.Writer, resolve f
 	if runtime.close != nil {
 		defer func() { resultErr = errors.Join(resultErr, runtime.close()) }()
 	}
-	if runtime.reader == nil || runtime.resume == nil || runtime.close == nil {
+	if runtime.control == nil || runtime.close == nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "debug resume requires controller observation, release and cleanup bindings"}
 	}
-	job, err := runtime.reader.ReadDebugJob(ctx, inv.Value("run"), inv.Value("job"))
+	pause, err := runtime.control.ReadDebugPause(ctx, inv.Value("run"), inv.Value("job"))
 	if err != nil {
 		return err
 	}
-	if err := job.Validate(inv.Value("run"), inv.Value("job")); err != nil {
+	if err := pause.Validate(inv.Value("run"), inv.Value("job")); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := runtime.resume(ctx, job.RunID, job.Job.ID); err != nil {
+	if err := runtime.control.ResumeDebugPause(ctx, pause.RunID, pause.JobID); err != nil {
 		return err
 	}
 	result := struct {
 		RunID   string `json:"run_id"`
 		JobID   string `json:"job_id"`
 		Resumed bool   `json:"resumed"`
-	}{job.RunID, job.Job.ID, true}
+	}{pause.RunID, pause.JobID, true}
 	if format == "json" {
 		return json.NewEncoder(out).Encode(result)
 	}

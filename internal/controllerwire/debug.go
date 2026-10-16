@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // DebugExecution identifies the current executor without exposing claim authority.
@@ -90,4 +91,10 @@ func invalidDebugProjection() error {
 type DebugReader interface {
 	ReadDebugJob(context.Context, string, string) (DebugJob, error)
 	ReadDebugPause(context.Context, string, string) (DebugPauseResult, error)
+}
+
+// DebugControl reads public diagnostics and releases pauses through controller authority.
+type DebugControl interface {
+	DebugReader
+	ResumeDebugPause(context.Context, string, string) error
 }
