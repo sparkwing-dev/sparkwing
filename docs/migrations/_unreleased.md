@@ -2599,3 +2599,8 @@ admission and leaves operator approval available beyond the launch cap.
 The operator signup status includes `account_limit` and `counts.admitted` and
 reports `launch_capacity` while automatic launch admission is full. Existing
 accounts still sign in. Explicit operator approval remains available.
+
+Launcher queue selection passes over teams whose standing capacity is full and
+jobs larger than that standing permits. Named oversized claims still refuse
+with the standing named. A lost payment dispute retains the team's hold until
+an operator releases it. Winning a dispute releases that dispute's hold.

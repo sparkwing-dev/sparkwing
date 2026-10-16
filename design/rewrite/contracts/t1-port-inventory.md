@@ -2806,8 +2806,12 @@ cap-override tests retire with those APIs. `billing_model_test.go` and
 settlement, collection, sign-in and explicit operator admission. Generated
 admissions and independent SQLite clients pin the standing capacity invariant.
 `billing_model_internal_test.go` carries the controller claim, signup, status and
-card-prepay read paths through the real store. The identity provider and runner
-profile are external contract fakes. `billing_docs_test.go` checks the policy
-table against the source documentation. Existing immutable-price, refund,
+card-prepay read paths through the real store. It also drives signed checkout
+and lost-dispute webhooks through verification and settlement to Cloud
+admission, renewal and completion. Queue proofs cover full teams and oversized
+jobs ahead of eligible work. The identity provider and runner profile are
+external contract fakes. Generated dispute delivery orders preserve Held after
+a chargeback until an operator releases its hold. `billing_docs_test.go` checks
+the policy table against the source documentation. Existing immutable-price, refund,
 retention and payment replay proofs remain. No native Stripe or PostgreSQL cell
 is promoted by these SQLite and controller-handler proofs.

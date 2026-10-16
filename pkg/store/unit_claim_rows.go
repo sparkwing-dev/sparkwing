@@ -199,11 +199,12 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 			continue
 		}
 		if metered {
-			if err := eligibleUnitBillingTx(ctx, tx, candidate.team, candidate.unit, requirements.Request); err != nil {
-				if errors.Is(err, ErrInsufficientCredits) {
-					continue
-				}
+			ok, err := eligibleUnitBillingTx(ctx, tx, candidate.team, candidate.unit, requirements.Request, launcherClaimant(c))
+			if err != nil {
 				return UnitRef{}, err
+			}
+			if !ok {
+				continue
 			}
 		}
 		candidate.score = verdict.PreferenceScore

@@ -26,13 +26,16 @@ prepaid balance. Adding funds raises standing in the settlement transaction.
 Using prepaid funds can lower its balance-backed tier. Successful collections
 and payment history remain available after the balance is spent. Holds prevent
 new Cloud admissions even when the balance is positive.
+An open dispute holds the team. A lost dispute retains Held standing until an
+operator releases its hold. A won or closed warning dispute releases its hold.
 
 While a collection is pending, new Cloud work waits and running work finishes.
 Admissions include resources already awarded and reserved for jobs that have
 not started. A job larger than its standing's capacity is refused immediately
 with the standing named. Each Cloud award carries a hard deadline. Renewal
-cannot extend it. Reclaiming a job keeps its first Cloud admission clock. A later standing change does not shorten a running job's
-awarded deadline.
+cannot extend it. Reclaiming a job keeps its first Cloud admission clock. A later
+standing change does not shorten a running job's awarded deadline. The launcher
+passes over teams without standing capacity so other teams can receive work.
 
 Owners may set a rolling spend budget. No team or shared-card dollar ceiling or
 daily spend cap applies. Local and self-hosted placement does not consume Cloud

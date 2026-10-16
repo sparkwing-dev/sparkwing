@@ -242,6 +242,7 @@ func applyProviderPaymentTx(ctx context.Context, tx *storeTx, e capability.Payme
 			if reversed.Grant != nil {
 				result.GrantID, result.AmountMicro = reversed.Grant.ID, reversed.Grant.AmountMicro
 			}
+			return result, nil
 		}
 		_, err = releaseCreditFreezesTx(ctx, tx, team, e.ObjectID, false, "", "", tx.now())
 		return result, err

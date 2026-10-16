@@ -190,6 +190,53 @@ func TestBillingModelDeclineHoldsAndSuccessfulChargeAdvancesLadder(t *testing.T)
 	}
 }
 
+func TestBillingModelDisputeOutcomePreservesStandingProperty(t *testing.T) {
+	property := func(seed uint32) bool {
+		s, tenant, now := providerPaymentFixture(t)
+		providerCheckoutPaid(t, s)
+		rewriteSchemaExec(t, s.db, `UPDATE teams SET billing_trust=''`)
+		statuses := []string{"lost", "won", "warning_closed"}
+		status := statuses[seed%uint32(len(statuses))]
+		events := []capability.PaymentEventKind{capability.PaymentDisputeOpened, capability.PaymentDisputeClosed, capability.PaymentDisputeOpened, capability.PaymentDisputeClosed}
+		rand.New(rand.NewSource(int64(seed))).Shuffle(len(events), func(i, j int) { events[i], events[j] = events[j], events[i] })
+		closed := false
+		for i, kind := range events {
+			event := providerPaymentEvent(now, kind)
+			event.ObjectID, event.EventID, event.Status = "dispute", fmt.Sprintf("dispute-event-%d", i), "needs_response"
+			if kind == capability.PaymentDisputeClosed {
+				event.Status, closed = status, true
+			}
+			for range 2 {
+				if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+					t.Fatal(err)
+				}
+			}
+			standing, err := tenant.BillingStanding(t.Context(), now)
+			if err != nil || (standing.Tier == "Held") != (!closed || status == "lost") {
+				t.Logf("outcome=%s closed=%t standing=%+v: %v", status, closed, standing, err)
+				return false
+			}
+		}
+		balance, err := tenant.CreditBalanceMicro(t.Context())
+		wantBalance := int64(100 * MicroCreditsPerCent)
+		if status == "lost" {
+			wantBalance = 0
+			if released, err := tenant.ReleaseCreditFreezes(t.Context(), "dispute", "operator", "reviewed", now); err != nil || released != 1 {
+				t.Fatalf("operator release=%d: %v", released, err)
+			}
+		}
+		return err == nil && balance == wantBalance
+	}
+	for seed := range uint32(3) {
+		if !property(seed) {
+			t.Fatalf("dispute changed standing: seed=%d", seed)
+		}
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(1122))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBillingModelCloudAdmissionCapacityProperty(t *testing.T) {
 	property := func(seed uint32) bool {
 		s, demand, _ := billingModelFixture(t)

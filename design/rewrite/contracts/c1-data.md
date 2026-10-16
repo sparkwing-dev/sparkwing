@@ -3166,3 +3166,9 @@ are removed. The final schema replaces `billing_rung_cents` with `billing_rung_i
 removes shared-card spend buckets. Standing is enforced inside Cloud issuance
 under the ledger lock. The award captures the hard deadline. See
 `docs/billing.md` for the decision's policy table.
+
+Queue eligibility reads the same standing capacity rule without taking the
+ledger lock ahead of claim locks. Issuance rechecks it under the ledger lock.
+Full teams and oversized jobs do not block other eligible teams. A lost dispute
+reverses its payment while retaining the hold. Won and warning-closed disputes
+release their hold. The existing named operator release remains available.

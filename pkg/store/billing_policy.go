@@ -72,6 +72,10 @@ func admitCloudTx(ctx context.Context, tx *storeTx, team Team, cores int64) erro
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
+	return checkCloudCapacityTx(ctx, tx, team, cores)
+}
+
+func checkCloudCapacityTx(ctx context.Context, tx *storeTx, team Team, cores int64) error {
 	standing, err := trustStandingTx(ctx, tx, team, tx.now())
 	if err != nil {
 		return err

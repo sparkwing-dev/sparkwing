@@ -2,11 +2,16 @@ package controller
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,11 +67,139 @@ func TestBillingModelControllerNewCloudAwardCarriesLimits(t *testing.T) {
 	}
 }
 
+func TestBillingModelControllerQueuePassesOverStandingLimitedTeams(t *testing.T) {
+	for _, blocked := range []string{"capacity", "oversized"} {
+		t.Run(blocked, func(t *testing.T) {
+			e, _ := engineRuntimeStore(t)
+			engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)
+			engineSQL(t, e.Store, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_payment_method) VALUES ('b',1,1,'customer-b','method-b')`)
+			engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) SELECT 'b','later',number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at+1,log_retention_class,log_retention_days FROM runs WHERE id='run'`)
+			engineSQL(t, e.Store, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) SELECT 'b','later',unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels FROM triggers WHERE id='run'`)
+			for _, id := range []string{"one", "two", "three"} {
+				engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
+			}
+			engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'b','later','job','pending',1,spec_json,execution_json FROM nodes WHERE team='a' AND node_id='one'`)
+			rates := store.CreditRateTable{{Cores: 4, MicroPerSecond: 1}, {Cores: 16, MicroPerSecond: 4}}
+			if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
+				t.Fatal(err)
+			}
+			e.Store.SetClaimProfileResolver(billingCloudProfile{})
+			e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
+			root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
+			h := New(e.Store, nil).WithEngineController(e).Handler()
+			if blocked == "capacity" {
+				for _, id := range []string{"one", "two"} {
+					engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", fmt.Sprintf(`{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":%q,"available_cores":64}`, id), http.StatusOK)
+				}
+			} else {
+				engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE team='a'`, []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":16}}}}`))
+			}
+			w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":64}`, http.StatusOK)
+			var response controllerwire.ClaimResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Claim == nil || response.Claim.RunID != "later" {
+				t.Fatalf("standing-limited team blocked eligible work: %s", w.Body)
+			}
+		})
+	}
+}
+
+func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
+	e, tenant := engineRuntimeStore(t)
+	engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
+	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)
+	for _, id := range []string{"one", "two"} {
+		engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":16}}}}`))
+	}
+	rates := store.CreditRateTable{{Cores: 16, MicroPerSecond: 1}}
+	if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
+		t.Fatal(err)
+	}
+	e.Store.SetClaimProfileResolver(billingCloudProfile{})
+	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
+	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
+	key, secret := filepath.Join(t.TempDir(), "api-key"), filepath.Join(t.TempDir(), "webhook-secret")
+	for path, value := range map[string]string{key: "sk_test_fixture", secret: "whsec_fixture"} {
+		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verifier, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: capability.PaymentTest, APIKeyFile: key, WebhookSecretFile: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(e.Store, nil).WithEngineController(e).WithPayments(verifier, e.Store).Handler()
+	webhook := func(id, kind, object string) {
+		t.Helper()
+		now := time.Now().Unix()
+		body := fmt.Sprintf(`{"id":%q,"object":"event","type":%q,"created":%d,"livemode":false,"data":{"object":%s}}`, id, kind, now, object)
+		mac := hmac.New(sha256.New, []byte("whsec_fixture"))
+		if _, err := fmt.Fprintf(mac, "%d.%s", now, body); err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest("POST", "/webhooks/stripe", strings.NewReader(body))
+		r.Header.Set("Stripe-Signature", fmt.Sprintf("t=%d,v1=%x", now, mac.Sum(nil)))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("payment=%d %s", w.Code, w.Body)
+		}
+	}
+	request := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"one","available_cores":64}`
+	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", request, http.StatusBadRequest)
+	if !strings.Contains(w.Body.String(), "New") {
+		t.Fatalf("oversized job omitted standing: %s", w.Body)
+	}
+	now := time.Now()
+	checkout, err := tenant.OpenCreditCheckout(t.Context(), 2000*store.MicroCreditsPerCent, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.AttachCreditCheckout(t.Context(), checkout, "prepay", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	webhook("prepay-paid", "checkout.session.completed", `{"id":"prepay","object":"checkout.session","mode":"payment","livemode":false,"payment_status":"paid","payment_intent":"payment","amount_total":2000,"currency":"usd"}`)
+	w = engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", request, http.StatusOK)
+	var response controllerwire.ClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response.Claim == nil {
+		t.Fatalf("prepay did not admit job: %s: %v", w.Body, err)
+	}
+	w = engineClaimHTTP(t, h, response.Claim.Capability, "POST", "/api/v1/claims/exchange", `{}`, http.StatusOK)
+	var exchanged controllerwire.ExchangeResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &exchanged); err != nil {
+		t.Fatal(err)
+	}
+	claim := exchanged.Claim
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/one/transition", `{"to":"running","cause":"start","source_attempt":0}`, http.StatusOK)
+	object := `{"id":"dispute","object":"dispute","livemode":false,"status":"lost","currency":"usd","amount":2000,"payment_intent":"payment","charge":"charge","reason":"fraudulent"}`
+	for _, id := range []string{"chargeback", "chargeback", "chargeback-replayed"} {
+		webhook(id, "charge.dispute.closed", object)
+	}
+	standing, err := tenant.BillingStanding(t.Context(), time.Now())
+	if err != nil || standing.Tier != "Held" {
+		t.Fatalf("chargeback standing=%+v: %v", standing, err)
+	}
+	w = engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":64}`, http.StatusOK)
+	var waiting controllerwire.ClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &waiting); err != nil || waiting.Claim != nil {
+		t.Fatalf("chargeback admitted work: %s: %v", w.Body, err)
+	}
+	w = engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/claims/"+claim.UnitID+"/heartbeat", `{"executing":true}`, http.StatusOK)
+	var beat controllerwire.RenewalResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &beat); err != nil || beat.CancelRequested {
+		t.Fatalf("chargeback cancelled running work: %s: %v", w.Body, err)
+	}
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/one/transition", `{"to":"success","cause":"report","source_attempt":1,"result":{"outcome":"success"}}`, http.StatusOK)
+}
+
 type billingIdentityProvider struct{}
 
 func (billingIdentityProvider) AuthorizeURL(string, string, string) string {
 	return "https://identity.test/authorize"
 }
+
 func (billingIdentityProvider) SignIn(_ context.Context, code, _, _ string) (store.SignInProfile, error) {
 	return store.SignInProfile{Provider: store.ProviderGoogle, Subject: code, Email: code + "@example.test", EmailVerified: true}, nil
 }
@@ -101,7 +234,6 @@ func TestBillingModelControllerWaitlistsThe101stAccount(t *testing.T) {
 	if err != nil || status.State != "waitlist" || !slices.Contains(status.Reasons, "launch_capacity") {
 		t.Fatalf("launch cap is invisible to operator: %+v: %v", status, err)
 	}
-
 }
 
 func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
