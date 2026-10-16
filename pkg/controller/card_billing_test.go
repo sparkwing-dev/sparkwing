@@ -20,9 +20,8 @@ type cardBilling struct {
 		DeclineCode string `json:"decline_code"`
 	} `json:"open_charge"`
 	Limits struct {
-		BudgetCents      int64  `json:"budget_cents"`
-		CreditLimitCents int64  `json:"credit_limit_cents"`
-		Binding          string `json:"binding"`
+		BudgetCents int64  `json:"budget_cents"`
+		Binding     string `json:"binding"`
 	} `json:"limits"`
 }
 

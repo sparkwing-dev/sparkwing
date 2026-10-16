@@ -2815,3 +2815,11 @@ a chargeback until an operator releases its hold. `billing_docs_test.go` checks
 the policy table against the source documentation. Existing immutable-price, refund,
 retention and payment replay proofs remain. No native Stripe or PostgreSQL cell
 is promoted by these SQLite and controller-handler proofs.
+
+`TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish`
+creates debt through a real Cloud award, runs the controller's collection worker
+against a provider transport fake, and delivers a signed decline webhook twice.
+Pending collection and Held standing both refuse queued admissions while the
+running holder renews and completes. This proof uses the real verifier, collection
+binding, store ledger and claim handlers. Only the external payment transport is
+faked. The retired credit-limit field is removed from the old billing fixture.

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -120,33 +121,7 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 	e.Store.SetClaimProfileResolver(billingCloudProfile{})
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
 	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
-	key, secret := filepath.Join(t.TempDir(), "api-key"), filepath.Join(t.TempDir(), "webhook-secret")
-	for path, value := range map[string]string{key: "sk_test_fixture", secret: "whsec_fixture"} {
-		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	verifier, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: capability.PaymentTest, APIKeyFile: key, WebhookSecretFile: secret})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(e.Store, nil).WithEngineController(e).WithPayments(verifier, e.Store).Handler()
-	webhook := func(id, kind, object string) {
-		t.Helper()
-		now := time.Now().Unix()
-		body := fmt.Sprintf(`{"id":%q,"object":"event","type":%q,"created":%d,"livemode":false,"data":{"object":%s}}`, id, kind, now, object)
-		mac := hmac.New(sha256.New, []byte("whsec_fixture"))
-		if _, err := fmt.Fprintf(mac, "%d.%s", now, body); err != nil {
-			t.Fatal(err)
-		}
-		r := httptest.NewRequest("POST", "/webhooks/stripe", strings.NewReader(body))
-		r.Header.Set("Stripe-Signature", fmt.Sprintf("t=%d,v1=%x", now, mac.Sum(nil)))
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		if w.Code != http.StatusNoContent {
-			t.Fatalf("payment=%d %s", w.Code, w.Body)
-		}
-	}
+	h, webhook := billingModelPaymentHandler(t, e)
 	request := `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"one","available_cores":64}`
 	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", request, http.StatusBadRequest)
 	if !strings.Contains(w.Body.String(), "New") {
@@ -192,6 +167,120 @@ func TestBillingModelControllerPrepayAndChargeback(t *testing.T) {
 		t.Fatalf("chargeback cancelled running work: %s: %v", w.Body, err)
 	}
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/one/transition", `{"to":"success","cause":"report","source_attempt":1,"result":{"outcome":"success"}}`, http.StatusOK)
+}
+
+func TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish(t *testing.T) {
+	e, tenant := engineRuntimeStore(t)
+	engineSQL(t, e.Store, `INSERT INTO settings(key,value) VALUES ('payment_mode',?)`, []byte(`"test"`))
+	engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)
+	for _, id := range []string{"one", "two"} {
+		engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',1,?,?)`, id, []byte(fmt.Sprintf(`{"id":%q}`, id)), []byte(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":4}}}}`))
+	}
+	rates := store.CreditRateTable{{Cores: 4, MicroPerSecond: 10 * store.MicroCreditsPerCent}}
+	if _, err := e.Store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
+		t.Fatal(err)
+	}
+	e.Store.SetClaimProfileResolver(billingCloudProfile{})
+	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
+	root := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
+	h, webhook := billingModelPaymentHandler(t, e)
+	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"one","available_cores":64}`, http.StatusOK)
+	var response controllerwire.ClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response.Claim == nil {
+		t.Fatalf("initial claim=%s: %v", w.Body, err)
+	}
+	w = engineClaimHTTP(t, h, response.Claim.Capability, "POST", "/api/v1/claims/exchange", `{}`, http.StatusOK)
+	var exchanged controllerwire.ExchangeResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &exchanged); err != nil {
+		t.Fatal(err)
+	}
+	claim := exchanged.Claim
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/one/transition", `{"to":"running","cause":"start","source_attempt":0}`, http.StatusOK)
+	worker := New(e.Store, nil).WithBillingCheckout("https://checkout.test", "credential")
+	calls := 0
+	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/internal/charge" {
+			t.Fatalf("unexpected provider call: %s", r.URL.Path)
+		}
+		var body struct {
+			Intent string `json:"payment_intent"`
+			Amount int64  `json:"amount_cents"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Amount != 600 || (calls == 0 && body.Intent != "") || (calls == 1 && body.Intent != "collection-payment") {
+			t.Fatalf("collection call %d: %+v", calls, body)
+		}
+		status := "created"
+		if calls > 0 {
+			status = "processing"
+		}
+		calls++
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"payment_intent":"collection-payment","status":%q}`, status)))}, nil
+	})
+	worker.cardBillingPass(t.Context())
+	if calls != 2 {
+		t.Fatalf("provider calls=%d; want creation then confirmation", calls)
+	}
+	for _, phase := range []string{"pending", "held"} {
+		if phase == "held" {
+			for range 2 {
+				webhook("collection-declined", "payment_intent.payment_failed", `{"id":"collection-payment","object":"payment_intent","livemode":false,"status":"requires_payment_method","amount":600,"currency":"usd","customer":"customer","last_payment_error":{"decline_code":"insufficient_funds"}}`)
+			}
+		}
+		standing, err := tenant.SpendStanding(t.Context(), time.Now())
+		wantTier, wantFailures := "New", int64(0)
+		if phase == "held" {
+			wantTier, wantFailures = "Held", 1
+		}
+		if err != nil || standing.OpenCharge == nil || standing.OpenCharge.Failures != wantFailures || standing.Billing.Tier != wantTier {
+			t.Fatalf("%s standing=%+v: %v", phase, standing, err)
+		}
+		w = engineClaimHTTP(t, h, root, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":64}`, http.StatusOK)
+		var waiting controllerwire.ClaimResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &waiting); err != nil || waiting.Claim != nil {
+			t.Fatalf("%s admitted work: %s: %v", phase, w.Body, err)
+		}
+		w = engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/claims/"+claim.UnitID+"/heartbeat", `{"executing":true}`, http.StatusOK)
+		var beat controllerwire.RenewalResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &beat); err != nil || beat.CancelRequested {
+			t.Fatalf("%s cancelled running work: %s: %v", phase, w.Body, err)
+		}
+	}
+	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/one/transition", `{"to":"success","cause":"report","source_attempt":1,"result":{"outcome":"success"}}`, http.StatusOK)
+}
+
+func billingModelPaymentHandler(t *testing.T, e *EngineController) (http.Handler, func(string, string, string)) {
+	t.Helper()
+	key, secret := filepath.Join(t.TempDir(), "api-key"), filepath.Join(t.TempDir(), "webhook-secret")
+	for path, value := range map[string]string{key: "sk_test_fixture", secret: "whsec_fixture"} {
+		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verifier, err := capability.NewPaymentAuthenticator(capability.PaymentConfig{Mode: capability.PaymentTest, APIKeyFile: key, WebhookSecretFile: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(e.Store, nil).WithEngineController(e).WithPayments(verifier, e.Store).Handler()
+	webhook := func(id, kind, object string) {
+		t.Helper()
+		now := time.Now().Unix()
+		body := fmt.Sprintf(`{"id":%q,"object":"event","type":%q,"created":%d,"livemode":false,"data":{"object":%s}}`, id, kind, now, object)
+		mac := hmac.New(sha256.New, []byte("whsec_fixture"))
+		if _, err := fmt.Fprintf(mac, "%d.%s", now, body); err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest("POST", "/webhooks/stripe", strings.NewReader(body))
+		r.Header.Set("Stripe-Signature", fmt.Sprintf("t=%d,v1=%x", now, mac.Sum(nil)))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("payment=%d %s", w.Code, w.Body)
+		}
+	}
+	return h, webhook
 }
 
 type billingIdentityProvider struct{}

@@ -1,94 +1,96 @@
-# W1b decision 112 continuation
+# W1b decision 112 verification
 
-W1b's billing model is implemented. Decision 112 still needs W2's production
-billing-page writer before the customer checkout, card setup, pay-now and budget
-mutation paths work end to end. No Git writes were made.
+The W1b store implementation is complete to the declared contracts. Decision
+112 still needs W2's production `BillingWriter` before customer checkout, card
+setup, pay-now and budget mutations work end to end. No production behavior or
+policy number changed in this session. No Git writes were made.
 
-This session fixes two remaining billing behaviors. Launcher queue eligibility
-passes over teams at their standing capacity and jobs larger than their tier,
-so they cannot block another team's eligible work. It reads the same capacity
-rule used by issuance without taking the ledger lock ahead of claim locks.
-Issuance still rechecks and reserves under that lock. Lost disputes reverse the
-payment and retain Held standing until an operator releases the hold. Won and
-warning-closed disputes release their own hold.
+The remaining controller collection proof is now covered.
+`TestBillingModelControllerPendingCollectionAndDeclineLetRunningWorkFinish`
+creates debt through a real Cloud reservation, runs the controller collection
+worker against a provider transport fake and delivers a signed decline webhook
+twice. Both pending collection and Held standing prevent queued admissions while
+the current holder renews. The job completes successfully after the decline.
+The verifier, collection association, ledger, claims and transitions are real.
+Only the external payment transport is faked. This test passed the existing
+production code. No new production fix or failing regression is claimed.
 
-The existing decision-112 implementation remains: one standing/rung table,
-collection ladder, first-week and monthly collection, pending-admission pause,
-decline downgrade, prepaid standing, Cloud deadlines, no automatic free credits
-and the launch signup gate. Dollar caps and their supporting production APIs,
-overrides and shared-card buckets were deleted in the preceding session. Owner
-budgets and operator per-account grants remain. The billing policy numbers are
-unchanged. Source billing docs, migration notes and their embedded copies now
-also describe queue behavior and chargeback holds.
+The existing billing implementation retains the single standing/rung table,
+postpaid ladder, first-week and monthly collection, pending-admission pause,
+decline downgrade, immediate prepaid standing, Cloud deadlines, no automatic
+free credits and the launch signup gate. Dollar caps and their production
+support were deleted in earlier sessions. Owner budgets and operator grants
+remain. `docs/billing.md` and `docs/migrations/_unreleased.md` already describe
+that behavior. Their policy and embedded-mirror checks pass.
 
-This session's production Go delta is **31 added, 11 deleted, net +20**. The
-replaced lines belong to eligibility error handling. No legacy billing path was
-restored. Combined W1+W1b store production Go against main is **21,490 added,
-25,800 deleted, net -4,310**, within the **-4,250** budget by 60 lines. These counts
-exclude tests, testdata, acceptance harnesses and contract declaration files.
+Production Go delta this session is **0 added, 0 deleted, net 0**. The remaining
+unused `CreditLimitCents` field is deleted from the old controller test fixture
+(one field line). A shared signed-webhook test helper replaces the inline copy.
+Combined W1+W1b store production Go against main remains **21,490 added, 25,800
+deleted, net -4,310**, within the **-4,250** budget by 60 lines. Counts exclude
+tests, testdata, acceptance harnesses and contract declarations.
 
-## Evidence
+## Verification
 
-- The new controller queue test failed with 409 for a full team and 400 for an
-  oversized job ahead of eligible work. Both cases pass after the fix.
-- The new generated dispute-order proof failed because a lost dispute restored
-  New standing. It now covers lost, won and warning-closed outcomes, duplicate
-  events and open/close reordering, payment conservation and operator release.
-- A signed-webhook controller proof drives prepay through the real verifier,
-  checkout settlement and Cloud admission. It then drives a lost dispute through
-  settlement to Held, refused new queued work, successful running renewal and
-  successful completion. It uses no payment or ledger fake.
-- The prior excluded collection-binding property had an invalid setup fixture.
-  Its conflicting setup association now satisfies the schema's shape constraint,
-  so it reaches the real binding transaction. All generated cases pass.
-- All 21 billing-model tests and focused collection-binding, provider, payment,
-  metered lifecycle, Cloud billing and store billing tests pass. Documentation
-  policy/mirror checks, repository-wide build, scoped vet, commentcheck against
-  main and diff whitespace checks pass.
-- Scoped race tests pass for the billing model and collection-binding proofs in
-  both store and controller packages. The full store sweep passes with only
-  `FuzzStorageStandingTenantInventory` excluded. Billing-page contract-fake
-  authority and replay proofs pass.
+All commands use `GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache`,
+`GOMAXPROCS=4` and `TMPDIR`/`GOTMPDIR=/tmp/sw-astra-W1b`. Go test uses at most
+`-p 4`. The worktree is `/home/bombuntu/.xwing/envs/1088/sparkwing`.
 
-Checks use `GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache`,
-`GOMAXPROCS=4`, and `TMPDIR`/`GOTMPDIR=/tmp/sw-astra-W1b`. Go test uses at most
-`-p 4`. Reproduce the model proofs with:
+- Repository-wide `go build ./...` passes.
+- `go vet ./pkg/store ./pkg/controller` passes.
+- All 22 `TestBillingModel` tests pass across store and controller.
+- Collection binding, payments, cards, metered lifecycle, store billing and
+  billing-page contract-fake suites pass with the one socket fixture excluded.
+- Race checks cover the billing model, collection binding and billing-page
+  authority/replay properties in both packages.
+- Docs policy, mirror and migration tests pass. Commentcheck against main and
+  `git diff --check` pass.
+
+Reproduce the focused billing sweep with:
 
 ```sh
-go -C /home/bombuntu/.xwing/envs/1088/sparkwing test -p 4 ./pkg/store ./pkg/controller -run '^TestBillingModel' -count=1
+go -C /home/bombuntu/.xwing/envs/1088/sparkwing test -p 4 ./pkg/store ./pkg/controller -run '^TestBillingModel|^TestCollectionBinding|^TestPayment|^TestCard|^TestMetered|^TestStoreBilling|^TestBillingPageHTTPAuthorityAndReplayProperty' -skip '^TestCardBilling_OwnerSetsABudget$' -count=1
 ```
 
-The race command adds `-race -p 2` and selects
-`^TestBillingModel|^TestCollectionBinding`. The full store command uses
-`test -p 4 ./pkg/store -skip '^FuzzStorageStandingTenantInventory$' -count=1`.
+The race command uses `-race -p 2` and selects
+`^TestBillingModel|^TestCollectionBinding|^TestBillingPageHTTPAuthorityAndReplayProperty`.
+Docs select `^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$|^TestMigrations`.
+Commentcheck is `go run ./internal/commentcheck -base main .`.
 
-No native acceptance cell is newly promoted. SQLite/controller handler proofs do
-not establish live Stripe, PostgreSQL, Kubernetes or browser execution. Those
-remain for the lead. No old acceptance test is ported this session. The current
-proof inventory is updated in `t1-port-inventory.md`.
+The existing SQLite acceptance proofs `TestStoreBillingStartAwardVersusStart`
+and `TestStoreBillingRetention` pass in the focused sweep. No native acceptance
+cell is promoted. No additional old test is ported. The proof inventory records
+the new controller coverage. `TestPortDestinations` still fails on three
+inherited W1 references already present at HEAD: missing
+`acceptance_actions_enrollment_test.go:TestStoreActionsEnrollment`,
+`acceptance_enrollment_test.go:TestStoreEnrolledClaims` and
+`acceptance_launcher_sync_test.go:TestStoreLauncherSync`. Each also lacks a
+matching scenario group. These references are outside decision 112 and were
+not changed.
 
-## Remaining integration and shared files
+## Open integration and limits
 
-No foreign-area contract signature change is needed. W2 must implement the
-existing `BillingWriter` contract: `PrepareAuthorizedBillingPage`,
+No foreign contract signature change or product decision is needed. W2 must
+implement its existing `BillingWriter`: `PrepareAuthorizedBillingPage`,
 `CompleteAuthorizedBillingPage`, `RecordAuthorizedBillingPageFailure` and
-`SetAuthorizedSpendBudget`. Only the controller test fake implements it in this
-checkout. Production page-opening mutations still return `policy_missing`.
-Existing contract-fake tests remain the evidence for that unimplemented seam.
+`SetAuthorizedSpendBudget`. Only the controller contract fake implements it in
+this checkout. Production page mutations still return `policy_missing`.
+Contract-fake proofs pass. Live checkout completion is not claimed.
 
-The sole production caller migration in W1's files is `unit_claim_rows.go`,
-which consumes the private eligibility helper's `(bool, error)` result and
-passes Cloud placement. Other shared changes are the controller billing-model
-tests, `c1-data.md`, `t1-port-inventory.md`, the billing docs, migration notes and
-their embedded mirrors. Lead-owned handoffs and amendments are unchanged.
+The broader controller selection fails at
+`TestCardBilling_OwnerSetsABudget` because its `httptest` listener is refused
+with `socket: operation not permitted`. The complete docs suite reaches the
+same restriction in `TestWebClient_Versions_HappyPath`. Focused socket-free
+selections pass. Live Stripe, PostgreSQL, Kubernetes and browser execution
+remain lead-owned evidence. The inherited unrelated
+`FuzzStorageStandingTenantInventory` failure from the previous session was not
+rerun or changed.
 
-The inherited `FuzzStorageStandingTenantInventory` seeds still fail: recorded log
-inventory is 3 bytes while the fixture expects `own+1`. This unrelated storage
-fixture remains outside decision 112. The broad store sweep excludes only it.
-The legacy external billing-route fixture cannot run: its `httptest` listener
-is refused with `socket: operation not permitted`. The new controller proofs use
-handlers directly. Native provider/service evidence remains with the lead. No
-new setting, service, interface, schema or customer policy was added. Scratch
+Shared files touched are `pkg/controller/billing_model_internal_test.go`,
+`pkg/controller/card_billing_test.go` and
+`design/rewrite/contracts/t1-port-inventory.md`. No production caller migration
+is needed. Lead-owned handoffs and amendments are unchanged. No setting,
+service, interface, schema or customer restriction was added. Scratch
 `/tmp/sw-astra-W1b` is removed after checks. `/tmp/sw-gocache` is retained.
 
 STATUS: CONTINUE
