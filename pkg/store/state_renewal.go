@@ -61,6 +61,9 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref NodeRef,
 	if err := accountUnitBillingTx(ctx, tx, t.team, unit, row.Generation, tx.now(), false); err != nil {
 		return err
 	}
+	if err := applyBillingCancellationTx(ctx, tx, t.team, unit, row.Generation, beat); err != nil {
+		return err
+	}
 	return observeUnitTx(ctx, tx, actor.CapabilityPrefix)
 }
 
@@ -137,6 +140,13 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 	}
 	if actor.Owner.Kind == OwnerTrigger {
 		if err := accountOwnerBillingTx(ctx, tx, t.team, runID, actor.Owner.Generation, now, false); err != nil {
+			return err
+		}
+		var kind capability.UnitKind
+		if err := tx.QueryRowContext(ctx, "SELECT unit_kind FROM triggers WHERE team=? AND id=?", t.team, runID).Scan(&kind); err != nil {
+			return err
+		}
+		if err := applyBillingCancellationTx(ctx, tx, t.team, UnitRef{Kind: kind, RunID: runID}, actor.Owner.Generation, beat); err != nil {
 			return err
 		}
 		return observeUnitTx(ctx, tx, actor.CapabilityPrefix)

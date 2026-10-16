@@ -130,8 +130,8 @@ func TestBlobUploadCrashReplay(t *testing.T) {
 		t.Fatalf("upload settlement leaked %d holds: %v", held, err)
 	}
 	standing, err = tenant.StorageStanding(t.Context())
-	if err != nil || standing.BlobBytes != 3 || standing.ReservedBlobBytes != 0 || standing.LogBytes != 0 {
-		t.Fatalf("reopened standing double-counted upload settlement: %+v: %v", standing, err)
+	if err != nil || standing.BlobBytes != 5 || standing.ReservedBlobBytes != 0 || standing.LogBytes != 0 {
+		t.Fatalf("reopened standing lost committed or possibly copied bytes: %+v: %v", standing, err)
 	}
 }
 

@@ -279,8 +279,7 @@ func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err err
 // principal, and reports whether the count reached the alarm.
 func (o *Operator) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
 	out := ComputeUsage{ByPrincipal: map[string]int64{}}
-	rows, err := o.s.query(ctx, `SELECT claim_principal, COUNT(*) FROM nodes
-	  WHERE credit_charged_through > 0 GROUP BY claim_principal`)
+	rows, err := o.s.query(ctx, `SELECT c.principal, COUNT(*) FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.metered=1 AND a.unit_kind='node' AND a.settled_at IS NULL GROUP BY c.principal`)
 	if err != nil {
 		return ComputeUsage{}, err
 	}
@@ -325,7 +324,7 @@ func (s *Store) enforceClaimComputeLimitsTx(
 	}
 	var held int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE team = ? AND credit_charged_through > 0`, team).Scan(&held); err != nil {
+		`SELECT COUNT(*) FROM billing_awards WHERE team = ? AND metered=1 AND unit_kind='node' AND settled_at IS NULL`, team).Scan(&held); err != nil {
 		return err
 	}
 	if held >= teamCap {
@@ -352,7 +351,7 @@ func (s *Store) enforceClaimComputeLimitsTx(
 func globalRunnerRefusal(ctx context.Context, q rowQuerier, limit int64) error {
 	var total int64
 	if err := q.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0`).Scan(&total); err != nil {
+		`SELECT COUNT(*) FROM billing_awards WHERE metered=1 AND unit_kind='node' AND settled_at IS NULL`).Scan(&total); err != nil {
 		return err
 	}
 	if total >= limit {

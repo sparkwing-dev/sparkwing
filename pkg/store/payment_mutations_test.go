@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -263,6 +264,53 @@ func TestPaymentMutationCollectionAmountsCannotOverflowProperty(t *testing.T) {
 		return reflect.DeepEqual(paymentMutationSnapshot(t, s), before)
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(42))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCardSettlementRequiresMatchingTeamAndCommittedRows(t *testing.T) {
+	for _, problem := range []string{"foreign_charge", "ignored_charge", "ignored_attempt"} {
+		t.Run(problem, func(t *testing.T) {
+			s, _, now := cardCollectionFixture(t)
+			cardCollectionDebt(t, s, "debt", 15000)
+			work := cardCollectionDue(t, s, now)
+			switch problem {
+			case "foreign_charge":
+				rewriteSchemaExec(t, s.db, "UPDATE card_charges SET team='b' WHERE id=?", work.ChargeID)
+			case "ignored_charge":
+				rewriteSchemaExec(t, s.db, "CREATE TRIGGER ignore_settlement BEFORE UPDATE ON card_charges BEGIN SELECT RAISE(IGNORE); END")
+			case "ignored_attempt":
+				rewriteSchemaExec(t, s.db, "CREATE TRIGGER ignore_settlement BEFORE UPDATE ON card_attempts BEGIN SELECT RAISE(IGNORE); END")
+			}
+			before := paymentMutationSnapshot(t, s)
+			p := CardPayment{Team: work.Team, ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "settled", AmountCents: work.AmountCents}
+			if _, _, err := s.AsOperator().SettleCardPayment(t.Context(), p, now); err == nil {
+				t.Fatal("invalid settlement committed")
+			}
+			if after := paymentMutationSnapshot(t, s); !reflect.DeepEqual(before, after) {
+				t.Fatal("refused settlement changed ledger")
+			}
+		})
+	}
+}
+
+func TestCardSettlementNeverTransfersForeignChargeDebtProperty(t *testing.T) {
+	property := func(suffix uint64, explicitTeam bool) bool {
+		s, _, now := cardCollectionFixture(t)
+		cardCollectionDebt(t, s, "debt", 15000)
+		work := cardCollectionDue(t, s, now)
+		foreign := fmt.Sprintf("foreign-%x", suffix)
+		rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)", foreign)
+		rewriteSchemaExec(t, s.db, "UPDATE card_charges SET team=? WHERE id=?", foreign, work.ChargeID)
+		before := paymentMutationSnapshot(t, s)
+		payment := CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "foreign-debt", AmountCents: work.AmountCents}
+		if explicitTeam {
+			payment.Team = work.Team
+		}
+		_, _, err := s.AsOperator().SettleCardPayment(t.Context(), payment, now)
+		return errors.Is(err, sql.ErrNoRows) && reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(6153))}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -3101,3 +3101,30 @@ enrollment field in the current provisioning contract. Queue depth has no claim
 observation field in the wire contract. Both remain zero until their owners
 supply those inputs. Missing capacity measurements stay absent. W1 does not
 derive concurrency or queue depth from CPU counts or leases.
+
+
+## Upload abandonment and billing ledger ownership
+
+`uploads.abandoned_at BIGINT` is nullable. Abort and leased upload expiry set it
+once under the upload and digest locks, register a tombstoned blob for possible
+copied bytes, and release quota in the same transaction. Pending tickets with no
+abandonment timestamp are roots in the tenant's reachable blob graph. Reservation
+holds the digest lock and clears its tombstone before the object copy can begin.
+Abandoned rows create no receipt. The object deleter treats missing bytes as
+success. This prevents repeat expiry from recreating already collected blobs.
+
+The node and trigger `credit_*` columns and the legacy claim-credit writers are
+removed. `billing_awards` and `billable_intervals` own compute charges. Unique
+indexes bind `(team,capability_prefix)` and
+`(team,run_id,node_id,unit_kind,generation)` to one award each. Node price and
+active compute usage read that ledger.
+
+Non-final metered checkpoints check headroom after charging and stamp the team's
+existing exhaustion time. Renewal delivers cancellation at the grace boundary.
+`DefaultCreditGraceSeconds` is the single ten-minute placeholder pending Korey's
+policy decision. Restored headroom clears exhaustion. The plan/eval executing
+flag behavior remains unchanged pending M4.
+
+Upload tickets retain their run and job identifiers without cascading foreign
+keys. They survive run deletion because leased expiry still needs the digest to
+collect possible copied bytes and release every quota dimension.

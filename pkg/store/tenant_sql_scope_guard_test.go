@@ -16,8 +16,9 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"revokeSetupAuthorityTx":     "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
-	"launcherReservationAwardTx": "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
+	"releaseExpiredBlobUploadQuotasTx": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
+	"revokeSetupAuthorityTx":           "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
+	"launcherReservationAwardTx":       "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",
 
 	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
 	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
@@ -69,15 +70,13 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).countRuns": "shares listRuns' predicate builder and its refusal",
 	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
-	"(*Store).SampleSealedSecrets": "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
-	"unlinkAccountIdentityTx":      "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
-	"(*Store).lookupSession":       "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
-	"(*Store).DeleteSession":       "ends the one session whose globally unique digest the caller presented, before its team is known",
-	"(*Store).mintCSRFKey":         "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
-	"(*Store).resolveSignInOnce":   "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
-	"approveOneTx":                 "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
-	"settleTriggerCreditsTx": "asks which team owns a trigger id and whether its claim holds a credit " +
-		"reservation; the settlement that follows is scoped to that team",
+	"(*Store).SampleSealedSecrets":     "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
+	"unlinkAccountIdentityTx":          "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
+	"(*Store).lookupSession":           "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
+	"(*Store).DeleteSession":           "ends the one session whose globally unique digest the caller presented, before its team is known",
+	"(*Store).mintCSRFKey":             "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
+	"(*Store).resolveSignInOnce":       "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
+	"approveOneTx":                     "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",
@@ -110,8 +109,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +
 		"through that team's handle; an answer scoped to the asker is no answer",
-	"(*Operator).ComputeUsage": "the operator's compute view counts every team's claimed cloud runners per principal against " +
-		"the deployment's alarm; the route serves it to an admin only",
+
 	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",

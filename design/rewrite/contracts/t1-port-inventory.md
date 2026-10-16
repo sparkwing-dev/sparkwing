@@ -2722,3 +2722,21 @@ tenant run listing through the real HTTP log reader. Generated trees cross the
 100-row internal page, contain a nested descendant and a cycle, and include a
 foreign tenant's child naming the same parent. Every selected descendant appears
 once and foreign events stay absent.
+
+## Store billing review ports
+
+`billing_price_runtime_test.go` replaces the legacy token/charge-window pricing
+fixtures. Real ClaimUnit, RenewUnit and ReleaseUnit transactions cover CPU and
+memory pins, reservation minimums, immutable award prices, unpriced refusal,
+refund attribution after card replacement, and ledger survival after run deletion.
+The existing unit-billing tests retain unfunded admission, last-credit races and
+unstarted refunds. The obsolete token lookup and separate FinalizeNodeCredits
+writer are removed with their fixtures. No archived acceptance cell is newly
+claimed by this cut.
+
+`credit_exhaustion_runtime_test.go` covers the grace boundary and restoration on
+job, plan, eval and host renewals. A grant cannot restart grace while a spend cap
+still binds. `upload_concurrency_dialect_test.go` runs commit/abort contention
+through independent SQLite clients and through storetest.NewPostgres when a
+server URL is configured. Upload GC properties cover pending tickets, abort,
+expiry, prior quota release, run deletion and cross-team manifest graphs.

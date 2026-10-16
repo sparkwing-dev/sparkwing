@@ -772,6 +772,9 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		row.Generation = award.Generation
 		row.LeaseExpiresAt = &award.LeaseExpiresAt
 	case NodeRunning:
+		if _, err := tx.ExecContext(ctx, "UPDATE nodes SET summary='',annotations_json=NULL WHERE team=? AND run_id=? AND node_id=?", team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+			return err
+		}
 		row.Status = StatusRunning
 		row.QueueStartedAt = nil
 		row.Attempt++

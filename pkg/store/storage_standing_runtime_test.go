@@ -62,14 +62,14 @@ func TestStoreDataStandingTracksOnlyLiveUploadHolds(t *testing.T) {
 	if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, request.ID); err != nil {
 		t.Fatal(err)
 	}
-	check(3, 0)
+	check(6, 0)
 	request.ID = "expired"
 	if _, err := tenant.ReserveBlobUpload(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
-	check(3, 3)
+	check(6, 3)
 	s.clock = func() time.Time { return request.ExpiresAt }
-	check(3, 0)
+	check(6, 0)
 	var held int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM quota_reservations WHERE team='a' AND state='held'").Scan(&held); err != nil || held != 3 {
 		t.Fatalf("report released holds: held=%d: %v", held, err)
