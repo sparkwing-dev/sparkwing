@@ -124,6 +124,9 @@ plan together. Retry retains the original request, source authority, SHA and
 accepted seals, with the retrier recorded separately. It never rewrites the
 original seal's identity to match the new run ID.
 
+Retry requires `mode=failed|all` and a nonempty `idempotency_key` in the request
+body. The server rejects a missing or unknown selection before creating a run.
+
 Direct store consumers use `Store.ClaimUnit` for launcher and runner awards.
 `Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
 and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by

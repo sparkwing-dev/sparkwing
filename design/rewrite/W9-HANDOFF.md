@@ -1,7 +1,8 @@
 # W9 continuation: local integration and runner transport
 
-Latest continuation: [W9-PRUNE-SELECTOR-CONTINUATION.md](W9-PRUNE-SELECTOR-CONTINUATION.md)
-closes prune acknowledgement and CLI numeric-selector rewriting.
+Latest continuation: [W9-RETRY-ACTIONS-CONTINUATION.md](W9-RETRY-ACTIONS-CONTINUATION.md)
+ports sealed retry actions, enforces selection validation before admission and
+records the committing retry-mode contract gap.
 
 The next continuation fixes background queue service binding and log finalization.
 See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.

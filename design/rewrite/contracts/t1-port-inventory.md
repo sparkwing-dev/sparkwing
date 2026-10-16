@@ -2775,3 +2775,25 @@ private input projection. No native placement cell is newly claimed.
 `TestRetryHistoryTraversesLongChainsAndCycles` covers a 274-run tree through root,
 leaf and numeric selectors, including a cycle back to the leaf.
 `TestRetryHistoryOrdersEqualTimestampsByRunNumber` pins deterministic order.
+
+## W9 sealed retry action ports
+
+`pkg/controller/retry_test.go` is deleted. Its raw trigger response, `full`
+query flag and environment provenance transport are removed contracts.
+
+| Archived test | Replacement and status |
+| --- | --- |
+| `TestRetry_CreatesNewTriggerWithSameInputs` | `TestRetryActionPreservesSealsAndCreatesPendingExecution` checks original and accepted seals, SHA, classified arguments and pending owner creation through the shared HTTP client and SQLite. |
+| `TestRetry_WorkingTreeRunRetainsDesktopClaimSource` | The same test retains sealed local source and origin instead of the removed trigger-source selector. |
+| `TestRetry_WorkingTreeRunIgnoresAnotherTeamsTriggerWithSameID` | `FuzzRetryActionCannotCrossAuthorityOrChangeSource` refuses foreign stable IDs and numeric selectors and verifies both teams' row counts. The final schema makes run IDs globally unique, so the old duplicate-ID fixture cannot be inserted. |
+| `TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot` | The sealed-input test checks three retry generations against the original checkout, plan and source identity. |
+| `TestRetry_PreAllocatesPendingRunRow` | The sealed-input test reads the new pending run and executable owner before execution and checks exact replay. |
+| `TestRetry_UnknownRunReturns404` | `TestRetryActionUnknownRunAndRemovedRequestShapes` checks canonical not_found and malformed retry bodies. |
+| `TestRetry_FullQueryParam` | **Open:** `TestReviewRetryModeIsPartOfCommittedReplay` behind rewrite_integration is red. The mode is validated at the controller but omitted from the committing intake request. C1/C2 must preserve it independently of the original execution seals and include it in replay identity. No mode-selection behavior is claimed complete. |
+| `TestTrigger_DropsEnvKeysOutsideTheAllowList` | `FuzzRunIntakeRejectsLegacyEnvironmentProvenance` refuses the removed trigger/env document and unknown raw environment fields before intake without echoing their values. Captured environment snapshots use their existing typed contract. |
+
+`FuzzRetryActionValidatesBeforeAdmission` checks generated modes and keys against
+the shared validator through the real HTTP router. Refused requests create no
+run. `TestRetryActionRechecksAuthorityBeforeReplay` covers revocation and
+membership loss after a committed retry. No native placement cell is newly
+claimed by these ports.

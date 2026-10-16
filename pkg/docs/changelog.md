@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **api:** Reject retry requests without a valid mode and idempotency key before creating a run.
+
 - **api (Breaking):** Return shared public run details for retry history, with redacted inputs and current lineage. Check each run against the caller's binding and omit raw invocation metadata. See [migration guide](docs/migrations/_unreleased.md#public-retry-history).
 
 - **cli:** Preserve numeric run selectors and stable IDs on cancel, retry and prune, including stdin. The CLI no longer prepends `run-` before the controller resolves the selected run.
