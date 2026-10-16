@@ -101,7 +101,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	planner.Masker, planner.ValidatePlan, planner.CanonicalHash = config.Masks.masker, functions.Validate, functions.Hash
 	owner := config.Owner
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
-	owner.Computing = processes.computing
+	owner.Computing = processes.Computing
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
 	owner.Executor, owner.Planner = executor, &planner
 	if config.Capacity == nil {

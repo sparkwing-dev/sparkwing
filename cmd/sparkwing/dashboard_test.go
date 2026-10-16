@@ -28,6 +28,12 @@ func (f *dashboardLifecycleFake) StartDashboard(_ context.Context, options wingd
 	return f.status, f.err
 }
 
+func (f *dashboardLifecycleFake) InstallController(_ context.Context, options wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+	f.calls = append(f.calls, "install")
+	f.options = options
+	return f.status, f.err
+}
+
 func (f *dashboardLifecycleFake) Stop(context.Context) error {
 	f.calls = append(f.calls, "stop")
 	if f.err == nil && !f.keepUp {
@@ -43,15 +49,8 @@ func (f *dashboardLifecycleFake) Status(context.Context) (wingd.LocalStatus, err
 
 type dashboardUnitsFake struct {
 	wingd.ManagedUnitManager
-	calls   []string
-	options wingd.LocalStartOptions
-	err     error
-}
-
-func (f *dashboardUnitsFake) InstallController(_ context.Context, options wingd.LocalStartOptions) error {
-	f.calls = append(f.calls, "install")
-	f.options = options
-	return f.err
+	calls []string
+	err   error
 }
 
 func (f *dashboardUnitsFake) UninstallController(context.Context) error {
@@ -67,7 +66,7 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 		{[]string{"start", "--stay", "--addr", "[::1]:9000"}, []string{"start"}, nil},
 		{[]string{"status"}, []string{"status"}, nil},
 		{[]string{"stop"}, []string{"stop", "status"}, nil},
-		{[]string{"install"}, []string{"status"}, []string{"install"}},
+		{[]string{"install"}, []string{"install"}, nil},
 		{[]string{"uninstall"}, []string{"status"}, []string{"uninstall"}},
 	} {
 		t.Run(tc.args[0], func(t *testing.T) {
@@ -100,8 +99,8 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 					t.Fatalf("start options: %+v", lifecycle.options)
 				}
 			}
-			if tc.args[0] == "install" && (!units.options.Stay || units.options.Home != services.options.Home || units.options.Executable != services.options.Executable || units.options.Version != services.options.Version) {
-				t.Fatalf("login options: %+v", units.options)
+			if tc.args[0] == "install" && (!lifecycle.options.Stay || lifecycle.options.Home != services.options.Home || lifecycle.options.Executable != services.options.Executable || lifecycle.options.Version != services.options.Version) {
+				t.Fatalf("login options: %+v", lifecycle.options)
 			}
 		})
 	}

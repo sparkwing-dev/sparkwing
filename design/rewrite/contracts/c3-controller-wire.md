@@ -174,29 +174,33 @@ The signed-object client never receives the reusable controller credential.
 
 ### Shared data messages
 
-`internal/controllerwire/data.go` completes W9's HTTP messages for the existing
-C2 data routes. Every nested field uses snake_case. Authority and uploader
-selectors are comparisons against authenticated state. Requests carry neither
-read sets nor caller-provided ref evidence. Responses preserve the authorized
-record, members, read edges and provenance from C1.
+`internal/controllerwire/data.go` mirrors the registered C2 HTTP handlers. The
+controller derives authority and uploader identity; no client authority, read-set
+or ref evidence is accepted in a request.
 
 | Route | Request | Response |
 | --- | --- | --- |
-| POST `/api/v1/data/upload` | `DataUploadRequest`, one stable Idempotency-Key per call | `DataUploadTicket` |
-| POST `/api/v1/data/commit` | `DataCommitRequest` with immutable ticket selector | `DataReceipt` |
-| POST `/api/v1/data/download` | `DataDownloadRequest` | `DataSignedTransfer` |
-| POST `/api/v1/data/has-many` | `DataHasManyRequest` | `DataPresence` |
-| GET `/api/v1/data/records` | `lookup=record|memo|depcache`, URL-escaped `selector` JSON containing `DataLookupRequest` | `DataRecordLookupResult`, `DataMemoHit` or `DataDepcacheHit` |
-| POST `/api/v1/data/records` | `DataRecordWriteRequest` with `operation=commit|copy_memo` and exactly its matching payload | `DataRecord` or `DataMemoHit` |
+| POST `/api/v1/data/upload` | `digest`, `size`; stable Idempotency-Key per call | `upload_id`, `url`, `headers`, `expires_at`, `sha256`, `size` |
+| POST `/api/v1/data/commit` | `upload_id` | `digest`, `created_at` |
+| POST `/api/v1/data/download` | `digest` | `url`, `headers`, `sha256`, `size`, `expires` |
+| POST `/api/v1/data/has-many` | `digests`, optional `deadline` | `present` |
+| GET `/api/v1/data/records` | flattened `kind`, `name`, `ref`, `pipeline`, `job`, `key`, `deadline`, `verified_default_only` query selectors | `found`, optional flat `record`, `members` |
+| POST `/api/v1/data/records` | flat logical record selectors, digest, optional manifest/expiry, members | flat canonical record |
 
-Record lookups transmit `verified_default_only` even when false. Authenticated
-remote-cache scope still forces verified-default reads at the server. An explicit
-budget becomes a request deadline and a context deadline. Exhaustion remains
-`blob.ErrBudget`. Upload reservation retries retain their generated key. Commit
-and record retries retain the exact body. Signed-object headers cannot carry a
-reusable controller bearer, cookie or proxy credential. W2 must bind these
-messages to DataController/DataBinding. Transport fakes do not establish native
-authorization, quota, signing or transaction behavior.
+The private local-host `data-authority` endpoints return C1's canonical live
+storage projection under the independently authenticated owner or node award.
+Native clients compare every byte/record authority argument against that captured
+projection and refresh it after each committed attempt start. Signed transfers
+carry object headers only. Output upload, record commit, verified download and
+shared log publication are exercised through the real controller HTTP handlers
+with an in-process transport.
+
+Record, memo and depcache HTTP responses do not carry C1's canonical read-set
+proof or complete source metadata. Cache adapters fail with `policy_missing`
+until that foreign schema contract is completed; they do not reconstruct proof
+from caller selectors. Output reads use persisted record keys and verified bytes.
+Upload and commit retries retain their original key/body. Explicit request
+budgets remain context deadlines and exhaust as `blob.ErrBudget`.
 
 ClaimedUnit includes accepted engine, source generation and owner/attempt/parent
 expiry deadlines. Its sealed request carries Source.Location. CloudJobAward consumes
@@ -810,12 +814,13 @@ authority changes. Native repository handlers remain an integration dependency.
 
 ### Local host and schedule transport
 
-The elected controller exposes private execution state under
+Local and hosted controllers expose private execution state under
 `/api/v1/runs/{run}/local-host`. Its snapshot and node reads carry complete C1
 execution state. They are separate from the public scheduling projection.
-Only awarded local owner or node credentials can use these routes. Reads remain
-available while a current holder drains cancellation. The hosted controller
-does not register these endpoints.
+Only awarded owner or node credentials can use these routes. Reads remain
+available while a current holder drains cancellation. Node credentials use
+node-scoped snapshot, authentication and binding endpoints. Their snapshots
+contain only the awarded node.
 
 `client.NewLocalHostClient` implements private state reads, transitions,
 authentication and relational binding checks without opening the store. The
@@ -823,6 +828,8 @@ controller derives mutation actors and fences from the authenticated bearer.
 The run transition endpoint accepts the start edge. Terminal completion uses
 the atomic finish endpoint, including typed admission refusal. Authentication
 lookups are confined to the owner and its independently awarded current nodes.
+`client.NewNodeHostClient` confines the same transport to one node award.
+Its renewal uses the node bearer and unit ID separately from the owner.
 Private authentication responses retain digest sidecars because public
 capability JSON omits them. No reusable raw bearer appears in those responses.
 
@@ -834,3 +841,10 @@ and proof/follow choices. Local mutations require verified OS-peer provenance.
 its checkout/project and its environment seal. Private environment values remain
 with `FileEnvironmentSnapshots`. W1's scheduled sealed intake consumes this
 association and the pin. Its launcher integration is a separate handoff.
+
+The private `POST /api/v1/local/doctor` operation requires a verified OS peer
+and sweeps the elected controller's session ledger. Dry-run leaves sessions in
+place. Failed event recording produces `unrecorded_step_outcome` findings;
+it does not fail a successful sweep. Partial cleanup findings accompany a
+canonical failure when another cleanup fails. The operation is never replayed by the
+client and is absent from the hosted controller.

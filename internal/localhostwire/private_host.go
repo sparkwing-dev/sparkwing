@@ -3,9 +3,15 @@ package localhostwire
 import (
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+// LocalDataAuthority carries the controller's canonical live storage projection.
+type LocalDataAuthority struct {
+	Authority blob.Authority `json:"authority"`
+}
 
 // LocalRunTransition carries a lifecycle edge without actor authority.
 type LocalRunTransition struct {

@@ -24,7 +24,7 @@ type Runtime struct {
 
 // MainWithVersion runs the runner CLI with its linker-stamped release version.
 func MainWithVersion(version string) {
-	MainWithRuntime(version, Runtime{})
+	MainWithRuntime(version, ProductionRuntime(version))
 }
 
 // MainWithRuntime runs the executable with its capability, source and native host bindings.

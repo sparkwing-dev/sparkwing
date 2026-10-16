@@ -359,6 +359,7 @@ registration fails. Registered secret values cannot occur in job, step, group or
 approval IDs, including generated declarations. Validation reports the field
 path without echoing the value. Registration also refuses a value contained in
 an already accepted identifier.
+Runtime mask registrations stay on the registering host, so declare a secret if its value may appear in an identifier on another host.
 
 `sw.OIDCToken(ctx, audience)` requests an identity token through the host.
 Credentials remain in the private process binding rather than the environment

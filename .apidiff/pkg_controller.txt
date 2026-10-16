@@ -518,6 +518,7 @@ func (s *Server) WithLicense(lic *license.License) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
 func (s *Server) WithLocalSchedules(service *crons.Service, prove LocalScheduleProver, environments LocalScheduleEnvironments) *Server
+func (s *Server) WithLocalSessions(directory string) *Server
 func (s *Server) WithLogRetention(days map[store.Team]int) *Server
 func (s *Server) WithMailer(m mailer.Mailer) *Server
 func (s *Server) WithMetricWriter(resolve func(context.Context, store.Team) (MetricWriter, error)) *Server

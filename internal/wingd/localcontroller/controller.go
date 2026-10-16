@@ -34,10 +34,11 @@ type Binding struct {
 
 // Services binds shared authorization, host execution and local state to one process.
 type Services struct {
-	State  State
-	HTTP   wingd.LocalHTTP
-	Runner runners.StoreRunnerConfig
-	Close  func() error
+	State    State
+	HTTP     wingd.LocalHTTP
+	Runner   runners.StoreRunnerConfig
+	Close    func() error
+	Maintain func(context.Context)
 }
 
 // Config supplies shared service constructors without opening another store.
@@ -176,6 +177,7 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 func (c *localController) maintain(ctx context.Context, lease store.SingletonLease) error {
 	tick := time.NewTicker(limits.Renew(limits.DefaultLease))
 	defer tick.Stop()
+	var nextMaintenance time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -188,6 +190,10 @@ func (c *localController) maintain(ctx context.Context, lease store.SingletonLea
 			}
 			if err := c.sweep(ctx, lease); err != nil {
 				return err
+			}
+			if c.services.Maintain != nil && !time.Now().Before(nextMaintenance) {
+				c.services.Maintain(ctx)
+				nextMaintenance = time.Now().Add(controller.StorageMaintenanceInterval)
 			}
 		}
 	}

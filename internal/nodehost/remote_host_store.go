@@ -1,4 +1,4 @@
-package main
+package nodehost
 
 import (
 	"context"
@@ -6,37 +6,39 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type privateHostState interface {
+// PrivateHostState supplies award-bound execution state.
+type PrivateHostState interface {
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
 }
 
-type cliHostState struct {
-	privateHostState
-	*nodehost.RemoteOwnerStore
+// RemoteHostStore joins authenticated execution state with shared controller operations.
+type RemoteHostStore struct {
+	PrivateHostState
+	*RemoteOwnerStore
 	controller controllerwire.Controller
 	unit       string
 	executing  func() bool
-	finish     func(context.Context, store.FinishRunRequest) (store.Applied, error)
+	Finish     func(context.Context, store.FinishRunRequest) (store.Applied, error)
 }
 
-func newCLIHostState(controller controllerwire.Controller, private privateHostState, unit string, executing func() bool) (*cliHostState, error) {
+// NewRemoteHostStore constructs an award-bound state adapter.
+func NewRemoteHostStore(controller controllerwire.Controller, private PrivateHostState, unit string, executing func() bool) (*RemoteHostStore, error) {
 	if controller == nil || private == nil || unit == "" || executing == nil {
 		return nil, errors.New("host state requires an awarded controller, private execution state, unit identity and compute activity")
 	}
-	return &cliHostState{
-		privateHostState: private, RemoteOwnerStore: &nodehost.RemoteOwnerStore{Controller: controller},
+	return &RemoteHostStore{
+		PrivateHostState: private, RemoteOwnerStore: &RemoteOwnerStore{Controller: controller},
 		controller: controller, unit: unit, executing: executing,
 	}, nil
 }
 
-func (s *cliHostState) AcceptPlan(ctx context.Context, request store.PlanAcceptance) (store.AcceptedPlan, error) {
+func (s *RemoteHostStore) AcceptPlan(ctx context.Context, request store.PlanAcceptance) (store.AcceptedPlan, error) {
 	response, err := s.controller.AcceptPlan(ctx, request.RunID, controllerwire.PlanSubmission{
 		Declarations: request.Seal.Declarations, Resolved: request.Seal.Resolved, Plan: request.Seal.Plan,
 	})
@@ -49,9 +51,9 @@ func (s *cliHostState) AcceptPlan(ctx context.Context, request store.PlanAccepta
 	}, nil
 }
 
-func (s *cliHostState) RecordStep(ctx context.Context, report store.StepReport) error {
+func (s *RemoteHostStore) RecordStep(ctx context.Context, report store.StepReport) error {
 	controller := s.controller
-	if nodes, ok := s.privateHostState.(interface {
+	if nodes, ok := s.PrivateHostState.(interface {
 		NodeController(context.Context, store.NodeRef) (controllerwire.Controller, error)
 	}); ok {
 		var err error
@@ -66,14 +68,14 @@ func (s *cliHostState) RecordStep(ctx context.Context, report store.StepReport) 
 	})
 }
 
-func (s *cliHostState) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
+func (s *RemoteHostStore) FinishRunAndUnit(ctx context.Context, request store.FinishRunRequest) (store.Applied, error) {
 	change := request.Transition
 	if request.Unit != change.Actor.Owner ||
 		(change.To != store.RunSuccess && change.To != store.RunFailed && change.To != store.RunCancelled) {
 		return store.Applied{}, errors.New("host finish requires its owner and terminal verdict")
 	}
-	if s.finish != nil {
-		return s.finish(ctx, request)
+	if s.Finish != nil {
+		return s.Finish(ctx, request)
 	}
 	if change.Cause != store.RunFinish {
 		return store.Applied{}, errors.New("host finish requires a supported terminal cause")
@@ -92,15 +94,20 @@ func (s *cliHostState) FinishRunAndUnit(ctx context.Context, request store.Finis
 	}, nil
 }
 
-func (s *cliHostState) RenewOwner(ctx context.Context, _ store.Actor, executing bool) (store.LeaseBeat, error) {
+func (s *RemoteHostStore) RenewOwner(ctx context.Context, _ store.Actor, executing bool) (store.LeaseBeat, error) {
 	return s.renew(ctx, executing)
 }
 
-func (s *cliHostState) RenewNodeClaim(ctx context.Context, _ store.NodeRef, _ store.Actor) (store.LeaseBeat, error) {
+func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+	if nodes, ok := s.PrivateHostState.(interface {
+		RenewNode(context.Context, store.NodeRef, store.Actor, bool) (store.LeaseBeat, error)
+	}); ok {
+		return nodes.RenewNode(ctx, ref, actor, s.executing())
+	}
 	return s.renew(ctx, s.executing())
 }
 
-func (s *cliHostState) renew(ctx context.Context, executing bool) (store.LeaseBeat, error) {
+func (s *RemoteHostStore) renew(ctx context.Context, executing bool) (store.LeaseBeat, error) {
 	response, err := s.controller.Renew(ctx, s.unit, controllerwire.RenewalRequest{Executing: executing})
 	if err != nil {
 		return store.LeaseBeat{}, err
@@ -111,4 +118,4 @@ func (s *cliHostState) renew(ctx context.Context, executing bool) (store.LeaseBe
 	}, nil
 }
 
-var _ nodehost.NativeHostStore = (*cliHostState)(nil)
+var _ NativeHostStore = (*RemoteHostStore)(nil)

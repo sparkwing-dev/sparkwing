@@ -65,7 +65,8 @@ func (p *NativeProcesses) StartPlanning(ctx context.Context, input PlanningProce
 	return p.compute.start(input.Run.RunID, func() (ExecutorProcess, error) { return config.StartPlanning(ctx, input, log) })
 }
 
-func (p *NativeProcesses) computing(runID string) bool { return p.compute.active(runID) }
+// Computing reports whether SDK work remains live for a run.
+func (p *NativeProcesses) Computing(runID string) bool { return p.compute.active(runID) }
 
 func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.ProcessBinding, revoke func() error, activity ExecutorActivity, accepted AcceptedRun) (ProtocolSessionConfig, error) {
 	config := p.Session

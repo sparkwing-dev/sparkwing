@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -147,6 +148,8 @@ type Server struct {
 	dashboard                 *Dashboard
 	localHTTPOnce             sync.Once
 	localHTTP                 wingd.LocalHTTP
+	localSessionMu            sync.Mutex
+	localSessions             *sessionledger.Ledger
 	localSchedules            *crons.Service
 	localScheduleProver       LocalScheduleProver
 	localScheduleEnvironments LocalScheduleEnvironments
@@ -362,6 +365,7 @@ func (s *Server) registeredRouters() *registeredMux {
 	var endpoints []Endpoint
 	endpoints = append(endpoints, s.operatorEndpoints()...)
 	endpoints = append(endpoints, s.engineEndpoints()...)
+	endpoints = append(endpoints, s.localHostEndpoints()...)
 	endpoints = append(endpoints, s.claimEndpoints()...)
 	endpoints = append(endpoints, s.authorityEndpoints()...)
 	endpoints = append(endpoints, s.capabilityEndpoints()...)

@@ -29,7 +29,7 @@ func TestSurfaceLauncherSyncAwardAndJobInstance(t *testing.T) {
 				if err := json.NewDecoder(req.Body).Decode(&got); err != nil || !reflect.DeepEqual(got, input) {
 					t.Fatalf("award or Job instance changed: %+v %v", got, err)
 				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"awards":[],"remove":[{"namespace":"ci","name":"job-1","uid":"previous-instance"}]}`))}, nil
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"awards":[],"remove_reservations":[],"remove":[{"namespace":"ci","name":"job-1","uid":"previous-instance"}]}`))}, nil
 			})}})
 			if err != nil {
 				t.Fatal(err)

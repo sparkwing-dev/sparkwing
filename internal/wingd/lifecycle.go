@@ -114,6 +114,7 @@ type LocalDoctorFinding struct {
 type LocalLifecycle interface {
 	EnsureStarted(context.Context, LocalStartOptions) (LocalStatus, error)
 	StartDashboard(context.Context, LocalStartOptions) (LocalStatus, error)
+	InstallController(context.Context, LocalStartOptions) (LocalStatus, error)
 	Stop(context.Context) error
 	Status(context.Context) (LocalStatus, error)
 	Doctor(context.Context, string) ([]LocalDoctorFinding, error)

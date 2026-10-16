@@ -28,7 +28,7 @@ type hostStateController struct {
 }
 
 type nodeControllerState struct {
-	privateHostState
+	nodehost.PrivateHostState
 	node func(context.Context, store.NodeRef) (controllerwire.Controller, error)
 }
 
@@ -44,7 +44,7 @@ func TestCLIHostStepUsesIndependentNodeAuthorityProperty(t *testing.T) {
 		}}
 		called := false
 		failure := errors.New("node authority unavailable")
-		nodes := nodeControllerState{privateHostState: &cliOwnerStore{}, node: func(_ context.Context, ref store.NodeRef) (controllerwire.Controller, error) {
+		nodes := nodeControllerState{PrivateHostState: &cliOwnerStore{}, node: func(_ context.Context, ref store.NodeRef) (controllerwire.Controller, error) {
 			if ref != (store.NodeRef{RunID: run, NodeID: node}) {
 				t.Fatal("step selected another node's authority")
 			}
@@ -56,7 +56,7 @@ func TestCLIHostStepUsesIndependentNodeAuthorityProperty(t *testing.T) {
 				return nil
 			}}, nil
 		}}
-		state, err := newCLIHostState(root, nodes, "unit", func() bool { return false })
+		state, err := nodehost.NewRemoteHostStore(root, nodes, "unit", func() bool { return false })
 		if err != nil {
 			return false
 		}
@@ -98,7 +98,7 @@ func TestCLIHostStatePreservesStepAttemptProperty(t *testing.T) {
 			called = gotRun == run && gotJob == job && body.StepID == step && body.State == report.State && body.SourceAttempt == report.Attempt.Attempt && body.MaskedError == message
 			return failure
 		}}
-		state, err := newCLIHostState(client, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
+		state, err := nodehost.NewRemoteHostStore(client, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
 		return err == nil && errors.Is(state.RecordStep(t.Context(), report), failure) && called
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
@@ -127,7 +127,7 @@ func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 			return beat, nil
 		},
 	}
-	state, err := newCLIHostState(client, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
+	state, err := nodehost.NewRemoteHostStore(client, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,18 +151,18 @@ func TestCLIHostStatePreservesPlanAndRenewal(t *testing.T) {
 func TestCLIHostStateRejectsIncompleteComposition(t *testing.T) {
 	for _, input := range []struct {
 		controller controllerwire.Controller
-		private    privateHostState
+		private    nodehost.PrivateHostState
 		unit       string
 	}{
 		{nil, &cliOwnerStore{}, "unit"},
 		{hostStateController{}, nil, "unit"},
 		{hostStateController{}, &cliOwnerStore{}, ""},
 	} {
-		if state, err := newCLIHostState(input.controller, input.private, input.unit, func() bool { return false }); err == nil || state != nil {
+		if state, err := nodehost.NewRemoteHostStore(input.controller, input.private, input.unit, func() bool { return false }); err == nil || state != nil {
 			t.Fatalf("incomplete composition = %+v, %v", state, err)
 		}
 	}
-	var _ nodehost.NativeHostStore = (*cliHostState)(nil)
+	var _ nodehost.NativeHostStore = (*nodehost.RemoteHostStore)(nil)
 }
 
 func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
@@ -216,7 +216,7 @@ func TestCLIHostStateHTTPDoesNotSendActorAuthorityProperty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		state, err := newCLIHostState(wire, &cliOwnerStore{}, "awarded-unit", func() bool { return !executing })
+		state, err := nodehost.NewRemoteHostStore(wire, &cliOwnerStore{}, "awarded-unit", func() bool { return !executing })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -252,7 +252,7 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 		}
 		return controllerwire.Applied{StateSeq: 10}, want
 	}}
-	state, err := newCLIHostState(wire, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
+	state, err := nodehost.NewRemoteHostStore(wire, &cliOwnerStore{}, "awarded-unit", func() bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 }
 
 func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
-	state, err := newCLIHostState(hostStateController{}, &cliOwnerStore{}, "unit", func() bool { return false })
+	state, err := nodehost.NewRemoteHostStore(hostStateController{}, &cliOwnerStore{}, "unit", func() bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
 		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunPolicyRefused, To: store.RunFailed,
 		OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyAdmissionFail}, Reason: "resources_refused",
 	}}
-	state.finish = func(_ context.Context, got store.FinishRunRequest) (store.Applied, error) {
+	state.Finish = func(_ context.Context, got store.FinishRunRequest) (store.Applied, error) {
 		if !reflect.DeepEqual(got, request) {
 			t.Fatal("admission refusal changed its policy cause or owner unit")
 		}

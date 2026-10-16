@@ -47,7 +47,31 @@ func (o localOwnerClient) Drain(ctx context.Context) error {
 
 type ownerRuntime struct {
 	wingd.LocalRuntime
-	owner controllerOwner
+	owner        controllerOwner
+	awaitManaged bool
+}
+
+func (r *ownerRuntime) AwaitReady(ctx context.Context) (wingd.LocalStatus, error) {
+	if !r.awaitManaged {
+		return r.LocalRuntime.AwaitReady(ctx)
+	}
+	return awaitLocalReady(ctx, r.Status)
+}
+
+func awaitLocalReady(ctx context.Context, query func(context.Context) (wingd.LocalStatus, error)) (wingd.LocalStatus, error) {
+	wait := newRetry("wait for local controller readiness", 0)
+	for {
+		status, err := query(ctx)
+		if err == nil && status.Running {
+			return status, nil
+		}
+		if err != nil && !errors.Is(err, ErrNoDaemon) {
+			return wingd.LocalStatus{}, err
+		}
+		if err := wait.wait(ctx, err); err != nil {
+			return wingd.LocalStatus{}, err
+		}
+	}
 }
 
 func (r *ownerRuntime) Status(ctx context.Context) (wingd.LocalStatus, error) {

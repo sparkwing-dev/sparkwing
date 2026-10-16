@@ -21,6 +21,7 @@ type nodeClaims struct {
 	current   func(context.Context) (capability.Principal, error)
 	readNode  func(context.Context, store.NodeRef) (store.NodeRow, error)
 	processes *nodehost.NativeProcesses
+	services  func(context.Context, capability.Principal, nodeproto.JobSpec) (nodehost.ProcessServices, error)
 	mu        sync.Mutex
 	nodes     map[string]nodeClaim
 }
@@ -123,8 +124,22 @@ func (c *nodeClaims) delegate(ctx context.Context, node string, generation, atte
 		data = &copy
 	}
 	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: principal.Capability.Digest}
+	if c.services == nil {
+		return nodehost.ProcessGrant{}, errors.New("local process services are unavailable")
+	}
+	services, err := c.services(ctx, principal, job)
+	if err != nil {
+		return nodehost.ProcessGrant{}, err
+	}
+	if services.RunID != row.Ref.RunID || services.Job.ID != job.ID || !completeServices(services) {
+		return nodehost.ProcessGrant{}, errors.New("local process services are incomplete or belong to another job")
+	}
 	return c.processes.Delegate(ctx, lookup, capability.DelegateSpec{
 		Parent: principal.Authority, Audience: capability.NodeHost, Grants: principal.Capability.Grants, Binding: fence,
 		Repositories: principal.Capability.Repositories, Data: data, ExpiresAt: principal.Capability.ExpiresAt,
-	}, nodehost.ProcessServices{RunID: row.Ref.RunID, Job: job})
+	}, services)
+}
+
+func completeServices(s nodehost.ProcessServices) bool {
+	return s.Secret != nil && s.Output != nil && s.Latest != nil && s.OIDC != nil && s.Annotation != nil && s.Summary != nil && s.StartChild != nil && s.AwaitChild != nil
 }
