@@ -1,23 +1,10 @@
 package sparkwing
 
-// SparkwingFlagDoc is a public, single-source-of-truth description of
-// one sparkwing-owned flag. Multiple help-rendering surfaces consume
-// this:
+// SparkwingFlagDoc describes one sparkwing-owned flag; every help surface
+// that lists sparkwing flags renders from [SparkwingFlagDocs].
 //
-//   - cmd/sparkwing's `sparkwing run --help` page (FlagSpec entries
-//     are derived from this list).
-//   - orchestrator's per-pipeline `sparkwing run <pipeline> --help`
-//     footer (the "SPARKWING FLAGS" enumeration the user sees
-//     alongside PIPELINE FLAGS).
-//
-// This list is the canonical source: the per-pipeline footer used to
-// hand-code "(--on, --from, --config)" and silently drifted every
-// time a new flag landed. Sourcing from one list keeps the surfaces
-// in lockstep.
-//
-// Every sparkwing-owned flag is prefixed `sw-`. Pipeline-author
-// Inputs flags occupy the full unprefixed namespace; there is no
-// reserved-name collision check because none can happen.
+// Every sparkwing-owned flag is prefixed `sw-`, leaving the unprefixed
+// namespace to pipeline Inputs flags, so no reserved-name check is needed.
 type SparkwingFlagDoc struct {
 	// Name is the long flag name without the leading "--".
 	Name string

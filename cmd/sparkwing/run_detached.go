@@ -497,10 +497,6 @@ func existingRunLogDir(paths orchestrator.Paths, runID string) string {
 	return dir
 }
 
-// describeArgsMismatch compares only the pipeline's arguments. --sw-priority is
-// absent from that map: a key names one intent, and resubmitting the
-// same work in a hurry is that same intent, so a repeat that differs only in
-// queue position answers with the original run rather than being refused.
 func describeArgsMismatch(original, incoming map[string]string) string {
 	if len(original) == len(incoming) {
 		same := true
