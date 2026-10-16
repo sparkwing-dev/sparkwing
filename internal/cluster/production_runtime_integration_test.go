@@ -4,6 +4,7 @@ package cluster
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -35,6 +37,81 @@ import (
 )
 
 const productionHTTPBoundary = "production HTTP boundary"
+
+func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
+	for _, command := range []string{"start", "warm"} {
+		for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
+			t.Run(command+"/"+string(kind), func(t *testing.T) {
+				hosting, unit := productionNativeAward(t, kind)
+				credentials := runnerCredentials(t)
+				config := filepath.Join(t.TempDir(), "config.yaml")
+				if err := os.WriteFile(config, []byte("runner:\n  controller: "+hosting.ControllerURL+"\n  repos: [github.com/acme/*]\n  max_concurrent: 1\n  credentials_dir: "+credentials+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithCancelCause(t.Context())
+				defer cancel(nil)
+				stop := errors.New("runner command probe completed")
+				var mu sync.Mutex
+				claims, renewals, private := 0, 0, 0
+				previousTransport := http.DefaultTransport
+				http.DefaultTransport = productionTransport(func(r *http.Request) (*http.Response, error) {
+					mu.Lock()
+					defer mu.Unlock()
+					var response any
+					switch r.Method + " " + r.URL.Path {
+					case "POST /api/v1/runners/claim":
+						claims++
+						if r.Header.Get("Authorization") != "Bearer private-runner-credential" {
+							t.Error("claim did not use the enrolled credential file")
+						}
+						if claims > 1 {
+							cancel(stop)
+							return nil, stop
+						}
+						var demand controllerwire.ClaimRequest
+						if err := json.NewDecoder(r.Body).Decode(&demand); err != nil {
+							return nil, err
+						}
+						if len(demand.Kinds) != 2 || demand.Kinds[0] != capability.UnitTrigger || demand.Kinds[1] != capability.UnitNode || demand.RunnerVersion != "dev" {
+							t.Errorf("command lost its unified claim selection: %+v", demand)
+						}
+						response = controllerwire.ClaimResponse{Claim: &unit}
+					case "POST /api/v1/claims/unit/heartbeat":
+						renewals++
+						if r.Header.Get("Authorization") != "Bearer "+unit.Capability {
+							t.Error("host renewal reused the enrollment credential")
+						}
+						response = controllerwire.RenewalResponse{ExpiresAt: unit.LeaseExpiresAt}
+					default:
+						if strings.Contains(r.URL.Path, "/local-host/") {
+							private++
+							return hosting.HTTP.Transport.RoundTrip(r)
+						}
+						return nil, fmt.Errorf("%s: %s %s", productionHTTPBoundary, r.Method, r.URL.Path)
+					}
+					body, err := json.Marshal(response)
+					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
+				})
+				t.Cleanup(func() { http.DefaultTransport = previousTransport })
+				args := []string{"--config=" + config}
+				if command == "warm" {
+					args = []string{"--controller=" + hosting.ControllerURL, "--repos=github.com/acme/*", "--credentials-dir=" + credentials, "--max-concurrent=1", "--max-claims-before-restart=1"}
+				}
+				err := ProductionRuntime("dev").Runner.Run(ctx, command, args, "dev")
+				if claims == 0 || renewals != 1 || private == 0 {
+					t.Fatalf("command did not claim, renew and bind its award: claims=%d renewals=%d private=%d error=%v", claims, renewals, private, err)
+				}
+				var socket *net.OpError
+				if errors.As(err, &socket) && socket.Op == "listen" && errors.Is(socket.Err, syscall.EPERM) {
+					t.Skipf("command reached native hosting after an enrolled claim: %v", err)
+				}
+				if err == nil || !strings.Contains(err.Error(), productionHTTPBoundary) {
+					t.Fatalf("command stopped before native source acquisition: %v", err)
+				}
+			})
+		}
+	}
+}
 
 func TestProductionRunnerOwnerReachesNativeHost(t *testing.T) {
 	testProductionNativeBinding(t, capability.UnitTrigger)
@@ -97,15 +174,15 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		Team: "team", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42"}, SHA: strings.Repeat("a", 40)},
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/project", PipelineDir: ".sparkwing"}},
 	}}
-	unit := controllerwire.ClaimedUnit{Unit: kind, UnitID: "unit", Purpose: purpose, Delivery: capability.DeliveryDirect, RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: raw, Request: request, LeaseExpiresAt: now.Add(time.Hour), Runner: nodeproto.RunnerIdentity{Name: "runner", Type: "runner"}}
+	unit := controllerwire.ClaimedUnit{Unit: kind, UnitID: "unit", Purpose: purpose, Delivery: capability.DeliveryDirect, RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: raw, Request: request, LeaseExpiresAt: now.Add(time.Hour), Runner: nodeproto.RunnerIdentity{Name: "runner", Type: "runner", Labels: []string{}}}
 	if kind == capability.UnitNode {
 		unit.Engine = &engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
-		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: request, Hash: "spec-hash", Resolved: runspec.Resolved{Engine: *unit.Engine}}, Plan: json.RawMessage(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
+		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: *unit.Engine}}, Plan: json.RawMessage(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
 		unit.Execution = &runspec.JobExecutionSettings{}
 	}
 	connection := client.EngineOptions{URL: "http://controller.invalid", Bearer: fixedBearer(raw), HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer "+raw {
-			t.Fatal("native binding lost the owner award")
+			return nil, errors.New("native binding lost the owner award")
 		}
 		var response any
 		switch r.Method + " " + r.URL.Path {
@@ -117,19 +194,26 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 		case "GET " + prefix + "/data-authority":
 			response = localhostwire.LocalDataAuthority{Authority: blob.Authority{CapabilityRef: "owner", Principal: "runner", Repo: "gh:42"}}
 		case "GET " + prefix + "/snapshot":
-			snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Team: "team", Request: request}}
+			snapshot := store.RunSnapshot{Run: store.RunRow{ID: "run", Team: "team", Request: request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: binding.Holder, Generation: binding.Generation}}}
 			if unit.Accepted != nil {
 				snapshot.Run.Spec, snapshot.Run.Plan = &unit.Accepted.Spec, unit.Accepted.Plan
-				snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Generation: binding.Generation, ClaimedBy: binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), Execution: *unit.Execution}}
+				snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
+				snapshot.Nodes = []store.NodeRow{productionAwardNode(unit, principal)}
 			}
 			response = snapshot
+		case "GET /api/v1/runs/run/local-host/nodes/job":
+			response = productionAwardNode(unit, principal)
 		default:
-			t.Fatalf("unexpected native binding request: %s %s", r.Method, r.URL)
+			return nil, fmt.Errorf("unexpected native binding request: %s %s", r.Method, r.URL)
 		}
 		body, err := json.Marshal(response)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
 	})}}
 	return productionHosting(filepath.Join(home, "state"), "v1.2.3", connection), unit
+}
+
+func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.Principal) store.NodeRow {
+	return store.NodeRow{Ref: store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, Status: store.StatusPending, Generation: unit.Binding.Generation, ClaimedBy: unit.Binding.Holder, CapabilityPrefix: principal.Capability.Prefix, Spec: json.RawMessage(`{"id":"job"}`), SpecHash: "job-hash", Execution: *unit.Execution}
 }
 
 func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
