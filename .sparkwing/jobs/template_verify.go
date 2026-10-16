@@ -859,5 +859,5 @@ func writeFixtureFiles(root string, files map[string]string) error {
 }
 
 func init() {
-	sparkwing.Register[TemplateVerifyArgs]("TemplateVerify", func() sparkwing.Pipeline[TemplateVerifyArgs] { return &TemplateVerify{} })
+	sparkwing.Register[TemplateVerifyArgs]("template-verify", func() sparkwing.Pipeline[TemplateVerifyArgs] { return &TemplateVerify{} })
 }

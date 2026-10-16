@@ -489,7 +489,7 @@ func ({{STRUCT}}Job) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 
@@ -569,7 +569,7 @@ func ({{STRUCT}}Deploy) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 
@@ -653,7 +653,7 @@ func ({{STRUCT}}Gate) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 
@@ -735,7 +735,7 @@ func ({{STRUCT}}Publish) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 
@@ -844,7 +844,7 @@ func ({{STRUCT}}PublishReport) run(ctx context.Context) error {
 }
 
 func init() {
-	sw.Register[sw.NoInputs]("{{STRUCT}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
+	sw.Register[sw.NoInputs]("{{NAME}}", func() sw.Pipeline[sw.NoInputs] { return &{{STRUCT}}{} })
 }
 `
 

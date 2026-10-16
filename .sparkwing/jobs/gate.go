@@ -877,7 +877,7 @@ func regexCheckRoot() string {
 }
 
 func init() {
-	sparkwing.Register("Gate", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Gate{} })
+	sparkwing.Register("gate", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Gate{} })
 }
 
 // safety: Go builds of one package leave an executable beside the sources,

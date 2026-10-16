@@ -100,5 +100,5 @@ func gofmtOverScope(ctx context.Context, scopeOf scopeFunc) error {
 }
 
 func init() {
-	sparkwing.Register("PreCommit", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PreCommit{} })
+	sparkwing.Register("pre-commit", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PreCommit{} })
 }

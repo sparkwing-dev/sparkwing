@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func TestSDKCheckoutPlanningRetainsInvokedAliasAndRegisteredEntrypoint(t *testing.T) {
+func TestSDKCheckoutPlanningUsesRegisteredNameAndRetainsGoType(t *testing.T) {
 	planner, input, fixture, processes := sdkPlanningFixture(t)
 	start := planner.Start
 	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
@@ -19,9 +19,9 @@ func TestSDKCheckoutPlanningRetainsInvokedAliasAndRegisteredEntrypoint(t *testin
 		proc.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
 			switch request.Op {
 			case nodeproto.OpDescribe:
-				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "target", Required: true}, {Name: "build.image", Required: true, JobID: "build"}}}}}, nil
+				return nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "target", Required: true}, {Name: "build.image", Required: true, JobID: "build"}}}}}, nil
 			case nodeproto.OpPlan:
-				if request.Pipeline != "Deploy" || request.Run.Pipeline != "deploy-prod" || request.Args["target"] != "production" || request.Args["build.image"] != "release" {
+				if request.Pipeline != "deploy-prod" || request.Run.Pipeline != "deploy-prod" || request.Args["target"] != "production" || request.Args["build.image"] != "release" {
 					t.Fatalf("pipeline identity or arguments changed: %+v", request)
 				}
 			}
@@ -50,7 +50,7 @@ func TestSDKCheckoutPlanningRetainsInvokedAliasAndRegisteredEntrypoint(t *testin
 	}
 }
 
-func TestNodeExecutorReplanUsesAcceptedEntrypointAndInvokedAlias(t *testing.T) {
+func TestNodeExecutorReplanUsesRegisteredName(t *testing.T) {
 	input, _, deps, _ := executorFixture(t)
 	var spec runspec.Spec
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
@@ -65,7 +65,7 @@ func TestNodeExecutorReplanUsesAcceptedEntrypointAndInvokedAlias(t *testing.T) {
 		process.(*executorProcess).answer = func(_ context.Context, request nodeproto.Request) (any, error) {
 			if request.Op == nodeproto.OpPlan {
 				planned = true
-				if request.Pipeline != "Deploy" || request.Run.Pipeline != "deploy-prod" {
+				if request.Pipeline != "deploy-prod" || request.Run.Pipeline != "deploy-prod" {
 					t.Errorf("replan changed pipeline identity: %+v", request)
 				}
 			}

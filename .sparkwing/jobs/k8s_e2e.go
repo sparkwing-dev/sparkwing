@@ -62,5 +62,5 @@ func runKubernetesE2EScript(ctx context.Context, root, script string) error {
 }
 
 func init() {
-	sparkwing.Register("KubernetesE2E", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &KubernetesE2E{} })
+	sparkwing.Register("k8s-e2e", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &KubernetesE2E{} })
 }

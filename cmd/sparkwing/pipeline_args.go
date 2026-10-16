@@ -53,11 +53,10 @@ func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
 }
 
 func boundPipelineSchema(schemas []nodeproto.PipelineDescription, identity clisurface.PipelineIdentity) (nodeproto.PipelineDescription, error) {
-	schema, err := findPipelineSchema(schemas, identity.Entrypoint)
+	schema, err := findPipelineSchema(schemas, identity.Name)
 	if err != nil {
 		return schema, fmt.Errorf("pipeline %q: %w", identity.Name, err)
 	}
-	schema.Name = identity.Name
 	return schema, nil
 }
 

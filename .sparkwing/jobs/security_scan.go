@@ -478,5 +478,5 @@ func firstInt(s string) int {
 }
 
 func init() {
-	sparkwing.Register[SecurityScanArgs]("SecurityScan", func() sparkwing.Pipeline[SecurityScanArgs] { return &SecurityScan{} })
+	sparkwing.Register[SecurityScanArgs]("security-scan", func() sparkwing.Pipeline[SecurityScanArgs] { return &SecurityScan{} })
 }

@@ -997,5 +997,5 @@ func fileAtTag(ctx context.Context, repoDir, tag, path string) (body string, pre
 }
 
 func init() {
-	sparkwing.Register[ReleaseArgs]("Release", func() sparkwing.Pipeline[ReleaseArgs] { return &Release{} })
+	sparkwing.Register[ReleaseArgs]("release", func() sparkwing.Pipeline[ReleaseArgs] { return &Release{} })
 }

@@ -428,5 +428,5 @@ func checkNoCommittedGoWorkFiles(jobContext context.Context) error {
 }
 
 func init() {
-	sparkwing.Register("PreRelease", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PreRelease{} })
+	sparkwing.Register("pre-release", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PreRelease{} })
 }

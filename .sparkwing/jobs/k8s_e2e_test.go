@@ -12,7 +12,7 @@ import (
 )
 
 func TestKubernetesE2EPipelineIsRegisteredAndBounded(t *testing.T) {
-	plan := inspectPipeline(t, "KubernetesE2E", nil)
+	plan := inspectPipeline(t, "k8s-e2e", nil)
 	nodes := plan.Jobs
 	if len(nodes) != 1 || nodes[0].ID != "k8s-e2e" {
 		t.Fatalf("k8s-e2e nodes = %v, want [k8s-e2e]", nodeIDs(nodes))

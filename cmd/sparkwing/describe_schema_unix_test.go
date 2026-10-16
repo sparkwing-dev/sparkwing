@@ -55,7 +55,7 @@ func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
 		fresh.Args[2].Name = "password-" + hex.EncodeToString([]byte(value))
 		fresh.Secrets = []nodeproto.SecretDeclaration{{Name: "TOKEN_" + hex.EncodeToString([]byte(value))}}
 		raw, err := json.Marshal([]nodeproto.PipelineDescription{
-			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{}}, fresh,
+			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{}}, fresh,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -102,12 +102,12 @@ func TestPipelineDescribePropagatesAcquisitionAndProtocolFailures(t *testing.T) 
 		t.Run(mode, func(t *testing.T) {
 			dir, _ := aliasProject(t)
 			fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
-			body := `[{"name":"Deploy","args":[]}]`
+			body := `[{"name":"deploy-prod","args":[]}]`
 			switch mode {
 			case "protocol":
 				body = `null`
 			case "registration":
-				body = `[{"name":"deploy-prod","args":[]}]`
+				body = `[{"name":"Deploy","args":[]}]`
 			case "binding":
 				writeRepoFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n    unknown: true\n")
 			}

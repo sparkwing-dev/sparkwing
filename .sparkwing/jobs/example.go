@@ -523,5 +523,5 @@ func nap(ctx context.Context, ms int) error {
 }
 
 func init() {
-	sparkwing.Register("Example", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Example{} })
+	sparkwing.Register("example", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Example{} })
 }

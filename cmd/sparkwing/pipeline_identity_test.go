@@ -26,7 +26,7 @@ func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 	}
 	writeRepoFile(t, filepath.Join(dir, "go.mod"), "module aliasfixture\n\ngo 1.26\n")
 	schema := nodeproto.PipelineDescription{
-		Name: "Deploy", Short: "Deploy a service", Help: "Deploys the selected service.",
+		Name: "deploy-prod", Short: "Deploy a service", Help: "Deploys the selected service.",
 		Args: []nodeproto.ArgumentDescription{
 			{Name: "region", Short: "r", Type: "string", Required: true},
 			{Name: "image", Type: "string", Required: true, JobID: "rollout"},
@@ -39,13 +39,15 @@ func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{schema}}); err != nil {
+	stage := schema
+	stage.Name = "deploy-stage"
+	if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{schema, stage}}); err != nil {
 		t.Fatal(err)
 	}
 	return dir, schema
 }
 
-func TestPipelineAliasRiskGateUsesEntrypointDeclaration(t *testing.T) {
+func TestPipelineRiskGateUsesRegisteredDeclaration(t *testing.T) {
 	_, schema := aliasProject(t)
 	bound, err := boundPipelineSchema([]nodeproto.PipelineDescription{schema}, clisurface.PipelineIdentity{Name: "deploy-prod", Entrypoint: "Deploy"})
 	if err != nil {
@@ -54,7 +56,7 @@ func TestPipelineAliasRiskGateUsesEntrypointDeclaration(t *testing.T) {
 	err = enforceRiskGate("deploy-prod", risksIn(bound), runFlags{})
 	var blocked *riskBlockedError
 	if !errors.As(err, &blocked) || blocked.Pipeline != "deploy-prod" || !reflect.DeepEqual(blocked.MissingLabels, []string{"prod"}) {
-		t.Fatalf("alias bypassed entrypoint risks: %v", err)
+		t.Fatalf("pipeline bypassed registered risks: %v", err)
 	}
 }
 
@@ -69,8 +71,8 @@ func FuzzPipelineAliasMetadataIsolation(f *testing.F) {
 			t.Fatal(err)
 		}
 		schemas := []nodeproto.PipelineDescription{
-			{Name: alias, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string"}}},
-			{Name: entry, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}, Risks: []string{"prod"}},
+			{Name: entry, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string"}}},
+			{Name: alias, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}, Risks: []string{"prod"}},
 		}
 		if reverse {
 			schemas[0], schemas[1] = schemas[1], schemas[0]
@@ -82,7 +84,7 @@ func FuzzPipelineAliasMetadataIsolation(f *testing.F) {
 		err = enforceRiskGate(alias, risksIn(schema), runFlags{})
 		var blocked *riskBlockedError
 		if !errors.As(err, &blocked) || blocked.Pipeline != alias || !reflect.DeepEqual(blocked.MissingLabels, []string{"prod"}) {
-			t.Fatalf("alias bypassed entrypoint risks: %v", err)
+			t.Fatalf("pipeline bypassed registered risks: %v", err)
 		}
 	})
 }
@@ -111,7 +113,7 @@ func TestPipelineAliasResolvesFlagsAndHelp(t *testing.T) {
 	if _, err := parsePipelineArgs(schema, []string{"--typo", "value"}); err == nil || !strings.Contains(err.Error(), "sparkwing run deploy-prod --help") {
 		t.Fatalf("alias diagnostic: %v", err)
 	}
-	if registered.Name != "Deploy" {
+	if registered.Name != "deploy-prod" {
 		t.Fatal("binding changed the registered schema")
 	}
 }
@@ -147,7 +149,7 @@ func TestPipelineAliasCatalogAndCompletion(t *testing.T) {
 
 func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 	dir, registered := aliasProject(t)
-	registered.Name = "deploy-prod"
+	registered.Name = "Deploy"
 	key, err := bincache.PipelineCacheKey(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -156,13 +158,12 @@ func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := &pipelineRun{ctx: t.Context(), sparkwingDir: dir}
-	if _, err := run.describedPipeline("deploy-prod"); err == nil || !strings.Contains(err.Error(), "Deploy") {
-		t.Fatalf("missing entrypoint used the alias registration: %v", err)
+	if _, err := run.describedPipeline("deploy-prod"); err == nil || !strings.Contains(err.Error(), "deploy-prod") {
+		t.Fatalf("missing registration used the Go type name: %v", err)
 	}
 	if _, err := pipelineFlagsFromCache(t.Context(), dir, "deploy-prod"); err == nil {
 		t.Fatal("completion used an unrelated registration")
 	}
-
 }
 
 func TestPipelineAliasRefusesInvalidBindingConfig(t *testing.T) {

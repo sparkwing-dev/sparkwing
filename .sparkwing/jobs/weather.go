@@ -65,5 +65,5 @@ func (p *WeatherReport) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwin
 }
 
 func init() {
-	sparkwing.Register("WeatherReport", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &WeatherReport{} })
+	sparkwing.Register("weather-report", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &WeatherReport{} })
 }

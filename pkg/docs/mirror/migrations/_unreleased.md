@@ -729,8 +729,8 @@ and its JSON failure receipt identifies the created run without its credential.
 ## Plan inspection
 
 Use `sparkwing pipeline plan --pipeline NAME -- <pipeline arguments>` to supply
-required inputs. The registered SDK entrypoint selects the code; the invoked
-project name remains in the run context. Secret inputs reach planning but are
+required inputs. The YAML pipeline name selects the SDK registration and remains
+in the run context. The YAML entrypoint identifies the Go type. Secret inputs reach planning but are
 redacted in previews and structured diagnostics. The preview JSON uses `jobs`
 in place of `nodes`.
 

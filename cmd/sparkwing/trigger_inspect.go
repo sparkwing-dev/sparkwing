@@ -119,6 +119,5 @@ func triggerDescription(raw []byte, selection preparedTriggerSource) (nodeproto.
 	if result.Name != selection.pipeline || result.Entrypoint != selection.source.Entrypoint {
 		return nodeproto.PipelineDescription{}, invalid
 	}
-	result.Name = result.Entrypoint
 	return result.PipelineDescription, nil
 }

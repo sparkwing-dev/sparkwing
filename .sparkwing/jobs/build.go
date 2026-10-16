@@ -44,5 +44,5 @@ func (p *Build) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInpu
 }
 
 func init() {
-	sparkwing.Register("Build", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Build{} })
+	sparkwing.Register("build", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Build{} })
 }

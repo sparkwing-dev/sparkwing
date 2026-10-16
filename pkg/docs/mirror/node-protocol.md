@@ -118,15 +118,15 @@ Describe failures fail discovery instead of returning a partial schema.
 <- {"reply":"3","ok":true,"result":{"pipelines":[{"name":"ship","args":[{"name":"target","type":"string","required":false,"default":"staging"}],"secrets":[{"name":"DEPLOY_TOKEN"}]}]}}
 ```
 
-`plan.pipeline` names a registered SDK entrypoint. `args` is an explicit object,
+`plan.pipeline` names the SDK registration, matching the YAML pipeline name. `args` is an explicit object,
 including `{}` when empty. `run` requires `run_id` and `pipeline`. Its pipeline
-name is the invoked name, which may be a project alias for the SDK entrypoint.
+name is the same registered name. The YAML entrypoint identifies the Go type.
 Optional context includes `git`, `trigger`, `started_at`, `dry_run` and `no_memo`.
 
-The host resolves a project alias before selecting its argument schema. An alias
-`deploy-prod` targeting `Deploy` uses `Deploy`'s pipeline and job flags. Initial
-planning and execution replan send `Deploy` as `plan.pipeline` and keep
-`deploy-prod` in `run.pipeline`.
+The host selects the argument schema by registered name. For YAML
+`name: deploy-prod, entrypoint: Deploy`, register `deploy-prod` with a factory
+returning the `Deploy` type. Initial planning and execution replan send
+`deploy-prod` as both `plan.pipeline` and `run.pipeline`.
 
 Planning occurs at most once per process. Execution processes reconstruct the
 plan from the accepted inputs and compare job declarations with the accepted

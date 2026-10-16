@@ -252,22 +252,22 @@ func stressWork(spec admissionStressSpec) func(context.Context) error {
 }
 
 func init() {
-	sparkwing.Register("AdmissionStressMatrix", func() sparkwing.Pipeline[AdmissionStressArgs] {
+	sparkwing.Register("admission-stress", func() sparkwing.Pipeline[AdmissionStressArgs] {
 		return &AdmissionStressMatrix{AdmissionStress{workload: stressMatrix}}
 	})
-	sparkwing.Register("AdmissionStressLightSequential", func() sparkwing.Pipeline[AdmissionStressArgs] {
+	sparkwing.Register("admission-stress-light-sequential", func() sparkwing.Pipeline[AdmissionStressArgs] {
 		return &AdmissionStressLightSequential{AdmissionStress{workload: stressLightSequential}}
 	})
-	sparkwing.Register("AdmissionStressLightParallel", func() sparkwing.Pipeline[AdmissionStressArgs] {
+	sparkwing.Register("admission-stress-light-parallel", func() sparkwing.Pipeline[AdmissionStressArgs] {
 		return &AdmissionStressLightParallel{AdmissionStress{workload: stressLightParallel}}
 	})
-	sparkwing.Register("AdmissionStressMediumFanIn", func() sparkwing.Pipeline[AdmissionStressArgs] {
+	sparkwing.Register("admission-stress-medium-fan-in", func() sparkwing.Pipeline[AdmissionStressArgs] {
 		return &AdmissionStressMediumFanIn{AdmissionStress{workload: stressMediumFanIn}}
 	})
-	sparkwing.Register("AdmissionStressCPUHeavy", func() sparkwing.Pipeline[AdmissionStressArgs] {
+	sparkwing.Register("admission-stress-cpu-heavy", func() sparkwing.Pipeline[AdmissionStressArgs] {
 		return &AdmissionStressCPUHeavy{AdmissionStress{workload: stressCPUHeavy}}
 	})
-	sparkwing.Register("AdmissionStressHeavy", func() sparkwing.Pipeline[AdmissionStressArgs] {
+	sparkwing.Register("admission-stress-heavy", func() sparkwing.Pipeline[AdmissionStressArgs] {
 		return &AdmissionStressHeavy{AdmissionStress{workload: stressHeavyParallel}}
 	})
 }

@@ -152,9 +152,9 @@ command. Pipeline listings can use cached metadata. Named describe always reads
 the selected SDK.
 Engine selection and `info` read the SDK pin from the pipeline directory's
 manifest and lockfile.
-A configured alias selects its registered SDK entrypoint for flags, help, secret
-classification and risks. Planning sends that entrypoint to the SDK and keeps
-the invoked alias in the run context. Pass required planning inputs after `--`,
+The YAML pipeline name selects its SDK registration for flags, help, secret
+classification and risks. Planning and execution send that name to the SDK and
+keep it in the run context. The YAML entrypoint names the Go type. Pass required planning inputs after `--`,
 for example `sparkwing pipeline plan --pipeline deploy-prod -- --region us-east`.
 Previews redact secret arguments while the SDK receives their execution values.
 

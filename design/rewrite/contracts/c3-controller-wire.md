@@ -122,13 +122,13 @@ without changing the checkout. `Git.SHA` retains that execution commit.
 `Source.Ref` retains the pipeline commit selected by the configured source or
 explicit pipeline revision. Both selections resolve to exact commits. A configured
 source pin and explicit pipeline revision must agree. `Source.Entrypoint` retains
-the execution configuration's SDK entrypoint, while
-the invoked alias supplies `Request.Pipeline`. GitHub repository identity requires
+the execution configuration's Go type identity, while
+the registered name supplies `Request.Pipeline`. GitHub repository identity requires
 a resolved positive numeric ID. Typed repository identity and origin HEAD supply
 no App trust or authority. Clone URLs cannot carry credentials.
 
-Request preparation selects that entrypoint's argument schema, preserves its
-secret classification, uses C4 request resolution and hashes the caller's captured
+Request preparation selects the registered pipeline name's argument schema,
+preserves its secret classification, uses C4 request resolution and hashes the caller's captured
 environment through `EnvironmentDigest`. Environment values stay with the private
 capture owner. Validation diagnostics mask supplied argument tokens through the
 shared CLI sanitizer. Supplied idempotency keys survive preparation and intake.

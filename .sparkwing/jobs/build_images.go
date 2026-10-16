@@ -188,5 +188,5 @@ func (p *BuildImages) summary(ctx context.Context) error {
 }
 
 func init() {
-	sparkwing.Register[BuildImagesArgs]("BuildImages", func() sparkwing.Pipeline[BuildImagesArgs] { return &BuildImages{} })
+	sparkwing.Register[BuildImagesArgs]("build-images", func() sparkwing.Pipeline[BuildImagesArgs] { return &BuildImages{} })
 }
