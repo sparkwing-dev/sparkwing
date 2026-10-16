@@ -138,10 +138,18 @@ func (h StoreHosting) authenticate(ctx context.Context, unit controllerwire.Clai
 		return capability.Principal{}, err
 	}
 	principal := authorized.Principal
-	if !principalMatches(unit, principal) {
-		return capability.Principal{}, awardMismatch()
+	if err := ValidateAwardPrincipal(unit, principal); err != nil {
+		return capability.Principal{}, err
 	}
 	return principal, nil
+}
+
+// ValidateAwardPrincipal checks an award against its authenticated persisted authority.
+func ValidateAwardPrincipal(unit controllerwire.ClaimedUnit, principal capability.Principal) error {
+	if !principalMatches(unit, principal) {
+		return awardMismatch()
+	}
+	return nil
 }
 
 func principalMatches(unit controllerwire.ClaimedUnit, principal capability.Principal) bool {

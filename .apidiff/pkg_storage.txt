@@ -3,10 +3,9 @@
 type BlobManifests struct{ Objects blob.ObjectBackend }
 func (m BlobManifests) ReadBlobManifest(ctx context.Context, team store.Team, digest blob.Digest) ([]blob.Member, error)
 func (m BlobManifests) VerifyBlob(ctx context.Context, expected blob.Blob) error
+func (m BlobManifests) VerifyBlobManifest(ctx context.Context, team store.Team, digest blob.Digest, members []blob.Member) error
 var ErrBadCursor = errors.New("storage: log stream cursor is not valid here")
-var ErrNotFound = errors.New("storage: not found")
 var ErrNotSupported = errors.New("storage: operation not supported")
-var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
 func LogCursor(ctx context.Context) string
 type LogStore interface {
 	Read(ctx context.Context, runID, nodeID string, opts ReadOpts) ([]byte, error)
@@ -23,64 +22,6 @@ type ReadOpts struct {
 }
 func (o ReadOpts) Apply(data []byte) ([]byte, error)
 func SafeSegment(id string) error
-type StateStore interface {
-	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
-	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
-	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
-	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
-	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
-	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
-	ReadRun(context.Context, string) (store.RunRow, error)
-	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
-	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
-	ReadStateEvents(context.Context, string, int64, int) ([]store.StateEvent, error)
-	ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error)
-	RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error)
-	RenewNodeClaim(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error)
-	RecordStep(context.Context, store.StepReport) error
-	WriteAnnotation(context.Context, store.AnnotationWrite) error
-	WriteSummary(context.Context, store.SummaryWrite) error
-	RecordSegments(context.Context, store.SegmentCommit) error
-}
-type StateStoreOld interface {
-	Close() error
-
-	CreateRun(ctx context.Context, r store.Run) error
-	FinishRun(ctx context.Context, runID, status, errMsg string) error
-	UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
-	GetRun(ctx context.Context, runID string) (*store.Run, error)
-	GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
-
-	CreateNode(ctx context.Context, n store.Node) error
-	StartNode(ctx context.Context, runID, nodeID string) error
-	FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
-	FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
-	UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
-	UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
-	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
-	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
-	SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
-
-	StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-	FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
-	SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-	AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
-	SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
-
-	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
-
-	AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error
-
-	CreateDebugPause(ctx context.Context, p store.DebugPause) error
-	GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error)
-	ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
-
-	FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
-
-	CreateApproval(ctx context.Context, a store.Approval) error
-	GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error)
-	ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
-}
 type StoreUsage struct {
 	Bytes      int64
 	Objects    int64

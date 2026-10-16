@@ -7,6 +7,13 @@ type credentialRouteExpectation struct {
 
 func credentialRouteExpectations() []credentialRouteExpectation {
 	return []credentialRouteExpectation{
+		{"GET", "/api/v1/runs/{run}/local-host/snapshot", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting"}},
+		{"GET", "/api/v1/runs/{run}/local-host/nodes/{job}", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting", "awarded_or_delegated_claim|data.read|ownNode|reporting"}},
+		{"POST", "/api/v1/runs/{run}/local-host/transition", "controller", "run", "capability", []string{"awarded_or_delegated_claim|runs.state|runOfTrigger|result"}},
+		{"POST", "/api/v1/runs/{run}/local-host/finish", "controller", "run", "capability", []string{"awarded_or_delegated_claim|runs.state|runOfTrigger|result"}},
+		{"POST", "/api/v1/runs/{run}/local-host/nodes/{job}/transition", "controller", "run", "capability", []string{"awarded_or_delegated_claim|node.result|ownNode|result", "awarded_or_delegated_claim|node.result|runOfTrigger|result"}},
+		{"POST", "/api/v1/runs/{run}/local-host/authentication", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting"}},
+		{"POST", "/api/v1/runs/{run}/local-host/binding", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|reporting"}},
 		{"GET", "/api/v1/runs/{run}/snapshot", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|sensitive"}},
 		{"POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", "controller", "run", "capability", []string{"awarded_or_delegated_claim|nodes.claim|runOfTrigger|sensitive"}},
 		{"POST", "/api/v1/runs", "controller", "team", "capability", []string{"unbound_member_or_local|runs.write|bodyNamesRun|credential", "awarded_or_delegated_claim|children.start|bodyNamesRun|sensitive"}},
@@ -105,6 +112,10 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"DELETE", "/api/v1/runners/github/{repository}", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"POST", "/api/v1/pools/{pool}/rules", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
 		{"DELETE", "/api/v1/pools/{pool}/rules/{rule}", "controller", "team", "capability", []string{"unbound_member_or_local|team.admin|none|credential"}},
+		{"PUT", "/api/v1/schedules/local/repos", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
+		{"POST", "/api/v1/schedules/local/tick", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
+		{"POST", "/api/v1/schedules/{schedule}/pin", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
+		{"POST", "/api/v1/schedules/{schedule}/unpin", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
 		{"PUT", "/api/v1/schedules/repos", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
 		{"DELETE", "/api/v1/schedules/repos", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},
 		{"PUT", "/api/v1/schedules/{schedule}/override", "controller", "team", "capability", []string{"unbound_member_or_local|runs.control|none|credential"}},

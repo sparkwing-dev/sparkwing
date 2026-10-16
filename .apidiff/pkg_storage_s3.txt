@@ -1,24 +1,18 @@
 # pkg/storage/s3
 
 type API interface {
-	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
-	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
-	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+	ListObjectsV2(context.Context, *s3.ListObjectsV2Input, ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
-type ArtifactStore struct {
-	Bucket string
-	Prefix string
-	Client API
-
+const DefaultMaxUsagePages = 1000
+type MeasurementStore struct {
+	Bucket        string
+	Prefix        string
+	Client        API
 	MaxUsagePages int
 }
-func (s *ArtifactStore) Get(ctx context.Context, key string) (io.ReadCloser, error)
-func (s *ArtifactStore) List(ctx context.Context, prefix string) ([]string, error)
-func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) error
-func (s *ArtifactStore) Usage(ctx context.Context) (storage.StoreUsage, error)
-const DefaultMaxUsagePages = 1000
-func NewArtifactStore(bucket, prefix string, client API) *ArtifactStore
+func (s *MeasurementStore) Usage(ctx context.Context) (storage.StoreUsage, error)
 func NewClient(ctx context.Context, optFns ...func(*awss3.Options)) (*awss3.Client, error)
+func NewMeasurementStore(bucket, prefix string, client API) *MeasurementStore
 func Open(ctx context.Context, raw string) (client *awss3.Client, bucket, prefix string, err error)
 func ParseURL(raw string) (bucket, prefix string, err error)
 const SDKMaxAttempts = 4

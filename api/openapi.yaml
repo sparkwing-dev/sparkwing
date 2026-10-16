@@ -1774,12 +1774,28 @@ components:
           $ref: '#/components/schemas/internal.controllerwire.LauncherJobRef'
         node_uid:
           type: string
+        reservation_id:
+          type: string
       required:
         - award
-        - job
         - node_uid
       type: object
       x-sparkwing-go-type: controllerwire.LauncherObservation
+    internal.controllerwire.LauncherReservationRef:
+      additionalProperties: true
+      properties:
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+        node_uid:
+          type: string
+        reservation_id:
+          type: string
+      required:
+        - award
+        - node_uid
+        - reservation_id
+      type: object
+      x-sparkwing-go-type: controllerwire.LauncherReservationRef
     internal.controllerwire.LauncherSyncRequest:
       additionalProperties: true
       properties:
@@ -1808,9 +1824,16 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.LauncherJobRef'
               type: array
             - type: "null"
+        remove_reservations:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.LauncherReservationRef'
+              type: array
+            - type: "null"
       required:
         - awards
         - remove
+        - remove_reservations
       type: object
       x-sparkwing-go-type: controllerwire.LauncherSyncResponse
     internal.controllerwire.LockView:
@@ -6212,7 +6235,7 @@ paths:
         owner: run
         authentication: capability
         access:
-          - credential: awarded_or_delegated_claim
+          - credential: pod_bootstrap
             grants:
               - claim.exchange
             binding: run
@@ -11380,6 +11403,243 @@ paths:
             liveness: credential
         retry: exact_body
       x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/authentication:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/runs/{run}/local-host/authentication
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/authentication
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - trigger.host
+            binding: runOfTrigger
+            liveness: reporting
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/binding:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/runs/{run}/local-host/binding
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/binding
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - trigger.host
+            binding: runOfTrigger
+            liveness: reporting
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/finish:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/runs/{run}/local-host/finish
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/finish
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - runs.state
+            binding: runOfTrigger
+            liveness: result
+        retry: exact_body
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/nodes/{job}:
+    get:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: job
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: GET /api/v1/runs/{run}/local-host/nodes/{job}
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/runs/{run}/local-host/nodes/{job}
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - trigger.host
+            binding: runOfTrigger
+            liveness: reporting
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: ownNode
+            liveness: reporting
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/nodes/{job}/transition:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: job
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/runs/{run}/local-host/nodes/{job}/transition
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/nodes/{job}/transition
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.result
+            binding: ownNode
+            liveness: result
+          - credential: awarded_or_delegated_claim
+            grants:
+              - node.result
+            binding: runOfTrigger
+            liveness: result
+        retry: exact_body
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/snapshot:
+    get:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: GET /api/v1/runs/{run}/local-host/snapshot
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/runs/{run}/local-host/snapshot
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - trigger.host
+            binding: runOfTrigger
+            liveness: reporting
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/runs/{run}/local-host/transition:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: run
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/runs/{run}/local-host/transition
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/runs/{run}/local-host/transition
+        audience: controller
+        owner: run
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - runs.state
+            binding: runOfTrigger
+            liveness: result
+        retry: exact_body
+      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/logs:
     get:
       parameters:
@@ -11768,6 +12028,11 @@ paths:
         authentication: capability
         access:
           - credential: awarded_or_delegated_claim
+            grants:
+              - source.read
+            binding: source
+            liveness: sensitive
+          - credential: pod_bootstrap
             grants:
               - source.read
             binding: source
@@ -12164,6 +12429,37 @@ paths:
             binding: none
             liveness: credential
         retry: safe
+  /api/v1/schedules/{schedule}/pin:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: schedule
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/schedules/{schedule}/pin
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/schedules/{schedule}/pin
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.control
+            binding: none
+            liveness: credential
+        retry: never
+      x-sparkwing-wire: undocumented
   /api/v1/schedules/{schedule}/resume:
     post:
       parameters:
@@ -12239,6 +12535,87 @@ paths:
             binding: none
             liveness: credential
         retry: idempotency_key
+  /api/v1/schedules/{schedule}/unpin:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      parameters:
+        - in: path
+          name: schedule
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/schedules/{schedule}/unpin
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/schedules/{schedule}/unpin
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.control
+            binding: none
+            liveness: credential
+        retry: safe
+      x-sparkwing-wire: undocumented
+  /api/v1/schedules/local/repos:
+    put:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: PUT /api/v1/schedules/local/repos
+      x-sparkwing-policy:
+        method: PUT
+        path: /api/v1/schedules/local/repos
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.control
+            binding: none
+            liveness: credential
+        retry: never
+      x-sparkwing-wire: undocumented
+  /api/v1/schedules/local/tick:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/schedules/local/tick
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/schedules/local/tick
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.control
+            binding: none
+            liveness: credential
+        retry: never
+      x-sparkwing-wire: undocumented
   /api/v1/schedules/repos:
     delete:
       parameters:

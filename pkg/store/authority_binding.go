@@ -26,18 +26,17 @@ func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal
 
 // CheckBinding implements relational authorization within the transaction owning a write.
 func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
-	if principal.Class == capability.CredentialPeer {
-		if principal.Capability.Subject.Kind != capability.SubjectLocal || principal.Capability.Subject.ID == "" || principal.Capability.Team != string(DefaultTeam) || target.Team != "" && target.Team != string(DefaultTeam) || rule != capability.BindNone {
-			return bindingRefusal()
-		}
-		if target.RunID != "" {
-			return bindingRunExistsTx(ctx, tx, string(DefaultTeam), target.RunID)
-		}
-		return nil
-	}
 	current, err := tx.ResolveAuthority(ctx, principal.Authority)
 	if err != nil {
 		return err
+	}
+	if principal.Class == capability.CredentialPeer {
+		if current.Capability.Subject != principal.Capability.Subject || current.Capability.Parent != nil || current.Capability.Binding != (capability.Binding{Kind: capability.BindingNone}) || current.Capability.Audience != capability.Controller || current.Capability.Team != string(DefaultTeam) {
+			return bindingRefusal()
+		}
+		if principal.Capability.Subject.Kind != capability.SubjectLocal || principal.Capability.Subject.ID == "" || principal.Capability.Team != string(DefaultTeam) || target.Team != "" && target.Team != string(DefaultTeam) {
+			return bindingRefusal()
+		}
 	}
 	c := current.Capability
 	deployment := rule == capability.BindNone && target.Team == "" && target.RunID == "" || rule == capability.BindClaimSelection && launcherClaimant(c)

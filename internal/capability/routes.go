@@ -2,6 +2,13 @@ package capability
 
 // Routes is the authorization table for controller and node-host operations, including external proofs.
 var Routes = []RoutePolicy{
+	route("GET", "/api/v1/runs/{run}/local-host/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting)),
+	route("GET", "/api/v1/runs/{run}/local-host/nodes/{job}", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting), claim(DataRead, BindOwnNode, LiveReporting)),
+	route("POST", "/api/v1/runs/{run}/local-host/transition", OwnerRun, RetryExactBody, claim(RunsState, BindRunOfTrigger, LiveResult)),
+	route("POST", "/api/v1/runs/{run}/local-host/finish", OwnerRun, RetryExactBody, claim(RunsState, BindRunOfTrigger, LiveResult)),
+	route("POST", "/api/v1/runs/{run}/local-host/nodes/{job}/transition", OwnerRun, RetryExactBody, claim(NodeResult, BindOwnNode, LiveResult), claim(NodeResult, BindRunOfTrigger, LiveResult)),
+	route("POST", "/api/v1/runs/{run}/local-host/authentication", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting)),
+	route("POST", "/api/v1/runs/{run}/local-host/binding", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveReporting)),
 	route("GET", "/api/v1/runs/{run}/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", OwnerRun, RetryNever, claim(NodesClaim, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs", OwnerTeam, RetryIdempotencyKey, intake(), claim(ChildrenStart, BindBodyNamesRun, LiveSensitive)),
@@ -100,6 +107,10 @@ var Routes = []RoutePolicy{
 	route("DELETE", "/api/v1/runners/github/{repository}", OwnerTeam, RetrySafe, member(TeamAdmin)),
 	route("POST", "/api/v1/pools/{pool}/rules", OwnerTeam, RetryIdempotencyKey, member(TeamAdmin)),
 	route("DELETE", "/api/v1/pools/{pool}/rules/{rule}", OwnerTeam, RetrySafe, member(TeamAdmin)),
+	route("PUT", "/api/v1/schedules/local/repos", OwnerTeam, RetryNever, member(RunsControl)),
+	route("POST", "/api/v1/schedules/local/tick", OwnerTeam, RetryNever, member(RunsControl)),
+	route("POST", "/api/v1/schedules/{schedule}/pin", OwnerTeam, RetryNever, member(RunsControl)),
+	route("POST", "/api/v1/schedules/{schedule}/unpin", OwnerTeam, RetrySafe, member(RunsControl)),
 	route("PUT", "/api/v1/schedules/repos", OwnerTeam, RetrySafe, member(RunsControl)),
 	route("DELETE", "/api/v1/schedules/repos", OwnerTeam, RetrySafe, member(RunsControl)),
 	route("PUT", "/api/v1/schedules/{schedule}/override", OwnerTeam, RetrySafe, member(RunsControl)),

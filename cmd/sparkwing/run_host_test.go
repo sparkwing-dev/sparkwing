@@ -88,7 +88,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 				},
 				claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 					*observed = append(*observed, "claim")
-					if detached || request.RunID != award.RunID || request.RunnerVersion != "v1.2.3" || !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitTrigger}) {
+					if detached || request.RunID != award.RunID || request.RunnerVersion != "v1.2.3" || request.AvailableCores <= 0 || !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitTrigger}) {
 						t.Fatalf("invalid local owner claim: %+v", request)
 					}
 					return controllerwire.ClaimResponse{Claim: &award}, nil

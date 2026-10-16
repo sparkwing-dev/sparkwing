@@ -7,10 +7,12 @@ import (
 	"runtime"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
@@ -113,6 +115,17 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (localc
 	b.Store.SetClaimProfileResolver(claimant)
 	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithSecretsCipher(cipher).
 		WithDashboard(controller.Dashboard{Local: true, Version: installedVersion(), Paths: paths.PathsAt(b.Home), Bundle: web.BundleFS()})
+	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(b.Home, "environments"))
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	schedules, err := localcontroller.NewScheduleService(b, installedVersion(), server.ScheduleLauncher())
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	server.WithLocalSchedules(schedules, func(ctx context.Context, root, pipeline string, environment []string) (crons.Proof, error) {
+		return proveLocalSchedule(ctx, b.Home, root, pipeline, environment)
+	}, snapshots)
 	return localcontroller.Services{
 		State: state, HTTP: server.HTTP(), Close: claimant.Close,
 		Runner: runners.StoreRunnerConfig{

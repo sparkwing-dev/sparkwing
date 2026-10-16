@@ -27,6 +27,49 @@ type hostStateController struct {
 	renew  func(context.Context, string, controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
 }
 
+type nodeControllerState struct {
+	privateHostState
+	node func(context.Context, store.NodeRef) (controllerwire.Controller, error)
+}
+
+func (s nodeControllerState) NodeController(ctx context.Context, ref store.NodeRef) (controllerwire.Controller, error) {
+	return s.node(ctx, ref)
+}
+
+func TestCLIHostStepUsesIndependentNodeAuthorityProperty(t *testing.T) {
+	property := func(run, node, step string, attempt uint16, refuse bool) bool {
+		root := hostStateController{step: func(context.Context, string, string, controllerwire.StepReportRequest) error {
+			t.Fatal("step used the run owner's bearer")
+			return nil
+		}}
+		called := false
+		failure := errors.New("node authority unavailable")
+		nodes := nodeControllerState{privateHostState: &cliOwnerStore{}, node: func(_ context.Context, ref store.NodeRef) (controllerwire.Controller, error) {
+			if ref != (store.NodeRef{RunID: run, NodeID: node}) {
+				t.Fatal("step selected another node's authority")
+			}
+			if refuse {
+				return nil, failure
+			}
+			return hostStateController{step: func(_ context.Context, gotRun, gotNode string, body controllerwire.StepReportRequest) error {
+				called = gotRun == run && gotNode == node && body.StepID == step && body.SourceAttempt == int64(attempt)+1
+				return nil
+			}}, nil
+		}}
+		state, err := newCLIHostState(root, nodes, "unit", func() bool { return false })
+		if err != nil {
+			return false
+		}
+		err = state.RecordStep(t.Context(), store.StepReport{
+			Attempt: runspec.AttemptIdentity{RunID: run, NodeID: node, Attempt: int64(attempt) + 1}, StepID: step, State: "passed",
+		})
+		return refuse && errors.Is(err, failure) && !called || !refuse && err == nil && called
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (c hostStateController) AcceptPlan(ctx context.Context, run string, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error) {
 	return c.plan(ctx, run, body)
 }
@@ -229,5 +272,27 @@ func TestCLIHostStateFinishRefusesInvalidOwnerOrVerdict(t *testing.T) {
 	}
 	if applied, err := state.FinishRunAndUnit(t.Context(), valid); !errors.Is(err, want) || applied != (store.Applied{}) || calls != 1 {
 		t.Fatalf("uncommitted completion = %+v, %v, calls=%d", applied, err, calls)
+	}
+}
+
+func TestCLIHostStateFinishesRefusedAdmissionWithItsOwnerUnit(t *testing.T) {
+	state, err := newCLIHostState(hostStateController{}, &cliOwnerStore{}, "unit", func() bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "host", Generation: 1}
+	request := store.FinishRunRequest{Unit: owner, Transition: store.RunTransition{
+		RunID: "run", Actor: store.Actor{Owner: owner}, Cause: store.RunPolicyRefused, To: store.RunFailed,
+		OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyAdmissionFail}, Reason: "resources_refused",
+	}}
+	state.finish = func(_ context.Context, got store.FinishRunRequest) (store.Applied, error) {
+		if !reflect.DeepEqual(got, request) {
+			t.Fatal("admission refusal changed its policy cause or owner unit")
+		}
+		return store.Applied{StateSeq: 3}, nil
+	}
+	applied, err := state.FinishRunAndUnit(t.Context(), request)
+	if err != nil || applied.StateSeq != 3 {
+		t.Fatalf("admission completion = %+v, %v", applied, err)
 	}
 }

@@ -243,7 +243,7 @@ func engineActor(a capability.Authorized) store.Actor {
 	}
 	if a.Principal.Capability.Unit == capability.UnitTrigger || a.Principal.Capability.Unit == capability.UnitPlan {
 		actor.Owner = store.OwnerLeaseRef{
-			Kind: store.OwnerTrigger, Name: a.Principal.Capability.UnitID, RunID: a.Target.RunID,
+			Kind: store.OwnerTrigger, RunID: a.Target.RunID,
 			Holder: b.Holder, Generation: b.Generation,
 		}
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,21 +14,20 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-type localScheduleRegistration struct {
-	Mode        controllerwire.ScheduleWriteMode
-	RepoPath    string
-	Project     *projectconfig.Config
-	Schedules   []controllerwire.ScheduleDeclaration
-	Environment []string
-	Follow      bool
-	Prove       bool
-}
+type localScheduleRegistration = controllerwire.LocalScheduleRegistration
 
 type localScheduleServices struct {
 	lifecycle      wingd.LocalLifecycle
@@ -62,6 +62,30 @@ func resolveLocalScheduleServices(ctx context.Context, home string) (localSchedu
 	}
 	return localScheduleServices{
 		lifecycle: services.lifecycle, units: services.units, options: services.options,
+		register: func(ctx context.Context, input localScheduleRegistration) (controllerwire.ScheduleRepoWritten, error) {
+			manager, closeTransport, err := localScheduleTransport(ctx, home)
+			if err != nil {
+				return controllerwire.ScheduleRepoWritten{}, err
+			}
+			defer closeTransport()
+			return manager.RegisterLocalSchedules(ctx, input)
+		},
+		pin: func(ctx context.Context, id string, pin bool) (controllerwire.ScheduleView, error) {
+			manager, closeTransport, err := localScheduleTransport(ctx, home)
+			if err != nil {
+				return controllerwire.ScheduleView{}, err
+			}
+			defer closeTransport()
+			return manager.SetLocalSchedulePinned(ctx, id, pin)
+		},
+		tick: func(ctx context.Context, dryRun bool) (controllerwire.TickView, error) {
+			manager, closeTransport, err := localScheduleTransport(ctx, home)
+			if err != nil {
+				return controllerwire.TickView{}, err
+			}
+			defer closeTransport()
+			return manager.TickLocalSchedules(ctx, dryRun)
+		},
 		installTimer: func(ctx context.Context, options wingd.LocalStartOptions) error {
 			if options.Home != host.SparkwingHome || options.Executable != host.Binary || options.Version != host.Version {
 				return fmt.Errorf("schedule timer differs from the captured local controller")
@@ -325,4 +349,51 @@ func runScheduleTickCommand(ctx context.Context, args []string, out io.Writer, r
 		err = fmt.Errorf("schedule tick: %s", result.Error)
 	}
 	return err
+}
+
+func localScheduleTransport(ctx context.Context, home string) (controllerwire.LocalScheduleManager, func(), error) {
+	options, closeTransport, err := localControllerOptions(ctx, home, wingdclient.QueryLocalController, func(ctx context.Context) (dashboardServices, error) { return resolveLocalServicesAt(ctx, home) })
+	if err != nil {
+		return nil, nil, err
+	}
+	manager, err := client.NewLocalScheduleManager(options)
+	if err != nil {
+		closeTransport()
+		return nil, nil, err
+	}
+	return manager, closeTransport, nil
+}
+
+func proveLocalSchedule(ctx context.Context, home, root, pipeline string, environment []string) (crons.Proof, error) {
+	options, err := localSourceOptions(home, environment, secrets.NewMasker())
+	if err != nil {
+		return crons.Proof{}, err
+	}
+	directory := filepath.Join(root, ".sparkwing")
+	if typescript, err := pipelineentry.IsTypeScript(directory); err != nil {
+		return crons.Proof{}, err
+	} else if typescript {
+		options.SDK = engine.TypeScriptSDK
+	}
+	repository, err := runspec.CanonicalRepository(runspec.RepoInput{AbsolutePath: root})
+	if err != nil {
+		return crons.Proof{}, err
+	}
+	entry, err := source.Acquire(ctx, source.Spec{RepoKey: string(repository.Key), LocalCheckout: root, PipelineDir: ".sparkwing"}, options)
+	if err != nil {
+		if entry != nil {
+			err = errors.Join(err, entry.Close())
+		}
+		return crons.Proof{}, err
+	}
+	if entry == nil {
+		return crons.Proof{}, errors.New("schedule source acquisition returned no entry")
+	}
+	if len(entry.Command) != 1 {
+		return crons.Proof{}, errors.Join(fmt.Errorf("%s: schedule pinning requires a standalone pipeline executable", pipeline), entry.Close())
+	}
+	if err := writeEngineNotices(os.Stderr, entry.Engine.Notices); err != nil {
+		return crons.Proof{}, errors.Join(err, entry.Close())
+	}
+	return crons.Proof{Binary: entry.Command[0], Release: entry.Close}, nil
 }

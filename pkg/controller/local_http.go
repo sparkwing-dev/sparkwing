@@ -28,12 +28,13 @@ func (s *Server) HTTP() wingd.LocalHTTP {
 			}
 			return capability.Subject{}
 		})
-		router := s.routers()
+		router := s.registeredRouters()
+		s.registerControllerEndpoints(router, s.localHostEndpoints())
 		router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			policy := s.routeProbe()
 			writeRouteMiss(w, allowedRouteMethods(policy, r, routeProbeMethods))
 		})
-		api := s.observedHandler(router)
+		api := s.observedHandler(router.ServeMux)
 		dashboard := api
 		if s.dashboard != nil {
 			dashboard = s.browserHandler(api)

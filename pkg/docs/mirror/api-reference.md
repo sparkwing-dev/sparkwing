@@ -11,6 +11,13 @@ The owner names the server lookup. Bindings and current authority constrain ever
 
 | Method | Path | Audience | Owner | Authentication | Retry | Access alternatives |
 |---|---|---|---|---|---|---|
+| `GET` | `/api/v1/runs/{run}/local-host/snapshot` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `reporting` |
+| `GET` | `/api/v1/runs/{run}/local-host/nodes/{job}` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `reporting`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `reporting` |
+| `POST` | `/api/v1/runs/{run}/local-host/transition` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `runs.state` / `runOfTrigger` / `result` |
+| `POST` | `/api/v1/runs/{run}/local-host/finish` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `runs.state` / `runOfTrigger` / `result` |
+| `POST` | `/api/v1/runs/{run}/local-host/nodes/{job}/transition` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.result` / `ownNode` / `result`<br>`awarded_or_delegated_claim` / `node.result` / `runOfTrigger` / `result` |
+| `POST` | `/api/v1/runs/{run}/local-host/authentication` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `reporting` |
+| `POST` | `/api/v1/runs/{run}/local-host/binding` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `reporting` |
 | `GET` | `/api/v1/runs/{run}/snapshot` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/reconcile` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `nodes.claim` / `runOfTrigger` / `sensitive` |
 | `POST` | `/api/v1/runs` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `runs.write` / `bodyNamesRun` / `credential`<br>`awarded_or_delegated_claim` / `children.start` / `bodyNamesRun` / `sensitive` |
@@ -35,7 +42,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `POST` | `/api/v1/runs/{run}/finish` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `runs.state` / `runOfTrigger` / `result`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
 | `POST` | `/api/v1/runs/{run}/heartbeat` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `reporting` |
 | `POST` | `/api/v1/runs/{run}/claim` | `controller` | `run` | `capability` | `never` | `here_award` / `trigger.host` / `runOfTrigger` / `hereClaim`<br>`any_live` / `triggers.claim` / `claimSelection` / `credential` |
-| `POST` | `/api/v1/runs/{run}/source-credential` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `source.read` / `source` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/source-credential` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `source.read` / `source` / `sensitive`<br>`pod_bootstrap` / `source.read` / `source` / `sensitive` |
 | `POST` | `/api/v1/runs/{run}/oidc-token` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `oidc.mint` / `run` / `sensitive` |
 | `POST` | `/api/v1/runs/{run}/children` | `controller` | `run` | `capability` | `idempotency_key` | `awarded_or_delegated_claim` / `children.start` / `bodyNamesRun` / `sensitive` |
 | `GET` | `/api/v1/runs/{run}/children/{child}` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `children.start` / `childOfBoundNode` / `sensitive` |
@@ -109,6 +116,10 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `DELETE` | `/api/v1/runners/github/{repository}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/pools/{pool}/rules` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/pools/{pool}/rules/{rule}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PUT` | `/api/v1/schedules/local/repos` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/schedules/local/tick` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/schedules/{schedule}/pin` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/schedules/{schedule}/unpin` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
 | `PUT` | `/api/v1/schedules/repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
 | `DELETE` | `/api/v1/schedules/repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
 | `PUT` | `/api/v1/schedules/{schedule}/override` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
@@ -170,7 +181,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `POST` | `/api/v1/runners/claim` | `controller` | `team` | `capability` | `never` | `any_live` / `nodes.claim` / `claimSelection` / `credential`<br>`any_live` / `triggers.claim` / `claimSelection` / `credential` |
 | `POST` | `/api/v1/launcher/claim` | `controller` | `deployment` | `capability` | `never` | `launcher_service` / `claims.launch` / `claimSelection` / `credential` |
 | `POST` | `/api/v1/launcher/sync` | `controller` | `deployment` | `capability` | `safe` | `launcher_service` / `claims.launch` / `claimSelection` / `credential` |
-| `POST` | `/api/v1/claims/exchange` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `claim.exchange` / `run` / `sensitive` |
+| `POST` | `/api/v1/claims/exchange` | `controller` | `run` | `capability` | `never` | `pod_bootstrap` / `claim.exchange` / `run` / `sensitive` |
 | `POST` | `/api/v1/claims/{claim}/heartbeat` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `ownClaim` / `reporting`<br>`eval_unit` / `expansion.submit` / `ownEval` / `expansion` |
 | `POST` | `/api/v1/claims/{claim}/logs` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `log.tail` / `ownClaim` / `logTail`<br>`eval_unit` / `expansion.submit` / `ownEval` / `expansion` |
 | `POST` | `/api/v1/claims/{claim}/log-segments` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `log.tail` / `ownClaim` / `logTail`<br>`eval_unit` / `expansion.submit` / `ownEval` / `expansion` |

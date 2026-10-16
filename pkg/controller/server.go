@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -143,9 +144,12 @@ type Server struct {
 	operators       atomic.Pointer[map[string]bool]
 	consoleWrites   ConsoleWriter
 
-	dashboard     *Dashboard
-	localHTTPOnce sync.Once
-	localHTTP     wingd.LocalHTTP
+	dashboard                 *Dashboard
+	localHTTPOnce             sync.Once
+	localHTTP                 wingd.LocalHTTP
+	localSchedules            *crons.Service
+	localScheduleProver       LocalScheduleProver
+	localScheduleEnvironments LocalScheduleEnvironments
 }
 
 // New constructs a Server bound to the given store. A trigger it accepts is
