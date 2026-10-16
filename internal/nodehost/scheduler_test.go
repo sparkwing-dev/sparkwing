@@ -29,6 +29,7 @@ func openStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	st.SetTestClock(t, time.Now)
 	return st
 }
 

@@ -117,6 +117,13 @@ type storeTx struct {
 	rotatingRoot *capability.Capability
 }
 
+// SetTestClock overrides the SQLite store clock until the test ends.
+func (s *Store) SetTestClock(t interface{ Cleanup(func()) }, clock func() time.Time) {
+	original := s.clock
+	t.Cleanup(func() { s.clock = original })
+	s.clock = clock
+}
+
 func (s *Store) now() time.Time {
 	if s.clock != nil {
 		return s.clock().UTC()
