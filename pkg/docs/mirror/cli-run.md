@@ -75,6 +75,17 @@ and removes it when the run ends. 'front' and 'back' stay
 unresolved until the consumer launches the run, so 'front' means
 ahead of the queue the run actually joins.
 
+--sw-ref-worktree NAME executes the --sw-ref commit in a named
+worktree of the repository instead of one made for the run. The
+consumer keeps it between runs and switches it to each run's commit
+in place, so files Git ignores (build output, dependency caches) and
+unchanged files' modification times carry over from one run to the
+next; tracked files, .sparkwing, go.work and go.work.sum match the
+commit. A run holds the worktree from before planning until its last
+node ends, and the next run naming it waits. It combines with
+--sw-pipeline-ref: the pipeline compiles from that ref and executes in
+the named worktree.
+
 A pipeline can declare source: origin/main in sparkwing.yaml. Every launch
 compiles that source while jobs execute in the submitting checkout.
 An explicit --sw-pipeline-ref must resolve to the declared source commit.
@@ -87,7 +98,8 @@ The execution checkout must retain .sparkwing/sparkwing.yaml;
 its pipeline source may be missing or unbuildable.
 The ref resolves when you
 launch; its tree is checked out only to compile and is removed when
-the run ends. It cannot be combined with --sw-ref.
+the run ends. It combines with --sw-ref only alongside
+--sw-ref-worktree.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run
 and the other run-shaping --sw- flags)
@@ -116,7 +128,8 @@ is running and exits after five idle minutes; see
 | Flag | Description |
 |---|---|
 | `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
-| `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref |
+| `--sw-ref-worktree NAME` | Detached only, with --sw-ref: execute in the named worktree, reused across runs so build output Git ignores stays warm; a run holding it makes the next one wait |
+| `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; combines with --sw-ref only alongside --sw-ref-worktree |
 | `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
 | `--sw-idempotency-key KEY` | Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one |
 | `--sw-request-id ID` | Detached only: tracing identifier recorded on the run; never affects deduplication |
@@ -150,6 +163,9 @@ sparkwing run fictional-release --version v0.28.1
 
 # Run from a different git ref
 sparkwing run fictional-build --sw-ref feature/xyz
+
+# Queue a commit into a reused worktree
+sparkwing run fictional-build --sw-detached --sw-ref feature/xyz --sw-ref-worktree checks
 
 # Queue a run that outlives the terminal
 sparkwing run nightly-report --sw-detached

@@ -33,18 +33,32 @@ func CreateRefWorktree(
 		return "", fmt.Errorf("secure ref worktree directory: %w", err)
 	}
 	dir := p.RefWorktreeDir(runID)
-	out, err := exec.CommandContext(ctx, "git", "-C", originRepo,
-		"worktree", "add", "--detach", "--quiet", "--", dir, string(commit)).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git worktree add %s: %w: %s", commit, err, strings.TrimSpace(string(out)))
+	if err := addRefWorktree(ctx, originRepo, dir, commit); err != nil {
+		return "", err
 	}
-	if info, serr := os.Stat(filepath.Join(dir, ".sparkwing")); serr != nil || !info.IsDir() {
+	if err := requirePipelineDir(dir, commit); err != nil {
 		if rerr := RemoveRefWorktree(ctx, p, dir, logger); rerr != nil {
 			return "", rerr
 		}
-		return "", fmt.Errorf("commit %s has no .sparkwing/ directory, so no pipeline can be resolved from it", commit)
+		return "", err
 	}
 	return dir, nil
+}
+
+func addRefWorktree(ctx context.Context, originRepo, dir string, commit Commit) error {
+	out, err := exec.CommandContext(ctx, "git", "-C", originRepo,
+		"worktree", "add", "--detach", "--quiet", "--", dir, string(commit)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree add %s: %w: %s", commit, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func requirePipelineDir(dir string, commit Commit) error {
+	if info, err := os.Stat(filepath.Join(dir, ".sparkwing")); err != nil || !info.IsDir() {
+		return fmt.Errorf("commit %s has no .sparkwing/ directory, so no pipeline can be resolved from it", commit)
+	}
+	return nil
 }
 
 // RemoveRefWorktree deletes a worktree and its registration. It refuses a
@@ -173,10 +187,14 @@ func HoldRefWorktree(p Paths, runID string) (*os.File, bool, error) {
 		return nil, false, fmt.Errorf("run id %q does not name one directory under %s",
 			runID, p.RefWorktreesDir())
 	}
-	if err := fssecure.EnsureDir(p.RefWorktreesDir()); err != nil {
+	return tryHoldLease(p.RefWorktreesDir(), refWorktreeLeasePath(p, runID))
+}
+
+func tryHoldLease(dir, leasePath string) (*os.File, bool, error) {
+	if err := fssecure.EnsureDir(dir); err != nil {
 		return nil, false, fmt.Errorf("secure ref worktree directory: %w", err)
 	}
-	file, err := openRefWorktreeLease(refWorktreeLeasePath(p, runID))
+	file, err := openRefWorktreeLease(leasePath)
 	if err != nil {
 		return nil, false, err
 	}

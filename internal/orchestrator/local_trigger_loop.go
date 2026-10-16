@@ -171,7 +171,7 @@ func claimChildTrigger(ctx context.Context, state RunCoordination, runID string)
 }
 
 func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
-	parentRepoDir string, cache *localCompileCache, logger *slog.Logger, env []string,
+	parentRepoDir string, cache *localCompileCache, logger *slog.Logger, env []string, inherit ...*os.File,
 ) error {
 	repoDir, cleanup, err := prepareTriggerRepo(ctx, trig, parentRepoDir)
 	if err != nil {
@@ -261,12 +261,21 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		return fmt.Errorf("prepare local dispatch admission: %w", err)
 	}
 	defer closeAdmission()
-	return execLocalChild(ctx, host, repoDir, []string{TriggerHostVerb, "--program", binPath, trig.ID}, env)
+	args := []string{TriggerHostVerb, "--program", binPath}
+	inherit = inheritableLease(inherit)
+	if len(inherit) > 0 {
+		args = append(args, "--"+TriggerHostLeaseFlag)
+	}
+	return execLocalChild(ctx, host, repoDir, append(args, trig.ID), env, inherit...)
 }
 
 // TriggerHostVerb is the hidden sparkwing verb that hosts one claimed local
-// trigger's run: `sparkwing __host-trigger --program <pipeline> <trigger-id>`.
+// trigger's run: `sparkwing __host-trigger --program <pipeline> [--lease] <trigger-id>`.
 const TriggerHostVerb = "__host-trigger"
+
+// TriggerHostLeaseFlag tells the trigger host that descriptor 3 holds the run's
+// worktree lease.
+const TriggerHostLeaseFlag = "lease"
 
 // safety: the process that claimed the trigger is the sparkwing CLI, so the run is hosted by that same build,
 // which keeps the engine values its host needs; every pipeline process the host starts gets the stripped
@@ -324,9 +333,10 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 	return append(out, "SPARKWING_HOME="+home)
 }
 
-func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []string) error {
+func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []string, inherit ...*os.File) error {
 	cmd := exec.Command(binPath, args...)
 	cmd.Dir = repoDir
+	cmd.ExtraFiles = inherit
 	cmd.Stdout = os.Stdout
 	tail := &stderrTail{limit: childStderrTailBytes}
 	cmd.Stderr = io.MultiWriter(os.Stderr, tail)

@@ -15,11 +15,17 @@ func runTriggerHost(args []string) error {
 	fs := flag.NewFlagSet(orchestrator.TriggerHostVerb, flag.ContinueOnError)
 	program := fs.String("program", "", "the compiled pipeline each node runs")
 	direct := fs.Bool("direct", false, "host the trigger in this process rather than under a shepherd that reaps what it leaves")
+	lease := fs.Bool(orchestrator.TriggerHostLeaseFlag, false, "descriptor 3 holds the run's worktree lease")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *lease {
+		if err := orchestrator.KeepInheritedLease(); err != nil {
+			return err
+		}
+	}
 	if *program == "" || fs.NArg() != 1 {
-		return errors.New("usage: sparkwing " + orchestrator.TriggerHostVerb + " --program <pipeline> <trigger-id>")
+		return errors.New("usage: sparkwing " + orchestrator.TriggerHostVerb + " --program <pipeline> [--lease] <trigger-id>")
 	}
 	if !*direct {
 		self, err := os.Executable()
