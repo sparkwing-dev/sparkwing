@@ -674,7 +674,7 @@ func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := pushPayload(7, 701, "acme/widgets", headSHA)
-	if code, out := f.deliver("push", payload, ""); code != http.StatusTooManyRequests || out["code"] != controller.ComputeLimitRefusedCode {
+	if code, out := f.deliver("push", payload, ""); code != http.StatusTooManyRequests || computeLimitReason(out) != controller.ComputeLimitRefusedCode {
 		t.Fatalf("limited app webhook = %d %v, want compute-limit 429", code, out)
 	}
 	if got := f.triggers(olga.team); len(got) != 0 {
@@ -1571,4 +1571,10 @@ func TestGitHubAppRunRecordsTheDefaultBranch(t *testing.T) {
 	if branch := run.Request.Request.Git.DefaultBranch; !branch.Set || branch.Value != "trunk" {
 		t.Fatalf("sealed git = %+v, want default branch trunk", run.Request.Request.Git)
 	}
+}
+
+func computeLimitReason(out map[string]any) any {
+	failure, _ := out["error"].(map[string]any)
+	details, _ := failure["details"].(map[string]any)
+	return details["reason"]
 }

@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // Code is the sole wire error discriminator. Clients branch on it rather than status or message.
@@ -336,6 +337,19 @@ func retryAfter(value any) string {
 		return ""
 	}
 	return strconv.FormatFloat(math.Ceil(millis/1000), 'f', 0, 64)
+}
+
+// RetryDelay returns the whole-second wait a rate-limited or unavailable failure names in details.retry_after_ms.
+func RetryDelay(err error) (time.Duration, bool) {
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Code != RateLimited && failure.Code != Unavailable {
+		return 0, false
+	}
+	seconds, parseErr := strconv.ParseInt(retryAfter(failure.Details["retry_after_ms"]), 10, 64)
+	if parseErr != nil {
+		return 0, false
+	}
+	return time.Duration(min(seconds, int64(time.Hour/time.Second))) * time.Second, true
 }
 
 // NoteResponseError retains the first cause for the request's masked diagnostic.

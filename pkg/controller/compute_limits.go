@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -122,17 +121,6 @@ func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimi
 	return out, nil
 }
 
-// safety: a runner tells this apart from a transport failure and keeps polling
-// rather than retrying the request.
-type computeLimitRefusalJSON struct {
-	Error    string `json:"error"`
-	Code     string `json:"code"`
-	Limit    string `json:"limit"`
-	Cap      int64  `json:"cap"`
-	Observed int64  `json:"observed"`
-	Scope    string `json:"scope,omitempty"`
-}
-
 // ComputeLimitRetryAfterSeconds is the Retry-After a guard refusal carries. A
 // guard clears when work finishes rather than on a schedule, so it names how
 // often a caller should ask again.
@@ -155,11 +143,14 @@ func (s *Server) writeComputeLimitRefusal(
 	s.logger.Warn("refused by a compute guard",
 		"limit", refused.Limit, "cap", refused.Cap,
 		"observed", refused.Observed, "scope", refused.Scope)
-	w.Header().Set("Retry-After", strconv.Itoa(ComputeLimitRetryAfterSeconds))
-	writeJSON(w, http.StatusTooManyRequests, computeLimitRefusalJSON{
-		Error: refused.Error(), Code: ComputeLimitRefusedCode,
-		Limit: refused.Limit, Cap: refused.Cap, Observed: refused.Observed, Scope: refused.Scope,
-	})
+	details := map[string]any{
+		"reason": ComputeLimitRefusedCode, "limit": refused.Limit, "cap": refused.Cap, "observed": refused.Observed,
+		"retry_after_ms": ComputeLimitRetryAfterSeconds * 1000,
+	}
+	if refused.Scope != "" {
+		details["scope"] = refused.Scope
+	}
+	writePolicyError(w, &apierr.Error{Code: apierr.RateLimited, Message: refused.Error(), Details: details})
 	return true
 }
 
