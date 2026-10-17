@@ -315,14 +315,7 @@ func TestNativeLogReadAuthorityProperty(t *testing.T) {
 
 func TestNativeLogReadEndsWithItsRoot(t *testing.T) {
 	f := newEgressFixture(t, egress.Config{})
-	tenant, err := f.store.ForTeam(t.Context(), "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: authority, CapabilityPrefix: "root"}, authority); err != nil {
-		t.Fatal(err)
-	}
+	revokeEngineMachine(t, f.store, "root")
 	before := f.objects.reads
 	w := f.fetch("GET", egressLogPath, f.claim)
 	if w.Code != 401 || strings.Contains(w.Body.String(), "hello") || f.objects.reads != before || f.meter.State().GlobalMonthBytes != 0 {

@@ -35,7 +35,7 @@ func operatorRoutes(team string) [][2]string {
 	}
 }
 
-func TestOperatorConsole_RefusesEveryCallerButTheListedOperatorsSession(t *testing.T) {
+func TestOperatorConsoleKeepsActionsPrivateAndPlacementReadMinimal(t *testing.T) {
 	f, operator, owner := operatorFixture(t)
 	body := map[string]any{"trust": "granted", "reason": "mine", "amount_cents": 100}
 	for _, route := range operatorRoutes(owner.team) {
@@ -47,8 +47,15 @@ func TestOperatorConsole_RefusesEveryCallerButTheListedOperatorsSession(t *testi
 			{"admin token", "Bearer " + f.admin, http.StatusForbidden},
 			{"the team's own owner", owner.auth, http.StatusForbidden},
 		} {
-			if code := f.call(route[0], route[1], tc.auth, body, nil); code != tc.want {
+			if tc.name == "admin token" && route == [2]string{"GET", "/api/v1/operator/teams/" + owner.team} {
+				tc.want = http.StatusOK
+			}
+			var response map[string]any
+			if code := f.call(route[0], route[1], tc.auth, body, &response); code != tc.want {
 				t.Errorf("%s: %s %s = %d want %d", tc.name, route[0], route[1], code, tc.want)
+			}
+			if tc.name == "admin token" && tc.want == http.StatusOK && (len(response) != 2 || response["team"] != owner.team || response["display_name"] == nil) {
+				t.Errorf("deployment team projection = %+v", response)
 			}
 		}
 	}

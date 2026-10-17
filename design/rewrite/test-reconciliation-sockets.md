@@ -141,7 +141,7 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestOperatorConsole_FindsATeamAndActsOnItWithAReason`.
 - `pkg/controller`: `TestOperatorConsole_KeepsARevocationAndDisputeHolds`.
 - `pkg/controller`: `TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID`.
-- `pkg/controller`: `TestOperatorConsole_RefusesEveryCallerButTheListedOperatorsSession`.
+- `pkg/controller`: `TestOperatorConsoleKeepsActionsPrivateAndPlacementReadMinimal`.
 - `pkg/controller`: `TestOperatorDeletesAnAccountByEmailAndATeamBySlug`.
 - `pkg/controller`: `TestReadHostKeyTakesTheKeyTheServerPresents`.
 - `pkg/controller`: `TestRefundReportingRejectsTeamOwnerAndRunner`.

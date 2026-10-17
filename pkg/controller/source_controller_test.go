@@ -61,10 +61,7 @@ func TestSourceControllerUsesStoreAuditAndBoundCipher(t *testing.T) {
 				t.Fatal(err)
 			}
 			if revoked {
-				root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"}
-				if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: root, CapabilityPrefix: root.ID}, root); err != nil {
-					t.Fatal(err)
-				}
+				revokeEngineMachine(t, e.Store, "runner")
 			}
 			audited := &auditedSourceCipher{Cipher: cipher, store: e.Store, t: t}
 			h := New(e.Store, nil).WithSecretsCipher(audited).Handler()

@@ -244,9 +244,9 @@ func TestRenewUnitRequiresBootstrapExchange(t *testing.T) {
 func revokeClaimRoot(t *testing.T, s *Store, prefix string, team Team) {
 	t.Helper()
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}
-	actor := Actor{Authority: ref}
 	var err error
 	if team != "" {
+		actor := authorityMember(t, s, "claim-revoker", RoleOwner)
 		err = (&Tenant{s: s, team: team}).RevokeAuthority(t.Context(), actor, ref)
 	} else {
 		operator := authorityRoot("revoker", "")

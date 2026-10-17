@@ -125,14 +125,7 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 		case 0:
 			status = 200
 		case 1:
-			tenant, err := e.Store.ForTeam(t.Context(), "a")
-			if err != nil {
-				t.Fatal(err)
-			}
-			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
-			if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
-				t.Fatal(err)
-			}
+			revokeEngineMachine(t, e.Store, "root")
 		case 2:
 			if trigger {
 				engineSQL(t, e.Store, `UPDATE triggers SET claimed_by='replacement',generation=generation+1 WHERE team='a' AND id='run'`)
@@ -311,14 +304,7 @@ func TestCredentialStartedClaimHTTPConsumesContractAttempt(t *testing.T) {
 	h = s.Handler()
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/annotations", `{"message":"accepted"}`, 204)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/other/annotations", `{"message":"foreign"}`, 403)
-	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
-		t.Fatal(err)
-	}
+	revokeEngineMachine(t, e.Store, "root")
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/annotations", `{"message":"after-revocation"}`, 401)
 	var count int
 	if err := e.Store.DB().QueryRow(`SELECT annotation_count FROM runs WHERE team='a' AND id='run'`).Scan(&count); err != nil || count != 1 {

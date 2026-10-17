@@ -131,6 +131,85 @@ handoff remains open; no new machine-registration integration uses a stub.
 Scratch is removed at handoff and `/tmp/sw-gocache` is retained. No Git write,
 service start, release, harness memory write or lead-owned contract edit occurred.
 
+## Native-failure reconciliation continuation
+
+The lead's session-1 native receipt is now present. Its shared-runner revocation
+failures reproduce through the store and HTTP recorders. The fixtures tried to
+revoke shared roots with those roots' own credentials. Updated them to use
+current team administration through the real issuer and revocation transaction.
+Production authorization is unchanged. Seven controller call sites share one
+test helper. The store tests reuse revokeClaimRoot and authorityMember.
+
+The ownership property now generates personal/shared enrollment, creator
+ownership, current administration and forged query selectors. It checks both
+HTTP status and persisted credential liveness. A demoted creator can revoke
+their own personal machine, but shared runners require current administration.
+
+The operator failures come from tests still refusing the deployment placement
+read approved in C2. Updated both suites to admit that read and require exactly
+the team ID and display name. The recorder acceptance test opens real SQLite
+for successful reads rather than invoking the authorized handler with a nil
+store. All console-action refusals remain. Names now describe that split:
+TestOperatorConsoleKeepsActionsPrivateAndPlacementReadMinimal and
+TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads.
+
+### Unit and acceptance evidence
+
+The reported failures ran red before edits. Their recorder/store selection now
+passes: store 1.894s, controller 5.506s, acceptance 0.446s. The broader selection,
+including machine enrollment, policy audit/rechecks, ownership, CLI settings and
+operator team creation, passes: store 6.951s, controller 4.988s, CLI 0.607s,
+acceptance 1.236s. Existing native topology cells remain for the lead.
+
+Race checks pass: store 73.233s, controller 5.468s, acceptance 3.277s. Selection:
+TestCapabilityClaimLivenessProperty, TestRenewUnitRefusesStaleAndRootAuthority,
+TestNativeTokenOwnershipRelationProperty, TestMachineEnrollmentTeamSettingProperty,
+TestTeamSetting, TestSharedMachine, TestMachineTeamSettingsHTTP and the operator
+HTTP boundary test. The latter ran under its prior name before the rename.
+
+### Commands and limits
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOTMPDIR=/tmp/sw-astra-W2/go,
+TMPDIR=/tmp/sw-astra-W2 and go -C with this worktree's absolute path.
+
+- go build -p 4 ./... passes.
+- go vet -p 4 ./pkg/store ./pkg/controller ./tests/acceptance passes.
+- go test -p 4 ./pkg/store ./pkg/controller ./cmd/sparkwing ./tests/acceptance
+  -run 'TestMachine|TestTeamSetting|TestSharedMachine|TestBurstPersonal|TestPersonal|TestRunnersPersonal|TestOperatorTeamsCreateCLI|TestOperatorHTTP|TestCapabilityClaimLivenessProperty|TestReleaseUnitRefusesForgedStartedAndCancelledClaims|TestRenewUnitRefusesStaleAndRootAuthority|TestCredentialClaimHTTPAncestryAndFenceProperty|TestCredentialStartedClaimHTTPConsumesContractAttempt|TestNativeLogReadEndsWithItsRoot|TestEngineClaimHTTPRefusalsDoNotAward|TestEngineClaimHTTPDeadCredentialProperty|TestTeamGitCredentialStaysWithTheTeamClaimAndHost|TestNativeTokenOwnershipRelationProperty|TestSourceControllerUsesStoreAuditAndBoundCipher|TestRootProvision|TestServing|TestCredentialRoute'
+  -count=1 passes.
+- go run ./internal/commentcheck -base main . is clean across 2,812 files.
+- gofmt and git diff --check pass.
+
+No whole-store/controller, PostgreSQL or socket-dependent native pass is claimed.
+The changed console fixture needs the lead's native rerun. No product behavior
+or public documentation changed, so there is no additional changelog impact.
+
+### Scope and remaining work
+
+Zero production lines added or deleted. W2 remains +17,655/-18,198 against
+main, net -543, within its -250 budget. Existing test setup and expectations
+were replaced. No historical test was newly ported and no old production API
+was removed in this continuation.
+
+Contract signatures and policies are unchanged. C2's evidence paragraph now
+records the approved deployment read, and t1-port-inventory records the approved
+personal-enrollment setting. No contract change request or design question is
+new. The earlier C1 QueuePriorityWriter persistence handoff remains open and
+uses its existing fake-backed controller seam. Machine enrollment uses no stub.
+
+Shared files touched: pkg/store/claim_authentication_property_test.go,
+pkg/store/unit_renewal_test.go, tests/acceptance/operator_authorization_test.go,
+design/rewrite/contracts/t1-port-inventory.md, design/rewrite/test-reconciliation.md
+and design/rewrite/test-reconciliation-sockets.md. Other changes are W2-owned
+controller tests, C2 evidence and this report. Lead-owned handoffs/amendments
+are unchanged.
+
+The receipt still contains FAIL from the last committed state. Completion awaits
+the harness's next commit and native run. No Git writes, installed Sparkwing
+execution, pipeline, service or harness-memory writes occurred. Scratch is
+deleted at handoff and /tmp/sw-gocache is retained.
+
 <!-- design:end -->
 
 STATUS: CONTINUE

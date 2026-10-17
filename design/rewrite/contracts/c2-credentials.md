@@ -1577,10 +1577,12 @@ T1 should implement these behavioral scenarios against the running contracts:
 | Auth cache | Both TTL and fresh full-generation equality are required. Ancestor/session revocation, cross-team launcher revocation and membership loss invalidate reuse. |
 | Windows | SID-verified local subjects, private-file ACLs and equivalent refusal semantics. |
 
-`TestOperatorHTTPRefusesNonConsoleAuthority` exercises thirteen actual Server
-registrations with the real verifier and fake committed facts. It refuses deployment
-and delegated bearers, ordinary sessions, local peers, dead sessions, wrong audiences,
-missing grants and missing CSRF proof. `TestOperatorHTTPCommitsAuthorizedActions`
+`TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads` exercises thirteen actual Server
+registrations with the real verifier and fake committed facts. Deployment and
+delegated bearers reach only the team placement read, whose real SQLite projection
+contains exactly the team ID and display name. Console actions refuse those
+bearers, ordinary sessions, local peers, dead sessions, wrong audiences, missing
+grants and missing CSRF proof. `TestOperatorHTTPForwardsActionsAndAudits`
 checks grant replay, trust, freeze/unfreeze and their authenticated actor IDs against
 SQLite, with and without the dashboard wrapper. Console handlers receive `Authorized`
 and use its subject ID for attribution. They no longer read the legacy principal.
