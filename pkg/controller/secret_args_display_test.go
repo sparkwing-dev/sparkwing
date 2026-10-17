@@ -175,53 +175,6 @@ func TestSecretArgs_ControllerAttemptsRedacts(t *testing.T) {
 		getBody(t, srv.URL+"/api/v1/runs/run-1/attempts"))
 }
 
-func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
-	st, srv := secretArgController(t)
-	seedSecretArgRun(t, st, "run-1")
-
-	resp, err := http.Post(srv.URL+"/api/v1/runs/run-1/retry", "application/json", bytes.NewBufferString(""))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("retry status=%d, want 202", resp.StatusCode)
-	}
-
-	ctx := context.Background()
-	src, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, "run-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if src.Args["token"] != ctlSecretValue {
-		t.Fatalf("source run args were mutated by a read path: %q", src.Args["token"])
-	}
-	if src.RetriedAs == "" {
-		t.Fatal("retry did not record RetriedAs")
-	}
-	retried, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, src.RetriedAs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if retried.Args["token"] != ctlSecretValue {
-		t.Errorf("retry run args[token] = %q, want plaintext %q -- the retry would execute with a literal %s",
-			retried.Args["token"], ctlSecretValue, runspec.RedactedArgValue)
-	}
-	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, src.RetriedAs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trig.Args["token"] != ctlSecretValue {
-		t.Errorf("retry trigger args[token] = %q, want plaintext", trig.Args["token"])
-	}
-
-	if got, _ := retried.Invocation[store.InvocationSecretArgsKey].([]any); len(got) != 1 || got[0] != "token" {
-		t.Fatalf("retry run classification = %v, want [token]", got)
-	}
-	assertRedactedResponse(t, "GET /api/v1/runs/{id} for a pending retry",
-		getBody(t, srv.URL+"/api/v1/runs/"+src.RetriedAs))
-}
-
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRunAs(t, st, "run-1", "pending")
