@@ -1018,7 +1018,7 @@ with separate `launcher.tokenSecret` and Kubernetes ServiceAccount/RBAC.
 image requires repository and tag together. Job runner and Docker coordinates
 also require a SHA-256 digest. AppVersion never selects a runtime image.
 The launcher targets the release namespace, alongside its customer ServiceAccount,
-admission exemption guard and default-deny Job egress policy. Allowed egress is
+Pod verification and default-deny Job egress policy. Allowed egress is
 operator-supplied through `launcher.networkPolicy.egress`.
 
 BuildJob retains the exact TeamNodeValue label and adds a NoSchedule CPU-band
@@ -1028,7 +1028,7 @@ Admission validation preserves the Job template annotations as well as placement
 NodePool provisioning stays an infrastructure prerequisite: each Ready node must
 carry its exact team's hashed label, and one reservation occupies the whole node.
 The launcher does not induce Karpenter scale-up. Native sidecars,
-PodLevelResources, admission APIs and escaped-node network enforcement must be
+PodLevelResources and escaped-node network enforcement must be
 verified on the target cluster. A Helm render establishes no native proof.
 
 ## Burst artifact execution and physical Cloud resources
@@ -1152,3 +1152,23 @@ request. Runtime environment snapshots retain their existing names/digest rule.
 Automation discovery reads the current default branch's declarations but cannot
 replace the default branch reported by the signed event. A later default-branch
 change does not remove the original push's default-branch trust.
+
+
+## EKS launcher verification amendment (2026-10-17)
+
+This implements the 07:30 lead decision. Delete admission exemption discovery,
+policy builders and chart policy templates. The Job retains its requested template before API defaulting. The launcher
+compares created Pods against that spec after activation and at every reconciliation.
+Only Kubernetes defaults and the explicit EKS pod-identity, Pod ENI and
+load-balancer readiness mutations pass. A changed container/image/security
+field or volume fails the comparison. Rejection records `sparkwing.dev/pod-rejected`,
+UID-fences deletion and fails the exact award through the existing sync route.
+The Job finalizer holds reservation cleanup until rejection acknowledgement and
+container termination. Empty lists await the Job controller through subsequent
+reconciliation. This remains detection after creation, as approved by the lead.
+
+Chart Pod labels use `app: sparkwing-<component>`. Cloud Job Pods use
+`app: sparkwing-job`. Namespace administrators grant create on Pods/Jobs only
+to the launcher. NodePool templates set the exact team-node label and matching
+NoSchedule taint. The Cloud example mounts a separate launcher controller
+credential, sets controller fsGroup, and shows trusted proxy CIDRs.

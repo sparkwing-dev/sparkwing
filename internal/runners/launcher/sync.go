@@ -42,6 +42,18 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
+		if job.Annotations[rejectedAnnotation] != "" {
+			if err := l.rejectJob(ctx, &job, binding, reservation); err != nil {
+				errs = append(errs, err)
+			}
+			continue
+		}
+		if jobFinished(job) && (job.Spec.Suspend == nil || !*job.Spec.Suspend) {
+			if verifyErr := l.verifyJobPods(ctx, &job); verifyErr != nil {
+				errs = append(errs, verifyErr, l.rejectJob(ctx, &job, binding, reservation))
+				continue
+			}
+		}
 		// safety: a live suspended Job may still be publishing its bootstrap on another launcher.
 		remove := job.DeletionTimestamp != nil || jobFinished(job)
 		deadline, deadlineErr := time.Parse(time.RFC3339Nano, job.Annotations[deadlineAnnotation])
@@ -68,11 +80,17 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			return errors.Join(append(errs, err)...)
 		}
 		for _, observation := range observations {
-			if !retirements[observation.JobName] {
-				continue
-			}
 			job := &jobs.Items[live[observation.JobName]]
 			_, reservation, err := jobOwnership(*job)
+			if err == nil && !retirements[observation.JobName] {
+				if job.Spec.Suspend != nil && *job.Spec.Suspend {
+					continue
+				}
+				if verifyErr := l.verifyJobPods(ctx, job); verifyErr != nil {
+					errs = append(errs, verifyErr, l.rejectJob(ctx, job, observation.Binding, reservation))
+				}
+				continue
+			}
 			if err == nil {
 				err = l.teardown(ctx, job, reservation)
 			}
@@ -188,7 +206,11 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 	if err := json.Unmarshal([]byte(job.Annotations[reservationAnnotation]), &reservation); err != nil {
 		return binding, reservation, fmt.Errorf("Job %s has invalid reservation: %w", job.Name, err)
 	}
-	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.Award != binding.LeaseRef() || reservation.NodeName != job.Spec.Template.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
+	var requested corev1.PodTemplateSpec
+	if err := json.Unmarshal([]byte(job.Annotations[templateAnnotation]), &requested); err != nil {
+		return binding, reservation, fmt.Errorf("Job %s has invalid requested template: %w", job.Name, err)
+	}
+	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.Award != binding.LeaseRef() || reservation.NodeName != requested.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
 		return binding, reservation, errors.New("Cloud Job ownership does not match its reservation")
 	}
 	return binding, reservation, nil

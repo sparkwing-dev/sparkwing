@@ -297,6 +297,10 @@ func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUn
 	if err := checkReaperTx(ctx, tx, actor, now); err != nil {
 		return err
 	}
+	return resolveExpansionLossTx(ctx, tx, target, status, now)
+}
+
+func resolveExpansionLossTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, now time.Time) error {
 	state := ExpansionFailed
 	failure := &ExpansionFailure{Code: apierr.Unavailable, MaskedError: "generator evaluator lost"}
 	if status == "cancelled" {

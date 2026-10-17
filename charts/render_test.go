@@ -2240,7 +2240,7 @@ func TestRunnerMetricsFlagFollowsMetricsPort(t *testing.T) {
 	}
 }
 
-func TestCloudLauncherCanVerifyAdmissionExemption(t *testing.T) {
+func TestCloudLauncherCanReadBoundaryNamespace(t *testing.T) {
 	for chart, settings := range map[string][]string{
 		"./sparkwing-runner-bundle": {"launcher.serviceAccountName=cloud-launcher"},
 		"./sparkwing-full":          {"sparkwing-runner-bundle.launcher.serviceAccountName=cloud-launcher"},
@@ -2259,11 +2259,7 @@ func TestCloudLauncherCanVerifyAdmissionExemption(t *testing.T) {
 				verbs                 []string
 			}{
 				{"ClusterRole", "", "namespaces", []string{"get"}},
-				{"ClusterRole", "admissionregistration.k8s.io", "mutatingwebhookconfigurations", []string{"list"}},
-				{"ClusterRole", "admissionregistration.k8s.io", "mutatingadmissionpolicybindings", []string{"list"}},
-				{"ClusterRole", "admissionregistration.k8s.io", "validatingadmissionpolicies", []string{"get"}},
-				{"ClusterRole", "admissionregistration.k8s.io", "validatingadmissionpolicybindings", []string{"get"}},
-				{"Role", "", "limitranges", []string{"list", "create"}},
+				{"Role", "", "limitranges", []string{"list"}},
 			} {
 				found := false
 				for _, resource := range resources {
@@ -2276,9 +2272,7 @@ func TestCloudLauncherCanVerifyAdmissionExemption(t *testing.T) {
 							if want.resource == "namespaces" && !reflect.DeepEqual(rule.ResourceNames, []string{"cloud-jobs"}) {
 								t.Errorf("namespace reads cover %v, want only cloud-jobs", rule.ResourceNames)
 							}
-							if strings.HasPrefix(want.resource, "validatingadmission") && !reflect.DeepEqual(rule.ResourceNames, []string{"sparkwing-cloud-exemption-cloud-jobs"}) {
-								t.Errorf("admission guard reads cover %v, want only sparkwing-cloud-exemption-cloud-jobs", rule.ResourceNames)
-							}
+
 							if want.kind == "Role" && resource.Metadata.Namespace != "cloud-jobs" {
 								t.Errorf("namespace permission in %q, want cloud-jobs", resource.Metadata.Namespace)
 							}

@@ -3821,3 +3821,14 @@ selects the same tenant, numeric repository, pipeline and live schedule's
 repository automation consent. It locks the installation before locking and
 rechecking that relation. Contents-only minting, exact repository and extra IDs,
 claim fencing and committing audit remain the existing source-release path.
+
+
+## Launcher Pod rejection amendment (2026-10-17, W8 integration)
+
+`Store.RejectLauncherAwards` transactionally validates claims.launch ancestry
+and the original award LeaseRef, then fails only its current plan/eval/work.
+The launcher actor and launch_rejected edges are restricted to this exact live
+award. Node failures use the common transition/billing/settlement path. Plan
+failure uses the common run transition and owner settlement. Eval failure uses
+the shared expansion-loss and eval billing paths. Ended original awards replay
+without touching replacement claims. Forged original fences refuse.

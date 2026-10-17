@@ -32,7 +32,7 @@ rules:
     verbs: ["create", "delete"]
   - apiGroups: [""]
     resources: ["limitranges"]
-    verbs: ["list", "create"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -62,13 +62,6 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     resourceNames: [{{ .Release.Namespace | quote }}]
-    verbs: ["get"]
-  - apiGroups: ["admissionregistration.k8s.io"]
-    resources: ["mutatingwebhookconfigurations", "mutatingadmissionpolicybindings"]
-    verbs: ["list"]
-  - apiGroups: ["admissionregistration.k8s.io"]
-    resources: ["validatingadmissionpolicies", "validatingadmissionpolicybindings"]
-    resourceNames: [{{ printf "sparkwing-cloud-exemption-%s" .Release.Namespace | quote }}]
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

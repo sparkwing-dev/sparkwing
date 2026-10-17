@@ -1207,3 +1207,15 @@ deadline and an explicit host stop still terminate the owner context. Claimed
 executor renewal continues to cancel its execution context on a cancellation beat.
 An owner waits for a holder with persisted cancellation intent instead of
 submitting the same cancellation again on each scheduling pass.
+
+
+## Launcher Pod rejection amendment (2026-10-17, W8 integration)
+
+`LauncherObservation.Rejected` (`rejected`, omitted when false) reports failed
+Pod verification for an exact Job instance and award. Reservation-only
+observations cannot reject awards. `/launcher/sync` authenticates the existing
+claims.launch service credential. The store rechecks ancestry, original award
+identity, holder and generation in the write transaction. Only that launcher's
+current plan/eval/work award can fail. Replays acknowledge cleanup without
+changing a replacement claim. A rejected observation returns its Job in Remove.
+No additional credential or endpoint is introduced.

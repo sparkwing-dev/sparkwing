@@ -47,7 +47,7 @@ Set `launcher.enabled=true` to run a Cloud launcher Deployment. Supply its
 in its credentials directory and needs the deployment `claims.launch` grant.
 `launcher.serviceAccountName` selects its separate Kubernetes identity. An empty
 name generates one from the release. Setting a name with the launcher disabled
-provisions only RBAC and the admission guard for an externally managed launcher.
+provisions only RBAC for an externally managed launcher.
 Set `runner.enabled=false` when all work goes through Cloud Jobs.
 
 `launcher.networkPolicy.egress` supplies allowed Job destinations alongside the
@@ -55,33 +55,23 @@ selecting default-deny policy. The [Cloud example](../sparkwing-full/examples/cl
 and [Cloud prerequisites](../sparkwing-full/README.md#cloud-node-and-network-prerequisites)
 describe team-node labels, CPU-band taints, disruption protection, native
 sidecars, PodLevelResources and node-level network enforcement.
-The cluster must serve the GA `admissionregistration.k8s.io/v1` validating
-admission policy and binding APIs, and mutating admission policy binding API.
-The launcher reads its namespace labels, mutating webhook configurations,
-mutating admission policy bindings, and namespace LimitRanges before publishing
-work. It also verifies the exact validating policy and binding installed by the
-chart. Namespace and validating guard reads are restricted to their expected
-resource names.
+The launcher reads each created Job's Pods and compares them with the requested
+spec. Kubernetes defaults and the named EKS pod-identity, VPC resource controller
+and load-balancer readiness injections are allowed. Any other change deletes
+the Job and fails its exact award. Reconciliation repeats the check, including
+after launcher restart. Kubernetes admission policy APIs are not required.
 
-The launcher needs LimitRange `list` and `create` permission to probe guard
-enforcement. It submits a valid LimitRange CREATE with Kubernetes dry-run enabled
-and requires a Forbidden response naming the exact validating guard. The probe
-persists nothing. The installed guard denies actual LimitRange creation in the
-Cloud Job namespace as well. A missing or inactive guard prevents publication.
+Use a dedicated Job namespace. Grant Pod and Job creation only to the launcher
+ServiceAccount. Kubernetes administrators and the Job controller remain trusted.
+Do not bind namespace edit/admin roles to customer accounts. Customer Job and
+runner ServiceAccounts receive no such rights. Keep team nodes tainted and keep
+other workloads from tolerating those taints. No RoleBinding can revoke a grant
+made by another RoleBinding, so audit existing namespace and cluster bindings.
 
-Use a dedicated Cloud Job namespace with no LimitRanges. Every mutating webhook
-that could change Job or Pod CREATE/UPDATE, and every mutating admission policy
-binding, must explicitly exclude the namespace using a namespace selector
-`matchExpressions` entry with key `kubernetes.io/metadata.name`, operator `NotIn`,
-and the release namespace in `values`. Object selectors do not prove exemption.
-Configure those exclusions before launching.
-
-The chart installs `sparkwing-cloud-exemption-<namespace>` as a
-ValidatingAdmissionPolicy and binding with denial on failure. This guard rejects
-future LimitRanges in the namespace, changes to its canonical namespace-name
-label, and webhook or mutating policy binding changes that remove the required
-exclusion. Cluster administrators must preserve the validating guard while Jobs
-are live. The launcher refuses publication if the required policy API is
-unavailable or the installed guard differs from its expected policy.
+The chart labels infrastructure Pods `app: sparkwing-controller`,
+`app: sparkwing-launcher` and `app: sparkwing-runner`. Customer Pods use
+`app: sparkwing-job`. Exclude these values from any baseline allow-all policies
+that would union away the corresponding chart fences. Node escape probes must
+pass before a Job is published.
 
 `values.yaml` lists the supported chart values.

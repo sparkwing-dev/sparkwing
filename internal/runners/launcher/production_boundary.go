@@ -85,7 +85,7 @@ func (p *productionBoundary) snapshot(ctx context.Context, r CloudNodeReservatio
 	if err != nil {
 		return "", nil, err
 	}
-	workloadLabels := labels.Set(map[string]string{"app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)})
+	workloadLabels := labels.Set(map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)})
 	deny := false
 	for _, policy := range policies.Items {
 		selector, err := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
@@ -275,7 +275,7 @@ func (p *productionBoundary) canary(ctx context.Context, r CloudNodeReservation,
 
 func (p *productionBoundary) measure(ctx context.Context, r CloudNodeReservation, denied []string, control string) *corev1.Pod {
 	pod := p.canary(ctx, r, "")
-	pod.Labels = map[string]string{"app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)}
+	pod.Labels = map[string]string{"app": "sparkwing-job", "app.kubernetes.io/managed-by": managedByLauncher, JobLabel: r.JobName, TeamLabel: labelHash(r.Team)}
 	pod.Spec.HostPID = true
 	container := &pod.Spec.Containers[0]
 	container.Name = "measure"
@@ -305,8 +305,13 @@ func validateCanary(expected, admitted *corev1.Pod) error {
 	if admitted == nil || admitted.UID == "" || admitted.Name != expected.Name || admitted.Namespace != expected.Namespace || admitted.DeletionTimestamp != nil || !equality.Semantic.DeepEqual(expected.Labels, admitted.Labels) || !equality.Semantic.DeepDerivative(expected.Annotations, admitted.Annotations) {
 		return errors.New("Kubernetes changed Cloud canary identity")
 	}
-	p, q := expected.Spec, admitted.Spec
-	if len(p.Containers) != len(q.Containers) || len(q.InitContainers) != 0 || len(q.EphemeralContainers) != 0 || len(q.Volumes) != 0 || p.HostNetwork != q.HostNetwork || p.HostPID != q.HostPID || p.HostIPC != q.HostIPC || !sameHostContainer(p.Containers[0], q.Containers[0]) || !equality.Semantic.DeepDerivative(p, q) {
+	p, q := expected.Spec.DeepCopy(), admitted.Spec.DeepCopy()
+	if err := removeEKSMutations(p, q); err != nil {
+		return err
+	}
+	defaultPodSpec(p)
+	defaultPodSpec(q)
+	if !equality.Semantic.DeepEqual(p, q) {
 		return errors.New("Kubernetes changed Cloud canary execution")
 	}
 	return nil

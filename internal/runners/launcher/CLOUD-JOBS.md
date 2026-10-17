@@ -31,21 +31,24 @@ ceiling, the builder refuses it before reserving a node. Exact values such as
 2.007 cores stay exact through conversion. The pod shares its awarded CPU and
 memory across the host and Docker sidecar.
 
-Before claiming work, `Launcher.LaunchOne` verifies a namespace exemption from
-programmable mutating admission for Job and Pod CREATE/UPDATE. It reads the actual
-namespace labels, webhook configurations and mutating policy bindings.
-A matching mutator, unreadable configuration or a LimitRange refuses the claim.
-The chart installs a denying admission guard that preserves the canonical
-namespace-name exclusions and refuses later LimitRanges. The launcher compares
-its complete policy and binding, then requires a dry-run LimitRange request to
-be denied by that exact policy and binding before taking the configuration
-snapshot. An installed but inactive guard cannot authorize work. Existing policy
-bindings must exclude the namespace even if their policies only match other
-resources. Later policy edits cannot widen those bindings into Cloud Jobs.
-Object selectors and CEL match conditions cannot establish this exemption because
-mutators can change object fields. Operators must retain the namespace exemption
-while Cloud Jobs exist. Cluster administrators remain trusted to preserve it.
-`FuzzLauncherRequiresJobAndPodAdmissionExemption` exercises the claim entrypoint.
+The Job retains its requested template before API defaulting. The launcher
+verifies Pods against that template after activation
+and on each reconciliation. An empty Pod list keeps the Job pending verification
+until the Job controller creates its Pod. The next reconciliation checks it.
+Kubernetes defaults and an explicit list of EKS mutations are allowed: pod
+identity environment values and projected token mounts/volumes, the VPC
+controller's Pod ENI resource and annotation, and load-balancer readiness gates.
+All other changes, including missing authored security fields, reject the Pod.
+The launcher logs rejection, UID-fences Job deletion and tells the controller to
+fail that exact plan, eval or work award. A rejection annotation and cleanup
+finalizer retain ownership until the controller acknowledges failure and every
+container stops. Restart reconciliation repeats pending rejection reports.
+
+RBAC grants Pod/Job creation only to the launcher. Operators must keep other
+bindings from granting those rights. Customer ServiceAccounts receive no API
+credential or role. Team nodes carry a team-specific NoSchedule taint, which
+only launcher Job Pods tolerate. Kubernetes administrators remain trusted.
+The launcher requires no Kubernetes admission policy API or webhook exclusions.
 
 `Launcher.LaunchOne` persists a suspended Job and checks the admitted response
 before creating the bootstrap Secret. Kubernetes defaults may fill unset fields.

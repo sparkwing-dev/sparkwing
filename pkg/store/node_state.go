@@ -72,6 +72,7 @@ const (
 	ActorController ActorKind = "controller"
 	ActorReaper     ActorKind = "reaper"
 	ActorOperator   ActorKind = "operator"
+	ActorLauncher   ActorKind = "launcher"
 )
 
 // OwnerLeaseKind selects the persisted liveness row; local hosts use a trigger lease too.
@@ -182,6 +183,7 @@ const (
 	CauseMaterialize     TransitionCause = "materialize"
 	CauseStart           TransitionCause = "start"
 	CauseReport          TransitionCause = "report"
+	CauseLaunchRejected  TransitionCause = "launch_rejected"
 	CauseRetry           TransitionCause = "retry"
 	CauseLeaseLapse      TransitionCause = "lease_lapse"
 	CauseCancel          TransitionCause = "cancel"
@@ -194,6 +196,7 @@ type EdgeGuard string
 
 // Guard values are requirements, not actor-supplied booleans.
 const (
+	GuardLauncherAward   EdgeGuard = "exact_live_launcher_award"
 	GuardOwner           EdgeGuard = "live_owner"
 	GuardOwnerPolicy     EdgeGuard = "typed_owner_policy"
 	GuardUnclaimed       EdgeGuard = "unclaimed"
@@ -229,6 +232,7 @@ func NodeTransitions() []NodeEdge {
 	owners := []ActorKind{ActorController, ActorRunHost}
 	cancellers := []ActorKind{ActorOperator, ActorController, ActorReaper}
 	return []NodeEdge{
+		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeFailed}, []ActorKind{ActorLauncher}, CauseLaunchRejected, []EdgeGuard{GuardLauncherAward}, false},
 		{[]NodeState{NodePending}, terminal, []ActorKind{ActorOperator}, CausePublish, []EdgeGuard{GuardPublication}, false},
 		{[]NodeState{NodePending}, []NodeState{NodePending}, []ActorKind{ActorOperator}, CausePublishAttempt, []EdgeGuard{GuardPublication}, false},
 		{[]NodeState{NodePending}, []NodeState{NodeReady}, owners, CauseRelease, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
@@ -636,6 +640,14 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 				if runGuardRefusal(run) != "" {
 					return errors.New("guard refused job release")
 				}
+			}
+		case GuardLauncherAward:
+			award, err := checkLauncherActorTx(ctx, tx, team, row.Ref.RunID, change.Actor)
+			if err != nil {
+				return err
+			}
+			if award.Claim.Kind != capability.UnitNode || award.Claim.NodeID != row.Ref.NodeID {
+				return holderRefusal()
 			}
 		case GuardUnclaimed:
 			if row.ClaimedBy != "" {

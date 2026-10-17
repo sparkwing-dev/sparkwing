@@ -161,6 +161,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 			Job:           controllerwire.LauncherJobRef{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID},
 			NodeUID:       observation.NodeUID,
 			ReservationID: observation.ReservationID,
+			Rejected:      observation.Rejected,
 		}
 		if observation.ReservationID != "" {
 			if observation.JobNamespace != "" || observation.JobUID != "" {

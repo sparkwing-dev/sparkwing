@@ -27,7 +27,7 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 	assertValidUniqueResourceNames(t, resources)
 	controller := componentResource(t, resources, "Deployment", "controller")
 	args := resourceContainer(t, controller).Args
-	for _, want := range []string{"--require-auth", "--cache-blob-store=s3://sparkwing-cloud-data/controller", "--bucket-store=s3://sparkwing-cloud-data/controller", "--cloudfront-domain=data.sparkwing.dev", "--cloudfront-key-pair-id=REPLACE_PUBLIC_KEY_ID", "--external-url=https://api.sparkwing.dev", "--github-app-id=123456", "--github-app-slug=sparkwing", "--operator-accounts=operator-account-id", "--credentials-dir=/etc/sparkwing/credentials"} {
+	for _, want := range []string{"--require-auth", "--trusted-proxy-cidrs=10.0.0.0/16", "--cache-blob-store=s3://sparkwing-cloud-data/controller", "--bucket-store=s3://sparkwing-cloud-data/controller", "--cloudfront-domain=data.sparkwing.dev", "--cloudfront-key-pair-id=REPLACE_PUBLIC_KEY_ID", "--external-url=https://api.sparkwing.dev", "--github-app-id=123456", "--github-app-slug=sparkwing", "--operator-accounts=operator-account-id", "--credentials-dir=/etc/sparkwing/credentials"} {
 		if !containsArg(args, want) {
 			t.Errorf("controller lacks %q: %v", want, args)
 		}
@@ -64,7 +64,7 @@ func TestCloudExampleRendersCompleteInstall(t *testing.T) {
 			}
 		}
 	}
-	for _, kind := range []string{"Service", "Ingress", "ServiceAccount", "Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding", "ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding", "NetworkPolicy"} {
+	for _, kind := range []string{"Service", "Ingress", "ServiceAccount", "Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding", "NetworkPolicy"} {
 		if !kinds[kind] {
 			t.Errorf("missing %s", kind)
 		}
@@ -116,7 +116,13 @@ func checkCloudBindings(t *testing.T, manifest []byte) {
 			if component != "controller" && component != "launcher" {
 				continue
 			}
+			if d.Spec.Template.Labels["app"] != "sparkwing-"+component {
+				t.Errorf("%s is outside baseline policy selectors", component)
+			}
 			pod := d.Spec.Template.Spec
+			if component == "controller" && (pod.SecurityContext == nil || pod.SecurityContext.FSGroup == nil || *pod.SecurityContext.FSGroup != 65534) {
+				t.Error("controller data volume lacks ownership")
+			}
 			paths := map[string]string{}
 			for _, volume := range pod.Volumes {
 				if volume.Projected == nil {

@@ -64,6 +64,17 @@ func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.
 			reservations = append(reservations, observation.Award)
 		}
 	}
+	var rejected []capability.LeaseRef
+	for _, observation := range observed {
+		if observation.Rejected {
+			rejected = append(rejected, observation.Award)
+		}
+	}
+	if len(rejected) > 0 {
+		if err := s.store.RejectLauncherAwards(ctx, ref, rejected); err != nil {
+			return controllerwire.LauncherSyncResponse{}, err
+		}
+	}
 	awards, err := s.store.ReadLauncherAwards(ctx, ref, reservations)
 	if err != nil {
 		return controllerwire.LauncherSyncResponse{}, err

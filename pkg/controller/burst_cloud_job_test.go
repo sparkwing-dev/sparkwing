@@ -4,7 +4,6 @@ package controller_test
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +12,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -30,7 +28,7 @@ import (
 
 func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof) {
 	t.Helper()
-	kube := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}}, launcher.AdmissionExemptionPolicy("cloud"), launcher.AdmissionExemptionBinding("cloud"))
+	kube := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}})
 	kube.PrependReactor("create", "*", func(action ktesting.Action) (bool, k8sruntime.Object, error) {
 		switch object := action.(ktesting.CreateAction).GetObject().(type) {
 		case *batchv1.Job:
@@ -39,12 +37,6 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 			object.UID = "burst-bootstrap-uid"
 		}
 		return false, nil, nil
-	})
-	kube.PrependReactor("create", "limitranges", func(action ktesting.Action) (bool, k8sruntime.Object, error) {
-		if len(action.(ktesting.CreateActionImpl).CreateOptions.DryRun) == 0 {
-			return false, nil, nil
-		}
-		return true, nil, apierrors.NewForbidden(corev1.Resource("limitranges"), "probe", errors.New("ValidatingAdmissionPolicy 'sparkwing-cloud-exemption-cloud' with binding 'sparkwing-cloud-exemption-cloud' denied request:"))
 	})
 	boundary := &burstCloudBoundary{}
 	var runtime *launcher.Launcher

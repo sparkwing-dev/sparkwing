@@ -102,3 +102,40 @@ func TestEngineLauncherSyncRejectsAmbiguousJobObservations(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineLauncherSyncCommitsPodRejection(t *testing.T) {
+	e, tenant := engineRuntimeStore(t)
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100_000_000, Reference: "pod-rejection", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
+	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+	claim, err := e.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "launcher", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.Store.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: claim.Award.Holder, Generation: claim.Award.Generation}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "job", UID: "uid"}, NodeUID: "node", Rejected: true}
+	body, err := json.Marshal(controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{observation}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	for range 2 {
+		w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", string(body), 200)
+		var response controllerwire.LauncherSyncResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Awards) != 0 || len(response.Remove) != 1 || response.Remove[0] != observation.Job {
+			t.Fatalf("rejection not acknowledged: %+v", response)
+		}
+	}
+	row, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || row.Outcome != store.NodeFailed || row.ClaimedBy != "" {
+		t.Fatalf("rejection did not fail persisted award: %+v %v", row, err)
+	}
+}

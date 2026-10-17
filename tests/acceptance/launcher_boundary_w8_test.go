@@ -109,7 +109,10 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 			if _, _, err := boundary.Reserve(t.Context(), award.Binding, "competing-job"); !errors.Is(err, launcher.ErrNoDedicatedNode) {
 				t.Fatalf("occupied node reused: %v", err)
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "work", Namespace: cfg.Namespace, Labels: map[string]string{launcher.JobLabel: job.Name}}, Spec: job.Spec.Template.Spec, Status: corev1.PodStatus{Phase: corev1.PodRunning, InitContainerStatuses: []corev1.ContainerStatus{{Name: "docker", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
+			pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: job.Spec.Template.Spec, Status: corev1.PodStatus{Phase: corev1.PodRunning, InitContainerStatuses: []corev1.ContainerStatus{{Name: "docker", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
+			pod.Name, pod.Namespace = "work", cfg.Namespace
+			controller := true
+			pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &controller, BlockOwnerDeletion: &controller}}
 			if _, err := kube.CoreV1().Pods(cfg.Namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
