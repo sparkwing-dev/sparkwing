@@ -329,23 +329,33 @@ func TestApprovalSkipPolicyProducesSuccess(t *testing.T) {
 }
 
 func TestOwnerDrainsPendingSupersessionIntent(t *testing.T) {
-	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "old", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
-	if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET cancel_requested_at=?,cancel_reason='superseded' WHERE run_id=? AND node_id='old'`, time.Now().UnixNano(), f.Input.RunID); err != nil {
-		t.Fatal(err)
-	}
-	f.Host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error {
-		t.Error("superseded pending work executed")
-		return errors.New("executed")
-	})
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	completion, err := f.Host.schedule(ctx, f.Input, f.Accepted, &source.Entry{})
-	if err != nil || completion.Outcome != "failed" {
-		t.Fatalf("pending cancellation result=%+v err=%v", completion, err)
-	}
-	row := capacityRow(t, f, "old")
-	if row.Outcome != store.NodeCancelled || row.Attempt != 0 {
-		t.Fatalf("pending cancellation=%s attempt=%d", row.Outcome, row.Attempt)
+	for _, ready := range []bool{false, true} {
+		t.Run(fmt.Sprint(ready), func(t *testing.T) {
+			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "old", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+			if ready {
+				row := capacityRow(t, f, "old")
+				if _, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: row.Ref, Actor: f.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET cancel_requested_at=?,cancel_reason='superseded' WHERE run_id=? AND node_id='old'`, time.Now().UnixNano(), f.Input.RunID); err != nil {
+				t.Fatal(err)
+			}
+			f.Host.Executor = ownerNodeFunc(func(context.Context, NodeInput) error {
+				t.Error("superseded pending work executed")
+				return errors.New("executed")
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			completion, err := f.Host.schedule(ctx, f.Input, f.Accepted, &source.Entry{})
+			if err != nil || completion.Outcome != "failed" {
+				t.Fatalf("pending cancellation result=%+v err=%v", completion, err)
+			}
+			row := capacityRow(t, f, "old")
+			if row.Outcome != store.NodeCancelled || row.Attempt != 0 || row.CancelReason != "superseded" {
+				t.Fatalf("pending cancellation=%s attempt=%d", row.Outcome, row.Attempt)
+			}
+		})
 	}
 }
 

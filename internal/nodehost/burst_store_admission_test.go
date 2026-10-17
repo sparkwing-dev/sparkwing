@@ -22,7 +22,7 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 		t.Run(map[bool]string{false: "executes", true: "refuses-before-start"}[refuse], func(t *testing.T) {
 			request := runspec.Request{
 				Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
-				Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "name=host"}, {Target: "cloud"}}},
+				Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "cloud"}}},
 			}
 			request.Options.Resources.Value.Cores.Value = 4
 			request.Options.Resources.Value.Cores.Set = true
@@ -84,17 +84,6 @@ func TestBurstSharedOwnerPersistsMachineAdmissionAndSetupFailure(t *testing.T) {
 	}
 }
 
-type burstSaturatedOwner struct{ optimistic bool }
-
-func (pstate burstSaturatedOwner) ResolveClaimProfile(_ context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
-	capacity := match.Resources{Cores: 64, MemoryBytes: 64 << 30}
-	available := capacity
-	if p.Capability.Subject.ID == "host" && !pstate.optimistic {
-		available = match.Resources{}
-	}
-	return match.Profile{Capacity: capacity}, available, nil
-}
-
 func TestBurstSharedOwnerKeepsSaturatedWorkClaimableByAnotherMachine(t *testing.T) {
 	burstSharedOwnerContention(t, false)
 }
@@ -119,7 +108,7 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	t.Helper()
 	request := runspec.Request{
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
-		Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "name=host"}, {Target: "name=desktop"}}},
+		Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "name=desktop"}}},
 	}
 	request.Options.Resources.Set = true
 	request.Options.Resources.Value.Cores.Set = true
@@ -130,7 +119,11 @@ func burstSharedOwnerContentionResources(t *testing.T, optimistic bool, cores fl
 	plan := capacityPlan("queue", 0, "job")
 	plan.Jobs[0].Concurrency[0].Scope = new("run")
 	fixture := newStoreHostFixtureForRequest(t, openStore(t), plan, request)
-	fixture.Store.SetClaimProfileResolver(burstSaturatedOwner{optimistic: optimistic})
+	if !optimistic {
+		if err := fixture.Store.RecordHereAvailability(t.Context(), fixture.Actor.Authority, match.Resources{}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)

@@ -160,7 +160,7 @@ func TestEngineResultReplayHTTP(t *testing.T) {
 			t.Run(operation+"/"+name, func(t *testing.T) {
 				b := newCredentialBoundary()
 				path, pattern, node := "/api/v1/runs/run/jobs/job/transition", "/api/v1/runs/{run}/jobs/{job}/transition", "job"
-				body := `{"to":"success","cause":"report","source_attempt":0,"result":{"outcome":"success"}}`
+				body := `{"to":"success","cause":"report","source_attempt":2,"result":{"outcome":"success"}}`
 				if operation == "run" {
 					b = ownerBoundary()
 					path, pattern, node, body = "/api/v1/runs/run/finish", "/api/v1/runs/{run}/finish", "", `{"outcome":"success"}`

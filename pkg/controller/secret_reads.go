@@ -66,6 +66,10 @@ func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capa
 	if err != nil {
 		return err
 	}
+	cipher, ok := s.secretsCipher.(BoundCipher)
+	if !ok || cipher == nil {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "secret decryption is unavailable"}
+	}
 	row, err := reader.ReadSecret(r.Context(), a)
 	if err != nil {
 		return engineLookupError(err)
@@ -81,10 +85,6 @@ func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capa
 	}
 	plain := row.Value
 	if !row.Ephemeral {
-		cipher, ok := s.secretsCipher.(BoundCipher)
-		if !ok || cipher == nil {
-			return &apierr.Error{Code: apierr.Unavailable, Message: "secret decryption is unavailable"}
-		}
 		plain, err = openSecret(cipher, bindingForRow(reader.Team(), row), row.Value)
 		if err != nil {
 			return errors.New("stored secret did not open")

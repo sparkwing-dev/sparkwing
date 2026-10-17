@@ -245,6 +245,9 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 			case "machine", "operator":
 				spec := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}}
 				if state == "machine" {
+					if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+						t.Fatal(err)
+					}
 					digest := sha256.Sum256([]byte(f.raw))
 					origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
 					spec = capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, Team: "team", Repositories: []string{"github.com/acme/*"}, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}, RegistrationID: "runner:team:runner"}

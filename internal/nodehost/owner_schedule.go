@@ -83,7 +83,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		for _, row := range snapshot.Nodes {
 			stop := active[row.Ref.NodeID]
-			if stop == nil || row.CancelRequestedAt == nil || row.Status == store.StatusDone {
+			if row.CancelRequestedAt == nil || row.Status == store.StatusDone {
 				continue
 			}
 			if row.ClaimedBy != "" && row.OwnerCapabilityPrefix != input.Owner.CapabilityPrefix {
@@ -98,7 +98,9 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 					continue
 				}
 			}
-			stop(&lease.CancelError{Reason: row.CancelReason})
+			if stop != nil {
+				stop(&lease.CancelError{Reason: row.CancelReason})
+			}
 		}
 		selected := false
 		for _, row := range snapshot.Nodes {

@@ -67,20 +67,20 @@ func decodeDataTarget(r *http.Request) (capability.RequestEvidence, error) {
 	if err == nil && r.Method == "POST" {
 		query, e := url.ParseQuery(r.URL.RawQuery)
 		if e != nil {
-			return capability.RequestEvidence{}, invalidEngineBody("invalid data query")
+			return capability.RequestEvidence{Target: capability.Target{Data: &target}}, invalidEngineBody("invalid data query")
 		}
-		if len(query) != 0 {
+		if query.Has("job") || query.Has("attempt") || query.Has("generation") {
 			if len(query) != 3 || len(query["job"]) != 1 || len(query["attempt"]) != 1 || len(query["generation"]) != 1 || query.Get("job") == "" {
-				return capability.RequestEvidence{}, invalidEngineBody("publication requires job, attempt and generation")
+				return capability.RequestEvidence{Target: capability.Target{Data: &target}}, invalidEngineBody("publication requires job, attempt and generation")
 			}
 			target.NodeID = query.Get("job")
 			target.Attempt, e = strconv.ParseInt(query.Get("attempt"), 10, 64)
 			if e != nil || target.Attempt <= 0 {
-				return capability.RequestEvidence{}, invalidEngineBody("invalid publication attempt")
+				return capability.RequestEvidence{Target: capability.Target{Data: &target}}, invalidEngineBody("invalid publication attempt")
 			}
 			target.Generation, e = strconv.ParseInt(query.Get("generation"), 10, 64)
 			if e != nil || target.Generation <= 0 {
-				return capability.RequestEvidence{}, invalidEngineBody("invalid publication generation")
+				return capability.RequestEvidence{Target: capability.Target{Data: &target}}, invalidEngineBody("invalid publication generation")
 			}
 		}
 	}

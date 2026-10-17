@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -254,11 +255,23 @@ func TestSecretReadHTTPRefusalsNeverOpenValues(t *testing.T) {
 	}
 }
 
+func TestSecretReadHTTPEphemeralValueSkipsDecryption(t *testing.T) {
+	b := secretClaim()
+	f, c, server := secretReadFixture(t, b, "private-value")
+	f.row.Ephemeral, f.row.Value = true, "private-value"
+	c.err = errors.New("ephemeral values cannot be decrypted")
+	w := authorityHTTP(server.Handler(), b, "GET", "/api/v1/secrets/TOKEN?run=run", "")
+	var result controllerwire.SecretValue
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Value != "private-value" || f.reads != 1 || c.opens != 0 {
+		t.Fatalf("ephemeral secret: reads=%d opens=%d HTTP %d %s", f.reads, c.opens, w.Code, w.Body.String())
+	}
+}
+
 func TestSecretReadHTTPBindingProperty(t *testing.T) {
 	property := func(value, selector string, mutation uint8) bool {
 		b := secretClaim()
 		f, c, server := secretReadFixture(t, b, value)
-		switch mutation % 9 {
+		switch mutation % 11 {
 		case 0:
 			f.team = "foreign"
 		case 1:
@@ -283,14 +296,21 @@ func TestSecretReadHTTPBindingProperty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+		case 9:
+			server.WithSecretsCipher(nil)
+		case 10:
+			server.WithSecretsCipher(plainCipher{})
 		}
 		query := url.Values{"team": {selector}, "pipeline": {selector}, "run": {"run"}}
 		w := authorityHTTP(server.Handler(), b, "GET", "/api/v1/secrets/TOKEN?"+query.Encode(), "")
 		var result apierr.Envelope
+		if mutation%11 >= 9 {
+			return w.Code == 503 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && result.Error.Code == apierr.Unavailable && f.reads == 0 && c.opens == 0
+		}
 		if w.Code != 500 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Error == nil {
 			return false
 		}
-		if mutation%9 == 0 {
+		if mutation%11 == 0 {
 			return result.Error.Code == apierr.PolicyMissing && c.opens == 0
 		}
 		return result.Error.Code == apierr.Internal && result.Error.Message == "request failed" && result.Error.Hint == "" && len(result.Error.Details) == 0

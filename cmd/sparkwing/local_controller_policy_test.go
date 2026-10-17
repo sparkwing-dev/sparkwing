@@ -23,9 +23,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	enginepolicy "github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -112,12 +114,14 @@ func TestProductionLocalControllerAdmitsRun(t *testing.T) {
 			previous := Version
 			Version = version
 			t.Cleanup(func() { Version = previous })
-			testProductionLocalControllerAdmitsRun(t)
+			for _, format := range []string{"unborn", "sha1", "sha256"} {
+				t.Run(format, func(t *testing.T) { testProductionLocalControllerAdmitsRun(t, format) })
+			}
 		})
 	}
 }
 
-func testProductionLocalControllerAdmitsRun(t *testing.T) {
+func testProductionLocalControllerAdmitsRun(t *testing.T, format string) {
 	previous := http.DefaultClient
 	requests := 0
 	http.DefaultClient = &http.Client{Transport: queueHostTransport(func(*http.Request) (*http.Response, error) {
@@ -130,12 +134,38 @@ func testProductionLocalControllerAdmitsRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	checkout := t.TempDir()
+	objectFormat := format
+	if format == "unborn" {
+		objectFormat = "sha1"
+	}
+	runSnapshotGit(t, checkout, "init", "--quiet", "--object-format="+objectFormat)
+	runSnapshotGit(t, checkout, "config", "user.name", "Local Test")
+	runSnapshotGit(t, checkout, "config", "user.email", "local@example.test")
+	if format != "unborn" {
+		runSnapshotGit(t, checkout, "commit", "--quiet", "--allow-empty", "-m", "source")
+	}
+	if err := os.MkdirAll(filepath.Join(checkout, ".sparkwing"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:example.com/acme/repo", LocalCheckout: checkout, PipelineDir: ".sparkwing"}, source.Options{Base: procenv.Base{Local: true, Captured: os.Environ()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]int{"unborn": 0, "sha1": 40, "sha256": 64}[format]; len(entry.SHA) != want {
+		t.Fatalf("acquired SHA length=%d, want %d", len(entry.SHA), want)
+	}
+	t.Cleanup(func() {
+		if err := entry.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	request := controllerwire.CreateRunRequest{IdempotencyKey: "local-policy", Request: runspec.Request{
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "example",
 		Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
 		Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 0}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "priority"}}},
-		Source:  runspec.Source{Location: runspec.SourceLocation{LocalCheckout: t.TempDir(), PipelineDir: ".sparkwing"}},
-		Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "head"},
+		Source:  runspec.Source{Location: runspec.SourceLocation{LocalCheckout: checkout, PipelineDir: ".sparkwing"}},
+		Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: entry.SHA},
 	}}
 	admitted, err := engine.CreateRun(t.Context(), request)
 	if err != nil {
@@ -146,6 +176,9 @@ func testProductionLocalControllerAdmitsRun(t *testing.T) {
 	}
 	if admitted.Request.Request.Options.Priority != request.Request.Options.Priority || admitted.Request.Request.Source != request.Request.Source {
 		t.Fatal("local admission lost explicit zero priority or acquisition location")
+	}
+	if admitted.Request.Request.Git.SHA != entry.SHA {
+		t.Fatal("local admission changed the acquired source commit")
 	}
 	if admitted.RunID == "" || admitted.Request.Request.Pipeline != "example" || admitted.Request.AuthorityRef.ID == "" {
 		t.Fatalf("incomplete admission: %+v", admitted)
