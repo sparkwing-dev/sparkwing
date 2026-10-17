@@ -27,6 +27,8 @@ func (s *DataController) persistedDataAuthority(ctx context.Context, a capabilit
 	grant := capability.DataRead
 	if slices.Contains(a.Access.Grants, capability.DataWrite) {
 		grant = capability.DataWrite
+	} else if a.Access.Binding == capability.BindSourceBundle && slices.Contains(a.Access.Grants, capability.SourceRead) {
+		grant = capability.SourceRead
 	}
 	return tenant.ResolveBlobAuthority(ctx, selector, grant)
 }
@@ -40,7 +42,10 @@ func validateDataAuthority(a capability.Authorized, authority blob.Authority) er
 	scope := c.Data
 	if scope == nil || scope.RepositoryKey == "" || c.Audience != capability.Controller || c.Team == "" || a.Target.Team != c.Team ||
 		a.Principal.Authority.ID == "" || authority.CapabilityRef == "" || authority.Principal == "" ||
-		string(authority.Repo) != scope.RepositoryKey || a.Access.Binding != capability.BindData || a.ResultReplay || a.LogTailAttempt != 0 {
+		string(authority.Repo) != scope.RepositoryKey || a.Access.Binding != capability.BindData && a.Access.Binding != capability.BindSourceBundle || a.ResultReplay || a.LogTailAttempt != 0 {
+		return dataForbidden()
+	}
+	if a.Access.Binding == capability.BindSourceBundle && (c.Delivery != capability.DeliveryBootstrap || scope.Use != capability.DataClaim && !(scope.Use == capability.DataExpansion && c.Unit == capability.UnitEval) || authority.Attempt.Set || authority.Upload.Set || a.Target.Data == nil || a.Target.Data.Operation != capability.DataDownload) {
 		return dataForbidden()
 	}
 	if authority.Attempt.Set && !dataAttemptMatches(authority.Attempt.Value, c.Team, scope) {

@@ -22,7 +22,9 @@ unlock.
 
 - **overflow:** Add explicit Cloud routing, tracked working-tree source bundles,
   requester-resolved ephemeral secrets, personal runner capacity and per-user
-  overflow controls. Local execution remains the default.
+  overflow controls. Local execution remains the default. Pre-intake source
+  upload network failures can fall back locally. Personal enrollment accepts an existing
+  independent account session through `runners add --session-stdin`.
 - **store (Breaking):** Advance the rewrite baseline to schema 5 for account
   provenance and overflow controls. [Migration](docs/migrations/_unreleased.md#explicit-cloud-overflow).
 

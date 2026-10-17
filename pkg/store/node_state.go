@@ -424,9 +424,6 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err != nil {
 		return Applied{}, err
 	}
-	if err := validateResultProofTx(ctx, tx, team, change.Actor, change.Ref, row.Attempt); err != nil {
-		return Applied{}, err
-	}
 	from, err := nodeState(row)
 	if err != nil {
 		return Applied{}, err
@@ -447,6 +444,9 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 			}
 		}
 		return Applied{Replayed: true, CancelRequested: row.CancelRequestedAt != nil && row.Status != StatusDone, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
+	}
+	if err := validateResultProofTx(ctx, tx, team, change.Actor, change.Ref, row.Attempt); err != nil {
+		return Applied{}, err
 	}
 	if change.SourceAttempt != nil && *change.SourceAttempt != row.Attempt {
 		return Applied{}, holderRefusal()

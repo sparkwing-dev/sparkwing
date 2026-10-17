@@ -60,14 +60,15 @@ func runRunners(args []string) error {
 }
 
 type runnerEnrollment struct {
-	path        string
-	config      userconfig.RunnerConfig
-	force       bool
-	service     runnerServicePlan
-	profileName string
-	format      string
-	pools       []string
-	personal    bool
+	path         string
+	config       userconfig.RunnerConfig
+	force        bool
+	service      runnerServicePlan
+	profileName  string
+	format       string
+	pools        []string
+	personal     bool
+	sessionStdin bool
 }
 
 func runRunnersAdd(args []string) error {
@@ -78,11 +79,21 @@ func runRunnersAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	manager, err := runnerTokenManager(prof)
+	ctx := context.Background()
+	var manager client.RunnerTokenManager
+	if enrollment.sessionStdin {
+		session, readErr := readTokenStdin(os.Stdin, os.Stderr, "existing account session")
+		if readErr != nil {
+			return readErr
+		}
+		manager, err = client.NewSessionRunnerTokenManager(ctx, client.EngineOptions{URL: prof.ControllerURL()}, session)
+	} else {
+		manager, err = runnerTokenManager(prof)
+	}
 	if err != nil {
 		return err
 	}
-	return enrollRunner(context.Background(), manager, enrollment)
+	return enrollRunner(ctx, manager, enrollment)
 }
 
 func runnerTokenManager(prof *namedProfile) (client.RunnerTokenManager, error) {
@@ -131,6 +142,10 @@ func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, erro
 	}
 	enrollment.pools = inv.Flags["reserved-for"]
 	enrollment.personal = inv.Bool("personal")
+	enrollment.sessionStdin = inv.Bool("session-stdin")
+	if enrollment.personal && !enrollment.sessionStdin {
+		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--personal requires --session-stdin with an existing independent account session"}
+	}
 	prof, err := resolveProfile(inv.Value("profile"))
 	if err != nil {
 		return enrollment, nil, err

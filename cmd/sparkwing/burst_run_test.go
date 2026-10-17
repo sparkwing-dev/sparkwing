@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"testing"
 
@@ -28,6 +29,49 @@ func TestRunRoutingPrecedence(t *testing.T) {
 	}
 }
 
+func FuzzBurstRouteNeverDuplicatesPossibleIntake(f *testing.F) {
+	f.Add("connection lost", false, false)
+	f.Add("connection lost", true, false)
+	f.Add("interrupted", true, true)
+	f.Fuzz(func(t *testing.T, message string, beforeIntake, cancelled bool) {
+		if len(message) > 1024 {
+			t.Skip()
+		}
+		cloud, profile := "cloud", "work"
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		localCalls, cloudCalls := 0, 0
+		var out bytes.Buffer
+		err := runRoutedCommand(ctx, "test", runFlags{}, nil, userconfig.RunRouting{Route: &cloud, Profile: &profile}, &out, burstRunDependencies{
+			connect: func(context.Context, string) (client.EngineOptions, func(), error) {
+				return client.EngineOptions{}, func() {}, nil
+			},
+			probe: func(context.Context, client.EngineOptions) error { return nil },
+			local: func(context.Context, string, runFlags, []string) error { localCalls++; return nil },
+			cloud: func(context.Context, string, runFlags, []string, userconfig.RunRouting, client.EngineOptions) error {
+				cloudCalls++
+				var cause error = errors.New(message)
+				if cancelled && len(message)%2 == 0 {
+					cancel()
+				} else if cancelled {
+					cause = context.Canceled
+				}
+				var failure error = &net.OpError{Op: "write", Net: "tcp", Err: cause}
+				if beforeIntake {
+					failure = &burstBeforeIntakeError{failure}
+				}
+				return fmt.Errorf("prepare or submit: %w", failure)
+			},
+		})
+		if cloudCalls != 1 || localCalls > 1 || localCalls == 1 != (beforeIntake && !cancelled) {
+			t.Fatalf("possible duplicate owner: before=%v cancelled=%v local=%d cloud=%d", beforeIntake, cancelled, localCalls, cloudCalls)
+		}
+		if (err == nil) != (localCalls == 1) || localCalls == 1 && out.Len() == 0 {
+			t.Fatalf("missing failure or fallback notice: local=%d err=%v", localCalls, err)
+		}
+	})
+}
+
 func TestBurstRouteFallsBackOnlyBeforeIntake(t *testing.T) {
 	cloud, profile := "cloud", "work"
 	for _, tc := range []struct {
@@ -37,6 +81,10 @@ func TestBurstRouteFallsBackOnlyBeforeIntake(t *testing.T) {
 	}{
 		{name: "online", remote: true},
 		{name: "offline", probe: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("unreachable")}, local: true},
+		{name: "offline during source upload", run: &burstBeforeIntakeError{&net.OpError{Op: "write", Net: "tcp", Err: errors.New("unreachable")}}, local: true, remote: true},
+		{name: "unavailable during source upload", run: &burstBeforeIntakeError{&apierr.Error{Code: apierr.Unavailable, Message: "unreachable"}}, local: true, remote: true},
+		{name: "source upload forbidden", run: &burstBeforeIntakeError{&apierr.Error{Code: apierr.Forbidden, Message: "denied"}}, remote: true},
+		{name: "source upload interrupted", run: &burstBeforeIntakeError{&net.OpError{Op: "write", Net: "tcp", Err: context.Canceled}}, remote: true},
 		{name: "unauthorized", probe: &apierr.Error{Code: apierr.Forbidden, Message: "denied"}},
 		{name: "lost intake response", run: &net.OpError{Op: "read", Net: "tcp", Err: errors.New("lost response")}, remote: true},
 	} {
@@ -61,8 +109,11 @@ func TestBurstRouteFallsBackOnlyBeforeIntake(t *testing.T) {
 			if tc.local && out.Len() == 0 {
 				t.Fatal("fallback was silent")
 			}
-			if (tc.probe != nil && !tc.local || tc.run != nil) && err == nil {
+			if (tc.probe != nil || tc.run != nil) && !tc.local && err == nil {
 				t.Fatal("failure lost")
+			}
+			if tc.local && err != nil {
+				t.Fatalf("local fallback failed: %v", err)
 			}
 		})
 	}

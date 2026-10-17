@@ -116,7 +116,7 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 		return bindingExpansionTx(ctx, tx, c, target)
 	case capability.BindSourceReport:
 		return bindingSourceReportTx(ctx, tx, c, target)
-	case capability.BindReadSet, capability.BindData:
+	case capability.BindReadSet, capability.BindData, capability.BindSourceBundle:
 		if target.Data != nil {
 			var checker capability.DataAccessChecker = tx
 			return checker.CheckDataAccess(ctx, capability.Authorized{Principal: p, Binding: b, Target: target}, *target.Data)

@@ -1,10 +1,8 @@
-# Storage rewrite contract
+# Storage
 
-This page describes the target storage contract. The byte backends,
-artifact, binary, source-bundle and tagged-log components implement it. Controller,
-tenant-store and host integration are still in progress. Working-tree
-triggers require an authorized storage binding and fail before upload or
-submission while that binding is absent.
+Sparkwing stores immutable bytes in S3 or the filesystem backend. The controller
+authorizes uploads, downloads and records. Working-tree source bundles use the
+same signed upload path as other run inputs.
 
 <!-- design:begin -->
 
@@ -31,8 +29,6 @@ The filesystem and S3 manifest readers derive file metadata from the tenant's
 immutable object. They verify its full length and digest, then close it before
 returning metadata. The record transaction checks that metadata against the
 submitted members and verifies each member's existence and authority.
-The physical reader adapter is implemented. Its authenticated controller binding
-is still pending.
 
 Each upload ticket must stage and verify its own bytes, including when identical
 content already exists. Missing staging fails the commit. Before settlement, a
@@ -46,9 +42,8 @@ leased collector's deletion interface. Replaying a deletion of absent bytes
 succeeds. The controller supplies its configured backend to the leased
 retained-data pass. Standalone controllers install S3 or, without a bucket,
 filesystem storage under their home directory's `data` directory. Filesystem
-transfers use signed data upload, object download and log upload routes. The
-old filesystem output and raw log routes are removed. Authenticated data and
-host bindings remain integration work. Deployment bucket measurement stays
+transfers use signed data upload, object download and log upload routes.
+Deployment bucket measurement stays
 separate from tenant accounting and deletes nothing.
 
 Memo and dependency-cache records carry repository and ref scope. Manual
@@ -57,14 +52,11 @@ before a verified default-branch fallback. Dependency caches try their own
 ref, the pull-request base, then the verified default branch.
 
 Outputs use the terminal result's committed record selector and verified blob
-bytes. The old store-local output directory, inline byte writes, signed output
-grants and obsolete scheduler are removed. Native hosts consume `StorageBinding`
+bytes. Native hosts consume `StorageBinding`
 and `OutputRecords.ReadResult`.
 
-Memo materialization uses `RecordStore.CopyMemo` to authorize and copy output
-and manifest records in one transaction. The old `output_from` attempt payload
-and `Store.FinishNodeCopyingOutput` are removed. Neither can attach an output
-through the retired `node_outputs` copy path.
+Memo materialization authorizes and copies output and manifest records in one
+transaction.
 
 Dependency-cache keys use the declaration, platform and the first present
 lockfile inside the workspace. The SDK's `DirCache.Key` and host share that

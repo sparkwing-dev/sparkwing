@@ -374,9 +374,10 @@ func Registry() []Command {
 			{Name: "target", Argument: "TARGET"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Use team credentials. --personal registers capacity for only the signed-in user's runs; the default is a team runner. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Team runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
+			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --personal."},
 			{Name: "repos", Argument: "PATTERN", Repeatable: true, CommaList: true},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
 			{Name: "max-concurrent", Argument: "N", Minimum: 1, HasMinimum: true},

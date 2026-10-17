@@ -70,11 +70,14 @@ func authenticationOwnerTx(ctx context.Context, tx *storeTx, c capability.Capabi
 }
 
 func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capability, out *capability.BindingState) error {
-	var lease, finished, cancelled sql.NullInt64
-	var reason string
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation,attempt,lease_expires_at,finished_at,cancel_requested_at,cancel_reason FROM nodes WHERE team=? AND run_id=? AND node_id=?`, c.Team, c.Binding.RunID, c.Binding.NodeID).Scan(&out.Current.Holder, &out.Current.Generation, &out.Current.Attempt, &lease, &finished, &cancelled, &reason)
+	var lease, started, finished, cancelled sql.NullInt64
+	var reason, status string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(claimed_by,''),generation,attempt,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,status FROM nodes WHERE team=? AND run_id=? AND node_id=?`, c.Team, c.Binding.RunID, c.Binding.NodeID).Scan(&out.Current.Holder, &out.Current.Generation, &out.Current.Attempt, &lease, &started, &finished, &cancelled, &reason, &status)
 	if err != nil {
 		return err
+	}
+	if c.Unit == capability.UnitNode && status == string(StatusPending) && !started.Valid {
+		out.Current.Attempt = 0
 	}
 	out.FinishedAt = stateTime(finished)
 	out.RunCancelled = out.RunCancelled || cancelled.Valid

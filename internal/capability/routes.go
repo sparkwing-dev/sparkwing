@@ -184,7 +184,7 @@ var Routes = []RoutePolicy{
 	route("POST", "/api/v1/claims/{claim}/logs", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail), evalUnit()),
 	route("POST", "/api/v1/claims/{claim}/log-segments", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail), evalUnit()),
 	route("POST", "/api/v1/claims/{claim}/log-manifest", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail), evalUnit()),
-	route("POST", "/api/v1/data/download", OwnerTeam, RetrySafe, claim(DataRead, BindData, LiveSensitive), claim(DataRead, BindData, LiveExpansion), repoReader()),
+	route("POST", "/api/v1/data/download", OwnerTeam, RetrySafe, claim(DataRead, BindData, LiveSensitive), claim(DataRead, BindData, LiveExpansion), repoReader(), AccessRule{Credential: CredentialBootstrap, Grants: []Grant{SourceRead}, Binding: BindSourceBundle, Liveness: LiveSensitive}),
 	route("POST", "/api/v1/data/source", OwnerTeam, RetryNever, member(RunsWrite)),
 	route("POST", "/api/v1/data/source/{upload}/commit", OwnerTeam, RetryNever, member(RunsWrite)),
 	route("POST", "/api/v1/data/upload", OwnerTeam, RetryIdempotencyKey, claim(DataWrite, BindData, LiveSensitive), publisher()),

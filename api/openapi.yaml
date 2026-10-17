@@ -6288,6 +6288,11 @@ paths:
               - data.read
             binding: data
             liveness: credential
+          - credential: pod_bootstrap
+            grants:
+              - source.read
+            binding: sourceBundle
+            liveness: sensitive
         retry: safe
   /api/v1/data/has-many:
     post:

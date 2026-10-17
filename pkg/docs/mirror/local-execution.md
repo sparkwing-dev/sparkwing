@@ -424,15 +424,17 @@ Cloud owns the run record. The invoking CLI hosts its scheduler, streams logs
 and requests cancellation on Ctrl-C. Nodes use the existing claim, lease and
 fencing rules. The local controller supplies this machine's admission only.
 Other machines register as runners with Cloud. `sparkwing runners add --runner NAME
---personal --profile work` reserves a registered machine for that user's runs.
-Personal enrollment requires an independent account session. A profile backed
-only by a member token cannot enroll a personal machine.
+--personal --session-stdin --profile work` reads an existing independent account
+session from stdin and reserves the machine for that user's runs. The session
+and its CSRF proof stay in memory. The command saves only the new runner
+credential. A profile backed only by a member token cannot enroll a personal machine.
 Cloud routing requires an attached terminal session. The default local route
 continues to support `--sw-detached`.
 Cloud overflow captures the working tree. Use `pipeline trigger` for explicit
 committed revisions instead of `--sw-ref` or `--sw-pipeline-ref`.
 
-An unreachable controller before intake produces a message and a local run.
+An unreachable controller before intake, including during source upload,
+produces a message and a local run.
 Authorization failures remain errors. After intake, a lost response or connection
 cannot start a second local run because the admitted run keeps its Cloud owner.
 

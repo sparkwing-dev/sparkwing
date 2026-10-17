@@ -55,6 +55,7 @@
       "label": "Operations",
       "slugs": [
         "observability",
+        "debugging",
         "diagnosing-admission",
         "security",
         "hotfix-runner",
@@ -63,6 +64,7 @@
         "auth",
         "oidc",
         "limits",
+        "billing",
         "hooks",
         "schedules",
         "api",

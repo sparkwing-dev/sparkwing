@@ -19,7 +19,7 @@ type deniedSourceAccess struct {
 
 func (a *deniedSourceAccess) BundleURL(context.Context, string) (string, error) {
 	a.signed++
-	return "", errors.New("unauthorized bundle signing")
+	return "", a.err
 }
 
 func FuzzSourceAuthorizationPrecedesBytes(f *testing.F) {
@@ -40,7 +40,11 @@ func FuzzSourceAuthorizationPrecedesBytes(f *testing.F) {
 		if entry != nil {
 			_ = entry.Close()
 		}
-		if entry != nil || !errors.Is(err, denied) || a.calls != 1 || a.signed != 0 {
+		calls, signatures := 1, 0
+		if bundled {
+			calls, signatures = 0, 1
+		}
+		if entry != nil || !errors.Is(err, denied) || a.calls != calls || a.signed != signatures {
 			t.Fatalf("denied source: entry=%v error=%v authorizations=%d signatures=%d", entry, err, a.calls, a.signed)
 		}
 		if entries, err := os.ReadDir(workspace); err != nil || len(entries) != 0 {

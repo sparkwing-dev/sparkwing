@@ -4,6 +4,25 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Bootstrap source bundles and transition source ordinals
+
+`POST /api/v1/data/download` also accepts `pod_bootstrap` with `source.read`,
+`sourceBundle` binding and sensitive liveness. `BootstrapGrants` remains exactly
+`source.read` and `claim.exchange`. The alternate permits only the submitted
+bundle digest in the bootstrap's bound run seal. It rechecks owner/generation,
+lease, ancestry, expiry, cancellation and the source fence before signing bytes.
+The run, node and generation come from the persisted capability. The caller
+supplies only the digest. Plan and Eval bootstrap preparation use the same rule.
+Secrets, output/cache reads, general existence queries, uploads and records stay
+unavailable before exchange. Consumed bootstraps cannot fetch another signed URL.
+
+New node awards bind holder and generation with attempt zero. Their retained
+node-wide attempt counter is historical until execution starts. The internal
+`RequestEvidence.ResultAttempt` carries the transition body's `source_attempt`
+for exact-body proof creation and replay, separately from current execution
+identity. C1 checks the source ordinal and authority together before applying a
+new transition. Exact replay preserves the new ordinal and state sequence.
+
 ### Operator team creation (decision 114)
 
 POST `/api/v1/operator/teams` is a deployment-owned AuthCapability route with
@@ -3256,6 +3275,11 @@ current run's persisted seal and its source-submission record. It remains under
 ordinary live awarded data authority. It grants no cross-run, cross-tenant,
 cache, binary or App trust. HTTPS and HTTP signed transfers follow the same
 configured endpoint contract as other shared data objects.
+Before an attempt starts, a live node award can read only this sealed source
+bundle. It has no result, output or upload identity until execution starts.
+Data authority resolves the route's read or write grant rather than treating
+the capability's write scope as a request to write. Data binding refusals use
+the canonical data error mapping before the handler runs.
 
 GitHub identity is verified before admission using the configured App, a
 confirmed team HTTPS source credential, or the public repository API. Bound
@@ -3288,4 +3312,4 @@ Machine provisioning accepts `Personal` only from a direct account session. `Cap
 
 Authenticated here bootstrap claims can report their machine's fixed `Capacity`, `OS`, `Arch` and current available resources. Awarded here owners update availability through optional `RenewalRequest.Available`. Store verifies the trigger generation, holder, capability prefix and lease before storing that observation. These observations confer no runner identity, pool membership or cross-run access. The owner observation joins ordinary live eligible claimant checks in the shared placement matcher.
 
-Personal machine enrollment accepts `runs.write` on an independent account session, so editors can register their own machines. Team-machine enrollment requires team administration in both handler and store. A root member bearer cannot establish independent machine consent. The CLI enrollment transport needs independent session authentication or a reviewed bounded-ancestry contract before bearer-based personal enrollment is offered.
+Personal machine enrollment accepts `runs.write` on an independent account session, so editors can register their own machines. Team-machine enrollment requires team administration in both handler and store. A root member bearer cannot establish independent machine consent. `runners add --personal --session-stdin` reads an existing independent account session without saving it. The client obtains its CSRF proof from `GET /api/v1/auth/session`, then presents `Authorization: Session`, same-controller Origin and matching CSRF header/cookie for enrollment and rollback revocation. It never exchanges a member bearer for independent consent. Capability-derived sessions retain their parent and cannot enroll personal machines. The default cookie prefix follows HTTPS; an HTTP deployment must configure insecure cookies.

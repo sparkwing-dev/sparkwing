@@ -84,6 +84,7 @@ func NewRunnerTokenManager(options EngineOptions) (RunnerTokenManager, error)
 func NewScheduleManager(options EngineOptions) (controllerwire.ScheduleManager, error)
 func NewScheduleRepositoryManager(options EngineOptions) (controllerwire.ScheduleRepositoryManager, error)
 func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, error)
+func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, session string) (RunnerTokenManager, error)
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error)
 func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (source.Access, error)
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error)
@@ -174,6 +175,7 @@ func (c *engineClient) WriteSchedules(ctx context.Context, input controllerwire.
 func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.SecretWrite) (controllerwire.SecretWritten, error)
 func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Manifest) error
 func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segment, body []byte) error
+func (t *runnerSessionTransport) RoundTrip(request *http.Request) (*http.Response, error)
 func (s *sourceAccess) BundleURL(ctx context.Context, digest string) (string, error)
 func (s *sourceAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error)
 func (c *tokenManager) CreateToken(ctx context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error)

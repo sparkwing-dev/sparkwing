@@ -104,10 +104,18 @@ func AuthorizeData(ctx context.Context, edges DataAccessChecker, authorized Auth
 		return &apierr.Error{Code: apierr.BadRequest, Message: "log reads use the controller log routes"}
 	}
 	c := authorized.Principal.Capability
+	grant := policy.Grant
+	sourceBundle := authorized.Access.Binding == BindSourceBundle
+	if sourceBundle {
+		if target.Operation != DataDownload || !matchesCredential(authorized.Principal, CredentialBootstrap) || c.Delivery != DeliveryBootstrap {
+			return forbidden(apierr.ReasonBinding)
+		}
+		grant = SourceRead
+	}
 	if c.Audience != Controller {
 		return forbidden(apierr.ReasonAudience)
 	}
-	if !slices.Contains(c.Grants, policy.Grant) || !slices.Contains(authorized.Access.Grants, policy.Grant) {
+	if !slices.Contains(c.Grants, grant) || !slices.Contains(authorized.Access.Grants, grant) {
 		return forbidden(apierr.ReasonMissingGrant)
 	}
 	if c.Team == "" || authorized.Target.Team != c.Team {
@@ -117,12 +125,18 @@ func AuthorizeData(ctx context.Context, edges DataAccessChecker, authorized Auth
 	if scope == nil || scope.RepositoryKey == "" {
 		return forbidden(apierr.ReasonRepositoryUnauthorized)
 	}
-	if authorized.ResultReplay || authorized.LogTailAttempt != 0 || authorized.Access.Binding != BindData {
+	if authorized.ResultReplay || authorized.LogTailAttempt != 0 || authorized.Access.Binding != BindData && !sourceBundle {
 		return forbidden(apierr.ReasonBinding)
 	}
 	if authorized.Access.Liveness != LiveSensitive && authorized.Access.Liveness != LiveExpansion &&
 		!(authorized.Access.Liveness == LiveCredential && (scope.Use == DataRemoteCache || scope.Use == DataPublish)) {
 		return forbidden(apierr.ReasonBinding)
+	}
+	if sourceBundle {
+		if authorized.Access.Liveness != LiveSensitive || scope.Use != DataClaim && !(scope.Use == DataExpansion && c.Unit == UnitEval) || scope.RunID == "" || scope.RunID != c.Binding.RunID || target.RunID != scope.RunID || target.NodeID != scope.NodeID || target.Generation != scope.Generation {
+			return forbidden(apierr.ReasonBinding)
+		}
+		return edges.CheckDataAccess(ctx, authorized, target)
 	}
 	if err := dataUse(authorized.Principal, *scope, policy.Grant); err != nil {
 		return err

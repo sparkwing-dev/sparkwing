@@ -1,5 +1,39 @@
 # C1 data contract
 
+## Source reads before an execution attempt
+
+A live node award may read its run's submitted `source_bundle` before its
+execution attempt starts, including a retry that retains an earlier attempt
+ordinal. `ResolveBlobAuthority` returns read authority without an attempt or
+upload identity for that pending node. Candidate edges permit only the bundle
+digest in the bound run's sealed request. Holder, generation, lease, cancellation,
+team and repository checks still apply. Output and cache reads, upload receipts
+and record writes continue to require an execution attempt.
+
+`ResolveDataAuthority` selects the grant required by the authorized operation,
+so a read does not acquire write authority from the capability's `WriteRef`.
+The HTTP policy router applies the existing data error projection to data binding
+refusals. An unreadable foreign digest returns `forbidden` rather than `internal`.
+The composed HTTP coverage is in `pkg/controller/burst_acceptance_test.go`.
+The source-read fence matrix is in `pkg/store/blob_source_setup_test.go`.
+
+Cloud source initialization precedes bootstrap exchange. A live Node, Plan or
+Eval bootstrap resolves `source.read` only for its sealed submitted source
+bundle. This projection has no attempt or upload identity. Store read-set
+construction derives the grant from persisted bootstrap delivery and excludes
+output, binary, cache and foreign-run edges. Generic `data.read`, `data.write`
+and all data operations except the exact bundle download remain unavailable.
+Exchange revokes the bootstrap's source authority with its other authority.
+
+Fresh node awards carry attempt zero in their data scope even when the node
+retains earlier attempt ordinals. Authentication reports no current execution
+attempt for a pending node that has not started. Starting execution allocates
+the next ordinal, which authentication then projects into the live award.
+Exact-body transition proofs use the decoded `source_attempt`, revalidated
+against the persisted source ordinal in the committing transaction. An identical
+actor and digest may replay before comparison with the advanced ordinal, after
+authority is rechecked. A changed source ordinal cannot reuse that proof.
+
 ## Operator team creation (decision 114)
 
 Store.CreateOperatorTeam(ctx, Authorized, slug, displayName) returns one

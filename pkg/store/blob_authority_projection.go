@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"slices"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -14,13 +16,11 @@ func (t *Tenant) ResolveDataAuthority(ctx context.Context, authorized capability
 		if ref.Kind != capability.AuthorityCapability || ref.ID == "" || authorized.Target.Team != string(t.team) {
 			return bindingRefusal()
 		}
-		p, err := tx.ResolveAuthority(ctx, ref)
-		if err != nil {
-			return err
-		}
 		grant := capability.DataRead
-		if p.Capability.Data != nil && p.Capability.Data.WriteRef != "" {
+		if slices.Contains(authorized.Access.Grants, capability.DataWrite) {
 			grant = capability.DataWrite
+		} else if authorized.Access.Binding == capability.BindSourceBundle && slices.Contains(authorized.Access.Grants, capability.SourceRead) {
+			grant = capability.SourceRead
 		}
 		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, blob.Authority{CapabilityRef: ref.ID}, grant)
 		authority = a.authority

@@ -99,9 +99,10 @@ records, and never fetch executable pipeline binaries.
 Logs use a separate signed segment path and controller-proxied reads. Tagged
 subjects distinguish job attempts from trigger, plan and eval units.
 
-The `swcg` cache-grant protocol and `cache-grant-key` credential are removed.
-Authenticated data routes use live capabilities. There is no compatibility
-endpoint or cache-service fallback.
+Cloud source initialization downloads the run's sealed source bundle before
+exchanging its bootstrap. The bootstrap's `source.read` grant permits only that
+bundle through the download route. It grants no output, cache, secret or upload
+access. After exchange, execution uses the awarded claim and its current attempt.
 
 ## Local cache reads and publication
 

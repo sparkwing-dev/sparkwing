@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -723,7 +724,7 @@ func TestRunnersEnrollmentRequestsPersonalCapacityOnlyWhenSelected(t *testing.T)
 			f := newRunnersFixture(t)
 			args := []string{"--profile", "prod", "--runner", "desk", "--config", f.config, "--no-service", "--output", "json"}
 			if personal {
-				args = append(args, "--personal")
+				args = append(args, "--personal", "--session-stdin")
 			}
 			enrollment, _, err := prepareRunnerEnrollment(args)
 			if err != nil {
@@ -755,6 +756,74 @@ func TestRunnersEnrollmentRequestsPersonalCapacityOnlyWhenSelected(t *testing.T)
 				t.Fatal("enrollment bearer reached output")
 			}
 		})
+	}
+}
+
+func TestRunnersPersonalEnrollmentRequiresIndependentSessionBeforeSideEffects(t *testing.T) {
+	f := newRunnersFixture(t)
+	profileHTTPFixture(t, func(*http.Request) (int, string) {
+		t.Fatal("missing session sent a request")
+		return 500, ""
+	})
+	err := runRunnersAdd([]string{"--profile", "prod", "--runner", "desk", "--personal", "--config", f.config})
+	if err == nil || !strings.Contains(err.Error(), "--session-stdin") {
+		t.Fatalf("missing independent session: %v", err)
+	}
+	if len(*f.calls) != 0 {
+		t.Fatalf("missing session reached service manager: %v", *f.calls)
+	}
+	if _, err := os.Stat(f.config); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing session wrote runner configuration: %v", err)
+	}
+}
+
+func TestRunnersPersonalEnrollmentUsesEphemeralSession(t *testing.T) {
+	f := newRunnersFixture(t)
+	withStdin(t, "private-independent-session\n")
+	profileHTTPFixture(t, func(r *http.Request) (int, string) {
+		if r.Header.Get("Authorization") != "Session private-independent-session" {
+			t.Fatalf("enrollment did not use independent consent: %s", r.URL.Path)
+		}
+		if r.Method == "GET" && r.URL.Path == "/api/v1/auth/session" {
+			return 200, `{"csrf_token":"private-csrf"}`
+		}
+		if r.Method != "POST" || r.URL.Path != "/api/v1/runners" || r.Header.Get("Origin") != "https://controller.example" || r.Header.Get("X-CSRF-Token") != "private-csrf" {
+			t.Fatalf("wrong session enrollment request: %s %s", r.Method, r.URL.Path)
+		}
+		cookie, err := r.Cookie("__Host-sw_csrf")
+		if err != nil || cookie.Value != "private-csrf" {
+			t.Fatal("missing session CSRF cookie")
+		}
+		var proposal client.EnrollRunnerRequest
+		if err := json.NewDecoder(r.Body).Decode(&proposal); err != nil || !proposal.Personal || proposal.Name != "desk" {
+			t.Fatalf("personal proposal: %+v %v", proposal, err)
+		}
+		return 201, `{"capability":"swk_12345678_runner-secret","prefix":"swk_12345678","team":"team","grants":["nodes.claim","triggers.claim"]}`
+	})
+	out := captureStdout(t, func() {
+		if err := runRunnersAdd([]string{"--profile", "prod", "--runner", "desk", "--personal", "--session-stdin", "--no-service", "--config", f.config, "--output", "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	config, err := userconfig.ReadConfig(f.config)
+	if err != nil || config.Runner == nil || config.Runner.CredentialsDir == nil {
+		t.Fatalf("personal configuration: %+v %v", config, err)
+	}
+	credential, err := os.ReadFile(filepath.Join(*config.Runner.CredentialsDir, "agent-token"))
+	if err != nil || string(credential) != "swk_12345678_runner-secret" {
+		t.Fatalf("runner credential: %v", err)
+	}
+	for _, path := range []string{f.config, os.Getenv("SPARKWING_CONFIG")} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), "private-independent-session") || strings.Contains(string(body), "private-csrf") {
+			t.Fatal("persisted ephemeral session authority")
+		}
+	}
+	if strings.Contains(out, "private-") || strings.Contains(out, "runner-secret") || !strings.Contains(out, `"personal":true`) {
+		t.Fatalf("unsafe or missing enrollment output: %s", out)
 	}
 }
 

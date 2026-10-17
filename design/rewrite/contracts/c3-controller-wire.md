@@ -977,6 +977,15 @@ transport. A bundle containing the selected commit checks out directly; missing
 pinned source revisions use credentialed delta fetch. Git credentials are
 released only when a remote fetch, tags, submodules or LFS needs them.
 
+Cloud source initialization downloads that bundle before exchanging its bootstrap.
+The `/data/download` bootstrap alternate requires `source.read` and the
+`sourceBundle` binding. It admits only the bound run's sealed submitted bundle,
+without granting general `data.read`, writes or secrets. Node, Plan and Eval
+preparation share this path. Exchange consumes its source authority. Retried
+node awards carry no active execution attempt until NodeStart allocates the next
+ordinal. Exact-body transition proof evidence carries the body's source ordinal
+independently, so replay does not change the allocated ordinal.
+
 The production GitHub lookup is shared by CLI and controller. The controller
 verifies public repositories without requiring an App; private identities use
 its App or confirmed team HTTPS source credential. It never trusts a typed
@@ -992,6 +1001,8 @@ converts YAML durations once. Targets are `here`, `machines`, `cloud`,
 RunnerHere and dispatch host. Cloud remains the sole run record owner, and the
 CLI hosts scheduling and public log attachment. Connection failure before intake
 falls back locally with a message. No post-intake error may submit a local copy.
+Source-upload network failures are marked as before intake and also fall back.
+The mark never covers run submission because a lost response can hide acceptance.
 
 `CreateRunRequest.LocalSecrets` is a private input-only map. The sealed
 `Request.LocalSecretNames` contains declared names only. Intake passes values to
@@ -1016,3 +1027,19 @@ C1 checks personal machine ownership from account subject provenance for every
 run claim. `GET /overflow` and `PUT /overflow` use OverflowControl and
 OverflowControlWrite under the authenticated account. Null means uncapped.
 Request caps only narrow the saved cap; team tier/ladder admission still applies.
+
+`NewSessionRunnerTokenManager(ctx, EngineOptions, session)` authenticates runner
+enrollment and token management with an existing account session. It rejects a
+simultaneous bearer callback, obtains CSRF from `GET /api/v1/auth/session`, and
+keeps the session and proof in memory. Mutations send Session authorization,
+the selected controller's Origin, and matching CSRF header and cookie. The
+client refuses redirects and never retries one-time enrollment. Session input
+cannot contain whitespace, control bytes or non-ASCII bytes. The controller
+still checks independent session ancestry and current membership on each write.
+
+`runners add --personal` requires `--session-stdin` before service preparation
+or enrollment. The flag reads an existing independent account-session
+presentation from stdin; it adds no login, bearer conversion or persisted
+session field. Only the issued runner credential is written to the private
+credential file. Failed installation revokes that credential through the same
+session transport and rolls back the local configuration.

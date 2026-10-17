@@ -22,6 +22,19 @@ type burstRunDependencies struct {
 	cloud   func(context.Context, string, runFlags, []string, userconfig.RunRouting, client.EngineOptions) error
 }
 
+type burstBeforeIntakeError struct{ error }
+
+func (e *burstBeforeIntakeError) Unwrap() error { return e.error }
+
+func burstControllerUnreachable(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var network net.Error
+	var failure *apierr.Error
+	return errors.As(err, &network) || errors.As(err, &failure) && failure.Code == apierr.Unavailable
+}
+
 func resolveRunRouting(machine userconfig.Config, project *projectconfig.Config, pipeline string) userconfig.RunRouting {
 	var layers []*userconfig.RunRouting
 	if machine.Run != nil {
@@ -62,21 +75,24 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 		return err
 	}
 	defer closeConnection()
-	if err := deps.probe(ctx, options); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		var network net.Error
-		var failure *apierr.Error
-		if !errors.As(err, &network) && !(errors.As(err, &failure) && failure.Code == apierr.Unavailable) {
+	err = deps.probe(ctx, options)
+	if err == nil {
+		err = deps.cloud(ctx, pipeline, flags, args, route, options)
+		var beforeIntake *burstBeforeIntakeError
+		if !errors.As(err, &beforeIntake) {
 			return err
 		}
-		if _, err := fmt.Fprintln(out, "Cloud controller is unreachable; running locally."); err != nil {
-			return err
-		}
-		return deps.local(ctx, pipeline, flags, args)
 	}
-	return deps.cloud(ctx, pipeline, flags, args, route, options)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if !burstControllerUnreachable(err) {
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "Cloud controller is unreachable; running locally."); err != nil {
+		return err
+	}
+	return deps.local(ctx, pipeline, flags, args)
 }
 
 func runConfiguredInvocation(pipeline string, flags runFlags, args []string) error {

@@ -399,7 +399,11 @@ are part of this contract.
     concurrency holders live. Capacity whose lease lapsed cannot be revived.
 11. Source acquisition trusts sealed identity and exact SHA, not today's branch
     head. It discovers origin HEAD only when DefaultBranch was absent. A bundle
-    only seeds a verified checkout. Credentials are bound to their host.
+    only seeds a verified checkout. Before creating a remote workspace, acquisition
+    obtains live authority through `BundleURL` for bundled source or
+    `GitCredential` for remote source. A complete bundle needs no Git credential.
+    Missing commits, tags, submodules and LFS require live Git authority before
+    their remote fetch. Credentials are bound to their host.
     SSH uses the confirmed KnownHosts value. ExtraRepositories limits submodule
     reads. Kind is github_app, https or ssh; empty means owner credentials, whose
     use is fenced by the runner repository allow-list. Team release requires the

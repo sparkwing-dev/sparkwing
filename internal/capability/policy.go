@@ -37,6 +37,7 @@ const (
 	BindReadSet            BindingRule = "readSet"
 	BindDeclaredSecret     BindingRule = "declaredSecret"
 	BindSource             BindingRule = "source"
+	BindSourceBundle       BindingRule = "sourceBundle"
 	BindData               BindingRule = "data"
 	BindExpansion          BindingRule = "expansion"
 	BindClaimSelection     BindingRule = "claimSelection"
@@ -507,6 +508,9 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 		return b.Kind == BindingNode && b.RunID != "" && b.NodeID != "" && (t.RunID == "" || run)
 	case BindDeclaredSecret, BindSource:
 		return isClaim(p) && (t.RunID == "" || run)
+	case BindSourceBundle:
+		return matchesCredential(p, CredentialBootstrap) && t.Data != nil && t.Data.Operation == DataDownload &&
+			t.Data.RunID == b.RunID && b.RunID != ""
 	case BindReadSet, BindData, BindClaimSelection:
 		return true
 	}
@@ -573,7 +577,7 @@ func validateRoutePolicy(route RoutePolicy) error {
 		}, access.Credential) ||
 			!slices.Contains([]BindingRule{
 				BindNone, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
-				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindData, BindExpansion, BindClaimSelection, BindOwnToken, BindMachineOwner,
+				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindSourceBundle, BindData, BindExpansion, BindClaimSelection, BindOwnToken, BindMachineOwner,
 				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval, BindSourceReport,
 			}, access.Binding) ||
 			!slices.ContainsFunc(LivenessPolicies, func(policy LivenessPolicy) bool { return policy.Class == access.Liveness }) {

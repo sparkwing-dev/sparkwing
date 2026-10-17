@@ -332,6 +332,9 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 
 func awardDataScope(row awardRow, c capability.Capability) *capability.DataScope {
 	scope := &capability.DataScope{Use: capability.DataClaim, RepositoryKey: row.repo, WriteRef: "manual:" + row.ref, RunID: row.run, NodeID: row.node, Attempt: row.attempt, Generation: c.Binding.Generation}
+	if c.Unit == capability.UnitNode {
+		scope.Attempt = 0
+	}
 	var sealed runspec.SealedRequest
 	if json.Unmarshal(row.request, &sealed) == nil && sealed.Request.Git.App.Set && sealed.Request.Git.App.Value.Ref == row.ref && sealed.Request.Git.App.Value.SHA == row.sha {
 		scope.WriteRef = row.ref

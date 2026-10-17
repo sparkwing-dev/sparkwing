@@ -77,7 +77,8 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		return blobActor{}, err
 	}
 	c := p.Capability
-	if c.Team != string(team) || c.Data == nil || !slices.Contains(c.Grants, grant) || c.Delivery == capability.DeliveryBootstrap {
+	if c.Team != string(team) || c.Data == nil || !slices.Contains(c.Grants, grant) ||
+		c.Delivery == capability.DeliveryBootstrap && grant != capability.SourceRead || grant == capability.SourceRead && c.Delivery != capability.DeliveryBootstrap {
 		return blobActor{}, authorityError(apierr.Forbidden, "blob grant and data scope are required")
 	}
 	a := blobActor{capability: c}
@@ -127,6 +128,15 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 	}
 	a.authority.Ref = facts
 	a.source = blob.UploadIdentity{Team: string(team), RunID: c.Binding.RunID, Principal: a.authority.Principal, CapabilityRef: c.Prefix}
+	if grant == capability.SourceRead {
+		if c.Data.Use != capability.DataClaim && !(c.Data.Use == capability.DataExpansion && c.Unit == capability.UnitEval) || !sealed.Request.Source.BundleDigest.Set || sealed.Request.Source.BundleDigest.Value == "" {
+			return a, bindingRefusal()
+		}
+		if err := checkSourceReleaseFenceTx(ctx, tx, c); err != nil {
+			return a, err
+		}
+		return a, checkBlobAuthorityHints(input, a.authority)
+	}
 	actor := Actor{Kind: ActorHolder, Authority: p.Authority, CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
 	switch {
 	case c.Data.Use == capability.DataPublish:
@@ -157,6 +167,10 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		}
 		if err := checkHolderTx(ctx, tx, team, row, actor, tx.now()); err != nil {
 			return a, err
+		}
+		// safety: source reads precede execution; output writes require an attempt.
+		if row.Status == StatusPending && row.StartedAt == nil && grant == capability.DataRead {
+			return a, checkBlobAuthorityHints(input, a.authority)
 		}
 		if row.Attempt <= 0 {
 			return a, holderRefusal()

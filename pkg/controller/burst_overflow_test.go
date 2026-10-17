@@ -128,7 +128,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := New(e.Store, nil).WithSecretsCipher(cipher).WithEngineController(e).WithLicense(accountSessionTestLicense(t))
-	raw, csrf, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
+	raw, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "account"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,20 +153,13 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 		t.Fatal("editor enrolled team machine")
 	}
 
-	r := httptest.NewRequest("POST", "https://controller.test/api/v1/runners", strings.NewReader(`{"name":"desktop","repos":["github.com/acme/*"],"personal":true}`))
-	r.Header.Set("Authorization", "Session "+raw)
-	r.Header.Set("Origin", "https://controller.test")
-	r.Header.Set("X-CSRF-Token", csrf)
-	r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, server.cookiesSecure()), Value: csrf})
-	r.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("personal enrollment: %d %s", w.Code, w.Body.String())
-	}
-	var enrolled credentialResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &enrolled); err != nil {
+	manager, err = client.NewSessionRunnerTokenManager(t.Context(), client.EngineOptions{URL: "https://controller.test", HTTP: &http.Client{Transport: localHostRoundTripper{handler: h}}}, raw)
+	if err != nil {
 		t.Fatal(err)
+	}
+	enrolled, err := manager.EnrollRunner(t.Context(), client.EnrollRunnerRequest{Name: "desktop", Repos: []string{"github.com/acme/*"}, Personal: true})
+	if err != nil {
+		t.Fatalf("personal enrollment: %v", err)
 	}
 	request, err := json.Marshal(runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}}}})
 	if err != nil {
@@ -178,4 +171,8 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusForbidden)
 	engineSQL(t, e.Store, `UPDATE runs SET created_principal='account'`)
 	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusOK)
+	if _, err := manager.RevokeToken(t.Context(), enrolled.Prefix); err != nil {
+		t.Fatalf("session revocation of enrolled machine: %v", err)
+	}
+	engineClaimHTTP(t, h, enrolled.Capability, "POST", "/api/v1/runners/claim", body, http.StatusUnauthorized)
 }

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -96,6 +98,67 @@ func (burstBundleAccess) GitCredential(context.Context, source.Spec) (source.Cre
 
 func (burstBundleAccess) BundleURL(context.Context, string) (string, error) {
 	return "https://example.test/bundle", nil
+}
+
+type burstRemoteAccess struct {
+	burstBundleAccess
+	calls int
+	err   error
+}
+
+func (a *burstRemoteAccess) GitCredential(context.Context, source.Spec) (source.Credential, error) {
+	a.calls++
+	return source.Credential{}, a.err
+}
+
+func TestBurstBundleRemotePoliciesRequireLiveCredentialAuthority(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	writeSnapshotFile(t, repo, "public.txt", "public\n", 0o644)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-m", "base")
+	snapshot, err := captureBurstSnapshot(t.Context(), repo, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := snapshot.close(); err != nil {
+			t.Error(err)
+		}
+	})
+	bundle, err := os.ReadFile(snapshot.BundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(bundle)
+	refused := errors.New("source remote authorization refused")
+	yes := true
+	for _, tc := range []struct {
+		name   string
+		sha    string
+		policy nodeproto.SourceSpec
+	}{
+		{name: "missing commit", sha: strings.Repeat("b", 40)},
+		{name: "tags", policy: nodeproto.SourceSpec{Tags: &yes}},
+		{name: "submodules", policy: nodeproto.SourceSpec{Submodules: &yes}},
+		{name: "LFS", policy: nodeproto.SourceSpec{LFS: &yes}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sha := snapshot.SHA
+			if tc.sha != "" {
+				sha = tc.sha
+			}
+			a := &burstRemoteAccess{err: refused}
+			workspace := t.TempDir()
+			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:example.test/team/repo", RemoteURL: "https://example.test/team/repo.git", SHA: sha, PipelineDir: ".", BundleDigest: hex.EncodeToString(sum[:]), Checkout: runspec.CheckoutPolicy{Policy: tc.policy}}, source.Options{Workspace: workspace, Access: a, BundleTransport: burstBundleTransport{bundle}})
+			if entry != nil || !errors.Is(err, refused) || a.calls != 1 {
+				t.Fatalf("remote source bypassed authority: entry=%v calls=%d err=%v", entry, a.calls, err)
+			}
+			files, err := os.ReadDir(workspace)
+			if err != nil || len(files) != 0 {
+				t.Fatalf("failed source retained workspace: %d %v", len(files), err)
+			}
+		})
+	}
 }
 
 type burstBundleTransport struct{ bundle []byte }

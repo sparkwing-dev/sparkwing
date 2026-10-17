@@ -2645,3 +2645,9 @@ capacity and availability. Renewal may refresh here availability. Personal
 runner enrollment adds `personal:true`. `GET` and `PUT /api/v1/overflow` manage
 the authenticated account's monthly allowance. The store baseline gains account
 subject-kind provenance and account overflow controls.
+
+Personal enrollment uses `sparkwing runners add --runner NAME --personal
+--session-stdin --profile PROFILE`. Supply an existing independent account
+session on stdin. A member token cannot create independent machine authority.
+The session and CSRF proof stay in memory. Failed installation revokes the new
+runner credential before returning an error.

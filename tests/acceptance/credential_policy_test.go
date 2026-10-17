@@ -165,5 +165,9 @@ func policyFixture(credential, binding, audience string, grants []capability.Gra
 	case "repo_cache_reader":
 		p.Capability.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "repo", VerifiedDefaultOnly: true}
 	}
+	if binding == "sourceBundle" {
+		p.Capability.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "repo", RunID: "run", NodeID: "job", Generation: 2}
+		target.Data = &capability.DataTarget{Operation: capability.DataDownload, RunID: "run", NodeID: "job", Generation: 2, Digest: strings.Repeat("a", 64)}
+	}
 	return p, target
 }

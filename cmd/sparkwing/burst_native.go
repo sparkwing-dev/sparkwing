@@ -189,7 +189,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	}
 	digest, err := client.UploadSourceSnapshot(ctx, connection, request.Request.Git, request.Request.Source, snapshot.BundlePath)
 	if err != nil {
-		return request, err
+		return request, &burstBeforeIntakeError{err}
 	}
 	request.Request.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: digest}
 	return request, nil
