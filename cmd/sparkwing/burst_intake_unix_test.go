@@ -247,10 +247,11 @@ import (
 )
 
 type pipeline struct{ sw.Base }
+type inputs struct { Block bool ` + "`sw:\"block\"`" + ` }
 type credentials struct { Token string ` + "`sw:\"TOKEN,required\"`" + ` }
 func (pipeline) ShortHelp() string { return "edited SDK" }
 func (pipeline) Secrets() any { return &credentials{} }
-func (pipeline) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunContext) error {
+func (pipeline) Plan(_ context.Context, p *sw.Plan, in inputs, _ sw.RunContext) error {
     sw.Job(p, "verify", func(ctx context.Context) error {
         value := sw.PipelineSecrets[credentials](ctx).Token
         if value == "" { return errors.New("missing requester secret") }
@@ -260,12 +261,17 @@ func (pipeline) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunConte
         }
         if _, err := os.Stat(".env"); !os.IsNotExist(err) { return errors.New("undeclared file uploaded") }
         sw.Info(ctx, "burst-edited-ok secret=%s encoded=%s", value, base64.StdEncoding.EncodeToString([]byte(value)))
+        if in.Block {
+            sw.Info(ctx, "burst-awaiting-cancellation")
+            <-ctx.Done()
+            return ctx.Err()
+        }
         return nil
     })
     return nil
 }
 func main() {
-    sw.Register("burst", func() sw.Pipeline[sw.NoInputs] { return pipeline{} })
+    sw.Register("burst", func() sw.Pipeline[inputs] { return pipeline{} })
     sw.Main()
 }
 `

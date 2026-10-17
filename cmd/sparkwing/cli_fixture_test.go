@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
 
@@ -134,8 +135,12 @@ func TestMain(m *testing.M) {
 	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "wingd", "pipeline", "__sdk-install", "__host-trigger", "__tick", "__complete":
+		case "wingd", "pipeline", "run", "runs", "runners", "overflow", "__sdk-install", "__host-trigger", "__tick", "__complete":
 			main()
+			return
+		case "__test-runner":
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+			cluster.MainWithVersion(installedVersion())
 			return
 		}
 	}
@@ -154,7 +159,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestDetachedHostEntrypointDoesNotRunPipelineFixtures(t *testing.T) {
-	for _, args := range [][]string{{"wingd", "run"}, {"pipeline", "describe"}, {"__sdk-install"}, {"__host-trigger"}, {"__tick"}, {"__complete"}} {
+	for _, args := range [][]string{{"wingd", "run"}, {"pipeline", "describe"}, {"run"}, {"runs"}, {"runners"}, {"overflow"}, {"__sdk-install"}, {"__host-trigger"}, {"__tick"}, {"__complete"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			cmd := exec.CommandContext(t.Context(), os.Args[0], append(args, "--help")...)
 			cmd.Env = append(os.Environ(), "SPARKWING_TEST_DAEMON_ENTRYPOINT=1")
@@ -166,5 +171,13 @@ func TestDetachedHostEntrypointDoesNotRunPipelineFixtures(t *testing.T) {
 				t.Fatalf("helper reentered the test suite: %s", output)
 			}
 		})
+	}
+}
+
+func TestPersonalRunnerEntrypointDoesNotRunPipelineFixtures(t *testing.T) {
+	command := exec.CommandContext(t.Context(), os.Args[0], "__test-runner", "start", "--help")
+	output, err := command.CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "sparkwing-runner start") || strings.Contains(string(output), "PASS") {
+		t.Fatalf("personal runner helper reentered the test suite: %v\n%s", err, output)
 	}
 }

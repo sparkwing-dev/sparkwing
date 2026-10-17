@@ -81,6 +81,9 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 				return entry, err
 			}
 		}
+		if err := fssecure.EnsureDir(options.Workspace); err != nil {
+			return entry, fmt.Errorf("prepare host workspace: %w", err)
+		}
 		root, err := fssecure.MkdirPrivateTemp(options.Workspace, "source-")
 		if err != nil {
 			return entry, fmt.Errorf("create source workspace: %w", err)

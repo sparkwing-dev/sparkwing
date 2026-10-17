@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -90,6 +94,19 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 					t.Fatalf("rollback credentials: %v %v", dirs, err)
 				}
 				return
+			}
+			boundary := errors.New("registered runner reached production composition")
+			startup := cluster.RunnerCLI{Factory: func(ctx context.Context, options cluster.RunnerOptions) (runners.RuntimeConfig, error) {
+				if options.Config.HolderPrefix == nil || *options.Config.HolderPrefix != "desk" {
+					t.Error("enrollment lost the registered display name")
+				}
+				if raw, err := options.Bearer(ctx); err != nil || raw == "" {
+					t.Errorf("enrolled credential was not available to startup: %v", err)
+				}
+				return runners.RuntimeConfig{}, boundary
+			}}
+			if err := startup.Run(t.Context(), "start", []string{"--config", f.config}, "development"); !errors.Is(err, boundary) {
+				t.Fatalf("personal enrollment cannot start its registered runner: %v", err)
 			}
 			if _, err := manager.RevokeToken(t.Context(), inventory.Tokens[0].Prefix); err != nil {
 				t.Fatal(err)

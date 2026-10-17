@@ -1048,6 +1048,17 @@ The public `rewrite_integration` probe uses the configured CLI, a real controlle
 and the production here host to check successful execution, masked terminal
 logs, an admitted handle and absence of a second local run record.
 
+The public native probes also enroll a personal machine through
+`runners add --personal --session-stdin`, start the production runner entrypoint,
+and observe that machine's node award with a zero overflow cap. Separate here
+and personal variants interrupt the attached CLI after a streamed SDK marker
+and require the Cloud-owned run and job to finish cancelled. These probes use
+real loopback and local-controller sockets and remain unverified where the
+sandbox refuses listeners. They add no runtime transport or wire fields.
+The personal fixture uses one test executable for both production entrypoints
+because the local SDK replacement binds the installed executable's digest.
+It does not prove signed engine distribution or separate release binaries.
+
 ### Overflow management client
 
 `controllerwire.OverflowManager` exposes `ReadOverflowControl` and

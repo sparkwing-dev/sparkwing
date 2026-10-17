@@ -61,6 +61,10 @@ Connections come only from this machine file. A project can name a profile but
 cannot define one. A controller observation uses a profile only when selected
 with `--profile`. See [Controller connections](backends.md).
 
+Enrollment saves the machine's display name in `runner.holder_prefix`.
+`sparkwing-runner start --config PATH` accepts this saved metadata. The Cloud
+controller supplies the runner identity and claim holder for each award.
+
 ## Permissions and writes
 
 The file carries credentials, so reads require an owner-only regular file.

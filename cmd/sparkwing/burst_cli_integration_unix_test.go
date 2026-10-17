@@ -3,27 +3,50 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestBurstPublicRunBuildsEditedSourceAndStreamsMaskedSecrets(t *testing.T) {
+	burstPublicRun(t, false, false)
+}
+
+func TestBurstPublicRunExecutesOnRegisteredPersonalMachine(t *testing.T) {
+	burstPublicRun(t, true, false)
+}
+
+func TestBurstPublicRunInterruptCancelsHereAndPersonalWork(t *testing.T) {
+	for _, personal := range []bool{false, true} {
+		t.Run(map[bool]string{false: "here", true: "personal"}[personal], func(t *testing.T) {
+			burstPublicRun(t, personal, true)
+		})
+	}
+}
+
+func burstPublicRun(t *testing.T, personal, interrupt bool) {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		t.Skipf("native burst requires loopback and local-controller sockets: %v", err)
@@ -33,6 +56,13 @@ func TestBurstPublicRunBuildsEditedSourceAndStreamsMaskedSecrets(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	cli := buildSubmitCLI(t)
+	if personal {
+		// safety: replacement pins bind the current executable's digest across host roles.
+		cli, err = os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -41,22 +71,43 @@ func TestBurstPublicRunBuildsEditedSourceAndStreamsMaskedSecrets(t *testing.T) {
 	t.Setenv("TOKEN", burstIntakeSecret)
 	repo := burstIntakeRepository(t)
 	endpoint := "http://" + listener.Addr().String()
-	_, controller, bearer := burstIntakeController(t, endpoint)
-	server := httptest.NewUnstartedServer(controller.Handler())
+	state, controller, bearer := burstIntakeController(t, endpoint)
+	var personalAwarded atomic.Bool
+	handler := controller.Handler()
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/runners/claim" {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		recorded := httptest.NewRecorder()
+		handler.ServeHTTP(recorded, r)
+		var result controllerwire.ClaimResponse
+		if recorded.Code == http.StatusOK && json.Unmarshal(recorded.Body.Bytes(), &result) == nil && result.Claim != nil && result.Claim.Unit == capability.UnitNode && result.Claim.Runner.Name == "burst-desktop" {
+			personalAwarded.Store(true)
+		}
+		for name, values := range recorded.Header() {
+			w.Header()[name] = values
+		}
+		w.WriteHeader(recorded.Code)
+		_, _ = w.Write(recorded.Body.Bytes())
+	}))
 	if err := server.Listener.Close(); err != nil {
 		t.Fatal(err)
 	}
 	server.Listener = listener
 	server.Start()
 	t.Cleanup(server.Close)
-	config := filepath.Join(t.TempDir(), "config.yaml")
+	config := filepath.Join(os.Getenv("SPARKWING_HOME"), "config.yaml")
 	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n", endpoint, bearer)
+	if personal {
+		contents += "    prefer: [{target: machines}]\n"
+	}
 	if err := os.WriteFile(config, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", config)
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
-	defer cancel()
+	t.Cleanup(cancel)
 	offlineStopDaemon(t, os.Getenv("SPARKWING_HOME"))
 	invoke := func(args ...string) []byte {
 		t.Helper()
@@ -73,8 +124,53 @@ func TestBurstPublicRunBuildsEditedSourceAndStreamsMaskedSecrets(t *testing.T) {
 		t.Fatalf("new requester has an overflow cap: %+v %v", overflow, err)
 	}
 	invoke("overflow", "set", "--profile", "cloud", "--minutes", "0", "-o=json")
+	if personal {
+		burstPublicPersonalRunner(t, ctx, cli, repo, state)
+	}
 	handleFile := filepath.Join(t.TempDir(), "run.json")
-	output := invoke("run", "burst", "--sw-run-handle-file", handleFile, "-o=json")
+	args := []string{"run", "burst", "--sw-run-handle-file", handleFile, "-o=json"}
+	var output []byte
+	if interrupt {
+		args = append(args, "--block")
+		command := exec.CommandContext(ctx, cli, args...)
+		command.Dir = repo
+		ready := make(chan struct{})
+		stream := &burstCLIOutput{ready: ready, marker: "burst-awaiting-cancellation"}
+		command.Stdout, command.Stderr = stream, stream
+		if err := command.Start(); err != nil {
+			t.Fatal(err)
+		}
+		finished := make(chan error, 1)
+		go func() { finished <- command.Wait() }()
+		joined := false
+		defer func() {
+			if !joined {
+				_ = command.Process.Kill()
+				<-finished
+			}
+		}()
+		select {
+		case <-ready:
+			if err := command.Process.Signal(os.Interrupt); err != nil {
+				t.Fatal(err)
+			}
+		case err := <-finished:
+			joined = true
+			t.Fatalf("burst stopped before its cancellation marker: %v\n%s", err, stream.String())
+		case <-ctx.Done():
+			<-finished
+			joined = true
+			t.Fatalf("burst did not reach its cancellation marker: %v\n%s", ctx.Err(), stream.String())
+		}
+		err := <-finished
+		joined = true
+		if err == nil {
+			t.Fatal("interrupted burst reported success")
+		}
+		output = []byte(stream.String())
+	} else {
+		output = invoke(args...)
+	}
 	if !strings.Contains(string(output), "burst-edited-ok secret=*** encoded=***") || strings.Contains(string(output), burstIntakeSecret) || strings.Contains(string(output), base64.StdEncoding.EncodeToString([]byte(burstIntakeSecret))) {
 		t.Fatalf("native burst lost masked terminal output: %s", output)
 	}
@@ -88,10 +184,74 @@ func TestBurstPublicRunBuildsEditedSourceAndStreamsMaskedSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail, err := member.ReadRun(ctx, handle.RunID)
-	if err != nil || detail.Status != "success" {
-		t.Fatalf("Cloud owner did not retain successful native execution: %+v %v", detail, err)
+	wantStatus := "success"
+	if interrupt {
+		wantStatus = "cancelled"
+	}
+	if err != nil || detail.Status != wantStatus || len(detail.Jobs) != 1 || detail.Jobs[0].Outcome != wantStatus {
+		t.Fatalf("Cloud owner did not retain native execution outcome %s: %+v %v", wantStatus, detail, err)
+	}
+	if personal && !personalAwarded.Load() {
+		t.Fatal("public burst did not award the job to its registered personal machine")
 	}
 	if local := invoke("runs", "list", "-o=json"); strings.Contains(string(local), handle.RunID) {
 		t.Fatalf("burst copied ownership into the local controller: %s", local)
 	}
+}
+
+func burstPublicPersonalRunner(t *testing.T, ctx context.Context, cli, repo string, state *store.Store) {
+	t.Helper()
+	session, _, _, err := state.CreateAccountSession(ctx, store.Account{ID: "burst-user"}, "default", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(os.Getenv("SPARKWING_HOME"), "runner.yaml")
+	enroll := exec.CommandContext(ctx, cli, "runners", "add", "--personal", "--session-stdin", "--no-service", "--profile", "cloud", "--runner", "burst-desktop", "--repos", "example.test/acme/*", "--max-concurrent", "1", "--config", config, "-o=json")
+	enroll.Dir, enroll.Stdin = repo, strings.NewReader(session+"\n")
+	if output, err := enroll.CombinedOutput(); err != nil {
+		t.Fatalf("public personal-machine enrollment: %v\n%s", err, output)
+	}
+	runner := exec.CommandContext(ctx, cli, "__test-runner", "start", "--config", config)
+	stream := &burstCLIOutput{}
+	runner.Stdout, runner.Stderr = stream, stream
+	if err := runner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- runner.Wait() }()
+	t.Cleanup(func() {
+		_ = runner.Process.Signal(os.Interrupt)
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			_ = runner.Process.Kill()
+			<-finished
+			t.Error("registered runner did not drain after interrupt")
+		}
+		t.Logf("registered runner output: %s", stream.String())
+	})
+}
+
+type burstCLIOutput struct {
+	mu     sync.Mutex
+	once   sync.Once
+	bytes  bytes.Buffer
+	ready  chan struct{}
+	marker string
+}
+
+func (w *burstCLIOutput) Write(body []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.bytes.Write(body)
+	if w.ready != nil && strings.Contains(w.bytes.String(), w.marker) {
+		w.once.Do(func() { close(w.ready) })
+	}
+	return n, err
+}
+
+func (w *burstCLIOutput) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.bytes.String()
 }

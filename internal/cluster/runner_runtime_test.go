@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
@@ -133,6 +134,44 @@ func TestRunnerRequiresSignedPolicyBeforeClaiming(t *testing.T) {
 	if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t)}, "v1.2.3"); !errors.Is(err, failure) {
 		t.Fatalf("Run = %v", err)
 	}
+}
+
+func FuzzRegisteredRunnerNameCannotReplaceAwardIdentity(f *testing.F) {
+	f.Add("desktop")
+	f.Add("here:foreign-run")
+	f.Add("pool=privileged")
+	f.Fuzz(func(t *testing.T, name string) {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		controller, credentials := "https://controller.example", runnerCredentials(t)
+		concurrency := 1
+		seen := false
+		cli := RunnerCLI{
+			ReadConfig: func(string) (userconfig.Config, error) {
+				return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, HolderPrefix: &name, MaxConcurrent: &concurrency, Repos: []string{"github.com/acme/*"}}}, nil
+			},
+			Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
+				return cliRuntime(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+					if request.RunID != "" || len(request.Labels) != 0 {
+						t.Error("registration metadata changed claim selection")
+					}
+					unit := cliAward(capability.UnitNode)
+					unit.Runner = nodeproto.RunnerIdentity{Name: "server-awarded", Type: "runner", Labels: []string{"linux"}}
+					return controllerwire.ClaimResponse{Claim: &unit}, nil
+				}, func(_ context.Context, unit controllerwire.ClaimedUnit) error {
+					seen = true
+					if unit.Runner.Name != "server-awarded" || !reflect.DeepEqual(unit.Runner.Labels, []string{"linux"}) {
+						t.Error("registration metadata replaced awarded runner identity")
+					}
+					cancel()
+					return nil
+				}, cliVersions{index: cliVersionIndex(t)}), nil
+			},
+		}
+		if err := cli.Run(ctx, "start", []string{"--config=/fixture/config.yaml"}, "v1.2.3"); !errors.Is(err, context.Canceled) || !seen {
+			t.Fatalf("registered runner did not execute its award: seen=%v error=%v", seen, err)
+		}
+	})
 }
 
 func TestRunnerBindsMetricsBeforeClaiming(t *testing.T) {

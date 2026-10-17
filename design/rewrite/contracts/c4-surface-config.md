@@ -959,13 +959,24 @@ reference exposes a real `burst-and-overflow` section anchor. Level-one and
 level-two description headings stay escaped so command sections retain their
 ownership of those levels.
 
-The CLI prepares its private source workspace on a fresh home before acquisition.
+Shared `source.PrepareCheckout` prepares its private host workspace after live
+source authorization and before creating the owned checkout. Every remote
+placement uses this path, including a fresh registered machine. CLI source
+options no longer create that directory independently.
 For Cloud-owned here runs, `hostSourceOptions` supplies the requesting machine's
 ambient environment through `procenv.Build`. Remote policy admits the existing
 minimal tool base plus `GOCACHE` and `GOMODCACHE`. Captured requester values,
 arbitrary user variables and credential-shaped names remain excluded. SDK
 installation and process execution use this same classified base. Local runs
 retain their captured environment policy.
+
+`runner.holder_prefix` saved by enrollment is registration display metadata.
+Starting that saved configuration does not select a claim holder or execution
+identity. Explicit `warm --holder-prefix` remains refused because the controller
+owns holder identity. Awarded runner names, labels and fences remain authoritative.
+The enrollment-to-startup regression uses real session enrollment and credential
+files. The runner-loop property varies saved names while preserving the awarded
+identity and claim selection.
 
 ## Cloud chart integration amendment
 

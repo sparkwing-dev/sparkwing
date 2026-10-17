@@ -2,6 +2,12 @@
 
 ## Declared requester secrets in composed execution
 
+`source.PrepareCheckout` owns preparation of an absent absolute host workspace
+for remote source. It authorizes Git or bundle access first, then uses the
+existing private-directory policy and acquisition-owned temporary checkout.
+Denied access creates no workspace. Closing an entry removes its checkout while
+retaining the empty host workspace. CLI options only select that workspace.
+
 The process secret route resolves its `name` as a secret selector, independently
 of named pipeline routes. Controller value replies use the shared SecretValue
 shape, preserving empty values and false shared visibility. The native process

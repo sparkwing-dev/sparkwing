@@ -175,7 +175,7 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 	if cfg.MaxConcurrent != nil {
 		options.Loop.MaxConcurrent = *cfg.MaxConcurrent
 	}
-	if cfg.HolderPrefix != nil && *cfg.HolderPrefix != "" {
+	if fs.Changed("holder-prefix") {
 		return options, errors.New("runner holder-prefix is unavailable: the controller claim contract owns holder identity")
 	}
 	if options.Loop.MaxConcurrent < 1 {
