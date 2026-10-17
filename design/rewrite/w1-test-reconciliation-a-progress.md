@@ -1,5 +1,46 @@
 # W1 test reconciliation-a progress
 
+## Current continuation
+
+The lead's native report after session 4 has no failures under the assigned
+controller prefixes. Its one failure outside `pkg/controller` is
+`TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField`. The focused command
+reproduced both errors before the correction (0.272s) and passes afterward
+(0.277s).
+
+Removed the stale `pkg/controller/handlers.go` reader entry and reviewed the
+`pkg/store/teststore/trigger.go` reader. The fixture copies display metadata into
+the existing reporting seed without granting authority. The guard still rejects
+unlisted readers, empty reasons and stale entries. No assertion, production code,
+contract or acceptance cell changed. No test was deleted or skipped.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and -p 4, with scratch beneath
+/tmp/sw-astra-W1. Whole-repository build and scoped store/teststore vet pass.
+The declared-repository, SQL-scope, tenant-writer and reporting-seed selection
+passes (store 0.640s, teststore 0.163s). Required commentcheck against main is
+clean across 2,688 files. These checks use no socket substitution.
+
+Current-session production delta is **0**. Deleted production lines: **0**.
+Store remains **-2,451 versus main**, **1,799 over** its -4,250 budget under the
+lead's filter. The inherited production reductions and source/schedule proofs
+below are not repeated. No new mechanisms or external integration points exist.
+
+Shared files touched are this report and the append-only reconciliation ledger.
+The only Go edit is `pkg/store/declared_repo_guard_test.go`. The shared Git config
+has no user identity or core.worktree override. No Git write occurred.
+
+The 01:15 retry-selection redesign belongs to W3 (env 1081), as stated in the
+lead-owned handoff. The previous report incorrectly treated it as W1 remaining
+work. ScheduleWriter route failures remain with the other reconciliation worker.
+No unfinished amendment assigned to this reconciliation slice was found.
+
+The supplied native report still contains FAIL and predates this correction.
+The lead must commit and rerun the native tests. Completion is not claimed.
+Scratch is removed at session end. The shared build cache is retained.
+
+## Previous continuation (committed in 000d06457)
+
 All **97 assigned controller groups pass**, with no failures or skips (24.073s).
 This includes the 96 previously reconciled groups and the new App-schedule
 source regression. The supplied native report still contains FAIL. Its remaining
@@ -107,12 +148,9 @@ The scheduled-origin half of the 14:40 W1 handoff and its legacy insertion cut
 are implemented. The App-delivery half was completed earlier. Enrollment,
 rotation, ordered placement, Cloud metering and connection work are not repeated.
 
-The lead's 2026-10-17 01:15 retry-selection handoff remains **OPEN**. Inspection
-confirms `EngineController.Retry` still validates and drops Mode before CreateRun.
-The next change must commit mode and selected source-result fences outside the
-immutable request/spec, canonicalize source aliases in the idempotency digest,
-and make host recovery consume the committed selection. This is the approved
-redesign, not another mode-only patch. It is not claimed fixed by this session.
+The lead's 2026-10-17 01:15 retry-selection redesign is assigned to W3 in env
+1081 under integration authority. Its source-selection, replay and host-recovery
+changes are outside this reconciliation slice. No fix is claimed here.
 
 The controller `ScheduleWriter` administration/run-now interface is still absent
 from Tenant. Its policy_missing route failures belong to the other reconciliation
