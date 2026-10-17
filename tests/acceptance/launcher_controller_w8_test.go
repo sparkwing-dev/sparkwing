@@ -64,7 +64,7 @@ func TestLauncherPollingW8Components(t *testing.T) {
 					args = append(args, option)
 					want = time.Second
 				}
-				err = cluster.RunLaunchCLI(ctx, args, func(_ context.Context, cfg launcher.CloudJobConfig, _ string) (*launcher.Launcher, error) {
+				err = cluster.RunLaunchCLI(ctx, args, func(_ context.Context, cfg launcher.CloudJobConfig, _ func(context.Context) (string, error)) (*launcher.Launcher, error) {
 					return &launcher.Launcher{Config: cfg, Kube: cloudKubeW8(), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil
 				})
 				if err != nil {
@@ -83,7 +83,7 @@ func TestLauncherPollingRefusesInvalidW8Components(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			_, cfg, _ := cloudFixture(launcher.CloudWork)
 			args := []string{"--poll=" + value, "--controller=" + cfg.ControllerURL, "--image=" + cfg.RunnerImage, "--docker-image=" + cfg.DockerImage, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + t.TempDir()}
-			err := cluster.RunLaunchCLI(t.Context(), args, func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error) {
+			err := cluster.RunLaunchCLI(t.Context(), args, func(context.Context, launcher.CloudJobConfig, func(context.Context) (string, error)) (*launcher.Launcher, error) {
 				t.Fatal("invalid poll reached launcher construction")
 				return nil, nil
 			})

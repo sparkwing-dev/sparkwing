@@ -85,6 +85,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- define "sparkwing-runner-bundle.componentLabels" -}}
 {{ include "sparkwing-runner-bundle.labels" .root }}
 app.kubernetes.io/component: {{ .component }}
+app: {{ printf "sparkwing-%s" .component }}
 {{- end }}
 
 {{/*

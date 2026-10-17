@@ -4,7 +4,6 @@ package controller_test
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +12,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -30,7 +28,7 @@ import (
 
 func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof) {
 	t.Helper()
-	kube := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}}, launcher.AdmissionExemptionPolicy("cloud"), launcher.AdmissionExemptionBinding("cloud"))
+	kube := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}})
 	kube.PrependReactor("create", "*", func(action ktesting.Action) (bool, k8sruntime.Object, error) {
 		switch object := action.(ktesting.CreateAction).GetObject().(type) {
 		case *batchv1.Job:
@@ -40,11 +38,23 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 		}
 		return false, nil, nil
 	})
-	kube.PrependReactor("create", "limitranges", func(action ktesting.Action) (bool, k8sruntime.Object, error) {
-		if len(action.(ktesting.CreateActionImpl).CreateOptions.DryRun) == 0 {
-			return false, nil, nil
+	kube.PrependReactor("list", "pods", func(action ktesting.Action) (bool, k8sruntime.Object, error) {
+		objects, err := kube.Tracker().List(batchv1.SchemeGroupVersion.WithResource("jobs"), batchv1.SchemeGroupVersion.WithKind("Job"), action.GetNamespace())
+		if err != nil {
+			return true, nil, err
 		}
-		return true, nil, apierrors.NewForbidden(corev1.Resource("limitranges"), "probe", errors.New("ValidatingAdmissionPolicy 'sparkwing-cloud-exemption-cloud' with binding 'sparkwing-cloud-exemption-cloud' denied request:"))
+		list := &corev1.PodList{}
+		for _, job := range objects.(*batchv1.JobList).Items {
+			if job.DeletionTimestamp != nil || (job.Spec.Suspend != nil && *job.Spec.Suspend) {
+				continue
+			}
+			pod := corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+			pod.Name, pod.Namespace = job.Name+"-pod", job.Namespace
+			controller := true
+			pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &controller}}
+			list.Items = append(list.Items, pod)
+		}
+		return true, list, nil
 	})
 	boundary := &burstCloudBoundary{}
 	var runtime *launcher.Launcher
@@ -163,3 +173,5 @@ type burstCloudHost func(context.Context, controllerwire.ClaimedUnit) error
 func (h burstCloudHost) Host(ctx context.Context, unit controllerwire.ClaimedUnit) error {
 	return h(ctx, unit)
 }
+
+func (*burstCloudBoundary) Retire(context.Context, launcher.CloudNodeReservation) error { return nil }

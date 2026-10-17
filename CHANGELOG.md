@@ -20,6 +20,18 @@ unlock.
 
 ## [Unreleased]
 
+- **Cloud launcher:** Protect team-node labels with NodeRestriction and verify
+  Karpenter ownership. Used nodes keep their team assignment. Rejected Pods
+  retire their nodes. Customer Pods refuse AWS credential injections, activation
+  requires one owned Pod, and transient API errors retry without failing work.
+  Launcher credential rotation needs no restart. `operator teams show` reports
+  the team's node label and value.
+
+- **Cloud launcher:** Verify created Pods against the requested spec, allowing
+  named EKS injections. Unexpected mutations delete the Job and fail its award.
+  Remove the Kubernetes admission-policy dependency. Cloud chart examples include
+  team NodePool labels and taints, controller-owned storage and proxy CIDRs.
+
 - **billing:** Apply early refund callbacks when the worker binds the provider
   refund ID, so completion and retry outcomes are retained once.
 

@@ -75,10 +75,11 @@ func reservationFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *c
 	server, root := storedCloudClaimantExpiryW8(t, nil)
 	_, cfg, _ := cloudFixture(launcher.CloudWork)
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "dedicated", UID: "node-uid", Labels: map[string]string{launcher.TeamNodeLabel: launcher.TeamNodeValue("default")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+	karpenter := cloudProvisionerW8(node, "default")
 	kube := cloudKubeW8(node)
 	clears := 0
 	boundary := &launcher.KubernetesBoundary{
-		Kube: kube, Namespace: cfg.Namespace,
+		Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace,
 		Probe: func(_ context.Context, r launcher.CloudNodeReservation) (launcher.CloudNetworkEvidence, error) {
 			return launcher.CloudNetworkEvidence{Namespace: cfg.Namespace, NodeUID: r.NodeUID, PolicyRevision: "verified", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
 		}, Clear: func(context.Context, launcher.CloudNodeReservation) error { clears++; return nil },

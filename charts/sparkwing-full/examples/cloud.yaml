@@ -16,6 +16,7 @@ controller:
   cloudfront:
     domain: data.sparkwing.dev
     keyPairID: REPLACE_PUBLIC_KEY_ID
+  trustedProxyCIDRs: [10.0.0.0/16]
   externalURL: https://api.sparkwing.dev
   dashboardURL: https://console.sparkwing.dev
   oauthRedirectURIs: https://console.sparkwing.dev/auth/github/callback,https://console.sparkwing.dev/auth/google/callback
@@ -32,9 +33,14 @@ controller:
 serviceAccount:
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/sparkwing-controller
-# EKS EBS CSI can own volume permissions. emptyDir uses fsGroup directly.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+  seccompProfile: {type: RuntimeDefault}
+# The controller must own /data to tighten its mode to 0700.
 volumePermissions:
-  enabled: false
+  enabled: true
 ingress:
   enabled: true
   className: nginx

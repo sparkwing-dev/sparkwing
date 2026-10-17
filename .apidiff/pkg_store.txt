@@ -91,6 +91,7 @@ const ActorClaimant ActorKind = "claimant"
 const ActorController ActorKind = "controller"
 const ActorHolder ActorKind = "holder"
 type ActorKind string
+const ActorLauncher ActorKind = "launcher"
 const ActorOperator ActorKind = "operator"
 const ActorReaper ActorKind = "reaper"
 const ActorRunHost ActorKind = "run_host"
@@ -316,6 +317,7 @@ const CauseApprovalTimeout TransitionCause = "approval_timeout"
 const CauseAward TransitionCause = "award"
 const CauseCancel TransitionCause = "cancel"
 const CauseDependency TransitionCause = "dependency"
+const CauseLaunchRejected TransitionCause = "launch_rejected"
 const CauseLeaseLapse TransitionCause = "lease_lapse"
 const CauseMaterialize TransitionCause = "materialize"
 const CauseOwnerPolicy TransitionCause = "owner_policy"
@@ -1073,6 +1075,7 @@ const GuardDisruptionCap EdgeGuard = "expired_claim_increment_reaches_cap"
 const GuardDisruptions EdgeGuard = "incremented_disruptions_below_cap"
 const GuardExpired EdgeGuard = "expired_claim"
 const GuardHolder EdgeGuard = "live_exact_holder"
+const GuardLauncherAward EdgeGuard = "exact_live_launcher_award"
 const GuardMaterialize EdgeGuard = "unclaimed_or_self_claimed_and_readable_source"
 const GuardOwner EdgeGuard = "live_owner"
 const GuardOwnerPolicy EdgeGuard = "typed_owner_policy"
@@ -1880,6 +1883,7 @@ func (f RunFilter) HasBeforeCursor() bool
 func (f RunFilter) HasCursor() bool
 const RunFilterVersion = "3"
 const RunFinish RunCause = "finish"
+const RunLaunchRejected RunCause = "launch_rejected"
 const RunOwnerLost RunCause = "owner_lost"
 const RunPending RunState = "pending"
 const RunPolicyRefused RunCause = "policy_refused"
@@ -2436,6 +2440,7 @@ func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) 
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordHereAvailability(ctx context.Context, authority capability.AuthorityRef, available match.Resources) error
 func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error
+func (s *Store) RejectLauncherAwards(ctx context.Context, authority capability.AuthorityRef, fences []capability.LeaseRef) error
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
 func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error)
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
@@ -2530,7 +2535,7 @@ func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID,
 func (t *Tenant) ApplyProfileFold(ctx context.Context, delivery EffectDelivery, observations map[string]ProfileObservation) (bool, error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
-func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capability.Authorized, in GitHubAppInstallation) (GitHubAppInstallation, error)
+func (t *Tenant) BindAuthorizedGitHubInstallation(ctx context.Context, a capability.Authorized, row GitHubAppInstallation) (GitHubAppInstallation, error)
 func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore
 func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error)
 func (t *Tenant) CancelAuthorizedWaiter(ctx context.Context, a capability.Authorized, key string, ref NodeRef) (bool, error)

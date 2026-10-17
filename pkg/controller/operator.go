@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -78,6 +79,14 @@ func (s *Server) handleOperatorTeam(w http.ResponseWriter, r *http.Request, auth
 	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
 	if err != nil {
 		return err
+	}
+	if capability.DeploymentAuthority(authorized.Principal) {
+		info, err := t.Info(r.Context())
+		if err != nil {
+			return err
+		}
+		writeJSON(w, http.StatusOK, controllerwire.OperatorTeam{Team: string(t.Team()), DisplayName: info.DisplayName})
+		return nil
 	}
 	out, err := operatorTeamView(r.Context(), t)
 	if err != nil {

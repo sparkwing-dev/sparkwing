@@ -3531,3 +3531,13 @@ return the same `not_found` envelope before decoder diagnostics or grant checks.
 Expansion resolution then reads the source node in that tenant and preserves
 its generation for binding. Exact result-body digests and child lineage
 selectors remain part of the authorization evidence.
+
+
+## W8 operator node placement read (2026-10-17, integration)
+
+GET /api/v1/operator/teams/{team} also accepts current deployment authority with
+operator.tokens under BindOperatorSettings. That route returns only the stored
+team ID and display name to deployment credentials. Console callers retain their
+existing view. OperatorManager.ReadOperatorTeam consumes this safe projection.
+The CLI derives the protected node label value through the launcher's shared
+TeamNodeValue. The read grants no team credential or financial authority.

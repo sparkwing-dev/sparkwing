@@ -38,13 +38,17 @@ func FuzzCloudSchedulingPreservesTeamAndDocker(f *testing.F) {
 		if pod.Spec.SecurityContext.RunAsUser == nil || *pod.Spec.SecurityContext.RunAsUser != 0 || !*pod.Spec.InitContainers[0].SecurityContext.Privileged {
 			t.Fatal("root/DinD missing")
 		}
+		teamTaint := false
 		found := false
 		for _, toleration := range pod.Spec.Tolerations {
+			if toleration.Key == TeamNodeLabel && toleration.Value == TeamNodeValue(team) && toleration.Operator == corev1.TolerationOpEqual && toleration.Effect == corev1.TaintEffectNoSchedule {
+				teamTaint = true
+			}
 			if toleration.Key == "sparkwing.dev/cpu-band" && toleration.Operator == corev1.TolerationOpExists && toleration.Effect == corev1.TaintEffectNoSchedule {
 				found = true
 			}
 		}
-		if !found {
+		if !found || !teamTaint {
 			t.Fatal("CPU band taint not tolerated")
 		}
 		r.Job.Spec.Suspend = ptr(true)

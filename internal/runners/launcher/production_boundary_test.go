@@ -59,7 +59,7 @@ func TestProductionBoundaryRequiresMeasuredCanaries(t *testing.T) {
 				}
 				return true, pod, nil
 			})
-			production, err := NewProductionBoundary(kube, CloudJobConfig{Namespace: "cloud", RunnerImage: "runner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", DockerImage: "docker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ControllerURL: "https://controller.example", CPUCeiling: 1, MemoryCeiling: 1 << 30}, "https://kubernetes.default:443")
+			production, err := NewProductionBoundary(kube, karpenterFixture(), CloudJobConfig{Namespace: "cloud", RunnerImage: "runner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", DockerImage: "docker@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ControllerURL: "https://controller.example", CPUCeiling: 1, MemoryCeiling: 1 << 30}, "https://kubernetes.default:443")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +111,7 @@ func FuzzProductionBoundaryCleanupReservationFence(f *testing.F) {
 		if _, err = kube.CoreV1().Pods(namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		boundary, err := NewProductionBoundary(kube, productionBoundaryConfig(), "https://kubernetes.default:443")
+		boundary, err := NewProductionBoundary(kube, karpenterFixture(), productionBoundaryConfig(), "https://kubernetes.default:443")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -169,7 +169,7 @@ func FuzzProductionBoundaryRefusesChangedCanary(f *testing.F) {
 			}
 			return true, pod, nil
 		})
-		boundary, err := NewProductionBoundary(kube, productionBoundaryConfig(), "https://kubernetes.default:443")
+		boundary, err := NewProductionBoundary(kube, karpenterFixture(), productionBoundaryConfig(), "https://kubernetes.default:443")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,7 +202,7 @@ func TestProductionBoundaryRequiresLiveIngressControl(t *testing.T) {
 		}
 		return false, nil, nil
 	})
-	boundary, err := NewProductionBoundary(kube, productionBoundaryConfig(), "https://kubernetes.default:443")
+	boundary, err := NewProductionBoundary(kube, karpenterFixture(), productionBoundaryConfig(), "https://kubernetes.default:443")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func FuzzProductionBoundaryRefusesConflictingDestinations(f *testing.F) {
 		if _, err := kube.NetworkingV1().NetworkPolicies("cloud").Create(t.Context(), policy, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}
-		boundary, err := NewProductionBoundary(kube, config, api)
+		boundary, err := NewProductionBoundary(kube, karpenterFixture(), config, api)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -3824,6 +3824,15 @@ rechecking that relation. Contents-only minting, exact repository and extra IDs,
 claim fencing and committing audit remain the existing source-release path.
 
 
+## Launcher Pod rejection amendment (2026-10-17, W8 integration)
+
+`Store.RejectLauncherAwards` transactionally validates claims.launch ancestry
+and the original award LeaseRef, then fails only its current plan/eval/work.
+The launcher actor and launch_rejected edges are restricted to this exact live
+award. Node failures use the common transition/billing/settlement path. Plan
+failure uses the common run transition and owner settlement. Eval failure uses
+the shared expansion-loss and eval billing paths. Ended original awards replay
+without touching replacement claims. Forged original fences refuse.
 ## W1b child admission reconciliation
 
 `Tenant.AdmitRun` checks child ancestry before sealing or inserting the new run.

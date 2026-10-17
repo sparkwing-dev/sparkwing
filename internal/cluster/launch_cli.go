@@ -17,7 +17,7 @@ const agentTokenCredential = "agent-token"
 
 // LauncherFactory binds the shared controller transport and the verified Cloud
 // boundary to the launcher. The bearer remains in the transport, never a Job.
-type LauncherFactory func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error)
+type LauncherFactory func(context.Context, launcher.CloudJobConfig, func(context.Context) (string, error)) (*launcher.Launcher, error)
 
 // RunLaunchCLI accepts the final Job configuration and refuses to start without
 // both an award transport and a boundary that establishes isolation at runtime.
@@ -70,7 +70,17 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	if token == "" {
 		return errors.New("launcher requires a credential in " + agentTokenCredential)
 	}
-	runner, err := factory(ctx, cfg, token)
+	bearer := func(ctx context.Context) (string, error) {
+		if err := context.Cause(ctx); err != nil {
+			return "", err
+		}
+		token, err := creds.Read(agentTokenCredential)
+		if err == nil && token == "" {
+			err = errors.New("launcher requires a credential in " + agentTokenCredential)
+		}
+		return token, err
+	}
+	runner, err := factory(ctx, cfg, bearer)
 	if err != nil {
 		return err
 	}
