@@ -210,6 +210,60 @@ the harness's next commit and native run. No Git writes, installed Sparkwing
 execution, pipeline, service or harness-memory writes occurred. Scratch is
 deleted at handoff and /tmp/sw-gocache is retained.
 
+## Session-2 native receipt reconciliation
+
+The latest lead receipt passes store, controller, capability, CLI, apiref and
+apispec. Its only failures are TestStorage's filesystem-sink and s3-sink log
+subtests. Both reproduce locally before the fixture change with
+`shared runner management requires team administration`.
+
+The log reader is an unbound machine credential with only logs.read. It cannot
+revoke its own shared-machine authority. The sink test now seeds an administrator
+with the existing credentialSeedAuthority helper after reopening SQLite and uses
+that session for revocation. The original reader still performs the post-revoke
+read, which must fail without returning bytes. No read assertion or production
+authorization changed.
+
+Invariant retained: shared-machine revocation requires current team
+administration. Existing TestSharedMachineManagementRequiresCurrentAdministration
+and TestNativeTokenOwnershipRelationProperty cover that boundary. No new security
+mechanism or production fix was needed.
+
+The exact red/green command is go test -p 4 ./tests/acceptance -run
+'^TestStorage$/^storage-log-segments-and-fallback$/^(filesystem-sink|s3-sink)$'
+-count=1. It fails in 0.204s before the change and passes in 20.557s after it.
+The existing property cases exercise both transports through the real persisted
+log records and store reopening without listeners.
+
+All commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOTMPDIR=/tmp/sw-astra-W2/go, TMPDIR=/tmp/sw-astra-W2 and go -C with this
+worktree's absolute path. Additional checks pass:
+
+- go build -p 4 ./... and go vet -p 4 ./tests/acceptance.
+- go test -p 4 ./pkg/store ./pkg/controller ./cmd/sparkwing -run
+  'TestMachineEnrollmentTeamSettingProperty|TestTeamSetting|TestSharedMachine|TestMachineTeamSettingsHTTP|TestBurstPersonal|TestPersonal|TestRunnersPersonal|TestNativeTokenOwnershipRelationProperty|TestOperatorTeamsCreateCLI'
+  -count=1. Store 2.967s, controller 0.710s, CLI 0.446s.
+- go run ./internal/commentcheck -base main . is clean across 2,812 files.
+- gofmt and git diff --check are clean.
+
+This continuation adds three test lines and replaces one. It adds and deletes
+zero production lines. W2 remains +17,655/-18,198 against main, net -543, within
+the -250 budget. No old production API was removed and no historical test was
+newly ported. The two storage log sink component subtests pass locally. No native
+acceptance cell is newly claimed.
+
+Shared file touched: tests/acceptance/storage_log_sink_test.go. The other change
+is this report. No callers outside that fixture required migration. Contract
+changes made or needed: none. The earlier C1 QueuePriorityWriter persistence
+handoff remains open behind its fake-backed controller seam. The machine slice
+uses real store, HTTP and CLI integration. Lead-owned handoffs and amendments
+are unchanged.
+
+The native receipt still contains FAIL and needs the lead's commit and rerun.
+No whole-repository test run, PostgreSQL test, native listener test, Sparkwing
+candidate execution, service start or Git write was attempted. Scratch is
+removed at handoff and /tmp/sw-gocache is retained.
+
 <!-- design:end -->
 
 STATUS: CONTINUE

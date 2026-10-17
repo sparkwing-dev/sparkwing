@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func checkStorageFilesystemLogSink(t *testing.T) {
@@ -159,7 +160,8 @@ func checkStorageLogSink(t *testing.T, objects storageLogObjects, transport http
 	if err == nil || result.Bytes != 0 {
 		return false
 	}
-	if err := records.RevokeAuthority(t.Context(), actor, actor.Authority); err != nil {
+	admin := credentialSeedAuthority(t, persisted, records.Team())
+	if err := records.RevokeAuthority(t.Context(), store.Actor{Authority: admin.Principal.Authority}, actor.Authority); err != nil {
 		t.Fatal(err)
 	}
 	output.Reset()
