@@ -211,7 +211,7 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "awards", Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost, Env: environment, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.com/repo"}, SHA: "head"}, Source: runspec.Source{Location: runspec.SourceLocation{LocalCheckout: t.TempDir(), PipelineDir: "."}}}
+	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "awards", Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost, Env: environment, EnvironmentSource: runspec.EnvironmentCaptured, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.com/repo"}, SHA: "head"}, Source: runspec.Source{Location: runspec.SourceLocation{LocalCheckout: t.TempDir(), PipelineDir: "."}}}
 	admitted, err := b.Tenant.AdmitRun(ctx, store.IntakeRequest{Authority: peer.Authorities[0].Principal.Authority, Request: request})
 	if err != nil {
 		t.Fatal(err)

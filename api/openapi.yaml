@@ -5672,6 +5672,8 @@ components:
           type: boolean
         ref:
           type: string
+        requested_ref:
+          type: string
         working_tree:
           type: boolean
       required:

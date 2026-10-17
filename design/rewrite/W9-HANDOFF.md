@@ -1,12 +1,13 @@
-# W9 continuation: native registration and merge reconciliation
+# W9 continuation: redesign suite corrections
 
-Latest continuation: [W9-NATIVE-REGISTRATION-CONTINUATION.md](W9-NATIVE-REGISTRATION-CONTINUATION.md).
-The four delta fixes remain in place. This session migrates the repository's SDK
-registrations to their configured entrypoints, corrects failing native fixtures,
-updates Windows verification references and resolves the two contract conflict
-contents. Build, vet, focused real-path tests, acceptance cells and doccheck pass.
-The lead's latest native report still contains FAIL. The lead must stage the
-resolved contracts, finish the merge, review/commit and rerun native verification.
+Latest continuation: [W9-REDESIGN-SUITE-CORRECTIONS.md](W9-REDESIGN-SUITE-CORRECTIONS.md).
+The reported full-suite failures are corrected in the burst, local-controller,
+repository-example and shared-machine revocation fixtures. OpenAPI is regenerated.
+Build, vet, focused regressions and surface acceptance checks pass. The supplied
+native report is green for the previous committed state. The lead must commit
+these edits and run the full repository and socket-dependent native suites.
+
+Previous redesign: [W9-SHARED-SOURCE-CHILD-ENVIRONMENT.md](W9-SHARED-SOURCE-CHILD-ENVIRONMENT.md).
 
 Previous continuation: [W9-CACHED-LOCAL-DEPENDENCIES.md](W9-CACHED-LOCAL-DEPENDENCIES.md).
 Matching local binaries are leased before invoking Go. Cold preparation retains

@@ -50,13 +50,8 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plain describe: %v", err)
 	}
-	found := false
-	for _, pipeline := range doc.Pipelines {
-		if pipeline.Name == "example" {
-			found = pipeline.Args != nil && len(pipeline.Args) == 0
-		}
-	}
-	if !found {
+	pipeline, found := doc.Pipeline("Example")
+	if !found || pipeline.Args == nil || len(pipeline.Args) != 0 {
 		t.Fatal("repository example must declare an empty arguments array")
 	}
 	_, handler, bearer := controller.EngineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
@@ -90,7 +85,7 @@ func TestClaimedRunDescribesRepositoryExampleOverSDKPipes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run-path describe: %v", err)
 	}
-	if prepared.Description.Name != "example" || prepared.Description.Args == nil || len(prepared.Args) != 0 {
+	if prepared.Description.Name != "Example" || prepared.Description.Args == nil || len(prepared.Args) != 0 {
 		t.Fatalf("run-path description: %+v", prepared)
 	}
 	raw, err := prepared.Functions.Plan(t.Context())
