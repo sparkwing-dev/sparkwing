@@ -145,4 +145,65 @@ Native completion and independent review remain with the lead.
 Git identity and core.worktree overrides remain absent. All checks have joined.
 W9 scratch was removed. The shared build cache was retained. No merge.
 
+## Recheck at `3c97acfb1`
+
+The preceding session's fixes are committed at this HEAD. The supplied native
+failure report predates them. This continuation changes only this report and
+the W9 handoff pointer. It adds or deletes no production code, tests, API or
+contract. Existing fixes were verified rather than reimplemented.
+
+Passed again: whole-repository build; focused CLI burst/here/local-host tests;
+controller burst/source/SDK and here tests; full short clisurface, controllerwire,
+controller/client and blob suites; local dependency-cache store round trips and
+scope property; vet of CLI, client, blob and store; W9 surface, here,
+credential-policy and private-wire amendment acceptance selections; commentcheck
+against main. These use the command environment documented above. No acceptance
+cell was newly unskipped, and no archived test was newly ported.
+
+Both exact native rerun selections above were attempted with `-v`. Every public
+CLI case and every HTTP SDK placement skipped on socket refusal. Parent PASS
+lines with skipped children are not native evidence. The lead must rerun those
+same two commands with sockets and inspect every selected case for skips.
+
+`TestReviewRetryModeIsPartOfCommittedReplay` was rerun through real client,
+router and SQLite. It still fails with `replayed=true` and no error after
+changing the mode. `EngineController.Retry` validates the mode, then omits it
+from `CreateRun`. The retry-selection DESIGN remains explicitly handed back
+to the lead. Recommendation: give C1 one admission-owned selector that commits
+normalized mode and selected source-result fences in execution lineage, uses
+canonical source ID plus mode in replay identity, and supplies the same
+selection to W3 after restart. C2 transports the mode separately from the
+immutable source request/spec seals. Require changed-mode conflicts, numeric/ID
+alias replay and failed/all execution proofs. This closes the W9 handback,
+not the product defect. No further CLI special case was added.
+
+The W9 assignment audit retains implemented A1-09, A1-16, A1-17, A1-38,
+A1-41, A1-43, A1-49, A1-51, A1-52 and the named here-claim transport.
+The handoffs' alias resolution, sealed step windows, launcher grammar, doctor,
+local composition, owner/eval separation, shared logs, service handover and
+decisions 110, 111, 113 and 114 retain their completed implementations.
+Their prior reports contain the component and native evidence boundaries.
+No lead-owned amendment or handoff file was edited.
+
+A1-50 is still incomplete for cross-profile cache and publication. The existing
+fake-binding CLI tests cover sealed cache opt-in and pre-intake refusal when
+required bindings are missing. This is distinct from the fixed local-cache
+warning. Public `DataRecordLookupResult` still omits canonical source/ref facts
+and read-set proof, while `blob.OpenRemoteCache` requires those facts. The client
+retains `policy_missing` for proof-dependent operations. Publication still needs
+non-executing intake plus authorized imported results/logs and nonfatal failure
+handling. These remain explicit integration work, not passing features.
+A1-53's native matrix, A1-52's native Windows bridge evidence and the deployed
+Cloud runner/DinD/network/object integration also remain open. Existing fakes
+do not establish those passes. No new contract change is made or requested by
+this recheck.
+
+Production delta this continuation: +0/-0. W9 versus main remains
++18,445/-23,824, net -5,379, within the -2,900 budget. The six production lines
+deleted by the preceding fix remain deleted. No caller migration or shared
+implementation edit is needed. Mechanisms added: none. Friction remains socket
+refusal and Overwing's reported source lag. Completion still needs native
+evidence and the unfinished integration work above. No Git writes, installation,
+operational Sparkwing command, deployment or release ran.
+
 STATUS: CONTINUE

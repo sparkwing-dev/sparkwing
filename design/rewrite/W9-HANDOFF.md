@@ -1,10 +1,17 @@
 # W9 continuation: local integration and runner transport
 
-Latest continuation: [W9-BURST-CONTROLS-AND-SDK.md](W9-BURST-CONTROLS-AND-SDK.md)
-adds account overflow commands and client transport. Composed here, personal and
-Cloud awards execute real Go SDK steps with masked requester secrets after route
-selector and value-response fixes. Cross-replica ephemeral delivery and native
-execution verification remain open. The report records all checks and limits.
+Latest continuation: [W9-BURST-NATIVE-FAILURES.md](W9-BURST-NATIVE-FAILURES.md).
+Commit `3c97acfb1` addresses the lead's native burst failures: session enrollment
+fixture configuration, execution-award validation, pipeline argument separation,
+attached local logs and local cache namespaces. The continuation rechecks that
+commit and gives the exact native rerun commands. Native execution remains
+unverified because the worker cannot open sockets. Retry selection is explicitly
+handed back to the lead with a failing regression and a recommendation.
+
+Earlier reports below describe their own bases. Their superseded missing-owner,
+here, source, local-cache and SDK replacement statements are not new blockers.
+Cross-profile remote cache/publication remains unfinished under A1-50. Full
+native and deployed acceptance remains lead work under A1-53.
 
 The next continuation fixes background queue service binding and log finalization.
 See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.
