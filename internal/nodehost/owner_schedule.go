@@ -153,6 +153,9 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			if !ok || row.Generation != action.Generation {
 				return RunCompletion{}, errors.New("decision does not match its persisted node")
 			}
+			if action.Kind == store.DecisionCancelHolder && row.CancelRequestedAt != nil {
+				continue
+			}
 			if action.Kind == store.DecisionExpand && expanded[action.NodeID] {
 				continue
 			}

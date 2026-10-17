@@ -3144,6 +3144,9 @@ column in the acceptance transaction. These records have separate owners, so
 finishing a run retains its accepted plan proof. Authentication reads the proof
 in the same snapshot as current ancestry and binding state. A terminal replay
 requires the same actor, route, resource, generation, attempt and body digest.
+Owner and publisher proofs name their issuing binding's attempt. They do not
+borrow the targeted job holder's ordinal. Node-holder proofs retain the
+captured source ordinal checked by C1.
 
 The native controller tests cover all nine data endpoints, including a signed
 filesystem upload, committed receipt, result record and download. Native result

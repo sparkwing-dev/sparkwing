@@ -4,10 +4,60 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
+
+func TestOwnerCancellationProofKeepsIssuerAttemptAndFenceProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(431, 719))
+	for i := range 32 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			tenant, now, owner := reconcileFixture(t)
+			owner.Holder, owner.Generation = owner.Owner.Holder, owner.Owner.Generation
+			owner.Result = &capability.RecordedResult{Actor: owner.Authority, Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/transition", RunID: "run", NodeID: "job", Generation: owner.Generation, Digest: strings.Repeat("a", 64)}
+			change := NodeTransition{Ref: NodeRef{"run", "job"}, Actor: owner, To: NodeCancelled, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: fmt.Sprintf("cancel/%x", random.Uint64())}}}
+			mutation := i % 8
+			switch mutation {
+			case 1:
+				owner.Result.Attempt = int64(1 + random.IntN(100))
+			case 2:
+				owner.Result.NodeID += fmt.Sprint(random.Uint64())
+			case 3:
+				owner.Result.Generation++
+			case 4:
+				change.Actor.Owner.Generation++
+			case 5:
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET lease_expires_at=?`, now.UnixNano())
+			case 6:
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='owner'`)
+			case 7:
+				owner.Result.Actor.ID += fmt.Sprint(random.Uint64())
+			}
+			before, err := tenant.ReadNode(t.Context(), change.Ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			applied, err := tenant.TransitionNode(t.Context(), change)
+			if mutation == 0 {
+				if err != nil || !applied.CancelRequested {
+					t.Fatalf("owner proof used the holder attempt: %+v %v", applied, err)
+				}
+				replayed, err := tenant.TransitionNode(t.Context(), change)
+				if err != nil || !replayed.Replayed || replayed.StateSeq != applied.StateSeq {
+					t.Fatalf("cancellation replay: %+v %v", replayed, err)
+				}
+			} else if err == nil {
+				t.Fatal("mismatched cancellation authority was accepted")
+			}
+			after, err := tenant.ReadNode(t.Context(), change.Ref)
+			if err != nil || after.Status != before.Status || after.Attempt != before.Attempt || after.Generation != before.Generation || after.ClaimedBy != before.ClaimedBy || mutation != 0 && after.StateSeq != before.StateSeq {
+				t.Fatalf("cancellation changed holder rights: %+v %v", after, err)
+			}
+		})
+	}
+}
 
 func TestCancellationIntentReachesHolderRenewal(t *testing.T) {
 	tenant, _, owner := reconcileFixture(t)

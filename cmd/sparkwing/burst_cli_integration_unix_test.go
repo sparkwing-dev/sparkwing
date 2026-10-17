@@ -235,7 +235,7 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 
 func burstVerifyDefaultCache(t *testing.T, state *store.Store, repo string) {
 	t.Helper()
-	branch := runSnapshotGit(t, repo, "symbolic-ref", "--short", "HEAD")
+	branch := strings.TrimSpace(runSnapshotGit(t, repo, "symbolic-ref", "--short", "HEAD"))
 	runSnapshotGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+branch)
 	key, err := depcachekey.Bytes("modules", "modules", []byte("edited\n"))
 	if err != nil {
@@ -246,7 +246,7 @@ func burstVerifyDefaultCache(t *testing.T, state *store.Store, repo string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts, err := json.Marshal(blob.RefFacts{Scope: ref, SHA: runSnapshotGit(t, repo, "rev-parse", "HEAD"), AppDeliveryKey: "fixture-app-delivery", DefaultBranch: branch, DefaultBranchVerified: true})
+	facts, err := json.Marshal(blob.RefFacts{Scope: ref, SHA: strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD")), AppDeliveryKey: "fixture-app-delivery", DefaultBranch: branch, DefaultBranchVerified: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 		wantStatus = "cancelled"
 	}
 	if err != nil || detail.Status != wantStatus || len(detail.Jobs) != 2 {
-		t.Fatalf("Cloud owner did not retain native execution outcome %s: %+v %v", wantStatus, detail, err)
+		t.Fatalf("Cloud owner did not retain native execution outcome %s: %+v %v\nCLI output:\n%s", wantStatus, detail, err, output)
 	}
 	for _, job := range detail.Jobs {
 		if job.Outcome != wantStatus && !(interrupt && job.ID == "consume" && job.Outcome == "skipped") {

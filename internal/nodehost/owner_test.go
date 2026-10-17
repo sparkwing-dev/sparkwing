@@ -134,6 +134,29 @@ func TestOwnerHostCancellationWaitsForRemoteAttemptCompletion(t *testing.T) {
 	})
 }
 
+func TestOwnerHostWaitsForAlreadyRequestedRemoteCancellation(t *testing.T) {
+	state, host, input := newOwnerFixture(t, true)
+	now := time.Now()
+	state.snapshot.Run.CancelRequestedAt = &now
+	state.snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: input.RunID, NodeID: "remote"}, Status: store.StatusRunning, ClaimedBy: "personal-machine", CancelRequestedAt: &now}}
+	host.Project = func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
+		row := snapshot.Nodes[0]
+		return store.ScheduleSnapshot{CancelRequested: true, Nodes: []store.ScheduleNode{{ID: row.Ref.NodeID, Status: string(row.Status), Claimed: row.ClaimedBy != "", Outcome: string(row.Outcome)}}}, nil
+	}
+	host.Decide = store.Decide
+	host.Wait = func(context.Context, store.RunSnapshot) error {
+		state.mu.Lock()
+		state.snapshot.Nodes[0].Status, state.snapshot.Nodes[0].Outcome = store.StatusDone, store.NodeCancelled
+		state.mu.Unlock()
+		state.record("remote-joined")
+		return nil
+	}
+	completion, err := host.Run(t.Context(), input)
+	if err != nil || completion.Outcome != "cancelled" || !slices.Contains(state.trace, "remote-joined") || slices.Contains(state.trace, "cancelled") {
+		t.Fatalf("owner repeated cancellation instead of waiting for the holder: %+v %v trace=%v", completion, err, state.trace)
+	}
+}
+
 func TestOwnerHostAuthorityLossStopsWhileWaitingForRemoteAttempt(t *testing.T) {
 	property := func(selector uint8) bool {
 		synctest.Test(t, func(t *testing.T) {

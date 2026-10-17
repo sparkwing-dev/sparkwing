@@ -1199,3 +1199,5 @@ waits for terminal results before owner completion. Cancellation during source
 preparation still stops preparation. Lost authority, renewal silence, the parent
 deadline and an explicit host stop still terminate the owner context. Claimed
 executor renewal continues to cancel its execution context on a cancellation beat.
+An owner waits for a holder with persisted cancellation intent instead of
+submitting the same cancellation again on each scheduling pass.

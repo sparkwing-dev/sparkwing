@@ -3568,8 +3568,10 @@ executor name. Import creates one terminal local node_attempts row, without an
 award, live holder, lease, trigger or billing reservation. It rejects a second import
 with changed bytes. CausePublish must agree with that imported outcome. Imported
 results retain the normal receipt, exact-attempt record and member checks.
-Publication result proofs keep the publisher's own zero attempt separate from
-the imported execution attempt. Secret availability preflight applies to
+Owner and publication result proofs use the issuing capability's attempt,
+separate from the job's execution attempt. Node-holder proofs use the captured
+source attempt and retain the committing transaction's ordinal check.
+Secret availability preflight applies to
 executable intake, while publish-mode plans require no execution secrets.
 
 Tenant.ReadLocalPublication reads terminal state and its selected result records

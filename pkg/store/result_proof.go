@@ -35,7 +35,7 @@ func validateResultProofTx(ctx context.Context, tx *storeTx, team Team, actor Ac
 		return err
 	}
 	c := p.Capability
-	if c.Data != nil && c.Data.Use == capability.DataPublish && actor.Kind == ActorOperator {
+	if c.Unit != capability.UnitNode {
 		attempt = c.Binding.Attempt
 	}
 	if c.Team != string(team) || c.Binding.RunID != ref.RunID || c.Binding.Generation != proof.Generation || c.Binding.Holder != actor.Holder || actor.CapabilityPrefix != c.Prefix || proof.Attempt != attempt {
