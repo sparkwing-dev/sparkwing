@@ -3482,3 +3482,20 @@ Current child requests carry the source snapshot explicitly. The native process
 client inherits it from its authenticated parent snapshot. Explicit repository
 and ref inputs retain their own source facts. This does not implement the
 client's still-missing cross-repository source resolution.
+
+
+## W1b scheduled-intake consumer contract
+
+C2's `ScheduledRunWriter` now calls
+`Tenant.AdmitScheduledRun(ctx, scheduleID, due)` for a leased controller tick or
+local schedule launcher. This method is still required from the committing store
+adapter. See C2's W1b scheduled-intake boundary for the exact signature, stored
+consent checks and transactional replay identity. The controller's old
+`admitTrigger`, `triggerIntake` and `triggerRows` are deleted. The remaining App
+invocation projection helper still serves its existing webhook caller.
+
+C2 ScheduleWriter's six manual schedule mutations also remain unimplemented by
+Tenant. Test doubles cover transport and use real sealed intake after fake
+consent. They do not prove atomic arming, revocation of stored arming consent or
+automatic GitHub App source authority. No store implementation or schema changes
+are made by this reconciliation.

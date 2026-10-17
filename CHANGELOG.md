@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **schedules:** Remove the controller's retired trigger insertion path. Scheduled execution requires a tenant scheduled-intake transaction and refuses a missing or wrong-team adapter.
+
 - **api:** Restore Git object ID validation on sealed run submissions and reject child pipeline cycles within a repository. A child request naming another team returns `forbidden`.
 
 - **controller:** Apply configured flood caps and queue shedding to sealed run submissions and retries

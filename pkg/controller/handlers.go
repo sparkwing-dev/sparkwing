@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -144,96 +143,6 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
-}
-
-type triggerReqGit struct {
-	Branch      string `json:"branch,omitempty"`
-	SHA         string `json:"sha,omitempty"`
-	Repo        string `json:"repo,omitempty"`
-	RepoURL     string `json:"repo_url,omitempty"`
-	GithubOwner string `json:"github_owner,omitempty"`
-	GithubRepo  string `json:"github_repo,omitempty"`
-}
-
-// safety: Env arrives sanitized; a caller inside the process supplies only keys
-// a run may read, because nothing filters it again here.
-type triggerIntake struct {
-	RunID         string
-	Pipeline      string
-	Args          map[string]string
-	Source        string
-	User          string
-	Env           map[string]string
-	Git           triggerReqGit
-	ParentRunID   string
-	ParentNodeID  string
-	RetryOf       string
-	RepoInherited bool
-	// safety: a second intake under one key fails with
-	// store.ErrDuplicateIdempotencyKey rather than starting a second run.
-	IdempotencyKey string
-	At             time.Time
-}
-
-// safety: every path that starts a run on this controller writes its three rows
-// here -- the trigger, the pending run, the dispatch -- so an HTTP submission
-// and a schedule the controller fired land identically.
-func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIntake) error {
-	// safety: the trigger and the run it names are written together, so a guard
-	// that refuses the run leaves no trigger behind for a worker to claim.
-	trig, run := triggerRows(in)
-	err := t.CreateTriggerWithRun(ctx, trig, run)
-	if err != nil {
-		if errors.Is(err, store.ErrDuplicateIdempotencyKey) || errors.Is(err, store.ErrComputeLimit) {
-			return err
-		}
-		return fmt.Errorf("persist the trigger and its run: %w", err)
-	}
-
-	s.recordQueueActivity(in.At)
-	return nil
-}
-
-func triggerRows(in triggerIntake) (store.Trigger, store.Run) {
-	trig := store.Trigger{
-		ID:             in.RunID,
-		Pipeline:       in.Pipeline,
-		Args:           in.Args,
-		TriggerSource:  in.Source,
-		TriggerUser:    in.User,
-		TriggerEnv:     in.Env,
-		GitBranch:      in.Git.Branch,
-		GitSHA:         in.Git.SHA,
-		Repo:           in.Git.Repo,
-		RepoURL:        in.Git.RepoURL,
-		GithubOwner:    in.Git.GithubOwner,
-		GithubRepo:     in.Git.GithubRepo,
-		CreatedAt:      in.At,
-		ParentRunID:    in.ParentRunID,
-		ParentNodeID:   in.ParentNodeID,
-		RetryOf:        in.RetryOf,
-		RepoInherited:  in.RepoInherited,
-		IdempotencyKey: in.IdempotencyKey,
-	}
-	run := store.Run{
-		ID:            in.RunID,
-		Pipeline:      in.Pipeline,
-		Status:        "pending",
-		TriggerSource: in.Source,
-		GitBranch:     in.Git.Branch,
-		GitSHA:        in.Git.SHA,
-		Args:          in.Args,
-		ParentRunID:   in.ParentRunID,
-		DeclaredRepo:  in.Git.Repo,
-		RepoURL:       in.Git.RepoURL,
-		GithubOwner:   in.Git.GithubOwner,
-		GithubRepo:    in.Git.GithubRepo,
-		RetryOf:       in.RetryOf,
-		CreatedAt:     in.At,
-		StartedAt:     in.At,
-		Invocation:    triggerRunInvocation(in.Env),
-	}
-	return trig, run
 }
 
 // safety: every host of a triggered run, the planning claim's included, reads the trigger's run flags and the

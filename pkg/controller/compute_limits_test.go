@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -343,13 +343,17 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	}
 
 	var refusal struct {
-		Code  string `json:"code"`
-		Limit string `json:"limit"`
+		Error struct {
+			Code    apierr.Code `json:"code"`
+			Details struct {
+				Limit string `json:"limit"`
+			} `json:"details"`
+		} `json:"error"`
 	}
 	f.call(http.MethodPost, "/api/v1/schedules/"+rows[0].ID+"/run", f.writer, nil,
 		http.StatusTooManyRequests, &refusal)
-	if refusal.Code != controller.ComputeLimitRefusedCode ||
-		refusal.Limit != store.ComputeLimitGlobalRunsPerHour {
+	if refusal.Error.Code != apierr.RateLimited ||
+		refusal.Error.Details.Limit != store.ComputeLimitGlobalRunsPerHour {
 		t.Fatalf("refusal = %+v, want the hourly guard named", refusal)
 	}
 	triggers, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Limit: 10})

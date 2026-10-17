@@ -22,6 +22,13 @@ access, billing provenance and claim fence. It rechecks those facts in the same
 transaction as a mutation. The store clock decides whether a holder is live.
 A client cannot replace those facts with headers, environment variables or JSON.
 
+Scheduled launches pass only a tenant, stored schedule ID and due instant to the
+scheduled-intake transaction. That transaction must recheck current arming consent
+and derive the actor, repository, source and replay identity from the stored row.
+The controller refuses a missing or wrong-team transaction adapter. Its schedule
+tests substitute consent and use real sealed intake. They do not establish the
+store's schedule-consent implementation or a working native timer.
+
 Pipeline authors execute code with the permissions of the runner's OS account.
 Same-account code may read the runner's private credential file, other files or
 process memory. Use a dedicated account, container or VM and enroll only code

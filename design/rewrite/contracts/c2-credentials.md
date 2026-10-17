@@ -3388,3 +3388,33 @@ API input cannot supply trigger environment maps. The retired `git.repo`,
 identity is the canonical repository key plus its verified acquisition location.
 The actor comes from authenticated authority. Submitted App facts are stripped,
 and App-origin intake still requires a verified delivery in the transaction.
+
+
+### W1b scheduled-intake boundary (integration reconciliation)
+
+`ScheduledRunWriter` is the controller tick's tenant transaction interface:
+
+- `Team() store.Team`
+- `AdmitScheduledRun(context.Context, string, time.Time) (store.AdmissionResult, error)`
+
+The arguments after context are the stored schedule ID and due instant.
+`WithScheduledRunWriter` supplies a resolver by tenant. The default requires
+`Tenant` to implement the interface. Missing and wrong-team adapters refuse with
+`policy_missing`. The controller passes a UTC instant and records activity only
+after a committed, nonempty run ID. It no longer builds legacy trigger/run rows
+or uses duplicate-trigger SQL as a replay path. `CronIdempotencyKey` is removed.
+
+The writer must load the schedule within its tenant and recheck current arming
+consent, complete authority ancestry, membership, repository authority and the
+schedule's declaration/paused state in the committing transaction. Derive actor,
+source, effective arguments, environment snapshot and all trust facts from stored
+consent and schedule state. Deduplicate `(team,schedule_id,due_instant)` inside
+that transaction, rechecking authority even on replay. Use the single sealed
+intake and its admission/billing guards. A typed schedule source grants no App
+trust or pool access. Return the first committed result for a repeated instant.
+
+This adds the tick boundary alongside the existing manual `ScheduleWriter`
+contract. It does not implement C1's committing schedule origin or arming
+consent. Controller tests fake consent and source-policy lookup, then use real
+Tenant.AdmitRun, immutable seals, queueing, replay and rate guards. Native local
+and controller schedules still require the C1 implementation of both interfaces.
