@@ -82,7 +82,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		},
 		close: func() error { cleanup(); return nil },
 		prepare: func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
-			return prepareNativeLocalRun(ctx, home, directory, pipeline, captured, snapshots, compileOptions{NoUpdate: flags.noUpdate})
+			return prepareNativeLocalRun(ctx, home, directory, pipeline, captured, snapshots, flags)
 		},
 		bind: func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
 			return bindLocalRunHost(ctx, home, transport, award)
@@ -148,7 +148,7 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 	}, nil
 }
 
-func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, captured []string, snapshots *nodehost.FileEnvironmentSnapshots, compile compileOptions) (_ localRunPreparation, err error) {
+func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, captured []string, snapshots *nodehost.FileEnvironmentSnapshots, flags runFlags) (_ localRunPreparation, err error) {
 	route, err := loadRunRouting(directory, pipeline)
 	if err != nil {
 		return localRunPreparation{}, err
@@ -191,7 +191,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		return localRunPreparation{}, err
 	} else if typescript {
 		options.SDK = engine.TypeScriptSDK
-	} else if err := resolveSparks(ctx, directory, compile); err != nil {
+	} else if err := resolveSparks(ctx, directory, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
 		return localRunPreparation{}, err
 	}
 	root := filepath.Dir(directory)
@@ -199,7 +199,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, err
 	}
-	entry, err := source.Acquire(ctx, source.Spec{RepoKey: string(repository.Key), LocalCheckout: root, PipelineDir: filepath.Base(directory)}, options)
+	entry, err := source.Acquire(ctx, source.Spec{RepoKey: string(repository.Key), LocalCheckout: root, PipelineDir: filepath.Base(directory), NoBincache: flags.noBincache, HashAllFiles: flags.hashAllFiles}, options)
 	if entry != nil {
 		defer func() { err = errors.Join(err, entry.Close()) }()
 	}
@@ -238,7 +238,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	return localRunPreparation{
 		identity: identity, described: []nodeproto.PipelineDescription{prepared.Description},
 		git:         runspec.Git{Repository: repository, SHA: entry.SHA},
-		source:      runspec.Source{Ref: entry.SHA, Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: filepath.Base(directory)}},
+		source:      runspec.Source{Ref: entry.SHA, Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: filepath.Base(directory)}, NoBincache: flags.noBincache, HashAllFiles: flags.hashAllFiles},
 		environment: seal, localSecrets: localSecrets, machine: machine, machineFile: configFile,
 		settings: settings.Inputs{Context: settings.Context{Origin: runspec.OriginLocal, Submitter: true, Local: true, NumCPU: runtime.NumCPU()}},
 	}, nil

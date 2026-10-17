@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 )
 
@@ -49,7 +50,7 @@ exit 1
 	t.Cleanup(func() { http.DefaultTransport = previous })
 	ctx := gotoolchain.WithSession(t.Context(), os.Environ(), nil)
 	for _, wantSource := range []string{"compiled", "cached"} {
-		lease, source, err := pipelineBinary(ctx, dir, os.Environ(), os.Stderr)
+		lease, source, err := pipelineBinary(ctx, dir, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 		if err != nil {
 			t.Fatal(err)
 		}

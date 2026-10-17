@@ -21,6 +21,8 @@ type Spec struct {
 	PipelineDir   string
 	Checkout      runspec.CheckoutPolicy
 	Engine        *engine.Identity
+	NoBincache    bool
+	HashAllFiles  bool
 	// BundleDigest identifies an optional authorized source_bundle seed.
 	BundleDigest string
 }

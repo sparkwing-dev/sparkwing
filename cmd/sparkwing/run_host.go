@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 type localRunOptions struct {
@@ -129,6 +130,23 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 			return err
 		}
 	}
+	if mode := strings.TrimSpace(flags.priority); mode == wingwire.PriorityFront || mode == wingwire.PriorityBack {
+		queue, ok := runtime.controller.(controllerwire.QueueManager)
+		if !ok {
+			return &apierr.Error{Code: apierr.Unavailable, Message: "run: controller cannot resolve relative priority"}
+		}
+		state, err := queue.ReadQueue(ctx)
+		if err != nil {
+			return err
+		}
+		rank := wingwire.ResolveRelativePriority(state.Waiters, mode)
+		for _, waiter := range state.Waiters {
+			if mode == wingwire.PriorityFront && rank <= waiter.Priority || mode == wingwire.PriorityBack && rank >= waiter.Priority {
+				return &apierr.Error{Code: apierr.InvalidArgs, Message: "run: relative priority exceeds the integer range"}
+			}
+		}
+		request.Request.Options.Priority.Value = rank
+	}
 	response, err := runtime.controller.CreateRun(ctx, request)
 	masker.Register(response.HereBearer)
 	for _, value := range response.Request.Request.RequestedArgs {
@@ -213,20 +231,14 @@ func validateLocalRunFlags(flags runFlags) error {
 		return flags.parseErr
 	}
 	if flags.prioritySet || flags.priority != "" {
-		priority, err := validatePriorityFlag(flags.priority)
-		if err != nil {
+		if _, err := validatePriorityFlag(flags.priority); err != nil {
 			return err
-		}
-		if priority == "front" || priority == "back" {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: relative priority requires controller queue resolution before sealing"}
 		}
 	}
 	for _, option := range []struct {
 		name string
 		set  bool
 	}{
-		{"sw-no-bincache", flags.noBincache},
-		{"sw-hash-all-files", flags.hashAllFiles},
 		{"sw-allow-unadmitted", flags.allowUnadmitted},
 		{"sw-index", flags.index != ""},
 		{"target", flags.target != ""},

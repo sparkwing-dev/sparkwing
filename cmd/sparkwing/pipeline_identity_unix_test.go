@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -147,7 +148,11 @@ func main() {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build SDK fixture: %v: %s", err, output)
 	}
-	if err := writeDescribeCache(t.Context(), dir, pipelineentry.Binary(binary)); err != nil {
+	key, err := bincache.PipelineCacheKey(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDescribeCache(t.Context(), dir, key, pipelineentry.Binary(binary)); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := gatherPipelinesCatalog(false)

@@ -87,7 +87,7 @@ func burstLocalFallbackSecrets(t *testing.T, value string) {
 			return client.EngineOptions{}, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("unreachable")}
 		},
 		local: func(ctx context.Context, pipeline string, flags runFlags, args []string) error {
-			prepared, err := prepareNativeLocalRun(ctx, home, filepath.Join(repo, ".sparkwing"), pipeline, captured, snapshots, compileOptions{})
+			prepared, err := prepareNativeLocalRun(ctx, home, filepath.Join(repo, ".sparkwing"), pipeline, captured, snapshots, flags)
 			if err == nil {
 				request, err = prepareLocalRunRequest(ctx, prepared, flags, args)
 			}

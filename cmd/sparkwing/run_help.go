@@ -60,7 +60,7 @@ func runSelectedHelp(dir, pipeline string, flags runFlags, selectEngine func(str
 	if err := selectEngine(sourceDir, closeSelections); err != nil {
 		return err
 	}
-	run := newPipelineRun(sourceDir, compileOptions{NoUpdate: flags.noUpdate, NoBincache: flags.noBincache, ExecutionDir: executionDir})
+	run := newPipelineRun(sourceDir, compileOptions{NoUpdate: flags.noUpdate, NoBincache: flags.noBincache, HashAllFiles: flags.hashAllFiles, ExecutionDir: executionDir})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, captured, nil)
 	if err := run.materialize(captured); err != nil {

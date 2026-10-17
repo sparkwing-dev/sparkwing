@@ -163,6 +163,8 @@ type Source struct {
 	Entrypoint   string           `json:"entrypoint"`
 	BundleDigest Optional[string] `json:"bundle_digest"`
 	Location     SourceLocation   `json:"location"`
+	NoBincache   bool             `json:"no_bincache,omitempty"`
+	HashAllFiles bool             `json:"hash_all_files,omitempty"`
 }
 
 // SourceLocation preserves acquisition input separately from repository identity and checkout policy.

@@ -39,7 +39,7 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := prepareNativeLocalRun(t.Context(), home, dir, "check", os.Environ(), snapshots, compileOptions{})
+	prepared, err := prepareNativeLocalRun(t.Context(), home, dir, "check", os.Environ(), snapshots, runFlags{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -99,8 +99,9 @@ var pipelineBuildFlags = []string{"-trimpath", "-ldflags", "-s -w"}
 
 // CompileOptions binds compiler subprocesses and diagnostics to captured inputs.
 type CompileOptions struct {
-	Environment []string
-	Diagnostics io.Writer
+	Environment  []string
+	Diagnostics  io.Writer
+	HashAllFiles bool
 }
 
 func CompilePipeline(ctx context.Context, sparkwingDir, dest string, options CompileOptions) error {
@@ -274,7 +275,7 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 }
 
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
-	parts, err := keyParts(sparkwingDir, goos, goarch, os.Environ())
+	parts, err := keyParts(sparkwingDir, goos, goarch, os.Environ(), false)
 	if err != nil {
 		return "", err
 	}
@@ -304,14 +305,18 @@ func digestOf(b []byte) string {
 }
 
 func ExplainCacheKey(sparkwingDir string, env []string) (string, []KeyPart, error) {
-	parts, err := keyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH, env)
+	return explainCacheKey(sparkwingDir, env, false)
+}
+
+func explainCacheKey(sparkwingDir string, env []string, hashAllFiles bool) (string, []KeyPart, error) {
+	parts, err := keyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH, env, hashAllFiles)
 	if err != nil {
 		return "", nil, err
 	}
 	return foldKey(parts), parts, nil
 }
 
-func keyParts(sparkwingDir, goos, goarch string, env []string) ([]KeyPart, error) {
+func keyParts(sparkwingDir, goos, goarch string, env []string, hashAllFiles bool) ([]KeyPart, error) {
 	var parts []KeyPart
 	add := func(label, detail string, material []byte) {
 		parts = append(parts, KeyPart{
@@ -328,7 +333,7 @@ func keyParts(sparkwingDir, goos, goarch string, env []string) ([]KeyPart, error
 	add("build environment", "captured Go build settings", buildEnvironmentKey(env))
 
 	var moduleBuf bytes.Buffer
-	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles)
+	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles, hashAllFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +368,7 @@ func keyParts(sparkwingDir, goos, goarch string, env []string) ([]KeyPart, error
 		var buf bytes.Buffer
 
 		fmt.Fprintf(&buf, "replace:%s\n", t.Label)
-		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles)
+		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles, hashAllFiles)
 		if err != nil {
 			return nil, err
 		}
@@ -440,13 +445,16 @@ func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGT"[exp])
 }
 
-func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter) (HashStats, error) {
+func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter, hashAllFiles bool) (HashStats, error) {
 	var stats HashStats
 	files, err := walkHashable(dir, keep)
 	if err != nil {
 		return stats, err
 	}
-	ignored := ignoredUnder(dir, files)
+	var ignored map[string]bool
+	if !hashAllFiles {
+		ignored = ignoredUnder(dir, files)
+	}
 	for _, path := range files {
 		if ignored[path] {
 			stats.Ignored++

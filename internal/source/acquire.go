@@ -73,6 +73,7 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	}
 	command, err := install(ctx, entry.Engine, engine.SDKInstallRequest{
 		Directory: entry.checkoutDirectory, PipelineDir: relative, SDK: options.SDK, Environment: environment, Masker: options.Base.Masker,
+		NoBincache: spec.NoBincache, HashAllFiles: spec.HashAllFiles,
 	})
 	if err != nil {
 		return entry, fmt.Errorf("install source entry: %w", err)

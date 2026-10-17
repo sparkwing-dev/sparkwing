@@ -1159,6 +1159,20 @@ change does not remove the original push's default-branch trust.
 
 ## Invocation and detached trace integration
 
+Local binary preparation retains `--sw-no-bincache` and
+`--sw-hash-all-files` in `runspec.Source.NoBincache` and `HashAllFiles`.
+Initial inspection and every retained-source acquisition use the same policy,
+including detached hosting and retries. The source adapter passes both fields
+to the verified selected engine's `SDKInstallRequest`. Uncached Go builds keep
+debug information and publish no binary-cache entry. Hash-all is scoped to one
+materialization and includes ignored module and local replacement inputs.
+
+Local relative priority resolves against the controller's machine admission
+queue immediately before intake. `front` ranks above the current highest waiter
+and `back` below the lowest. An empty queue gives +1 or -1. The resulting integer
+keeps flag provenance in the request and survives sealing and retry. A rank
+outside the integer range fails before submission.
+
 All Sparkwing handlers consume the original parsed `Invocation`. Execution
 does not reconstruct arguments or declare another flag parser. Engine handoff
 replays the original arguments from the invoking directory, so a relative

@@ -57,6 +57,14 @@ Unknown engine flags fail before execution setup. Local `run` accepts no
 connection profile. Use `pipeline trigger --profile NAME` to submit to a remote
 controller. `--target` is an engine control, rather than an author argument.
 
+For local execution, `--sw-no-bincache` compiles a fresh Go pipeline executable with debug information.
+`--sw-hash-all-files` includes Git-ignored files in binary-cache keys, including
+local replacement modules. Both options apply to initial inspection and retained
+execution, including detached runs and retries.
+
+Local `--sw-priority front|back` resolves once against the controller's current
+machine queue before submission. The sealed request retains the numeric rank.
+
 The CLI resolves the configured pipeline name and SDK entrypoint separately.
 The invoked alias remains visible to author code. `--sw-allow-risk` authorizes
 declared risk labels. The accepted request retains those permissions, including

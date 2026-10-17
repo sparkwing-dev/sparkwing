@@ -31,6 +31,8 @@ type SDKInstallRequest struct {
 	PipelineDir         string          `json:"pipeline_dir"`
 	ExecutableDirectory string          `json:"executable_directory,omitempty"`
 	SDK                 SDKKind         `json:"sdk"`
+	NoBincache          bool            `json:"no_bincache,omitempty"`
+	HashAllFiles        bool            `json:"hash_all_files,omitempty"`
 	Environment         []string        `json:"-"`
 	Masker              *secrets.Masker `json:"-"`
 }

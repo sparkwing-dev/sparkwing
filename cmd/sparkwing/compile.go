@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -60,10 +59,6 @@ func (r *pipelineRun) materialize(env []string) error {
 	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
 		return err
 	}
-	key, _, err := bincache.ExplainCacheKey(r.sparkwingDir, env)
-	if err != nil {
-		return fmt.Errorf("read .sparkwing/ to weigh what it declares: %w", err)
-	}
 	if r.uncached {
 		dir, err := os.MkdirTemp("", "sparkwing-source-bin-")
 		if err != nil {
@@ -74,11 +69,10 @@ func (r *pipelineRun) materialize(env []string) error {
 			return err
 		}
 		r.entry, r.source = pipelineentry.Binary(r.uncachedBinary), "source"
-		ensureDescribeCache(r.ctx, r.sparkwingDir, key, r.entry)
 		return nil
 	}
 
-	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, env, os.Stderr)
+	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, bincache.CompileOptions{Environment: env, Diagnostics: os.Stderr, HashAllFiles: r.opts.HashAllFiles})
 	if err != nil {
 		return err
 	}
@@ -122,8 +116,7 @@ func (r *pipelineRun) finish(err error) error {
 
 // safety: the returned lease pins the cache entry the binary lives in, so the
 // caller releases it once the binary has run or been read.
-func pipelineBinary(ctx context.Context, sparkwingDir string, env []string, diagnostics io.Writer) (*bincache.Lease, string, error) {
-	options := bincache.CompileOptions{Environment: env, Diagnostics: diagnostics}
+func pipelineBinary(ctx context.Context, sparkwingDir string, options bincache.CompileOptions) (*bincache.Lease, string, error) {
 	lease, published, err := bincache.MaterializePipeline(ctx, sparkwingDir, options)
 	if err != nil {
 		return nil, "", err
@@ -139,7 +132,7 @@ func ensureDescribeCache(ctx context.Context, sparkwingDir, key string, entry pi
 	if readDescribeFile(describeCachePath(key)) != nil {
 		return
 	}
-	if err := writeDescribeCache(ctx, sparkwingDir, entry); err != nil {
+	if err := writeDescribeCache(ctx, sparkwingDir, key, entry); err != nil {
 		slog.Default().Debug("describe cache write failed", "err", err, "hash", key)
 	}
 }
@@ -148,6 +141,7 @@ type compileOptions struct {
 	ExecutionDir string
 	NoUpdate     bool
 	NoBincache   bool
+	HashAllFiles bool
 }
 
 func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions) error {

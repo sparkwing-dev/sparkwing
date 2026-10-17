@@ -59,7 +59,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	var command []string
 	var cachedExecutable string
 	if request.SDK == engine.GoSDK {
-		command, cachedExecutable, err = installGoSDK(ctx, dir, request.ExecutableDirectory, pin, environment, diagnostics, masker)
+		command, cachedExecutable, err = installGoSDK(ctx, dir, request, pin, environment, diagnostics, masker)
 	} else {
 		command, err = installTypeScriptSDK(ctx, dir, pin, environment, diagnostics, masker)
 	}
@@ -69,8 +69,8 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable})
 }
 
-func installGoSDK(ctx context.Context, dir, executableDirectory string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
-	if !filepath.IsAbs(executableDirectory) {
+func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
+	if !filepath.IsAbs(request.ExecutableDirectory) {
 		return nil, "", errors.New("Go installation requires an owned executable directory")
 	}
 	flags := ""
@@ -81,10 +81,21 @@ func installGoSDK(ctx context.Context, dir, executableDirectory string, pin engi
 	}
 	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
 	var buildDiagnostics bytes.Buffer
-	options := bincache.CompileOptions{Environment: environment, Diagnostics: &buildDiagnostics}
-	lease, _, err := bincache.MaterializePipeline(ctx, dir, options)
-	if lease != nil {
-		defer func() { result = errors.Join(result, lease.Release()) }()
+	options := bincache.CompileOptions{Environment: environment, Diagnostics: &buildDiagnostics, HashAllFiles: request.HashAllFiles}
+	name := "pipeline"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(request.ExecutableDirectory, name)
+	var lease *bincache.Lease
+	var err error
+	if request.NoBincache {
+		err = bincache.CompileUncachedPipeline(ctx, dir, path, options)
+	} else {
+		lease, _, err = bincache.MaterializePipeline(ctx, dir, options)
+		if lease != nil {
+			defer func() { result = errors.Join(result, lease.Release()) }()
+		}
 	}
 	if err := installDiagnostic(diagnostics, masker, buildDiagnostics.Bytes(), err); err != nil {
 		return nil, "", err
@@ -115,16 +126,14 @@ func installGoSDK(ctx context.Context, dir, executableDirectory string, pin engi
 	if module.Version != pin.Version || replacement != pin.Replacement {
 		return nil, "", &apierr.Error{Code: apierr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
 	}
+	if request.NoBincache {
+		return []string{path}, "", nil
+	}
 	source, err := os.Open(lease.Path())
 	if err != nil {
 		return nil, "", err
 	}
 	defer func() { result = errors.Join(result, source.Close()) }()
-	name := "pipeline"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	path := filepath.Join(executableDirectory, name)
 	destination, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
 	if err != nil {
 		return nil, "", err

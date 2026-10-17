@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Local runs honor `--sw-no-bincache` and `--sw-hash-all-files` during
+  inspection, detached hosting and retries. Uncached Go builds keep debug
+  information. Resolve relative priority against the local controller queue.
+
 - **CLI:** Use one command parser for execution and help. Honor `--checkout`
   for repository registration and removal. Utility mutations emit JSON when
   piped, including version holds, state recovery and sparks checks and updates.

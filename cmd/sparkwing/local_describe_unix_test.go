@@ -34,7 +34,7 @@ func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	captured := os.Environ()
-	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", captured, snapshots, compileOptions{})
+	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", captured, snapshots, runFlags{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestNativeLocalPreparationResolvesTrackingSparksBeforeInstallation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = prepareNativeLocalRun(t.Context(), home, dir, "ci", os.Environ(), snapshots, compileOptions{})
+	_, err = prepareNativeLocalRun(t.Context(), home, dir, "ci", os.Environ(), snapshots, runFlags{})
 	if err == nil || !strings.Contains(err.Error(), "--sw-no-update") || !strings.Contains(err.Error(), "example.com/dependency@latest") {
 		t.Fatalf("tracking resolution did not precede source installation: %v", err)
 	}
