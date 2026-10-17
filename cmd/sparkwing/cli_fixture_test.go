@@ -134,7 +134,7 @@ func TestMain(m *testing.M) {
 	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "wingd", "__sdk-install", "__host-trigger", "__tick", "__complete":
+		case "wingd", "pipeline", "__sdk-install", "__host-trigger", "__tick", "__complete":
 			main()
 			return
 		}
@@ -154,7 +154,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestDetachedHostEntrypointDoesNotRunPipelineFixtures(t *testing.T) {
-	for _, args := range [][]string{{"wingd", "run"}, {"__sdk-install"}, {"__host-trigger"}, {"__tick"}, {"__complete"}} {
+	for _, args := range [][]string{{"wingd", "run"}, {"pipeline", "describe"}, {"__sdk-install"}, {"__host-trigger"}, {"__tick"}, {"__complete"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			cmd := exec.CommandContext(t.Context(), os.Args[0], append(args, "--help")...)
 			cmd.Env = append(os.Environ(), "SPARKWING_TEST_DAEMON_ENTRYPOINT=1")

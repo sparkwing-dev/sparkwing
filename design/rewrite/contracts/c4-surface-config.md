@@ -959,6 +959,14 @@ reference exposes a real `burst-and-overflow` section anchor. Level-one and
 level-two description headings stay escaped so command sections retain their
 ownership of those levels.
 
+The CLI prepares its private source workspace on a fresh home before acquisition.
+For Cloud-owned here runs, `hostSourceOptions` supplies the requesting machine's
+ambient environment through `procenv.Build`. Remote policy admits the existing
+minimal tool base plus `GOCACHE` and `GOMODCACHE`. Captured requester values,
+arbitrary user variables and credential-shaped names remain excluded. SDK
+installation and process execution use this same classified base. Local runs
+retain their captured environment policy.
+
 ## Cloud chart integration amendment
 
 The full chart exposes controller-owned S3 bytes as `controller.dataStore.s3URL`,

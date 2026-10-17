@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -91,10 +92,14 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 	if err != nil {
 		return source.Options{}, err
 	}
+	workspace := filepath.Join(home, "workspaces")
+	if err := fssecure.EnsureDir(workspace); err != nil {
+		return source.Options{}, err
+	}
 	return source.Options{
 		Engines: engines, SDK: engine.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Masker: masker},
+		Workspace: workspace, Base: procenv.Base{Local: local, Captured: captured, Ambient: os.Environ(), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
 	}, nil
 }
 

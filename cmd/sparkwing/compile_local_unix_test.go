@@ -22,7 +22,7 @@ func TestLocalPipelineBinaryBuildsOnceWithoutRemoteTransfers(t *testing.T) {
 	t.Setenv("BUILD_LOG", buildLog)
 	bin := filepath.Join(root, "go")
 	script := `#!/bin/sh
-if [ "$1" = mod ]; then exit 0; fi
+if [ "$1" = list ]; then exit 0; fi
 if [ "$1" = env ]; then printf 'auto\ngo1.26.9\noff\n'; exit 0; fi
 while [ $# -gt 0 ]; do
   if [ "$1" = -o ]; then

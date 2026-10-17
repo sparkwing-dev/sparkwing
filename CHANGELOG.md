@@ -27,6 +27,9 @@ unlock.
   independent account session through `runners add --session-stdin`.
   `overflow show` reports your allowance and usage, and `overflow set` changes
   or removes your saved monthly cap.
+- **run:** Prepare fresh source workspaces and the filtered host tool environment
+  for Cloud-routed here execution. Go SDK installation resolves the pipeline's
+  imported packages without downloading unused module archives.
 - **store (Breaking):** Advance the rewrite baseline to schema 5 for account
   provenance and overflow controls. [Migration](docs/migrations/_unreleased.md#explicit-cloud-overflow).
 - **charts (Breaking):** Require repository and tag for every enabled image. Add a Cloud launcher Deployment, controller S3 values, and EKS/ExternalSecret examples. Cloud Jobs retain CPU-band tolerations and Karpenter disruption protection. See [migration guide](docs/migrations/_unreleased.md#cloud-helm-images-and-launcher).

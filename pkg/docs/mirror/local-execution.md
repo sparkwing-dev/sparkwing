@@ -443,6 +443,8 @@ deletions. It excludes untracked files unless the pipeline lists their exact
 repository-relative paths in `source_files`. The bundle has no parent history.
 Secret files and any snapshot containing a resolved local secret are refused
 before upload. Bundle upload uses authorized content-addressed source storage.
+Each host builds the pipeline from the uploaded snapshot with its selected
+engine. Go installation downloads the dependencies used by the pipeline.
 
 ```yaml
 pipelines:

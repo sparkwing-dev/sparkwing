@@ -1039,6 +1039,15 @@ uses a real loopback HTTP listener. Neither changes the runtime wire. Source
 acquisition and selected engine resolution remain separate from that SDK
 subprocess fixture.
 
+The CLI preparation acceptance also compiles a real Go SDK entry from tracked
+working-tree edits, uploads it through authorized source storage, admits a
+Cloud-owned here run, claims its owner, downloads the sealed bundle and installs
+and describes that SDK again. Declared extra files survive and undeclared `.env`
+does not. It uses the real development engine policy and selected installer.
+The public `rewrite_integration` probe uses the configured CLI, a real controller
+and the production here host to check successful execution, masked terminal
+logs, an admitted handle and absence of a second local run record.
+
 ### Overflow management client
 
 `controllerwire.OverflowManager` exposes `ReadOverflowControl` and

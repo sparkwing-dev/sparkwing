@@ -74,6 +74,14 @@ warm reports. It does not authorize execution after the lease is released.
 Real Go fixtures cover missing checksums, overlays, undeclared SDK replacement refusal and
 execution after cache pruning. Native platform evidence remains separate.
 
+Dependency preparation runs `go list -deps` for the pipeline package, using
+the same workspace selection as compilation. Covering workspaces remain active.
+Unrelated workspaces are disabled for preparation. Outside a covering workspace,
+it uses `-mod=mod` and the effective modfile to prepare imported package
+checksums before computing the cache key. It no longer
+downloads every module archive in the graph. An unavailable unused archive
+cannot block a pipeline whose build dependencies are already available.
+
 Local dispatch consumes ReadPin, VersionForPin and Resolve for both SDKs. It
 rechecks policy on every invocation and stops re-executing only when the current
 and resolved executables are the same file. Info reads pin metadata without
