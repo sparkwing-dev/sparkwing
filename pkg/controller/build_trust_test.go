@@ -1,28 +1,73 @@
 package controller_test
 
 import (
-	"net/http"
+	"encoding/json"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(523, "olga")
-	var answer struct {
-		TrustLocalBuilds bool `json:"trust_local_builds"`
+	f := newBrowserFixture(t, nil)
+	read := func(want bool) {
+		t.Helper()
+		rec := f.serve(f.cookieRequest("GET", "/api/v1/team/build-trust", ""))
+		var answer struct {
+			TrustLocalBuilds bool `json:"trust_local_builds"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil || rec.Code != 200 || answer.TrustLocalBuilds != want {
+			t.Fatalf("trust = %d %s: %v", rec.Code, rec.Body, err)
+		}
+		got, err := teststore.ForTeam(t, f.st, store.DefaultTeam).TrustLocalBuilds(t.Context())
+		if err != nil || got != want {
+			t.Fatalf("stored trust = %v: %v", got, err)
+		}
 	}
-	if code := f.call("GET", "/api/v1/team/build-trust", olga.auth, nil, &answer); code != http.StatusOK || answer.TrustLocalBuilds {
-		t.Fatalf("default trust = %d %+v", code, answer)
+	read(false)
+	for _, body := range []string{`{"trust_local_builds":true}`, `{"trust_local_builds":false}`} {
+		if rec := f.serve(f.cookieRequest("PUT", "/api/v1/team/build-trust", body)); rec.Code != 200 {
+			t.Fatalf("write = %d %s", rec.Code, rec.Body)
+		}
+		read(body == `{"trust_local_builds":true}`)
 	}
-	if code := f.call("PUT", "/api/v1/team/build-trust", olga.auth,
-		map[string]bool{"trust_local_builds": true}, &answer); code != http.StatusOK || !answer.TrustLocalBuilds {
-		t.Fatalf("enable trust = %d %+v", code, answer)
+}
+
+func TestBuildTrustMutationStaysWithItsTeamAndCurrentOwnerProperty(t *testing.T) {
+	f := newBrowserFixture(t, nil)
+	if err := f.st.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
+		t.Fatal(err)
 	}
-	trust, err := teststore.ForTeam(t, f.store, store.Team(olga.team)).TrustLocalBuilds(t.Context())
-	if err != nil || !trust {
-		t.Fatalf("stored trust = %v, %v", trust, err)
+	property := func(role uint8, enabled bool) bool {
+		current := []string{"owner", "editor", "reader"}[role%3]
+		if _, err := f.st.DB().Exec(`UPDATE memberships SET role=? WHERE team='default' AND account_id='alice'`, current); err != nil {
+			t.Fatal(err)
+		}
+		before, err := teststore.ForTeam(t, f.st, store.DefaultTeam).TrustLocalBuilds(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := json.Marshal(map[string]bool{"trust_local_builds": enabled})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := f.serve(f.cookieRequest("PUT", "/api/v1/team/build-trust", string(body)))
+		wantStatus, want := 403, before
+		if current == "owner" {
+			wantStatus, want = 200, enabled
+		}
+		got, err := teststore.ForTeam(t, f.st, store.DefaultTeam).TrustLocalBuilds(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreign, err := teststore.ForTeam(t, f.st, "foreign").TrustLocalBuilds(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec.Code == wantStatus && got == want && !foreign
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+		t.Fatal(err)
 	}
 }

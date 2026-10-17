@@ -2,12 +2,14 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"testing"
 	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func cardCollectionFixture(t *testing.T) (*Store, *Tenant, time.Time) {
@@ -201,6 +203,9 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 
 	cardCollectionDebt(t, s, "ch_1", 15_000)
 	w := cardCollectionDue(t, s, now)
+	if err := s.AsOperator().RecordAttemptIntent(ctx, w.AttemptID, "pi_short", w.Customer, now); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{
 		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_short", AmountCents: 100,
 	}, now); err != nil {
@@ -216,8 +221,10 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if due, err := s.AsOperator().DueCardRefunds(ctx, now); err != nil || len(due) != 0 {
 		t.Fatalf("a pending refund = %+v, %v; want not due", due, err)
 	}
-	if queued, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_short-0", "re_1", "failed", now); err != nil || !queued {
-		t.Fatalf("report failed = %v, %v", queued, err)
+	event := providerPaymentEvent(now, capability.PaymentRefund)
+	event.PaymentID, event.ObjectID, event.Status = "pi_short", "re_1", "failed"
+	if _, err := s.settlePaymentFacts(ctx, event); err != nil {
+		t.Fatal(err)
 	}
 	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(30*time.Minute)); err != nil || len(due) != 0 {
 		t.Fatalf("a failed refund inside its backoff = %+v, %v", due, err)
@@ -229,8 +236,8 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "pi_short-1", "re_2", "succeeded", now); err != nil {
 		t.Fatal(err)
 	}
-	if queued, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_short-0", "re_1", "failed", now); err != nil || queued {
-		t.Fatalf("a stale report of the first refund = %v, %v; want ignored", queued, err)
+	if got, err := s.settlePaymentFacts(ctx, event); err != nil || !got.Replayed {
+		t.Fatalf("stale refund replay: %+v, %v", got, err)
 	}
 	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
 		t.Fatalf("a succeeded refund = %+v, %v; want done", due, err)
@@ -238,40 +245,186 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 }
 
 func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
-	for _, tc := range []struct {
-		status  string
-		dueLate bool
-	}{{"failed", true}, {"succeeded", false}} {
-		t.Run(tc.status, func(t *testing.T) {
+	for _, test := range []struct{ recorded, response string }{
+		{"failed", "pending"},
+		{"canceled", "pending"},
+		{"succeeded", "pending"},
+		{"succeeded", "failed"},
+		{"failed", "succeeded"},
+	} {
+		status := test.recorded
+		t.Run(status+"/"+test.response, func(t *testing.T) {
 			s, _, now := cardCollectionFixture(t)
 			ctx := t.Context()
-
 			cardCollectionDebt(t, s, "ch_1", 15_000)
-			w := cardCollectionDue(t, s, now)
-			if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{
-				ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_short", AmountCents: 100,
-			}, now); err != nil {
+			work := cardCollectionDue(t, s, now)
+			if err := s.AsOperator().RecordAttemptIntent(ctx, work.AttemptID, "pi_short", work.Customer, now); err != nil {
 				t.Fatal(err)
 			}
-			if queued, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_short-0", "re_1", tc.status, now); err != nil || !queued {
-				t.Fatalf("early %s report = %v, %v; want applied", tc.status, queued, err)
-			}
-			if _, err := s.AsOperator().TestOnlyReportCardRefund(ctx, "pi_short-0", "re_1", tc.status, now); err != nil {
+			if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "pi_short", AmountCents: 100}, now); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "pi_short-0", "re_1", "pending", now); err != nil {
+			event := providerPaymentEvent(now, capability.PaymentRefund)
+			event.PaymentID, event.ObjectID, event.Status = "pi_short", "re_1", status
+			for _, id := range []string{"early", "early", "early-again"} {
+				event.EventID = id
+				if _, err := s.settlePaymentFacts(ctx, event); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 2 {
+				if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "pi_short-0", "re_1", test.response, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var state string
+			var attempts int
+			if err := s.db.QueryRow("SELECT status,attempts FROM card_refunds WHERE team='a' AND payment_intent='pi_short'").Scan(&state, &attempts); err != nil {
 				t.Fatal(err)
+			}
+			wantState, wantAttempts := CardRefundDue, 1
+			if status == "succeeded" || test.response == "succeeded" {
+				wantState, wantAttempts = CardRefundSucceeded, 0
+			}
+			if state != wantState || attempts != wantAttempts {
+				t.Fatalf("bound refund lost its recorded outcome: status=%s attempts=%d, want %s/%d", state, attempts, wantState, wantAttempts)
 			}
 			due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
-			switch {
-			case err != nil:
+			if err != nil {
 				t.Fatal(err)
-			case tc.dueLate && (len(due) != 1 || due[0].Key != "pi_short-1"):
-				t.Fatalf("after an early failure = %+v; want one retry under the next key", due)
-			case !tc.dueLate && len(due) != 0:
-				t.Fatalf("after an early success = %+v; want nothing due", due)
+			}
+			if wantState == CardRefundSucceeded && len(due) != 0 || wantState == CardRefundDue && (len(due) != 1 || due[0].Key != "pi_short-1") {
+				t.Fatalf("refund after recorded %s: %+v", status, due)
 			}
 		})
+	}
+}
+
+func TestRecordedRefundCannotBindAnotherAssociationProperty(t *testing.T) {
+	property := func(seed uint32, outcome uint8) bool {
+		s, _, now := cardCollectionFixture(t)
+		ctx := t.Context()
+		cardCollectionDebt(t, s, "debt", 15_000)
+		work := cardCollectionDue(t, s, now)
+		if err := s.AsOperator().RecordAttemptIntent(ctx, work.AttemptID, "payment", work.Customer, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 100}, now); err != nil {
+			t.Fatal(err)
+		}
+		event := providerPaymentEvent(now, capability.PaymentRefund)
+		foreign := fmt.Sprintf("other-' OR 1=1 --/雪/%x", seed)
+		event.ObjectID, event.Status = "bound-refund", []string{"failed", "canceled", "succeeded"}[outcome%3]
+		if seed%4 == 0 {
+			event.ObjectID = foreign
+		}
+		if _, err := s.settlePaymentFacts(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+		switch seed % 4 {
+		case 1:
+			rewriteSchemaExec(t, s.db, "UPDATE payment_events SET team='b' WHERE event_kind='refund'")
+		case 2:
+			if err := s.AsOperator().SetPaymentMode(ctx, capability.PaymentLive); err != nil {
+				t.Fatal(err)
+			}
+		case 3:
+			rewriteSchemaExec(t, s.db, "UPDATE payment_events SET payment_id=? WHERE event_kind='refund'", foreign)
+		}
+		if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "bound-refund", "pending", now); err != nil {
+			t.Fatal(err)
+		}
+		var status, id string
+		var attempts int
+		if err := s.db.QueryRow("SELECT status,refund_id,attempts FROM card_refunds WHERE team='a' AND payment_intent='payment'").Scan(&status, &id, &attempts); err != nil {
+			t.Fatal(err)
+		}
+		return status == CardRefundPending && id == "bound-refund" && attempts == 0
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 24, Rand: rand.New(rand.NewSource(42))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
+	s, tenant, now := cardCollectionFixture(t)
+	ctx := t.Context()
+	cardCollectionDebt(t, s, "debt", 15_000)
+	work := cardCollectionDue(t, s, now)
+	if err := s.AsOperator().RecordAttemptIntent(ctx, work.AttemptID, "payment", work.Customer, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 1_000}, now); err != nil {
+		t.Fatal(err)
+	}
+	owner := authorityMember(t, s, "operator", RoleReader)
+	console := s.AsConsole(func(id string) bool { return id == "operator" })
+	a := capability.Authorized{Principal: capability.Principal{Class: capability.CredentialConsole, Authority: owner.Authority, Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}}}, Target: capability.Target{Team: "a"}}
+	if _, err := console.ConsoleRefund(ctx, a, controllerwire.OperatorRefund{PaymentID: "payment", RefundID: "operator-refund", AmountCents: 400, Reason: "partial"}, "once"); err != nil {
+		t.Fatal(err)
+	}
+	event := providerPaymentEvent(now, capability.PaymentRefund)
+	event.ObjectID, event.Status, event.AmountMinor = "operator-refund", "succeeded", 400
+	if _, err := s.settlePaymentFacts(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.AsOperator().DueCardRefunds(ctx, now)
+	if err != nil || len(due) != 1 || due[0].Key != "payment-0" {
+		t.Fatalf("operator refund moved the queue: %+v, %v", due, err)
+	}
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "queued-refund", "pending", now); err != nil {
+		t.Fatal(err)
+	}
+	event.EventID, event.ObjectID, event.AmountMinor = "queue-result", "queued-refund", 1_000
+	for range 2 {
+		if _, err := s.settlePaymentFacts(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
+		t.Fatalf("successful refund remains queued: %+v, %v", due, err)
+	}
+	state, err := tenant.CreditState(ctx, 0)
+	if err != nil || state.ReversedMicro != 1_000*MicroCreditsPerCent {
+		t.Fatalf("operator and queued refunds exceeded the payment: %+v, %v", state, err)
+	}
+}
+
+func TestRecordedRefundBindingRollsBackWithItsOutcome(t *testing.T) {
+	s, _, now := cardCollectionFixture(t)
+	ctx := t.Context()
+	cardCollectionDebt(t, s, "debt", 15_000)
+	work := cardCollectionDue(t, s, now)
+	if err := s.AsOperator().RecordAttemptIntent(ctx, work.AttemptID, "payment", work.Customer, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.AsOperator().SettleCardPayment(ctx, CardPayment{ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "payment", AmountCents: 100}, now); err != nil {
+		t.Fatal(err)
+	}
+	event := providerPaymentEvent(now, capability.PaymentRefund)
+	event.ObjectID, event.Status = "refund", "failed"
+	if _, err := s.settlePaymentFacts(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_refund_outcome BEFORE UPDATE ON card_refunds WHEN NEW.attempts>OLD.attempts BEGIN SELECT RAISE(ABORT,'outcome unavailable'); END`)
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund", "pending", now); err == nil {
+		t.Fatal("refund binding committed without its recorded outcome")
+	}
+	var status, id string
+	var attempts int
+	if err := s.db.QueryRow("SELECT status,refund_id,attempts FROM card_refunds WHERE team='a' AND payment_intent='payment'").Scan(&status, &id, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if status != CardRefundDue || id != "" || attempts != 0 {
+		t.Fatalf("partial refund binding survived rollback: %s/%s/%d", status, id, attempts)
+	}
+	rewriteSchemaExec(t, s.db, "DROP TRIGGER refuse_refund_outcome")
+	if err := s.AsOperator().MarkCardRefundMade(ctx, "a", "payment-0", "refund", "pending", now); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.AsOperator().DueCardRefunds(ctx, now.Add(2*time.Hour))
+	if err != nil || len(due) != 1 || due[0].Key != "payment-1" {
+		t.Fatalf("refund outcome was lost on retry: %+v, %v", due, err)
 	}
 }
 

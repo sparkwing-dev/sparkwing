@@ -27,24 +27,24 @@ func fixedRun() *store.Run {
 	}
 }
 
-func outputRef(output []byte) *store.OutputRef {
+func outputDigest(output []byte) string {
 	if len(output) == 0 {
-		return nil
+		return ""
 	}
 	sum := sha256.Sum256(output)
-	return &store.OutputRef{Key: "outputs/r/n/a", Size: int64(len(output)), SHA256: hex.EncodeToString(sum[:])}
+	return hex.EncodeToString(sum[:])
 }
 
 func node(id, outcome string, started time.Time, dur time.Duration, output []byte, deps ...string) *store.Node {
 	finished := started.Add(dur)
 	return &store.Node{
-		NodeID:     id,
-		Status:     "done",
-		Outcome:    outcome,
-		Deps:       deps,
-		StartedAt:  &started,
-		FinishedAt: &finished,
-		OutputRef:  outputRef(output),
+		NodeID:       id,
+		Status:       "done",
+		Outcome:      outcome,
+		Deps:         deps,
+		StartedAt:    &started,
+		FinishedAt:   &finished,
+		OutputDigest: outputDigest(output),
 	}
 }
 

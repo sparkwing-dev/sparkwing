@@ -123,6 +123,9 @@ func (f *identityFixture) call(method, path, auth string, body, out any) int {
 	if err != nil {
 		f.t.Fatal(err)
 	}
+	if req.Body == nil {
+		req.Body = http.NoBody
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -136,18 +139,16 @@ func (f *identityFixture) call(method, path, auth string, body, out any) int {
 		}
 		req.Header.Set("Origin", req.URL.Scheme+"://"+req.URL.Host)
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(resp.Body)
+	req.Header.Set("Origin", req.URL.Scheme+"://"+req.URL.Host)
+	w := httptest.NewRecorder()
+	f.srv.Handler().ServeHTTP(w, req)
+	raw := w.Body.Bytes()
 	if out != nil && len(raw) > 0 {
 		if err := json.Unmarshal(raw, out); err != nil {
 			f.t.Fatalf("%s %s: decode %q: %v", method, path, raw, err)
 		}
 	}
-	return resp.StatusCode
+	return w.Code
 }
 
 func (f *identityFixture) consoleAuth() string {

@@ -20,6 +20,25 @@ unlock.
 
 ## [Unreleased]
 
+- **billing:** Apply early refund callbacks when the worker binds the provider
+  refund ID, so completion and retry outcomes are retained once.
+
+- **store (Breaking):** Require verified payment settlement or an authorized console
+  refund for reversals. `Tenant.RecordCreditGrant` accepts free grants only.
+  Remove the unused `Tenant.AppendEventOnce`, `Operator.DropCardAttempt`,
+  `ValidCreditGrantKind` and `ErrReversalExceedsPayment` APIs.
+
+- **store (Breaking):** Report committed output digests in jobs and receipts
+  Replace `Node.OutputRef` with `Node.OutputDigest` and remove `OutputRef`,
+  `OutputKeyPrefix` and `NodeLogSealGrace`. `CreditRateTable.ClassForResource`
+  takes `match.Resources` directly instead of the removed `ExecutorResource` alias.
+
+- **schedules:** Remove the controller's retired trigger insertion path. Scheduled execution requires a tenant scheduled-intake transaction and refuses a missing or wrong-team adapter.
+
+- **api:** Restore Git object ID validation on sealed run submissions and reject child pipeline cycles within a repository. A child request naming another team returns `forbidden`.
+
+- **controller:** Apply configured flood caps and queue shedding to sealed run submissions and retries
+  Content deduplication replays one committed run without returning its one-time here bearer again.
 - **run:** Reuse local pipeline binaries before resolving Go dependencies, so
   cache hits do not require a working Go compiler.
 

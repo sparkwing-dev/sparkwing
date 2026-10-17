@@ -46,17 +46,22 @@ func (s *EngineController) handleCancel(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-func (s *EngineController) handleRetry(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body controllerwire.RetryRequest
-	if err := decodeEngineRequest(r, &body); err != nil {
-		return err
+func (s *Server) handleRetry(engine *EngineController) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+	return func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+		var body controllerwire.RetryRequest
+		if err := decodeEngineRequest(r, &body); err != nil {
+			return err
+		}
+		if err := body.Validate(); err != nil {
+			return err
+		}
+		response, err := engine.Retry(r.Context(), a, body)
+		if err != nil {
+			return err
+		}
+		writeJSON(w, http.StatusOK, response)
+		return nil
 	}
-	response, err := s.Retry(r.Context(), a, body)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, response)
-	return nil
 }
 
 func (s *EngineController) handleRenewal(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

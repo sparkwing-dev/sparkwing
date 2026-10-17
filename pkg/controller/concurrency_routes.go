@@ -43,7 +43,7 @@ func (s *Server) concurrencyStore(ctx context.Context, team string) (Concurrency
 		var tenant *store.Tenant
 		tenant, err = s.store.ForTeam(ctx, store.Team(team))
 		if tenant != nil {
-			transactions, _ = any(tenant).(ConcurrencyStore)
+			transactions = tenant
 		}
 	}
 	if err != nil {

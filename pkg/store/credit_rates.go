@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
@@ -90,7 +92,7 @@ func (e *UnpricedCPUClassError) Error() string {
 func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 
 // ClassForResource returns the class that covers both halves of a node's request: the smallest class whose cores cover the cpu rounded up to a whole core and whose [CPUClassMemoryBytes] covers the memory asked for.
-func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error) {
+func (t CreditRateTable) ClassForResource(res match.Resources) (CreditRate, error) {
 	if len(t) == 0 {
 		return CreditRate{}, fmt.Errorf("%w: the rate table prices no cpu class", ErrInvalidCreditSetting)
 	}
@@ -246,16 +248,4 @@ func addCreditRateTableWrites(writes map[string]string, table CreditRateTable) e
 		writes[metaKeyCreditRateMicro] = formatCreditSetting(base)
 	}
 	return nil
-}
-
-// safety: pricing uses the controller's stored resource request, not a claim's
-// self-reported size, so a runner cannot lower its own bill.
-func nodeCreditClassTx(
-	ctx context.Context, q rowQuerier, table CreditRateTable, runID, nodeID string,
-) (CreditRate, error) {
-	charge, err := nodeChargeTx(ctx, q, runID, nodeID)
-	if err != nil {
-		return CreditRate{}, err
-	}
-	return table.ClassForResource(charge)
 }

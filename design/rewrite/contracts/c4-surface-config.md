@@ -1152,3 +1152,12 @@ request. Runtime environment snapshots retain their existing names/digest rule.
 Automation discovery reads the current default branch's declarations but cannot
 replace the default branch reported by the signed event. A later default-branch
 change does not remove the original push's default-branch trust.
+
+
+## Child lineage reporting, 2026-10-17
+
+`Lineage.RepoInherited` uses optional JSON `repo_inherited`. True records that the
+child caller omitted a repository override. C1 checks the parent repository and
+seals this intent before reporting it. False is omitted, preserving canonical
+encodings for requests without inherited repository intent. Source authorization
+continues through the current intake policy.

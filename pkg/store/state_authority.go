@@ -173,7 +173,7 @@ func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID stri
 		return err
 	}
 	c := principal.Capability
-	if c.Team != string(team) || (c.Binding.RunID != "" && c.Binding.RunID != runID) {
+	if c.Team != string(team) && !(actor.Kind == ActorClaimant && launcherClaimant(c)) || (c.Binding.RunID != "" && c.Binding.RunID != runID) {
 		return holderRefusal()
 	}
 	if actor.CapabilityPrefix != "" && actor.CapabilityPrefix != c.Prefix {

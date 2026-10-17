@@ -22,6 +22,13 @@ access, billing provenance and claim fence. It rechecks those facts in the same
 transaction as a mutation. The store clock decides whether a holder is live.
 A client cannot replace those facts with headers, environment variables or JSON.
 
+Scheduled launches pass only a tenant, stored schedule ID and due instant to the
+scheduled-intake transaction. That transaction must recheck current arming consent
+and derive the actor, repository, source and replay identity from the stored row.
+The controller refuses a missing or wrong-team transaction adapter. Its schedule
+tests substitute consent and use real sealed intake. They do not establish the
+store's schedule-consent implementation or a working native timer.
+
 Pipeline authors execute code with the permissions of the runner's OS account.
 Same-account code may read the runner's private credential file, other files or
 process memory. Use a dedicated account, container or VM and enroll only code
@@ -72,6 +79,18 @@ flush does not reopen general data, source or secret access. A job-process
 credential dies with its process. Plan, eval, owner and job bindings retain
 their separate permissions.
 
+### Run intake and child calls
+
+A supplied Git SHA must be empty or a full 40- or 64-character hexadecimal
+object ID. Revision names and option-shaped values are refused before admission.
+API input cannot choose the submitting account or attach verified App facts.
+
+A child call names its live parent job. Only that job can read the child through
+its parent relation. The private job snapshot supplies execution inputs, while
+public run details keep secret arguments redacted. Admission checks ancestor
+pipeline and repository identities within the same team. Re-entering one returns
+`409`; a missing ancestor returns `404` without disclosing foreign run facts.
+
 ### Request audit log
 
 Audit records identify the route, operation, team, subject and public credential
@@ -101,6 +120,23 @@ Request limits protect a controller process. Persistent usage counters and
 quotas aggregate in the store. The supported deployment has one controller
 replica. Coordinated request limiters and cross-replica live-log fan-out are
 separate work. Flushed log segments remain the persistence fallback.
+
+### Run submission budgets
+
+The configured hourly flood cap gives each API token its own bucket for
+submissions and retries. App deliveries share their team's separate bucket.
+Queue shedding measures that team's pending work.
+Exhaustion returns `429`; queue shedding returns `503`. Both carry
+`Retry-After`. These process budgets complement the store's persistent limits.
+
+When content deduplication is configured, identical API submissions by the
+same team and submitting identity share an intake key within that window. The store owns
+the commit and replay: the first response is `201`, and replay returns `200`
+with `replayed: true` and the same run ID. Replay never returns another here
+bearer. An explicit idempotency key takes precedence over content deduplication.
+Persisted replay runs before flood charging, so a replay does not spend the
+flood budget. A refused store transaction leaves no replay result. Retrying
+the same content inside the dedupe window can still create its first run.
 
 ### Limits profiles
 

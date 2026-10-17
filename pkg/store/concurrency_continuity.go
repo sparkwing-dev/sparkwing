@@ -18,7 +18,7 @@ const capacityRunLiveSQL = `r.status IN ('pending','running') AND r.finished_at 
 func capacityGenerationTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) (int64, error) {
 	var generation int64
 	var err error
-	if nodeID != "" && !isInheritedHolderNodeID(nodeID) {
+	if nodeID != "" {
 		err = tx.QueryRowContext(ctx, `SELECT generation FROM nodes WHERE team=? AND run_id=? AND node_id=? AND status<>'done'`, team, runID, nodeID).Scan(&generation)
 	} else {
 		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN dispatch='controller' AND plan_accepted_generation>0

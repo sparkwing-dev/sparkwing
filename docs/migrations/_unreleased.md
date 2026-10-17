@@ -2381,8 +2381,19 @@ use their existing lease-holder identity and require no new configuration.
 
 `POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
 `Tenant.RecordCreditGrant` refuse `paid` grants.
-Free operator grants keep their console path. Payment reversals require a
-verified provider event.
+Free operator grants keep their console path. `Tenant.RecordCreditGrant` accepts
+only free grants. Payment reversals require a verified provider event or the
+authorized console refund transaction. `ValidCreditGrantKind` and
+`ErrReversalExceedsPayment` are removed with the raw reversal path.
+
+`Tenant.AppendEventOnce` and the unused `Operator.DropCardAttempt` are removed.
+State events commit with their transition. External event ingestion uses
+`Tenant.AppendEventCharged`.
+
+Queued refund callbacks use verified provider settlement, which selects the
+persisted payment and exact refund object. `Operator.MarkCardRefundMade` applies
+any matching outcome recorded before the provider response was bound. Callback
+callers no longer supply refund-attempt keys.
 
 Checkout integrations must supply C2's verified provider event to
 `Store.SettlePayment`. The committed checkout supplies the team and credit

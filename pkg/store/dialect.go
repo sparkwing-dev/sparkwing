@@ -110,6 +110,7 @@ type storeTx struct {
 	finishedLocalSecrets []localSecretKey
 	appAdmission         *GitHubAppAdmission
 	scheduleAdmission    *scheduleAdmission
+	unpricedDemand       *UnitDemand
 	clockErr             error
 	ctx                  context.Context
 	deletingTeam         Team

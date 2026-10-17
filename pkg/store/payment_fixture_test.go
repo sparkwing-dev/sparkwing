@@ -61,15 +61,3 @@ func (o *Operator) TestOnlyRecordPaymentWarning(ctx context.Context, w PaymentWa
 	}
 	return team, nil
 }
-
-// TestOnlyReportCardRefund exercises the transaction owner with trusted fixture facts.
-func (o *Operator) TestOnlyReportCardRefund(ctx context.Context, key, refundID, status string, now time.Time) (changed bool, err error) {
-	err = o.s.inTx(ctx, func(tx *storeTx) error {
-		changed, err = reportCardRefundTx(ctx, tx, key, refundID, status, now)
-		return err
-	})
-	if err != nil {
-		return false, err
-	}
-	return changed, err
-}

@@ -63,6 +63,24 @@ func TestConsoleRefundCurrentAuthorityPayerAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "credit_grants", 2)
+	tenant := &Tenant{s: s, team: "a"}
+	state, err := tenant.CreditState(t.Context(), 0)
+	if err != nil || state.GrantedMicro != 1_000_000 || state.ReversedMicro != MicroCreditsPerCent || state.BalanceMicro != 1_000_000-MicroCreditsPerCent {
+		t.Fatalf("refund ledger: %+v, %v", state, err)
+	}
+	totals, err := s.AsOperator().CreditLedgerTotals(t.Context())
+	if err != nil || totals.ReversedMicro != MicroCreditsPerCent || totals.BalanceMicro != state.BalanceMicro {
+		t.Fatalf("refund totals: %+v, %v", totals, err)
+	}
+	grants, err := tenant.ListCreditGrants(t.Context(), 10)
+	if err != nil || len(grants) != 2 {
+		t.Fatalf("refund history: %+v, %v", grants, err)
+	}
+	for _, grant := range grants {
+		if grant.Kind == CreditGrantReversal && (grant.AmountMicro != -MicroCreditsPerCent || grant.Reverses != "payment:test:checkout") {
+			t.Fatalf("refund lost its payment reference: %+v", grant)
+		}
+	}
 	events, err := (&Tenant{s: s, team: "a"}).BusinessEvents(t.Context(), "operator.refund_recorded")
 	if err != nil || len(events) != 1 || events[0].Actor != "operator" || events[0].Attrs["reason"] != "support" {
 		t.Fatalf("audit = %+v: %v", events, err)

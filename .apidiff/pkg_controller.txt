@@ -107,7 +107,6 @@ type CreditReader interface {
 }
 const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
-func CronIdempotencyKey(scheduleID string, due time.Time) string
 type Dashboard struct {
 	Local bool
 
@@ -192,6 +191,7 @@ func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capab
 func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
 func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
+func (s *EngineController) CheckRunner(ctx context.Context, authority capability.AuthorityRef, version string) (capability.Principal, error)
 func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error)
 func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
@@ -352,7 +352,7 @@ func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, erro
 func OperatorReason(reason string) (string, error)
 type OperatorSettingsWriter interface {
 	WriteComputeLimits(context.Context, capability.Authorized, map[string]int64) (store.ComputeLimits, error)
-	WriteSignUpSettings(context.Context, capability.Authorized, SignUpSettingsChange) error
+	WriteSignUpSettings(context.Context, capability.Authorized, store.SignUpSettingsChange) error
 	WriteStorageSettings(context.Context, capability.Authorized, store.StorageSettings) error
 	WriteStorageQuota(context.Context, capability.Authorized, store.StorageQuota) (store.StorageQuota, error)
 	WriteStorageAllowance(context.Context, capability.Authorized, int64) (store.StorageQuota, error)
@@ -439,6 +439,10 @@ type ScheduleWriter interface {
 	RunAuthorizedSchedule(context.Context, capability.Authorized, string, string) (string, string, bool, error)
 	DeleteAuthorizedSchedule(context.Context, capability.Authorized, string) (string, bool, error)
 }
+type ScheduledRunWriter interface {
+	Team() store.Team
+	AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)
+}
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)
 type SecretReader interface {
 	Team() store.Team
@@ -455,11 +459,13 @@ func (s *Server) MaintainStorage(ctx context.Context)
 func (s *Server) Metering() bool
 func (s *Server) MultiTeam() bool
 func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
+func (s *Server) ReconcileRunEffects(ctx context.Context) (err error)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Registrations() []string
 func (s *Server) ResolveIntake(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error)
+func (s *Server) ResolveScheduleRepository(ctx context.Context, team store.Team, remote string) (runspec.Repository, error)
+func (s *Server) ResolveScheduleSource(ctx context.Context, row store.CronSchedule, request runspec.Request) (runspec.Request, error)
 func (s *Server) ScheduleLauncher() crons.Launcher
-func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 func (s *Server) WithAccountReader(reader AccountReader) *Server
 func (s *Server) WithAccountWriter(writer AccountWriter) *Server
@@ -521,6 +527,7 @@ func (s *Server) WithRunControlWriter(resolve func(context.Context, store.Team) 
 func (s *Server) WithRunnerInventory(resolve func(context.Context, store.Team) (RunnerInventoryReader, error)) *Server
 func (s *Server) WithRunnerMeteringWriter(writer RunnerMeteringWriter) *Server
 func (s *Server) WithScheduleWriter(resolve func(context.Context, store.Team) (ScheduleWriter, error)) *Server
+func (s *Server) WithScheduledRunWriter(resolve func(context.Context, store.Team) (ScheduledRunWriter, error)) *Server
 func (s *Server) WithSecretReader(resolve func(context.Context, store.Team) (SecretReader, error)) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
@@ -542,15 +549,6 @@ type ServicesResponse struct {
 	MultiTeam bool
 
 	DirectData bool
-}
-type SignUpSettingsChange struct {
-	Mode                 *string
-	Reason               string
-	HourlyLimit          *int
-	DailyLimit           *int
-	HourlyWarn           *int
-	GitHubMinAccountDays *int
-	FreeTeamMembers      *int
 }
 type SignedEngineVersionPolicy struct {
 	Resolver *engine.Resolver
@@ -578,6 +576,7 @@ type SourceAuditReader interface {
 }
 type SourceController struct {
 	Store         *store.Store
+	GitHub        store.GitHubSourceProvider
 	Cipher        BoundCipher
 	ResolveTenant func(context.Context, store.Team) (SourceTransactions, error)
 }

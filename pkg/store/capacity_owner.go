@@ -18,7 +18,7 @@ type capacityFence struct {
 
 // AcquireCapacity admits capacity under the live owner and captured work binding.
 func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, binding CapacityBinding, actor Actor) (AcquireSlotResponse, error) {
-	if req.RunID != binding.RunID || req.NodeID != binding.NodeID || req.CacheKeyHash != "" || req.InheritedHolderID != "" {
+	if req.RunID != binding.RunID || req.NodeID != binding.NodeID || req.CacheKeyHash != "" {
 		return AcquireSlotResponse{}, holderRefusal()
 	}
 	return t.acquireConcurrencySlot(ctx, req, &capacityFence{binding, actor})
@@ -26,7 +26,7 @@ func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, bi
 
 // ResolveCapacityWaiter adjudicates promotion and sealed queue expiry under the captured owner fence.
 func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding CapacityBinding, actor Actor) (WaiterResolution, error) {
-	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", "", false, &capacityFence{binding, actor})
+	return t.resolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", &capacityFence{binding, actor})
 }
 
 func checkCapacityFenceTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {
@@ -206,9 +206,16 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 	if err := checkCapacityOwnerTx(ctx, tx, team, fence); err != nil {
 		return err
 	}
+	if err := lockCapacityWorkTx(ctx, tx, team, key, NodeRef{fence.binding.RunID, fence.binding.NodeID}); err != nil {
+		return err
+	}
+	return checkCapacityFenceTx(ctx, tx, team, fence)
+}
+
+func lockCapacityWorkTx(ctx context.Context, tx *storeTx, team Team, key string, ref NodeRef) error {
 	rows, err := tx.QueryContext(ctx, `SELECT run_id,node_id FROM concurrency_holders WHERE team=? AND key=?
 UNION SELECT run_id,node_id FROM concurrency_waiters WHERE team=? AND key=?
-UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, fence.binding.RunID, fence.binding.NodeID)
+UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, ref.RunID, ref.NodeID)
 	if err != nil {
 		return err
 	}
@@ -242,7 +249,7 @@ UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, fence.binding.R
 			return err
 		}
 	}
-	return checkCapacityFenceTx(ctx, tx, team, fence)
+	return nil
 }
 
 func checkCapacityOwnerTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {

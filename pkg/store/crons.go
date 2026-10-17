@@ -131,6 +131,7 @@ type CronDeclaration struct {
 // override was set against, so a reader can tell an override whose
 // declaration has moved under it since.
 type CronOverride struct {
+	TZSet   bool              `json:"tz_set,omitempty"`
 	Cron    string            `json:"cron,omitempty"`
 	TZ      string            `json:"tz,omitempty"`
 	Overlap string            `json:"overlap,omitempty"`
@@ -177,7 +178,7 @@ func (s CronSchedule) Effective() CronDeclaration {
 	if s.Override.Cron != "" {
 		decl.Cron = s.Override.Cron
 	}
-	if s.Override.TZ != "" {
+	if s.Override.TZSet || s.Override.TZ != "" {
 		decl.TZ = s.Override.TZ
 	}
 	if s.Override.Overlap != "" {
@@ -298,12 +299,17 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 	if err != nil {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: %w", err)
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return CronSchedule{}, false, err
-	}
-	defer rollbackUnlessDone(tx, &err)
+	var storedRow CronSchedule
+	var wasCreated bool
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		storedRow, wasCreated, err = t.armCronScheduleTx(ctx, tx, sched, repository, args, now)
+		return err
+	})
+	return storedRow, wasCreated, err
+}
 
+func (t *Tenant) armCronScheduleTx(ctx context.Context, tx *storeTx, sched CronSchedule, repository runspec.Repository, args string, now time.Time) (stored CronSchedule, created bool, err error) {
 	var id string
 	if sched.GitHubRepositoryID > 0 {
 		err = tx.QueryRowContext(ctx,
@@ -372,9 +378,6 @@ UPDATE cron_schedules
 	}
 	stored, err = getCronScheduleTx(ctx, tx, t.team, id)
 	if err != nil {
-		return CronSchedule{}, false, err
-	}
-	if err := tx.Commit(); err != nil {
 		return CronSchedule{}, false, err
 	}
 	return stored, created, nil
@@ -518,10 +521,18 @@ func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLo
 // declares. Base and SetAt come from the argument, and SetAt defaults
 // to now when it is zero.
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error {
+	return t.s.inTx(ctx, func(tx *storeTx) error { return t.setCronOverrideTx(ctx, tx, id, o, now) })
+}
+
+func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, o CronOverride, now time.Time) error {
 	if o.Overlap != "" && o.Overlap != CronOverlapSkip && o.Overlap != CronOverlapQueue {
 		return fmt.Errorf("SetCronOverride: unknown overlap policy %q", o.Overlap)
 	}
 	var overrideArgs any
+	var overrideTZ any
+	if o.TZSet || o.TZ != "" {
+		overrideTZ = o.TZ
+	}
 	if o.Args != nil {
 		encoded, err := encodeCronArgs(o.Args)
 		if err != nil {
@@ -541,14 +552,15 @@ func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride,
 	if o.CatchUp != nil {
 		catchUp = int64(*o.CatchUp)
 	}
-	return t.s.updateCronSchedule(ctx, id,
+	result, err := tx.ExecContext(ctx,
 		`UPDATE cron_schedules
             SET override_cron = ?, override_tz = ?, override_overlap = ?,
                 override_catch_up_ns = ?, override_args = ?, override_base = ?,
                 override_set_at = ?, updated_at = ?
           WHERE team = ? AND id = ?`,
-		o.Cron, o.TZ, o.Overlap, catchUp, overrideArgs, string(base),
+		o.Cron, overrideTZ, o.Overlap, catchUp, overrideArgs, string(base),
 		setAt.UnixNano(), now.UnixNano(), string(t.team), id)
+	return credentialRowChanged(result, err)
 }
 
 // ClearCronOverride drops this host's edit, returning the schedule to
@@ -638,17 +650,17 @@ func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time
 	if fire != nil && !knownCronOutcome(fire.Outcome) {
 		return fmt.Errorf("ResolveCronDue: unknown outcome %q", fire.Outcome)
 	}
+	return t.s.inTx(ctx, func(tx *storeTx) error { return t.resolveCronDueTx(ctx, tx, id, cursor, next, fire, now) })
+}
+
+func (t *Tenant) resolveCronDueTx(ctx context.Context, tx *storeTx, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error) {
 	fireArgs := "{}"
 	if fire != nil {
-		if fireArgs, err = encodeCronArgs(fire.Args); err != nil {
-			return fmt.Errorf("ResolveCronDue: %w", err)
+		fireArgs, err = encodeCronArgs(fire.Args)
+		if err != nil {
+			return err
 		}
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
 
 	var exists string
 	switch err := tx.QueryRowContext(ctx,
@@ -692,7 +704,7 @@ func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time
 			return derr
 		}
 		if recorded {
-			return tx.Commit()
+			return nil
 		}
 		fireID := fire.ID
 		if fireID == "" {
@@ -718,7 +730,7 @@ func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // safety: two evaluators of one minute reach one run through the idempotency
@@ -901,6 +913,7 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 		return sched, nil
 	}
 	override := CronOverride{
+		TZSet:   overrideTZ.Valid,
 		Cron:    overrideCron.String,
 		TZ:      overrideTZ.String,
 		Overlap: overrideOverlap.String,

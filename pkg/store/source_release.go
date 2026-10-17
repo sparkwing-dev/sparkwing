@@ -56,7 +56,10 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		request.CredentialID = credential.ID
 		request.SSH = credential.Kind == GitCredentialSSH
 		request.SSHHostConfirmed = credential.ConfirmedAt != nil
-		if credential.ConfirmedAt == nil || credential.Kind != GitCredentialSSH && credential.Kind != GitCredentialHTTPS {
+		if credential.ConfirmedAt == nil {
+			return apierr.Authorization(apierr.ReasonCredentialUnconfirmed, "git credential host must be confirmed")
+		}
+		if credential.Kind != GitCredentialSSH && credential.Kind != GitCredentialHTTPS {
 			return bindingRefusal()
 		}
 		policy := t.s.sourcePolicy

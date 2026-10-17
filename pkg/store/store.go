@@ -573,6 +573,7 @@ func IsProtocolErr(err error) bool {
 
 // Run is the redacted reporting view of a persisted run.
 type Run struct {
+	RepoInherited   bool              `json:"repo_inherited,omitempty"`
 	ID              string            `json:"id"`
 	Number          int64             `json:"number"`
 	Pipeline        string            `json:"pipeline"`
@@ -917,6 +918,7 @@ func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 		return nil, fmt.Errorf("decode run request: %w", err)
 	}
 	display := runspec.DisplayRequest(sealed)
+	r.RepoInherited = sealed.Request.Lineage.RepoInherited
 	r.RepoURL = sealed.Request.Source.Location.RemoteURL
 	if len(spec) > 0 {
 		var accepted runspec.Spec
@@ -954,15 +956,15 @@ func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 
 // Node reports persisted job metadata and attempt history.
 type Node struct {
-	RunID      string     `json:"run_id,omitempty"`
-	NodeID     string     `json:"id"`
-	Status     string     `json:"status"`
-	Outcome    string     `json:"outcome,omitempty"`
-	Deps       []string   `json:"deps"`
-	Error      string     `json:"error,omitempty"`
-	OutputRef  *OutputRef `json:"output_ref,omitempty"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	RunID        string     `json:"run_id,omitempty"`
+	NodeID       string     `json:"id"`
+	Status       string     `json:"status"`
+	Outcome      string     `json:"outcome,omitempty"`
+	Deps         []string   `json:"deps"`
+	Error        string     `json:"error,omitempty"`
+	OutputDigest string     `json:"output_digest,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 
 	ReadyAt            *time.Time         `json:"ready_at,omitempty"`
 	ClaimedBy          string             `json:"claimed_by,omitempty"`
@@ -1015,6 +1017,8 @@ type Node struct {
 	ProcessWallNanos int64          `json:"process_wall_nanos,omitempty"`
 	SpecHash         string         `json:"spec_hash,omitempty"`
 	Generated        *GeneratedNode `json:"generated,omitempty"`
+
+	outputRecord []byte
 }
 
 // GeneratedNode is how a generator added a node to its run.
@@ -1060,6 +1064,9 @@ func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 			return nil, err
 		}
 		n.ExecutionAttempts = attempts
+		if err := t.populateNodeOutput(ctx, n); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -1078,13 +1085,16 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 		return nil, err
 	}
 	record.ExecutionAttempts = attempts
+	if err := t.populateNodeOutput(ctx, record); err != nil {
+		return nil, err
+	}
 	return record, nil
 }
 
 const nodeSelectColumns = `run_id,node_id,status,outcome,deps_json,error,started_at,finished_at,
  ready_at,claimed_by,lease_expires_at,needs_labels,prefers_labels,requested_cores,requested_memory_bytes,requested_slots,
  offer_started_at,status_detail,last_heartbeat,failure_reason,exit_code,annotations_json,summary,cpu_nanos,max_rss_bytes,process_wall_nanos,
- generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,COALESCE((SELECT c.cpu_class FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id AND a.unit_kind='node' AND a.generation=nodes.generation),0),spec_hash,generated_json`
+ generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,COALESCE((SELECT c.cpu_class FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id AND a.unit_kind='node' AND a.generation=nodes.generation),0),spec_hash,generated_json,output_record`
 
 func scanNodeRow(rs rowScanner, n *Node) error {
 	var deps, labels, prefers, annotations, generated []byte
@@ -1095,7 +1105,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&ready, &holder, &lease, &labels, &prefers, &n.RequestedCores, &n.RequestedMemoryBytes, &n.RequestedSlots,
 		&offered, &n.StatusDetail, &heartbeat, &n.FailureReason, &exit, &annotations, &n.Summary, &n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
 		&n.ClaimGeneration, &n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executed, &n.AttemptsConsumed,
-		&n.PlacementReason, &hold, &n.CreditCPUClassCores, &n.SpecHash, &generated)
+		&n.PlacementReason, &hold, &n.CreditCPUClassCores, &n.SpecHash, &generated, &n.outputRecord)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("job", "")
 	}
@@ -1508,7 +1518,7 @@ func scanTrigger(rs rowScanner) (*Trigger, error) {
 	tr.GitBranch, tr.GitSHA, tr.CreatedAt = run.GitBranch, run.GitSHA, run.CreatedAt
 	tr.ClaimedAt, tr.LeaseExpiresAt = stateTime(claimed), stateTime(lease)
 	tr.ParentRunID, tr.RetryOf, tr.RetrySource = run.ParentRunID, run.RetryOf, run.RetrySource
-	tr.Repo, tr.RepoURL = run.DeclaredRepo, run.RepoURL
+	tr.Repo, tr.RepoURL, tr.RepoInherited = run.DeclaredRepo, run.RepoURL, run.RepoInherited
 	return &tr, nil
 }
 

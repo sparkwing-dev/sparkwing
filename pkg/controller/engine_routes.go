@@ -71,7 +71,7 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/retry", Authentication: capability.AuthCapability,
-			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleRetry,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleRetry(engine),
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/heartbeat", Authentication: capability.AuthCapability,
@@ -192,7 +192,13 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err := decodeEngineRequest(r, &body); err != nil {
 			return err
 		}
+		if err := validateGitSHA(body.Request.Git.SHA); err != nil {
+			return invalidEngineBody(err.Error())
+		}
 		if err := s.resolveIntakeSource(r.Context(), a.Target.Team, &body.Request); err != nil {
+			return err
+		}
+		if err := s.dedupeIntake(a, &body); err != nil {
 			return err
 		}
 		ctx := context.WithValue(r.Context(), verifiedIntakeSourceKey{}, verifiedIntakeSource{location: body.Request.Source.Location, repository: body.Request.Git.Repository})
@@ -279,6 +285,10 @@ func decodeEngineRequest(r *http.Request, body any) error {
 }
 
 func engineLookupError(err error) error {
+	var unpriced *store.UnpricedCPUClassError
+	if errors.As(err, &unpriced) {
+		return &apierr.Error{Code: apierr.Conflict, Message: unpriced.Error(), Details: map[string]any{"reason": UnpricedCPUClassCode}}
+	}
 	var sqlErr interface{ SQLState() string }
 	if errors.As(err, &sqlErr) {
 		switch sqlErr.SQLState() {

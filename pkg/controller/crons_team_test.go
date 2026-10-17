@@ -165,21 +165,21 @@ func TestControllerCrons_ATeamsSchedulesAreCapped(t *testing.T) {
 		entries = append(entries, map[string]any{"pipeline": fmt.Sprintf("p%d", i), "cron": "0 3 * * *"})
 	}
 	many["schedules"] = entries
-	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, many); got != http.StatusBadRequest {
-		t.Errorf("a push of 21 schedules = %d want 400", got)
+	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, many); got != http.StatusConflict {
+		t.Errorf("a push of 21 schedules = %d want 409", got)
 	}
 
 	for i := range 10 {
 		body := cronPushBody()
-		body["repo_url"] = fmt.Sprintf("https://github.com/acme/repo-%d.git", i)
+		body["repo_url"] = fmt.Sprintf("https://gitlab.com/acme/repo-%d.git", i)
 		f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, body, http.StatusOK, nil)
 	}
 	eleventh := cronPushBody()
-	eleventh["repo_url"] = "https://github.com/acme/repo-10.git"
+	eleventh["repo_url"] = "https://gitlab.com/acme/repo-10.git"
 	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, eleventh); got != http.StatusConflict {
 		t.Errorf("an eleventh repository = %d want 409", got)
 	}
 	again := cronPushBody()
-	again["repo_url"] = "https://github.com/acme/repo-3.git"
+	again["repo_url"] = "https://gitlab.com/acme/repo-3.git"
 	f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, again, http.StatusOK, nil)
 }

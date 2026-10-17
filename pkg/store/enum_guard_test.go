@@ -25,15 +25,15 @@ var enumGroups = map[string]struct {
 	"store.AcquireKind": {
 		file: "pkg/store/concurrency.go",
 		values: []string{
-			"AcquireGranted", "AcquireQueued", "AcquireCoalesced",
-			"AcquireSkipped", "AcquireFailed", "AcquireCached",
+			"AcquireGranted", "AcquireQueued",
+			"AcquireSkipped", "AcquireFailed",
 			"AcquireCancellingOthers",
 		},
 	},
 	"store.WaiterStatus": {
 		file: "pkg/store/concurrency.go",
 		values: []string{
-			"WaiterStillWaiting", "WaiterPromoted", "WaiterCached",
+			"WaiterStillWaiting", "WaiterPromoted",
 			"WaiterLeaderFinished", "WaiterCancelled", "WaiterExpired",
 		},
 	},
@@ -55,7 +55,7 @@ var enumGroups = map[string]struct {
 	"store.OnLimit": {
 		file: "pkg/store/concurrency.go",
 		values: []string{
-			"OnLimitQueue", "OnLimitCoalesce", "OnLimitSkip",
+			"OnLimitQueue", "OnLimitSkip",
 			"OnLimitFail", "OnLimitCancelOthers",
 		},
 	},

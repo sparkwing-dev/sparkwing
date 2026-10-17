@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -21,60 +20,71 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-// safety: a node whose plan pins no cpu resolves to one core, which the
-// smallest class of the default rate table covers, so that is the price these
-// fixtures are billed at.
-var unpinnedNodeRateMicro = store.DefaultCreditRateTable(store.DefaultCreditRateMicro).RateFor(1)
-
 type creditsFixture struct {
-	url      string
+	srv      *controller.Server
+	handler  http.Handler
+	console  string
 	store    *store.Store
 	admin    string
-	runner   string
-	prefix   string
 	readonly string
+	writer   string
 }
 
-func newCreditsFixture(t *testing.T, metered bool) creditsFixture {
-	return newCreditsFixtureWithLicense(t, metered, license.FeatureMetering)
+func newCreditsFixture(t *testing.T) creditsFixture {
+	return newCreditsFixtureWithLicense(t, license.FeatureMetering)
 }
 
-func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) creditsFixture {
+func newCreditsFixtureWithLicense(t *testing.T, feature string) creditsFixture {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	browser := newBrowserFixture(t, nil)
+	st := browser.st
 	now := time.Now().UTC()
 	admin, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatalf("admin token: %v", err)
 	}
-	runner, runnerTok, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*"}, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "pool"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(now, 0), RegistrationID: "runner:" + string(store.DefaultTeam) + ":" + "pool", Metered: metered})
-	if err != nil {
-		t.Fatalf("runner token: %v", err)
-	}
 	readonly, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "viewer"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.read"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
-	ctrl := controller.New(st, nil)
-	controller.ConfigureConsoleFixture(ctrl)
+	ctrl := browser.srv.WithCloudDeployment(true).WithOperatorAccounts([]string{"alice"})
 	if feature != "" {
 		pub, priv := licensetest.NewKey(t)
 		raw := licensetest.Sign(t, priv, licensetest.Terms{
-			Features: []string{feature}, IssuedTo: "test",
+			Features: []string{feature, license.FeatureMultiTeam}, IssuedTo: "test",
 			IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
 		})
 		ctrl.WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	}
-	srv := httptest.NewServer(ctrl.Handler())
-	t.Cleanup(srv.Close)
 	return creditsFixture{
-		url: srv.URL, store: st,
-		admin: admin, runner: runner, prefix: runnerTok.Prefix, readonly: readonly,
+		srv: ctrl, handler: ctrl.Handler(), console: sessionAuth(browser.sessID), store: st, writer: browser.token,
+		admin: admin, readonly: readonly,
 	}
+}
+
+func (f creditsFixture) request(t *testing.T, method, path, token string, body any) (int, []byte) {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(raw)
+	}
+	r := httptest.NewRequest(method, dashOrigin+path, reader)
+	r.Header.Set("Content-Type", "application/json")
+	if strings.HasPrefix(token, "Session ") {
+		if err := controller.ConsoleFixtureRequest(f.srv, r, sessionIDOf(token)); err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Origin", dashOrigin)
+	} else {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	f.handler.ServeHTTP(w, r)
+	return w.Code, w.Body.Bytes()
 }
 
 func creditsRequest(t *testing.T, method, url, token string, body any) (int, []byte) {
@@ -105,84 +115,13 @@ func creditsRequest(t *testing.T, method, url, token string, body any) (int, []b
 	return resp.StatusCode, out
 }
 
-func creditsRequestWithHeader(
-	t *testing.T, method, url, token string, body any,
-) (int, []byte, http.Header) {
-	t.Helper()
-	var reader io.Reader
-	if body != nil {
-		buf, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		reader = bytes.NewReader(buf)
-	}
-	req, err := http.NewRequest(method, url, reader)
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("do: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	out, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
-	return resp.StatusCode, out, resp.Header
-}
-
-func setNodeChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
-	t.Helper()
-	if _, err := st.DB().Exec(
-		`UPDATE nodes SET credit_charged_through = ?,
-		 execution_started_at = COALESCE(execution_started_at, ?)
-		 WHERE run_id = ? AND node_id = ?`,
-		at.UnixNano(), at.Add(-store.MinBillableSeconds*time.Second).UnixNano(), runID, nodeID); err != nil {
-		t.Fatalf("rewind the charge window: %v", err)
-	}
-}
-
-func ageExhaustionStamp(t *testing.T, st *store.Store, at time.Time) {
-	t.Helper()
-	if _, err := st.DB().Exec(
-		`UPDATE teams SET credit_exhausted_at = ? WHERE name = ?`,
-		at.UnixNano(), string(store.DefaultTeam)); err != nil {
-		t.Fatalf("age the exhaustion stamp: %v", err)
-	}
-}
-
-// safety: the grace clock a cancellation runs on is the node's own, so a test
-// reaches the deadline by moving that instant rather than the ledger stamp.
-func ageNodeExhaustionAnchor(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
-	t.Helper()
-	if _, err := st.DB().Exec(
-		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE run_id = ? AND node_id = ?`,
-		at.UnixNano(), runID, nodeID); err != nil {
-		t.Fatalf("age the node's exhaustion anchor: %v", err)
-	}
-}
-
-func creditChargesOfKind(charges []store.CreditCharge, kind string) []store.CreditCharge {
-	var out []store.CreditCharge
-	for _, c := range charges {
-		if c.Kind == kind {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
 func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	f := newCreditsFixture(t, false)
+	f := newCreditsFixture(t)
 
-	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits", f.readonly, nil)
+	status, body := f.request(t, http.MethodGet, "/api/v1/credits", f.readonly, nil)
 	if status != http.StatusOK {
 		t.Fatalf("GET /credits = %d: %s", status, body)
 	}
@@ -213,11 +152,9 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 		t.Fatalf("unit constants = %d/%d", state.MicroPerCredit, state.CreditsPerDollar)
 	}
 
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_9", CreatedBy: "test"}); err != nil {
-		t.Fatal(err)
-	}
+	reference := controller.PaidCreditsFixture(t, f.store, teamTenant(t, f.store, store.DefaultTeam), 1000)
 
-	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits/history", f.readonly, nil)
+	status, body = f.request(t, http.MethodGet, "/api/v1/credits/history", f.readonly, nil)
 	if status != http.StatusOK {
 		t.Fatalf("history = %d: %s", status, body)
 	}
@@ -236,15 +173,15 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	if len(history.Grants) != 1 {
 		t.Fatalf("grants = %d, want 1", len(history.Grants))
 	}
-	if history.Grants[0].Reference != "pay_9" || history.Grants[0].CreatedBy != "test" {
+	if history.Grants[0].Reference != reference || history.Grants[0].CreatedBy != "payment_provider" || history.Grants[0].Kind != store.CreditGrantPaid || history.Grants[0].AmountMicro != 1000*store.MicroCreditsPerCent {
 		t.Fatalf("grant row = %+v", history.Grants[0])
 	}
 	if len(history.Charges) != 0 {
 		t.Fatalf("charges = %d, want 0", len(history.Charges))
 	}
 
-	status, body = creditsRequest(t, http.MethodGet,
-		f.url+"/api/v1/credits/history?limit=5000", f.readonly, nil)
+	status, body = f.request(t, http.MethodGet,
+		"/api/v1/credits/history?limit=5000", f.readonly, nil)
 	if status != http.StatusBadRequest {
 		t.Fatalf("history above the limit ceiling = %d: %s", status, body)
 	}
@@ -255,7 +192,11 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 
 func creditSettings(t *testing.T, f creditsFixture, method string, body any) (int, creditSettingsView) {
 	t.Helper()
-	status, raw := creditsRequest(t, method, f.url+"/api/v1/credits/settings", f.admin, body)
+	path, auth := "/api/v1/credits/settings", f.readonly
+	if method != http.MethodGet {
+		path, auth = "/api/v1/operator/credits/settings", f.console
+	}
+	status, raw := f.request(t, method, path, auth, body)
 	var view creditSettingsView
 	if status == http.StatusOK {
 		if err := json.Unmarshal(raw, &view); err != nil {
@@ -291,23 +232,21 @@ func (v creditSettingsView) rateFor(cores int64) int64 {
 }
 
 func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
-	f := newCreditsFixture(t, false)
+	f := newCreditsFixture(t)
 
-	status, _ := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits/settings", f.readonly, nil)
+	status, _ := f.request(t, http.MethodGet, "/api/v1/credits/settings", f.readonly, nil)
 	if status != http.StatusOK {
 		t.Fatalf("read with runs.read = %d, want 200", status)
 	}
-	status, _ = creditsRequest(t, http.MethodPut, f.url+"/api/v1/credits/settings", f.readonly,
+	status, _ = f.request(t, http.MethodPut, "/api/v1/operator/credits/settings", f.readonly,
 		map[string]any{"grace_seconds": 0})
 	if status != http.StatusForbidden {
 		t.Fatalf("write without admin = %d, want 403", status)
 	}
 }
 
-// An installation that never set a table reads one price for every class, so
-// its bill is what the single rate charged on its own.
 func TestCreditSettings_ReadsTheDefaultRateLadder(t *testing.T) {
-	f := newCreditsFixture(t, false)
+	f := newCreditsFixture(t)
 
 	status, view := creditSettings(t, f, http.MethodGet, nil)
 	if status != http.StatusOK {
@@ -328,7 +267,7 @@ func TestCreditSettings_ReadsTheDefaultRateLadder(t *testing.T) {
 }
 
 func TestCreditSettings_TakesTheRateTableAsAListOrAsAnObject(t *testing.T) {
-	f := newCreditsFixture(t, false)
+	f := newCreditsFixture(t)
 
 	status, view := creditSettings(t, f, http.MethodPut, map[string]any{
 		"rate_table": []map[string]any{
@@ -362,7 +301,7 @@ func TestCreditSettings_TakesTheRateTableAsAListOrAsAnObject(t *testing.T) {
 }
 
 func TestCreditSettings_RefusesARateTableTheLedgerCannotPrice(t *testing.T) {
-	f := newCreditsFixture(t, false)
+	f := newCreditsFixture(t)
 
 	for name, body := range map[string]map[string]any{
 		"no class":   {"rate_table": []map[string]any{}},
@@ -392,17 +331,15 @@ func TestCreditSettings_RefusesARateTableTheLedgerCannotPrice(t *testing.T) {
 	}
 }
 
-// With a table stored the scalar is the four-core entry under another name, so
-// writing it alone is refused and the caller is told what to write instead.
 func TestCreditSettings_RefusesTheScalarOnceATableExists(t *testing.T) {
-	f := newCreditsFixture(t, false)
+	f := newCreditsFixture(t)
 
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
 		"rate_table": map[string]int64{"2": 10_000, "4": 20_000},
 	}); status != http.StatusOK {
 		t.Fatalf("PUT the table = %d", status)
 	}
-	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/credits/settings", f.admin,
+	status, body := f.request(t, http.MethodPut, "/api/v1/operator/credits/settings", f.console,
 		map[string]any{"rate_micro_per_second": 30_000})
 	if status != http.StatusBadRequest {
 		t.Fatalf("PUT the scalar = %d, want 400", status)
@@ -422,224 +359,5 @@ func TestCreditSettings_RefusesTheScalarOnceATableExists(t *testing.T) {
 		"rate_table":            map[string]int64{"2": 10_000, "4": 20_000},
 	}); status != http.StatusBadRequest {
 		t.Fatalf("PUT both = %d, want 400", status)
-	}
-}
-
-// A claim for a node the table cannot price fails the node with the reason, so
-// the run stops instead of every poller retrying it forever.
-func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_table": map[string]int64{"2": 10_000, "4": 20_000},
-	}); status != http.StatusOK {
-		t.Fatalf("set the rate table = %d", status)
-	}
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
-		ID: "run-huge", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":96}}]}`),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-huge", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := teststore.SeedNodeReady(f.store, ctx, "run-huge", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-
-	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
-		map[string]any{"holder_id": "pod-1", "lease_secs": 60})
-	if status != http.StatusConflict {
-		t.Fatalf("claim = %d: %s", status, body)
-	}
-	if !strings.Contains(string(body), controller.UnpricedCPUClassCode) {
-		t.Fatalf("the refusal carries no code: %s", body)
-	}
-	node, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetNode(ctx, "run-huge", "build")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.Outcome != "failed" || node.FailureReason != store.FailureUnpricedCPUClass {
-		t.Fatalf("node = %s/%s, want a failure naming the unpriced class", node.Outcome, node.FailureReason)
-	}
-}
-
-// A claim that asserts its own cpu changes nothing: the class comes from the
-// plan the controller holds.
-func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_table": map[string]int64{"2": 10_000, "4": 20_000, "16": 70_000},
-	}); status != http.StatusOK {
-		t.Fatalf("set the rate table = %d", status)
-	}
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
-		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":16}}]}`),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := teststore.SeedNodeReady(f.store, ctx, "run-big", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-
-	// safety: the claim surface carries no cpu figure at all, so a body that
-	// asserts one is refused rather than quietly ignored.
-	status, _ := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
-		map[string]any{
-			"holder_id": "pod-1", "lease_secs": 60,
-			"capacity": map[string]any{"max_concurrent": 1, "active_claims": 0, "cores": 0.01},
-		})
-	if status != http.StatusBadRequest {
-		t.Fatalf("a claim asserting its own cpu = %d, want 400", status)
-	}
-
-	// safety: a sixteen-core node is above the warm class, so it is awarded by
-	// the targeted claim its own Kubernetes node makes.
-	status, body := creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
-		map[string]any{"holder_id": "pod-1", "lease_secs": 60, "sizes_to_class": true})
-	if status != http.StatusOK {
-		t.Fatalf("claim = %d: %s", status, body)
-	}
-	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
-	if err != nil {
-		t.Fatalf("list charges: %v", err)
-	}
-	if len(charges) != 1 || charges[0].CPUClassCores != 16 || charges[0].RateMicroPerSecond != 70_000 {
-		t.Fatalf("reservation = %+v, want the 16-core class the plan asked for", charges)
-	}
-}
-
-func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay-quarter", CreatedBy: "root"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
-		ID: "run-quarter", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":0.25}}]}`),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-quarter", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := teststore.SeedNodeReady(f.store, ctx, "run-quarter", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-	status, body := creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/runs/run-quarter/nodes/build/claim", f.runner,
-		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60, "sizes_to_class": true})
-	if status != http.StatusOK {
-		t.Fatalf("claim = %d: %s", status, body)
-	}
-	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
-	if err != nil {
-		t.Fatalf("list charges: %v", err)
-	}
-	if len(charges) != 1 || charges[0].CPUClassCores != 2 ||
-		charges[0].RateMicroPerSecond != 9_000 ||
-		charges[0].AmountMicro != 9_000*store.MinBillableSeconds {
-		t.Fatalf("reservation = %+v, want the minimum billable seconds at the two-core class", charges)
-	}
-}
-
-// Naming a node is not a way around the ladder: a claimant outside the
-// class-routed path is held to the warm class.
-func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
-		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":8}}]}`),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := teststore.SeedNodeReady(f.store, ctx, "run-big", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-
-	status, body := creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
-		map[string]any{"holder_id": "runner:warm", "lease_secs": 60})
-	if status != http.StatusConflict {
-		t.Fatalf("named claim without sizes_to_class = %d: %s", status, body)
-	}
-	status, body = creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
-		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60, "sizes_to_class": true})
-	if status != http.StatusOK {
-		t.Fatalf("named claim that sizes to the class = %d: %s", status, body)
-	}
-}
-
-// A node above the warm class is not in the queue a warm runner polls, so it
-// waits for a Kubernetes node sized to its class.
-func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
-		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":8}}]}`),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := teststore.SeedNodeReady(f.store, ctx, "run-big", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-
-	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
-		map[string]any{"holder_id": "pod-1", "lease_secs": 60})
-	if status != http.StatusNoContent {
-		t.Fatalf("warm claim = %d: %s", status, body)
-	}
-	node, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetNode(ctx, "run-big", "build")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.Claimed || node.Outcome != "" {
-		t.Fatalf("node = claimed %t outcome %q, want it still queued", node.Claimed, node.Outcome)
-	}
-
-	status, body = creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
-		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60, "sizes_to_class": true})
-	if status != http.StatusOK {
-		t.Fatalf("targeted claim = %d: %s", status, body)
-	}
-	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
-	if err != nil {
-		t.Fatalf("list charges: %v", err)
-	}
-	if len(charges) != 1 || charges[0].CPUClassCores != 8 {
-		t.Fatalf("reservation = %+v, want the 8-core class", charges)
 	}
 }

@@ -72,10 +72,10 @@ func planTopologyHash(nodes []*store.Node) string {
 func outputsHashes(nodes []*store.Node) map[string]string {
 	out := make(map[string]string, len(nodes))
 	for _, n := range nodes {
-		if n.OutputRef == nil {
+		if n.OutputDigest == "" {
 			continue
 		}
-		out[n.NodeID] = "sha256:" + n.OutputRef.SHA256
+		out[n.NodeID] = "sha256:" + n.OutputDigest
 	}
 	return out
 }

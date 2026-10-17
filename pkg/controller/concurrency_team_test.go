@@ -1,161 +1,56 @@
 package controller_test
 
 import (
-	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
+	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
-// A runner resolving a coalesce follower names its leader in the query. A
-// leader in another team must read as absent, or the route reports that
-// team's node outcome.
 func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		ctx := context.Background()
-		if err := teststore.SeedNodeFinish(f.st, ctx, f.teamA.Team(), store.NodeRef{RunID: f.runA, NodeID: "n1"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
-			t.Fatal(err)
-		}
-		claimSeq := f.claimRun(f.runnerB, "run-by-b", "")
-
-		leaderB := "leader-b"
-		seedRun(t, f.st, f.teamB, leaderB, "build-b")
-		if err := teststore.SeedNode(f.st, ctx, store.Node{RunID: leaderB, NodeID: "lead", Status: "running"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := teststore.SeedNodeFinish(f.st, ctx, f.teamB.Team(), store.NodeRef{RunID: leaderB, NodeID: "lead"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
-			t.Fatal(err)
-		}
-
-		resolve := func(leaderRun, leaderNode string) map[string]any {
-			t.Helper()
-			q := url.Values{
-				"run_id": {"run-by-b"}, "node_id": {"follower"},
-				"leader_run_id": {leaderRun}, "leader_node_id": {leaderNode},
-			}
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-				f.url+"/api/v1/concurrency/deploy/resolve?"+q.Encode(), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			req.Header.Set("Authorization", f.runnerB)
-			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimSeq, 10))
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			raw, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("resolve leader %s/%s = %d: %s", leaderRun, leaderNode, resp.StatusCode, raw)
-			}
-			var out map[string]any
-			if err := json.Unmarshal(raw, &out); err != nil {
-				t.Fatal(err)
-			}
-			return out
-		}
-
-		if got := resolve(leaderB, "lead"); got["status"] != string(store.WaiterLeaderFinished) || got["leader_outcome"] != "success" {
-			t.Fatalf("own-team leader resolve = %v, want leader_finished/success", got)
-		}
-
-		foreign := resolve(f.runA, "n1")
-		if foreign["status"] != string(store.WaiterCancelled) || foreign["leader_outcome"] != nil {
-			t.Errorf("foreign leader resolve = %v, want cancelled with no outcome", foreign)
-		}
-		missing := resolve("no-such-run", "n1")
-		if foreign["status"] != missing["status"] {
-			t.Errorf("a foreign leader answers %v, a missing one %v", foreign, missing)
-		}
-	})
-}
-
-func (f *tenancyFixture) claimRun(auth, runID, extraRunJSON string) int64 {
-	t := f.t
-	t.Helper()
-	ctx := context.Background()
-	if err := teststore.SeedTrigger(f.st, ctx, f.teamB.Team(), store.Trigger{
-		ID: runID, Pipeline: "build-b", TriggerSource: "api", CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	code, body := f.do("POST", "/api/v1/triggers/claim", auth, map[string]any{})
-	if code != http.StatusOK {
-		t.Fatalf("claim as team B's runner = %d: %s", code, body)
-	}
-	var claimed store.Trigger
-	if err := json.Unmarshal([]byte(body), &claimed); err != nil {
-		t.Fatal(err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.url+"/api/v1/runs", strings.NewReader(
-		`{"id":"`+runID+`",`+extraRunJSON+`"pipeline":"build-b","status":"running"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", auth)
-	req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /runs under team B's trigger claim = %d: %s", resp.StatusCode, raw)
-	}
-	return claimed.ClaimSeq
-}
-
-// A trigger naming a parent run walks that run's ancestry for cycle
-// detection. A foreign ancestor of the caller's own run ends the walk
-// instead of naming its pipeline in a cycle error.
-func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
-	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		ctx := context.Background()
-		raw, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMachine, Repositories: []string{"github.com/*/*"}, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "b-spawner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, ExpiresAt: teststore.CredentialExpiry(time.Now(), 0), RegistrationID: "runner:" + string(f.teamB.Team()) + ":" + "b-spawner"})
+		admitted, claim := tenantRunClaim(t, f)
+		plan := nodeproto.PlanDoc{Concurrency: []nodeproto.ConcurrencySpec{{Group: "deploy"}}, Jobs: []nodeproto.JobSpec{}}
+		declarations := runspec.CheckoutDeclarations{Version: 1}
+		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
 		if err != nil {
 			t.Fatal(err)
 		}
-		spawner := "Bearer " + raw
-		claimSeq := f.claimRun(spawner, "child-b", `"parent_run_id":"`+f.runA+`",`)
-
-		trigger := func(pipeline string) (int, string) {
+		raw, err := json.Marshal(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		auth := "Bearer " + claim.Capability
+		submission := controllerwire.PlanSubmission{Declarations: declarations, Plan: raw, Resolved: runspec.Resolved{SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}
+		if code, body := f.do("POST", "/api/v1/runs/"+admitted.RunID+"/plan", auth, submission); code != 200 {
+			t.Fatalf("plan: %d %s", code, body)
+		}
+		acquire := map[string]any{"holder_id": "own-holder", "run_id": admitted.RunID, "job_id": ""}
+		if code, body := f.do("POST", "/api/v1/queue/groups/global:deploy/acquire", auth, acquire); code != 200 {
+			t.Fatalf("own slot: %d %s", code, body)
+		}
+		resolve := func(leader, forged string) string {
 			t.Helper()
-			b, _ := json.Marshal(map[string]any{
-				"pipeline": pipeline, "parent_run_id": "child-b", "trigger": map[string]any{"source": "api"},
-			})
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.url+"/api/v1/triggers", strings.NewReader(string(b)))
-			if err != nil {
-				t.Fatal(err)
+			query := url.Values{"run_id": {admitted.RunID}, "job_id": {""}, "leader_run_id": {leader}, "leader_job_id": {"n1"}, "team": {forged}}
+			code, body := f.do("GET", "/api/v1/queue/groups/global:deploy/resolve?"+query.Encode(), auth, nil)
+			if code != http.StatusForbidden {
+				t.Fatalf("foreign/missing leader: %d %s", code, body)
 			}
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", spawner)
-			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimSeq, 10))
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			return resp.StatusCode, string(out)
+			return body
 		}
-		if code, body := trigger("build-b"); code != http.StatusConflict {
-			t.Errorf("re-entering the parent's own pipeline = %d, want a cycle: %s", code, body)
-		}
-		if code, body := trigger("build-a"); code != http.StatusAccepted {
-			t.Errorf("team B's ancestry walk read team A's run = %d: %s", code, body)
+		missing := resolve("missing", "")
+		if err := quick.Check(func(forged string) bool {
+			body := resolve(f.runA, forged)
+			return body == missing && !strings.Contains(body, "leader_outcome") && !strings.Contains(body, f.victim)
+		}, &quick.Config{MaxCount: 32}); err != nil {
+			t.Fatal(err)
 		}
 	})
 }

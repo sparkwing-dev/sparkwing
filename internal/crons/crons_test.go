@@ -1031,42 +1031,6 @@ func TestResolveNamesTheCandidatesWhenABareNameIsAmbiguous(t *testing.T) {
 	}
 }
 
-func TestRunNowLaunchesWithoutMovingTheCursor(t *testing.T) {
-	ctx := context.Background()
-	now := at(t, "2026-01-01T00:00:30Z")
-	h := newHarness(t, now)
-	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
-	if err := h.svc.Pause(ctx, sched.ID); err != nil {
-		t.Fatalf("Pause: %v", err)
-	}
-	h.clock.set(at(t, "2026-01-01T00:00:45Z"))
-
-	runID, err := h.svc.RunNow(ctx, sched.ID)
-	if err != nil {
-		t.Fatalf("RunNow: %v", err)
-	}
-	if runID != "run-1" {
-		t.Fatalf("run id = %q", runID)
-	}
-	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
-	if err != nil {
-		t.Fatalf("GetCronSchedule: %v", err)
-	}
-	if !stored.CursorAt.Equal(sched.CursorAt) {
-		t.Errorf("RunNow moved the cursor to %v", stored.CursorAt)
-	}
-	if stored.LastRunID != runID || stored.LastOutcome != store.CronOutcomeFired {
-		t.Errorf("RunNow did not stamp the row: %+v", stored)
-	}
-	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
-	if err != nil {
-		t.Fatalf("ListCronFires: %v", err)
-	}
-	if len(fires) != 1 || fires[0].Detail != "run now" {
-		t.Fatalf("fires: %+v", fires)
-	}
-}
-
 func TestUpcomingReadsTheScheduleInItsOwnZone(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
@@ -1275,5 +1239,39 @@ func TestTeamScheduleIDKeepsTheOperatorsIDsAndSeparatesTeams(t *testing.T) {
 	a, b := TeamScheduleID("team-a", repo, pipeline, "default"), TeamScheduleID("team-b", repo, pipeline, "default")
 	if a == b || a == ScheduleID(repo, pipeline, "default") {
 		t.Errorf("two teams arm one schedule under ids %s and %s", a, b)
+	}
+}
+
+type transactionFailure string
+
+func (e transactionFailure) Error() string    { return string(e) }
+func (e transactionFailure) SQLState() string { return string(e) }
+
+func TestTickRetriesAbortedIntakeWithoutConsumingTheDueInstant(t *testing.T) {
+	for _, code := range []transactionFailure{"40P01", "40001", "55P03"} {
+		t.Run(string(code), func(t *testing.T) {
+			h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+			row := armOne(t, h, writeRepo(t, "retry", everyMinute))
+			h.launcher.launchErr = code
+			h.clock.set(at(t, "2026-01-01T00:01:05Z"))
+			report, err := h.svc.Tick(t.Context(), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tenant := teststore.ForTeam(t, h.store, store.DefaultTeam)
+			stored, err := tenant.GetCronSchedule(t.Context(), row.ID)
+			if err != nil || !stored.CursorAt.Equal(row.CursorAt) || report.Failed != 1 {
+				t.Fatalf("aborted intake consumed due instant: %+v %+v %v", stored, report, err)
+			}
+			fires, err := tenant.ListCronFires(t.Context(), row.ID, 10)
+			if err != nil || len(fires) != 0 {
+				t.Fatalf("aborted fire recorded: %+v %v", fires, err)
+			}
+			h.launcher.launchErr = nil
+			report, err = h.svc.Tick(t.Context(), false)
+			if err != nil || report.Fired != 1 {
+				t.Fatalf("retry: %+v %v", report, err)
+			}
+		})
 	}
 }

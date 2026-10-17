@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -147,6 +148,14 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 	result, err = remote.ReconcileNode(t.Context(), request)
 	if err != nil || result.Kind != store.KeepTerminal || result.Node.OutputRecord == nil || result.Node.ManifestRecord == nil || *result.Node.OutputRecord != selectedOutput || *result.Node.ManifestRecord != selectedManifest {
 		t.Fatalf("persisted destination selectors: %+v: %v", result, err)
+	}
+	nodes, err := tenant.ListNodes(t.Context(), "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := receipt.BuildReceipt(&store.Run{ID: "target"}, nodes, 0, "")
+	if got := rec.Identity.OutputsHash["job"]; got != "sha256:"+string(digest) {
+		t.Fatalf("materialized receipt output = %q", got)
 	}
 	data := &controller.DataController{
 		Store: s, Objects: objects, Access: tenant,
