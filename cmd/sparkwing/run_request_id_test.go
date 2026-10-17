@@ -18,6 +18,7 @@ func TestDetachedRequestIDSurvivesRealPreparationIntakeAndRetry(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	repo := initSnapshotRepo(t)
+	runSnapshotGit(t, repo, "commit", "--allow-empty", "-m", "initial")
 	dir := filepath.Join(repo, ".sparkwing")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)

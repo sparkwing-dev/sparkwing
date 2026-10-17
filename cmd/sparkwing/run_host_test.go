@@ -47,7 +47,7 @@ func localTestAward(t *testing.T) controllerwire.ClaimedUnit {
 	t.Helper()
 	request, err := runspec.SealRequest(runspec.Request{
 		Version: 1, Team: "team", Pipeline: "ci", Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost,
-		Git: runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey("local:" + strings.Repeat("a", 64))}}, RequestedArgs: map[string]string{"password": "private-value"},
+		Git: runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey("local:" + strings.Repeat("a", 64))}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{"password": "private-value"},
 	}, runspec.IntakeFacts{RunID: "local-run", AdmittedAt: time.Unix(1, 0)})
 	if err != nil {
 		t.Fatal(err)
@@ -370,7 +370,7 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 	return localRunPreparation{
 		identity:  clisurface.PipelineIdentity{Name: "ci", Entrypoint: "CI"},
 		described: []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
-		git:       award.Request.Request.Git, source: runspec.Source{Entrypoint: "CI"}, environment: env,
+		git:       award.Request.Request.Git, source: runspec.Source{Ref: award.Request.Request.Source.Ref, Entrypoint: "CI"}, environment: env,
 		settings: settings.Inputs{Context: settings.Context{NumCPU: 4}},
 	}
 }

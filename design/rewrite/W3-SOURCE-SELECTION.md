@@ -1,8 +1,9 @@
 # W3 source selection and acquisition
 
 Executable intake now requires resolved execution/code commits, and native
-hosting classifies acquired code. Cross-language ownership, live submodule
-authorization metadata and the next native harness run remain open.
+hosting classifies acquired code. The [native-source continuation](W3-NATIVE-SOURCE-CONTINUATION.md)
+repairs the native fixtures and closes the live submodule metadata gap.
+Cross-language ownership and the next native harness run remain open.
 The full initial inventory is in [W3-SOURCE-INVENTORY.md](W3-SOURCE-INVENTORY.md).
 
 ## Implemented
@@ -102,8 +103,9 @@ Contract changes made under integration authority are in
 [the W3 continuation](contracts/w3-source-selection-continuation.md). C3 now
 states that all unaccepted source is classified after acquisition, and separates
 execution-host credential release from controller-private ref resolution.
-No route, wire field, schema, grant, setting, environment variable, cache,
-retry policy or timeout was added. Internal Options.LocalBundle is the new
+No route, schema, grant, setting, environment variable, cache, retry policy
+or timeout was added. The native-source continuation adds the optional
+extra_repositories response field for audited submodule authorization. Internal Options.LocalBundle is the new
 host-owned snapshot-import input. The new controller adapter and Git leaf are
 the mechanisms required by the assigned source-ownership cut.
 
@@ -124,21 +126,17 @@ bundle import API.
    package. This separate SDK runtime does not select pipeline code or engines,
    but a literal cross-language ownership rule needs a lead/W5 decision and
    implementation. It is listed explicitly in the inventory.
-3. Live C2 source credential responses still omit ExtraRepositories. Source's
-   submodule implementation checks this approved list, and tests supply it
-   through the contract fake. The real client currently cannot carry approved
-   App extra-repository metadata into acquisition. Keep the refusal until C2
-   carries that authoritative list. No permission was widened to make tests pass.
-4. W3-native-latest.md contains five passing package results from the previous
-   committed state, headed 08:26 MDT. It predates these edits. The lead owns the
-   new socket-enabled run and complete repository suite. No native Windows,
-   Darwin, PostgreSQL or deployed-runner evidence is claimed here.
+3. Live App releases now carry audited ExtraRepositories through C2 and the host
+   client. The native-source continuation records its tests and contract changes.
+4. W3-native-latest.md is headed 11:56 MDT and contains FAIL results caused by
+   missing or placeholder commit IDs. The continuation repairs those fixtures.
+   The lead owns the next socket-enabled run and complete repository suite.
 5. The previous report's SQLite follower-cancellation DESIGN remains unchanged.
    No newer handoff settled it. This session's full host suite passes.
 
 There is no remaining stub in the new W3 resolver/acquisition implementation.
 The engine resolver/installer and remote-public-source access in the child proof
-are explicit test doubles. The two real adapter boundaries above and native
+are explicit test doubles. The TypeScript ownership boundary above and native
 confirmation remain open, so this report does not claim completion.
 
 ## Shared files

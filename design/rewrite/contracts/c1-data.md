@@ -3777,12 +3777,14 @@ Controller schedules reach the same sealed intake through the adapter below.
 ## Integration amendment: audited GitHub source release
 
 `Tenant.ReleaseGitHubSourceCredential(ctx, Authorized, GitHubSourceProvider)`
-returns a `githubapp.Token` only after the existing source-release audit commits.
+returns a `source.Credential` only after the existing source-release audit commits.
+Its `ExtraRepositories` contains the approved extra repository names read in that
+transaction. The primary repository is excluded.
 The provider interface contains only `InstallationTokenByIDs`, matching the
 existing GitHub client and store test fake. A short transaction resolves and
 validates source authority and consent. Minting runs with no transaction open.
 A second short transaction repeats authority, enrollment, consent and fence
-checks, requires the same installation and approved ID set, and writes the audit.
+checks, requires the same installation, approved IDs and names, and writes the audit.
 GitHub verifies coverage while minting that ID set. Source release never lists
 installation repositories, so the listing's 1,000-repository bound cannot turn
 an authorized source into not_found. Refused coverage returns conflict; other

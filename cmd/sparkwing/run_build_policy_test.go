@@ -25,6 +25,7 @@ func TestRunBuildPolicyReachesRealPreparationAndRetainedSource(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	repo := initSnapshotRepo(t)
+	runSnapshotGit(t, repo, "commit", "--allow-empty", "-m", "initial")
 	dir := filepath.Join(repo, ".sparkwing")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -95,6 +96,10 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 				t.Fatal(err)
 			}
 			request.Request.Team = "default"
+			commit := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+			if request.Request.Git.SHA != commit || request.Request.Source.Ref != commit || !request.Request.Source.WorkingTree {
+				t.Fatalf("working source lost resolved identity: %+v %+v", request.Request.Git, request.Request.Source)
+			}
 			sealed, err := runspec.SealRequest(request.Request, runspec.IntakeFacts{RunID: "retained"})
 			if err != nil {
 				t.Fatal(err)

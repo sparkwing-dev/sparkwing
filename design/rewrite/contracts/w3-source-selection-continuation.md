@@ -7,7 +7,10 @@
 in `Git.Ref` and `Source.RequestedRef`. `source.ResolveRevisions` chooses the
 execution/code pair. Verified App commits pass through without a branch lookup.
 `source.ResolveRef` supplies local and authenticated remote lookup for that
-resolver. Schedules use it too.
+resolver. Schedules use it too. An unborn local checkout remains valid for
+unsealed inspection, but cannot pass executable intake without a resolved
+commit. Local working-tree execution with an existing HEAD retains its live
+files and carries that resolved commit in both identities.
 
 Fresh-branch children submit intent through the authenticated child-intake
 route. Before sealing, the controller resolves it against the parent's stored
@@ -39,7 +42,11 @@ Fixture directories, generated dependencies and test files are excluded.
 Binary-cache bundle acquisition is deleted. Its upload API remains because
 source publication still calls it.
 
-No wire field, route, schema, grant, setting or environment variable was added.
+The source-credential response adds optional `extra_repositories`. C1 returns
+`source.Credential` with the names from its audited App release. C2 and the
+host client preserve that list for acquisition. The release rechecks both IDs
+and names after minting. No route, schema, grant, setting or environment
+variable was added.
 No lead-owned handoff or amendment file changed. W9 owns preview/describe and
 child local-secret inheritance.
 

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -133,9 +134,14 @@ func acceptLocalExample(t *testing.T, root string, raw []byte, selected engine.R
 	if err != nil {
 		t.Fatal(err)
 	}
+	commit, err := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "--verify", "HEAD^{commit}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.TrimSpace(string(commit))
 	request := runspec.Request{
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "example", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
-		Git: runspec.Git{Repository: repository}, Source: runspec.Source{Entrypoint: "Example", Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: ".sparkwing"}},
+		Git: runspec.Git{Repository: repository, SHA: sha}, Source: runspec.Source{Ref: sha, WorkingTree: true, Entrypoint: "Example", Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: ".sparkwing"}},
 	}
 	input, err := json.Marshal(controllerwire.CreateRunRequest{Request: request})
 	if err != nil {

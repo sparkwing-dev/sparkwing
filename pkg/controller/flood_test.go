@@ -31,7 +31,7 @@ func fortyHex(seed int) string { return fmt.Sprintf("%040x", seed) }
 func (f *floodFixture) submit(token, pipeline, sha string) *httptest.ResponseRecorder {
 	f.t.Helper()
 	body := computeIntake(pipeline)
-	body.Request.Git.SHA = sha
+	body.Request.Git.SHA, body.Request.Source.Ref = sha, sha
 	return f.intake(token, body)
 }
 

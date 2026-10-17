@@ -53,7 +53,8 @@ func hereAward(t *testing.T) controllerwire.ClaimedUnit {
 	request, err := runspec.SealRequest(runspec.Request{
 		Version: 1, Team: "team", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
 		Origin: runspec.OriginTrigger, Options: runspec.Options{Runner: runner},
-		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:42"}},
+		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:42"}, SHA: "0123456789abcdef0123456789abcdef01234567"},
+		Source:        runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"},
 		RequestedArgs: map[string]string{"password": "secret-argument"},
 	}, runspec.IntakeFacts{RunID: "original-run", AdmittedAt: time.Unix(1, 0)})
 	if err != nil {

@@ -78,7 +78,7 @@ func TestControllerIntakeRefusesUnsafeAcquisitionLocations(t *testing.T) {
 	admit := func(location runspec.SourceLocation) error {
 		_, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, Request: runspec.Request{
 			Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginTrigger,
-			Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}}, Source: runspec.Source{Location: location},
+			Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567", Location: location},
 		}})
 		return err
 	}
