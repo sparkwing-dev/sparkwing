@@ -74,7 +74,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		},
 		close: func() error { cleanup(); return nil },
 		prepare: func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
-			return prepareNativeLocalRun(ctx, home, directory, pipeline, seal, captured, snapshots)
+			return prepareNativeLocalRun(ctx, home, directory, pipeline, seal, captured, snapshots, compileOptions{NoUpdate: flags.noUpdate})
 		},
 		bind: func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
 			return bindLocalRunHost(ctx, home, transport, award)
@@ -98,7 +98,7 @@ func localSourceOptions(home string, captured []string, masker *secrets.Masker) 
 	}, nil
 }
 
-func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, seal runspec.EnvSnapshot, captured []string, snapshots *nodehost.FileEnvironmentSnapshots) (_ localRunPreparation, err error) {
+func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, seal runspec.EnvSnapshot, captured []string, snapshots *nodehost.FileEnvironmentSnapshots, compile compileOptions) (_ localRunPreparation, err error) {
 	identity, err := pipelineIdentityAt(directory, pipeline)
 	if err != nil {
 		return localRunPreparation{}, err
@@ -120,6 +120,8 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		return localRunPreparation{}, err
 	} else if typescript {
 		options.SDK = engine.TypeScriptSDK
+	} else if err := resolveSparks(ctx, directory, compile); err != nil {
+		return localRunPreparation{}, err
 	}
 	root := filepath.Dir(directory)
 	repository, err := runspec.CanonicalRepository(runspec.RepoInput{AbsolutePath: root})

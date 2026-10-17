@@ -132,14 +132,22 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 			return fmt.Errorf("run %s is admitted but its handle could not be published: %w", response.RunID, err)
 		}
 	}
+	format := response.Request.Request.Options.Output.Value
 	if flags.detached {
-		return errors.Join(emitLocalRunReceipt(out, response, request.Request.Options.Output.Value), ctx.Err())
+		return errors.Join(emitLocalRunReceipt(out, response, format), ctx.Err())
+	}
+	if err := emitLocalRunEvent(out, format, "run_start", response.RunID, pipeline, ""); err != nil {
+		return fmt.Errorf("run %s is admitted but its start record could not be written: %w", response.RunID, err)
 	}
 	completion, err := hostLocalRun(ctx, runtime, response.RunID, response.Request.Hash, deps.version)
 	if err != nil {
 		return fmt.Errorf("run %s is admitted: %w", response.RunID, err)
 	}
-	return statusExitCode(completion.Outcome)
+	outputErr := emitLocalRunEvent(out, format, "run_finish", response.RunID, pipeline, completion.Outcome)
+	if outputErr != nil {
+		outputErr = fmt.Errorf("run %s is %s but its completion record could not be written: %w", response.RunID, completion.Outcome, outputErr)
+	}
+	return errors.Join(statusExitCode(completion.Outcome), outputErr)
 }
 
 func validateLocalRunFlags(flags runFlags) error {
@@ -159,7 +167,6 @@ func validateLocalRunFlags(flags runFlags) error {
 		name string
 		set  bool
 	}{
-		{"sw-no-update", flags.noUpdate},
 		{"sw-no-bincache", flags.noBincache},
 		{"sw-hash-all-files", flags.hashAllFiles},
 		{"sw-allow-unadmitted", flags.allowUnadmitted},

@@ -85,6 +85,17 @@ contract. Cloud Job scratch remains the fixed aggregate 20 GiB including DinD,
 enforced by Kubernetes accounting/eviction. Real node/network evidence and full
 teardown remain W8 and deployment acceptance obligations.
 
+Local Go preparation resolves project sparks through the existing resolver before
+source installation and intake. Exact versions need no version lookup. Tracking
+versions fail with the existing `--sw-no-update` hint when resolution fails.
+That invocation flag skips resolution and keeps the current module pins and
+overlay. The selected engine still installs and verifies the SDK through C3.
+Foreground output uses the sealed output selection. It emits `run_start` after
+intake and `run_finish` with run ID, pipeline and actual status only after the
+host returns its committed terminal verdict. JSON uses event/attrs records.
+Plain and pretty output include the same run identity and status. Failed or
+cancelled outcomes keep their nonzero exit. Output failures remain errors.
+
 Status: process environments, limits, settings and both YAML schemas are implemented.
 Source location validation, Git environments, concurrency resolution, shared
 guard parsing and enrollment rollback still need W6 integration under

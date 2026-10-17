@@ -177,6 +177,105 @@ func TestLocalRunEnsuresControllerAfterPreparationBeforeIntake(t *testing.T) {
 	}
 }
 
+func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
+	for _, outcome := range []string{"success", "failed", "cancelled"} {
+		t.Run(outcome, func(t *testing.T) {
+			var calls []string
+			deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+			resolve := deps.resolve
+			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+				runtime, err := resolve(ctx, options)
+				bind := runtime.bind
+				runtime.bind = func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
+					session, err := bind(ctx, award)
+					session.host = hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
+						return nodehost.RunCompletion{Outcome: outcome}, nil
+					})
+					return session, err
+				}
+				return runtime, err
+			}
+			var out bytes.Buffer
+			flags, args := parseRunFlags([]string{"--sw-output=json", "--", "--password=private-value"})
+			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
+			if (err == nil) != (outcome == "success") {
+				t.Fatalf("outcome=%s error=%v", outcome, err)
+			}
+			var terminal struct {
+				Event string `json:"event"`
+				Attrs struct {
+					RunID    string `json:"run_id"`
+					Pipeline string `json:"pipeline"`
+					Status   string `json:"status"`
+				} `json:"attrs"`
+			}
+			decoder := json.NewDecoder(&out)
+			if err := decoder.Decode(&terminal); err != nil || terminal.Event != "run_start" {
+				t.Fatalf("missing start record: %+v %v", terminal, err)
+			}
+			if err := decoder.Decode(&terminal); err != nil {
+				t.Fatal(err)
+			}
+			if terminal.Event != "run_finish" || terminal.Attrs.RunID != "local-run" || terminal.Attrs.Pipeline != "ci" || terminal.Attrs.Status != outcome {
+				t.Fatalf("missing committed completion: %+v", terminal)
+			}
+		})
+	}
+}
+
+func TestLocalRunNoUpdateReachesPreparation(t *testing.T) {
+	var calls []string
+	flags, args := parseRunFlags([]string{"--sw-no-update", "--", "--password=private-value"})
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	resolve := deps.resolve
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		prepare := runtime.prepare
+		runtime.prepare = func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
+			if !flags.noUpdate {
+				t.Fatal("preparation lost --sw-no-update")
+			}
+			return prepare(ctx, pipeline, flags)
+		}
+		return runtime, err
+	}
+	if err := runLocalCommand(t.Context(), "ci", flags, args, io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLocalForegroundRunOutputFailuresStayVisible(t *testing.T) {
+	for _, format := range []string{"json", "plain", "pretty"} {
+		for _, at := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s/%d", format, at), func(t *testing.T) {
+				var calls []string
+				out := localFailingEventWriter{at: at}
+				flags, args := parseRunFlags([]string{"--sw-output=" + format, "--", "--password=private-value"})
+				err := runLocalCommand(t.Context(), "ci", flags, args, &out, localRuntimeFor(t, localTestAward(t), false, &calls))
+				if err == nil || !strings.Contains(err.Error(), "closed output") || !strings.Contains(err.Error(), "local-run") {
+					t.Fatalf("output failure was hidden: %v", err)
+				}
+				if at == 2 && !strings.Contains(out.String(), "local-run") {
+					t.Fatal("start record lost admitted identity")
+				}
+			})
+		}
+	}
+}
+
+type localFailingEventWriter struct {
+	bytes.Buffer
+	at, writes int
+}
+
+func (w *localFailingEventWriter) Write(body []byte) (int, error) {
+	w.writes++
+	if w.writes == w.at {
+		return 0, errors.New("closed output")
+	}
+	return w.Buffer.Write(body)
+}
+
 func TestLocalRunRejectsUnsupportedSelectionsBeforeAnyEffect(t *testing.T) {
 	for _, flags := range []runFlags{{detached: true, index: "/index"}} {
 		deps := localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
