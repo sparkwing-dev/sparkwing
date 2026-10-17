@@ -5241,6 +5241,8 @@ components:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.'
         reason:
           type: string
+        request_id:
+          type: string
         requested_args:
           anyOf:
             - additionalProperties:

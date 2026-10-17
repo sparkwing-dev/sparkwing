@@ -1156,3 +1156,17 @@ request. Runtime environment snapshots retain their existing names/digest rule.
 Automation discovery reads the current default branch's declarations but cannot
 replace the default branch reported by the signed event. A later default-branch
 change does not remove the original push's default-branch trust.
+
+## Invocation and detached trace integration
+
+Hook install, uninstall and status, and pipeline scaffolding consume the parsed
+`clisurface.Invocation`. Hook `--all-repos` selects the registered repositories.
+The removed `--fleet` and hooks `--all` spellings are refused. Hook mutations
+report their resulting status in the selected output format. Their progress and
+warnings go to stderr. Pipeline scaffolding emits a JSON pipeline/path receipt,
+a plain pipeline name, or pretty guidance after dependency resolution succeeds.
+
+`--sw-request-id` is retained for detached runs. It becomes optional
+`runspec.Request.RequestID` and survives intake, sealing and retry. The detached
+JSON receipt includes `request_id` when supplied. It is trace metadata. Only
+`--sw-idempotency-key` deduplicates submissions.

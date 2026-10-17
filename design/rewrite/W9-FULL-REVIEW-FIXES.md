@@ -1,137 +1,131 @@
 # W9 full-area review fixes
 
-Base: `7afbac89c`. No Git writes. Lead-owned amendments and handoffs are unchanged.
-The supplied native report has no FAIL for the last committed state. This work
-still needs the lead's commit, review and fresh native harness run.
+Base: `195cf2156`. No Git writes. Lead-owned amendments and handoffs are unchanged.
+The latest native report still contains FAIL. The lead must commit, review and
+rerun its native harness. Its `./internal/projectconfig` target is stale. The
+package is `./pkg/projectconfig`.
 
-Closed rulings: 1, 2, 3, 6, 9, 10 and 12.
+Closed rulings: 1, 2, 3, 6, 8, 9, 10, 11 and 12. Ruling 4 is partly implemented.
+Rulings 5 and 7 remain open.
 
-- Here intake uses native committed-source preparation and selects RunnerHere.
-  Request.Reason survives sealing, intake, replay and retry. The new regression
-  uses the real parser, Git checkout, SDK compilation, selected-engine installer
-  and inspection, HTTP client, controller handler and SQLite store. It injects
-  no preparation. First intake returns a bearer, replay returns none, and a
-  changed reason under the original key conflicts. The obsolete refusal test
-  no longer expects here intake to fail.
-- Hook proofs and generated hooks use plain output. A proof's actual process
-  environment passes through the run parser. Generated hooks execute through sh
-  and retain explicit pretty/json/plain overrides. The quiet-output string test
-  and prose are replaced.
-- Repository plan subprocesses use --pipeline. Any failed baseline restores the
-  module snapshot and stops before bump or commit. The uncompared success state,
-  type, projection and separate comparison list are deleted. A real SDK fixture
-  runs through execOps.Plan and the public subprocess parser. The existing
-  updater component test now rejects its formerly accepted baseline failure.
-- Git source selection and inspection checkout both supply procenv's masker.
-  Real Git fixtures accept HTTPS_PROXY=https://user:pass@proxy. A generated-input
-  regression checks that proxy userinfo stays out of acquisition diagnostics.
-- Catalog and completion metadata join by configured entrypoint and display the
-  invoked name. A real compiled SDK supplies metadata for two aliases, alongside
-  an unrelated registration whose name collides with one alias. The old fake
-  catalog/completion test is replaced; its separate registered-flag assertion
-  remains.
-- Launch guides present Local and Cloud. Self-hosted runners join Cloud.
-  Operator onboarding uses operator teams create. Deferred controller onboarding,
-  stale pending claims and the cache-service promise are removed. Generated API
-  docs and embedded mirrors are refreshed.
-- profiles set --token and profiles add --scope are hard cuts. --token-stdin
-  remains. Real config and stdin tests preserve other settings. Usage refusals
-  leave credential bytes unchanged and never echo supplied token values.
+This session implements:
 
-Invariants fixed: here reasons survive the immutable request; hooks emit only
-accepted output selections; an uncomparable baseline cannot authorize an SDK
-update; proxy credentials remain masked while Git still receives network
-configuration; alias metadata belongs to its configured entrypoint; credentials
-never enter the profiles command through argv. Proxy and profile boundaries have
-fuzz targets. Each corrected behavior ran red before the product edit.
+- Hooks install, uninstall and status consume the parsed Invocation. Their
+  duplicate pflag declarations and the old hooks dispatcher are deleted.
+  `--all-repos` works. `--fleet` and hooks `--all` are refused. Mutations emit
+  resulting hook status as JSON by default when piped. Progress and warnings go
+  to stderr. Existing chain/proof tests now enter through the real public parser.
+- Pipeline scaffolding consumes Invocation and emits a JSON pipeline/path
+  receipt or a plain pipeline name after dependency resolution succeeds. Pretty
+  output keeps the guidance. The duplicate parser and bootstrap prose renderer
+  are deleted. Real SDK fixtures exercise JSON, plain and piped defaults.
+- A flag sweep sends every advertised sparkwing leaf-command flag through its
+  execution parser. It also exposed cache handlers binding the removed `--all`
+  spelling. They now bind `--all-entries`. Legacy parser helpers accept the
+  globally registered `--help-all` and stop rejecting registered `-o` selections.
+  Removing those remaining parser helpers belongs to the open Invocation work.
+- Detached `--sw-request-id` becomes optional Request.RequestID. Native SDK
+  preparation, the HTTP client, local controller, store intake, retry and the
+  detached JSON receipt retain it. Separate submissions with the same trace ID
+  receive distinct run IDs. Idempotency remains a separate contract.
+- A released-engine fixture has an exact SDK version and no replacement. It
+  builds a real release-version CLI, verifies signed policy and all six release
+  downloads, then installs and describes the SDK through the selected engine.
+  A fresh resolver repeats installation and inspection offline from the verified
+  cache with no network requests. Cached policy is read and corrupted engine
+  bytes are refused. SDK module bytes come from a generated local module proxy.
+  Preparation, installers, SDK processes and environment snapshots are real.
+  Only the external release HTTP transport serves fixture bytes.
+- Generated CLI documentation now matches the registry, including the prior
+  profiles scope cut. OpenAPI and embedded docs are regenerated.
 
-Four listed simplifications are done: claim_paths.go is deleted (14 lines),
-runSparksResolve plus dispatch/help entries are deleted (34 lines), twelve
-interface constructors return newEngineClient directly (48 fewer lines), and
-unsupported profile scope, unused completion bookkeeping and deferred onboarding
-prose are removed. The first simplification, passing Invocation through all
-handlers and deleting reconstruction/duplicate parsing, remains with ruling 4.
+Invariants: registered grammar reaches execution unchanged. Mutation stdout
+obeys the selected format. A trace ID survives the run without becoming a replay
+key. Released offline execution uses authenticated policy and executable bytes.
+The parser/output and request-ID regressions ran red before product changes.
+The released-engine addition is integration evidence for existing behavior.
 
-Remaining rulings, in order for the next session:
+Previous sessions completed native here intake and reason sealing, accepted hook
+output, fail-closed repository baseline comparison, masked Git proxy environments,
+alias metadata joins, decision-114 launch guides, and the profile token/scope cuts.
+Four simplifications remain complete: claim_paths.go and runSparksResolve are
+removed, client constructors return newEngineClient directly, and unsupported
+profile scope, unused completion bookkeeping and deferred onboarding prose are
+removed. The Invocation simplification now covers hooks and scaffolding only.
 
-1. Ruling 4 and simplification 1: one Invocation through execution; remove
-   --fleet and legacy hooks --all, implement --all-repos and output/usage contracts,
-   and exercise every registered command's flags through the real handlers.
-2. Ruling 5: filtered run.submit_env_allow capture, private transport/retention
-   and host consumption, including masking. The unconditional refusal remains.
-3. Rulings 7 and 8: retained run switches and request-id. The placeholder
-   refusals and discarded request-id remain. No cuts in this group were made.
-4. Ruling 11: released-engine offline fixture through signed policy and verified
-   cache. The existing replacement-pin offline fixture is insufficient.
+Remaining work:
 
-The option table records the retained contract, not completed implementation:
+1. Finish ruling 4 and simplification 1. Pass Invocation through every remaining
+   handler and remove argv reconstruction, repeated parsing and duplicate flag
+   declarations. The public flag sweep passes, but that does not finish the
+   structural cut or prove every handler's non-help output behavior.
+2. Ruling 5. Capture filtered run.submit_env_allow values, transport and retain
+   them privately, consume them in hosts and mask them. The unconditional trigger
+   refusal remains. Values must not enter the public names/digest snapshot.
+3. Ruling 7. Implement the retained switches below. Their integration refusals
+   remain. No run option was cut this session.
 
-| Option | Kept or cut | Source and remaining work |
+| Option | Kept or cut | Source and state |
 | --- | --- | --- |
-| Relative --sw-priority | Kept, pending | C4 Registry/run and settings priority; resolve queue position before sealing. |
-| --sw-no-bincache | Kept, pending | C4 Registry/run; connect source installation to the existing uncached compiler. |
-| --sw-hash-all-files | Kept, pending | C4 Registry/run; connect the retained source/hash policy. |
+| Relative --sw-priority | Kept, pending | C4 Registry/run and settings priority. Resolve queue position before sealing. |
+| --sw-no-bincache | Kept, pending | C4 Registry/run. Bind the existing uncached compiler to retained preparation. |
+| --sw-hash-all-files | Kept, pending | C4 Registry/run. Bind the retained source/hash policy. |
 | --sw-allow-unadmitted | Kept, pending | C4 Registry/run and decision 91's retained local admission model. |
-| --sw-index | Kept, pending | C4 Registry/run and procenv.Runtime.GateIndex; retain its verified private snapshot. |
-| --target | Kept, pending | C4 Registry/run; bind the selected target through retained preparation. |
-| --sw-request-id | Kept, pending | C4 Registry/run requires detached mode; implement the retained contract rather than discarding it. |
-| profiles set --token | Cut | Lead ruling 12; use --token-stdin. |
-| profiles add --scope | Cut | Lead simplification 5; existing member credentials enter through stdin. |
+| --sw-index | Kept, pending | C4 Registry/run and procenv.Runtime.GateIndex. Retain a verified private snapshot. |
+| --target | Kept, pending | C4 Registry/run. Bind the selected target through preparation. |
+| --sw-request-id | Kept, implemented | C4 Registry/run, detached tracing contract in local-execution. |
+| Hooks --fleet and --all | Cut | Lead ruling 4 and C4's --all-repos grammar. No aliases. |
+| profiles set --token | Cut previously | Lead ruling 12. Use --token-stdin. |
+| profiles add --scope | Cut previously | Lead simplification 5. Use current member credentials. |
 
-Contract changes made: runspec.Request adds optional reason, included by the
-existing canonical request/spec hashing and retry cloning. C1 data, C3 controller-wire and
-C4 surface contracts record it. C4 also records fail-closed baseline comparison.
-No database migration, route, grant, credential kind, timeout, limit, environment
-variable or compatibility path is added. No foreign contract amendment is needed
-to finish these closed rulings. Remaining integration work is listed above.
+Contract changes made: Request.RequestID adds optional trace metadata to existing
+request JSON. C1 data, C3 controller-wire and C4 surface contracts record sealing,
+retry and receipt behavior. C4 also records hook and scaffolding output. There
+is no new schema column, route, grant, configuration key, environment variable,
+timeout, limit or compatibility path. No contract change is needed from another
+area for the work completed here.
 
-Shared files touched: internal/runspec/contracts.go; internal/repos/update.go and
-update_test.go; api/openapi.yaml; docs/api-reference.md; pkg/docs/changelog.md and
-mirrors; and the C1/C3/C4 contracts. The API regeneration also picks up pre-existing
-source drift in AppFacts, PullRequest and operator object-store quota bindings.
-Other edits belong to W9. Removing UncomparedPipeline migrates its sole CLI
-renderer in cmd/sparkwing/repos.go. The unused client paths and sparks resolver
-have no remaining callers. Client constructor edits are in engine_client.go,
-pools.go, prune.go, queue.go, runlogs.go, runners.go, runreview.go, schedules.go,
-secret_management.go and sizing.go.
+Shared files touched: internal/runspec/contracts.go, api/openapi.yaml,
+CHANGELOG.md, pkg/docs/changelog.md and embedded mirrors, plus C1/C3/C4 contracts.
+No API removal required a caller migration outside W9. Test-only parser adapters
+replace the old []string entry points in existing hook and scaffold tests. They
+call runSparkwing and do not inject preparation or product implementations.
 
-Verification uses GOWORK=off, GOFLAGS='-buildvcs=false -p=4',
-GOCACHE=/tmp/sw-gocache, TMPDIR=/tmp/sw-astra-W9 and
-GOTMPDIR=/tmp/sw-astra-W9/go. At most four package workers run per test command.
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+TMPDIR=/tmp/sw-astra-W9 and GOTMPDIR=/tmp/sw-astra-W9/go, with at most four package
+workers per test command.
 
-- Whole-repository go build -p 4 ./... passes. Vet passes for CLI, clisurface,
-  repos, runspec and controller/client.
-- Complete clisurface, repos, runspec and controller/client suites pass.
-- Focused CLI hook, alias, profile, trigger/preparation/inspection, repository and
-  launch-guide tests pass. The new native-here and real plan subprocess tests
-  pass. Focused controller intake/here/retry/operator-team tests pass.
-- Surface, Here and EngineAmendments acceptance families pass. No acceptance cell
-  was newly unskipped and no archived inventory test was newly ported.
-- Profile token/scope fuzzing passes 3,438 generated cases. Proxy/Git fuzzing
-  passes its seeds and ten real-Git cases with two workers.
-- Full doccheck, generated API spec check, embedded mirror/privacy checks,
-  commentcheck against main, sleepcheck against HEAD and diff whitespace pass.
-- A broad CLI selection stopped at TestDocsMigrationsValidatesWebBoundsBeforeFetching's
-  forbidden TCP listener. The complete pkg/docs suite stops at
-  TestWebClient_Versions_HappyPath for the same sandbox restriction. These do not
-  establish native full-suite success. The lead runs those suites after commit.
+- Whole-repository go build -p 4 ./... passes.
+- Focused vet passes for CLI, clisurface, controllerwire, runspec and client.
+- Complete clisurface, controllerwire, runspec and controller/client suites pass.
+- The changed-test selection covers 93 CLI tests, including the registry flag
+  sweep, native request tracing, released-engine offline inspection, scaffolding,
+  hook chains, Git proofs and generated reference drift. Its first run found one
+  test still capturing status output from stderr. After correcting that capture,
+  all 93 focused tests pass together (15.482s).
+- Surface and EngineAmendments acceptance families pass. No acceptance cell was
+  newly unskipped and no archived inventory test was newly ported.
+- Doccheck, OpenAPI generator comparison, embedded mirror check, commentcheck
+  against main, sleepcheck against HEAD and whitespace checks pass.
+- Native sockets, full CLI/bin suites and Windows/Darwin distribution remain
+  with the lead harness. The latest native report is still failing and is not
+  replaced by these focused results.
 
-The earlier amendment/handoff audit remains: A1-09/16/17/38/41/43/49/50/51/52,
+The previous amendment/handoff audit remains: A1-09/16/17/38/41/43/49/50/51/52,
 source attempts, step reports/windows, pipeline identity, launcher grammar,
 doctor, local composition, owner/eval separation, shared logs, service handover
 and decisions 110/111/113/114 retain their completed implementations. A1-53 and
-native Windows/Darwin, deployed Cloud/DinD, signed fresh-machine distribution and
-PostgreSQL remain lead integration lanes. No foreign stub blocked this session.
-The legacy bin/k8s-e2e.sh onboarding stop remains outside these W9 doc edits;
-its stale source-scanning assertion was removed from setup_docs_test.go.
+deployed Cloud/DinD, native platforms, fresh-machine distribution and PostgreSQL
+remain lead integration lanes. No foreign stub blocked this session.
 
-Production Go this session: +45/-167, net -122. W9-owned production is -101.
-W9 versus main is +19,106/-23,856, net -4,750, within the -2,900 budget.
-Whole legacy files deleted: one, the 14-line claim_paths.go. Other dead production
-paths are deleted in place. Scratch is removed after all checks join. The shared build cache is retained.
+Production budget accounting this session: +97/-170, net -73. RequestID adds one
+line in the excluded declaration file. W9 versus main: +19,193/-24,015, net
+-4,822, within the -2,900 budget. No whole production file was deleted this
+session. Obsolete parsers, the dispatcher and bootstrap renderer were deleted
+in place. Scratch is removed after checks join. The shared build cache is kept.
 
-Friction: socket refusal prevents native listener evidence, and the installed
-Overwing binary reports source lag. Native completion belongs to the lead
-harness. Rulings 4/5/7/8/11 still require implementation.
+Friction: the native harness still names a removed package, and the installed
+Overwing binary reports source lag. Remaining work is rulings 4/5/7 and the lead's
+native/review evidence. Rulings 8 and 11 no longer need implementation.
 
 STATUS: CONTINUE

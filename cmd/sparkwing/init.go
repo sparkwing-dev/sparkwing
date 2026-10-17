@@ -23,12 +23,10 @@ import (
 
 func bootstrapDotSparkwing(cwd, sparkwingDir string) error {
 	moduleName := scaffoldModuleName(filepath.Base(cwd))
-	existed := dirExists(sparkwingDir)
-	report, err := writeSkeleton(sparkwingDir, moduleName, false)
+	_, err := writeSkeleton(sparkwingDir, moduleName, false)
 	if err != nil {
 		return err
 	}
-	printInitReport(moduleName, existed, report)
 	return nil
 }
 
@@ -244,7 +242,6 @@ func tidySkeleton(ctx context.Context, sparkwingDir string) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	fmt.Println()
 	cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 	cmd.Env = env
 	cmd.Dir = sparkwingDir
@@ -299,28 +296,5 @@ func runSpinner(w io.Writer, frames []rune, label string, done <-chan struct{}, 
 			i++
 			render()
 		}
-	}
-}
-
-func printInitReport(moduleName string, existedBefore bool, rep initFileReport) {
-	if existedBefore {
-		fmt.Printf("%s .sparkwing already in place (module %s)\n", color.Cyan("==>"), moduleName)
-	} else {
-		fmt.Printf("%s bootstrapping .sparkwing\n", color.Cyan("==>"))
-	}
-
-	for _, p := range rep.Created {
-		fmt.Printf("  %s %s\n", color.Green("+"), p)
-	}
-	for _, p := range rep.Existed {
-		fmt.Printf("  %s %s\n", color.Dim("="), color.Dim(p))
-	}
-	for _, p := range rep.Skipped {
-		fmt.Printf("  %s %s %s\n", color.Yellow("!"), p, color.Dim("(kept; pass --force to overwrite)"))
-	}
-	if !goOnPath() {
-		fmt.Println()
-		fmt.Println("toolchain: Go is NOT on PATH")
-		fmt.Printf("  %s\n", goInstallHintForce())
 	}
 }

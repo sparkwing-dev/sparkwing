@@ -21,7 +21,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -31,43 +32,16 @@ import (
 
 const sparkwingHookMarker = githooks.Marker
 
-func runHooks(args []string) error {
-	if handleParentHelp(cmdHooks, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdHooks, os.Stderr)
-		return errors.New("hooks: subcommand required (install|uninstall|status)")
-	}
-	switch args[0] {
-	case "install":
-		return runHooksInstall(args[1:])
-	case "uninstall":
-		return runHooksUninstall(args[1:])
-	case "status":
-		return runHooksStatus(args[1:])
-	default:
-		PrintHelp(cmdHooks, os.Stderr)
-		return fmt.Errorf("hooks: unknown subcommand %q", args[0])
-	}
-}
-
-func runHooksInstall(args []string) error {
-	fs := flag.NewFlagSet(cmdHooksInstall.Path, flag.ContinueOnError)
-	fleet := fs.Bool("fleet", false, "install into every registered repo")
-	noProve := fs.Bool("no-prove", false, "claim core.hooksPath without running the gate first")
-	if err := parseAndCheck(cmdHooksInstall, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
+func runHooksInstall(inv clisurface.Invocation) error {
 	opts := installOptions{}
-	if !*noProve {
+	if !inv.Bool("no-prove") {
 		opts.prove = runPipelineForProof()
 	}
-	if *fleet {
-		return installFleet(opts)
+	if inv.Bool("all-repos") {
+		if err := installFleet(opts); err != nil {
+			return err
+		}
+		return surveyHooks(false, inv.Output(color.IsInteractiveStdout()))
 	}
 	repoRoot, sparkwingDir, err := resolveHooksRepo()
 	if err != nil {
@@ -76,7 +50,7 @@ func runHooksInstall(args []string) error {
 	if _, err := installHooks(runGit, repoRoot, sparkwingDir, opts); err != nil {
 		return fmt.Errorf("hooks install: %w", err)
 	}
-	return nil
+	return statusHooks(runGit, repoRoot, inv.Output(color.IsInteractiveStdout()))
 }
 
 func installFleet(opts installOptions) error {
@@ -85,7 +59,7 @@ func installFleet(opts installOptions) error {
 		return fmt.Errorf("hooks install: %w", err)
 	}
 	if len(roots) == 0 {
-		fmt.Fprintln(os.Stdout, "hooks install: no repos registered; run `sparkwing repos add <dir>` first")
+		fmt.Fprintln(os.Stderr, "hooks install: no repos registered; run `sparkwing repos add <dir>` first")
 		return nil
 	}
 	armed, noGate := 0, 0
@@ -94,7 +68,7 @@ func installFleet(opts installOptions) error {
 		sparkwingDir := filepath.Join(root, ".sparkwing")
 		declared, err := declaredHookNames(root)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "\n=== %s\nerror: %v\n", root, err)
+			fmt.Fprintf(os.Stderr, "\n=== %s\nerror: %v\n", root, err)
 			failed = append(failed, filepath.Base(root))
 			continue
 		}
@@ -102,11 +76,11 @@ func installFleet(opts installOptions) error {
 			noGate++
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "\n=== %s\n", root)
+		fmt.Fprintf(os.Stderr, "\n=== %s\n", root)
 		gated, err := installHooks(runGit, root, sparkwingDir, opts)
 		switch {
 		case err != nil:
-			fmt.Fprintf(os.Stdout, "error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			failed = append(failed, filepath.Base(root))
 		case gated:
 			armed++
@@ -116,10 +90,10 @@ func installFleet(opts installOptions) error {
 			ungated = append(ungated, filepath.Base(root))
 		}
 	}
-	fmt.Fprintf(os.Stdout, "\n%d repo(s) armed, %d with no gate to arm, %d left ungated, %d failed\n",
+	fmt.Fprintf(os.Stderr, "\n%d repo(s) armed, %d with no gate to arm, %d left ungated, %d failed\n",
 		armed, noGate, len(ungated), len(failed))
 	if len(ungated) > 0 {
-		fmt.Fprintf(os.Stdout, "still ungated: %s\n"+
+		fmt.Fprintf(os.Stderr, "still ungated: %s\n"+
 			"  each one printed why above; a gate that cannot run is left unarmed because arming it would fail every commit rather than gate one\n",
 			strings.Join(ungated, ", "))
 	}
@@ -194,7 +168,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		return false, err
 	}
 	if len(hooksToRun) == 0 {
-		fmt.Fprintln(os.Stdout, "hooks install: no pipelines declare pre_commit, pre_push, or post_commit triggers")
+		fmt.Fprintln(os.Stderr, "hooks install: no pipelines declare pre_commit, pre_push, or post_commit triggers")
 		return false, nil
 	}
 
@@ -247,7 +221,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 			skipped++
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "installed %s -> %s%s\n", hookName, strings.Join(pipes, ", "),
+		fmt.Fprintf(os.Stderr, "installed %s -> %s%s\n", hookName, strings.Join(pipes, ", "),
 			chainSuffix(globalHooks[hookName]))
 		installed++
 	}
@@ -263,10 +237,10 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 			skipped++
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "installed %s -> the global hook\n", hookName)
+		fmt.Fprintf(os.Stderr, "installed %s -> the global hook\n", hookName)
 		installed++
 	}
-	fmt.Fprintf(os.Stdout, "\n%d hook(s) installed, %d skipped\n", installed, skipped)
+	fmt.Fprintf(os.Stderr, "\n%d hook(s) installed, %d skipped\n", installed, skipped)
 	gated, err := armHooks(git, repoRoot, hooksDir, unforwardedGlobalHooks(globalHooks, hooksDir), hooksToRun, plan)
 	if err != nil {
 		return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
@@ -462,7 +436,7 @@ func chainSuffix(chained bool) string {
 func writeManagedHook(hooksDir, name, content string) (bool, error) {
 	path := filepath.Join(hooksDir, name)
 	if existing, err := os.ReadFile(path); err == nil && !strings.Contains(string(existing), sparkwingHookMarker) {
-		fmt.Fprintf(os.Stdout, "skipped %s: existing hook is not managed by sparkwing (remove it first)\n", name)
+		fmt.Fprintf(os.Stderr, "skipped %s: existing hook is not managed by sparkwing (remove it first)\n", name)
 		return false, nil
 	}
 	if err := replaceHookFile(path, []byte(content), 0o755); err != nil {
@@ -593,7 +567,7 @@ func armHooks(git githooks.Git, repoRoot, hooksDir string, unforwarded []string,
 		if _, err := git(repoRoot, "config", "core.hooksPath", hooksDir); err != nil {
 			return false, fmt.Errorf("claim core.hooksPath for this repo: %w", err)
 		}
-		fmt.Fprintf(os.Stdout, "\ncore.hooksPath -> %s\n"+
+		fmt.Fprintf(os.Stderr, "\ncore.hooksPath -> %s\n"+
 			"  the global core.hooksPath (%s) would otherwise shadow these hooks; its own hooks still fire, chained after this repo's\n",
 			hooksDir, plan.active)
 	}
@@ -634,12 +608,12 @@ func proveGates(prove Prover, repoRoot string, hooksToRun map[string][]string) m
 	}
 	for _, hookName := range githooks.BlockingHooks {
 		for _, pipeline := range hooksToRun[hookName] {
-			fmt.Fprintf(os.Stdout, "\nproving %s (%s) before arming it...\n", pipeline, hookName)
+			fmt.Fprintf(os.Stderr, "\nproving %s (%s) before arming it...\n", pipeline, hookName)
 			if err := prove(repoRoot, pipeline); err != nil {
 				failed[hookName] = fmt.Errorf("%s did not pass: %w", pipeline, err)
 				break
 			}
-			fmt.Fprintf(os.Stdout, "  %s passed\n", pipeline)
+			fmt.Fprintf(os.Stderr, "  %s passed\n", pipeline)
 		}
 	}
 	return failed
@@ -681,14 +655,7 @@ func lastLine(out []byte) string {
 	return "no output"
 }
 
-func runHooksUninstall(args []string) error {
-	fs := flag.NewFlagSet(cmdHooksUninstall.Path, flag.ContinueOnError)
-	if err := parseAndCheck(cmdHooksUninstall, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
+func runHooksUninstall(inv clisurface.Invocation) error {
 	repoRoot, err := resolveCleanupRoot()
 	if err != nil {
 		return fmt.Errorf("hooks uninstall: %w", err)
@@ -696,7 +663,7 @@ func runHooksUninstall(args []string) error {
 	if err := uninstallHooks(runGit, repoRoot); err != nil {
 		return fmt.Errorf("hooks uninstall: %w", err)
 	}
-	return nil
+	return statusHooks(runGit, repoRoot, inv.Output(color.IsInteractiveStdout()))
 }
 
 func uninstallHooks(git githooks.Git, repoRoot string) error {
@@ -706,7 +673,7 @@ func uninstallHooks(git githooks.Git, repoRoot string) error {
 	}
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil {
-		fmt.Fprintln(os.Stdout, "no sparkwing hooks installed")
+		fmt.Fprintln(os.Stderr, "no sparkwing hooks installed")
 		releaseHooksPath(git, repoRoot, hooksDir)
 		return nil
 	}
@@ -726,13 +693,13 @@ func uninstallHooks(git githooks.Git, repoRoot string) error {
 		if err := os.Remove(p); err != nil {
 			return fmt.Errorf("remove %s: %w", p, err)
 		}
-		fmt.Fprintf(os.Stdout, "removed %s\n", e.Name())
+		fmt.Fprintf(os.Stderr, "removed %s\n", e.Name())
 		removed++
 	}
 	if removed == 0 {
-		fmt.Fprintln(os.Stdout, "no sparkwing hooks installed")
+		fmt.Fprintln(os.Stderr, "no sparkwing hooks installed")
 	} else {
-		fmt.Fprintf(os.Stdout, "\n%d hook(s) removed\n", removed)
+		fmt.Fprintf(os.Stderr, "\n%d hook(s) removed\n", removed)
 	}
 	releaseHooksPath(git, repoRoot, hooksDir)
 	return nil
@@ -749,41 +716,22 @@ func releaseHooksPath(git githooks.Git, repoRoot, hooksDir string) {
 	if _, err := git(repoRoot, "config", "--unset", "core.hooksPath"); err != nil {
 		return
 	}
-	fmt.Fprintln(os.Stdout, "core.hooksPath released; the machine's global hooks apply here again")
+	fmt.Fprintln(os.Stderr, "core.hooksPath released; the machine's global hooks apply here again")
 }
 
-func runHooksStatus(args []string) error {
-	fs := flag.NewFlagSet(cmdHooksStatus.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	prove := fs.Bool("prove", false, "make the gate refuse a test commit and report whether it did")
-	fleet := fs.Bool("fleet", false, "with --prove, prove every registered repo")
-	all := fs.Bool("all", false, "report the effective gates of every registered repo")
-	ungated := fs.Bool("ungated", false, "with --all, list only the repos git runs no gate for")
-	if err := parseAndCheck(cmdHooksStatus, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runHooksStatus(inv clisurface.Invocation) error {
+	mode := inv.Output(color.IsInteractiveStdout())
+	if inv.Bool("prove") {
+		return proveHooks(inv.Bool("all-repos"), mode)
 	}
-	mode, err := resolveOutputFormat(*output, fs.Name())
-	if err != nil {
-		return err
+	if inv.Bool("all-repos") {
+		return surveyHooks(inv.Bool("ungated"), mode)
 	}
-	switch {
-	case *prove:
-		return proveHooks(*fleet, mode)
-	case *all:
-		return surveyHooks(*ungated, mode)
-	}
-
 	repoRoot, _, err := resolveHooksRepo()
 	if err != nil {
 		return fmt.Errorf("hooks status: %w", err)
 	}
-	if err := statusHooks(runGit, repoRoot, mode); err != nil {
-		return fmt.Errorf("hooks status: %w", err)
-	}
-	return nil
+	return statusHooks(runGit, repoRoot, mode)
 }
 
 type managedHookStatus struct {
@@ -886,7 +834,7 @@ func reportSilencedGlobalHooks(git githooks.Git, repoRoot, hooksDir string) {
 	if len(silenced) == 0 {
 		return
 	}
-	fmt.Fprintf(os.Stdout, "\nwarning: the machine's global %s does not fire here: git reads %s and nothing there hands off to it\n"+
+	fmt.Fprintf(os.Stderr, "\nwarning: the machine's global %s does not fire here: git reads %s and nothing there hands off to it\n"+
 		"  re-run `sparkwing pipeline hooks install` to restore the forwarder, clearing any hand-written hook of that name first -- install will not overwrite one\n",
 		strings.Join(silenced, ", "), hooksDir)
 }
@@ -894,7 +842,7 @@ func reportSilencedGlobalHooks(git githooks.Git, repoRoot, hooksDir string) {
 func surveyHooks(ungatedOnly bool, format string) error {
 	rows, err := surveyFleet(runGit)
 	if err != nil {
-		return fmt.Errorf("hooks status --all: %w", err)
+		return fmt.Errorf("hooks status --all-repos: %w", err)
 	}
 	if ungatedOnly {
 		rows = githooks.Ungated(rows)
@@ -942,7 +890,7 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 	_ = tw.Flush()
 	if len(ungated) == 0 && len(lapsed) == 0 {
 		fmt.Fprintf(w, "\n%d repo(s), every declared gate fires\n", len(rows))
-		fmt.Fprintln(w, "this is what the hook directories say; `sparkwing pipeline hooks status --prove --fleet` is what a commit says")
+		fmt.Fprintln(w, "this is what the hook directories say; `sparkwing pipeline hooks status --prove --all-repos` is what a commit says")
 		return nil
 	}
 	if len(ungated) > 0 {

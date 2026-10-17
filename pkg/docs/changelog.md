@@ -278,6 +278,12 @@ unlock.
   Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 ### Fixed
 
+- **CLI:** Hook install, uninstall and pipeline scaffolding accept `-o pretty|json|plain`
+  and emit JSON when piped. Hook `--all-repos` selects registered repositories.
+- **run:** Detached runs retain `--sw-request-id` through intake and retry and include it
+  in the JSON submission receipt without deduplicating submissions.
+
+
 - **controller:** Preserve manual ref namespaces in data record queries and responses. A record written under `manual:<ref>` can be selected with the same ref, and lookups keep verified and manual read grants separate.
 
 - **controller:** Read committed logs through the configured data backend and retain the claim's holder fence

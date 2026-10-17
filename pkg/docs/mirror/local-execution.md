@@ -167,7 +167,8 @@ part of the model. A successful submission receipt identifies the allocated run.
 It does not prove that execution has started.
 
 `--sw-idempotency-key` gives repeated detached submissions one durable identity.
-`--sw-request-id` is a tracing field and does not deduplicate work. JSON receipts
+`--sw-request-id` is a tracing field retained through intake and retry. The
+detached JSON receipt includes it as `request_id`. It does not deduplicate work. JSON receipts
 exclude raw arguments, captured environment values, private bearers and seal
 hashes. A log path is reported only when it exists.
 

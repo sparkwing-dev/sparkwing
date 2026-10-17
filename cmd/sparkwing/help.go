@@ -130,6 +130,9 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	if fs.Lookup("help") == nil {
 		fs.BoolP("help", "h", false, helpFlag.Desc)
 	}
+	if fs.Lookup("help-all") == nil {
+		fs.Bool("help-all", false, "show all help")
+	}
 	if err := fs.Parse(args); err != nil {
 		if strings.Contains(err.Error(), "needs an argument") && (strings.Contains(err.Error(), "output") || strings.Contains(err.Error(), "-o")) {
 			return fmt.Errorf("%s: --output requires pretty|json|plain", cmd.Path)
@@ -151,14 +154,12 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	if err := f.Value.Set(mode); err != nil {
 		return err
 	}
-	if help, err := fs.GetBool("help"); err == nil && help {
+	allHelp, _ := fs.GetBool("help-all")
+	if help, err := fs.GetBool("help"); err == nil && (help || allHelp) {
 		if err := writeCommandHelp(cmd, os.Stdout, mode); err != nil {
 			return err
 		}
 		return errHelpRequested
-	}
-	if !hasOutput && fs.Changed("output") {
-		return fmt.Errorf("%s: --output is not supported", cmd.Path)
 	}
 	return validateFlagDeps(cmd, fs)
 }

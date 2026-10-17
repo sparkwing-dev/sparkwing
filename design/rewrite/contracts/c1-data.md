@@ -3828,3 +3828,10 @@ selects the same tenant, numeric repository, pipeline and live schedule's
 repository automation consent. It locks the installation before locking and
 rechecking that relation. Contents-only minting, exact repository and extra IDs,
 claim fencing and committing audit remain the existing source-release path.
+
+## Detached request trace
+
+`runspec.Request.RequestID` carries optional detached submission trace metadata.
+The ordinary request seal, intake persistence and retry clone retain it. It
+carries no authority and does not replace the intake idempotency key. No schema
+column is added because it lives in the existing request JSON.

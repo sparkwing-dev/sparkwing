@@ -493,3 +493,7 @@ func (p *Lint) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunCo
 ```bash
 sparkwing run lint        # runs locally; no git hook required
 ```
+
+Hook installation and removal report the resulting hook status. Piped commands
+emit JSON records by default. Use `-o plain` for hook names or `-o pretty` for a
+readable report. Installation progress and warnings go to stderr.

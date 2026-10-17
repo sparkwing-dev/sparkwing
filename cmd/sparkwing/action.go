@@ -60,16 +60,12 @@ func runPipeline(args []string) error {
 		return runPipelineList(args[1:])
 	case "describe":
 		return runPipelineDescribe(args[1:])
-	case "new":
-		return runPipelineNew(args[1:])
 	case "lint":
 		return runPipelineLint(args[1:])
 	case "plan":
 		return runPipelinePlan(args[1:])
 	case "trigger":
 		return runPipelineTrigger(args[1:])
-	case "hooks":
-		return runHooks(args[1:])
 	case "sparks":
 		return runSparks(args[1:])
 	default:

@@ -56,6 +56,7 @@ type runFlags struct {
 
 	detached       bool
 	pipelineRef    string
+	requestID      string
 	idempotencyKey string
 	outputFormat   string
 	outputOrigin   settings.Origin
@@ -105,7 +106,7 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		only: inv.Value("sw-only"), noCache: inv.Bool("sw-no-memo"),
 		dryRun: inv.Bool("sw-dry-run"), allow: inv.Flags["sw-allow-risk"],
 		index: inv.Value("sw-index"), runHandleFile: inv.Value("sw-run-handle-file"),
-		detached: inv.Bool("sw-detached"), idempotencyKey: inv.Value("sw-idempotency-key"),
+		detached: inv.Bool("sw-detached"), idempotencyKey: inv.Value("sw-idempotency-key"), requestID: inv.Value("sw-request-id"),
 		outputFormat: output, outputOrigin: outputOrigin,
 	}, inv.Args
 }

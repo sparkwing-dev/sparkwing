@@ -72,7 +72,7 @@ func TestInstallFleet_CountsWhatItArmedAndNamesWhatItDidNot(t *testing.T) {
 	f.registerRepos(t, f.repo, red, quiet)
 
 	var err error
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		err = installFleet(installOptions{prove: proverFailingIn(red)})
 	})
 	if err == nil {
@@ -92,7 +92,7 @@ func TestInstallFleet_CountsARepoWithNoGateApartFromTheOnesItArmed(t *testing.T)
 	notifier := f.addRepo(t, "notifier", notifyOnlyProject)
 	f.registerRepos(t, f.repo, notifier)
 
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		if err := installFleet(installOptions{}); err != nil {
 			t.Fatalf("installFleet: %v", err)
 		}
@@ -111,7 +111,7 @@ func TestInstallFleet_LeavesTheRepoWhoseGateCannotRunUnarmed(t *testing.T) {
 	red := f.addRepo(t, "redgate", gateProject)
 	f.registerRepos(t, f.repo, red)
 
-	captureStdout(t, func() {
+	captureStderr(t, func() {
 		if err := installFleet(installOptions{prove: proverFailingIn(red)}); err == nil {
 			t.Fatal("rejected installation returned success")
 		}
@@ -131,7 +131,7 @@ func TestInstallFleet_SweepsOnlyTheRegisteredCheckouts(t *testing.T) {
 	unregistered := f.addRepo(t, "unregistered", gateProject)
 	f.registerRepos(t, f.repo)
 
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		if err := installFleet(installOptions{}); err != nil {
 			t.Fatalf("installFleet: %v", err)
 		}
@@ -149,7 +149,7 @@ func TestInstallFleet_SaysSoWhenTheRegistryIsEmpty(t *testing.T) {
 	f.asProcessEnv(t)
 	f.registerRepos(t)
 
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		if err := installFleet(installOptions{}); err != nil {
 			t.Fatalf("installFleet: %v", err)
 		}
@@ -166,7 +166,7 @@ func TestInstallFleet_FailsTheRepoWhoseConfigDoesNotLoad(t *testing.T) {
 	f.registerRepos(t, f.repo, broken)
 
 	var err error
-	out := captureStdout(t, func() { err = installFleet(installOptions{}) })
+	out := captureStderr(t, func() { err = installFleet(installOptions{}) })
 	if err == nil {
 		t.Fatalf("the sweep passed over a repo whose config does not load:\n%s", out)
 	}
@@ -212,7 +212,7 @@ func TestSurveyFleet_ReportsAnUnloadableConfigRatherThanNoGates(t *testing.T) {
 func TestStatusHooks_FailsWhenTheConfigNoLongerLoads(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)
-	captureStdout(t, func() {
+	captureStderr(t, func() {
 		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
 			t.Fatalf("installHooks: %v", err)
 		}

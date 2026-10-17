@@ -242,6 +242,16 @@ func runSparkwing(args []string) (result error) {
 	args = invocationArgs(inv)
 	toolchainReplayArgs = args
 	noteVersionTransition(os.Stderr, args[0])
+	switch inv.Command.Path {
+	case "sparkwing pipeline new":
+		return runPipelineNew(inv)
+	case "sparkwing pipeline hooks install":
+		return runHooksInstall(inv)
+	case "sparkwing pipeline hooks uninstall":
+		return runHooksUninstall(inv)
+	case "sparkwing pipeline hooks status":
+		return runHooksStatus(inv)
+	}
 	return dispatchCommand(args)
 }
 

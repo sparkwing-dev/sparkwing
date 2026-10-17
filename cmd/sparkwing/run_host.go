@@ -331,9 +331,10 @@ func emitLocalRunReceipt(out io.Writer, response controllerwire.CreateRunRespons
 		return localRunProtocolError("detached submission produced no run ID")
 	}
 	receipt := struct {
-		RunID    string `json:"run_id"`
-		Replayed bool   `json:"replayed"`
-	}{response.RunID, response.Replayed}
+		RunID     string `json:"run_id"`
+		RequestID string `json:"request_id,omitempty"`
+		Replayed  bool   `json:"replayed"`
+	}{response.RunID, response.Request.Request.RequestID, response.Replayed}
 	switch format {
 	case "json":
 		return json.NewEncoder(out).Encode(receipt)

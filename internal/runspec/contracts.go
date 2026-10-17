@@ -372,6 +372,7 @@ type Request struct {
 	Origin            Origin                `json:"origin"`
 	Dispatch          Dispatch              `json:"dispatch"`
 	Reason            string                `json:"reason,omitempty"`
+	RequestID         string                `json:"request_id,omitempty"`
 	LocalSecretNames  []string              `json:"local_secret_names,omitempty"`
 	SecretArgs        Optional[[]string]    `json:"secret_args"`
 	RequestedArgs     map[string]string     `json:"requested_args"`

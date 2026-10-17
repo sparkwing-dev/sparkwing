@@ -75,7 +75,7 @@ func runCacheInfo(args []string) error {
 	var output string
 	var all bool
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	fs.BoolVar(&all, "all", false, "List every entry rather than the ten most recent")
+	fs.BoolVar(&all, "all-entries", false, "List every entry rather than the ten most recent")
 	docsCache := fs.Bool("docs", false, "report the docs --web fetch cache instead")
 	if err := parseAndCheck(cmdCacheInfo, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -177,7 +177,7 @@ func runCacheInfo(args []string) error {
 				ownerLabel(e.Owners, all))
 		}
 		if !all && len(entries) > len(shown) {
-			fmt.Printf("  %s\n", color.Dim(fmt.Sprintf("... and %d more (--all to list)", len(entries)-len(shown))))
+			fmt.Printf("  %s\n", color.Dim(fmt.Sprintf("... and %d more (--all-entries to list)", len(entries)-len(shown))))
 		}
 	})
 }
@@ -190,7 +190,7 @@ func runCachePrune(args []string) error {
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	fs.StringVar(&maxBytesRaw, "max-bytes", "", "byte ceiling, e.g. 512MiB")
 	fs.IntVar(&maxEntries, "max-entries", -1, "entry ceiling")
-	fs.BoolVar(&all, "all", false, "remove every inactive entry")
+	fs.BoolVar(&all, "all-entries", false, "remove every inactive entry")
 	docsCache := fs.Bool("docs", false, "clear the docs --web fetch cache instead")
 	if err := parseAndCheck(cmdCachePrune, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {

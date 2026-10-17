@@ -174,11 +174,11 @@ func TestHooksCommands_InstallStatusAndUninstallDriveTheWholeChain(t *testing.T)
 	hooksDir := filepath.Join(f.repo, ".git", "hooks")
 
 	out := captureStdout(t, func() {
-		if err := runIn(t, f.repo, runHooksInstall, "--no-prove"); err != nil {
+		if err := runIn(t, f.repo, parseHooksInstall, "--no-prove"); err != nil {
 			t.Fatalf("hooks install: %v", err)
 		}
 	})
-	if !strings.Contains(out, "installed pre-commit -> gate, then the global hook") {
+	if !strings.Contains(out, `"chains_global":true`) {
 		t.Errorf("install should chain the gate ahead of the global hook:\n%s", out)
 	}
 	if got := strings.TrimSpace(f.git(t, "config", "--local", "core.hooksPath")); got != hooksDir {
@@ -186,7 +186,7 @@ func TestHooksCommands_InstallStatusAndUninstallDriveTheWholeChain(t *testing.T)
 	}
 
 	out = captureStdout(t, func() {
-		if err := runIn(t, f.repo, runHooksStatus, "--output", "pretty"); err != nil {
+		if err := runIn(t, f.repo, parseHooksStatus, "--output", "pretty"); err != nil {
 			t.Fatalf("hooks status: %v", err)
 		}
 	})
@@ -196,11 +196,11 @@ func TestHooksCommands_InstallStatusAndUninstallDriveTheWholeChain(t *testing.T)
 	}
 
 	out = captureStdout(t, func() {
-		if err := runIn(t, f.repo, runHooksUninstall); err != nil {
+		if err := runIn(t, f.repo, parseHooksUninstall); err != nil {
 			t.Fatalf("hooks uninstall: %v", err)
 		}
 	})
-	if !strings.Contains(out, "removed pre-commit") {
+	if !strings.Contains(out, `"installed":0`) {
 		t.Errorf("uninstall should report what it removed:\n%s", out)
 	}
 	if got, err := f.tryGit(f.repo, "config", "--local", "core.hooksPath"); err == nil {
@@ -216,9 +216,9 @@ func TestHooksCommands_RejectARepoWithNoSparkwingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, run := range map[string]func([]string) error{
-		"install":   runHooksInstall,
-		"uninstall": runHooksUninstall,
-		"status":    runHooksStatus,
+		"install":   parseHooksInstall,
+		"uninstall": parseHooksUninstall,
+		"status":    parseHooksStatus,
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := runIn(t, bare, run)

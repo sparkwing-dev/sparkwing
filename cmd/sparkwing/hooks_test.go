@@ -74,7 +74,7 @@ func gateRepo(t *testing.T) string {
 func installInto(t *testing.T, git githooks.Git, repo string) string {
 	t.Helper()
 	var err error
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		_, err = installHooks(git, repo, filepath.Join(repo, ".sparkwing"), installOptions{})
 	})
 	if err != nil {
@@ -507,7 +507,7 @@ func TestHooksStatus_ReportsAGlobalHookNothingHandsOffTo(t *testing.T) {
 	installInto(t, git.run, repo)
 	writeRepoFile(t, filepath.Join(repo, ".git", "hooks", "prepare-commit-msg"), "#!/bin/sh\necho hand written\n")
 
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		if err := statusHooks(git.run, repo, "pretty"); err != nil {
 			t.Fatalf("status: %v", err)
 		}
@@ -722,7 +722,7 @@ func TestHooksUninstallStillRemovesHooksAfterTheProjectFilesAreGone(t *testing.T
 	hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
 	writeExec(t, hook, renderHookScript("pre-commit", []string{"lint"}, false))
 	captureStdout(t, func() {
-		if err := runIn(t, filepath.Join(repo, ".sparkwing"), runHooksUninstall); err != nil {
+		if err := runIn(t, filepath.Join(repo, ".sparkwing"), parseHooksUninstall); err != nil {
 			t.Fatalf("hooks uninstall with no sparkwing.yaml or go.mod: %v", err)
 		}
 	})

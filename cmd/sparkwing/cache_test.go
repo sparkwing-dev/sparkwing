@@ -125,7 +125,7 @@ func TestCachePruneJSONReportsBoundedOutcome(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"--all", "-o", "json"})
+		runErr = runCachePrune([]string{"--all-entries", "-o", "json"})
 	})
 	if runErr != nil {
 		t.Fatalf("cache prune: %v", runErr)
@@ -158,7 +158,7 @@ func TestCachePruneJSONReportsAPIFailure(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"--all", "-o", "json"})
+		runErr = runCachePrune([]string{"--all-entries", "-o", "json"})
 	})
 	if runErr == nil {
 		t.Fatal("cache prune hid API failure")
@@ -210,7 +210,7 @@ func TestCachePruneRejectsOutputBeforeMutation(t *testing.T) {
 		calls++
 		return bincache.PruneResult{}, nil
 	}
-	if err := runCachePrune([]string{"--all", "-o", "bogus"}); err == nil {
+	if err := runCachePrune([]string{"--all-entries", "-o", "bogus"}); err == nil {
 		t.Fatal("cache prune accepted an invalid output format")
 	}
 	if calls != 0 {
