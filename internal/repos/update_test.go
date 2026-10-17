@@ -246,26 +246,15 @@ func TestUpdateFleet_SilentWithoutProgress(t *testing.T) {
 	}
 }
 
-func TestUpdateRepo_BaselineUnplannableIsSetAside(t *testing.T) {
+func TestUpdateRepo_BaselineFailurePreventsBumpAndCommit(t *testing.T) {
 	f := &fakeOps{
-		pin:        "v0.15.6",
-		pipelines:  []string{"deploy", "gate"},
-		beforeErr:  map[string]error{"deploy": errors.New("inputs for pipeline \"deploy\": --tag is required")},
-		planBefore: map[string]Plan{"gate": planWith("a")},
-		planAfter:  map[string]Plan{"gate": planWith("a")},
+		pin: "v0.15.6", pipelines: []string{"deploy", "gate"},
+		beforeErr:  map[string]error{"deploy": errors.New("inputs for pipeline deploy: --tag is required")},
+		planBefore: map[string]Plan{"gate": planWith("a")}, planAfter: map[string]Plan{"gate": planWith("a")},
 	}
-	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
-	if v.Kind != VerdictClean {
-		t.Fatalf("kind = %s (%s), want clean", v.Kind, v.Err)
-	}
-	if len(v.Diffs) != 1 || v.Diffs[0].Pipeline != "gate" {
-		t.Fatalf("diffs = %+v, want only gate", v.Diffs)
-	}
-	if len(v.Uncompared) != 1 || v.Uncompared[0].Pipeline != "deploy" || !strings.Contains(v.Uncompared[0].Reason, "--tag") {
-		t.Fatalf("uncompared = %+v", v.Uncompared)
-	}
-	if !strings.Contains(verdictLine(v), "1 pipeline(s) not compared") {
-		t.Errorf("verdict line = %q", verdictLine(v))
+	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Apply: true})
+	if v.Kind != VerdictBroken || !strings.Contains(v.Err, "deploy (before bump)") || f.afterBump || f.committed || !f.restored {
+		t.Fatalf("verdict=%+v bumped=%v committed=%v restored=%v", v, f.afterBump, f.committed, f.restored)
 	}
 }
 

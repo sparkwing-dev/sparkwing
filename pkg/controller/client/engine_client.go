@@ -28,20 +28,12 @@ type EngineOptions struct {
 // Otherwise Launcher selects /launcher/claim and ordinary claims use /runners/claim.
 // Here intake is never transparently retried: replay cannot reproduce HereBearer.
 func NewEngineClient(options EngineOptions) (controllerwire.Controller, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 // NewRunReader uses the authenticated controller transport for public run views.
 func NewRunReader(options EngineOptions) (controllerwire.RunReader, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func newEngineClient(options EngineOptions) (*engineClient, error) {

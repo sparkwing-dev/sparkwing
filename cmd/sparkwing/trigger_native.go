@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
@@ -24,9 +25,6 @@ import (
 func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result controllerwire.CreateRunRequest, resultErr error) {
 	unavailable := func(message string) (controllerwire.CreateRunRequest, error) {
 		return controllerwire.CreateRunRequest{}, &apierr.Error{Code: apierr.Unavailable, Message: message}
-	}
-	if flags.runner == hereRunnerFlag {
-		return unavailable("here intake requires the reason to survive the sealed request and replay")
 	}
 	if len(flags.allowSecretFiles) != 0 && !flags.workingTree {
 		return unavailable("--allow-secret-file requires --working-tree")
@@ -119,12 +117,15 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	input := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: settings.Values{Options: runspec.Options{Profile: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: flags.profile}}}}}
 	if flags.runner != "" {
 		selection := runspec.RunnerSelection{Kind: runspec.RunnerName, Value: flags.runner}
+		if flags.runner == hereRunnerFlag {
+			selection.Kind, selection.Value = runspec.RunnerHere, ""
+		}
 		if label, ok := strings.CutPrefix(flags.runner, "label="); ok {
 			selection.Kind, selection.Value = runspec.RunnerLabel, label
 		}
 		input.Flags.Runner.Set, input.Flags.Runner.Value = true, selection
 	}
-	result, err = prepareTriggerRequest(triggerRequestInput{source: selected, settings: input, described: described, args: flags.passthrough, env: map[string]string{}})
+	result, err = prepareTriggerRequest(triggerRequestInput{source: selected, settings: input, described: described, reason: flags.reason, args: flags.passthrough, env: map[string]string{}})
 	if err != nil || snapshot == nil {
 		return result, err
 	}
@@ -146,7 +147,7 @@ func snapshotTriggerCheckout(ctx context.Context, snapshot *worktreeSnapshot) (s
 }
 
 func triggerInspectionCheckout(ctx context.Context, repo, sha, bundle, workspace string) (string, error) {
-	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: os.Environ()}, procenv.Runtime{})
+	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, procenv.Runtime{})
 	if err != nil {
 		return "", err
 	}

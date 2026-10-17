@@ -107,11 +107,36 @@ func TestRenderHookScript_BlockingHooksAbortOnFailure(t *testing.T) {
 	}
 }
 
-func TestRenderHookScript_QuietByDefault(t *testing.T) {
+func TestRenderedHooksUseRunOutputGrammar(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX hook")
+	}
+	bin := t.TempDir()
+	writeExec(t, filepath.Join(bin, "sparkwing"), "#!/bin/sh\nprintf '%s\\n' \"$SPARKWING_LOG_FORMAT\"\n")
 	for _, hook := range []string{"pre-commit", "pre-push", "post-commit"} {
-		script := renderHookScript(hook, []string{"lint"}, false)
-		if !strings.Contains(script, `export SPARKWING_LOG_FORMAT="${SPARKWING_LOG_FORMAT:-quiet}"`) {
-			t.Errorf("%s hook should default the log format to quiet while honoring an override:\n%s", hook, script)
+		for _, format := range []string{"", "json", "pretty", "plain"} {
+			t.Run(hook+"/"+format, func(t *testing.T) {
+				t.Setenv("SPARKWING_LOG_FORMAT", format)
+				command := exec.CommandContext(t.Context(), "sh", "-c", renderHookScript(hook, []string{"lint"}, false))
+				command.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				raw, err := command.Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				selected := strings.TrimSpace(string(raw))
+				t.Setenv("SPARKWING_LOG_FORMAT", selected)
+				flags, _ := parseRunFlags(nil)
+				if flags.parseErr != nil {
+					t.Fatalf("generated hook output %q: %v", selected, flags.parseErr)
+				}
+				want := format
+				if want == "" {
+					want = "plain"
+				}
+				if flags.outputFormat != want {
+					t.Fatalf("output = %s, want %s", flags.outputFormat, want)
+				}
+			})
 		}
 	}
 }

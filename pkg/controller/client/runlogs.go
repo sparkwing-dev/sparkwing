@@ -12,11 +12,7 @@ import (
 var _ controllerwire.LogReader = (*engineClient)(nil)
 
 func NewLogReader(options EngineOptions) (controllerwire.LogReader, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) ReadLogs(ctx context.Context, run string, q controllerwire.LogQuery) (controllerwire.LogPage, error) {

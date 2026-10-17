@@ -112,7 +112,7 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if buildEnv == nil {
 		buildEnv = procenv.Build
 	}
-	env, err := buildEnv(procenv.Git, procenv.Base{Local: true, Captured: input.environment}, procenv.Runtime{})
+	env, err := buildEnv(procenv.Git, procenv.Base{Local: true, Captured: input.environment, Masker: secrets.NewMasker()}, procenv.Runtime{})
 	if err != nil {
 		return result, err
 	}
@@ -279,6 +279,7 @@ func triggerRepository(ctx context.Context, remote string, githubID func(context
 
 type triggerRequestInput struct {
 	idempotencyKey string
+	reason         string
 	source         preparedTriggerSource
 	settings       settings.Inputs
 	described      []nodeproto.PipelineDescription
@@ -333,7 +334,7 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 		key = rand.Text()
 	}
 	return controllerwire.CreateRunRequest{IdempotencyKey: key, Request: runspec.Request{
-		Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
+		Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Reason: input.reason,
 		Git: input.source.git, Source: input.source.source, Options: options, Env: env,
 		RequestedArgs: args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: secretArgs},
 	}}, nil

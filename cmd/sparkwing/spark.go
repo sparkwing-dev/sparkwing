@@ -45,7 +45,7 @@ func runSparks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSparks, os.Stderr)
-		return errors.New("spark: subcommand required (catalog|list|lint|resolve|update|add|remove|inflate)")
+		return errors.New("spark: subcommand required (catalog|list|lint|update|add|remove|inflate)")
 	}
 	switch args[0] {
 	case "catalog":
@@ -54,8 +54,6 @@ func runSparks(args []string) error {
 		return runSparksList(args[1:])
 	case "lint":
 		return runSparksLint(args[1:])
-	case "resolve":
-		return runSparksResolve(args[1:])
 	case "update":
 		return runSparksUpdate(args[1:])
 	case "add":
@@ -416,35 +414,6 @@ func resolveSparkJSONPath(verb, target string) (libDir, manifestPath string, err
 		return target, manifestPath, nil
 	}
 	return filepath.Dir(target), target, nil
-}
-
-func runSparksResolve(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksResolve.Path, flag.ContinueOnError)
-	quiet := fs.BoolP("quiet", "q", false, "suppress progress output; print only changes")
-	if err := parseAndCheck(cmdSparksResolve, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	sparkwingDir, err := defaultSparkwingDir()
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
-	if err != nil {
-		return err
-	}
-	if changed {
-		fmt.Fprintf(os.Stdout, "overlay written: %s\n",
-			filepath.Join(sparkwingDir, sparks.OverlayModfileName))
-		return nil
-	}
-	if !*quiet {
-		fmt.Fprintln(os.Stdout, "up-to-date (no overlay changes)")
-	}
-	return nil
 }
 
 func runSparksUpdate(args []string) error {

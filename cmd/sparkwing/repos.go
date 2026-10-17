@@ -413,9 +413,7 @@ func printOneVerdict(v repos.Verdict) {
 			fmt.Printf("    %s\n", line)
 		}
 	}
-	for _, u := range v.Uncompared {
-		fmt.Printf("      %s\n", color.Dim("not compared: "+u.Pipeline+" -- "+compactReason(u.Reason)))
-	}
+
 	if len(v.Guides) > 0 {
 		fmt.Printf("      %s\n", color.Dim("migration guides in range:"))
 		for _, g := range v.Guides {
@@ -491,7 +489,7 @@ func (o execOps) Plan(sparkwingDir, pipeline string) (repos.Plan, error) {
 	if err != nil {
 		self = "sparkwing"
 	}
-	cmd := exec.CommandContext(o.context(), self, "pipeline", "plan", "--name", pipeline, "-o", "json")
+	cmd := exec.CommandContext(o.context(), self, "pipeline", "plan", "--pipeline", pipeline, "-o", "json")
 	cmd.Dir = filepath.Dir(sparkwingDir)
 	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer

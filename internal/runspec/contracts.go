@@ -371,6 +371,7 @@ type Request struct {
 	Mode              IntakeMode            `json:"mode"`
 	Origin            Origin                `json:"origin"`
 	Dispatch          Dispatch              `json:"dispatch"`
+	Reason            string                `json:"reason,omitempty"`
 	LocalSecretNames  []string              `json:"local_secret_names,omitempty"`
 	SecretArgs        Optional[[]string]    `json:"secret_args"`
 	RequestedArgs     map[string]string     `json:"requested_args"`

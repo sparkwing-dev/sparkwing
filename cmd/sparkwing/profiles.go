@@ -9,9 +9,10 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/term"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
-	"golang.org/x/term"
 )
 
 func runProfiles(args []string) error {
@@ -58,7 +59,7 @@ func setProfile(inv clisurface.Invocation, format string) error {
 			return err
 		}
 	}
-	token := inv.Value("token")
+	var token string
 	if inv.Bool("token-stdin") {
 		token, err = readTokenStdin(os.Stdin, os.Stderr, fmt.Sprintf("new bearer token for %q", name))
 		if err != nil {
@@ -78,7 +79,7 @@ func setProfile(inv clisurface.Invocation, format string) error {
 		if inv.Has("controller") {
 			p.Controller.URL = base
 		}
-		if inv.Has("token") || inv.Bool("token-stdin") {
+		if inv.Bool("token-stdin") {
 			p.Controller.Token = &token
 		}
 		profiles[name], updated = p, p

@@ -180,13 +180,11 @@ has already landed, so the hook runs its pipelines, tolerates failures,
 and always exits zero. Keep post-commit pipelines fast or detach their
 slow work; the hook runs in the commit's foreground.
 
-Managed hooks render quietly by default: each run prints one progress
-line and a one-line pass/fail status with the run id, instead of
-streaming every step into the commit or push. On failure the hook
-surfaces the failing step's error; the full log stays retrievable with
-`sparkwing runs logs --run <id>`. The hook sets
-`SPARKWING_LOG_FORMAT=quiet`; export a different value (`pretty` or
-`json`) before the git command to see the full stream.
+Managed hooks use plain output by default. Runs stream their output and print
+start and finish records with the run ID and status. The hook sets
+`SPARKWING_LOG_FORMAT=plain`. Export `pretty` or `json` before the Git command
+to select another format. Installation proofs also use plain output and report
+the last output line when the gate fails.
 
 ### Hooks are per repository, and the repository says so
 

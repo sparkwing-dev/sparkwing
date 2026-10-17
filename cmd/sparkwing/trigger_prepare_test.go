@@ -482,3 +482,43 @@ func FuzzTriggerRepositoryCredentialsNeverReachIntake(f *testing.F) {
 		}
 	})
 }
+
+func TestTriggerCheckoutsAcceptAuthenticatedProxy(t *testing.T) {
+	repo, sha := triggerPreparationRepo(t)
+	runSnapshotGit(t, repo, "remote", "set-url", "origin", "https://git.example/acme/app.git")
+	t.Setenv("HTTPS_PROXY", "https://user:pass@proxy")
+	selected, err := prepareTriggerSource(t.Context(), triggerSourceInput{checkout: repo, pipeline: "deploy-prod", environment: os.Environ()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.source.Ref != sha {
+		t.Fatal("proxy changed source revision")
+	}
+	checkout, err := triggerInspectionCheckout(t.Context(), repo, sha, "", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(runSnapshotGit(t, checkout, "rev-parse", "HEAD")); got != sha {
+		t.Fatalf("inspection revision = %s", got)
+	}
+}
+
+func FuzzTriggerGitProxyCredentialsStayPrivate(f *testing.F) {
+	f.Add("private-password")
+	f.Add("引数\"'/@:&=\n")
+	f.Fuzz(func(t *testing.T, value string) {
+		value = "private-" + strings.ReplaceAll(strings.ToValidUTF8(value, "?"), "\x00", "?") + "-credential"
+		repo, _ := triggerPreparationRepo(t)
+		runSnapshotGit(t, repo, "remote", "set-url", "origin", "https://git.example/acme/app.git")
+		proxy := "https://" + url.UserPassword("private-user", value).String() + "@proxy"
+		input := triggerSourceInput{checkout: repo, pipeline: "deploy-prod", environment: append(os.Environ(), "HTTPS_PROXY="+proxy)}
+		selected, err := prepareTriggerSource(t.Context(), input)
+		if err != nil {
+			t.Fatalf("proxy prevented local Git inspection: %v", err)
+		}
+		_, err = selected.checkout.read(t.Context(), "rev-parse", "--verify", "missing^{commit}")
+		if err == nil || strings.Contains(err.Error(), value) || strings.Contains(err.Error(), proxy) {
+			t.Fatalf("Git error disclosed proxy: %v", err)
+		}
+	})
+}

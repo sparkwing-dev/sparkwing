@@ -14,11 +14,7 @@ var _ controllerwire.PoolManager = (*engineClient)(nil)
 
 // NewPoolManager shares authenticated transport and retry policy with engines.
 func NewPoolManager(options EngineOptions) (controllerwire.PoolManager, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) ListPools(ctx context.Context) (controllerwire.Pools, error) {

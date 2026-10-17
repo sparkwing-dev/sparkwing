@@ -16,9 +16,6 @@ import (
 )
 
 func addProfile(inv clisurface.Invocation, format string) error {
-	if inv.Has("scope") {
-		return errors.New("profiles add: credential enrollment with --scope is unavailable; use --token-stdin with an existing credential")
-	}
 	base, err := normalizeControllerURL(inv.Value("controller"))
 	if err != nil {
 		return err

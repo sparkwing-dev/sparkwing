@@ -14,8 +14,7 @@ still needs it.
 one dashboard, one run history, and one queue: a triggered run waits there
 until a runner claims it, and fails with `queue_timeout` at the queue
 deadline when none does (see [scheduling.md](scheduling.md)). The
-same command reaches any controller you can reach, including one your team
-runs:
+Cloud profile selects the hosted controller:
 
 ```bash
 sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
@@ -23,8 +22,8 @@ sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
 
 Start local. Read [Install](#install) and [Quick start](#quick-start),
 then [Sparkwing Cloud](#sparkwing-cloud) when you want a team to see the
-same runs. [Advanced deployments](#advanced-deployments) covers hosting
-the state, cache, or controller yourself.
+same runs. [Self-hosted runners](self-hosting.md#add-workstation-capacity)
+adds capacity from your own machines to Cloud.
 
 ## Install
 
@@ -175,10 +174,8 @@ copies its source into your repo. See
 
 Each `sparkwing` invocation compiles `.sparkwing/` and runs the pipeline as a host
 subprocess. Run state lives under `~/.sparkwing/` (SQLite + log files).
-The dashboard commands use the local controller lifecycle. This rewrite build
-still needs its native runtime, managed-service and log bindings. Commands report
-`unavailable` when those bindings are absent. See [Local dashboard](native-mode.md)
-for the current integration boundary.
+The local controller starts on demand and the dashboard commands manage its
+lifecycle. See [Local dashboard](native-mode.md) for service installation.
 Dashboard records include `url` when known. Use `--output plain` for a single
 `running` or `stopped` value, or `--output pretty` for the terminal layout.
 A stopped `status` still exits 1; stopping an absent server exits 0.
@@ -351,17 +348,22 @@ user-managed deploy targets, not local sparkwing deployments.
 
 Sparkwing Cloud is the hosted controller. A controller owns the shared
 dashboard, run history, scheduling, webhooks, and tokens, and machines
-reach it over outbound HTTPS. The same command reaches any controller you
-can reach, Sparkwing Cloud and one your team runs alike.
+reach it over outbound HTTPS. Self-hosted runners register to Cloud and
+supply capacity without operating a shared controller.
 
 ```bash
 sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
 ```
 
-Use an existing member credential for team commands. A fresh self-hosted
-controller needs a team and its first team-admin credential. The operator
-onboarding route for that step is pending Korey's decision. A deployment bootstrap
-seed grants deployment operations only. See [Self-hosting](self-hosting.md).
+Use an existing member credential for team commands. Cloud operators can create
+a team and its first administrator without OAuth:
+
+```bash
+sparkwing operator teams create --team support-test --display-name Support --profile deployment -o json
+```
+
+The deployment profile requires `operator.tokens`. The first team credential is
+returned once. See [Cloud operations](auth.md#cloud-operations-and-test-environments).
 
 It reads the token from stdin, checks health, authenticates through
 `/api/v1/auth/whoami`, and saves the profile in
@@ -439,22 +441,7 @@ Runs started by a push come with the Sparkwing GitHub App.
 
 ## Advanced deployments
 
-Everything below is optional. A team on the two paths above never has to
-read it; reach for one of these when you host the state, cache, or
-controller yourself. Each is one profile away, and pipeline code does not
-change between them.
-
-**Self-hosted controller.** The `sparkwing-full` Helm chart deploys the
-controller, dashboard, cache, and Kubernetes runner into a
-cluster you operate. See [Self-hosting](self-hosting.md) and
-[hosted controller](deployment-modes.md#hosted-controller).
-
-**One of your own machines as the controller.** A single-instance
-controller on one box, backed by SQLite and local disk, lets a laptop
-trigger pipelines on a desktop you own. See
-[one of your own machines as the controller](deployment-modes.md#one-of-your-own-machines-as-the-controller).
-
-**Profile surface YAML.** The `controller:` block and the `state` /
-`cache` / `logs` surfaces are documented in
-[Storage backends](backends.md), and the full field list in
-[config-reference.md](config-reference.md).
+The launch offering is Local and Cloud. Self-hosted runners register to Cloud.
+Operating a shared controller is deferred to a future licensed offering.
+The [deployment modes](deployment-modes.md) page compares the two modes.
+The controller chart stays available for Cloud operators.

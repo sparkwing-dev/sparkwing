@@ -70,8 +70,8 @@ func TestTriggerCommandPreparationFailureCannotSubmit(t *testing.T) {
 	}
 }
 
-func TestNativeTriggerRefusesMissingContractsBeforeIntake(t *testing.T) {
-	for _, flags := range []triggerFlags{{workingTree: true}, {runner: hereRunnerFlag}, {allowSecretFiles: []string{"private.env"}}} {
+func TestNativeTriggerRefusesIncompleteSourceBeforeIntake(t *testing.T) {
+	for _, flags := range []triggerFlags{{workingTree: true}, {allowSecretFiles: []string{"private.env"}}} {
 		request, err := prepareNativeTrigger(t.Context(), flags)
 		if err == nil || request.IdempotencyKey != "" || request.Request.Pipeline != "" || strings.Contains(err.Error(), "private.env") {
 			t.Fatalf("request=%+v error=%v", request, err)

@@ -45,6 +45,13 @@ against the persisted source ordinal in the committing transaction. An identical
 actor and digest may replay before comparison with the advanced ordinal, after
 authority is rechecked. A changed source ordinal cannot reuse that proof.
 
+## Here intake reasons
+
+`runspec.Request.Reason` retains the explicit here-trigger reason in the existing
+request JSON and canonical seal. Intake, replay and retry preserve it. Changing
+that reason under the original idempotency key conflicts. It adds no authority
+and does not alter one-time here bearer issuance.
+
 ## Committed retry selection
 
 `IntakeRequest.RetryMode` is separate from `Request`. An unset mode normalizes

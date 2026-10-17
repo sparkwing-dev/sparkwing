@@ -17,11 +17,7 @@ var _ controllerwire.ScheduleManager = (*engineClient)(nil)
 // NewScheduleManager uses the shared authenticated transport and route policy
 // for schedule observations, cadence edits and idempotent launches.
 func NewScheduleManager(options EngineOptions) (controllerwire.ScheduleManager, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) ListSchedules(ctx context.Context, q controllerwire.ScheduleQuery) (controllerwire.ScheduleOverview, error) {
@@ -188,11 +184,7 @@ var _ controllerwire.ScheduleRepositoryManager = (*engineClient)(nil)
 // NewScheduleRepositoryManager uses the common controller connection for
 // atomic replacement and withdrawal of a repository's schedule declarations.
 func NewScheduleRepositoryManager(options EngineOptions) (controllerwire.ScheduleRepositoryManager, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) WriteSchedules(ctx context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error) {

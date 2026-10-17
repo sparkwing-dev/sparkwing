@@ -115,3 +115,55 @@ func main() {
 		}
 	}
 }
+
+func TestPipelineAliasDiscoveryUsesConfiguredEntrypoint(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	projectAt(t, "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n  - name: deploy-stage\n    entrypoint: Deploy\n")
+	dir, err := findSparkwingDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSDKFixture(t, dir, `package main
+import (
+ "context"
+ sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+type pipeline struct{ sw.Base }
+func (pipeline) ShortHelp() string { return "entrypoint metadata" }
+func (pipeline) Plan(_ context.Context, p *sw.Plan, _ sw.NoInputs, _ sw.RunContext) error {
+ sw.Job(p, "verify", func(context.Context) error { return nil })
+ return nil
+}
+type unrelated struct{ pipeline }
+func (unrelated) ShortHelp() string { return "unrelated metadata" }
+func main() {
+ sw.Register("Deploy", func() sw.Pipeline[sw.NoInputs] { return pipeline{} })
+ sw.Register("deploy-prod", func() sw.Pipeline[sw.NoInputs] { return unrelated{} })
+ sw.Main()
+}
+`)
+	binary := filepath.Join(t.TempDir(), "pipeline")
+	command := exec.CommandContext(t.Context(), "go", "-C", dir, "build", "-mod=mod", "-o", binary, ".")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build SDK fixture: %v: %s", err, output)
+	}
+	if err := writeDescribeCache(t.Context(), dir, pipelineentry.Binary(binary)); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := gatherPipelinesCatalog(false)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("catalog=%+v err=%v", rows, err)
+	}
+	for index, name := range []string{"deploy-prod", "deploy-stage"} {
+		if rows[index].Name != name || rows[index].Entrypoint != "Deploy" || rows[index].Short != "entrypoint metadata" {
+			t.Fatalf("catalog=%+v", rows)
+		}
+	}
+	var output strings.Builder
+	if err := runInternalCompletePipelines(&output, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSuffix(output.String(), "\n"); got != "deploy-prod\t\tpipeline\tentrypoint metadata\ndeploy-stage\t\tpipeline\tentrypoint metadata" {
+		t.Fatalf("completion=%q", got)
+	}
+}

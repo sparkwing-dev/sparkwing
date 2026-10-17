@@ -1,4 +1,4 @@
-# Self-hosting Sparkwing
+# Self-hosted runners and Cloud operations
 
 The launch offering is Local and Cloud. Self-hosted runners register to Cloud.
 Operating your own shared controller is outside the launch offering. The
@@ -18,7 +18,7 @@ CLI hosts the run. Profiles select controller connections. Publication and
 remote-cache reads are separate opt-ins. See [Local execution](local-execution.md)
 for the execution and lifecycle integration boundaries.
 
-## Shared controller and dashboard
+## Cloud controller and dashboard
 
 The [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) is the
 repository's Kubernetes deployment surface. It requires an explicitly compatible
@@ -31,65 +31,25 @@ not create or delete a cluster. Native deployment parity remains a launch check.
 
 ### First shared deployment
 
-Create a private credentials directory and supply a controller capability seed:
+This is Cloud operator setup. Controller bootstrap credentials grant deployment
+operations. Team membership and runner enrollment require a team credential.
+Create a team and its first administrator through the audited operator command:
 
-```sh
-install -d -m 700 ./controller-credentials
-python3 -c 'import base64, secrets; print("swk_" + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("="))' > ./controller-credentials/bootstrap-admin-token
-chmod 600 ./controller-credentials/bootstrap-admin-token
-sparkwing-controller --credentials-dir "$PWD/controller-credentials" --require-auth
+```bash
+sparkwing operator teams create --team support-test --display-name Support --profile deployment -o json
 ```
 
-Startup provisions that seed once. It grants `operator.limits`,
-`operator.object_store` and `operator.tokens`. It cannot read team runs, create a
-team member credential, or enroll a runner. Private routes remain authenticated
-when no seed exists. There is no unauthenticated token-mint endpoint.
+The deployment profile needs `operator.tokens`. The command returns the first
+team credential once. See [Deployment bootstrap](auth.md#deployment-bootstrap)
+and the [controller chart](../charts/sparkwing-full/README.md) for credential files.
 
-Creating a team and its first team-admin credential through an operator
-onboarding route is pending Korey's decision. A fresh shared deployment cannot
-complete team setup through the public API yet. The Kubernetes end-to-end script
-stops at this pending step. Do not mint a legacy `kind:user, scopes:[admin]` token
-or write rows into the database as an installation workaround.
+Team members save their credential with `profiles add --token-stdin`. The command
+checks health and authenticates through `/api/v1/auth/whoami`. A deployment
+credential can pass the probe while remaining unable to call team routes.
 
-With an existing team member credential, save a profile and enroll a runner:
-
-```sh
-sparkwing profiles add --controller https://controller.example --profile team --token-stdin
-sparkwing runners add --profile team --runner builder
-sparkwing pipeline trigger build --profile team
-```
-
-`profiles add` verifies public health and authenticates with
-`GET /api/v1/auth/whoami`. Deployment credentials can pass this probe while
-remaining unable to call team routes. `tokens create --type member` issues a
-member credential. Runners enroll through `runners add`.
-
-Use `sparkwing pipeline trigger build --profile team --working-tree` to submit
-uncommitted changes. The CLI captures an immutable Git snapshot and commits its
-bytes through the controller's shared object store before creating the run.
-The run binds the bundle digest to the same team, repository and selected
-revisions. Workers acquire it with their awarded authority; it grants no App
-trust or verified-branch cache authority. Committed bundles awaiting intake expire
-after 24 hours; pending transfers follow signed-ticket expiry, and submitted
-source follows run retention.
-
-For GitHub, the CLI resolves numeric repository identity with `GH_TOKEN` or
-`GITHUB_TOKEN` when needed. The controller verifies identity independently:
-through its GitHub App, a configured team HTTPS source credential, or GitHub's
-public API for public repositories. The CLI never forwards its environment
-token to the controller.
-
-
-When isolating the CLI with `SPARKWING_HOME`, also set `SPARKWING_CONFIG` to a
-private config path before `profiles add`. The home selects runtime state.
-It does not relocate the machine config, and the write guard refuses an
-implicit write to the regular config from an isolated home:
-
-```sh
-export SPARKWING_HOME="$PWD/cli-state"
-export SPARKWING_CONFIG="$PWD/cli-config/config.yaml"
-sparkwing profiles add --controller https://controller.example --profile team --token-stdin
-```
+When isolating the CLI with `SPARKWING_HOME`, set `SPARKWING_CONFIG` to a private
+config path before saving a profile. The runtime home does not relocate the
+machine config.
 
 ### Node log retention
 
@@ -184,15 +144,6 @@ runners. Filesystem storage needs no CloudFront signing keys.
 Controller embedders configure authenticated data routes through
 `WithDataController`. Host storage bindings need separate wiring. See
 [Data downloads](api.md#data-downloads) for route behavior.
-The self-hosted controller runs without credit metering unless a signed license
-grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
-no credit or team billing routes, and gives teams unlimited room in the
-controller's storage-tier checks. Operator-set storage quotas still apply.
-The dashboard hides Billing. Customers who need Sparkwing Cloud or enterprise
-metering can contact Korey for help running the operator console and
-sparkwing-ops. See
-[Credits](auth.md#credits) for the licensed behavior.
-
 ### Storage class
 
 When you deploy sparkwing in-cluster (Helm chart at `charts/sparkwing-full`),
@@ -254,21 +205,6 @@ can seed acquisition, which still verifies the sealed commit.
 shapes: what a restore needs beside the database, how to prove a backup
 is good before relying on it, and what rollback means at each stage of a
 controller upgrade.
-
-## Migrating from the Docker Compose example
-
-Treat the Helm installation as a new deployment. Sparkwing provides no
-in-place conversion or automatic import for the old Compose volumes. Keep
-the controller and log data volumes until you decide whether
-their history must be retained, then:
-
-1. Deploy `sparkwing-full` with one compatible image set.
-2. Recreate controller tokens and update remote profiles with the new URL.
-3. Point workstation runners and webhooks at the new controller.
-4. Retire the Compose stack only after the new path completes a real pipeline.
-
-Pipelines that do not need shared history can move to direct local execution
-instead.
 
 ## Add workstation capacity
 

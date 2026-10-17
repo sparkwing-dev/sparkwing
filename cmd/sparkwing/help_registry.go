@@ -358,7 +358,6 @@ var (
 	cmdSparks             = surfaceCommand("sparkwing pipeline sparks")
 	cmdSparksList         = surfaceCommand("sparkwing pipeline sparks list")
 	cmdSparksLint         = surfaceCommand("sparkwing pipeline sparks lint")
-	cmdSparksResolve      = Command{Path: "sparkwing pipeline sparks resolve", Hidden: true}
 	cmdSparksUpdate       = surfaceCommand("sparkwing pipeline sparks update")
 	cmdSparksAdd          = surfaceCommand("sparkwing pipeline sparks add")
 	cmdSparksRemove       = surfaceCommand("sparkwing pipeline sparks remove")

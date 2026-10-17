@@ -152,6 +152,8 @@ spark, source, version and project-file path. Plain receipts emit the spark name
 Repository updates select the current checkout unless `--all-repos` is set.
 Apply is the default; `--dry-run` previews, including read-only SDK pin inspection
 with `--in-place`. Fleet application requires `--yes` before reading the fleet.
+Every baseline plan must succeed before a repository SDK update can bump or
+commit. The subprocess adapter uses `pipeline plan --pipeline NAME`.
 
 | Concern | Authoritative source |
 | --- | --- |
@@ -261,6 +263,8 @@ three operator sources. File, key and line survive the conversion. A captured
 winner keeps its original origin when another host consumes the sealed request.
 
 `RunnerSelection` chooses any, name, label or here for one run.
+The CLI retains `pipeline trigger --runner here --reason TEXT` as
+`Request.Reason`, which participates in intake hashing and survives replay and retry.
 `RunnerPreferences` resolves the machine's runner configuration at startup.
 Dry-run, no-memo, risk permissions, pause controls, debug, workers, output and
 publication/cache profiles all have request fields. Startup credentials and

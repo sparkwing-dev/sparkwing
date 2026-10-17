@@ -163,10 +163,13 @@ wired. Private environment retention remains a binding. Working-tree upload
 is integrated below. Native selected-engine process-tree cancellation remains unverified.
 The public command now uses this prepared request and sealed intake path.
 GitHub numeric-ID lookup and working-tree source binding use the integrated paths below.
-Captured environment delivery still needs a native binding. Initial here intake requires a contract for persisting
-the required reason and refuses before submission until that contract exists. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
-that reason. It must survive intake and replay before the CLI can replace the old
-path without dropping it. No foreign contract is changed by this component.
+Captured environment delivery still needs a native binding.
+`runspec.Request.Reason` carries the explicit `--runner here --reason` text in
+both request and spec seals. Intake, replay and retry preserve it with the
+selected `RunnerHere`. Changing the reason under an existing intake key is a
+conflict. Initial here intake uses the same native committed-source preparation,
+selected-engine inspection and authenticated controller client as other triggers.
+The reason adds no authority and does not change the one-time bearer rules.
 
 Sealed here resume and retry follow public logs with the caller's display
 credential. The retained bearer selects the named owner claim, and the fresh

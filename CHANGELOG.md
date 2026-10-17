@@ -20,6 +20,28 @@ unlock.
 
 ## [Unreleased]
 
+- **docs:** Present Local and Cloud as the launch modes, with self-hosted runners
+  registering to Cloud. Document operator team creation and remove cache-service
+  and self-hosted-controller onboarding promises.
+
+- **pipeline trigger:** Submit `--runner here` through native preparation and
+  retain its reason in the sealed request, including replay and retry.
+
+- **repos update:** Use `pipeline plan --pipeline` for comparisons. A failed
+  baseline stops the update before the SDK bump or commit.
+
+- **pipeline discovery:** Join descriptions by the configured entrypoint while
+  displaying the invoked pipeline name in listings and completion.
+
+- **profiles (Breaking):** Remove `profiles set --token` and the unsupported
+  `profiles add --scope`. Pipe credentials to `--token-stdin`. Create member
+  credentials with `tokens create` and teams with `operator teams create`.
+
+- **hooks:** Use the run parser's plain output format for installation proofs
+  and generated hooks.
+
+- **source:** Accept authenticated proxy settings when inspecting Git checkouts.
+
 - **run:** Reuse local pipeline binaries before resolving Go dependencies, so
   cache hits do not require a working Go compiler.
 

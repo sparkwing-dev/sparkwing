@@ -4488,11 +4488,15 @@ components:
     internal.runspec.AppFacts:
       additionalProperties: true
       properties:
+        action:
+          type: string
         default_branch:
           type: string
         default_branch_push:
           type: boolean
         delivery_key:
+          type: string
+        event:
           type: string
         installation_id:
           type: integer
@@ -4904,6 +4908,18 @@ components:
         - value
       type: object
       x-sparkwing-go-type: runspec.Optional[[]string]
+    internal.runspec.Optional.bool.:
+      additionalProperties: true
+      properties:
+        set:
+          type: boolean
+        value:
+          type: boolean
+      required:
+        - set
+        - value
+      type: object
+      x-sparkwing-go-type: runspec.Optional[bool]
     internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.blob.Digest.:
       additionalProperties: true
       properties:
@@ -5157,9 +5173,14 @@ components:
           type: string
         head_sha:
           type: string
+        label:
+          type: string
+        merged:
+          $ref: '#/components/schemas/internal.runspec.Optional.bool.'
         number:
           type: integer
       required:
+        - merged
         - number
         - action
         - base_repo
@@ -5218,6 +5239,8 @@ components:
           type: string
         pull_request:
           $ref: '#/components/schemas/internal.runspec.Optional.github.com.sparkwing-dev.sparkwing.internal.runspec.PullRequest.'
+        reason:
+          type: string
         requested_args:
           anyOf:
             - additionalProperties:
@@ -8222,12 +8245,12 @@ paths:
           - credential: deployment_admin
             grants:
               - operator.object_store
-            binding: none
+            binding: operator_settings
             liveness: credential
           - credential: operator_console_session
             grants:
               - operator.console
-            binding: none
+            binding: operator_settings
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
@@ -8258,12 +8281,12 @@ paths:
           - credential: deployment_admin
             grants:
               - operator.object_store
-            binding: none
+            binding: operator_settings
             liveness: credential
           - credential: operator_console_session
             grants:
               - operator.console
-            binding: none
+            binding: operator_settings
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented

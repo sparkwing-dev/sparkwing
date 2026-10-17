@@ -667,7 +667,7 @@ func pipelineProofCommand(repoRoot, pipeline string) (*exec.Cmd, error) {
 	}
 	cmd := exec.Command(self, args...)
 	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "SPARKWING_LOG_FORMAT=quiet")
+	cmd.Env = append(os.Environ(), "SPARKWING_LOG_FORMAT=plain")
 	return cmd, nil
 }
 
@@ -1096,7 +1096,7 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool) string 
 		b.WriteString(githooks.SelfTestScript())
 	}
 	if len(pipes) > 0 {
-		b.WriteString("export SPARKWING_LOG_FORMAT=\"${SPARKWING_LOG_FORMAT:-quiet}\"\n")
+		b.WriteString("export SPARKWING_LOG_FORMAT=\"${SPARKWING_LOG_FORMAT:-plain}\"\n")
 	}
 	if blocking {
 		b.WriteString("set -e\n")

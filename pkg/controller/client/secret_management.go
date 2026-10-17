@@ -15,11 +15,7 @@ var _ controllerwire.SecretManager = (*engineClient)(nil)
 // NewSecretManager uses the common authenticated transport and route-owned
 // retry policy. Raw secret values are never part of metadata responses.
 func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) ListSecrets(ctx context.Context) (controllerwire.Secrets, error) {

@@ -13,11 +13,7 @@ var _ controllerwire.RunReview = (*engineClient)(nil)
 
 // NewRunReview uses the same authenticated transport and route policies as engines.
 func NewRunReview(options EngineOptions) (controllerwire.RunReview, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) ListApprovals(ctx context.Context, run string) (controllerwire.Approvals, error) {

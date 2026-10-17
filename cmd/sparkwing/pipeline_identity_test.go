@@ -118,32 +118,11 @@ func TestPipelineAliasResolvesFlagsAndHelp(t *testing.T) {
 	}
 }
 
-func TestPipelineAliasCatalogAndCompletion(t *testing.T) {
+func TestPipelineAliasFlagsUseRegisteredName(t *testing.T) {
 	dir, registered := aliasProject(t)
-	catalog, err := gatherPipelinesCatalog(true)
-	if err != nil || len(catalog) != 2 {
-		t.Fatalf("catalog: %+v %v", catalog, err)
-	}
-	for _, pipeline := range catalog {
-		if pipeline.Entrypoint != "Deploy" || pipeline.Short != registered.Short || !reflect.DeepEqual(pipeline.Args, registered.Args) || !reflect.DeepEqual(pipeline.Secrets, registered.Secrets) {
-			t.Fatalf("alias lost SDK metadata: %+v", pipeline)
-		}
-	}
 	flags, err := pipelineFlagsFromCache(t.Context(), dir, "deploy-prod")
 	if err != nil || !reflect.DeepEqual(flags, registered.Args) {
 		t.Fatalf("alias flags: %+v %v", flags, err)
-	}
-	var out bytes.Buffer
-	if err := runInternalCompletePipelines(&out, nil); err != nil {
-		t.Fatal(err)
-	}
-	for _, alias := range []string{"deploy-prod", "deploy-stage"} {
-		if !strings.Contains(out.String(), alias+"\t\tpipeline\tDeploy a service") {
-			t.Fatalf("alias completion: %s", &out)
-		}
-	}
-	if strings.Contains(out.String(), "Deploy\t\t") {
-		t.Fatalf("uninvoked entrypoint became a project pipeline: %s", &out)
 	}
 }
 

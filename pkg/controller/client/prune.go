@@ -12,11 +12,7 @@ var _ controllerwire.RunPruner = (*engineClient)(nil)
 
 // NewRunPruner selects and deletes runs through the shared controller transport.
 func NewRunPruner(options EngineOptions) (controllerwire.RunPruner, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) DeleteRun(ctx context.Context, run string) error {

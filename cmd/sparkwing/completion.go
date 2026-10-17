@@ -114,14 +114,12 @@ func runInternalCompletePipelines(w io.Writer, _ []string) error {
 		desc string
 	}
 	var rows []completionRow
-	pipelineNames := map[string]struct{}{}
 	if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
 		for _, p := range cfg.Registry().Pipelines {
-			pipelineNames[p.Name] = struct{}{}
 			rows = append(rows, completionRow{
 				name: p.Name,
 				kind: "pipeline",
-				desc: shortPipelineHint(shortByName[p.Name], helpByName[p.Name], p),
+				desc: shortPipelineHint(shortByName[p.Entrypoint], helpByName[p.Entrypoint], p),
 			})
 		}
 	}

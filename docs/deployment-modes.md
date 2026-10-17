@@ -1,250 +1,94 @@
 # Deployment modes
 
-Two paths carry a reader: **Local** and **Sparkwing Cloud**.
-[Getting started](getting-started.md) walks both. This page is the
-storage-and-coordination taxonomy underneath them, for a team that hosts
-its own state, cache, or controller.
+Sparkwing has two launch modes: **Local** and **Sparkwing Cloud**.
+Self-hosted runners register to Cloud. Operating a shared controller is deferred
+to a future licensed offering.
 
-| Shape | Infrastructure | Shared dashboard | Coordinated cache | Triggers / approvals / debug pauses | Auth surface |
-| --- | --- | --- | --- | --- | --- |
-| Local | none | -- | -- | -- | filesystem |
-| Sparkwing Cloud | none (hosted) | yes | yes | yes | tokens / sessions |
-| Self-hosted controller | controller + DB + object store | yes | yes | yes | tokens / sessions |
-
-`sparkwing run` executes on this machine and records to the local SQLite
-store, logs, cache, and secrets; it takes no `--profile`. A profile in
-`~/.config/sparkwing/config.yaml` names a controller (see
-[Storage backends](backends.md)).
-`sparkwing pipeline trigger <pipeline> --profile NAME` runs a pipeline on
-that profile's controller, and read verbs such as
-`sparkwing runs list --profile NAME` read its history. Shared run history
-lives on a controller: runners never write a shared bucket or database
-themselves.
+| Mode | Infrastructure you operate | Dashboard and history | Execution |
+| --- | --- | --- | --- |
+| Local | none | private to this OS user | this machine |
+| Sparkwing Cloud | optional self-hosted runners | shared with your team | Cloud and registered runners |
 
 ## Local
 
-SQLite under `~/.sparkwing/state.db`, with per-run logs under
-`~/.sparkwing/runs/<runID>/`. Zero shared
-infrastructure. Every `sparkwing run` records here.
+`sparkwing run` starts the local controller on demand and hosts the run in the
+CLI process. The controller owns SQLite, logs, secrets and local object storage
+under `~/.sparkwing/`. Its private socket checks the connecting OS user. Local
+mode needs no account, profile or network listener.
 
-For: a developer working on pipelines on their own laptop.
+```bash
+sparkwing run build
+sparkwing dashboard start
+```
 
-Tradeoff: nobody else can see what you ran.
-
-Local runs need no controller connection profile. The dashboard lifecycle still
-needs native runtime and service bindings in this rewrite build. See
-[Local dashboard](native-mode.md) for that boundary and
-[offline after the first build](getting-started.md#offline-after-the-first-build).
+After the first successful build, exact-pinned pipelines can run offline. See
+[Getting started](getting-started.md#offline-after-the-first-build).
 
 ## Sparkwing Cloud
 
-Sparkwing Cloud is the hosted controller. A controller owns the shared
-dashboard, run history, scheduling, webhooks, and tokens; machines reach
-it over outbound HTTPS and hold no database credential. The same command
-reaches any controller you can reach, including one your team runs:
+Cloud owns shared history, the team dashboard, schedules, webhooks, credentials
+and the queue. Clients and self-hosted runners connect over outbound HTTPS.
+They hold no database or object-store credentials.
+
+Save a member credential from stdin, then submit a pipeline:
 
 ```bash
-sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --profile work --token-stdin
+sparkwing pipeline trigger build --profile work
 ```
 
-It stores the token from stdin in the private machine file and prints
-connection metadata with the token redacted. `sparkwing pipeline trigger <pipeline> --profile NAME` then
-runs a pipeline there. See
-[connecting to Sparkwing Cloud](getting-started.md#sparkwing-cloud) for
-the flags, and [hosted controller](#hosted-controller) below for
-what the controller process does and how to run one.
+`profiles add` checks public health and authenticates through
+`/api/v1/auth/whoami`. Passing the probe grants only the credential's existing
+authority. Read commands use the same explicit profile:
 
-## Advanced shapes
-
-The rest of this page is for a team that runs its own controller. Each
-shape is a profile away: pipeline code does not change.
-
-### Hosted controller
-
-A central controller process owns Postgres + object-store credentials
-and serves the dashboard. Clients reach it over HTTP and never see the
-underlying database: `sparkwing pipeline trigger` submits a run, the
-controller dispatches it to its runners, and the dashboard and read verbs
-read the results. The final version contract selects the exact verified engine
-from the checkout's SDK pin. That engine owns its matching node protocol. The
-controller API retains each engine's twelve-month compatibility window. Native
-engine resolution and host composition remain integration requirements.
-
-For: a team that wants shared run history on infrastructure it runs,
-including untrusted CI, public webhooks, or a need to decouple client and
-schema versions.
-
-Tradeoff: you have to host the controller. Deploy the complete OSS stack with
-the `sparkwing-full` Helm chart. Teams that do not need a shared controller can
-keep pipeline execution and its dashboard local instead.
-
-The "owns Postgres" framing above describes the multi-tenant case; the
-controller's state backend is pluggable. See
-[one of your own machines as the controller](#one-of-your-own-machines-as-the-controller)
-for the single-box shape.
-
-```yaml
-# ~/.config/sparkwing/config.yaml
-profiles:
-  prod:
-    controller:
-      url: https://api.example.dev
-      token: swk_xxx
-    # state is implied by the controller; reads go through it.
+```bash
+sparkwing runs list --profile work
 ```
 
-The controller authenticates private routes immediately. A mounted
-`bootstrap-admin-token` provisions deployment administration only. Creating a
-team and its first team-admin credential through operator onboarding is pending
-Korey's decision. The seed cannot create team credentials or enroll runners.
-See [Self-hosting](self-hosting.md#first-shared-deployment).
-
-For an existing team, use `profiles add --token-stdin` with its member credential,
-then enroll machines with `runners add`. The profile probe calls authenticated
-`/api/v1/auth/whoami`, so an operator can verify its connection without gaining
-team access. When `SPARKWING_HOME` isolates state, set `SPARKWING_CONFIG` too
-before saving a profile.
-
-A profile with a `controller:` block points commands at that controller
-over HTTP; the nested `token:` authenticates. `sparkwing pipeline trigger
-<pipeline> --profile prod` submits the selected committed source.
 Add `--working-tree` to submit an immutable snapshot of tracked and unignored
-untracked files through the controller's shared object store. The run seals its
-bundle digest, and awarded workers read only that source bundle. Register or edit
-profiles with `sparkwing profiles`. See
-[Self-hosting](self-hosting.md) for the supported local and controller
-deployment paths.
+untracked files. The controller stores the bundle and seals its digest. Awarded
+workers acquire that exact source through their claim authority.
 
-Node logs go through the controller too. A runner uploads each node's log
-as gzip segments through URLs the controller issues, into the controller's cache
-bucket (`--cache-blob-store`) or, without one, its output directory. The
-dashboard, `sparkwing runs logs --profile` and `sparkwing pipeline trigger`
-read them back through the controller's log routes. A controller with
-neither a cache bucket nor an output directory keeps no node logs. See
-[observability.md](observability.md#node-logs-kept-as-segments).
+## Self-hosted runners
 
-#### Watching a run live
+Enroll a machine into a Cloud team:
 
-A node's segments land every 10 seconds or 1 MiB, so the controller
-closes the gap while someone watches. The dashboard's log stream and
-`sparkwing runs logs --follow` hold a 30-second watch on the node; while
-it is held, the node's runner pushes its lines to the controller, which
-holds the last 512 KiB per node in memory, and the reader follows that
-ring after the segments uploaded so far. An unwatched node sends nothing
-live. A read after the node finishes comes from the segments.
+```bash
+sparkwing runners add --profile work --runner builder
+```
 
-The ring is memory, bounded per node (512 KiB), across all nodes
-together (64 MiB), and by ring count (1024 nodes holding one at once).
-Past the byte bounds the oldest bytes of the widest ring go first; past
-the node bound the ring of the node that wrote least recently is
-released. A node's ring is released shortly after the node finishes, or
-after ten minutes of silence from a node that never reported finishing.
-`sparkwing-controller` takes each bound as `--live-log-node-kb`,
-`--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`, and
-refuses a non-positive value.
-
-A reader is told when it misses bytes: a stream of the ring alone
-(`GET /api/v1/runs/{run}/jobs/{job}/logs/stream`) whose buffer dropped
-lines before the reader got to them emits one marker line naming the
-dropped byte count, and a reader still attached when the buffer is
-released gets a marker pointing it at the durable copy. The shared paged read (`GET /api/v1/runs/{run}/logs`) carries tagged
-subjects, an opaque cursor and a completeness flag. Persisted segments cover
-live-ring gaps. Native cursor and final-segment integration still needs
-acceptance evidence.
-
-#### Schema versioning
-
-A state database, SQLite or Postgres (see
-[PostgreSQL state](self-hosting.md#postgresql-state)), records its schema
-version in `sparkwing_schema_version`. Until paid launch there is one
-baseline schema, version 1, and no upgrade path. On startup:
-
-- Empty database: the binary creates the baseline in one transaction.
-  Concurrent controller instances against a fresh Postgres database
-  coordinate via an advisory lock; exactly one creates it.
-- Database at the binary's version: nothing to do.
-- Database at any other version, including every database a release
-  before the baseline wrote: the binary refuses to start with
-  `sparkwing: this store predates the baseline ...; delete <path> (or drop
-  the database) and start again`. Delete the SQLite file or drop the
-  Postgres database, then start the binary again.
-
-Every binary that opens one database must be built at the same schema
-version. Clients that reach the database through a controller never meet
-the schema.
-
-#### Testing against Postgres
-
-The store's own test suite runs against either dialect.
-`SPARKWING_TEST_STORE=postgres` points every test that opens through the
-store's test helper at Postgres instead of a local SQLite file, and
-`SPARKWING_TEST_PG_URL` names the server each test creates a schema of its
-own on. With the dialect selected and no URL the suite fails rather than
-skipping, so a misconfigured run cannot look like a pass. `sparkwing run
-store-postgres` sets both against an embedded Postgres it starts and stops
-itself, so proving a store change on the controller's Postgres dialect
-needs neither Docker nor a database of your own.
-
-#### One-click provisioning
-
-A Terraform module under `install/terraform/mode3-postgres` stands up the
-Postgres a self-hosted controller uses in one `terraform apply`: the
-database (a single RDS instance or an Aurora Serverless v2 cluster, picked
-by one knob), its security group, and its subnet group across the private
-subnets you give it. It writes the connection string to AWS Secrets
-Manager for the controller's `pg-url` credential. You supply the VPC and
-private subnets; the module places the database into networking you
-already run. Its README covers the variables and how to point a
-controller at the result.
-
-### One of your own machines as the controller
-
-A single-instance controller on one box can back its state with SQLite
-(`~/.sparkwing/state.db`) and keep caches and logs on local disk -- the
-same storage layout as the local path, but fronted by the HTTP
-controller so untrusted clients still never touch the store directly. A
-laptop that triggers pipelines on a desktop you own is this shape: one
-person's own machines, coordinated without an account. Solo operators
-and small teams don't need to stand up Postgres to run it. Back the
-controller with Postgres and object storage when you outgrow a single box
--- more than one controller instance, or state and caches that must survive that box. A
-team's fleet coordinates through Sparkwing Cloud, or through a controller
-the team runs.
-
-## Local runs
-
-Every `sparkwing run` records through this machine's local controller. Jobs
-exchange artifacts through its local blob store. `--sw-cache-from PROFILE`
-opts into authorized, read-only remote cache access. `--publish PROFILE` copies
-completed results to a controller with local provenance. See
-[local execution](local-execution.md) for native binding requirements.
+Personal capacity belongs to your own account and requires an independent
+account session during enrollment. Team capacity uses a team-admin credential.
+See [Self-hosted runners](self-hosting.md#add-workstation-capacity).
 
 ## Selecting a profile
 
-Profile selection is explicit: pass `--profile NAME` on the command that
-should reach the profile. Neither the environment nor a project-wide
-default selects one. `sparkwing run` takes no `--profile`; it refuses one
-with a message naming `sparkwing pipeline trigger <pipeline> --profile
-NAME`, the command that runs a pipeline on a controller. A pipeline whose
-`.sparkwing/sparkwing.yaml` entry names `profile:` is pinned to that
-controller profile; see
-[pinning a pipeline to a profile](backends.md#pinning-a-pipeline-to-a-profile).
-A CI job names its profile on its own command line (see
-[ci-embedded.md](ci-embedded.md)).
+A profile in `~/.config/sparkwing/config.yaml` selects a controller connection.
+Pass `--profile NAME` on the command that should reach Cloud. `sparkwing run`
+uses local state. Its `--sw-cache-from PROFILE` and `--publish PROFILE` options
+opt into read-only remote cache access and publication separately. Pipeline
+binaries stay in the machine's local cache. There is no separate cache service.
 
-## Choosing a shape
+When isolating runtime state with `SPARKWING_HOME`, set `SPARKWING_CONFIG` to a
+private config path too before saving a profile. See
+[Storage backends](backends.md) and [Local execution](local-execution.md).
 
-A practical decision order:
+## Advanced shapes
 
-1. **One person on their own machine?** Local.
-2. **A team that wants one dashboard and one run history?**
-   [Sparkwing Cloud](#sparkwing-cloud), and `sparkwing pipeline trigger`
-   from laptops and CI.
-3. **The same on infrastructure you run, with untrusted runners
-   (public CI, customer pipelines) kept away from the database?**
-   [Hosted controller](#hosted-controller), or
-   [one of your own machines](#one-of-your-own-machines-as-the-controller)
-   for a single box.
+### Hosted controller
 
-You can move between shapes by editing a profile; pipeline code doesn't
-change.
+The repository's controller and Helm chart are Cloud operator infrastructure.
+The controller owns persistence and issues scoped object transfers through
+`/data`. Runners never write directly to its database. The SDK pin selects the
+verified matching engine, and controller APIs retain the engine's support window.
+
+Cloud operators can create a team and its first administrator without OAuth:
+
+```bash
+sparkwing operator teams create --team support-test --display-name Support --profile deployment -o json
+```
+
+This requires deployment authority with `operator.tokens`, or the operator's
+direct browser session and CSRF proof. The operation returns the first team
+credential once. See [Cloud operations](auth.md#cloud-operations-and-test-environments)
+and the [controller chart](../charts/sparkwing-full/README.md).

@@ -300,7 +300,6 @@ func Registry() []Command {
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "token-stdin"},
-			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "force"},
 			{Name: "no-probe"},
 		}},
@@ -312,8 +311,7 @@ func Registry() []Command {
 		{Path: "sparkwing profiles set", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "controller", Argument: "URL"},
-			{Name: "token", Argument: "TOKEN", Conflicts: []string{"token-stdin"}},
-			{Name: "token-stdin", Conflicts: []string{"token"}},
+			{Name: "token-stdin"},
 		}},
 		{Path: "sparkwing profiles show", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},

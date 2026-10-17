@@ -14,11 +14,7 @@ var _ controllerwire.RunnerReader = (*engineClient)(nil)
 // NewRunnerReader reads team-scoped public runner details using the same
 // credentials and retry policy as other controller observations.
 func NewRunnerReader(options EngineOptions) (controllerwire.RunnerReader, error) {
-	c, err := newEngineClient(options)
-	if err != nil {
-		return nil, err
-	}
-	return c, nil
+	return newEngineClient(options)
 }
 
 func (c *engineClient) ListRunners(ctx context.Context) (controllerwire.Runners, error) {
