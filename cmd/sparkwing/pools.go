@@ -15,11 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-func runPools(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"pools"}, args...))
-	if err != nil {
-		return err
-	}
+func runPools(ctx context.Context, inv clisurface.Invocation) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() || inv.Command.Path == "sparkwing pools" {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, format)

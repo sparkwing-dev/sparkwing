@@ -18,17 +18,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-func runTokens(args []string) error { return runTokenCommand(context.Background(), args, false) }
-
-func runTokenCommand(ctx context.Context, args []string, deployment bool) error {
-	prefix := []string{"tokens"}
-	if deployment {
-		prefix = []string{"operator", "tokens"}
-	}
-	inv, err := clisurface.Parse("sparkwing", append(prefix, args...))
-	if err != nil {
-		return err
-	}
+func runTokenCommand(ctx context.Context, inv clisurface.Invocation) error {
+	deployment := strings.HasPrefix(inv.Command.Path, "sparkwing operator ")
 	if inv.Help() || inv.Command.Path == "sparkwing tokens" || inv.Command.Path == "sparkwing operator tokens" {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}

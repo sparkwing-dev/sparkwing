@@ -40,7 +40,7 @@ func main(){ f,err:=os.OpenFile(os.Getenv("SPARKWING_TEST_DESCRIBES"),os.O_CREAT
 	}
 	writeRegistry(t, filepath.Join(t.TempDir(), "config.yaml"), registry.String())
 	out := captureStdout(t, func() {
-		if err := runReposList([]string{"--checkouts", "-o", "json"}); err != nil {
+		if err := runReposListArgs([]string{"--checkouts", "-o", "json"}); err != nil {
 			t.Fatal(err)
 		}
 	})

@@ -42,7 +42,7 @@ func TestSparksLintAcceptsModulesManifest(t *testing.T) {
 		"kube/go.mod":   "module github.com/acme/my-sparks/kube\n\ngo 1.26.0\n",
 	})
 	var err error
-	out := captureStdout(t, func() { err = runSparksLint([]string{dir}) })
+	out := captureStdout(t, func() { err = runSparksLintArgs([]string{"--path", dir, "-o", "pretty"}) })
 	if err != nil {
 		t.Fatalf("lint: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestSparksLintAcceptsPackagesManifest(t *testing.T) {
 		"unrelated/x.go": "package unrelated\n",
 	})
 	var err error
-	out := captureStdout(t, func() { err = runSparksLint([]string{"--path", dir}) })
+	out := captureStdout(t, func() { err = runSparksLintArgs([]string{"--path", dir, "-o", "pretty"}) })
 	if err != nil {
 		t.Fatalf("lint: %v", err)
 	}
@@ -79,8 +79,8 @@ func TestSparksLintAcceptsPackagesManifest(t *testing.T) {
 
 func TestSparksLintRejectsPathFlagWithPositional(t *testing.T) {
 	dir := t.TempDir()
-	err := runSparksLint([]string{"--path", dir, dir})
-	if err == nil || !strings.Contains(err.Error(), "both given") {
+	err := runSparksLintArgs([]string{"--path", dir, dir})
+	if exitCodeFor(err) != 2 {
 		t.Fatalf("want conflict error, got %v", err)
 	}
 }
@@ -236,7 +236,7 @@ func TestSparksAddNeverAdoptsTheRuntimeHome(t *testing.T) {
 	if err := os.MkdirAll(checkout, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := runIn(t, checkout, runSparksAdd, "--source", "example.com/lib")
+	err := runIn(t, checkout, runSparksAddArgs, "--source", "example.com/lib")
 	if err == nil || !strings.Contains(err.Error(), "no .sparkwing/ project") {
 		t.Fatalf("sparks add in an uninitialized checkout = %v, want a refusal naming the missing project", err)
 	}
@@ -265,7 +265,7 @@ func TestDiscoveryStopsAtAnUnreadableNestedProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(nested, 0o755) })
-	err := runIn(t, filepath.Join(root, "app", "src"), runSparksAdd, "--source", "example.com/lib")
+	err := runIn(t, filepath.Join(root, "app", "src"), runSparksAddArgs, "--source", "example.com/lib")
 	if err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("sparks add under an unreadable project = %v, want the inspection error", err)
 	}

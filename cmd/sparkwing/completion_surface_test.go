@@ -14,7 +14,7 @@ func TestCompletionUsesFinalCommandAndFlagVocabulary(t *testing.T) {
 		{"flags", "run", "--sw-no-memo", "--sw-no-cache"},
 	} {
 		out := captureStdout(t, func() {
-			if err := runInternalComplete([]string{"--kind", test.kind, "--word=" + test.word, "-o", "plain"}); err != nil {
+			if err := runInternalCompleteArgs([]string{"--kind", test.kind, "--word=" + test.word, "-o", "plain"}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -27,7 +27,7 @@ func TestCompletionUsesFinalCommandAndFlagVocabulary(t *testing.T) {
 func TestCompletionArtifactsSupportFinalShellSet(t *testing.T) {
 	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
 		out := captureStdout(t, func() {
-			if err := runCompletion([]string{"--shell", shell, "-o", "plain"}); err != nil {
+			if err := runCompletionArgs([]string{"--shell", shell, "-o", "plain"}); err != nil {
 				t.Fatal(err)
 			}
 		})

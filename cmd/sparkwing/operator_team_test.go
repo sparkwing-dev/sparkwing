@@ -51,7 +51,7 @@ func TestOperatorTeamsCreateCLIThroughStore(t *testing.T) {
 			}
 			args := []string{"create", "--team", "cloud-support", "--display-name", "Cloud support", "--profile", "deployment", "-o", format}
 			var out bytes.Buffer
-			if err := runOperatorTeamsCommand(t.Context(), args, &out, connect); err != nil {
+			if err := runOperatorTeamsCommandArgs(t.Context(), args, &out, connect); err != nil {
 				t.Fatal(err)
 			}
 			credential := strings.TrimSpace(out.String())
@@ -76,7 +76,7 @@ func TestOperatorTeamsCreateCLIThroughStore(t *testing.T) {
 				t.Fatalf("issued admin: %d %s", w.Code, w.Body)
 			}
 			out.Reset()
-			err = runOperatorTeamsCommand(t.Context(), args, &out, connect)
+			err = runOperatorTeamsCommandArgs(t.Context(), args, &out, connect)
 			var api *apierr.Error
 			if !errors.As(err, &api) || api.Code != apierr.Conflict || out.Len() != 0 || calls != 2 || closes != 2 {
 				t.Fatalf("duplicate: %v output=%q calls=%d closes=%d", err, out.String(), calls, closes)
@@ -92,7 +92,7 @@ func TestOperatorTeamsCreateCLIValidatesBeforeConnecting(t *testing.T) {
 			t.Fatal("invalid command connected")
 			return nil, nil, io.EOF
 		}
-		if err := runOperatorTeamsCommand(t.Context(), args, &out, connect); err == nil || exitCodeFor(err) != 2 || out.Len() != 0 {
+		if err := runOperatorTeamsCommandArgs(t.Context(), args, &out, connect); err == nil || exitCodeFor(err) != 2 || out.Len() != 0 {
 			t.Fatalf("args=%v err=%v output=%q", args, err, out.String())
 		}
 	}

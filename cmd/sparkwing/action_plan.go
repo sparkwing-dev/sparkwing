@@ -62,27 +62,12 @@ type pipelinePlanArgs struct {
 	passthrough []string
 }
 
-func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "plan"}, args...))
-	if err != nil {
-		return pipelinePlanArgs{}, false, err
-	}
-	return pipelinePlanArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"), passthrough: inv.Args}, inv.Help(), nil
+func pipelinePlanOptions(inv clisurface.Invocation) pipelinePlanArgs {
+	return pipelinePlanArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"), passthrough: inv.Args}
 }
 
-func runPipelinePlan(args []string) error {
-	parsed, helpRequested, err := parsePipelinePlanArgs(args)
-	if err != nil {
-		return err
-	}
-	if helpRequested {
-		PrintHelp(cmdPipelinePlan, os.Stdout)
-		return nil
-	}
-	if parsed.pipeline == "" {
-		PrintHelp(cmdPipelinePlan, os.Stderr)
-		return errors.New("plan: --pipeline is required")
-	}
+func runPipelinePlan(inv clisurface.Invocation) error {
+	parsed := pipelinePlanOptions(inv)
 	format, err := resolveOutputFormat(parsed.output, cmdPipelinePlan.Path)
 	if err != nil {
 		return err

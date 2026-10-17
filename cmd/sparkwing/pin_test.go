@@ -20,15 +20,15 @@ pipelines:
 func TestRun_RefusesAPinnedPipelineAndNamesTrigger(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  prod: { controller: { url: http://127.0.0.1:1 } }\n")
 	projectAt(t, pinnedProject)
-	err := dispatchRun([]string{"release"})
+	err := dispatchRunArgs([]string{"release"})
 	if err == nil || !strings.Contains(err.Error(), "pipeline release is pinned to profile prod; use sparkwing pipeline trigger release --profile prod") {
-		t.Fatalf("dispatchRun(release) = %v, want the pin refusal", err)
+		t.Fatalf("dispatchRunArgs(release) = %v, want the pin refusal", err)
 	}
 }
 
 func TestPipelineTrigger_ThePinIsNoDefault(t *testing.T) {
 	projectAt(t, pinnedProject)
-	err := runPipelineTrigger([]string{"release"})
+	err := runPipelineTriggerArgs([]string{"release"})
 	if err == nil || !strings.Contains(err.Error(), "--profile is required") {
 		t.Fatalf("trigger release with no --profile = %v, want --profile required", err)
 	}
@@ -82,7 +82,7 @@ func TestRun_SwRefReadsThePinAtTheExecutedRevision(t *testing.T) {
 	gitIn(t, root, "commit", "-q", "-am", "unpinned")
 	gitIn(t, root, "tag", "unpinned")
 
-	err = dispatchRun([]string{"release", "--sw-ref", "pinned"})
+	err = dispatchRunArgs([]string{"release", "--sw-ref", "pinned"})
 	if err == nil || !strings.Contains(err.Error(), "pinned to profile prod") {
 		t.Fatalf("--sw-ref to a pinned revision from an unpinned checkout = %v, want the pin refusal", err)
 	}
@@ -101,19 +101,19 @@ func TestPinRefusal_SuggestsACommandTriggerParses(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  prod: { controller: { url: http://127.0.0.1:1 } }\n")
 	projectAt(t, pinnedProject)
 	for _, args := range [][]string{{"release"}, {"build", "--profile", "prod"}} {
-		err := dispatchRun(args)
+		err := dispatchRunArgs(args)
 		if err == nil {
-			t.Fatalf("dispatchRun(%q) succeeded", args)
+			t.Fatalf("dispatchRunArgs(%q) succeeded", args)
 		}
 		_, suggested, ok := strings.Cut(err.Error(), "sparkwing pipeline trigger ")
 		if !ok {
-			t.Fatalf("dispatchRun(%q) = %v, names no trigger command", args, err)
+			t.Fatalf("dispatchRunArgs(%q) = %v, names no trigger command", args, err)
 		}
 		invocation := strings.Fields(suggested)
 		if len(invocation) > 0 && invocation[0] == "<pipeline>" {
 			invocation[0] = args[0]
 		}
-		flags, perr := parseTriggerFlags(invocation)
+		flags, perr := parseTriggerFlagsArgs(invocation)
 		if perr != nil || flags.pipeline != args[0] || flags.profile == "" {
 			t.Fatalf("suggested %q parses to %+v, %v; want pipeline %s with a --profile", suggested, flags, perr, args[0])
 		}

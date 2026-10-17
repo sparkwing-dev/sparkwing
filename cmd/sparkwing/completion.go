@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -17,35 +16,26 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-func runCompletion(args []string) error {
-	fs := flag.NewFlagSet(cmdCompletion.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "pretty | json | plain")
-	shell := fs.String("shell", "", "shell to emit completion for (bash | zsh | fish | powershell)")
-	if err := parseAndCheck(cmdCompletion, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runCompletion(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	if fs.NArg() > 0 {
-		PrintHelp(cmdCompletion, os.Stderr)
-		return fmt.Errorf("completion: unexpected positional %q (use --shell)", fs.Arg(0))
+	output := inv.Output(color.IsInteractiveStdout())
+	shell := inv.Value("shell")
+	if shell == "" {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--shell is required (bash | zsh | fish | powershell)"}
 	}
-	if *shell == "" {
-		PrintHelp(cmdCompletion, os.Stderr)
-		return errors.New("completion: --shell is required (bash | zsh | fish | powershell)")
-	}
-	switch *shell {
+	switch shell {
 	case "bash":
-		return writeText(os.Stdout, "artifact", renderBash(), *output)
+		return writeText(os.Stdout, "artifact", renderBash(), output)
 	case "zsh":
-		return writeText(os.Stdout, "artifact", renderZsh(), *output)
+		return writeText(os.Stdout, "artifact", renderZsh(), output)
 	case "fish":
-		return writeText(os.Stdout, "artifact", renderFish(), *output)
+		return writeText(os.Stdout, "artifact", renderFish(), output)
 	case "powershell":
-		return writeText(os.Stdout, "artifact", renderPowerShell(), *output)
+		return writeText(os.Stdout, "artifact", renderPowerShell(), output)
 	default:
-		return fmt.Errorf("completion: unknown shell %q (expected bash|zsh|fish|powershell)", *shell)
+		return fmt.Errorf("completion: unknown shell %q (expected bash|zsh|fish|powershell)", shell)
 	}
 }
 
@@ -58,11 +48,7 @@ var internalCompleters = map[string]func(io.Writer, []string) error{
 	"pipeline-flags": runInternalCompletePipelineFlags,
 }
 
-func runInternalComplete(args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"__complete"}, args...))
-	if err != nil {
-		return err
-	}
+func runInternalComplete(inv clisurface.Invocation) error {
 	var out strings.Builder
 	for _, kind := range inv.Flags["kind"] {
 		complete, ok := internalCompleters[kind]

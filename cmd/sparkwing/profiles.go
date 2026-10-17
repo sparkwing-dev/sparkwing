@@ -15,11 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-func runProfiles(args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"profiles"}, args...))
-	if err != nil {
-		return err
-	}
+func runProfiles(inv clisurface.Invocation) error {
 	format := inv.Output(term.IsTerminal(int(os.Stdout.Fd())))
 	if inv.Help() || inv.Command.Path == "sparkwing profiles" {
 		return writeCommandHelp(surfaceCommand(inv.Command.Path), os.Stdout, format)

@@ -1159,6 +1159,18 @@ change does not remove the original push's default-branch trust.
 
 ## Invocation and detached trace integration
 
+All Sparkwing handlers consume the original parsed `Invocation`. Execution
+does not reconstruct arguments or declare another flag parser. Engine handoff
+replays the original arguments from the invoking directory, so a relative
+`--checkout` is applied once by the selected engine. Pipeline arguments retain
+their exact spelling and separators.
+
+Repository add, remove and info require the global `--checkout`. Mutations
+select that absolute checkout, with no positional or basename fallback. Their
+receipts honor the selected output. Version holds, unreadable-state recovery
+and sparks lint/update also emit JSON when piped. Required-flag diagnostics
+retain the registry's explanation when present.
+
 Hook install, uninstall and status, and pipeline scaffolding consume the parsed
 `clisurface.Invocation`. Hook `--all-repos` selects the registered repositories.
 The removed `--fleet` and hooks `--all` spellings are refused. Hook mutations

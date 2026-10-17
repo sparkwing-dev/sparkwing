@@ -154,7 +154,7 @@ func newScheduleCommandFixture(t *testing.T) *scheduleCommandFixture {
 func TestScheduleInstallUsesRepositoryContractAndKeepsPinnedSource(t *testing.T) {
 	f := newScheduleCommandFixture(t)
 	var out bytes.Buffer
-	if err := runScheduleCommand(t.Context(), []string{"install", "--profile", "prod", "-o", "json"}, &out, f.command); err != nil {
+	if err := runScheduleCommandArgs(t.Context(), []string{"install", "--profile", "prod", "-o", "json"}, &out, f.command); err != nil {
 		t.Fatal(err)
 	}
 	input := f.repository.input
@@ -173,7 +173,7 @@ func TestScheduleInstallRejectsUnknownSelectorsAndMissingProjectBeforeConnecting
 			f.command.load = func(string) (*projectconfig.Config, error) { return nil, errors.New("project disappeared") }
 		}
 		var out bytes.Buffer
-		err := runScheduleCommand(t.Context(), []string{"install", "--profile", "prod", "--schedule", "unknown"}, &out, f.command)
+		err := runScheduleCommandArgs(t.Context(), []string{"install", "--profile", "prod", "--schedule", "unknown"}, &out, f.command)
 		if err == nil || len(f.calls) != 0 || out.Len() != 0 {
 			t.Fatalf("incomplete declaration changed schedules: %v %v %s", err, f.calls, out.String())
 		}
@@ -194,7 +194,7 @@ func TestScheduleUninstallDoesNotNeedProjectFilesOrAPinnedCommit(t *testing.T) {
 		return controllerwire.ScheduleRepoRequest{RepoURL: "https://example.com/repo.git"}, nil
 	}
 	var out bytes.Buffer
-	if err := runScheduleCommand(t.Context(), []string{"uninstall", "--profile", "prod", "-o", "plain"}, &out, f.command); err != nil || f.repository.deleted == "" || out.String() != "https://example.com/repo.git\n" {
+	if err := runScheduleCommandArgs(t.Context(), []string{"uninstall", "--profile", "prod", "-o", "plain"}, &out, f.command); err != nil || f.repository.deleted == "" || out.String() != "https://example.com/repo.git\n" {
 		t.Fatalf("uninstall: %v %s", err, out.String())
 	}
 }
@@ -205,7 +205,7 @@ func TestLocalScheduleInstallCapturesBeforeStartingAndUsesManagedTimers(t *testi
 	f.command.environment = func() []string { return environment }
 	f.services.lifecycle = scheduleLifecycleFixture{calls: &f.calls, before: func() { environment[0] = "CAPTURE=daemon" }}
 	var out bytes.Buffer
-	if err := runScheduleCommand(t.Context(), []string{"install", "--no-prove", "-o", "plain"}, &out, f.command); err != nil {
+	if err := runScheduleCommandArgs(t.Context(), []string{"install", "--no-prove", "-o", "plain"}, &out, f.command); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.registrations) != 1 || !reflect.DeepEqual(f.registrations[0].Environment, []string{"CAPTURE=install"}) || !f.registrations[0].Follow || f.registrations[0].Prove || f.registrations[0].Schedules[0].Name != "host" || out.String() != "local-id\n" {
@@ -239,9 +239,9 @@ func TestLocalScheduleBindingsRefuseBeforeControllerOrMutationEffects(t *testing
 			var out bytes.Buffer
 			var err error
 			if action == "tick" {
-				err = runScheduleTickCommand(t.Context(), []string{"--home", f.services.options.Home}, &out, f.command.local)
+				err = runScheduleTickCommandArgs(t.Context(), []string{"--home", f.services.options.Home}, &out, f.command.local)
 			} else {
-				err = runScheduleCommand(t.Context(), args, &out, f.command)
+				err = runScheduleCommandArgs(t.Context(), args, &out, f.command)
 			}
 			var refusal *apierr.Error
 			if !errors.As(err, &refusal) || refusal.Code != apierr.PolicyMissing || out.Len() != 0 {
@@ -260,7 +260,7 @@ func TestLocalSchedulePinResolvesAllSelectorsAndDeduplicates(t *testing.T) {
 	for _, names := range []string{"s1,missing", "s1,check/nightly"} {
 		f := newScheduleCommandFixture(t)
 		var out bytes.Buffer
-		err := runScheduleCommand(t.Context(), []string{"set", "--schedule", names, "--pin", "-o", "plain"}, &out, f.command)
+		err := runScheduleCommandArgs(t.Context(), []string{"set", "--schedule", names, "--pin", "-o", "plain"}, &out, f.command)
 		if strings.Contains(names, "missing") {
 			if err == nil || strings.Contains(strings.Join(f.calls, ","), "pin:") || out.Len() != 0 {
 				t.Fatalf("partial pin: %v %v %s", err, f.calls, out.String())
@@ -281,7 +281,7 @@ func TestScheduleTickHonorsCapturedHomeAndDryRun(t *testing.T) {
 			home = "relative"
 		}
 		var out bytes.Buffer
-		err := runScheduleTickCommand(t.Context(), []string{"--home", home, "--dry-run", "-o", "json"}, &out, f.command.local)
+		err := runScheduleTickCommandArgs(t.Context(), []string{"--home", home, "--dry-run", "-o", "json"}, &out, f.command.local)
 		if mode == "same" {
 			if err != nil || !reflect.DeepEqual(f.calls, []string{"start", "tick"}) || !strings.Contains(out.String(), "2026-10-15T03:00:00Z") {
 				t.Fatalf("tick: %v %v %s", err, f.calls, out.String())
@@ -303,7 +303,7 @@ func TestScheduleTickResolvesTheExplicitHomeBeforeStarting(t *testing.T) {
 		return services, nil
 	}
 	var out bytes.Buffer
-	if err := runScheduleTickCommand(t.Context(), []string{"--home", explicit, "--dry-run"}, &out, resolve); err != nil || home != explicit || !reflect.DeepEqual(f.calls, []string{"start", "tick"}) {
+	if err := runScheduleTickCommandArgs(t.Context(), []string{"--home", explicit, "--dry-run"}, &out, resolve); err != nil || home != explicit || !reflect.DeepEqual(f.calls, []string{"start", "tick"}) {
 		t.Fatalf("captured home: %s %v %v", home, f.calls, err)
 	}
 }
@@ -318,7 +318,7 @@ func TestScheduleInstallChecksEveryRepositoryBeforeStarting(t *testing.T) {
 		return projectconfig.Parse([]byte(scheduleProject))
 	}
 	var out bytes.Buffer
-	if err := runScheduleCommand(t.Context(), []string{"install", "--all-repos"}, &out, f.command); err == nil || len(f.calls) != 0 || len(f.registrations) != 0 || out.Len() != 0 {
+	if err := runScheduleCommandArgs(t.Context(), []string{"install", "--all-repos"}, &out, f.command); err == nil || len(f.calls) != 0 || len(f.registrations) != 0 || out.Len() != 0 {
 		t.Fatalf("partial fleet install: %v %v %s", err, f.calls, out.String())
 	}
 }
@@ -328,7 +328,7 @@ func TestScheduleInstallRefreshesAnExistingManagedTimer(t *testing.T) {
 	f.services.units = scheduleUnitsFixture{calls: &f.calls, units: []wingd.ManagedUnit{{Kind: wingd.ManagedSchedule, Home: f.services.options.Home}}}
 	f.services.installTimer = nil
 	var out bytes.Buffer
-	if err := runScheduleCommand(t.Context(), []string{"install"}, &out, f.command); err != nil || !reflect.DeepEqual(f.calls, []string{"inspect", "start", "register", "refresh"}) {
+	if err := runScheduleCommandArgs(t.Context(), []string{"install"}, &out, f.command); err != nil || !reflect.DeepEqual(f.calls, []string{"inspect", "start", "register", "refresh"}) {
 		t.Fatalf("managed refresh: %v %v", f.calls, err)
 	}
 }
@@ -345,7 +345,7 @@ func TestLocalScheduleInstallWithoutDeclarationsDoesNotInstallATimer(t *testing.
 		return controllerwire.ScheduleRepoWritten{}, nil
 	}
 	var out bytes.Buffer
-	if err := runScheduleCommand(t.Context(), []string{"install"}, &out, f.command); err != nil || !reflect.DeepEqual(f.calls, []string{"start", "register"}) {
+	if err := runScheduleCommandArgs(t.Context(), []string{"install"}, &out, f.command); err != nil || !reflect.DeepEqual(f.calls, []string{"start", "register"}) {
 		t.Fatalf("empty declaration installed a timer: %v %v", f.calls, err)
 	}
 }
@@ -354,7 +354,7 @@ func TestScheduleUninstallUsesManagerAndRemovesLastNativeTimer(t *testing.T) {
 	f := newScheduleCommandFixture(t)
 	f.services.units = scheduleUnitsFixture{calls: &f.calls, units: []wingd.ManagedUnit{{Kind: wingd.ManagedSchedule, Home: f.services.options.Home}}}
 	var out bytes.Buffer
-	if err := runScheduleCommand(t.Context(), []string{"uninstall", "-o", "plain"}, &out, f.command); err != nil || out.String() != "s1\n" || !reflect.DeepEqual(f.manager.calls, []string{"delete:s1"}) {
+	if err := runScheduleCommandArgs(t.Context(), []string{"uninstall", "-o", "plain"}, &out, f.command); err != nil || out.String() != "s1\n" || !reflect.DeepEqual(f.manager.calls, []string{"delete:s1"}) {
 		t.Fatalf("uninstall: %v %v %s", err, f.manager.calls, out.String())
 	}
 	if !reflect.DeepEqual(f.calls, []string{"inspect", "start", "connect:", "uninstall-timer", "close"}) {

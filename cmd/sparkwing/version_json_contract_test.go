@@ -15,7 +15,7 @@ import (
 // names it, in a place no other test looks.
 func TestVersionJSONKeepsTheFieldTheToolchainSwitchReads(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runVersion([]string{"-o", "json", "--offline"}); err != nil {
+		if err := runVersionArgs([]string{"-o", "json", "--offline"}); err != nil {
 			t.Fatalf("`sparkwing version -o json --offline`: %v", err)
 		}
 	})
@@ -67,7 +67,7 @@ func TestVersionJSONCarriesTheFieldTheInstallerProbes(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := runVersion([]string{"-o", "json", "--offline"}); err != nil {
+		if err := runVersionArgs([]string{"-o", "json", "--offline"}); err != nil {
 			t.Fatalf("`sparkwing version -o json --offline`: %v", err)
 		}
 	})

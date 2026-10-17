@@ -108,7 +108,7 @@ func TestCommandsPointsAtAllWhenOnlyHiddenMatched(t *testing.T) {
 func commandsOutput(t *testing.T, args ...string) string {
 	t.Helper()
 	var err error
-	out := captureStdout(t, func() { err = runCommands(args) })
+	out := captureStdout(t, func() { err = runCommandsArgs(args) })
 	if err != nil {
 		t.Fatalf("commands %v: %v", args, err)
 	}
@@ -118,6 +118,6 @@ func commandsOutput(t *testing.T, args ...string) string {
 func runCommandsQuiet(t *testing.T, args ...string) error {
 	t.Helper()
 	var err error
-	captureStdout(t, func() { err = runCommands(args) })
+	captureStdout(t, func() { err = runCommandsArgs(args) })
 	return err
 }

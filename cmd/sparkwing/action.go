@@ -10,14 +10,14 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
-
-	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -47,58 +47,23 @@ func (p Pipeline) index() PipelineIndex {
 	return PipelineIndex{Name: p.Name, Short: short, Entrypoint: p.Entrypoint, Triggers: p.Triggers}
 }
 
-func runPipeline(args []string) error {
-	if handleParentHelp(cmdPipeline, args) {
-		return nil
+func runPipelineList(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	if len(args) == 0 {
-		PrintHelp(cmdPipeline, os.Stderr)
-		return errors.New("repo: subcommand required")
-	}
-	switch args[0] {
-	case "list":
-		return runPipelineList(args[1:])
-	case "describe":
-		return runPipelineDescribe(args[1:])
-	case "lint":
-		return runPipelineLint(args[1:])
-	case "plan":
-		return runPipelinePlan(args[1:])
-	case "trigger":
-		return runPipelineTrigger(args[1:])
-	case "sparks":
-		return runSparks(args[1:])
-	default:
-		PrintHelp(cmdPipeline, os.Stderr)
-		return fmt.Errorf("pipeline: unknown subcommand %q", args[0])
-	}
-}
-
-func runPipelineList(args []string) error {
-	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	includeHidden := fs.Bool("all", false, "include hidden entries (hidden: true in yaml / # hidden: true in scripts)")
-	query := fs.String("search", "", "rank entries whose fields match every token; searches hidden entries too")
-	if err := parseAndCheck(cmdPipelineList, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("pipeline list: unexpected positional %q (use --search)", fs.Arg(0))
-	}
-	format, err := resolveOutputFormat(*output, cmdPipelineList.Path)
+	output := inv.Output(color.IsInteractiveStdout())
+	includeHidden, query := inv.Bool("all"), inv.Value("search")
+	format, err := resolveOutputFormat(output, cmdPipelineList.Path)
 	if err != nil {
 		return err
 	}
-	if fs.Changed("search") {
-		if strings.TrimSpace(*query) == "" {
+	if inv.Has("search") {
+		if strings.TrimSpace(query) == "" {
 			return errors.New("pipeline list: --search needs at least one token")
 		}
-		return searchPipelines(*query, format)
+		return searchPipelines(query, format)
 	}
-	pipelines, err := gatherPipelinesCatalog(*includeHidden)
+	pipelines, err := gatherPipelinesCatalog(includeHidden)
 	if err != nil {
 		return err
 	}
@@ -205,34 +170,25 @@ func plural(n int) string {
 	return "es"
 }
 
-func runPipelineDescribe(args []string) error {
-	return runPipelineDescribeCommand(args, withPipelineEntry)
+func runPipelineDescribe(inv clisurface.Invocation) error {
+	return runPipelineDescribeCommand(inv, withPipelineEntry)
 }
 
-func runPipelineDescribeCommand(args []string, withEntry func(string, func(context.Context, pipelineentry.Command, string) error) error) error {
-	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	pipelineName := fs.String("pipeline", "", "pipeline name to describe")
-	secretsOnly := fs.Bool("secrets", false, "print the declared secrets, required or optional")
-	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string, func(context.Context, pipelineentry.Command, string) error) error) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	if fs.NArg() > 0 {
-		PrintHelp(cmdPipelineDescribe, os.Stderr)
-		return fmt.Errorf("describe: unexpected positional %q (use --pipeline)", fs.Arg(0))
-	}
-	if *pipelineName == "" {
+	output := inv.Output(color.IsInteractiveStdout())
+	pipelineName, secretsOnly := inv.Value("pipeline"), inv.Bool("secrets")
+	if pipelineName == "" {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
 		return errors.New("describe: --pipeline is required")
 	}
-	format, err := resolveOutputFormat(*output, cmdPipelineDescribe.Path)
+	format, err := resolveOutputFormat(output, cmdPipelineDescribe.Path)
 	if err != nil {
 		return err
 	}
-	name := *pipelineName
+	name := pipelineName
 	found := Pipeline{PipelineDescription: nodeproto.PipelineDescription{Name: name}}
 	var schema nodeproto.PipelineDescription
 	err = withEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
@@ -261,7 +217,7 @@ func runPipelineDescribeCommand(args []string, withEntry func(string, func(conte
 	if err != nil {
 		return err
 	}
-	if *secretsOnly {
+	if secretsOnly {
 		return describePipelineSecrets(name, format, schema.Secrets)
 	}
 	found.describe(schema)

@@ -73,7 +73,7 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 			} else {
 				args = append(args, "--no-service")
 			}
-			captureStdout(t, func() { err = runRunnersAdd(args) })
+			captureStdout(t, func() { err = runRunnersAddArgs(args) })
 			if (err != nil) != failService {
 				t.Fatalf("enrollment with failed service %v: %v", failService, err)
 			}

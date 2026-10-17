@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **CLI:** Use one command parser for execution and help. Honor `--checkout`
+  for repository registration and removal. Utility mutations emit JSON when
+  piped, including version holds, state recovery and sparks checks and updates.
+
 - **docs:** Present Local and Cloud as the launch modes, with self-hosted runners
   registering to Cloud. Document operator team creation and remove cache-service
   and self-hosted-controller onboarding promises.

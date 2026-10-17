@@ -60,18 +60,18 @@ func TestDaemonExplainAndEventsReadWithoutDaemon(t *testing.T) {
 		}
 	}
 	t.Setenv("SPARKWING_HOME", home)
-	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
+	plain := captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
 	if !strings.Contains(plain, "Queued behind run run-0: cores") || !strings.Contains(plain, "Admitted after 350ms") {
 		t.Fatalf("timeline: %s", plain)
 	}
 	t.Setenv("SPARKWING_HOME", home)
-	jsonExplain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1"}) })
+	jsonExplain := captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--explain", "--run", "run-1"}) })
 	if strings.Count(jsonExplain, "\n") != 3 || !strings.Contains(jsonExplain, `"kind":"request"`) {
 		t.Fatalf("piped explanation: %s", jsonExplain)
 	}
 	json := captureDaemonOutput(t, func() error {
 		t.Setenv("SPARKWING_HOME", home)
-		return runDaemonEvents([]string{"--run", "run-1", "--kind", "queued", "-o", "json"})
+		return runDaemonEventsArgs([]string{"--run", "run-1", "--kind", "queued", "-o", "json"})
 	})
 	page := decodeDaemonEventPage(t, json)
 	if len(page.Records) != 1 || page.Records[0].Kind != "queued" || page.Cursor != "" || page.Truncated {
@@ -82,18 +82,18 @@ func TestDaemonExplainAndEventsReadWithoutDaemon(t *testing.T) {
 func TestDaemonEventsReportsEmptyJournalLocation(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
-	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"-o", "plain"}) })
+	plain := captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"-o", "plain"}) })
 	if !strings.Contains(plain, "No events are retained in "+filepath.Join(home, "wingd")) {
 		t.Fatalf("empty journal: %q", plain)
 	}
 	t.Setenv("SPARKWING_HOME", home)
-	json := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"-o", "json"}) })
+	json := captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"-o", "json"}) })
 	page := decodeDaemonEventPage(t, json)
 	if len(page.Records) != 0 || page.Cursor != "" || page.Truncated {
 		t.Fatalf("empty JSON journal: %q", json)
 	}
 	t.Setenv("SPARKWING_HOME", home)
-	if err := runDaemonEvents([]string{"-o", "csv"}); err == nil || !strings.Contains(err.Error(), "pretty, json, plain") {
+	if err := runDaemonEventsArgs([]string{"-o", "csv"}); err == nil || !strings.Contains(err.Error(), "pretty, json, plain") {
 		t.Fatalf("invalid output mode: %v", err)
 	}
 }
@@ -118,7 +118,7 @@ func TestDaemonExplainIncludesOwnedSlotsAndChildAttaches(t *testing.T) {
 		}
 	}
 	t.Setenv("SPARKWING_HOME", home)
-	plain := captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
+	plain := captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--explain", "--run", "run-1", "-o", "plain"}) })
 	for _, fragment := range []string{"node-slot: Requested 0.2 cores", "node-slot: Admitted after 12.4s (backfill)", "child-1: Attached child", "child-2: Request rejected: parent lease missing", "refused-slot: Request rejected: draining", "node-slot: Released lease-1"} {
 		if !strings.Contains(plain, fragment) {
 			t.Errorf("missing %q in %s", fragment, plain)
@@ -144,7 +144,7 @@ func TestDaemonExplainFollowsDescendantsTransitively(t *testing.T) {
 	}
 	output := captureDaemonOutput(t, func() error {
 		t.Setenv("SPARKWING_HOME", home)
-		return runDaemonEvents([]string{"--explain", "--run", "root", "-o", "json"})
+		return runDaemonEventsArgs([]string{"--explain", "--run", "root", "-o", "json"})
 	})
 	if strings.Count(output, `"run_id":"grandchild"`) != 2 || !strings.Contains(output, `"run_id":"child"`) || strings.Contains(output, `"run_id":"unrelated"`) {
 		t.Fatalf("transitive timeline: %s", output)
@@ -169,8 +169,8 @@ func TestDaemonJournalReportsSkippedRecords(t *testing.T) {
 	}
 	t.Setenv("SPARKWING_HOME", home)
 	for _, run := range []func() error{
-		func() error { return runDaemonEvents([]string{"-o", "json"}) },
-		func() error { return runDaemonEvents([]string{"--explain", "--run", "run-1", "-o", "json"}) },
+		func() error { return runDaemonEventsArgs([]string{"-o", "json"}) },
+		func() error { return runDaemonEventsArgs([]string{"--explain", "--run", "run-1", "-o", "json"}) },
 	} {
 		warning := captureDaemonErrorOutput(t, func() error {
 			_ = captureDaemonOutput(t, run)
@@ -234,15 +234,15 @@ func TestDaemonEventsBoundsFilteredOutputAndContinues(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	first := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--run", "run-1"}) }))
+	first := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--run", "run-1"}) }))
 	if len(first.Records) != 50 || first.Records[0].Data["index"] != float64(5) || first.Records[49].Data["index"] != float64(54) || first.Cursor == "" || !first.Truncated {
 		t.Fatalf("first page: %+v", first)
 	}
-	older := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--run", "run-1", "--cursor", first.Cursor}) }))
+	older := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--run", "run-1", "--cursor", first.Cursor}) }))
 	if len(older.Records) != 5 || older.Records[0].Data["index"] != float64(0) || older.Records[4].Data["index"] != float64(4) || older.Cursor != "" || older.Truncated {
 		t.Fatalf("older page: %+v", older)
 	}
-	all := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEvents([]string{"--run", "run-1", "--limit", "55"}) }))
+	all := decodeDaemonEventPage(t, captureDaemonOutput(t, func() error { return runDaemonEventsArgs([]string{"--run", "run-1", "--limit", "55"}) }))
 	if len(all.Records) != 55 || all.Cursor != "" || all.Truncated {
 		t.Fatalf("all records: %+v", all)
 	}

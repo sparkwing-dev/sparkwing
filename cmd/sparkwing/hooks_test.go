@@ -125,7 +125,7 @@ func TestRenderedHooksUseRunOutputGrammar(t *testing.T) {
 				}
 				selected := strings.TrimSpace(string(raw))
 				t.Setenv("SPARKWING_LOG_FORMAT", selected)
-				flags, _ := parseRunFlags(nil)
+				flags, _ := parseRunFlagsArgs(nil)
 				if flags.parseErr != nil {
 					t.Fatalf("generated hook output %q: %v", selected, flags.parseErr)
 				}

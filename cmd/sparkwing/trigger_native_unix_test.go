@@ -37,7 +37,7 @@ func main() { sw.Register("deploy-prod", func() sw.Pipeline[sw.NoInputs] { retur
 	runSnapshotGit(t, repo, "remote", "add", "origin", "https://git.example/acme/app.git")
 	runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
 	t.Chdir(repo)
-	flags, err := parseTriggerFlags([]string{"deploy-prod", "--profile=prod", "--runner=here", "--reason=investigate deployment"})
+	flags, err := parseTriggerFlagsArgs([]string{"deploy-prod", "--profile=prod", "--runner=here", "--reason=investigate deployment"})
 	if err != nil {
 		t.Fatal(err)
 	}

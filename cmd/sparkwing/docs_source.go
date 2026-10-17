@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -19,14 +18,6 @@ type docsWebFlags struct {
 	web     bool
 	version string
 	noCache bool
-}
-
-func registerWebFlags(fs *flag.FlagSet, f *docsWebFlags, includeVersion bool) {
-	fs.BoolVar(&f.web, "web", false, "fetch from sparkwing.dev instead of the embedded corpus")
-	if includeVersion {
-		fs.StringVar(&f.version, "version", "", "doc version: vX.Y.Z, 'latest', or empty for this CLI's embedded version")
-	}
-	fs.BoolVar(&f.noCache, "no-cache", false, "with --web, bypass the on-disk cache (read + write)")
 }
 
 func embeddedVersion() string {

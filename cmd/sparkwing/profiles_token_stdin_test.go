@@ -73,7 +73,7 @@ func TestProfilesAddNoProbeReadsTokenFromStdin(t *testing.T) {
 	withStdin(t, "swu_from_stdin\n")
 	out := captureStdout(t, func() {
 		args := []string{"--profile", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
-		if err := runProfiles(append([]string{"add"}, args...)); err != nil {
+		if err := runProfilesArgs(append([]string{"add"}, args...)); err != nil {
 			t.Errorf("profiles add: %v", err)
 		}
 	})
@@ -90,13 +90,13 @@ func TestProfilesSetReadsTokenFromStdin(t *testing.T) {
 	withStdin(t, "swu_first\n")
 	captureStdout(t, func() {
 		args := []string{"--profile", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
-		if err := runProfiles(append([]string{"add"}, args...)); err != nil {
+		if err := runProfilesArgs(append([]string{"add"}, args...)); err != nil {
 			t.Fatalf("profiles add: %v", err)
 		}
 	})
 	withStdin(t, "swu_rotated\n")
 	captureStdout(t, func() {
-		if err := runProfiles([]string{"set", "--profile", "prod", "--token-stdin"}); err != nil {
+		if err := runProfilesArgs([]string{"set", "--profile", "prod", "--token-stdin"}); err != nil {
 			t.Fatalf("profiles set: %v", err)
 		}
 	})

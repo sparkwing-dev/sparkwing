@@ -127,7 +127,7 @@ func TestLocalRunUsesSealedIntakeAndNamedOwnerClaim(t *testing.T) {
 			var calls []string
 			var out bytes.Buffer
 			deps := localRuntimeFor(t, localTestAward(t), detached, &calls)
-			flags, args := parseRunFlags([]string{fmt.Sprintf("--sw-detached=%t", detached), "-o=json", "--", "--password", "private-value"})
+			flags, args := parseRunFlagsArgs([]string{fmt.Sprintf("--sw-detached=%t", detached), "-o=json", "--", "--password", "private-value"})
 			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
 			want := []string{"resolve", "prepare", "create", "claim", "bind", "host", "host-close", "close"}
 			if detached {
@@ -197,7 +197,7 @@ func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
 				return runtime, err
 			}
 			var out bytes.Buffer
-			flags, args := parseRunFlags([]string{"--sw-output=json", "--", "--password=private-value"})
+			flags, args := parseRunFlagsArgs([]string{"--sw-output=json", "--", "--password=private-value"})
 			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
 			if (err == nil) != (outcome == "success") {
 				t.Fatalf("outcome=%s error=%v", outcome, err)
@@ -226,7 +226,7 @@ func TestLocalForegroundRunReportsCommittedOutcome(t *testing.T) {
 
 func TestLocalRunNoUpdateReachesPreparation(t *testing.T) {
 	var calls []string
-	flags, args := parseRunFlags([]string{"--sw-no-update", "--", "--password=private-value"})
+	flags, args := parseRunFlagsArgs([]string{"--sw-no-update", "--", "--password=private-value"})
 	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 	resolve := deps.resolve
 	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
@@ -251,7 +251,7 @@ func TestLocalForegroundRunOutputFailuresStayVisible(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%d", format, at), func(t *testing.T) {
 				var calls []string
 				out := localFailingEventWriter{at: at}
-				flags, args := parseRunFlags([]string{"--sw-output=" + format, "--", "--password=private-value"})
+				flags, args := parseRunFlagsArgs([]string{"--sw-output=" + format, "--", "--password=private-value"})
 				err := runLocalCommand(t.Context(), "ci", flags, args, &out, localRuntimeFor(t, localTestAward(t), false, &calls))
 				if err == nil || !strings.Contains(err.Error(), "closed output") || !strings.Contains(err.Error(), "local-run") {
 					t.Fatalf("output failure was hidden: %v", err)
@@ -361,7 +361,7 @@ func TestParsedLocalOutputSurvivesIntakeAndReceipt(t *testing.T) {
 	for _, option := range [][]string{{"-o", "plain"}, {"--output=plain"}, {"--sw-output=plain"}, nil} {
 		t.Run(strings.Join(option, " "), func(t *testing.T) {
 			t.Setenv("SPARKWING_LOG_FORMAT", "plain")
-			flags, args := parseRunFlags(append(append([]string{"--sw-detached"}, option...), "--", "--password=private-value"))
+			flags, args := parseRunFlagsArgs(append(append([]string{"--sw-detached"}, option...), "--", "--password=private-value"))
 			var calls []string
 			deps := localRuntimeFor(t, localTestAward(t), true, &calls)
 			resolve := deps.resolve
@@ -393,7 +393,7 @@ func TestLocalPreparationRetainsC4PresenceAndMachineDefaults(t *testing.T) {
 	input.machineFile = "/captured/config.yaml"
 	input.machine.Run = &userconfig.RunConfig{CacheFrom: new("ci-cache")}
 	input.settings.Environment = settings.Values{Options: runspec.Options{NoMemo: runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "plain"}}}}
-	flags, args := parseRunFlags([]string{"--publish", "history", "--sw-start-at", "build/compile", "--sw-stop-at", "test/verify", "--sw-only", "build*", "--sw-no-memo=false", "--sw-workers", "2", "--sw-priority=0", "--sw-pause-before", "build,test", "--sw-pause-on-failure=false", "--", "--password", "private-value"})
+	flags, args := parseRunFlagsArgs([]string{"--publish", "history", "--sw-start-at", "build/compile", "--sw-stop-at", "test/verify", "--sw-only", "build*", "--sw-no-memo=false", "--sw-workers", "2", "--sw-priority=0", "--sw-pause-before", "build,test", "--sw-pause-on-failure=false", "--", "--password", "private-value"})
 	if flags.parseErr != nil {
 		t.Fatal(flags.parseErr)
 	}
@@ -414,7 +414,7 @@ func TestLocalPreparationRetainsC4PresenceAndMachineDefaults(t *testing.T) {
 	if !request.Request.SecretArgs.Set || !reflect.DeepEqual(request.Request.SecretArgs.Value, []string{"password"}) {
 		t.Fatal("lost argument classification")
 	}
-	flags, args = parseRunFlags([]string{"--sw-cache-from=", "--", "--password", "private-value"})
+	flags, args = parseRunFlagsArgs([]string{"--sw-cache-from=", "--", "--password", "private-value"})
 	request, err = prepareLocalRunRequest(t.Context(), input, flags, args)
 	if err != nil || request.Request.Options.CacheFrom.Value != "" || request.Request.Options.CacheFrom.Origin.Layer != runspec.LayerFlag {
 		t.Fatalf("explicit empty cache profile did not override machine default: %+v %v", request.Request.Options.CacheFrom, err)
@@ -532,12 +532,12 @@ func TestStandaloneHostUsesFinalFlagsAndSharedHost(t *testing.T) {
 		}
 		return resolve(ctx, opts)
 	}
-	err := runLocalHostCommand(t.Context(), []string{"--run", award.RunID, "--state-db", db, "--env-file", env, "--standalone-reason", "isolated CI"}, io.Discard, deps)
+	err := runLocalHostCommandArgs(t.Context(), []string{"--run", award.RunID, "--state-db", db, "--env-file", env, "--standalone-reason", "isolated CI"}, io.Discard, deps)
 	if err != nil || !reflect.DeepEqual(calls, []string{"resolve", "claim", "bind", "host", "host-close", "close"}) {
 		t.Fatalf("standalone calls=%v error=%v", calls, err)
 	}
 	for _, args := range [][]string{{"--program", "pipeline", "run"}, {"--run", "r", "--state-db", "relative", "--standalone-reason", "CI"}, {"--run", "r", "--state-db", db}} {
-		if err := runLocalHostCommand(t.Context(), args, io.Discard, localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
+		if err := runLocalHostCommandArgs(t.Context(), args, io.Discard, localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
 			t.Fatal("invalid host arguments reached native composition")
 			return localRunRuntime{}, nil
 		}}); err == nil {
@@ -849,7 +849,7 @@ func TestLocalAttachedRunStreamsCommittedLogs(t *testing.T) {
 		return runtime, err
 	}
 	var out bytes.Buffer
-	flags, args := parseRunFlags([]string{"-o=json", "--", "--password", "private-value"})
+	flags, args := parseRunFlagsArgs([]string{"-o=json", "--", "--password", "private-value"})
 	if err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps); err != nil {
 		t.Fatal(err)
 	}

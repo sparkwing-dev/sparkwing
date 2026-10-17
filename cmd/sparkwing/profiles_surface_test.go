@@ -23,7 +23,7 @@ func TestProfilesSurfaceMutationOutputs(t *testing.T) {
 				{"remove", "--profile", "prod", "--keep-token"},
 			} {
 				out := captureStdout(t, func() {
-					if err := runProfiles(append(args, "-o", format)); err != nil {
+					if err := runProfilesArgs(append(args, "-o", format)); err != nil {
 						t.Fatal(err)
 					}
 				})
@@ -62,7 +62,7 @@ func TestProfilesSurfaceRejectsOldFlagsBeforeWriting(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			path := profilesFixturePath(t)
-			if err := runProfiles(args); err == nil {
+			if err := runProfilesArgs(args); err == nil {
 				t.Fatal("accepted removed or invalid surface")
 			}
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -74,7 +74,7 @@ func TestProfilesSurfaceRejectsOldFlagsBeforeWriting(t *testing.T) {
 
 func TestProfilesSurfaceScopeCannotSilentlySucceed(t *testing.T) {
 	path := profilesFixturePath(t)
-	err := runProfiles([]string{"add", "--controller", "https://api.example", "--scope", "runs.read", "--no-probe"})
+	err := runProfilesArgs([]string{"add", "--controller", "https://api.example", "--scope", "runs.read", "--no-probe"})
 	if err == nil {
 		t.Fatal("unimplemented credential enrollment silently succeeded")
 	}
@@ -93,7 +93,7 @@ func TestProfilesRejectArgvTokenWithoutWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := captureStdout(t, func() {
-		err = runProfiles([]string{"set", "--profile=prod", "--token=private-credential"})
+		err = runProfilesArgs([]string{"set", "--profile=prod", "--token=private-credential"})
 	})
 	var usage *clisurface.UsageError
 	if !errors.As(err, &usage) || exitCodeFor(err) != 2 || output != "" || strings.Contains(err.Error(), "private-credential") {

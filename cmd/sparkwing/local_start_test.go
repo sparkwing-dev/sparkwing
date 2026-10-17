@@ -72,7 +72,7 @@ func TestEnsureLocalControllerPreservesFailures(t *testing.T) {
 
 func TestSeparateConsumerCommandRemoved(t *testing.T) {
 	for _, action := range []string{"start", "status", "stop"} {
-		if err := runJobs([]string{"consumer", action}); err == nil {
+		if err := runJobsArgs([]string{"consumer", action}); err == nil {
 			t.Fatalf("removed consumer %s accepted", action)
 		}
 	}

@@ -40,25 +40,6 @@ var (
 	runnerServiceGOOS = runtime.GOOS
 )
 
-func runRunners(args []string) error {
-	if handleParentHelp(cmdRunners, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdRunners, os.Stderr)
-		return errors.New("runners: subcommand required (add|remove)")
-	}
-	switch args[0] {
-	case "add":
-		return runRunnersAdd(args[1:])
-	case "remove":
-		return runRunnersRemove(args[1:])
-	default:
-		PrintHelp(cmdRunners, os.Stderr)
-		return fmt.Errorf("runners: unknown subcommand %q", args[0])
-	}
-}
-
 type runnerEnrollment struct {
 	path         string
 	config       userconfig.RunnerConfig
@@ -71,8 +52,8 @@ type runnerEnrollment struct {
 	sessionStdin bool
 }
 
-func runRunnersAdd(args []string) error {
-	enrollment, prof, err := prepareRunnerEnrollment(args)
+func runRunnersAdd(inv clisurface.Invocation) error {
+	enrollment, prof, err := prepareRunnerEnrollment(inv)
 	if errors.Is(err, errHelpRequested) {
 		return nil
 	}
@@ -100,8 +81,8 @@ func runnerTokenManager(prof *namedProfile) (client.RunnerTokenManager, error) {
 	return client.NewRunnerTokenManager(client.EngineOptions{URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil }})
 }
 
-func prepareRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, error) {
-	enrollment, prof, err := parseRunnerEnrollment(args)
+func prepareRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedProfile, error) {
+	enrollment, prof, err := parseRunnerEnrollment(inv)
 	if err != nil {
 		return enrollment, prof, err
 	}
@@ -115,12 +96,8 @@ func prepareRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, er
 	return enrollment, prof, err
 }
 
-func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, error) {
+func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedProfile, error) {
 	var enrollment runnerEnrollment
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "add"}, args...))
-	if err != nil {
-		return enrollment, nil, err
-	}
 	enrollment.format = inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		if err := writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, enrollment.format); err != nil {
@@ -263,8 +240,8 @@ type runnerRemoval struct {
 	noService                                    bool
 }
 
-func runRunnersRemove(args []string) error {
-	removal, prof, err := prepareRunnerRemoval(args)
+func runRunnersRemove(inv clisurface.Invocation) error {
+	removal, prof, err := prepareRunnerRemoval(inv)
 	if errors.Is(err, errHelpRequested) {
 		return nil
 	}
@@ -278,12 +255,8 @@ func runRunnersRemove(args []string) error {
 	return removeRunner(context.Background(), manager, removal)
 }
 
-func prepareRunnerRemoval(args []string) (runnerRemoval, *namedProfile, error) {
+func prepareRunnerRemoval(inv clisurface.Invocation) (runnerRemoval, *namedProfile, error) {
 	var removal runnerRemoval
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "remove"}, args...))
-	if err != nil {
-		return removal, nil, err
-	}
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		if err := writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, format); err != nil {

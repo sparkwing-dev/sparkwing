@@ -18,6 +18,11 @@ when stdout is redirected. `--output pretty|json|plain` (or `-o`) overrides
 the default. JSON reports occupy one line; JSON lists emit one object per
 line, with an empty stream for no results. Errors go to stderr.
 
+Repository registration uses `repos add --checkout PATH` and
+`repos remove --checkout PATH`. Their JSON receipts include the action,
+absolute path and affected count. `version hold`, `daemon recover-state` and
+`pipeline sparks lint|update` also honor the selected output format.
+
 Help, documentation, onboarding cards and completion scripts emit records
 with `kind` and `text` in JSON mode. Help also carries command metadata.
 Use explicit plain output when consuming their original text:

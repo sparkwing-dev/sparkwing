@@ -58,7 +58,7 @@ func TestReviewProductionExecutionBindings(t *testing.T) {
 		}
 	})
 	t.Run("local schedules", func(t *testing.T) {
-		if err := runScheduleCommand(t.Context(), []string{"install"}, io.Discard, defaultScheduleCommand()); err != nil {
+		if err := runScheduleCommandArgs(t.Context(), []string{"install"}, io.Discard, defaultScheduleCommand()); err != nil {
 			t.Fatalf("public schedules install has no concrete owner: %v", err)
 		}
 	})
@@ -106,7 +106,7 @@ func TestReviewPublicDoctorSweepsAndWarnsForPrunedRun(t *testing.T) {
 	}
 	st = nil
 	out := captureStdout(t, func() {
-		err = runDoctor([]string{"-o=json"})
+		err = runDoctorArgs([]string{"-o=json"})
 	})
 	if err != nil {
 		t.Fatalf("successful cleanup failed: %v", err)

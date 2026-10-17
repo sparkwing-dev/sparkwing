@@ -105,11 +105,7 @@ func parseRunList(inv clisurface.Invocation) (runListOptions, error) {
 	return o, nil
 }
 
-func runRunsList(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "list"}, args...))
-	if err != nil {
-		return err
-	}
+func runRunsList(ctx context.Context, inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}

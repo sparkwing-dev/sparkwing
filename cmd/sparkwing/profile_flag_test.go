@@ -62,7 +62,7 @@ profiles:
 }
 
 func TestDispatchRun_RejectsRetiredSwProfile(t *testing.T) {
-	err := dispatchRun([]string{"some-pipeline", "--sw-profile", "y"})
+	err := dispatchRunArgs([]string{"some-pipeline", "--sw-profile", "y"})
 	if err == nil {
 		t.Fatal("expected retired-flag error for --sw-profile")
 	}
@@ -96,7 +96,7 @@ profiles:
   lite: { controller: { url: https://lite.example.dev } }
 `)
 	for _, name := range []string{"prod", "lite"} {
-		err := dispatchRun([]string{"deploy", "--profile", name})
+		err := dispatchRunArgs([]string{"deploy", "--profile", name})
 		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger <pipeline> --profile NAME") {
 			t.Errorf("run deploy --profile %s = %v, want a refusal naming pipeline trigger", name, err)
 		}

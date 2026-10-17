@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -17,39 +15,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-func runWingd(args []string) error {
-	if len(args) == 0 {
-		return errors.New("wingd: subcommand required (run)")
-	}
-	switch args[0] {
-	case "run":
-		return runWingdRun(args[1:])
-	default:
-		return fmt.Errorf("wingd: unknown subcommand %q", args[0])
-	}
-}
-
-func runWingdRun(args []string) error {
+func runWingdRun(inv clisurface.Invocation) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runWingdRunCommand(ctx, args, os.Stdout, wingd.LocalStartOptions{Version: installedVersion()}, func(ctx context.Context, options wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
+	return runWingdRunCommand(ctx, inv, os.Stdout, wingd.LocalStartOptions{Version: installedVersion()}, func(ctx context.Context, options wingd.LocalStartOptions) (wingd.LocalRuntime, error) {
 		services, err := resolveLocalServicesAt(ctx, options.Home)
 		return services.runtime, err
 	})
 }
 
-func runWingdRunCommand(ctx context.Context, args []string, out io.Writer, options wingd.LocalStartOptions, resolve func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error)) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"wingd", "run"}, args...))
-	if err != nil {
-		return err
-	}
+func runWingdRunCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, options wingd.LocalStartOptions, resolve func(context.Context, wingd.LocalStartOptions) (wingd.LocalRuntime, error)) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, inv.Output(false))
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	options, err = foregroundOptions(inv, options)
+	options, err := foregroundOptions(inv, options)
 	if err != nil {
 		return err
 	}

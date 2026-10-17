@@ -108,7 +108,7 @@ func TestHookInstallationProofUsesRunOutputGrammar(t *testing.T) {
 			t.Setenv("SPARKWING_LOG_FORMAT", value)
 		}
 	}
-	flags, _ := parseRunFlags(command.Args[3:])
+	flags, _ := parseRunFlagsArgs(command.Args[3:])
 	if flags.parseErr != nil {
 		t.Fatalf("installation proof rejected by run parser: %v", flags.parseErr)
 	}

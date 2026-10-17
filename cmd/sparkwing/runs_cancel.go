@@ -14,11 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-func runRunsCancel(ctx context.Context, args []string) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "cancel"}, args...))
-	if err != nil {
-		return err
-	}
+func runRunsCancel(ctx context.Context, inv clisurface.Invocation) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, format)

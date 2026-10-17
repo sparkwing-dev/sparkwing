@@ -75,14 +75,7 @@ func validatePriorityFlag(v string) (string, error) {
 		v, wingwire.PriorityFront, wingwire.PriorityBack)
 }
 
-func parseRunFlags(args []string) (runFlags, []string) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"run", "pipeline"}, args...))
-	if err != nil {
-		if inv.Command.Path == "sparkwing run" && inv.Has("profile") {
-			err = &clisurface.UsageError{Path: inv.Command.Path, Message: "--profile is not accepted by local run; use sparkwing pipeline trigger <pipeline> --profile NAME"}
-		}
-		return runFlags{parseErr: err}, nil
-	}
+func runFlagsFromInvocation(inv clisurface.Invocation) (runFlags, []string) {
 	output, outputOrigin := runOutput(inv, os.Getenv("SPARKWING_LOG_FORMAT"), color.IsInteractiveStdout())
 	if output != "pretty" && output != "json" && output != "plain" {
 		return runFlags{parseErr: errors.New("SPARKWING_LOG_FORMAT must be pretty, json or plain")}, nil

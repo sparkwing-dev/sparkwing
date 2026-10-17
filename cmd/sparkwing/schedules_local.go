@@ -295,16 +295,12 @@ func changeLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts s
 	return nil
 }
 
-func runScheduleTick(args []string) error {
-	return runScheduleTickCommand(context.Background(), args, os.Stdout, resolveLocalScheduleServices)
+func runScheduleTick(inv clisurface.Invocation) error {
+	return runScheduleTickCommand(context.Background(), inv, os.Stdout, resolveLocalScheduleServices)
 }
 
-func runScheduleTickCommand(ctx context.Context, args []string, out io.Writer, resolve func(context.Context, string) (localScheduleServices, error)) error {
+func runScheduleTickCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, resolve func(context.Context, string) (localScheduleServices, error)) error {
 	if err := ctx.Err(); err != nil {
-		return err
-	}
-	inv, err := clisurface.Parse("sparkwing", append([]string{"__tick"}, args...))
-	if err != nil {
 		return err
 	}
 	format := inv.Output(color.IsInteractiveStdout())

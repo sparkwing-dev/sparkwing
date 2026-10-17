@@ -30,11 +30,7 @@ func resolveRunReview(ctx context.Context, profile string) (controllerwire.RunRe
 	return review, closeTransport, nil
 }
 
-func runReviewCommand(ctx context.Context, args []string, out io.Writer, resolve func(context.Context, string) (controllerwire.RunReview, func(), error)) error {
-	inv, err := clisurface.Parse("sparkwing", args)
-	if err != nil {
-		return err
-	}
+func runReviewCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, resolve func(context.Context, string) (controllerwire.RunReview, func(), error)) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() || inv.Command.Path == cmdAnnotations.Path || inv.Command.Path == cmdApprovals.Path {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

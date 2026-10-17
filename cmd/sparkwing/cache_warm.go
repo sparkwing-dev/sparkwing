@@ -41,10 +41,10 @@ type cacheWarmDependencies struct {
 	prepare     func(context.Context, string, []string, io.Writer) (cacheWarmResult, error)
 }
 
-func runCacheWarm(args []string) error {
+func runCacheWarm(inv clisurface.Invocation) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runCacheWarmCommand(ctx, args, os.Stdout, cacheWarmDependencies{
+	return runCacheWarmCommand(ctx, inv, os.Stdout, cacheWarmDependencies{
 		locate: defaultSparkwingDir, environment: os.Environ(), buildEnv: procenv.Build,
 		diagnostics: os.Stderr,
 		clear: func(ctx context.Context) (bincache.PruneResult, error) {
@@ -54,11 +54,7 @@ func runCacheWarm(args []string) error {
 	})
 }
 
-func runCacheWarmCommand(ctx context.Context, args []string, out io.Writer, deps cacheWarmDependencies) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"cache", "warm"}, args...))
-	if err != nil {
-		return err
-	}
+func runCacheWarmCommand(ctx context.Context, inv clisurface.Invocation, out io.Writer, deps cacheWarmDependencies) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

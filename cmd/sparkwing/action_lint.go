@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,35 +21,18 @@ type pipelineLintArgs struct {
 	rules    bool
 }
 
-func parsePipelineLintArgs(args []string) (pipelineLintArgs, bool, error) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "lint"}, args...))
-	if err != nil {
-		return pipelineLintArgs{}, false, err
-	}
-	return pipelineLintArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), dir: inv.Value("dir"), all: !inv.Has("pipeline"), rules: inv.Bool("rules")}, inv.Help(), nil
+func pipelineLintOptions(inv clisurface.Invocation) pipelineLintArgs {
+	return pipelineLintArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), dir: inv.Value("dir"), all: !inv.Has("pipeline"), rules: inv.Bool("rules")}
 }
 
-func runPipelineLint(args []string) error {
-	parsed, helpRequested, err := parsePipelineLintArgs(args)
-	if err != nil {
-		return err
-	}
-	if helpRequested {
-		PrintHelp(cmdPipelineLint, os.Stdout)
-		return nil
-	}
+func runPipelineLint(inv clisurface.Invocation) error {
+	parsed := pipelineLintOptions(inv)
 	format, err := resolveOutputFormat(parsed.output, cmdPipelineLint.Path)
 	if err != nil {
 		return err
 	}
 	if parsed.rules {
 		return printLintRules(format)
-	}
-	if parsed.all && parsed.pipeline != "" {
-		return errors.New("lint: --all and --pipeline are mutually exclusive")
-	}
-	if !parsed.all && parsed.pipeline == "" {
-		parsed.all = true
 	}
 	cwd, err := os.Getwd()
 	if err != nil {

@@ -67,7 +67,7 @@ func TestPipelineDescribeSecretsFollowsTheSourceAndFailsLoudly(t *testing.T) {
 	for _, name := range []string{"FIRST_TOKEN", "RENAMED_TOKEN"} {
 		writeSDKFixture(t, dir, strings.Replace(describeSecretsSource, "NAME", name, 1))
 		var commandErr error
-		stdout := captureStdout(t, func() { commandErr = runPipelineDescribeCommand(args, inspect) })
+		stdout := captureStdout(t, func() { commandErr = runPipelineDescribeCommandArgs(args, inspect) })
 		if commandErr != nil {
 			t.Fatal(commandErr)
 		}
@@ -85,7 +85,7 @@ func TestPipelineDescribeSecretsFollowsTheSourceAndFailsLoudly(t *testing.T) {
 	}
 	writeSDKFixture(t, dir, "package main\n\nfunc main() { undefined() }\n")
 	var commandErr error
-	stdout := captureStdout(t, func() { commandErr = runPipelineDescribeCommand(args, inspect) })
+	stdout := captureStdout(t, func() { commandErr = runPipelineDescribeCommandArgs(args, inspect) })
 	if commandErr == nil || stdout != "" {
 		t.Fatalf("unbuildable source returned a successful schema: %v, output=%s", commandErr, stdout)
 	}

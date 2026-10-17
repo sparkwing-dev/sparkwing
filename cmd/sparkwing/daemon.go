@@ -11,32 +11,12 @@ import (
 	"strings"
 	"time"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 )
-
-func runDaemon(args []string) error {
-	if handleParentHelp(cmdDaemon, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdDaemon, os.Stdout)
-		return nil
-	}
-	switch args[0] {
-	case "status", "restart", "stop":
-		return runDaemonLifecycle(args)
-	case "recover-state":
-		return runDaemonRecoverState(args[1:])
-	case "events":
-		return runDaemonEvents(args[1:])
-	default:
-		PrintHelp(cmdDaemon, os.Stderr)
-		return fmt.Errorf("daemon: unknown subcommand %q", args[0])
-	}
-}
 
 func explainRunAdmission(out io.Writer, records []journal.Record, runID, format string) error {
 	children := make(map[string][]string)
@@ -273,22 +253,23 @@ func compactValue(value any) string {
 	}
 }
 
-func runDaemonRecoverState(args []string) error {
-	fs := flag.NewFlagSet(cmdDaemonRecoverState.Path, flag.ContinueOnError)
-	yes := fs.Bool("yes", false, "confirm every run described by the unreadable state has stopped")
-	if err := parseAndCheck(cmdDaemonRecoverState, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runDaemonRecoverState(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
-	if !*yes {
+	yes := inv.Bool("yes")
+	if !yes {
 		return errors.New("daemon recover-state: refusing without --yes; unreadable state may describe live admission holders")
 	}
 	quarantined, err := wingd.RecoverUnreadableState("", time.Now())
 	if err != nil {
 		return fmt.Errorf("daemon recover-state: %w", err)
 	}
-	fmt.Fprintf(os.Stdout, "preserved unreadable daemon state at %s\n", quarantined)
-	return nil
+	if inv.Output(color.IsInteractiveStdout()) == "json" {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Preserved string `json:"preserved"`
+		}{quarantined})
+	}
+	_, err = fmt.Fprintln(os.Stdout, quarantined)
+	return err
 }

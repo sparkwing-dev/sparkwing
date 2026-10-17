@@ -105,7 +105,7 @@ func TestCommandsJSONOmitsHiddenUnlessAsked(t *testing.T) {
 
 func TestHelpJSONStillCarriesFullDetail(t *testing.T) {
 	var buf bytes.Buffer
-	if err := renderHelp(cmdCommands, []string{"--output", "json"}, &buf); err != nil {
+	if err := writeCommandHelp(cmdCommands, &buf, "json"); err != nil {
 		t.Fatal(err)
 	}
 

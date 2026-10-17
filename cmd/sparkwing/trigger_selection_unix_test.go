@@ -48,7 +48,7 @@ func TestTriggerCommandGuardsTheSelectedRevision(t *testing.T) {
 	selectedRevisionGit(t)
 	for _, profile := range []string{"prod", "dev"} {
 		t.Run(profile, func(t *testing.T) {
-			err := runTriggerCommand(t.Context(), []string{"deploy", "--ref=release", "--profile=" + profile, "--detach"}, io.Discard, prepareNativeTrigger,
+			err := runTriggerCommandArgs(t.Context(), []string{"deploy", "--ref=release", "--profile=" + profile, "--detach"}, io.Discard, prepareNativeTrigger,
 				func(_ context.Context, _ string) (client.EngineOptions, func(), error) {
 					t.Fatal("source inspection crossed its fixture boundary")
 					return client.EngineOptions{}, nil, nil
@@ -135,7 +135,7 @@ func TestRunHelpSelectsExecutionRefAndConfiguredSource(t *testing.T) {
 	}
 	boundary := errors.New("selected engine boundary")
 	called := false
-	err = dispatchRunWithEngine([]string{"deploy", "--sw-ref=release", "--", "--help"}, func(selected string, beforeExec func()) error {
+	err = dispatchRunWithEngineArgs([]string{"deploy", "--sw-ref=release", "--", "--help"}, func(selected string, beforeExec func()) error {
 		called = true
 		raw, err := os.ReadFile(filepath.Join(selected, "sparkwing.yaml"))
 		if err != nil || !strings.Contains(string(raw), "CodeDeploy") {

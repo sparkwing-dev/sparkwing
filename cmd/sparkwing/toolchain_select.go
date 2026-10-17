@@ -17,7 +17,10 @@ import (
 
 const toolchainModeEnv = "SPARKWING_TOOLCHAIN"
 
-var toolchainReplayArgs []string
+var (
+	toolchainReplayArgs      []string
+	toolchainReplayDirectory string
+)
 
 var (
 	readEnginePin    = engine.ReadPin
@@ -56,7 +59,7 @@ func switchToolchain(dir string, beforeExec func()) error {
 			if beforeExec != nil {
 				beforeExec()
 			}
-			return execToolchain(binary, args, environment)
+			return replayToolchain(binary, args, environment)
 		}, diagnostics: os.Stderr,
 		resolve: func(ctx context.Context, pin engine.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
 			resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, LocalOnly: true})
@@ -67,6 +70,20 @@ func switchToolchain(dir string, beforeExec func()) error {
 		},
 	}
 	return command.run(ctx, dir, sdk, os.Getenv(toolchainModeEnv), toolchainArgs(), os.Environ())
+}
+
+func replayToolchain(binary string, args, environment []string) (result error) {
+	if toolchainReplayDirectory != "" {
+		previous, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := os.Chdir(toolchainReplayDirectory); err != nil {
+			return err
+		}
+		defer func() { result = errors.Join(result, os.Chdir(previous)) }()
+	}
+	return execToolchain(binary, args, environment)
 }
 
 func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk engine.SDKKind, rawMode string, args, environment []string) error {

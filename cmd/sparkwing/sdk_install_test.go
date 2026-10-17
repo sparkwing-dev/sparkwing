@@ -16,7 +16,7 @@ func TestSDKInstallPassesRequestToEngineOwner(t *testing.T) {
 	var output, diagnostics bytes.Buffer
 	want := errors.New("installation failed")
 	called := false
-	err := runSDKInstallCommand(t.Context(), nil, "v1.2.3", input, &output, &diagnostics, func(ctx context.Context, version string, request io.Reader, out, diagnostic io.Writer) error {
+	err := runSDKInstallCommandArgs(t.Context(), nil, "v1.2.3", input, &output, &diagnostics, func(ctx context.Context, version string, request io.Reader, out, diagnostic io.Writer) error {
 		called = true
 		if ctx != t.Context() || version != "v1.2.3" || request != input || out != &output || diagnostic != &diagnostics {
 			t.Fatal("installer boundaries changed")
@@ -30,18 +30,18 @@ func TestSDKInstallPassesRequestToEngineOwner(t *testing.T) {
 
 func TestSDKInstallRejectsArgumentsBeforeEngineOwner(t *testing.T) {
 	for _, args := range [][]string{{"argument"}, {"--unknown"}, {"--home", "/checkout"}} {
-		err := runSDKInstallCommand(t.Context(), args, "version", nil, io.Discard, io.Discard, nil)
+		err := runSDKInstallCommandArgs(t.Context(), args, "version", nil, io.Discard, io.Discard, nil)
 		if err == nil {
 			t.Fatalf("accepted arguments %q", args)
 		}
 	}
 	var help bytes.Buffer
-	if err := runSDKInstallCommand(t.Context(), []string{"--help"}, "version", nil, &help, nil, nil); err != nil || help.Len() == 0 {
+	if err := runSDKInstallCommandArgs(t.Context(), []string{"--help"}, "version", nil, &help, nil, nil); err != nil || help.Len() == 0 {
 		t.Fatalf("help=%q error=%v", help.String(), err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := runSDKInstallCommand(ctx, nil, "version", nil, io.Discard, nil, nil); !errors.Is(err, context.Canceled) {
+	if err := runSDKInstallCommandArgs(ctx, nil, "version", nil, io.Discard, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled install=%v", err)
 	}
 }
@@ -49,7 +49,7 @@ func TestSDKInstallRejectsArgumentsBeforeEngineOwner(t *testing.T) {
 func TestSDKInstallRejectsInvalidRequestsThroughEngineOwner(t *testing.T) {
 	for _, body := range []string{"", "null", "{}", `{"directory":"/checkout","directory":"/other"}`, `{"environment":["TOKEN=secret"]}`, `{} {}`, `{"directory":"relative","pipeline_dir":".","sdk":"go"}`, `{"directory":"/checkout","pipeline_dir":"../outside","sdk":"go"}`} {
 		var out bytes.Buffer
-		err := runSDKInstallCommand(t.Context(), nil, "version", strings.NewReader(body), &out, io.Discard, sdkinstall.Run)
+		err := runSDKInstallCommandArgs(t.Context(), nil, "version", strings.NewReader(body), &out, io.Discard, sdkinstall.Run)
 		if err == nil || out.Len() != 0 {
 			t.Fatalf("request=%q output=%q error=%v", body, out.String(), err)
 		}

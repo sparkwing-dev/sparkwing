@@ -23,8 +23,8 @@ type retryConnection struct {
 	close func()
 }
 
-func runRunsRetry(ctx context.Context, args []string) error {
-	return runRunsRetryCommand(ctx, args, os.Stdin, os.Stdout, resolveRetryConnection)
+func runRunsRetry(ctx context.Context, inv clisurface.Invocation) error {
+	return runRunsRetryCommand(ctx, inv, os.Stdin, os.Stdout, resolveRetryConnection)
 }
 
 func resolveRetryConnection(ctx context.Context, profile string) (retryConnection, error) {
@@ -42,11 +42,7 @@ func resolveRetryConnection(ctx context.Context, profile string) (retryConnectio
 	}}, nil
 }
 
-func runRunsRetryCommand(ctx context.Context, args []string, input io.Reader, out io.Writer, resolve func(context.Context, string) (retryConnection, error)) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "retry"}, args...))
-	if err != nil {
-		return err
-	}
+func runRunsRetryCommand(ctx context.Context, inv clisurface.Invocation, input io.Reader, out io.Writer, resolve func(context.Context, string) (retryConnection, error)) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), out, format)

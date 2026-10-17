@@ -14,7 +14,7 @@ func TestParseRunFlags_Index(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			wf, pass := parseRunFlags(tc.args)
+			wf, pass := parseRunFlagsArgs(tc.args)
 			if wf.index != tc.want {
 				t.Errorf("index = %q, want %q", wf.index, tc.want)
 			}

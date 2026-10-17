@@ -61,7 +61,7 @@ func TestUpgradeSelectsRepositorySDKAndReportsPreview(t *testing.T) {
 			}}}
 			var out bytes.Buffer
 			command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, out: &out}
-			if err := command.run(t.Context(), []string{"--checkout", root, "--version=v1.1.0", "--dry-run", "--output=json"}); err != nil {
+			if err := command.runArgs(t.Context(), []string{"--checkout", root, "--version=v1.1.0", "--dry-run", "--output=json"}); err != nil {
 				t.Fatal(err)
 			}
 			if fake.request != (engine.UpgradeRequest{Checkout: root, SDK: sdk, Version: "v1.1.0", DryRun: true}) {
@@ -81,7 +81,7 @@ func TestUpgradeSelectsRepositorySDKAndReportsPreview(t *testing.T) {
 func TestUpgradeRejectsGrammarBeforeOpeningResolver(t *testing.T) {
 	for _, args := range [][]string{{"--output=xml"}, {"--version"}, {"extra"}, {"--unknown"}} {
 		command := upgradeCommand{newResolver: func() (upgradeResolver, error) { t.Fatal("opened resolver on invalid invocation"); return nil, nil }}
-		if err := command.run(t.Context(), args); err == nil {
+		if err := command.runArgs(t.Context(), args); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
 	}
@@ -90,7 +90,7 @@ func TestUpgradeRejectsGrammarBeforeOpeningResolver(t *testing.T) {
 func TestUpgradeHelpDoesNotOpenRepositoryOrResolver(t *testing.T) {
 	var out bytes.Buffer
 	command := upgradeCommand{out: &out}
-	if err := command.run(t.Context(), []string{"--checkout=/does-not-exist", "--help", "--output=plain"}); err != nil {
+	if err := command.runArgs(t.Context(), []string{"--checkout=/does-not-exist", "--help", "--output=plain"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "--dry-run") || !strings.Contains(out.String(), "--version") {
@@ -116,7 +116,7 @@ func TestUpgradePreservesPolicyAndVerificationFailures(t *testing.T) {
 		fake := &fakeUpgradeResolver{err: failure}
 		var out bytes.Buffer
 		command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, out: &out}
-		if err := command.run(t.Context(), []string{"--checkout", root}); !errors.Is(err, failure) {
+		if err := command.runArgs(t.Context(), []string{"--checkout", root}); !errors.Is(err, failure) {
 			t.Fatalf("error = %v", err)
 		}
 		if out.Len() != 0 {
@@ -131,14 +131,14 @@ func TestUpgradeVerifiedResult(t *testing.T) {
 	fake := &fakeUpgradeResolver{result: engine.UpgradeResult{Applied: true, Verified: true, Plan: engine.UpgradePlan{Before: engine.Pin{Version: "v1.0.0"}, After: engine.Pin{Version: "v1.1.0"}}}}
 	var out bytes.Buffer
 	command := upgradeCommand{newResolver: func() (upgradeResolver, error) { return fake, nil }, verifier: verifier, out: &out}
-	if err := command.run(t.Context(), []string{"--checkout", root, "--output=pretty"}); err != nil {
+	if err := command.runArgs(t.Context(), []string{"--checkout", root, "--output=pretty"}); err != nil {
 		t.Fatal(err)
 	}
 	if fake.verifier != verifier || !strings.Contains(out.String(), "Verified and applied") {
 		t.Fatalf("result: %s", &out)
 	}
 	fake.result.Verified = false
-	if err := command.run(t.Context(), []string{"--checkout", root}); err == nil {
+	if err := command.runArgs(t.Context(), []string{"--checkout", root}); err == nil {
 		t.Fatal("unverified result reported as success")
 	}
 }

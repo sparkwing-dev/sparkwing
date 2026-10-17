@@ -39,7 +39,7 @@ func TestCacheWarmPreparesLocalEntryAndReportsClearing(t *testing.T) {
 			},
 		}
 		var out bytes.Buffer
-		if err := runCacheWarmCommand(t.Context(), []string{"--clear-cache", "-o", "json"}, &out, deps); err != nil {
+		if err := runCacheWarmCommandArgs(t.Context(), []string{"--clear-cache", "-o", "json"}, &out, deps); err != nil {
 			t.Fatal(err)
 		}
 		var result cacheWarmResult
@@ -55,13 +55,13 @@ func TestCacheWarmPreparesLocalEntryAndReportsClearing(t *testing.T) {
 func TestCacheWarmPreflightPreventsSideEffects(t *testing.T) {
 	for _, args := range [][]string{{"--unknown"}, {"-o", "yaml"}, {"unexpected"}, {"--profile", "prod"}} {
 		var out bytes.Buffer
-		err := runCacheWarmCommand(t.Context(), args, &out, cacheWarmDependencies{})
+		err := runCacheWarmCommandArgs(t.Context(), args, &out, cacheWarmDependencies{})
 		if err == nil || exitCodeFor(err) != 2 || out.Len() != 0 {
 			t.Fatalf("%v: %v %s", args, err, &out)
 		}
 	}
 	var out bytes.Buffer
-	if err := runCacheWarmCommand(t.Context(), []string{"--help", "-o", "json"}, &out, cacheWarmDependencies{}); err != nil || out.Len() == 0 {
+	if err := runCacheWarmCommandArgs(t.Context(), []string{"--help", "-o", "json"}, &out, cacheWarmDependencies{}); err != nil || out.Len() == 0 {
 		t.Fatalf("help: %v %s", err, &out)
 	}
 }
@@ -86,7 +86,7 @@ func TestCacheWarmFailureEmitsNoSuccess(t *testing.T) {
 			},
 		}
 		var out bytes.Buffer
-		err := runCacheWarmCommand(t.Context(), []string{"--clear-cache", "-o", "json"}, &out, deps)
+		err := runCacheWarmCommandArgs(t.Context(), []string{"--clear-cache", "-o", "json"}, &out, deps)
 		if !errors.Is(err, failure) || out.Len() != 0 || calls[len(calls)-1] != failAt {
 			t.Fatalf("%s: calls=%v err=%v output=%s", failAt, calls, err, &out)
 		}
@@ -102,10 +102,10 @@ func TestCacheWarmWithoutClearingReturnsThePath(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	if err := runCacheWarmCommand(t.Context(), []string{"-o", "plain"}, &out, deps); err != nil || out.String() != "/cache/pipeline\n" {
+	if err := runCacheWarmCommandArgs(t.Context(), []string{"-o", "plain"}, &out, deps); err != nil || out.String() != "/cache/pipeline\n" {
 		t.Fatalf("path: %v %s", err, &out)
 	}
-	if err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, doctorFailedWriter{}, deps); !errors.Is(err, io.ErrClosedPipe) {
+	if err := runCacheWarmCommandArgs(t.Context(), []string{"-o", "json"}, doctorFailedWriter{}, deps); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("writer error: %v", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestCacheWarmCanceledBeforePreparation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	var out bytes.Buffer
-	err := runCacheWarmCommand(ctx, []string{"--clear-cache"}, &out, cacheWarmDependencies{})
+	err := runCacheWarmCommandArgs(ctx, []string{"--clear-cache"}, &out, cacheWarmDependencies{})
 	if !errors.Is(err, context.Canceled) || out.Len() != 0 {
 		t.Fatalf("cancellation: %v %s", err, &out)
 	}
@@ -137,7 +137,7 @@ func TestCacheWarmUsesInstallEnvironmentBeforeClearing(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	if err := runCacheWarmCommand(t.Context(), []string{"--clear-cache", "-o", "json"}, &out, deps); !errors.Is(err, failure) || out.Len() != 0 {
+	if err := runCacheWarmCommandArgs(t.Context(), []string{"--clear-cache", "-o", "json"}, &out, deps); !errors.Is(err, failure) || out.Len() != 0 {
 		t.Fatalf("environment failure: %v %s", err, &out)
 	}
 }
@@ -162,7 +162,7 @@ func TestCacheWarmMasksInstallerOutputAndErrors(t *testing.T) {
 			return cacheWarmResult{}, failure
 		},
 	}
-	err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, &out, deps)
+	err := runCacheWarmCommandArgs(t.Context(), []string{"-o", "json"}, &out, deps)
 	if !errors.Is(err, failure) || out.Len() != 0 || strings.Contains(err.Error(), "p@ss") || strings.Contains(diagnostics.String(), "alice") || strings.Contains(diagnostics.String(), "p@ss") {
 		t.Fatalf("installer leaked diagnostics: err=%v stdout=%s stderr=%s", err, &out, &diagnostics)
 	}
@@ -178,7 +178,7 @@ func TestCacheWarmFlushesDiagnosticsBeforeSuccess(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, &out, deps)
+	err := runCacheWarmCommandArgs(t.Context(), []string{"-o", "json"}, &out, deps)
 	if !errors.Is(err, io.ErrClosedPipe) || out.Len() != 0 {
 		t.Fatalf("diagnostics failure reported success: err=%v out=%s", err, &out)
 	}

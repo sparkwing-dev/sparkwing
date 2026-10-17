@@ -51,7 +51,7 @@ func TestProfilesAddStoresExistingCredentialAfterProbe(t *testing.T) {
 		}
 	})
 	out := captureStdout(t, func() {
-		if err := runProfiles([]string{"add", "--controller", "https://api.example", "--profile", "prod", "--token-stdin"}); err != nil {
+		if err := runProfilesArgs([]string{"add", "--controller", "https://api.example", "--profile", "prod", "--token-stdin"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -67,7 +67,7 @@ func TestProfilesAddDerivesNameAndRefusesReplacement(t *testing.T) {
 	path := profilesFixturePath(t)
 	args := []string{"add", "--controller", "https://api.example", "--no-probe"}
 	captureStdout(t, func() {
-		if err := runProfiles(args); err != nil {
+		if err := runProfilesArgs(args); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -78,7 +78,7 @@ func TestProfilesAddDerivesNameAndRefusesReplacement(t *testing.T) {
 	if got := loadSavedProfile(t, path, "api-example").ControllerURL(); got != "https://api.example" {
 		t.Fatal(got)
 	}
-	if err := runProfiles(args); err == nil || !strings.Contains(err.Error(), "--force") {
+	if err := runProfilesArgs(args); err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("replacement refusal: %v", err)
 	}
 	after, err := os.ReadFile(path)
@@ -87,7 +87,7 @@ func TestProfilesAddDerivesNameAndRefusesReplacement(t *testing.T) {
 	}
 	withStdin(t, "replacement-credential\n")
 	captureStdout(t, func() {
-		if err := runProfiles(append(args, "--force", "--token-stdin")); err != nil {
+		if err := runProfilesArgs(append(args, "--force", "--token-stdin")); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -117,7 +117,7 @@ func TestProfilesAddProbeFailureDoesNotWrite(t *testing.T) {
 				withStdin(t, "swu_not_valid\n")
 				args = append(args, "--token-stdin")
 			}
-			if err := runProfiles(args); err == nil {
+			if err := runProfilesArgs(args); err == nil {
 				t.Fatal("failed probe accepted")
 			}
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -174,7 +174,7 @@ func TestProfilesRemoveRevokesOnlyMemberCredential(t *testing.T) {
 				return 500, ""
 			})
 			var result error
-			out := captureStdout(t, func() { result = runProfiles([]string{"remove", "--profile", "prod"}) })
+			out := captureStdout(t, func() { result = runProfilesArgs([]string{"remove", "--profile", "prod"}) })
 			if (result == nil) != tc.wantRemoved {
 				t.Fatalf("removal = %v", result)
 			}
@@ -199,13 +199,13 @@ func TestProfilesRemoveKeepTokenMakesNoRequest(t *testing.T) {
 	path := profilesFixturePath(t)
 	withStdin(t, "swu_private\n")
 	captureStdout(t, func() {
-		if err := runProfiles([]string{"add", "--controller", "https://api.example", "--profile", "prod", "--no-probe", "--token-stdin"}); err != nil {
+		if err := runProfilesArgs([]string{"add", "--controller", "https://api.example", "--profile", "prod", "--no-probe", "--token-stdin"}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	profileHTTPFixture(t, func(*http.Request) (int, string) { t.Fatal("keep-token contacted controller"); return 500, "" })
 	captureStdout(t, func() {
-		if err := runProfiles([]string{"remove", "--profile", "prod", "--keep-token"}); err != nil {
+		if err := runProfilesArgs([]string{"remove", "--profile", "prod", "--keep-token"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -218,7 +218,7 @@ func TestProfilesRemoveKeepTokenMakesNoRequest(t *testing.T) {
 func TestProfilesAddRejectsInvalidController(t *testing.T) {
 	for _, endpoint := range []string{"api.example", "file:///private", "https://user:private@api.example", "https://api.example?token=private", "https://api.example#private"} {
 		path := profilesFixturePath(t)
-		err := runProfiles([]string{"add", "--controller", endpoint, "--no-probe"})
+		err := runProfilesArgs([]string{"add", "--controller", endpoint, "--no-probe"})
 		if err == nil {
 			t.Fatalf("accepted %q", endpoint)
 		}
@@ -247,7 +247,7 @@ func TestProfileProbePreservesCanonicalError(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = runProfiles(args[1:])
+			err = runProfilesArgs(args[1:])
 			if err == nil {
 				t.Fatal("probe accepted refusal")
 			}

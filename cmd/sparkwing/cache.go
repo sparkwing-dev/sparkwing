@@ -3,14 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -19,29 +19,6 @@ import (
 )
 
 var pruneCacheToLimits = bincache.PruneToLimits
-
-func runCache(args []string) error {
-	if len(args) == 0 {
-		PrintHelp(cmdCache, os.Stderr)
-		return errors.New("cache: missing subcommand")
-	}
-	switch args[0] {
-	case "info":
-		return runCacheInfo(args[1:])
-	case "prune":
-		return runCachePrune(args[1:])
-	case "explain":
-		return runCacheExplain(args[1:])
-	case "warm":
-		return runCacheWarm(args[1:])
-	case "help", "-h", "--help":
-		PrintHelp(cmdCache, os.Stdout)
-		return nil
-	default:
-		PrintHelp(cmdCache, os.Stderr)
-		return fmt.Errorf("cache: unknown verb %q (valid: info, prune, explain, warm)", args[0])
-	}
-}
 
 type cacheInfoReport struct {
 	Dir           string           `json:"dir"`
@@ -70,26 +47,17 @@ type cacheInfoOwner struct {
 	Uses int    `json:"uses"`
 }
 
-func runCacheInfo(args []string) error {
-	fs := flag.NewFlagSet(cmdCacheInfo.Path, flag.ContinueOnError)
-	var output string
-	var all bool
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	fs.BoolVar(&all, "all-entries", false, "List every entry rather than the ten most recent")
-	docsCache := fs.Bool("docs", false, "report the docs --web fetch cache instead")
-	if err := parseAndCheck(cmdCacheInfo, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runCacheInfo(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
+	output := inv.Output(color.IsInteractiveStdout())
+	all := inv.Bool("all-entries")
+	docsCache := inv.Bool("docs")
 	if err := validateCacheOutput(output); err != nil {
 		return err
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("cache info: unexpected positional %q", fs.Arg(0))
-	}
-	if *docsCache {
+	if docsCache {
 		return docsCacheInfo(output)
 	}
 
@@ -182,29 +150,21 @@ func runCacheInfo(args []string) error {
 	})
 }
 
-func runCachePrune(args []string) error {
-	fs := flag.NewFlagSet(cmdCachePrune.Path, flag.ContinueOnError)
-	var output, maxBytesRaw string
-	var maxEntries int
-	var all bool
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	fs.StringVar(&maxBytesRaw, "max-bytes", "", "byte ceiling, e.g. 512MiB")
-	fs.IntVar(&maxEntries, "max-entries", -1, "entry ceiling")
-	fs.BoolVar(&all, "all-entries", false, "remove every inactive entry")
-	docsCache := fs.Bool("docs", false, "clear the docs --web fetch cache instead")
-	if err := parseAndCheck(cmdCachePrune, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runCachePrune(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
+	output := inv.Output(color.IsInteractiveStdout())
+	maxBytesRaw := inv.Value("max-bytes")
+	maxEntries := -1
+	if inv.Has("max-entries") {
+		maxEntries, _ = strconv.Atoi(inv.Value("max-entries"))
+	}
+	all, docsCache := inv.Bool("all-entries"), inv.Bool("docs")
 	if err := validateCacheOutput(output); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 {
-		return fmt.Errorf("cache prune: unexpected positional %q", fs.Arg(0))
-	}
-	if *docsCache {
+	if docsCache {
 		return docsCacheClear(output)
 	}
 	limits, err := bincache.ConfiguredLimits()
@@ -342,21 +302,13 @@ type cacheExplainPrev struct {
 	Changed []string `json:"changed_inputs,omitempty"`
 }
 
-func runCacheExplain(args []string) error {
-	fs := flag.NewFlagSet(cmdCacheExplain.Path, flag.ContinueOnError)
-	var output string
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	if err := parseAndCheck(cmdCacheExplain, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runCacheExplain(inv clisurface.Invocation) error {
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
+	output := inv.Output(color.IsInteractiveStdout())
 	if err := validateCacheOutput(output); err != nil {
 		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("cache explain: unexpected positional %q", fs.Arg(0))
 	}
 	dir, err := findSparkwingDir()
 	if err != nil {

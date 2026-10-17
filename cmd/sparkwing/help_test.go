@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	flag "github.com/spf13/pflag"
 )
 
 func TestPrintHelpHidesHiddenFlag(t *testing.T) {
@@ -138,60 +136,6 @@ func TestRunsHelpUsesPublicLogsCommandName(t *testing.T) {
 	}
 }
 
-func TestBindFlagsString(t *testing.T) {
-	cmd := Command{
-		Path: "sparkwing bind-test",
-		Flags: []FlagSpec{
-			{Name: "a", Type: FlagString, DefaultValue: "default-a"},
-			{Name: "b", Type: FlagBool, DefaultValue: true},
-			{Name: "c", Type: FlagInt, DefaultValue: 7},
-			{Name: "d", Type: FlagStringSlice},
-		},
-	}
-	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
-	v := bindFlags(cmd, fs)
-	if err := fs.Parse([]string{"--a", "set", "--b=false", "--c", "42", "--d", "x", "--d", "y"}); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if v.String("a") != "set" {
-		t.Errorf("a = %q, want %q", v.String("a"), "set")
-	}
-	if v.Bool("b") != false {
-		t.Errorf("b = %v, want false", v.Bool("b"))
-	}
-	if v.Int("c") != 42 {
-		t.Errorf("c = %d, want 42", v.Int("c"))
-	}
-	if got := v.StringSlice("d"); len(got) != 2 || got[0] != "x" || got[1] != "y" {
-		t.Errorf("d = %v, want [x y]", got)
-	}
-}
-
-func TestBindFlagsDefaults(t *testing.T) {
-	cmd := Command{
-		Path: "sparkwing bind-defaults",
-		Flags: []FlagSpec{
-			{Name: "a", Type: FlagString, DefaultValue: "default-a"},
-			{Name: "b", Type: FlagBool, DefaultValue: true},
-			{Name: "c", Type: FlagInt, DefaultValue: 7},
-		},
-	}
-	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
-	v := bindFlags(cmd, fs)
-	if err := fs.Parse(nil); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if v.String("a") != "default-a" {
-		t.Errorf("a default = %q, want default-a", v.String("a"))
-	}
-	if v.Bool("b") != true {
-		t.Errorf("b default = %v, want true", v.Bool("b"))
-	}
-	if v.Int("c") != 7 {
-		t.Errorf("c default = %d, want 7", v.Int("c"))
-	}
-}
-
 func TestRunHelpListsArcFlags(t *testing.T) {
 	cases := []struct {
 		name string
@@ -292,42 +236,6 @@ func TestHelpListingMatchesRegistry(t *testing.T) {
 					child.Path, parent.Path)
 			}
 		}
-	}
-}
-
-func TestWantsHelpIsPositionIndependent(t *testing.T) {
-	yes := [][]string{
-		{"--help"},
-		{"-h"},
-		{"--template", "--help"},
-		{"--name", "x", "--template", "--help"},
-		{"--topic", "-h"},
-	}
-	for _, args := range yes {
-		if !wantsHelp(args) {
-			t.Errorf("wantsHelp(%q) = false, want true", args)
-		}
-	}
-
-	no := [][]string{
-		{},
-		{"--name", "x"},
-		{"--short", "helpful things"},
-		{"--search", "help"},
-	}
-	for _, args := range no {
-		if wantsHelp(args) {
-			t.Errorf("wantsHelp(%q) = true, want false", args)
-		}
-	}
-}
-
-func TestWantsHelpStopsAtTheTerminator(t *testing.T) {
-	if wantsHelp([]string{"--", "--help"}) {
-		t.Error("--help after -- is an operand, not a help request")
-	}
-	if !wantsHelp([]string{"--help", "--", "x"}) {
-		t.Error("--help before -- is still a help request")
 	}
 }
 

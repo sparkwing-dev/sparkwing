@@ -36,7 +36,7 @@ func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing
 			}
 			var resultErr error
 			out := captureStdout(t, func() {
-				resultErr = runPipelineDescribe([]string{"--pipeline=deploy-prod", "-o=json"})
+				resultErr = runPipelineDescribeArgs([]string{"--pipeline=deploy-prod", "-o=json"})
 			})
 			if resultErr == nil || strings.TrimSpace(out) != "" {
 				t.Fatalf("unusable source returned a successful schema: output=%s error=%v", out, resultErr)
@@ -68,7 +68,7 @@ func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
 		calls := 0
 		var resultErr error
 		out := captureStdout(t, func() {
-			resultErr = runPipelineDescribeCommand(args, func(name string, inspect func(context.Context, pipelineentry.Command, string) error) error {
+			resultErr = runPipelineDescribeCommandArgs(args, func(name string, inspect func(context.Context, pipelineentry.Command, string) error) error {
 				calls++
 				if name != "deploy-prod" {
 					return errors.New("lost the invoked pipeline")
@@ -120,7 +120,7 @@ func TestPipelineDescribePropagatesAcquisitionAndProtocolFailures(t *testing.T) 
 				}
 				var resultErr error
 				out := captureStdout(t, func() {
-					resultErr = runPipelineDescribeCommand(args, func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
+					resultErr = runPipelineDescribeCommandArgs(args, func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
 						if mode == "acquire" {
 							return failure
 						}
@@ -154,7 +154,7 @@ func TestTriggerInspectionRetainsLiveDescribeArgumentsAndClassifications(t *test
 		}
 		var commandErr error
 		raw := captureStdout(t, func() {
-			commandErr = runPipelineDescribeCommand(args[2:], func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
+			commandErr = runPipelineDescribeCommandArgs(args[2:], func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
 				return inspect(ctx, pipelineentry.Binary(fixture), filepath.Dir(dir))
 			})
 		})

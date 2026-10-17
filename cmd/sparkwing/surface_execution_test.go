@@ -12,16 +12,13 @@ import (
 
 func TestRegisteredFlagsReachExecutionParser(t *testing.T) {
 	for _, command := range clisurface.Registry() {
-		if !strings.HasPrefix(command.Path, "sparkwing ") || command.Hidden || command.Path == "sparkwing" || len(childCommands(command.Path)) != 0 {
+		if !strings.HasPrefix(command.Path, "sparkwing ") || len(childCommands(command.Path)) != 0 {
 			continue
 		}
 		for _, f := range append(clisurface.GlobalFlags(), command.Flags...) {
-			if f.Name == "checkout" || f.Name == "help" {
-				continue
-			}
 			t.Run(command.Path+"/"+f.Name, func(t *testing.T) {
 				args := strings.Fields(strings.TrimPrefix(command.Path, "sparkwing "))
-				if command.PipelineArgument {
+				if command.PipelineArgument && command.Path != "sparkwing run" {
 					args = append(args, "example")
 				}
 				value := "example"
@@ -39,20 +36,26 @@ func TestRegisteredFlagsReachExecutionParser(t *testing.T) {
 				if f.Argument != "" {
 					token += "=" + value
 				}
-				args = append(args, token, "--help")
+				tokenIndex := len(args)
+				args = append(args, token)
+				if f.Name != "help" {
+					args = append(args, "--help")
+				}
 				var err error
-				captureStdout(t, func() {
-					if command.Path == "sparkwing run" {
-						flags, _ := parseRunFlags(args[2:])
-						err = flags.parseErr
-					} else if strings.HasPrefix(command.Path, "sparkwing pipeline hooks ") || command.Path == "sparkwing pipeline new" {
-						err = runSparkwing(args)
-					} else {
-						err = dispatchCommand(args)
-					}
-				})
+				captureStdout(t, func() { err = runSparkwing(args) })
 				if err != nil {
 					t.Fatal(err)
+				}
+				if f.Short != "" {
+					token = "-" + f.Short
+					if f.Argument != "" {
+						token += "=" + value
+					}
+					args[tokenIndex] = token
+					captureStdout(t, func() { err = runSparkwing(args) })
+					if err != nil {
+						t.Fatal(err)
+					}
 				}
 			})
 		}

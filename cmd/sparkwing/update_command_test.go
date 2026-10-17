@@ -52,7 +52,7 @@ func updateCommandFixture(t *testing.T) (updateCommand, *bytes.Buffer, *[]string
 
 func TestUpdateCommandRefreshesManagedUnitsAfterVerifiedInstall(t *testing.T) {
 	command, out, calls := updateCommandFixture(t)
-	if err := command.run(t.Context(), []string{"--version", "v1.2.3", "--force", "--override-hold", "-o", "json"}); err != nil {
+	if err := command.runArgs(t.Context(), []string{"--version", "v1.2.3", "--force", "--override-hold", "-o", "json"}); err != nil {
 		t.Fatal(err)
 	}
 	var receipt updateReceipt
@@ -67,7 +67,7 @@ func TestUpdateCommandRefreshesManagedUnitsAfterVerifiedInstall(t *testing.T) {
 
 func TestUpdateCommandDryRunNeverInstallsOrTouchesUnits(t *testing.T) {
 	command, out, calls := updateCommandFixture(t)
-	err := command.run(t.Context(), []string{"--dry-run", "--version", "v1.2.3", "-o", "json"})
+	err := command.runArgs(t.Context(), []string{"--dry-run", "--version", "v1.2.3", "-o", "json"})
 	if exitCodeFor(err) != 1 || !reflect.DeepEqual(*calls, []string{"check v1.2.3"}) {
 		t.Fatalf("err=%v calls=%v", err, *calls)
 	}
@@ -79,12 +79,19 @@ func TestUpdateCommandDryRunNeverInstallsOrTouchesUnits(t *testing.T) {
 
 func TestUpdateCommandRejectsInvalidInputBeforeDependencies(t *testing.T) {
 	for _, args := range [][]string{
-		{"--cli"}, {"--check"}, {"--sdk"}, {"--version="}, {"--version", "../../tag"},
-		{"--version", "v1.2"}, {"--output", "jsonl"}, {"--output="}, {"extra"},
+		{"--cli"},
+		{"--check"},
+		{"--sdk"},
+		{"--version="},
+		{"--version", "../../tag"},
+		{"--version", "v1.2"},
+		{"--output", "jsonl"},
+		{"--output="},
+		{"extra"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			command, out, calls := updateCommandFixture(t)
-			if err := command.run(t.Context(), args); err == nil || len(*calls) != 0 || out.Len() != 0 {
+			if err := command.runArgs(t.Context(), args); err == nil || len(*calls) != 0 || out.Len() != 0 {
 				t.Fatalf("err=%v calls=%v output=%q", err, *calls, out)
 			}
 		})
@@ -98,7 +105,7 @@ func TestUpdateCommandNoReceiptOrRefreshAfterInstallFailure(t *testing.T) {
 		*calls = append(*calls, "install")
 		return updateReceipt{}, failure
 	}
-	if err := command.run(t.Context(), nil); !errors.Is(err, failure) || out.Len() != 0 || !reflect.DeepEqual(*calls, []string{"units", "install"}) {
+	if err := command.runArgs(t.Context(), nil); !errors.Is(err, failure) || out.Len() != 0 || !reflect.DeepEqual(*calls, []string{"units", "install"}) {
 		t.Fatalf("err=%v calls=%v output=%q", err, *calls, out)
 	}
 }
@@ -113,7 +120,7 @@ func TestUpdateCommandRequiresUnitIntegrationBeforeReplacement(t *testing.T) {
 				}
 				return nil, errors.New("unit manager unavailable")
 			}
-			if err := command.run(t.Context(), nil); err == nil || len(*calls) != 0 || out.Len() != 0 {
+			if err := command.runArgs(t.Context(), nil); err == nil || len(*calls) != 0 || out.Len() != 0 {
 				t.Fatalf("err=%v calls=%v output=%q", err, *calls, out)
 			}
 		})
@@ -126,7 +133,7 @@ func TestUpdateCommandRefreshFailureNamesInstalledVersionWithoutSuccess(t *testi
 	command.units = func(context.Context) (wingd.ManagedUnitManager, error) {
 		return updateUnitsFixture{calls: calls, err: failure}, nil
 	}
-	err := command.run(t.Context(), []string{"--force", "--override-hold"})
+	err := command.runArgs(t.Context(), []string{"--force", "--override-hold"})
 	if !errors.Is(err, failure) || !strings.Contains(err.Error(), "v1.2.3") || !strings.Contains(err.Error(), "installed") || out.Len() != 0 {
 		t.Fatalf("err=%v output=%q", err, out)
 	}
@@ -138,14 +145,14 @@ func TestUpdateCommandRefreshesCurrentInstallForRecovery(t *testing.T) {
 	command.install = func(string, bool, bool) (updateReceipt, error) {
 		return updateReceipt{Target: "cli", Status: "current", After: updateIdentity{Version: "v1.2.3", Path: path}}, nil
 	}
-	if err := command.run(t.Context(), []string{"-o", "plain"}); err != nil || out.String() != "v1.2.3\n" || !reflect.DeepEqual(*calls, []string{"units", "refresh " + path + " v1.2.3"}) {
+	if err := command.runArgs(t.Context(), []string{"-o", "plain"}); err != nil || out.String() != "v1.2.3\n" || !reflect.DeepEqual(*calls, []string{"units", "refresh " + path + " v1.2.3"}) {
 		t.Fatalf("err=%v calls=%v output=%q", err, *calls, out)
 	}
 }
 
 func TestUpdateCommandHelpDoesNotResolveServices(t *testing.T) {
 	command, out, calls := updateCommandFixture(t)
-	if err := command.run(t.Context(), []string{"--help", "-o", "json"}); err != nil || out.Len() == 0 || len(*calls) != 0 {
+	if err := command.runArgs(t.Context(), []string{"--help", "-o", "json"}); err != nil || out.Len() == 0 || len(*calls) != 0 {
 		t.Fatalf("err=%v calls=%v output=%q", err, *calls, out)
 	}
 }
@@ -153,7 +160,7 @@ func TestUpdateCommandHelpDoesNotResolveServices(t *testing.T) {
 func TestUpdateCommandPropagatesReceiptWriteFailure(t *testing.T) {
 	command, _, _ := updateCommandFixture(t)
 	command.out = updateFailWriter{}
-	if err := command.run(t.Context(), []string{"--force", "--override-hold", "-o", "pretty"}); !errors.Is(err, io.ErrClosedPipe) {
+	if err := command.runArgs(t.Context(), []string{"--force", "--override-hold", "-o", "pretty"}); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("write failure=%v", err)
 	}
 }
@@ -181,7 +188,7 @@ func TestUpdateCommandRefusesUnconfirmedInstalledIdentity(t *testing.T) {
 				}
 				return result, err
 			}
-			if err := command.run(t.Context(), []string{"--force", "--override-hold"}); err == nil || out.Len() != 0 || !reflect.DeepEqual(*calls, []string{"units", "install "}) {
+			if err := command.runArgs(t.Context(), []string{"--force", "--override-hold"}); err == nil || out.Len() != 0 || !reflect.DeepEqual(*calls, []string{"units", "install "}) {
 				t.Fatalf("err=%v calls=%v output=%q", err, *calls, out)
 			}
 		})
@@ -203,7 +210,7 @@ func TestUpdateCommandDryRunStatusesAndWriterFailures(t *testing.T) {
 				}
 				return updateCheckReport{Status: scenario.status}
 			}
-			err := command.run(t.Context(), []string{"--dry-run", "--version", "v1.2.3", "--force", "--override-hold", "-o", "plain"})
+			err := command.runArgs(t.Context(), []string{"--dry-run", "--version", "v1.2.3", "--force", "--override-hold", "-o", "plain"})
 			if exitCodeFor(err) != scenario.code || out.String() != scenario.status+"\n" || len(*calls) != 0 {
 				t.Fatalf("err=%v calls=%v output=%q", err, *calls, out)
 			}
@@ -211,7 +218,7 @@ func TestUpdateCommandDryRunStatusesAndWriterFailures(t *testing.T) {
 	}
 	command, _, _ := updateCommandFixture(t)
 	command.out = updateFailWriter{}
-	if err := command.run(t.Context(), []string{"--dry-run", "-o", "pretty"}); !errors.Is(err, io.ErrClosedPipe) {
+	if err := command.runArgs(t.Context(), []string{"--dry-run", "-o", "pretty"}); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("preview writer failure=%v", err)
 	}
 }
@@ -230,7 +237,7 @@ func TestUpdateCommandOutputDefaultsAndOverrides(t *testing.T) {
 			if scenario.mode != "" {
 				args = append(args, "--output="+scenario.mode)
 			}
-			if err := command.run(t.Context(), args); err != nil {
+			if err := command.runArgs(t.Context(), args); err != nil {
 				t.Fatal(err)
 			}
 			jsonOutput := scenario.mode == "json" || scenario.mode == "" && !scenario.terminal

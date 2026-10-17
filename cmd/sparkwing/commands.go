@@ -2,14 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
-
-	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -132,42 +130,30 @@ func commandIndex(picked []*Command) []CommandIndexJSON {
 	return out
 }
 
-func runCommands(args []string) error {
-	fs := flag.NewFlagSet(cmdCommands.Path, flag.ContinueOnError)
-	var output string
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
-	artifactFormat := fs.String("format", "", "artifact format: markdown")
-	includeHidden := fs.Bool("all", false, "include hidden commands")
-	pathPrefix := fs.String("path", "", "only emit commands whose Path starts with this prefix")
-	query := fs.String("search", "", "match every search word against command paths and synopses")
-	var paging discoveryPaging
-	fs.IntVar(&paging.limit, "limit", 40, "maximum records, at least one")
-	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
-	splitDir := fs.String("split-dir", "", "with --format markdown: write one page per top-level command group into this directory")
-	if err := parseAndCheck(cmdCommands, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func runCommands(inv clisurface.Invocation) error {
+	output := inv.Output(color.IsInteractiveStdout())
+	artifactFormat, splitDir := inv.Value("format"), inv.Value("split-dir")
+	includeHidden := inv.Bool("all")
+	pathPrefix, query := inv.Value("path"), inv.Value("search")
+	paging := discoveryPaging{limit: 40, cursor: inv.Value("cursor")}
+	if inv.Has("limit") {
+		paging.limit, _ = strconv.Atoi(inv.Value("limit"))
 	}
 	if paging.limit < 1 {
 		return fmt.Errorf("--limit must be at least one")
 	}
-	if *artifactFormat == "markdown" && (fs.Changed("limit") || fs.Changed("cursor") || fs.Changed("search")) {
+	if artifactFormat == "markdown" && (inv.Has("limit") || inv.Has("cursor") || inv.Has("search")) {
 		return fmt.Errorf("commands: markdown export is exhaustive; --search, --limit and --cursor apply to the index")
 	}
-	if *artifactFormat != "" && *artifactFormat != "markdown" {
+	if artifactFormat != "" && artifactFormat != "markdown" {
 		return fmt.Errorf("commands: --format must be markdown")
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("commands: unexpected positional %q", fs.Arg(0))
-	}
-	if *splitDir != "" {
-		if *artifactFormat != "markdown" {
+	if splitDir != "" {
+		if artifactFormat != "markdown" {
 			return fmt.Errorf("commands: --split-dir requires --format markdown")
 		}
 
-		if *pathPrefix != "" {
+		if pathPrefix != "" {
 			return fmt.Errorf("commands: --split-dir writes the full reference and conflicts with --path")
 		}
 	}
@@ -176,9 +162,9 @@ func runCommands(args []string) error {
 	copy(sorted, allCommands)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 
-	prefix := strings.TrimSpace(*pathPrefix)
-	if blankPathFilter(*pathPrefix, prefix) {
-		return unmatchedPathError(*pathPrefix, 0)
+	prefix := strings.TrimSpace(pathPrefix)
+	if blankPathFilter(pathPrefix, prefix) {
+		return unmatchedPathError(pathPrefix, 0)
 	}
 	picked := []*Command{}
 	hiddenMatches := 0
@@ -187,7 +173,7 @@ func runCommands(args []string) error {
 			continue
 		}
 
-		if c.Hidden && !*includeHidden {
+		if c.Hidden && !includeHidden {
 			hiddenMatches++
 			continue
 		}
@@ -197,20 +183,20 @@ func runCommands(args []string) error {
 		return unmatchedPathError(prefix, hiddenMatches)
 	}
 
-	if *artifactFormat == "markdown" {
+	if artifactFormat == "markdown" {
 		full := make([]CommandJSON, 0, len(picked))
 		for _, c := range picked {
 			full = append(full, toCommandJSON(c))
 		}
-		if *splitDir != "" {
-			return writeSplitMarkdownOutput(*splitDir, full, output)
+		if splitDir != "" {
+			return writeSplitMarkdownOutput(splitDir, full, output)
 		}
 		return writeText(os.Stdout, "artifact", renderCommandsMarkdown(full), output)
 	}
 
 	visible := make([]*Command, 0, len(sorted))
 	for _, c := range sorted {
-		if !c.Hidden || *includeHidden {
+		if !c.Hidden || includeHidden {
 			visible = append(visible, c)
 		}
 	}
@@ -221,7 +207,7 @@ func runCommands(args []string) error {
 	filtered := make([]*Command, 0, len(picked))
 	keys := []string{}
 	for _, c := range picked {
-		if matchesDiscoveryQuery(*query, c.Path+" "+c.Synopsis) {
+		if matchesDiscoveryQuery(query, c.Path+" "+c.Synopsis) {
 			filtered = append(filtered, c)
 			keys = append(keys, c.Path)
 		}

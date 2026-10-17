@@ -43,7 +43,7 @@ func main() { sw.Register("check", func() sw.Pipeline[sw.NoInputs] { return pipe
 	if err != nil {
 		t.Fatal(err)
 	}
-	flags, args := parseRunFlags([]string{"--sw-detached", "--sw-request-id=trace-42"})
+	flags, args := parseRunFlagsArgs([]string{"--sw-detached", "--sw-request-id=trace-42"})
 	request, err := prepareLocalRunRequest(t.Context(), prepared, flags, args)
 	if err != nil {
 		t.Fatal(err)

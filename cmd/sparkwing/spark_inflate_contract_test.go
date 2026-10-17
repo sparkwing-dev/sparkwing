@@ -23,7 +23,7 @@ func TestSparksInflateContract(t *testing.T) {
 				}
 				var out bytes.Buffer
 				calls := 0
-				err := runSparksInflateCommand(context.Background(), args, &out,
+				err := runSparksInflateCommandArgs(context.Background(), args, &out,
 					func() (string, error) { return "/repo/.sparkwing", nil },
 					func(ctx context.Context, dir, module string) (*sparks.VendorResult, error) {
 						calls++
@@ -58,7 +58,7 @@ func TestSparksInflateContract(t *testing.T) {
 func TestSparksInflateRefusesInvalidInputBeforeLookup(t *testing.T) {
 	for _, args := range [][]string{nil, {"--module", "templates"}, {"templates"}, {"--library="}, {"--library", "templates", "-o", "xml"}} {
 		var out bytes.Buffer
-		err := runSparksInflateCommand(context.Background(), args, &out,
+		err := runSparksInflateCommandArgs(context.Background(), args, &out,
 			func() (string, error) { t.Fatal("looked up project for invalid input"); return "", nil }, nil)
 		if err == nil || out.Len() != 0 {
 			t.Fatalf("args=%v: %v, %s", args, err, &out)
@@ -69,26 +69,26 @@ func TestSparksInflateRefusesInvalidInputBeforeLookup(t *testing.T) {
 func TestSparksInflateHelpAndCancellation(t *testing.T) {
 	var out bytes.Buffer
 	lookup := func() (string, error) { t.Fatal("unexpected project lookup"); return "", nil }
-	if err := runSparksInflateCommand(context.Background(), []string{"--help"}, &out, lookup, nil); err != nil || !strings.Contains(out.String(), "--library") {
+	if err := runSparksInflateCommandArgs(context.Background(), []string{"--help"}, &out, lookup, nil); err != nil || !strings.Contains(out.String(), "--library") {
 		t.Fatalf("help: %s %v", &out, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	out.Reset()
-	if err := runSparksInflateCommand(ctx, []string{"--library", "templates"}, &out, lookup, nil); !errors.Is(err, context.Canceled) || out.Len() != 0 {
+	if err := runSparksInflateCommandArgs(ctx, []string{"--library", "templates"}, &out, lookup, nil); !errors.Is(err, context.Canceled) || out.Len() != 0 {
 		t.Fatalf("cancel: %s %v", &out, err)
 	}
 }
 
 func TestSparksInflateErrorsRemainFailures(t *testing.T) {
 	failure := errors.New("vendor failed")
-	err := runSparksInflateCommand(context.Background(), []string{"--library", "templates"}, io.Discard,
+	err := runSparksInflateCommandArgs(context.Background(), []string{"--library", "templates"}, io.Discard,
 		func() (string, error) { return "/repo/.sparkwing", nil },
 		func(context.Context, string, string) (*sparks.VendorResult, error) { return nil, failure })
 	if !errors.Is(err, failure) {
 		t.Fatalf("vendor error: %v", err)
 	}
-	err = runSparksInflateCommand(context.Background(), []string{"--library", "templates"}, retryBrokenWriter{},
+	err = runSparksInflateCommandArgs(context.Background(), []string{"--library", "templates"}, retryBrokenWriter{},
 		func() (string, error) { return "/repo/.sparkwing", nil },
 		func(context.Context, string, string) (*sparks.VendorResult, error) {
 			return &sparks.VendorResult{}, nil
