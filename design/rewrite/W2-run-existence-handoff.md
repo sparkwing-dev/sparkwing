@@ -62,10 +62,10 @@ and handoffs remain untouched. Earlier W2 serving, bootstrap and operator-team
 work remains committed. C1's QueuePriorityWriter transaction remains the prior
 separate integration point, with its existing fake-backed HTTP contract.
 
-The lead's native receipt now reports two failures: a GitHub App fixture panic
-and a stale declared-repository guard entry. Completion requires the lead
-harness to commit the fixes and replace that receipt with a run containing no
-FAIL. There is no new design question or contract request.
+The latest native receipt passes store and capability tests. Three controller
+tests stop at GitHub App connect-start returning 500. Completion requires the
+lead harness to commit the fix below and replace that receipt with a run
+containing no FAIL. There is no new design question or contract request.
 
 The committed implementation's production files belong to W2: authority_routes.go,
 child_routes.go, engine_claim_routes.go, engine_job_control.go, engine_routes.go,
@@ -74,7 +74,7 @@ policy_router.go, private_host.go, run_selector.go and source_controller.go,
 all under pkg/controller. No caller outside W2 required migration. The only
 contract edit is design/rewrite/contracts/c2-credentials.md.
 
-## Native-failure continuation
+## Fixture and guard continuation
 
 The native panic address 0x1828a68 resolves to ConsoleFixtureRequest in the
 controller test binary. newAppFixture left identityFixture.srv nil while a
@@ -123,6 +123,66 @@ The lead-owned handoffs and amendments remain unchanged. No Git write,
 candidate binary, service or pipeline ran. Scratch is deleted before handoff
 and the shared cache is retained. The native receipt still contains FAIL, so
 the lead must rerun it before completion.
+
+## GitHub connection transaction continuation
+
+The native connect-start failure was reproduced without sockets by
+TestGitHubBrowserConnectionRealStore: selecting the production adapter returned
+500 policy_missing. Tenant did not implement the existing GitHubConnectWriter
+contract. Implemented its three methods in pkg/store/github_connect.go and
+assigned the concrete tenant in default controller composition. The compiler
+now checks conformance at that assignment.
+
+Invariant: identity reads, nonce consumption and installation binding require
+the same live direct session and current team administration, and installation
+binding must match that account's current linked GitHub identity. The adapter
+uses teamMutationTx and locks the account. Consumption uses the store clock
+and existing nonce table. Binding shares the existing ownership guard in the
+same authorization transaction and derives ConnectedBy from resolved authority.
+No new interface, table, grant, setting or credential mechanism was added.
+
+Deleted the unused Store.ConsumeGitHubAppConnectState API and migrated its
+only caller, pkg/store/flow_nonce_runtime_test.go, to the shared internal nonce
+owner. Extracted the nonce and installation helpers so both existing consumers
+and the new adapter use the same implementations. Production changes including
+shared files are +107/-23, net +84. W2 production against main remains
++17,124/-18,016, net -892. The 23 deleted lines include eight lines retiring the
+global API. No historical test was ported and no acceptance cell was unskipped.
+
+Tests added before implementation cover the real router/authenticator/store
+connection and replay, generated adversarial session/identity changes, the
+store-clock expiry boundary, forged binding facts and foreign installation
+takeover. The missing-writer test now injects a missing writer explicitly,
+because nil resolution selects the implemented production adapter.
+
+Passing checks, using the environment and concurrency limits recorded above:
+
+- Whole-repository go build -p 4 ./....
+- go vet -p 4 ./pkg/controller ./pkg/store ./internal/capability ./internal/apierr.
+- Controller TestGitHubBrowserConnection* and both unchanged privacy tests,
+  1.638s.
+- Store TestGitHubConnect*, TestFlowNonces*, TestGitHubAppMutations*,
+  TestGitHubAppInstallationBelongsToOneTeam and Test*Guard*, 4.218s.
+- The new real-store connection test, both privacy tests and new store
+  connection tests under -race: controller 9.342s, store 29.010s.
+- Focused capability/apierr tests and the credential, authority, deployment,
+  engine-authority and local-node acceptance selection, 2.158s.
+- Commentcheck against main across 2,688 Go files and git diff --check.
+
+Shared files touched: pkg/store/github_app.go, github_connect.go,
+github_connect_test.go, identity_link.go and flow_nonce_runtime_test.go.
+W2 files touched: pkg/controller/browser_github_app_routes.go and its test,
+plus this report and the C2 implementation note. Existing contract signatures
+and lead-owned handoffs/amendments are unchanged. The prior QueuePriorityWriter
+persistence integration remains with C1. Native GitHub/provider-listener tests
+and PostgreSQL verification remain open for the lead.
+
+The original native GitHub test still cannot start here because googletest.New
+requires a TCP listener. A broad test selection also hit that socket refusal
+in the controller's installation-ownership test. The recorder reproduction
+passes, but no full native controller/store pass is claimed. The supplied
+receipt still contains FAIL. No Git write, installed binary, service or pipeline
+ran. Scratch is deleted at handoff and the shared cache is retained.
 
 <!-- design:end -->
 

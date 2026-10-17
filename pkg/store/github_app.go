@@ -103,6 +103,19 @@ func scanGitHubAppInstallation(row interface{ Scan(...any) error }) (GitHubAppIn
 // connector of a binding t already holds. An installation another team holds
 // is [ErrInstallationBoundElsewhere], and the binding stays where it is.
 func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
+	var out GitHubAppInstallation
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		out, err = t.bindGitHubAppInstallationTx(ctx, tx, in, now)
+		return err
+	})
+	if err != nil {
+		return GitHubAppInstallation{}, err
+	}
+	return out, nil
+}
+
+func (t *Tenant) bindGitHubAppInstallationTx(ctx context.Context, tx *storeTx, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
 	if in.InstallationID <= 0 || in.AccountID <= 0 || in.AccountLogin == "" || in.AccountType == "" {
 		return GitHubAppInstallation{}, fmt.Errorf("%w: a binding needs the installation and its account", ErrInvalidInput)
 	}
@@ -113,7 +126,7 @@ func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInst
 	}
 	// safety: the conflict guard compares teams, so a second team's connect
 	// updates nothing and cannot take the installation over.
-	res, err := t.s.exec(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO github_app_installations (`+githubAppInstallationCols+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (installation_id) DO UPDATE SET
@@ -133,7 +146,8 @@ func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInst
 		}
 		return GitHubAppInstallation{}, ErrInstallationBoundElsewhere
 	}
-	return t.GitHubAppInstallation(ctx, in.InstallationID)
+	return scanGitHubAppInstallation(tx.QueryRowContext(ctx, `SELECT `+githubAppInstallationCols+`
+		FROM github_app_installations WHERE team=? AND installation_id=?`, t.team, in.InstallationID))
 }
 
 // GitHubAppInstallation reads t's binding of installation, or ErrNotFound.
@@ -393,14 +407,6 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 	_, err := t.s.exec(ctx, `UPDATE github_app_triggers SET repository = ?, installation_id = ? WHERE team = ? AND repository_id = ?`,
 		repo.Slug(), installation, string(t.team), repositoryID)
 	return err
-}
-
-// ConsumeGitHubAppConnectState records that the connect flow named by nonce
-// finished, and reports false when one already did. The record lives until
-// the state expires, so every replica and a restarted controller refuse a
-// state that was used once.
-func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
-	return s.consumeFlowNonce(ctx, "github_app_connect", nonce, expires)
 }
 
 // GitHubAppDeliveryRetention is how long a delivery's digest is remembered.

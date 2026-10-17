@@ -211,23 +211,25 @@ func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expi
 }
 
 func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expires time.Time) (bool, error) {
-	if nonce == "" {
-		return false, nil
-	}
 	used := false
 	err := s.inTx(ctx, func(tx *storeTx) error {
-		if !expires.After(tx.now()) {
-			return nil
-		}
-		result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		used = n == 1
+		var err error
+		used, err = consumeFlowNonceTx(ctx, tx, kind, nonce, expires)
 		return err
 	})
 	return err == nil && used, err
+}
+
+func consumeFlowNonceTx(ctx context.Context, tx *storeTx, kind, nonce string, expires time.Time) (bool, error) {
+	if nonce == "" || !expires.After(tx.now()) {
+		return false, nil
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
 }
 
 // IdentityLinkStateKey is the key a controller signs link-flow state with.

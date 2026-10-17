@@ -2806,6 +2806,12 @@ validates provider installation facts and atomically refuses foreign ownership.
 The server performs the provider user/admin check and passes verified facts.
 No raw AccountIdentity, nonce-consumer or installation-bind fallback remains.
 
+The concrete C1 adapter is `store.Tenant`. It shares `teamMutationTx`, the
+transactional nonce consumer and the installation ownership guard. Default
+controller composition assigns that tenant directly to `GitHubConnectWriter`,
+so missing methods fail compilation. The unused global
+`Store.ConsumeGitHubAppConnectState` API is removed.
+
 C2 declares ConsoleWriter in console_writes.go. All methods receive context and
 Authorized before their operation fields. Its exact methods are ConsoleGrantCredit
 (CreditGrantRequest to CreditGrantResult), ConsoleSetBillingTrust
