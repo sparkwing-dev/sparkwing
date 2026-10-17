@@ -9,6 +9,7 @@ CREATE TABLE teams (
     credit_exhausted_at BIGINT NOT NULL DEFAULT 0,
     display_name TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',
+    members_can_add_machines BIGINT NOT NULL DEFAULT 1 CHECK(members_can_add_machines IN (0,1)),
     billing_trust_at BIGINT NOT NULL DEFAULT 0,
     billing_trust_reason TEXT NOT NULL DEFAULT '',
     billing_trust TEXT NOT NULL DEFAULT '' CHECK(billing_trust IN ('','granted','revoked')),

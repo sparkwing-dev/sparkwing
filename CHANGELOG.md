@@ -60,6 +60,11 @@ unlock.
   and generated hooks.
 
 - **source:** Accept authenticated proxy settings when inspecting Git checkouts.
+- **Personal machines:** Members can enroll their own machines by default.
+  Administrators control `members_can_add_machines` in team settings or with
+  `sparkwing team settings set`. Changes are audited and preserve registered
+  machines. Shared runner enrollment and revocation require administration.
+
 - **Cloud launcher:** Protect team-node labels with NodeRestriction and verify
   Karpenter ownership. Used nodes keep their team assignment. Rejected Pods
   retire their nodes. Customer Pods refuse AWS credential injections, activation

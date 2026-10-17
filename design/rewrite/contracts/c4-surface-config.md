@@ -51,6 +51,16 @@ emit no success receipt. The command adds no new routes, grants or settings.
 
 <!-- design:begin -->
 
+The machine-registration decision adds `sparkwing team settings show --profile
+NAME` and `team settings set --profile NAME --members-can-add-machines true|false`.
+Both use the authenticated team settings routes. Set requires current team
+administration and commits an audit. JSON returns `members_can_add_machines`.
+The default is true. Personal enrollment requires an independent account session,
+and members may use it while this setting permits it. Shared runner enrollment,
+token rotation and revocation always require administration. The console exposes
+the setting and personal/shared enrollment through the same routes. Disabling
+enrollment preserves existing machine authority and owner-only claim scope.
+
 ## Amendment 1: environment, presence and managed units
 
 [Amendments 1](amendments-1.md) records the cross-area consumers.
@@ -1275,9 +1285,12 @@ The dispatcher, local execution and help resolve `--sw-ref`, `--sw-pipeline-ref`
 source pin through one selection boundary before inspection or building. The
 execution checkout supplies project configuration. Its exact SHA is sealed in
 `Git.SHA`. Local source selection seals the pipeline code SHA in `Source.Ref`.
-A source ref that names the execution ref projects to the sealed `Git.SHA`
-without looking up that ref again. This also preserves scheduled intake. `Source.WorkingTree` retains
-local code from the working tree when no committed source was selected.
+`Source.RequestedRef` preserves the unresolved pipeline ref intent; `Source.Ref`
+contains only the resolved code commit. `source.ResolveRevisions` resolves both
+execution and code identities before intake for runs, triggers, burst and local
+schedules. Inspection and hosting use `source.ForRequest` and shared acquisition.
+`Source.WorkingTree` retains local code from the working tree when no committed
+source was selected.
 `Source.CommittedCheckout` records explicit committed execution, including when
 that revision equals HEAD. Acquisition restores the execution and code checkouts
 separately. SDK installation uses the code checkout, while author code runs in
@@ -1287,8 +1300,17 @@ Environment provenance is sealed independently of invocation origin. Children
 inherit both the parent's snapshot identity and its storage source. Local
 schedule registration marks captured provenance before saving its request.
 
-The documentation checker parses current migration destination commands in
-Before/After tables and fenced After examples. Before examples remain historical.
+Child requests inherit only acquisition, Git, environment, execution location
+and run options. Their entrypoint and secret argument declarations are selected
+for the child pipeline by the shared checkout planner; parent declarations are
+not copied. Environment release uses the live execution unit's own run, holder,
+generation, prefix and lease. Evaluation also checks source and controller
+expansion fences. Reading these environment values does not require or add SourceRead.
+
+The documentation checker checks all current migration instructions. Only
+explicit Before blocks, Before table columns and inline Before references are
+historical. Command names in prose are references; complete shell invocations
+and inline invocations with arguments are parsed against the current grammar.
 
 ## Launcher review reconciliation (2026-10-17, W8 integration)
 

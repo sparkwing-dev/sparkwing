@@ -80,13 +80,18 @@ func TestNativeChildPreservesOmittedRepositoryIntent(t *testing.T) {
 			transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
 				var body struct {
 					Request struct {
-						Lineage struct {
+						Source     runspec.Source             `json:"source"`
+						SecretArgs runspec.Optional[[]string] `json:"secret_args"`
+						Lineage    struct {
 							RepoInherited bool `json:"repo_inherited"`
 						} `json:"lineage"`
 					} `json:"request"`
 				}
 				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 					t.Fatal(err)
+				}
+				if body.Request.Source.Entrypoint != "" || body.Request.SecretArgs.Set {
+					t.Fatal("child inherited parent pipeline declaration")
 				}
 				if body.Request.Lineage.RepoInherited != (repo == "") {
 					t.Fatalf("repository omission lost: %+v", body)
@@ -97,7 +102,7 @@ func TestNativeChildPreservesOmittedRepositoryIntent(t *testing.T) {
 				}
 				return engineResponse(http.StatusCreated, string(response)), nil
 			})
-			process := &NativeProcessClient{transport: transport, run: "run", job: "job", request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/team/repo"}}}}
+			process := &NativeProcessClient{transport: transport, run: "run", job: "job", request: runspec.Request{Source: runspec.Source{Entrypoint: "Build"}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"password"}}, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/team/repo"}}}}
 			if _, err := process.StartChild(t.Context(), "deploy", nil, repo, ""); err != nil {
 				t.Fatal(err)
 			}

@@ -4,21 +4,18 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
-	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -88,39 +85,39 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 			return result, branchErr
 		}
 		selected.git.Ref = branch
-		if selected.source.Ref != snapshot.SHA {
-			if err := snapshot.includeRevision(ctx, selected.source.Ref); err != nil {
-				return result, err
+		for _, revision := range []string{selected.git.SHA, selected.source.Ref} {
+			if revision != snapshot.SHA {
+				if err := snapshot.includeRevision(ctx, revision); err != nil {
+					return result, err
+				}
 			}
 		}
-		if _, err := selected.checkout.read(ctx, "checkout", "--quiet", "--detach", selected.source.Ref, "--"); err != nil {
+		if _, err := selected.checkout.read(ctx, "checkout", "--quiet", "--detach", selected.git.SHA, "--"); err != nil {
 			return result, err
 		}
 	}
-	sdk, err := selected.sdk(ctx)
+	home, err := wingd.HomeDir("")
 	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
+		return result, err
 	}
-	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
+	options, err := hostSourceOptions(home, captured, masker, false)
 	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
+		return result, err
 	}
-	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode})
-	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
-	}
+	options.SDK = ""
 	if snapshot == nil {
 		workspace, err := os.MkdirTemp("", "sparkwing-trigger-inspect-*")
 		if err != nil {
 			return result, err
 		}
 		defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(workspace)) }()
-		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.source.Ref, "", workspace)
+		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, "", workspace)
 		if err != nil {
 			return result, err
 		}
 	}
-	options := source.Options{SDK: sdk, Engines: engines, PreparedCheckout: checkout, Base: procenv.Base{Masker: masker}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
+	options.PreparedCheckout = checkout
+
 	described, err := inspectTriggerSource(ctx, selected, captured, options)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
@@ -160,31 +157,32 @@ func snapshotTriggerCheckout(ctx context.Context, snapshot *worktreeSnapshot) (s
 }
 
 func triggerInspectionCheckout(ctx context.Context, repo, sha, bundle, workspace string) (string, error) {
-	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}, procenv.Runtime{})
-	if err != nil {
-		return "", err
-	}
-	read := func(directory string, args ...string) (string, error) {
-		return (triggerCheckout{directory: directory, environment: environment}).read(ctx, args...)
-	}
-	directory := filepath.Join(workspace, "checkout")
-	if _, err := read(repo, "clone", "--quiet", "--shared", "--no-checkout", "--", repo, directory); err != nil {
-		return "", err
-	}
-	remote, err := read(repo, "remote", "get-url", "origin")
-	if err != nil {
-		return "", err
-	}
-	if _, err := read(directory, "remote", "set-url", "origin", strings.TrimSpace(remote)); err != nil {
-		return "", err
-	}
+	options := source.Options{Workspace: workspace, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
+	committed := sha
 	if bundle != "" {
-		if _, err := read(directory, "bundle", "unbundle", bundle); err != nil {
+		committed = ""
+	}
+	entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: committed, CommittedCheckout: true, PipelineDir: "."}, options)
+	if err != nil {
+		return "", err
+	}
+	environment, err := procenv.Build(procenv.Git, options.Base, procenv.Runtime{})
+	if err != nil {
+		return "", err
+	}
+	reader := triggerCheckout{directory: entry.CheckoutDirectory(), environment: environment}
+	if bundle != "" {
+		if _, err := reader.read(ctx, "bundle", "unbundle", bundle); err != nil {
+			return "", err
+		}
+		if _, err := reader.read(ctx, "checkout", "--quiet", "--detach", sha, "--"); err != nil {
 			return "", err
 		}
 	}
-	if _, err := read(directory, "checkout", "--quiet", "--detach", sha, "--"); err != nil {
+	remote, err := (triggerCheckout{directory: repo, environment: environment}).read(ctx, "remote", "get-url", "origin")
+	if err != nil {
 		return "", err
 	}
-	return directory, nil
+	_, err = reader.read(ctx, "remote", "set-url", "origin", remote)
+	return reader.directory, err
 }

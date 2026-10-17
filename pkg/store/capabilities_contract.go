@@ -487,6 +487,9 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 	if targetNode.principal.Capability.Team != string(t.team) {
 		return authorityError(apierr.Forbidden, "revocation target belongs to another team")
 	}
+	if err := machineAdministrationTx(ctx, tx, p, targetNode.principal.Capability); err != nil {
+		return err
+	}
 	if !slices.Contains(p.Capability.Grants, capability.TeamAdmin) && p.Authority != target {
 		if target.Kind != capability.AuthorityCapability {
 			return bindingRefusal()

@@ -303,6 +303,20 @@ with `Allow: POST`.
 
 ## Capability inventory and rotation
 
+Shared runners require current team administration for enrollment, token
+rotation and revocation. Members enroll their own personal machines through
+`sparkwing runners add --personal --session-stdin` with an independent account
+session. The team setting `members_can_add_machines` defaults to true. When it
+is false, personal enrollment requires administration too. Existing machines
+keep their owner-only claim scope until explicitly revoked.
+
+`GET /api/v1/team/settings` returns `members_can_add_machines` under `runs.read`.
+`PUT /api/v1/team/settings` requires `team.admin` and an explicit boolean with
+that name. Changes and their actor, store time and old/new values commit with
+an audit event. Audit failure rolls back the setting. Administrators can use
+the console's team settings or `sparkwing team settings set --profile work
+--members-can-add-machines false`. Members can read it with `team settings show`.
+
 `GET /api/v1/tokens` lists credentials within the authenticated team. Members
 need `runs.read` and see their own credentials. A team admin can see the team's
 credentials. `GET /api/v1/tokens/{token}` checks ownership of that prefix.

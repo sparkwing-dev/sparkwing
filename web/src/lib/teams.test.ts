@@ -95,6 +95,9 @@ describe("role gates", () => {
     assert.equal(teams.canConnectMachines("owner"), true);
     assert.equal(teams.canConnectMachines("editor"), false);
     assert.equal(teams.canConnectMachines("reader"), false);
+    assert.equal(teams.canConnectMachines("editor", true), true);
+    assert.equal(teams.canConnectMachines("reader", true), true);
+    assert.equal(teams.canConnectMachines(undefined, true), false);
   });
 
   it("never offers a role above the caller's own", () => {
@@ -309,6 +312,11 @@ describe("team administration calls", () => {
 });
 
 describe("mintMachineToken", () => {
+  it("keeps personal enrollment explicit", async () => {
+    respond = () => Response.json({ capability: "private-machine", grants: ["nodes.claim"] });
+    await teams.mintMachineToken("desk", ["github.com/acme/*"], true);
+    assert.equal(JSON.parse(calls[0].body).personal, true);
+  });
   it("sends the name and repository patterns for server-authorized enrollment", async () => {
     respond = () =>
       new Response(
@@ -344,6 +352,18 @@ describe("mintMachineToken", () => {
         return true;
       },
     );
+  });
+});
+
+describe("team settings", () => {
+  it("reads and changes enrollment through the selected team's settings routes", async () => {
+    respond = () => Response.json({ members_can_add_machines: true });
+    assert.deepEqual(await teams.getTeamSettings(), { members_can_add_machines: true });
+    await teams.setTeamSettings({ members_can_add_machines: false });
+    assert.equal(calls[0].url, "/api/v1/team/settings");
+    assert.equal(calls[1].method, "PUT");
+    assert.equal(calls[1].headers.get("X-CSRF-Token"), "session-csrf");
+    assert.deepEqual(JSON.parse(calls[1].body), { members_can_add_machines: false });
   });
 });
 

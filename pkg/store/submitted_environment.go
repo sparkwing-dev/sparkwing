@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -113,10 +112,10 @@ func (t *Tenant) ReadSubmittedEnvironment(ctx context.Context, authority capabil
 			return err
 		}
 		c := chain[0].principal.Capability
-		if c.Team != string(t.team) || c.Audience != capability.Controller || c.Unit == "" || c.Delivery != capability.DeliveryDirect || !slices.Contains(c.Grants, capability.SourceRead) || c.Binding.RunID == "" {
+		if c.Team != string(t.team) {
 			return bindingRefusal()
 		}
-		if err := checkSourceReleaseFenceTx(ctx, tx, c); err != nil {
+		if err := checkExecutionUnitTx(ctx, tx, c); err != nil {
 			return err
 		}
 		values, err = t.readSubmittedEnvironmentTx(ctx, tx, c.Binding.RunID)
@@ -126,10 +125,37 @@ func (t *Tenant) ReadSubmittedEnvironment(ctx context.Context, authority capabil
 		if _, err := authorityChainTx(ctx, tx, authority, false); err != nil {
 			return err
 		}
-		return checkSourceReleaseFenceTx(ctx, tx, c)
+		return checkExecutionUnitTx(ctx, tx, c)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return values, nil
+}
+
+func checkExecutionUnitTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
+	_, actor, err := renewalActor(c)
+	if err != nil {
+		return err
+	}
+	row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: c.Unit, UnitID: c.UnitID})
+	if err != nil {
+		return err
+	}
+	if row.team != c.Team || row.prefix != c.Prefix || row.holder != actor.Holder || row.generation != actor.Generation || !row.lease.Valid || row.lease.Int64 <= tx.now().UnixNano() || row.expiry.Valid && row.expiry.Int64 <= tx.now().UnixNano() {
+		return bindingRefusal()
+	}
+	if c.Unit == capability.UnitEval {
+		if err := bindingExpansionTx(ctx, tx, c, capability.Target{RunID: row.run, NodeID: row.node, SourceGeneration: c.Binding.Generation}); err != nil {
+			return err
+		}
+		state, err := authenticationBindingTx(ctx, tx, c)
+		if err != nil {
+			return err
+		}
+		if state.RunCancelled || state.Expansion == nil || state.Expansion.Lease != *c.Binding.Expansion || state.Expansion.ControllerLeaseExpiresAt == nil || !state.Expansion.ControllerLeaseExpiresAt.After(tx.now()) {
+			return bindingRefusal()
+		}
+	}
+	return nil
 }

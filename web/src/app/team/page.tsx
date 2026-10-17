@@ -20,6 +20,7 @@ import {
   type Member,
   type Role,
   type TeamInvitation,
+  type TeamSettings,
   assignableRoles,
   canDeleteTeam,
   canManageTeam,
@@ -31,6 +32,8 @@ import {
   lastOwnerNote,
   listInvitations,
   listMembers,
+  getTeamSettings,
+  setTeamSettings,
   removeMember,
   revokeInvitation,
 } from "@/lib/teams";
@@ -49,10 +52,12 @@ function Members({ me }: { me: Me }) {
   const [invitations, setInvitations] = useState<TeamInvitation[] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [settings, setSettings] = useState<TeamSettings | null>(null);
 
   const load = useCallback(async () => {
     try {
       setMembers(await listMembers());
+      setSettings(await getTeamSettings());
       setLoadError("");
     } catch (err) {
       setLoadError(errorText(err));
@@ -100,11 +105,24 @@ function Members({ me }: { me: Me }) {
 
   return (
     <>
+      <Panel title="Team settings" hint="Shared runners always require team administration. Turning off personal enrollment keeps existing machines registered until an administrator revokes them.">
+        <label className="flex items-center gap-3 p-4 text-sm">
+          <input
+            type="checkbox"
+            checked={settings?.members_can_add_machines ?? false}
+            disabled={!owner || settings === null || busy !== null}
+            onChange={(e) => run("settings", async () => {
+              setSettings(await setTeamSettings({ members_can_add_machines: e.target.checked }));
+            }, "Team settings saved")}
+          />
+          Members can add personal machines (members_can_add_machines)
+        </label>
+      </Panel>
       <Panel
         title="Members"
         hint={
           owner
-            ? "Owners manage members, invitations and machine tokens. Editors run pipelines and connect machines. Readers see runs and logs."
+            ? "Owners manage members, invitations and shared runners. Members connect personal machines when team settings allow it."
             : "Only owners change roles or invite people."
         }
       >

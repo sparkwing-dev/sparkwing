@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 const pinnedProject = `
@@ -90,13 +92,20 @@ func TestRun_SwRefReadsThePinAtTheExecutedRevision(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "sparkwing.yaml"), []byte(pinnedProject), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if entry, err := pinnedPipelineAt(dir, "unpinned", "release"); err != nil || entry == nil || entry.Profile != "" {
-		t.Fatalf("pin at the unpinned revision = %+v, %v; want the unpinned entry though the checkout pins it", entry, err)
+	selected, err := selectLocalRunSource(t.Context(), t.TempDir(), dir, "release", runFlags{ref: "unpinned"}, os.Environ(), secrets.NewMasker())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := selected.execution.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if entry, err := pinnedPipeline(selected.execution.Directory, "release"); err != nil || entry == nil || entry.Profile != "" {
+		t.Fatalf("unpinned revision: %+v %v", entry, err)
 	}
 }
 
-// The command a refusal suggests must be one pipeline trigger accepts: the
-// parser requires the pipeline name before any flag.
 func TestPinRefusal_SuggestsACommandTriggerParses(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  prod: { controller: { url: http://127.0.0.1:1 } }\n")
 	projectAt(t, pinnedProject)

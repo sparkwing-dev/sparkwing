@@ -8,6 +8,7 @@ import (
 
 func (s *Server) teamReadEndpoints() []Endpoint {
 	endpoints := []Endpoint{
+		{Method: "GET", Pattern: "/api/v1/team/settings", Decode: authorityTarget, Handle: s.handleTeamSettings},
 		{Method: "GET", Pattern: "/api/v1/schedules", Decode: authorityTarget, Handle: s.handleListCrons},
 		{Method: "GET", Pattern: "/api/v1/schedules/{schedule}", Decode: authorityTarget, Handle: s.handleGetCron},
 		{Method: "GET", Pattern: "/api/v1/team/invitations", Decode: authorityTarget, Handle: s.handleListInvitations},

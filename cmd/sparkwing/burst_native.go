@@ -168,10 +168,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		return controllerwire.CreateRunRequest{}, err
 	}
 	options.PreparedCheckout = checkout
-	options.SDK, err = selected.sdk(ctx)
-	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
-	}
+	options.SDK = ""
 	selected.source.NoBincache, selected.source.HashAllFiles = flags.noBincache, flags.hashAllFiles
 	described, err := inspectTriggerSource(ctx, selected, captured, options)
 	if err != nil {

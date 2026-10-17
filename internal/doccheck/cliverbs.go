@@ -54,7 +54,7 @@ func checkCLIVerbs(contentDir string) bool {
 		examples := extractInvocations(rel, doc)
 		if strings.Contains(filepath.ToSlash(rel), "migrations/") {
 			for i := range examples {
-				if examples[i].args != nil || examples[i].err != nil {
+				if examples[i].args != nil || examples[i].err != nil || valid[examples[i].raw] {
 					continue
 				}
 				raw := strings.NewReplacer("[flags]", "", "[-- pipeline-flags]", "", "[", "", "]", "", "...", "").Replace(examples[i].raw)
@@ -313,58 +313,63 @@ func isGroup(cur string, valid map[string]bool) bool {
 }
 
 func migrationDestinations(doc string) string {
+	historical := regexp.MustCompile("Before: `[^`]*`")
 	lines := strings.Split(doc, "\n")
-	after, table, column, fence := false, false, -1, false
+	before, fence, column, depth, ended := false, false, -1, 0, false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
-			fence = !fence
-			if !fence {
-				if !after {
-					lines[i] = ""
+		if !fence {
+			heading := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+			if heading > 0 && depth > 0 && heading <= depth {
+				depth = 0
+				before = false
+			}
+			if depth > 0 {
+				lines[i] = ""
+				if strings.HasPrefix(trimmed, "```") {
+					fence = true
 				}
 				continue
 			}
-		}
-		if !fence {
 			if strings.HasPrefix(trimmed, "|") {
 				cells := strings.Split(strings.ReplaceAll(trimmed, `\|`, "\x00"), "|")
-				if strings.Contains(line, "Before") && strings.Contains(line, "After") {
-					table, column = true, -1
-					for j, cell := range cells {
-						if strings.TrimSpace(cell) == "After" {
-							column = j
-						}
+				for j, cell := range cells {
+					if strings.TrimSpace(cell) == "Before" {
+						column = j
 					}
-					lines[i] = ""
-					continue
 				}
-				if table && column >= 0 && column < len(cells) {
-					lines[i] = strings.ReplaceAll(cells[column], "\x00", "|")
-					continue
+				if column >= 0 && column < len(cells) {
+					cells[column] = ""
+					lines[i] = strings.ReplaceAll(strings.Join(cells, "|"), "\x00", "|")
 				}
-			} else {
-				table, column = false, -1
+				continue
+			}
+			column = -1
+			if before && ended && trimmed != "" && line == trimmed && !strings.HasPrefix(trimmed, "```") {
+				before = false
 			}
 			label := strings.TrimLeft(trimmed, "# *-")
-			if strings.HasPrefix(trimmed, "**") || strings.HasPrefix(trimmed, "- **") {
-				if !strings.HasPrefix(label, "After") {
-					after = false
+			if strings.HasPrefix(label, "Before:") || strings.HasPrefix(label, "Before**") || label == "Before" {
+				before = true
+				depth = heading
+				ended = false
+				if heading == 0 && strings.HasPrefix(trimmed, "Before:") && historical.MatchString(trimmed) {
+					before = false
 				}
-			}
-			if strings.HasPrefix(label, "Before") {
-				after = false
-			}
-			if strings.HasPrefix(label, "After") {
-				after = true
-			}
-			if strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(label, "After") {
-				after = false
+			} else if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "- **") || strings.HasPrefix(trimmed, "**") || strings.HasSuffix(trimmed, ":") {
+				before = false
 			}
 		}
-		explicit := strings.HasPrefix(strings.TrimLeft(trimmed, "# *-"), "After")
-		if !after || !fence && !explicit {
+		if before && !fence && trimmed == "" {
+			ended = true
+		}
+		if strings.HasPrefix(trimmed, "```") {
+			fence = !fence
+		}
+		if before {
 			lines[i] = ""
+		} else {
+			lines[i] = historical.ReplaceAllString(lines[i], "")
 		}
 	}
 	return strings.Join(lines, "\n")

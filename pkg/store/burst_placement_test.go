@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -51,6 +52,10 @@ func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 			}
 			issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:mine", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "mine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
 			if err != nil {
+				t.Fatal(err)
+			}
+			a := teamAuthorization(t, s, owner, "a", "PUT", "/api/v1/team/settings")
+			if err := (&Tenant{s: s, team: "a"}).SetAuthorizedTeamSettings(t.Context(), a, controllerwire.TeamSettings{}); err != nil {
 				t.Fatal(err)
 			}
 			if i%4 == 0 {

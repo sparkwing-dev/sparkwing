@@ -13,7 +13,10 @@ Retries and child intake retain the source values and seal identity, encrypting
 them under the new execution ID. Replay cannot replace values. Retention follows
 the run row, including deletion. SetRunEnvironmentCipher is configured with the
 controller's existing credential cipher. ReadSubmittedEnvironment releases only
-to the run's live direct execution award with source.read and repository binding.
+to the run's live direct trigger, plan, eval or node execution award. The persisted
+unit prefix, holder, generation and lease fence the release. Eval also retains
+its source and controller expansion leases. SourceRead is independent of
+environment release, so eval retains its fixed narrow grants.
 Plan acceptance includes these registered masks in identifier refusal.
 
 ## Verified-default record observations
@@ -567,6 +570,15 @@ The unused `Operator.TeamRunIDs` report is removed with its legacy per-run
 object-purge contract. Tenant purge keeps its scoped inventory checks.
 
 <!-- design:begin -->
+
+Machine registration adds `teams.members_can_add_machines`, a checked 0/1
+column defaulting to 1. Baseline version 7 refuses older stores without migration.
+The native Tenant.TeamSettings and SetAuthorizedTeamSettings methods share
+controllerwire.TeamSettings with HTTP and CLI. Setting writes use the existing
+team administration transaction and atomically record `team.settings_changed`.
+Root issuance checks the setting under the same team lock. Current administration
+is always required for shared-runner enrollment, rotation and revocation.
+Personal enrollment remains bound to its independent account-session owner.
 
 ## Raw cancellation and unused readers removed
 
@@ -3560,7 +3572,7 @@ pipeline_success_pins.
 
 `Request.Burst` seals ordered `PlacementStep{Target, Hold}` preferences and an optional narrowing `OverflowMinutes` cap. Targets resolve to authenticated here capacity, the requesting account's registered machines, Cloud or granted runner/pool selectors. Existing `ClaimPlacement` controls hold times for the same owner projections, reconciliation and claim paths. Burst nodes can overflow a here-hosted run without transferring its owner.
 
-The baseline is version 6. `runs.created_subject_kind` accompanies the authenticated creator ID so personal-machine ownership cannot confuse account and machine IDs. `overflow_controls(team, account_id, monthly_minutes)` stores optional monthly allowances. No row means no per-user cap. Account authority changes its own allowance through `SetOverflowLimit` and reads usage through `ReadOverflowControl`. Cloud admission observes the narrower stored/request cap as well as team billing admission. Existing work finishes and unmetered capacity remains eligible. Full field and verification details are in `design/rewrite/W9-BURST-PLACEMENT.md`.
+The baseline is version 7. `runs.created_subject_kind` accompanies the authenticated creator ID so personal-machine ownership cannot confuse account and machine IDs. `overflow_controls(team, account_id, monthly_minutes)` stores optional monthly allowances. No row means no per-user cap. Account authority changes its own allowance through `SetOverflowLimit` and reads usage through `ReadOverflowControl`. Cloud admission observes the narrower stored/request cap as well as team billing admission. Existing work finishes and unmetered capacity remains eligible. Full field and verification details are in `design/rewrite/W9-BURST-PLACEMENT.md`.
 
 `billing_awards.requester_account` captures the authenticated account creator
 from the run at award time. Non-account creators store an empty value.
@@ -3693,7 +3705,7 @@ report lock and ID recording transaction. Failed ID persistence is retried by
 adopting the check with this run's external ID.
 
 This adds one column to the final schema. Combined with burst attribution and
-overflow controls, the disposable baseline is version 6. Earlier stores are
+overflow controls, the disposable baseline is version 7. Earlier stores are
 refused. There is no migration or backfill. Native QA needs a fresh version-6 store.
 
 `Server.ReconcileRunEffects` replaces `ReconcileProfileFolds` in both controller

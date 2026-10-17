@@ -274,6 +274,15 @@ func Registry() []Command {
 			{Name: "pipeline-ref", Argument: "REF"},
 		}},
 		{Path: "sparkwing overflow", Flags: []Flag{}},
+		{Path: "sparkwing team", Flags: []Flag{}},
+		{Path: "sparkwing team settings", Flags: []Flag{}},
+		{Path: "sparkwing team settings show", Authority: TeamCredential, Rules: []string{"Show the team's members_can_add_machines setting. It defaults to true and allows members to enroll only their own personal machines."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+		}},
+		{Path: "sparkwing team settings set", Authority: TeamCredential, Rules: []string{"Only team administrators change members_can_add_machines. Changes are audited. False requires administration for new personal enrollments and keeps existing machines registered. Shared runner registration, token minting and revocation always require administration."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "members-can-add-machines", Argument: "BOOL", Values: []string{"true", "false"}, Required: true},
+		}},
 		{Path: "sparkwing overflow show", Authority: TeamCredential, Rules: []string{"Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
@@ -385,7 +394,7 @@ func Registry() []Command {
 			{Name: "sw-run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Team runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Shared runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Changing the setting keeps existing machines registered. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --personal."},

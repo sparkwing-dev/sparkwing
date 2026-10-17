@@ -64,10 +64,20 @@ func selectLocalRunSource(ctx context.Context, home, directory, pipeline string,
 	if err != nil {
 		return localSourceSelection{}, err
 	}
-	revision, err := triggerPipelineRevision(ctx, reader, cfg, pipeline, flags.pipelineRef, "")
-	if err != nil {
-		return localSourceSelection{}, err
+	selected := runspec.Source{Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: filepath.Base(directory)}, NoBincache: flags.noBincache, HashAllFiles: flags.hashAllFiles}
+	if entry := cfg.Registry().Find(pipeline); entry != nil {
+		selected.RequestedRef = entry.Source
 	}
+	git := runspec.Git{Repository: repository, SHA: sha, Ref: flags.ref}
+	if flags.ref != "" || selected.RequestedRef != "" || flags.pipelineRef != "" {
+		git, selected, err = source.ResolveRevisions(ctx, git, selected, flags.pipelineRef, func(ref string) (string, error) {
+			return reader.read(ctx, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+		})
+		if err != nil {
+			return localSourceSelection{}, err
+		}
+	}
+	revision := selected.Ref
 	if flags.ref == "" && revision != "" {
 		if err := acquireExecution(); err != nil {
 			return localSourceSelection{}, err
@@ -77,7 +87,9 @@ func selectLocalRunSource(ctx context.Context, home, directory, pipeline string,
 	if revision == "" {
 		revision = execution.SHA
 	}
-	return localSourceSelection{identity: identity, execution: execution, git: runspec.Git{Repository: repository, SHA: execution.SHA, Ref: flags.ref}, source: runspec.Source{Ref: revision, Entrypoint: identity.Entrypoint, WorkingTree: working, CommittedCheckout: flags.ref != "", Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: filepath.Base(directory)}, NoBincache: flags.noBincache, HashAllFiles: flags.hashAllFiles}}, nil
+	git.SHA = execution.SHA
+	selected.Ref, selected.WorkingTree, selected.CommittedCheckout = revision, working, flags.ref != ""
+	return localSourceSelection{identity: identity, execution: execution, git: git, source: selected}, nil
 }
 
 func (s localSourceSelection) checkout(ctx context.Context, home string, captured []string) (*source.Entry, error) {

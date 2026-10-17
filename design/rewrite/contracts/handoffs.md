@@ -701,3 +701,12 @@ Assigned to W8 (env 1086).
 - Only team admins and owners can change the setting, and changes are audited. Turning it off does not revoke machines already registered; admins revoke them explicitly.
 - CLI and console: the setting appears in team settings. `sparkwing runners add --personal` (or the existing personal enrollment path) works for members when the setting allows it, and refuses with a clear message naming the setting when it does not.
 Assigned to W2 (env 1080), with W9's CLI surface under integration authority.
+
+## 2026-10-17 11:00 lead decision: three W9 mechanisms redesigned under the two-strikes rule
+
+Review: /home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/review/areas/W9-review-1792251789-final.md. Each mechanism below has produced its second bug, so the fix is structural and per-caller patches are refused.
+1. Source selection. One shared resolver turns ref intent (execution ref, pipeline ref) into resolved execution and code commits. CLI runs, triggers, trigger inspection, burst, local schedules and hosting all use it, and its result is what gets sealed. Unresolved ref intent is stored separately from resolved commit identity. Delete every bespoke single-SHA projection (trigger_inspect.go, trigger_native.go, schedule_source.go). Inspection and hosting consume the same acquisition.
+2. Child identity. Child requests are built from an explicit allow-list of fields inherited from the parent, never by cloning the parent request. The child's pipeline selects its SDK entrypoint through the shared planner rule, so the parent's Source.Entrypoint never carries over.
+3. Environment release. Submitted or captured environment values are released through the live execution-unit fence (plan, eval or expansion, and node units) for the unit's own run. This is independent of source-credential (SourceRead) permission and keeps each unit's grants narrow.
+Docs: the migration checker validates every current instruction, excluding only material explicitly marked historical ("Before"). Fix v0.67.0's crons tick claim (decision 94) and the stale environment restrictions, and remove the two stale test comments.
+Assigned to W9 (env 1087) under integration authority. Each mechanism gets a real-path test that runs past admission into hosting.

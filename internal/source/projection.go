@@ -25,9 +25,6 @@ func ForRequest(sealed runspec.SealedRequest) (Spec, error) {
 	}
 	if !r.Source.WorkingTree {
 		spec.PipelineSHA = r.Source.Ref
-		if r.Source.Ref != "" && r.Source.Ref == r.Git.Ref {
-			spec.PipelineSHA = r.Git.SHA
-		}
 	}
 	if location.LocalCheckout != "" {
 		spec.CommittedCheckout = r.Source.CommittedCheckout

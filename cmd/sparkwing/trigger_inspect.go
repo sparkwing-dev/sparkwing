@@ -32,16 +32,9 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 	}()
 	captured = slices.DeleteFunc(slices.Clone(captured), func(item string) bool { return strings.HasPrefix(item, "SPARKWING_GATE_INDEX=") })
 	options.Base = procenv.Base{Local: true, Captured: captured, Masker: masker}
-	spec := source.Spec{
-		RepoKey: string(selection.git.Repository.Key), RemoteURL: selection.source.Location.RemoteURL,
-		SHA: selection.source.Ref, PipelineDir: selection.source.Location.PipelineDir, LocalCheckout: selection.source.Location.LocalCheckout,
-		NoBincache: selection.source.NoBincache, HashAllFiles: selection.source.HashAllFiles,
-	}
-	if selection.source.BundleDigest.Set {
-		spec.BundleDigest = selection.source.BundleDigest.Value
-	}
-	if selection.git.DefaultBranch.Set {
-		spec.DefaultBranch = selection.git.DefaultBranch.Value
+	spec, err := source.ForRequest(runspec.SealedRequest{Request: runspec.Request{Git: selection.git, Source: selection.source}})
+	if err != nil {
+		return nil, err
 	}
 	entry, err := source.Acquire(ctx, spec, options)
 	if entry != nil {

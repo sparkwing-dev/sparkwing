@@ -294,3 +294,23 @@ func TestMigrationAfterSectionChecksEveryExample(t *testing.T) {
 		t.Fatal("second After example was ignored")
 	}
 }
+
+func TestMigrationCurrentInstructionsAreAllChecked(t *testing.T) {
+	for _, doc := range []string{
+		"Run `sparkwing crons tick` now.",
+		"Before: `sparkwing retired`.\n\nRun `sparkwing crons tick` now.",
+		"- **Before:** `sparkwing retired`.\n\nRun `sparkwing crons tick` now.",
+		"Before:\n```bash\nsparkwing retired\n```\n\nOperator steps:\nRun `sparkwing crons tick` now.",
+		"### Before\n```bash\nsparkwing retired\n```\n### Operator steps\nRun `sparkwing crons tick` now.",
+		"| Before | After | Notes |\n|---|---|---|\n| `sparkwing retired` | `sparkwing run ci` | Run `sparkwing crons tick` |\n",
+	} {
+		content := t.TempDir()
+		if err := os.Mkdir(filepath.Join(content, "migrations"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeDoc(t, filepath.Join(content, "migrations"), "v1.md", doc)
+		if checkCLIVerbs(content) {
+			t.Fatalf("unchecked current instruction: %s", doc)
+		}
+	}
+}

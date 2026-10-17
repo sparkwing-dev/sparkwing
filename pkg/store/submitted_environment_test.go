@@ -63,7 +63,7 @@ func FuzzSubmittedEnvironmentStaysPrivateAndClaimBound(f *testing.F) {
 		owner.Unit, owner.UnitID, owner.Purpose = capability.UnitTrigger, admitted.RunID, capability.PurposeTrigger
 		owner.Parent, owner.Issuance, owner.Delivery = &request.Authority, capability.Award, capability.DeliveryDirect
 		owner.Data = &capability.DataScope{RepositoryKey: string(request.Request.Git.Repository.Key)}
-		owner.Grants = []capability.Grant{capability.SourceRead, capability.TriggerHost}
+		owner.Grants = []capability.Grant{capability.TriggerHost}
 		owner.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: admitted.RunID, Holder: "host", Generation: 1}
 		persistPlanOwner(t, tenant.s, owner)
 		rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='host',generation=1,lease_expires_at=?,capability_prefix=? WHERE id=?`, now.Add(time.Minute).UnixNano(), owner.Prefix, admitted.RunID)
@@ -177,4 +177,107 @@ func TestSubmittedEnvironmentRefusesInvalidIntakeAtomically(t *testing.T) {
 			rewriteSchemaCount(t, tenant.s.db, "runs", 0)
 		})
 	}
+}
+
+func FuzzExecutionEnvironmentUsesOnlyLiveUnitFence(f *testing.F) {
+	for kind := uint8(0); kind < 3; kind++ {
+		for change := uint8(0); change < 11; change++ {
+			f.Add(kind, change, "captured-value")
+		}
+	}
+	f.Fuzz(func(t *testing.T, index, change uint8, value string) {
+		if len(value) > 256 || strings.ContainsRune(value, 0) {
+			return
+		}
+		kind := []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[index%3]
+		s, _, claim, now := launcherSnapshotFixture(t, kind)
+		tenant := &Tenant{s: s, team: claim.Team}
+		cipher, err := secrets.NewCipher(bytes.Repeat([]byte{42}, secrets.KeySize))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.SetRunEnvironmentCipher(cipher)
+		run, err := tenant.ReadRun(t.Context(), claim.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run.Request.Request.EnvironmentSource = runspec.EnvironmentSubmitted
+		run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_VALUE": value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(run.Request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		values, err := json.Marshal(map[string][]byte{"BUILD_VALUE": []byte(value)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelope, err := cipher.SealBound(string(claim.Team), claim.RunID, "run-environment", false, true, string(values))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,submitted_env=? WHERE id=?`, raw, envelope, claim.RunID)
+		bootstrap := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}
+		if got, err := tenant.ReadSubmittedEnvironment(t.Context(), bootstrap); err == nil || got != nil {
+			t.Fatal("bootstrap read environment")
+		}
+		issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: bootstrap.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}
+		got, err := tenant.ReadSubmittedEnvironment(t.Context(), authority)
+		if err != nil || string(got["BUILD_VALUE"]) != value || len(got) != 1 {
+			t.Fatalf("%s lost environment: %v", kind, err)
+		}
+		table, predicate := "triggers", `id='run'`
+		if kind == capability.UnitNode {
+			table, predicate = "nodes", `run_id='run'`
+		}
+		if kind == capability.UnitEval {
+			table, predicate = "eval_units", `run_id='run'`
+		}
+		switch change % 11 {
+		case 0:
+			tenant.team = "foreign"
+		case 1:
+			rewriteSchemaExec(t, s.db, "UPDATE "+table+" SET generation=generation+1 WHERE "+predicate)
+		case 2:
+			rewriteSchemaExec(t, s.db, "UPDATE "+table+" SET claimed_by='foreign' WHERE "+predicate)
+		case 3:
+			rewriteSchemaExec(t, s.db, "UPDATE "+table+" SET capability_prefix='foreign' WHERE "+predicate)
+		case 4:
+			*now = now.Add(3 * time.Hour)
+		case 5:
+			rewriteSchemaExec(t, s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, authority.ID)
+		case 6:
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=1 WHERE id='run'`)
+		case 7:
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET status='success',finished_at=1 WHERE id='run'`)
+		case 8:
+			if kind == capability.UnitEval {
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=generation+1 WHERE run_id='run'`)
+			} else {
+				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=1 WHERE id='run'`)
+			}
+		case 9:
+			if kind == capability.UnitEval {
+				rewriteSchemaExec(t, s.db, `UPDATE leases SET generation=generation+1`)
+			} else {
+				rewriteSchemaExec(t, s.db, "UPDATE "+table+" SET lease_expires_at=1 WHERE "+predicate)
+			}
+		case 10:
+			if kind == capability.UnitEval {
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET cancel_requested_at=1 WHERE run_id='run'`)
+			} else {
+				rewriteSchemaExec(t, s.db, `UPDATE triggers SET expires_at=1 WHERE id='run'`)
+			}
+
+		}
+		if got, err := tenant.ReadSubmittedEnvironment(t.Context(), authority); err == nil || got != nil {
+			t.Fatalf("%s released outside live fence %d", kind, change%11)
+		}
+	})
 }

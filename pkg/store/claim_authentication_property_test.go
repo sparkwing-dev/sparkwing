@@ -63,9 +63,7 @@ func TestCapabilityClaimLivenessProperty(t *testing.T) {
 			case 4:
 				rewriteSchemaExec(t, s.db, `DELETE FROM runs WHERE id='run'`)
 			case 3:
-				if err := (&Tenant{s: s, team: "a"}).RevokeAuthority(t.Context(), Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"}}, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"}); err != nil {
-					t.Fatal(err)
-				}
+				revokeClaimRoot(t, s, "runner", "a")
 			}
 			if sensitive(raw) || reporting(raw) || result(raw) {
 				t.Fatal("ended, superseded or revoked authority authenticated")

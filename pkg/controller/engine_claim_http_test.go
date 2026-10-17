@@ -23,7 +23,26 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
+
+func revokeEngineMachine(t *testing.T, s *store.Store, prefix string) {
+	t.Helper()
+	_, admin, err := teststore.ProvisionCredential(t.Context(), s, capability.ProvisionSpec{
+		Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "claim-revoker"},
+		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TeamAdmin},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := s.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: admin.Prefix}}, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func engineHTTPRoot(t *testing.T, e *EngineController, team, prefix string, grants []capability.Grant) string {
 	t.Helper()
@@ -151,14 +170,7 @@ func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/runners/claim", `{}`, 401)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["node"]}`, 403)
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error {
-		tenant, err := e.Store.ForTeam(t.Context(), "a")
-		if err != nil {
-			t.Fatal(err)
-		}
-		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
-		if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
-			t.Fatal(err)
-		}
+		revokeEngineMachine(t, e.Store, "root")
 		return nil
 	})
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 401)
@@ -314,14 +326,7 @@ func TestEngineClaimHTTPDeadCredentialProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"compute_start"}`, 403)
-	tenant, err := e.Store.ForTeam(t.Context(), "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
-		t.Fatal(err)
-	}
+	revokeEngineMachine(t, e.Store, "root")
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", body, 401)
 	var count int
 	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || count != 0 {

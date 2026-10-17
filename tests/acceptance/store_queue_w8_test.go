@@ -9,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
@@ -51,13 +50,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 			want = apierr.Unauthenticated
 		case 7:
 			ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}
-			tenant, err := server.Store.ForTeam(t.Context(), store.DefaultTeam)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
-				t.Fatal(err)
-			}
+			revokeStoredRunnerW8(t, server.Store, ref)
 			want = apierr.Unauthenticated
 		}
 		runner, err := runners.NewStoreRunner(server, runners.StoreRunnerConfig{

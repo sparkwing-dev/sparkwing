@@ -167,6 +167,9 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	if spec.PipelineSHA != "" && (spec.PipelineSHA != actual || spec.LocalCheckout != "" && !spec.CommittedCheckout) {
 		code := spec.PipelineSource()
 		codeOptions := options
+		if options.PreparedCheckout != "" {
+			code.LocalCheckout, code.RemoteURL = options.PreparedCheckout, ""
+		}
 		codeOptions.PreparedCheckout = ""
 		entry.pipelineEntry, err = PrepareCheckout(ctx, code, codeOptions)
 		if err != nil {

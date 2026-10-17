@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
@@ -23,8 +28,9 @@ import (
 )
 
 func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
-	for _, failService := range []bool{false, true} {
-		t.Run(map[bool]string{false: "register", true: "rollback"}[failService], func(t *testing.T) {
+	for _, mode := range []string{"register", "rollback", "disabled", "shared", "settings"} {
+		t.Run(mode, func(t *testing.T) {
+			failService := mode == "rollback"
 			f := newRunnersFixture(t)
 			state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
@@ -43,6 +49,11 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('personal-test','member','editor',1)`,
 			} {
 				if _, err := state.DB().ExecContext(t.Context(), query); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "disabled" {
+				if _, err := state.DB().ExecContext(t.Context(), `UPDATE teams SET members_can_add_machines=0 WHERE name='personal-test'`); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -67,13 +78,63 @@ func TestRunnersPersonalEnrollmentCLIThroughController(t *testing.T) {
 				return w.Result(), nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = original })
+			if mode == "settings" {
+				if _, err := state.DB().ExecContext(t.Context(), `UPDATE memberships SET role='owner'`); err != nil {
+					t.Fatal(err)
+				}
+				digest := sha256.Sum256([]byte(session))
+				authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+				issued, err := state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "personal-test", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Grants: []capability.Grant{capability.RunsRead, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeProfilesFixture(t, "profiles:\n  prod:\n    controller: { url: https://controller.example, token: "+issued.Raw+" }\n")
+				for _, args := range [][]string{{"show"}, {"set", "--members-can-add-machines", "false"}, {"show"}} {
+					var callErr error
+					out := captureStdout(t, func() {
+						callErr = runSparkwing(append([]string{"team", "settings"}, append(args, "--profile", "prod", "--output", "json")...))
+					})
+					if callErr != nil || !strings.Contains(out, `"members_can_add_machines":`) {
+						t.Fatalf("settings CLI %v: %s %v", args, out, callErr)
+					}
+				}
+				if _, err := state.DB().ExecContext(t.Context(), `UPDATE memberships SET role='editor'`); err != nil {
+					t.Fatal(err)
+				}
+				if err := runSparkwing([]string{"team", "settings", "set", "--profile", "prod", "--members-can-add-machines", "true"}); err == nil {
+					t.Fatal("demoted admin changed team setting through CLI")
+				}
+				tenant := teststore.ForTeam(t, state, "personal-test")
+				events, err := tenant.BusinessEvents(t.Context(), "team.settings_changed")
+				if err != nil || len(events) != 1 || events[0].Actor != "member" {
+					t.Fatalf("CLI setting audit: %+v %v", events, err)
+				}
+				return
+			}
 			args := []string{"--profile", "prod", "--runner", "desk", "--personal", "--session-stdin", "--repos", "github.com/acme/*", "--config", f.config, "--output", "json"}
+			if mode == "shared" {
+				args = slices.DeleteFunc(args, func(arg string) bool { return arg == "--personal" })
+			}
 			if failService {
 				f.failExec["systemctl --user daemon-reload"] = "installation refused"
 			} else {
 				args = append(args, "--no-service")
 			}
 			captureStdout(t, func() { err = runRunnersAddArgs(args) })
+			if mode == "disabled" || mode == "shared" {
+				want := "members_can_add_machines"
+				if mode == "shared" {
+					want = "team administration"
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("refusal must name %s: %v", want, err)
+				}
+				var count int
+				if err := state.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities WHERE subject_kind='machine'`).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("refused enrollment persisted credentials: %d %v", count, err)
+				}
+				return
+			}
 			if (err != nil) != failService {
 				t.Fatalf("enrollment with failed service %v: %v", failService, err)
 			}

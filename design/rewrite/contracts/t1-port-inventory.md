@@ -238,7 +238,8 @@ reuse after revocation or expiry, rotation grace and concurrent mint limits to
 `TestRunnerTokenRefusesADuplicateAgentName`, `TestAgentNameIsUniqueOnEveryMintPath`
 and `TestIdentityRunnerTokenCapHoldsUnderConcurrentMints`. Their superseded
 raw-token tests are removed with the unused team token constructors and inventory.
-The final machine origin requires current team administration, as C2 specifies.
+Shared machine origin requires current team administration. Personal enrollment
+accepts any current member when members_can_add_machines is on, as C2 specifies.
 
 `TestProvisionMemberCurrentScopesProperty` ports current-role, requested-subset
 and removal assertions from `TestMemberTokenScopesAreBoundedByTheMintersRole`,

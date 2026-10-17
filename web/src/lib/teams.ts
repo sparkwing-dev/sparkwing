@@ -51,8 +51,8 @@ export function canManageTeam(role: Role | undefined): boolean {
   return role === "owner";
 }
 
-export function canConnectMachines(role: Role | undefined): boolean {
-  return canManageTeam(role);
+export function canConnectMachines(role: Role | undefined, membersCanAddMachines = false): boolean {
+  return canManageTeam(role) || role !== undefined && membersCanAddMachines;
 }
 
 export function assignableRoles(role: Role | undefined): Role[] {
@@ -365,12 +365,26 @@ export async function listTeamTokens(): Promise<TeamToken[]> {
 export async function mintMachineToken(
   name: string,
   repos: string[],
+  personal = false,
 ): Promise<MintedMachineToken> {
   const res = await send("POST", "/api/v1/runners", "Connect a machine", {
     name,
     repos,
+    ...(personal ? { personal: true } : {}),
   });
   return (await res.json()) as MintedMachineToken;
+}
+
+export type TeamSettings = { members_can_add_machines: boolean };
+
+export async function getTeamSettings(): Promise<TeamSettings> {
+  const res = await send("GET", "/api/v1/team/settings", "Read team settings");
+  return (await res.json()) as TeamSettings;
+}
+
+export async function setTeamSettings(settings: TeamSettings): Promise<TeamSettings> {
+  const res = await send("PUT", "/api/v1/team/settings", "Change team settings", settings);
+  return (await res.json()) as TeamSettings;
 }
 
 const readerScopes = ["runs.read", "logs.read"];

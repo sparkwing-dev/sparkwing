@@ -70,5 +70,6 @@ func (s *EngineController) resolveExpansionTarget(ctx context.Context, principal
 		return target, missingEndpointPolicy()
 	}
 	target.UnitSourceNodeID, target.UnitSourceGeneration = node.Ref.NodeID, node.Generation
+	target.SourceGeneration = node.Generation
 	return target, nil
 }

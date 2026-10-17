@@ -9,21 +9,19 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -47,26 +45,6 @@ type triggerCheckout struct {
 	directory   string
 	environment []string
 	diagnostics io.Writer
-}
-
-func (s preparedTriggerSource) sdk(ctx context.Context) (engine.SDKKind, error) {
-	manifest := path.Join(s.source.Location.PipelineDir, "package.json")
-	listed, err := s.checkout.read(ctx, "ls-tree", "--name-only", s.source.Ref, "--", manifest)
-	if err != nil || listed == "" {
-		return engine.GoSDK, err
-	}
-	raw, err := s.checkout.read(ctx, "show", s.source.Ref+":"+manifest)
-	if err != nil {
-		return "", err
-	}
-	typescript, err := pipelineentry.IsTypeScriptManifest([]byte(raw))
-	if err != nil {
-		return "", fmt.Errorf("selected pipeline package.json: %w", err)
-	}
-	if typescript {
-		return engine.TypeScriptSDK, nil
-	}
-	return engine.GoSDK, nil
 }
 
 func (c triggerCheckout) read(ctx context.Context, args ...string) (string, error) {
@@ -173,20 +151,18 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if err != nil {
 		return result, err
 	}
-	pipelineSHA, err := triggerPipelineRevision(ctx, reader, cfg, input.pipeline, input.pipelineRef, sha)
+	selected := runspec.Source{Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"}}
+	profile := ""
+	if entry := cfg.Registry().Find(identity.Name); entry != nil {
+		selected.RequestedRef, profile = entry.Source, entry.Profile
+	}
+	git, selected, err = source.ResolveRevisions(ctx, git, selected, input.pipelineRef, func(ref string) (string, error) {
+		return reader.read(ctx, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	})
 	if err != nil {
 		return result, err
 	}
-	profile := ""
-	if cfg != nil {
-		if entry := cfg.Registry().Find(identity.Name); entry != nil {
-			profile = entry.Profile
-		}
-	}
-	return preparedTriggerSource{pipeline: identity.Name, profile: profile, git: git, source: runspec.Source{
-		Ref: pipelineSHA, Entrypoint: identity.Entrypoint,
-		Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"},
-	}, checkout: reader}, nil
+	return preparedTriggerSource{pipeline: identity.Name, profile: profile, git: git, source: selected, checkout: reader}, nil
 }
 
 func (s preparedTriggerSource) checkProfile(profile string) error {
@@ -194,39 +170,6 @@ func (s preparedTriggerSource) checkProfile(profile string) error {
 		return fmt.Errorf("pipeline trigger: pipeline %s is pinned to profile %s; pass --profile %s", s.pipeline, s.profile, s.profile)
 	}
 	return nil
-}
-
-func triggerPipelineRevision(ctx context.Context, checkout triggerCheckout, cfg *projectconfig.Config, pipeline, explicit, execution string) (string, error) {
-	declared := ""
-	if cfg != nil {
-		for _, entry := range cfg.Pipelines {
-			if entry.Name == pipeline && entry.Source != nil {
-				declared = strings.TrimSpace(*entry.Source)
-			}
-		}
-	}
-	explicit = strings.TrimSpace(explicit)
-	ref := declared
-	if ref == "" {
-		ref = explicit
-	}
-	if ref == "" {
-		return execution, nil
-	}
-	sha, err := checkout.read(ctx, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-	if err != nil {
-		return "", err
-	}
-	if declared != "" && explicit != "" && explicit != declared {
-		override, err := checkout.read(ctx, "rev-parse", "--verify", "--end-of-options", explicit+"^{commit}")
-		if err != nil {
-			return "", err
-		}
-		if override != sha {
-			return "", &apierr.Error{Code: apierr.InvalidArgs, Message: "pipeline revision disagrees with the configured source pin"}
-		}
-	}
-	return sha, nil
 }
 
 func gitExitCode(err error, code int) bool {

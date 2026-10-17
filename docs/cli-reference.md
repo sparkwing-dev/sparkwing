@@ -28,6 +28,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing runs`](cli-runs.md) -- Inspect and control pipeline runs
 - [`sparkwing schedules`](cli-schedules.md) -- Manage scheduled pipeline runs
 - [`sparkwing secrets`](cli-secrets.md) -- Manage secrets in this machine's local store or on a controller
+- [`sparkwing team`](cli-team.md) -- Manage your team
 - [`sparkwing tokens`](cli-tokens.md) -- Manage team credentials
 - [`sparkwing update`](cli-update.md) -- Update the CLI binary
 - [`sparkwing upgrade`](cli-upgrade.md) -- Upgrade repository SDK pins

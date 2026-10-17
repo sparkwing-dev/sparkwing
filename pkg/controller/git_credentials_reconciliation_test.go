@@ -353,10 +353,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 			status = 401
 			engineSQL(t, f.s.store, `UPDATE nodes SET generation=generation+? WHERE team='a' AND run_id='run' AND node_id='job'`, int64(noise)+1)
 		case 3:
-			root := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "runner"}
-			if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: root, CapabilityPrefix: root.ID}, root); err != nil {
-				t.Fatal(err)
-			}
+			revokeEngineMachine(t, f.s.store, "runner")
 			status = 401
 		case 4:
 			if err := f.s.store.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {

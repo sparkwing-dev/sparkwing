@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -358,22 +356,22 @@ func localScheduleTransport(ctx context.Context, home string) (controllerwire.Lo
 	return manager, closeTransport, nil
 }
 
-func proveLocalSchedule(ctx context.Context, home, root, pipeline string, environment []string) (crons.Proof, error) {
+func proveLocalSchedule(ctx context.Context, home, root, pipeline string, environment []string) (_ crons.Proof, err error) {
 	options, err := hostSourceOptions(home, environment, secrets.NewMasker(), true)
 	if err != nil {
 		return crons.Proof{}, err
 	}
-	directory := filepath.Join(root, ".sparkwing")
-	if typescript, err := pipelineentry.IsTypeScript(directory); err != nil {
-		return crons.Proof{}, err
-	} else if typescript {
-		options.SDK = engine.TypeScriptSDK
-	}
-	repository, err := runspec.CanonicalRepository(runspec.RepoInput{AbsolutePath: root})
+	selected, err := selectLocalRunSource(ctx, home, filepath.Join(root, ".sparkwing"), pipeline, runFlags{}, environment, options.Base.Masker)
 	if err != nil {
 		return crons.Proof{}, err
 	}
-	entry, err := source.Acquire(ctx, source.Spec{RepoKey: string(repository.Key), LocalCheckout: root, PipelineDir: ".sparkwing"}, options)
+	defer func() { err = errors.Join(err, selected.execution.Close()) }()
+	spec, err := source.ForRequest(runspec.SealedRequest{Request: runspec.Request{Git: selected.git, Source: selected.source}})
+	if err != nil {
+		return crons.Proof{}, err
+	}
+	options.SDK = ""
+	entry, err := source.Acquire(ctx, spec, options)
 	if err != nil {
 		if entry != nil {
 			err = errors.Join(err, entry.Close())

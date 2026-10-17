@@ -159,6 +159,7 @@ type EnvSnapshot struct {
 
 // safety: Source records acquisition intent without embedding source credentials.
 type Source struct {
+	RequestedRef      string           `json:"requested_ref,omitempty"`
 	Ref               string           `json:"ref"`
 	Entrypoint        string           `json:"entrypoint"`
 	BundleDigest      Optional[string] `json:"bundle_digest"`

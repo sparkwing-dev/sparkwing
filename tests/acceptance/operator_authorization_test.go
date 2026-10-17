@@ -75,7 +75,7 @@ func consoleAuthorization(b *credentialBoundary) controller.RouteAuthorization {
 	}
 }
 
-func TestOperatorHTTPRefusesNonConsoleAuthority(t *testing.T) {
+func TestOperatorHTTPSeparatesConsoleActionsFromDeploymentReads(t *testing.T) {
 	for _, route := range consoleRequests {
 		for _, name := range []string{"anonymous", "deployment bearer", "delegated bearer", "account session", "local peer", "revoked session", "expired session", "membership lost", "wrong audience", "missing grant", "missing csrf"} {
 			if name == "missing csrf" && route[0] == http.MethodGet {
@@ -124,9 +124,36 @@ func TestOperatorHTTPRefusesNonConsoleAuthority(t *testing.T) {
 				case "missing csrf":
 					r.Header.Del("X-CSRF-Token")
 				}
-				s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
+				placementRead := route == [2]string{"GET", "/api/v1/operator/teams/customer"} && (name == "deployment bearer" || name == "delegated bearer")
+				var st *store.Store
+				if placementRead {
+					var err error
+					st, err = teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := st.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+					if err := st.AsOperator().CreateTeam(t.Context(), "customer"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				s := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
 				w := httptest.NewRecorder()
 				s.Handler().ServeHTTP(w, r)
+				if placementRead {
+					var projection map[string]any
+					if err := json.Unmarshal(w.Body.Bytes(), &projection); err != nil {
+						t.Fatal(err)
+					}
+					if w.Code != http.StatusOK || len(projection) != 2 || projection["team"] != "customer" || projection["display_name"] == nil {
+						t.Fatalf("deployment team projection = %d %s", w.Code, w.Body)
+					}
+					return
+				}
 				var body apierr.Envelope
 				if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)

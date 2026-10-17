@@ -10,12 +10,23 @@ setting and provenance. Intake validates both before admitting.
 ClaimedUnit.SubmittedEnv is populated only on live direct execution awards,
 including successful bootstrap exchange and fresh node reconciliation. Source
 bootstrap awards, launcher sync and reconciled awards without a fresh bearer
-carry no values. The controller rechecks the claim, tenant, repository binding,
-cancellation and lease before release. NativeServices verifies the values against
+carry no values. The controller rechecks the live execution unit and its own run,
+tenant, prefix, holder, generation, cancellation and lease before release. Eval
+also checks its source generation and controller expansion lease. SourceRead
+is independent of environment release. NativeServices verifies the values against
 the sealed identity before merging them with the remote base or starting code.
 No new route or grant is introduced.
 
 <!-- design:begin -->
+
+Team machine enrollment settings share controllerwire.TeamSettings with the
+store, HTTP routes and concrete client.TeamSettingsClient. ReadTeamSettings
+uses GET `/api/v1/team/settings` under `runs.read`; SetTeamSettings uses PUT
+under current `team.admin` with an explicit `members_can_add_machines` boolean.
+The default is true. Personal issuance still needs an independent account
+session and claims only its owner's work. Shared runners always require
+administration to enroll, rotate or revoke. Settings changes audit atomically
+and do not revoke existing machines.
 
 ## Operator team creation (decision 114)
 

@@ -268,13 +268,13 @@ func TestNativeTokenOwnershipRelationProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	sequence := 0
-	property := func(owned, administrator bool, hint uint64) bool {
+	property := func(owned, administrator, personal bool, hint uint64) bool {
 		engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE team='a' AND account_id='member'`)
 		creator, key := other, otherCSRF
 		if owned {
 			creator, key = raw, csrf
 		}
-		body := fmt.Sprintf(`{"name":"property-%d","repos":["github.com/acme/*"]}`, sequence)
+		body := fmt.Sprintf(`{"name":"property-%d","repos":["github.com/acme/*"],"personal":%t}`, sequence, personal)
 		sequence++
 		issued := reviewSessionRequest(t, s, creator, key, "POST", "/api/v1/runners", body, 201)
 		var token credentialResponse
@@ -285,12 +285,13 @@ func TestNativeTokenOwnershipRelationProperty(t *testing.T) {
 			engineSQL(t, s.store, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='member'`)
 		}
 		expected := 403
-		if owned || administrator {
+		allowed := owned && personal || administrator
+		if allowed {
 			expected = 204
 		}
 		reviewSessionRequest(t, s, raw, csrf, "DELETE", fmt.Sprintf("/api/v1/tokens/%s?owner=member&team=%d", token.Prefix, hint), "", expected)
 		_, err := s.store.LookupCapability(t.Context(), sha256.Sum256([]byte(token.Capability)))
-		return (err != nil) == (owned || administrator)
+		return (err != nil) == allowed
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
