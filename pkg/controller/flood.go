@@ -2,6 +2,10 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"sync"
@@ -9,6 +13,9 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -135,8 +142,8 @@ func (s *Server) triggerFloodRefusal(ctx context.Context, tenant *store.Tenant, 
 }
 
 type dedupeEntry struct {
-	runID string
-	at    time.Time
+	key string
+	at  time.Time
 }
 
 // safety: the answer expires rather than persisting, because two identical
@@ -149,22 +156,15 @@ type dedupeWindow struct {
 
 // safety: looking up and recording under one lock is what stops two simultaneous
 // identical submissions from both starting a run.
-func (d *dedupeWindow) claim(digest, runID string, now time.Time) (string, bool) {
+func (d *dedupeWindow) claim(digest, key string, now time.Time) (string, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if e, ok := d.seen[digest]; ok && now.Sub(e.at) < d.window {
-		return e.runID, true
+		return e.key, true
 	}
 	d.evictLocked(now)
-	d.seen[digest] = dedupeEntry{runID: runID, at: now}
+	d.seen[digest] = dedupeEntry{key: key, at: now}
 	return "", false
-}
-
-// safety: a submission the store refused must not shadow the caller's next attempt.
-func (d *dedupeWindow) forget(digest string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	delete(d.seen, digest)
 }
 
 // safety: the window bounds this map in time but not under a flood, so a full
@@ -270,4 +270,48 @@ func (w *warnEvery) due() bool {
 	}
 	w.last = now
 	return true
+}
+
+func (s *Server) admissionFloodRefusal(ctx context.Context, a capability.Authorized) error {
+	if s.flood == nil {
+		return nil
+	}
+	tenant, err := s.tenantForTeam(ctx, store.Team(a.Target.Team))
+	if err != nil {
+		return engineLookupError(err)
+	}
+	refusal := s.triggerFloodRefusal(ctx, tenant, githubAppFloodKey(tenant.Team()), "api")
+	if refusal == nil {
+		return nil
+	}
+	code := apierr.RateLimited
+	if refusal.status == http.StatusServiceUnavailable {
+		code = apierr.Unavailable
+	}
+	return &apierr.Error{Code: code, Message: refusal.msg, Details: map[string]any{"retry_after_ms": refusal.wait.Milliseconds()}}
+}
+
+func (s *Server) dedupeIntake(a capability.Authorized, body *controllerwire.CreateRunRequest) error {
+	if s.flood == nil || s.flood.dedupe == nil || body.IdempotencyKey != "" {
+		return nil
+	}
+	intake, err := IntakeForStore(a, *body)
+	if err != nil {
+		return err
+	}
+	canonical, err := json.Marshal(intake.Request)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(canonical)
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return err
+	}
+	key := hex.EncodeToString(nonce[:])
+	if existing, found := s.flood.dedupe.claim(hex.EncodeToString(digest[:]), key, time.Now()); found {
+		key = existing
+	}
+	body.IdempotencyKey = key
+	return nil
 }

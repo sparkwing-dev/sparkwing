@@ -2,221 +2,201 @@ package controller_test
 
 import (
 	"bytes"
-	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func newFloodServer(t *testing.T, p controller.FloodPolicy) (string, *store.Store) {
+type floodFixture struct{ *browserFixture }
+
+func newFloodServer(t *testing.T, policy controller.FloodPolicy) *floodFixture {
 	t.Helper()
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
+	f := newBrowserFixture(t, nil)
+	f.st.SetIntakePolicy(receiptPolicy{})
+	f.srv.WithFloodPolicy(policy)
+	f.h = f.srv.Handler()
+	return &floodFixture{f}
+}
+
+func fortyHex(seed int) string { return fmt.Sprintf("%040x", seed) }
+
+func (f *floodFixture) submit(token, pipeline, sha string) *httptest.ResponseRecorder {
+	f.t.Helper()
+	body := computeIntake(pipeline)
+	body.Request.Git.SHA = sha
+	return f.intake(token, body)
+}
+
+func (f *floodFixture) intake(token string, body controllerwire.CreateRunRequest) *httptest.ResponseRecorder {
+	f.t.Helper()
+	raw, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		f.t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	ts := httptest.NewServer(controller.New(st, nil).WithFloodPolicy(p).Handler())
-	t.Cleanup(ts.Close)
-	return ts.URL, st
+	req := httptest.NewRequest("POST", "/api/v1/runs", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	return f.serve(req)
 }
 
-func submitTrigger(t *testing.T, base, pipeline, sha string) (int, string) {
+func floodRun(t *testing.T, response *httptest.ResponseRecorder, status int) controllerwire.CreateRunResponse {
 	t.Helper()
-	return postJSONWithStatus(t, base+"/api/v1/triggers", map[string]any{
-		"pipeline": pipeline,
-		"trigger":  map[string]string{"source": "api"},
-		"git":      map[string]string{"branch": "main", "sha": sha},
-	})
-}
-
-func jsonBody(t *testing.T, v any) *bytes.Reader {
-	t.Helper()
-	raw, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal body: %v", err)
+	var out controllerwire.CreateRunResponse
+	if response.Code != status || json.Unmarshal(response.Body.Bytes(), &out) != nil || out.RunID == "" {
+		t.Fatalf("intake = %d %s, want %d and a run", response.Code, response.Body, status)
 	}
-	return bytes.NewReader(raw)
-}
-
-func fortyHex(seed int) string {
-	return fmt.Sprintf("%040x", seed)
+	return out
 }
 
 func TestFloodPolicy_CapsRunsPerPrincipalHour(t *testing.T) {
-	base, _ := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 2})
-
+	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 2})
 	for i := range 2 {
-		if status, body := submitTrigger(t, base, "build", fortyHex(i)); status != http.StatusAccepted {
-			t.Fatalf("submission %d status=%d want 202 (body %s)", i, status, body)
-		}
+		floodRun(t, f.submit(f.token, "build", fortyHex(i)), 201)
 	}
-
-	resp, err := http.Post(base+"/api/v1/triggers", "application/json",
-		jsonBody(t, map[string]any{
-			"pipeline": "build",
-			"trigger":  map[string]string{"source": "api"},
-			"git":      map[string]string{"branch": "main", "sha": fortyHex(9)},
-		}))
-	if err != nil {
-		t.Fatalf("post: %v", err)
+	refused := f.submit(f.token, "build", fortyHex(9))
+	if refused.Code != 429 {
+		t.Fatalf("cap = %d %s", refused.Code, refused.Body)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("capped submission status=%d want 429", resp.StatusCode)
-	}
-	after, err := strconv.Atoi(resp.Header.Get("Retry-After"))
-	if err != nil || after <= 0 {
-		t.Errorf("Retry-After=%q want a positive whole number of seconds", resp.Header.Get("Retry-After"))
+	if seconds, err := strconv.Atoi(refused.Header().Get("Retry-After")); err != nil || seconds <= 0 {
+		t.Fatalf("Retry-After = %q", refused.Header().Get("Retry-After"))
 	}
 }
 
 func TestFloodPolicy_UnsetCapAdmitsEverySubmission(t *testing.T) {
-	base, _ := newFloodServer(t, controller.FloodPolicy{})
+	f := newFloodServer(t, controller.FloodPolicy{})
 	for i := range 5 {
-		if status, body := submitTrigger(t, base, "build", fortyHex(i)); status != http.StatusAccepted {
-			t.Fatalf("submission %d status=%d want 202 (body %s)", i, status, body)
-		}
+		floodRun(t, f.submit(f.token, "build", fortyHex(i)), 201)
 	}
 }
 
 func TestFloodPolicy_ShedsAboveTheQueueDepthThreshold(t *testing.T) {
-	base, st := newFloodServer(t, controller.FloodPolicy{ShedQueueDepth: 2})
-	ctx := context.Background()
+	f := newFloodServer(t, controller.FloodPolicy{})
 	for i := range 2 {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
-			ID: fmt.Sprintf("run-seed-%d", i), Pipeline: "build", CreatedAt: time.Now(),
-		}); err != nil {
-			t.Fatalf("seed trigger %d: %v", i, err)
-		}
+		floodRun(t, f.submit(f.token, "build", fortyHex(i)), 201)
 	}
-
-	resp, err := http.Post(base+"/api/v1/triggers", "application/json",
-		jsonBody(t, map[string]any{
-			"pipeline": "build",
-			"trigger":  map[string]string{"source": "api"},
-			"git":      map[string]string{"branch": "main", "sha": fortyHex(1)},
-		}))
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("shed submission status=%d want 503", resp.StatusCode)
-	}
-	if resp.Header.Get("Retry-After") == "" {
-		t.Error("shed submission carried no Retry-After")
+	f.srv.WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
+	refused := f.submit(f.token, "build", fortyHex(3))
+	if refused.Code != 503 || refused.Header().Get("Retry-After") == "" {
+		t.Fatalf("shed = %d %s headers %v", refused.Code, refused.Body, refused.Header())
 	}
 }
 
 func TestFloodPolicy_DedupesIdenticalSubmissionsInsideTheWindow(t *testing.T) {
-	base, _ := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
-
-	status, body := submitTrigger(t, base, "build", fortyHex(1))
-	if status != http.StatusAccepted {
-		t.Fatalf("first submission status=%d want 202 (body %s)", status, body)
+	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+	first := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
+	repeat := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 200)
+	if repeat.RunID != first.RunID || !repeat.Replayed {
+		t.Fatalf("repeat = %+v, first = %+v", repeat, first)
 	}
-	var first struct {
-		RunID string `json:"run_id"`
-	}
-	if err := json.Unmarshal([]byte(body), &first); err != nil {
-		t.Fatalf("decode first submission: %v", err)
-	}
-
-	status, body = submitTrigger(t, base, "build", fortyHex(1))
-	if status != http.StatusConflict {
-		t.Fatalf("repeat submission status=%d want 409 (body %s)", status, body)
-	}
-	var repeat struct {
-		RunID  string `json:"run_id"`
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(body), &repeat); err != nil {
-		t.Fatalf("decode repeat submission: %v", err)
-	}
-	if repeat.Status != "duplicate" || repeat.RunID != first.RunID {
-		t.Errorf("repeat answered %+v; want duplicate naming %s", repeat, first.RunID)
-	}
-
-	if status, body := submitTrigger(t, base, "build", fortyHex(2)); status != http.StatusAccepted {
-		t.Fatalf("differing submission status=%d want 202 (body %s)", status, body)
+	different := floodRun(t, f.submit(f.token, "build", fortyHex(2)), 201)
+	if different.RunID == first.RunID {
+		t.Fatal("different source reused a run")
 	}
 }
 
 func TestFloodPolicy_UnsetWindowDedupesNothing(t *testing.T) {
-	base, _ := newFloodServer(t, controller.FloodPolicy{})
-	for i := range 2 {
-		if status, body := submitTrigger(t, base, "build", fortyHex(1)); status != http.StatusAccepted {
-			t.Fatalf("submission %d status=%d want 202 (body %s)", i, status, body)
-		}
+	f := newFloodServer(t, controller.FloodPolicy{})
+	first := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
+	second := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
+	if first.RunID == second.RunID {
+		t.Fatal("unset window reused a run")
 	}
 }
 
 func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
+	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+	other := floodMember(t, f, "default", "other")
+	first := floodRun(t, f.submit(f.token, "build", fortyHex(7)), 201)
+	second := floodRun(t, f.submit(other, "build", fortyHex(7)), 201)
+	if first.RunID == second.RunID {
+		t.Fatal("another principal received the first principal's run")
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	now := time.Now().UTC()
-	tenantA, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "tenant-a"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
-	if err != nil {
-		t.Fatalf("tenant-a token: %v", err)
+	repeat := floodRun(t, f.submit(f.token, "build", fortyHex(7)), 200)
+	if repeat.RunID != first.RunID || !repeat.Replayed {
+		t.Fatalf("repeat = %+v", repeat)
 	}
-	tenantB, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "tenant-b"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
-	if err != nil {
-		t.Fatalf("tenant-b token: %v", err)
-	}
-	ts := httptest.NewServer(controller.New(st, nil).
-		WithFloodPolicy(controller.FloodPolicy{DedupeWindow: time.Minute}).
-		Handler())
-	t.Cleanup(ts.Close)
+}
 
-	submission := map[string]any{
-		"pipeline": "build",
-		"trigger":  map[string]string{"source": "api"},
-		"git":      map[string]string{"branch": "main", "sha": fortyHex(7)},
+func TestFloodPolicyConcurrentIdenticalIntakeCommitsOneRun(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, 8)
+	var wg sync.WaitGroup
+	for range cap(responses) {
+		wg.Go(func() { <-start; responses <- f.submit(f.token, "build", fortyHex(1)) })
 	}
-	status, body := postJSONWithBearer(t, ts.URL+"/api/v1/triggers", tenantA, submission)
-	if status != http.StatusAccepted {
-		t.Fatalf("tenant-a submission status=%d want 202 (body %s)", status, body)
+	close(start)
+	wg.Wait()
+	close(responses)
+	created, id := 0, ""
+	for response := range responses {
+		if response.Code == 201 {
+			created++
+		}
+		var out controllerwire.CreateRunResponse
+		if (response.Code != 200 && response.Code != 201) || json.Unmarshal(response.Body.Bytes(), &out) != nil || out.RunID == "" {
+			t.Fatalf("concurrent intake = %d %s", response.Code, response.Body)
+		}
+		if id != "" && out.RunID != id {
+			t.Fatalf("runs = %s and %s", id, out.RunID)
+		}
+		id = out.RunID
 	}
-	var first struct {
-		RunID string `json:"run_id"`
+	if created != 1 {
+		t.Fatalf("created = %d", created)
 	}
-	if err := json.Unmarshal([]byte(body), &first); err != nil {
-		t.Fatalf("decode tenant-a submission: %v", err)
+	var count int
+	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("stored runs = %d: %v", count, err)
 	}
+}
 
-	status, body = postJSONWithBearer(t, ts.URL+"/api/v1/triggers", tenantB, submission)
-	if status != http.StatusAccepted {
-		t.Fatalf("tenant-b submission status=%d want 202; one tenant was answered with another's run (body %s)",
-			status, body)
+func TestFloodPolicyExplicitIntakeKeysTakePrecedence(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+	body := computeIntake("build")
+	body.IdempotencyKey = "one"
+	first := floodRun(t, f.intake(f.token, body), 201)
+	body.IdempotencyKey = "two"
+	second := floodRun(t, f.intake(f.token, body), 201)
+	if first.RunID == second.RunID {
+		t.Fatal("explicit invocation keys were collapsed")
 	}
-	var second struct {
-		RunID string `json:"run_id"`
+	body.IdempotencyKey = "one"
+	replay := floodRun(t, f.intake(f.token, body), 200)
+	if replay.RunID != first.RunID || !replay.Replayed {
+		t.Fatalf("explicit replay = %+v", replay)
 	}
-	if err := json.Unmarshal([]byte(body), &second); err != nil {
-		t.Fatalf("decode tenant-b submission: %v", err)
-	}
-	if second.RunID == first.RunID {
-		t.Errorf("tenant-b was handed tenant-a's run %s", first.RunID)
-	}
+}
 
-	status, _ = postJSONWithBearer(t, ts.URL+"/api/v1/triggers", tenantA, submission)
-	if status != http.StatusConflict {
-		t.Errorf("tenant-a repeat status=%d want 409; its own redelivery must still dedupe", status)
+func TestFloodPolicyDedupeRechecksAuthorityAndReturnsHereBearerOnce(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+	body := computeIntake("build")
+	body.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
+	first := floodRun(t, f.intake(f.token, body), 201)
+	if first.HereBearer == "" {
+		t.Fatal("initial here authority is missing")
+	}
+	replay := floodRun(t, f.intake(f.token, body), 200)
+	if replay.RunID != first.RunID || !replay.Replayed || replay.HereBearer != "" {
+		t.Fatalf("replay = run %s, replayed %v, bearer present %v", replay.RunID, replay.Replayed, replay.HereBearer != "")
+	}
+	principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := f.serve(f.cookieRequest("DELETE", "/api/v1/tokens/"+principal.Capability.Prefix, "")); response.Code != 204 {
+		t.Fatalf("revoke = %d %s", response.Code, response.Body)
+	}
+	if response := f.intake(f.token, body); response.Code != 401 {
+		t.Fatalf("revoked replay = %d %s", response.Code, response.Body)
 	}
 }

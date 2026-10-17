@@ -71,7 +71,7 @@ func (s *Server) engineEndpoints() []Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/retry", Authentication: capability.AuthCapability,
-			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handleRetry,
+			Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.handleRetry(engine),
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/heartbeat", Authentication: capability.AuthCapability,
@@ -184,6 +184,12 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 			return err
 		}
 		if err := s.resolveIntakeSource(r.Context(), a.Target.Team, &body.Request); err != nil {
+			return err
+		}
+		if err := s.admissionFloodRefusal(r.Context(), a); err != nil {
+			return err
+		}
+		if err := s.dedupeIntake(a, &body); err != nil {
 			return err
 		}
 		ctx := context.WithValue(r.Context(), verifiedIntakeSourceKey{}, verifiedIntakeSource{location: body.Request.Source.Location, repository: body.Request.Git.Repository})

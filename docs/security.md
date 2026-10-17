@@ -102,6 +102,20 @@ quotas aggregate in the store. The supported deployment has one controller
 replica. Coordinated request limiters and cross-replica live-log fan-out are
 separate work. Flushed log segments remain the persistence fallback.
 
+### Run submission budgets
+
+The configured hourly flood cap is shared by a team's API submissions,
+retries and App deliveries. Queue shedding measures that team's pending work.
+Exhaustion returns `429`; queue shedding returns `503`. Both carry
+`Retry-After`. These process budgets complement the store's persistent limits.
+
+When content deduplication is configured, identical API submissions by the
+same team and submitting identity share an intake key within that window. The store owns
+the commit and replay: the first response is `201`, and replay returns `200`
+with `replayed: true` and the same run ID. Replay never returns another here
+bearer. An explicit idempotency key takes precedence over content deduplication.
+The flood budget still applies to each API request, including a replay.
+
 ### Limits profiles
 
 An operator profile supplies defaults for its declared guards. Explicit operator

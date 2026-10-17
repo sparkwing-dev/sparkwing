@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **controller:** Apply configured flood caps and queue shedding to sealed run submissions and retries
+  Content deduplication replays one committed run without returning its one-time here bearer again.
+
 - **storage:** Honor the configured S3 path prefix for uploads, downloads, logs, artifacts, source bundles and cleanup
 
 - **charts (Breaking):** Require repository and tag for every enabled image. Add a Cloud launcher Deployment, controller S3 values, and EKS/ExternalSecret examples. Cloud Jobs retain CPU-band tolerations and Karpenter disruption protection. See [migration guide](docs/migrations/_unreleased.md#cloud-helm-images-and-launcher).

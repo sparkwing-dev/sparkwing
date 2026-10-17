@@ -3359,3 +3359,17 @@ details.reason=unpriced_cpu_class. It formerly escaped as HTTP 500. Claim refusa
 keeps the pending job, balance and attempts unchanged and creates no reservation
 or charge. The controller tests use committed checkout reservations and signed
 Stripe events for paid credit setup.
+
+### API flood integration
+
+Sealed API intake and retry use the existing per-controller flood limiter,
+sharing `team:<team>` with verified App intake. Queue shedding reads only that
+tenant's pending units. Both paths return canonical rate_limited/unavailable
+errors with retry_after_ms. No new cap or default is introduced.
+
+Optional content deduplication gives normalized API requests a stable random
+intake key for the configured window, scoped by the server-derived team and
+subject. It stores no bearer or response. C1 AdmitRun owns atomic commit, replay
+and current authority checks, including concurrent first requests. Explicit
+idempotency keys win. HTTP uses the current 201/200 CreateRunResponse contract;
+replay carries no here bearer. Each API request still spends its flood budget.
