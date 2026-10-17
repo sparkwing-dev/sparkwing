@@ -1,68 +1,89 @@
 package controller_test
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A node's attempt history is read through its lineage root, so a root the
-// creator could name would open another team's history to it. A node's root
-// is its own run unless the server recorded the run as a retry.
 func TestTeamBoundary_ANodeCannotAdoptAnotherTeamsAttemptHistory(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		ctx := context.Background()
-		if _, err := f.st.DB().ExecContext(ctx, `INSERT INTO node_execution_attempts
-  (team, lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation, coordinator_id, membership_id,
-   executor_kind, executor_name, executor_id, executor_location, holder_id, reservation_id, started_at,
-   outcome, failure_reason)
-VALUES ($1, $2, $2, 'n1', 1, 1, 'coord-a', 'member-a', 'runner', 'team-a-box', 'exec-a', 'self-hosted',
-   'holder-a', 'res-a', $3, 'failed', 'team A private failure')`,
-			string(f.teamA.Team()), f.runA, time.Now().UnixNano()); err != nil {
-			t.Fatalf("seed team A's attempt: %v", err)
+		if _, err := f.st.DB().ExecContext(t.Context(), `UPDATE nodes SET status='done',outcome='failed',attempt=1,generation=1,finished_at=$3 WHERE team=$1 AND run_id=$2 AND node_id='n1'`, f.teamA.Team(), f.runA, time.Now().UnixNano()); err != nil {
+			t.Fatal(err)
 		}
-		if _, body := f.do(http.MethodGet, "/api/v1/runs/"+f.runA+"/nodes", f.ownerA, nil); !strings.Contains(body, "team A private failure") {
-			t.Fatalf("team A cannot read its own attempt, so its absence below would prove nothing: %s", body)
+		if _, err := f.st.DB().ExecContext(t.Context(), `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason) VALUES ($1,$2,'n1',1,1,'holder-a','claim-a','runner','team-a-box','self-hosted',$3,$3,'failed','team A private failure')`, f.teamA.Team(), f.runA, time.Now().UnixNano()); err != nil {
+			t.Fatal(err)
 		}
-
-		const runB = "run-b-adopts-root"
-		gen := f.claimRun(f.runnerB, runB, "")
-		raw, _ := json.Marshal(map[string]any{"id": "n1", "status": "pending", "retry_root_run_id": f.runA})
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.url+"/api/v1/runs/"+runB+"/nodes", bytes.NewReader(raw))
+		if code, body := f.do("GET", "/api/v1/runs/"+f.runA+"/jobs/n1/attempts", f.ownerA, nil); code != 200 || !strings.Contains(body, "team A private failure") || !strings.Contains(body, `"attempt":1`) {
+			t.Fatalf("owner attempt = %d: %s", code, body)
+		}
+		admitted, claim := tenantRunClaim(t, f)
+		plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "n1", Steps: []nodeproto.StepSpec{{ID: "work"}}}}}
+		declarations := runspec.CheckoutDeclarations{Version: 1}
+		resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", f.runnerB)
-		req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(gen, 10))
-		resp, err := http.DefaultClient.Do(req)
+		rawPlan, err := json.Marshal(plan)
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusCreated {
-			t.Fatalf("team B creates its node = %d: %s", resp.StatusCode, out)
-		}
-
-		node, err := f.teamB.GetNode(ctx, runB, "n1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if node.RetryRootRunID != runB {
-			t.Errorf("team B's node took lineage root %q from its request; want its own run %q", node.RetryRootRunID, runB)
-		}
-		for _, path := range []string{"/api/v1/runs/" + runB + "/nodes", "/api/v1/runs/" + runB + "/nodes/n1", "/api/v1/runs/" + runB + "?include=nodes"} {
-			code, body := f.do(http.MethodGet, path, f.everyScopeB, nil)
-			if code != http.StatusOK || strings.Contains(body, "team A private failure") || strings.Contains(body, "team-a-box") {
-				t.Errorf("GET %s as team B = %d, and must not carry team A's attempt: %s", path, code, body)
+		submission := controllerwire.PlanSubmission{Declarations: declarations, Plan: rawPlan, Resolved: runspec.Resolved{SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}
+		path := "/api/v1/runs/" + admitted.RunID
+		property := func(value string) bool {
+			for _, root := range []string{f.runA, "forged-" + value} {
+				var document struct {
+					Jobs []map[string]json.RawMessage `json:"jobs"`
+				}
+				if err := json.Unmarshal(rawPlan, &document); err != nil {
+					t.Fatal(err)
+				}
+				encoded, err := json.Marshal(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				document.Jobs[0]["retry_root_run_id"] = encoded
+				altered := submission
+				altered.Plan, err = json.Marshal(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+				code, body := f.do("POST", path+"/plan", "Bearer "+claim.Capability, altered)
+				if code != http.StatusUnprocessableEntity || strings.Contains(body, "team A private failure") || strings.Contains(body, "team-a-box") {
+					t.Fatalf("forged attempt lineage = %d: %s", code, body)
+				}
 			}
+			snapshot, err := f.teamB.ReadSnapshot(t.Context(), admitted.RunID)
+			return err == nil && snapshot.Run.Spec == nil && len(snapshot.Nodes) == 0
+		}
+		if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+			t.Fatal(err)
+		}
+		if code, body := f.do("POST", path+"/plan", "Bearer "+claim.Capability, submission); code != 200 {
+			t.Fatalf("own plan = %d: %s", code, body)
+		}
+		node, err := f.teamB.ReadNode(t.Context(), store.NodeRef{RunID: admitted.RunID, NodeID: "n1"})
+		if err != nil || node.Attempt != 0 || node.Generation != 0 {
+			t.Fatalf("own initial job = %+v: %v", node, err)
+		}
+		for _, suffix := range []string{"/jobs", "/jobs/n1", "/jobs/n1/attempts"} {
+			code, body := f.do("GET", path+suffix, f.everyScopeB, nil)
+			if code != 200 || strings.Contains(body, "team A private failure") || strings.Contains(body, "team-a-box") || strings.Contains(body, f.runA) {
+				t.Fatalf("own job view %s = %d: %s", suffix, code, body)
+			}
+		}
+		view, err := f.teamB.ReadRunView(t.Context(), admitted.RunID)
+		if err != nil || len(view.Attempts) != 0 {
+			t.Fatalf("foreign attempts persisted: %+v: %v", view.Attempts, err)
 		}
 	})
 }

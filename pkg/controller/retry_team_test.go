@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A trigger's retry_of links the new run into another run's attempt tree, and
@@ -16,42 +18,31 @@ import (
 func TestTeamBoundary_ATriggerCannotRetryAnotherTeamsRun(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		for _, victim := range []string{f.runA, f.victim} {
-			code, body := f.do("POST", "/api/v1/triggers", f.ownerB, map[string]any{
-				"pipeline": "build-b", "trigger": map[string]any{"source": "api"},
-				"retry_of": victim,
-			})
+			code, body := f.do("POST", "/api/v1/runs/"+victim+"/retry", f.ownerB, controllerwire.RetryRequest{Mode: "all", IdempotencyKey: "foreign-retry"})
 			if code != http.StatusNotFound {
-				t.Errorf("POST /triggers as team B with retry_of %s = %d want 404: %s", victim, code, body)
-			}
-			var resp struct {
-				RunID string `json:"run_id"`
-			}
-			if json.Unmarshal([]byte(body), &resp) == nil && resp.RunID != "" {
-				_, attempts := f.do("GET", "/api/v1/runs/"+resp.RunID+"/attempts", f.ownerB, nil)
-				if attemptIDs(t, attempts)[victim] {
-					t.Errorf("team B's attempts of %s list %s: %s", resp.RunID, victim, attempts)
-				}
+				t.Fatalf("retry foreign run %s = %d: %s", victim, code, body)
 			}
 		}
-
-		code, body := f.do("POST", "/api/v1/triggers", f.ownerB, map[string]any{
-			"pipeline": "build-b", "trigger": map[string]any{"source": "api"},
-		})
-		if code != http.StatusAccepted {
-			t.Fatalf("POST /triggers as team B = %d: %s", code, body)
+		code, body := f.do("POST", "/api/v1/runs", f.ownerB, computeIntake("build-b"))
+		var own controllerwire.CreateRunResponse
+		if code != http.StatusCreated || json.Unmarshal([]byte(body), &own) != nil || own.RunID == "" {
+			t.Fatalf("own intake = %d: %s", code, body)
 		}
-		var own struct {
-			RunID string `json:"run_id"`
-		}
-		if err := json.Unmarshal([]byte(body), &own); err != nil {
+		if err := teststore.SeedRunFinish(f.st, t.Context(), f.teamB.Team(), own.RunID, "failed", "boom"); err != nil {
 			t.Fatal(err)
 		}
-		code, body = f.do("POST", "/api/v1/triggers", f.ownerB, map[string]any{
-			"pipeline": "build-b", "trigger": map[string]any{"source": "manual"},
-			"retry_of": own.RunID,
-		})
-		if code != http.StatusAccepted {
-			t.Fatalf("POST /triggers as team B retrying its own run = %d: %s", code, body)
+		code, body = f.do("POST", "/api/v1/runs/"+own.RunID+"/retry", f.ownerB, controllerwire.RetryRequest{Mode: "all", IdempotencyKey: "own-retry"})
+		if code != http.StatusOK {
+			t.Fatalf("own retry = %d: %s", code, body)
+		}
+		var retried controllerwire.CreateRunResponse
+		if err := json.Unmarshal([]byte(body), &retried); err != nil {
+			t.Fatal(err)
+		}
+		code, body = f.do("GET", "/api/v1/runs/"+retried.RunID+"/attempts", f.ownerB, nil)
+		ids := attemptIDs(t, body)
+		if code != 200 || !ids[own.RunID] || !ids[retried.RunID] || ids[f.runA] || ids[f.victim] {
+			t.Fatalf("own attempts = %d: %s", code, body)
 		}
 	})
 }
@@ -64,15 +55,12 @@ func TestTeamBoundary_AttemptsNeverFollowAPointerIntoAnotherTeam(t *testing.T) {
 		now := time.Now()
 		seedRetry := func(tn *store.Tenant, id, retryOf string) {
 			t.Helper()
-			if err := tn.CreateTriggerWithRun(ctx,
-				store.Trigger{ID: id, Pipeline: "p", TriggerSource: "api", RetryOf: retryOf, CreatedAt: now},
-				store.Run{ID: id, Pipeline: "p", Status: "running", RetryOf: retryOf, CreatedAt: now, StartedAt: now},
-			); err != nil {
+			if err := teststore.SeedRun(f.st, ctx, tn.Team(), store.Run{ID: id, Pipeline: "p", Status: "running", RetryOf: retryOf, CreatedAt: now, StartedAt: now}); err != nil {
 				t.Fatal(err)
 			}
 		}
 		seedRetry(f.teamB, "b-retries-a", f.runA)
-		seedRun(t, f.teamB, "b-root", "p")
+		seedRun(t, f.st, f.teamB, "b-root", "p")
 		seedRetry(f.teamA, "a-retries-b", "b-root")
 
 		for _, tc := range []struct{ asked, leaked string }{
