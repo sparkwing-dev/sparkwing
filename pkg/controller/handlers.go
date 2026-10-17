@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -143,19 +142,6 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
-}
-
-// safety: every host of a triggered run, the planning claim's included, reads the trigger's run flags and the
-// default branch a GitHub App trigger recorded from the run row, so every intake that creates a run records them.
-func triggerRunInvocation(env map[string]string) map[string]any {
-	inv := runflags.FromTriggerEnv(env).Invocation()
-	if branch := env[EnvDefaultBranch]; branch != "" {
-		if inv == nil {
-			inv = map[string]any{}
-		}
-		inv[runflags.DefaultBranchKey] = branch
-	}
-	return inv
 }
 
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

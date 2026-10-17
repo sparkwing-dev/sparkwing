@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -36,6 +39,7 @@ type internalCall struct {
 
 type checkoutCall struct {
 	Bearer      string
+	Key         string `json:"key"`
 	Team        string `json:"team"`
 	AmountCents int64  `json:"amount_cents"`
 }
@@ -146,21 +150,6 @@ type teamBilling struct {
 	} `json:"grants"`
 }
 
-// safety: billing-page fixtures seed balances without inventing a payment proof.
-func (f *identityFixture) grantTo(team, kind, reference string, micro int64) int {
-	f.t.Helper()
-	t, err := f.store.ForTeam(context.Background(), store.Team(team))
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	if _, err := t.RecordCreditGrant(context.Background(), store.CreditGrantRequest{
-		Kind: kind, AmountMicro: micro, Reference: reference, CreatedBy: "test", Reason: "test",
-	}); err != nil {
-		f.t.Fatalf("grant %s %s: %v", kind, reference, err)
-	}
-	return http.StatusCreated
-}
-
 func (f *identityFixture) trust(team string) {
 	f.t.Helper()
 	t, err := f.store.ForTeam(context.Background(), store.Team(team))
@@ -178,9 +167,7 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 	f, _ := billingFixture(t)
 	owner, editor, reader := teamOf(f)
 	outsider := f.user("x", "xena@example.com")
-	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 2_500*store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Fatalf("grant = %d", code)
-	}
+	reference := controller.PaidCreditsFixture(t, f.store, teamTenant(t, f.store, store.Team(owner.team)), 2_500)
 
 	for _, tc := range []struct {
 		name string
@@ -197,7 +184,7 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 		if b.CanPurchase != tc.buy || !b.CheckoutEnabled {
 			t.Errorf("%s: can_purchase=%v checkout_enabled=%v, want %v and true", tc.name, b.CanPurchase, b.CheckoutEnabled, tc.buy)
 		}
-		if len(b.Grants) != 1 || b.Grants[0].Kind != store.CreditGrantPaid || b.Grants[0].Reference != "pi_1" {
+		if len(b.Grants) != 1 || b.Grants[0].Kind != store.CreditGrantPaid || b.Grants[0].Reference != reference {
 			t.Errorf("%s grants = %+v", tc.name, b.Grants)
 		}
 		if b.MicroPerCredit != 100_000 || b.CreditsPerDollar != 1_000 || b.MinBillableSeconds != 60 ||
@@ -220,6 +207,9 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 
 func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 	f, fc := billingFixture(t)
+	if err := f.store.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+		t.Fatal(err)
+	}
 	owner, editor, reader := teamOf(f)
 
 	var out struct {
@@ -263,8 +253,25 @@ func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 	}
 }
 
+func (f *identityFixture) checkoutRequest(auth string, cents int64, key string) *httptest.ResponseRecorder {
+	f.t.Helper()
+	r := httptest.NewRequest(http.MethodPost, f.url+"/api/v1/team/billing/checkout", strings.NewReader(fmt.Sprintf(`{"amount_cents":%d}`, cents)))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Origin", r.URL.Scheme+"://"+r.URL.Host)
+	r.Header.Set("Idempotency-Key", key)
+	if err := controller.ConsoleFixtureRequest(f.srv, r, sessionIDOf(auth)); err != nil {
+		f.t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	f.srv.Handler().ServeHTTP(w, r)
+	return w
+}
+
 func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 	f, fc := billingFixture(t)
+	if err := f.store.AsOperator().SetPaymentMode(t.Context(), capability.PaymentTest); err != nil {
+		t.Fatal(err)
+	}
 	owner := f.user("o", "olga@example.com")
 	f.trust(owner.team)
 	for _, tc := range []struct {
@@ -278,30 +285,39 @@ func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 		fc.mu.Lock()
 		fc.status, fc.url = tc.status, tc.url
 		fc.mu.Unlock()
-		if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-			map[string]any{"amount_cents": 50_000}, nil); code != http.StatusBadGateway {
-			t.Errorf("%s = %d want 502", tc.name, code)
+		if w := f.checkoutRequest(owner.auth, 50_000, "retry-checkout"); w.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s = %d %s, want 503", tc.name, w.Code, w.Body)
 		}
 	}
 	fc.mu.Lock()
 	fc.status, fc.url = http.StatusOK, "https://checkout.stripe.test/c/pay/cs_test_1"
 	fc.mu.Unlock()
-	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift", 4_500*100*store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Fatalf("grant = %d", code)
+	if w := f.checkoutRequest(owner.auth, 50_000, "retry-checkout"); w.Code != http.StatusOK {
+		t.Fatalf("retrying the reserved checkout = %d %s, want 200", w.Code, w.Body)
 	}
-	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-		map[string]any{"amount_cents": 50_000}, nil); code != http.StatusOK {
-		t.Errorf("a checkout after failed sessions = %d want 200: a session that never opened still counts", code)
+	calls := fc.calls()
+	if len(calls) != 3 || calls[0].Key == "" || calls[1].Key != calls[0].Key || calls[2].Key != calls[0].Key {
+		t.Fatalf("provider retries changed reservation: %+v", calls)
+	}
+	var reservations int
+	if err := f.store.DB().QueryRow(`SELECT COUNT(*) FROM credit_checkouts WHERE team=?`, owner.team).Scan(&reservations); err != nil || reservations != 1 {
+		t.Fatalf("checkout reservations = %d: %v, want one", reservations, err)
+	}
+	if balance, err := teamTenant(t, f.store, store.Team(owner.team)).CreditBalanceMicro(t.Context()); err != nil || balance != 0 {
+		t.Fatalf("opening checkout changed the credit balance = %d: %v", balance, err)
 	}
 
 	plain := newIdentityFixture(t)
 	solo := plain.user("o", "olga@example.com")
 	var body struct {
-		Code string `json:"code"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	if code := plain.call("POST", "/api/v1/team/billing/checkout", solo.auth,
-		map[string]any{"amount_cents": 2_500}, &body); code != http.StatusServiceUnavailable || body.Code != "checkout_unavailable" {
-		t.Errorf("checkout on a controller with no service = %d %q want 503 checkout_unavailable", code, body.Code)
+		map[string]any{"amount_cents": 2_500}, &body); code != http.StatusServiceUnavailable || body.Error.Code != "unavailable" || body.Error.Message != "request failed" {
+		t.Errorf("checkout on a controller with no service = %d %q want 503 unavailable", code, body.Error.Code)
 	}
 	var b teamBilling
 	plain.call("GET", "/api/v1/team/billing", solo.auth, nil, &b)
@@ -334,7 +350,7 @@ func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
 	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "revoked", "reason": "chargeback"}, &got); code != http.StatusOK {
 		t.Fatalf("revoke = %d", code)
 	}
-	if got.Trust != "revoked" || got.Trusted || got.TrustReason != "chargeback" || got.TrustBy != "korey@example.com" || got.Standing != "Held" {
+	if got.Trust != "revoked" || got.Trusted || got.TrustReason != "chargeback" || got.TrustBy != operator.id || got.Standing != "Held" {
 		t.Errorf("after revoke = %+v", got)
 	}
 	var team operatorTeam

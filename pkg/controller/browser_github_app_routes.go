@@ -18,6 +18,8 @@ type GitHubConnectWriter interface {
 	BindAuthorizedGitHubInstallation(context.Context, capability.Authorized, store.GitHubAppInstallation) (store.GitHubAppInstallation, error)
 }
 
+var _ GitHubConnectWriter = (*store.Tenant)(nil)
+
 // WithGitHubConnectWriter supplies tenant installation connection transactions.
 func (s *Server) WithGitHubConnectWriter(resolve func(context.Context, store.Team) (GitHubConnectWriter, error)) *Server {
 	s.resolveGitHubConnectWriter = resolve

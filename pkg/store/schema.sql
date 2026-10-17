@@ -626,6 +626,7 @@ CREATE TABLE github_app_triggers (
 );
 
 CREATE TABLE github_app_deliveries (
+    admitted_team TEXT NOT NULL DEFAULT '',
     digest TEXT NOT NULL PRIMARY KEY,
     delivery_id TEXT NOT NULL,
     received_at BIGINT NOT NULL,
@@ -816,6 +817,7 @@ CREATE TABLE git_credential_machines (
 
 CREATE TABLE github_app_extra_repos (
     team TEXT NOT NULL REFERENCES teams(name),
+    repository_id BIGINT NOT NULL CHECK(repository_id > 0),
     repository TEXT NOT NULL,
     extra_repo TEXT NOT NULL,
     created_by TEXT NOT NULL DEFAULT '',

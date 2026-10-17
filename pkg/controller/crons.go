@@ -38,7 +38,7 @@ type cronLauncher struct {
 // ScheduledRunWriter admits a stored schedule through the sealed intake transaction.
 type ScheduledRunWriter interface {
 	Team() store.Team
-	AdmitScheduledRun(context.Context, string, time.Time) (store.AdmissionResult, error)
+	AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)
 }
 
 // WithScheduledRunWriter supplies tenant scheduled-intake transactions before serving.
@@ -57,9 +57,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	if l.server.resolveScheduledRunWriter != nil {
 		writer, err = l.server.resolveScheduledRunWriter(ctx, s.Team)
 	} else {
-		var tenant *store.Tenant
-		tenant, err = l.server.tenantForTeam(ctx, s.Team)
-		writer = tenant
+		writer, err = l.server.tenantForTeam(ctx, s.Team)
 	}
 	if err != nil {
 		return "", err
@@ -67,14 +65,24 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	if writer == nil || writer.Team() != s.Team {
 		return "", missingEndpointPolicy()
 	}
-	admitted, err := writer.AdmitScheduledRun(ctx, s.ID, due.UTC())
+	tenant, err := l.server.tenantForTeam(ctx, s.Team)
+	if err != nil {
+		return "", err
+	}
+	s, err = tenant.GetCronSchedule(ctx, s.ID)
+	if err != nil {
+		return "", err
+	}
+	admitted, err := writer.AdmitScheduledRun(ctx, s, due)
 	if err != nil {
 		return "", err
 	}
 	if admitted.RunID == "" {
 		return "", missingEndpointPolicy()
 	}
-	l.server.recordQueueActivity(admitted.Request.AdmittedAt)
+	if !admitted.Replayed {
+		l.server.recordQueueActivity(admitted.Request.AdmittedAt)
+	}
 	return admitted.RunID, nil
 }
 

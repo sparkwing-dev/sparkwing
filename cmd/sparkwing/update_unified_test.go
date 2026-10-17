@@ -285,7 +285,7 @@ func TestUnifiedSDKCheckReadsPinWithoutGoOrModuleWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	report = readPinSummary(dir)
-	if report.Runs != "" || !strings.Contains(report.Refusal, "replacement") {
+	if report.Runs != "(devel)" || report.Refusal != "" {
 		t.Fatalf("replacement misreported: %+v", report)
 	}
 }

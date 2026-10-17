@@ -21,14 +21,6 @@ type GitHubAppAutomation struct {
 // ErrGitHubAppAutomationRevoked refuses a plan whose consent is no longer current.
 var ErrGitHubAppAutomationRevoked = errors.New("store: repository automation consent is no longer current")
 
-// CreateGitHubAutomationTriggerWithRun admits an automatic run only under the consent generation that planned it.
-func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error {
-	if grant.InstallationID <= 0 || grant.RepositoryID <= 0 || grant.EnabledAt.IsZero() || trig.GithubRepoID != grant.RepositoryID {
-		return ErrInvalidInput
-	}
-	return t.createTriggerWithRun(ctx, trig, run, &grant)
-}
-
 func (t *Tenant) checkGitHubAppAutomationTx(ctx context.Context, tx *storeTx, grant GitHubAppAutomation) error {
 	// safety: writing both authority rows serializes admission with suspension, unbinding and consent deletion.
 	res, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET updated_at = updated_at

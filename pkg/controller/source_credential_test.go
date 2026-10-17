@@ -2,11 +2,19 @@ package controller_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
@@ -15,9 +23,31 @@ import (
 )
 
 type sourceAnswer struct {
-	store.SourceCredential
-	Error   string `json:"error"`
-	Message string `json:"message"`
+	Kind       string `json:"kind"`
+	Host       string `json:"host"`
+	Secret     string `json:"secret"`
+	Username   string `json:"username"`
+	KnownHosts string `json:"known_hosts"`
+	Token      string `json:"-"`
+	Error      string `json:"-"`
+	Message    string `json:"-"`
+}
+
+func (s *sourceAnswer) UnmarshalJSON(body []byte) error {
+	type response sourceAnswer
+	var out struct {
+		response
+		Failure *apierr.Error `json:"error"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return err
+	}
+	*s = sourceAnswer(out.response)
+	s.Token = s.Secret
+	if out.Failure != nil {
+		s.Error, s.Message = string(out.Failure.Code), out.Failure.Message
+	}
+	return nil
 }
 
 func (f *appFixture) sourceCredential(auth, runID string) (sourceAnswer, int) {
@@ -29,20 +59,14 @@ func (f *appFixture) sourceCredential(auth, runID string) (sourceAnswer, int) {
 
 func (f *appFixture) createRun(owner signedIn, runID, repoURL string, repoID int64) {
 	f.t.Helper()
-	ctx := context.Background()
-	tn, err := f.store.ForTeam(ctx, store.Team(owner.team))
-	if err != nil {
-		f.t.Fatal(err)
+	key := githubFixtureKey(repoID)
+	if repoID == 0 {
+		key = map[string]string{"https://github.com/acme/widgets.git": "gh:701", "https://github.com/acme/plans.git": "gh:702"}[repoURL]
+		if key == "" {
+			key = "host:" + strings.TrimPrefix(strings.TrimSuffix(repoURL, ".git"), "https://")
+		}
 	}
-	now := time.Now()
-	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: runID, Pipeline: "build", RepoURL: repoURL, GithubRepoID: repoID,
-		CreatedAt: now, GitBranch: "main", GitSHA: headSHA,
-	}, store.Run{
-		ID: runID, Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now, RepoURL: repoURL,
-	}); err != nil {
-		f.t.Fatal(err)
-	}
+	seedSourceRun(f.t, f.store, owner.team, runID, repoURL, key, "refs/heads/main", headSHA, repoID, runspec.DispatchHost)
 }
 
 func (f *appFixture) runWork(owner signedIn, runID, repoURL string) (auth, prefix string) {
@@ -66,23 +90,27 @@ func (f *appFixture) claimRunNode(owner signedIn, runID, repoURL string, repoID 
 		f.t.Fatal(err)
 	}
 	bearer, prefix = f.teamRunner(owner, "r-"+runID)
-	var n claimedNode
-	if code := f.call("POST", "/api/v1/runs/"+runID+"/nodes/compile/claim", bearer,
-		map[string]any{"holder_id": "pod-" + runID}, &n); code != http.StatusOK || n.RunID != runID ||
-		!strings.HasPrefix(n.ClaimToken, store.ClaimTokenPrefix+"_") {
+	var n controllerwire.ClaimResponse
+	if code := f.call("POST", "/api/v1/runners/claim", bearer, githubClaimBody(capability.UnitNode, runID, "compile"), &n); code != http.StatusOK || n.Claim == nil || n.Claim.RunID != runID || n.Claim.Capability == "" {
 		f.t.Fatalf("claim %s = %d %+v", runID, code, n)
 	}
-	return bearer, "Bearer " + n.ClaimToken, prefix
+	if n.Claim.Request.Request.Git.SHA != headSHA || n.Claim.Request.Request.Source.Location.RemoteURL != repoURL {
+		f.t.Fatalf("claim changed sealed checkout: %+v", n.Claim.Request.Request.Git)
+	}
+	return bearer, "Bearer " + n.Claim.Capability, prefix
 }
 
 func (f *appFixture) teamRunner(owner signedIn, name string) (auth, prefix string) {
 	f.t.Helper()
-	var m mintedRunner
-	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
-		map[string]any{"scopes": machineScopes, "name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}}, &m); code != http.StatusCreated {
+	var m struct {
+		Capability string `json:"capability"`
+		Prefix     string `json:"prefix"`
+	}
+	if code := f.call("POST", "/api/v1/runners", owner.auth,
+		map[string]any{"name": name, "repos": []string{"github.com/*/*", "gitlab.example.com/*/*", "git.example.invalid/*/*"}}, &m); code != http.StatusCreated {
 		f.t.Fatalf("mint runner = %d", code)
 	}
-	return "Bearer " + m.Token, m.Prefix
+	return "Bearer " + m.Capability, m.Prefix
 }
 
 func (f *appFixture) setExtraRepos(who signedIn, repo string, extras []string) (int, map[string]any) {
@@ -91,6 +119,43 @@ func (f *appFixture) setExtraRepos(who signedIn, repo string, extras []string) (
 	code := f.call("PUT", "/api/v1/team/github-app/extra-repos", who.auth,
 		map[string]any{"repository": repo, "extra_repos": extras}, &out)
 	return code, out
+}
+
+func TestSourceCredential_AppScheduleUsesLiveAutomationConsent(t *testing.T) {
+	f := newAppFixture(t)
+	owner := f.ghUser(501, "olga")
+	f.connect(owner, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(automationConfig))
+	enableAutomation(t, f, owner)
+	tenant := teststore.ForTeam(t, f.store, store.Team(owner.team))
+	now := time.Now().UTC()
+	sched, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{
+		ID: "app-nightly", RepoPath: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: store.CronWhereController, GitBranch: "main", LockedRef: headSHA,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := tenant.AdmitScheduledRun(t.Context(), sched, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine, _ := f.teamRunner(owner, "schedule-host")
+	var award controllerwire.ClaimResponse
+	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitTrigger, admitted.RunID, ""), &award); code != http.StatusOK || award.Claim == nil || award.Claim.Request.Request.Git.App.Set || award.Claim.Request.Request.Git.DefaultBranch.Set {
+		t.Fatalf("schedule award=%+v status=%d", award, code)
+	}
+	claim := "Bearer " + award.Claim.Capability
+	if got, code := f.sourceCredential(claim, admitted.RunID); code != http.StatusOK || got.Secret == "" || !f.app.TokenCovers(got.Secret, "acme/widgets") || f.app.TokenCovers(got.Secret, "acme/plans") {
+		t.Fatalf("scheduled source=%+v status=%d", got, code)
+	}
+	if code := f.call("DELETE", "/api/v1/team/github-app/automation?repository_id=701", owner.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("revoke automation=%d", code)
+	}
+	if got, code := f.sourceCredential(claim, admitted.RunID); code != http.StatusNotFound || got.Secret != "" {
+		t.Fatalf("revoked schedule source=%+v status=%d", got, code)
+	}
 }
 
 // A run the App started gets a token that reads its repository, named by the
@@ -103,10 +168,18 @@ func TestSourceCredential_AppTokenReadsTheVerifiedRepository(t *testing.T) {
 	before := len(f.app.Minted())
 	got, code := f.sourceCredential(node, "run-widgets")
 	if code != http.StatusOK || got.Kind != "github_app" || got.Host != "github.com" ||
-		!slices.Equal(got.Repositories, []string{"acme/widgets"}) || got.SHA != headSHA {
+		got.Secret == "" {
 		t.Fatalf("source credential = %d %+v, want the App token for acme/widgets", code, got)
 	}
-	minted := f.app.Minted()[before:]
+	minted := slices.DeleteFunc(f.app.Minted()[before:], func(token githubapptest.MintedToken) bool {
+		if token.Permissions["metadata"] != "read" {
+			return false
+		}
+		if len(token.Permissions) != 1 {
+			t.Fatalf("metadata lookup requested content access: %+v", token)
+		}
+		return true
+	})
 	if len(minted) != 1 || !slices.Equal(minted[0].RepositoryIDs, []int64{701}) || len(minted[0].Repositories) != 0 ||
 		len(minted[0].Permissions) != 1 || minted[0].Permissions["contents"] != "read" {
 		t.Fatalf("minted = %+v, want one read-only token for 701 by id", minted)
@@ -126,9 +199,9 @@ func TestSourceCredential_TypedRepositoryNeedsASubscription(t *testing.T) {
 	node, _ := f.nodeClaim(olga, "run-plans", "https://github.com/acme/plans.git", 0)
 	before := len(f.app.Minted())
 	got, code := f.sourceCredential(node, "run-plans")
-	if code != http.StatusNotFound || got.Error != "no_source_credential" || got.Token != "" ||
+	if code != http.StatusNotFound || got.Error != "not_found" || got.Token != "" ||
 		!strings.Contains(got.Message, "subscribes it") {
-		t.Fatalf("an unsubscribed private repository = %d %+v, want no_source_credential naming the subscription", code, got)
+		t.Fatalf("an unsubscribed private repository = %d %+v, want not_found naming the subscription", code, got)
 	}
 	if n := len(f.app.Minted()) - before; n != 0 {
 		t.Fatalf("the refusal minted %d tokens", n)
@@ -167,8 +240,14 @@ func TestSourceCredential_NamesTheRemedy(t *testing.T) {
 			runID := "run-" + strings.ReplaceAll(name, " ", "-")
 			node, _ := f.nodeClaim(olga, runID, tc.repo, tc.id)
 			got, code := f.sourceCredential(node, runID)
-			if code != http.StatusNotFound || got.Error != "no_source_credential" || !strings.Contains(got.Message, tc.want) {
-				t.Fatalf("source credential = %d %+v, want no_source_credential naming %q", code, got, tc.want)
+			if name == "uncovered github" {
+				if code != http.StatusConflict || got.Error != "conflict" || got.Secret != "" || !strings.Contains(got.Message, "someone/else") {
+					t.Fatalf("uncovered mint = %d %+v", code, got)
+				}
+				return
+			}
+			if code != http.StatusNotFound || got.Error != "not_found" || !strings.Contains(got.Message, tc.want) {
+				t.Fatalf("source credential = %d %+v, want not_found naming %q", code, got, tc.want)
 			}
 			if !strings.Contains(got.Message, "Git credentials") {
 				t.Fatalf("the remedy %q does not name the team's git credentials", got.Message)
@@ -192,19 +271,19 @@ func TestSourceCredential_NeedsTheRunsOwnClaimToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	machine, _ := f.teamRunner(olga, "holder")
-	if code := f.call("POST", "/api/v1/runs/run-widgets/nodes/compile/claim", machine,
-		map[string]any{"holder_id": "pod-widgets"}, nil); code != http.StatusOK {
+	if code := f.call("POST", "/api/v1/runners/claim", machine,
+		githubClaimBody(capability.UnitNode, "run-widgets", "compile"), nil); code != http.StatusOK {
 		t.Fatalf("claim = %d", code)
 	}
 	idle, _ := f.teamRunner(olga, "idle")
 	for name, auth := range map[string]string{"the claim's machine": machine, "an idle machine": idle, "the owner": olga.auth} {
-		if got, code := f.sourceCredential(auth, "run-widgets"); code != http.StatusForbidden || got.Error != "claim_token_required" || got.Token != "" {
-			t.Fatalf("%s = %d %+v, want 403 claim_token_required", name, code, got)
+		if got, code := f.sourceCredential(auth, "run-widgets"); code != http.StatusForbidden || got.Error != "forbidden" || got.Token != "" {
+			t.Fatalf("%s = %d %+v, want 403 forbidden", name, code, got)
 		}
 	}
 	bobs, _ := f.nodeClaim(bob, "run-bob", "https://github.com/bob/tools.git", 801)
 	if got, code := f.sourceCredential(bobs, "run-widgets"); (code != http.StatusForbidden && code != http.StatusNotFound) ||
-		got.Token != "" || got.Error == "no_source_credential" {
+		got.Token != "" || got.Error == "not_found" {
 		t.Fatalf("another team's claim token = %d %+v, want a refusal that reveals nothing", code, got)
 	}
 }
@@ -217,8 +296,12 @@ func TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 
 	var asked sourceAnswer
 	code := f.call("POST", "/api/v1/runs/run-widgets/source-credential", node, map[string]any{"extra_repos": []string{"acme/plans"}}, &asked)
-	if code != http.StatusOK || f.app.TokenCovers(asked.Token, "acme/plans") || len(asked.Repositories) != 1 {
-		t.Fatalf("a runner naming acme/plans itself = %d %+v; its token must read the run's repository alone", code, asked)
+	if code != http.StatusBadRequest || asked.Secret != "" {
+		t.Fatalf("runner-selected extras = %d %+v", code, asked)
+	}
+	asked, code = f.sourceCredential(node, "run-widgets")
+	if code != http.StatusOK || f.app.TokenCovers(asked.Token, "acme/plans") || !f.app.TokenCovers(asked.Token, "acme/widgets") {
+		t.Fatalf("source-only token = %d %+v", code, asked)
 	}
 
 	eddie := f.user("e", "eddie@example.com")
@@ -255,17 +338,85 @@ func TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 	}
 
 	got, code := f.sourceCredential(node, "run-widgets")
-	if code != http.StatusOK || got.Kind != "github_app" || !slices.Equal(got.Repositories, []string{"acme/widgets", "acme/plans"}) {
+	if code != http.StatusOK || got.Kind != "github_app" || got.Secret == "" {
 		t.Fatalf("source credential once listed = %d %+v", code, got)
 	}
 	if !f.app.TokenCovers(got.Token, "acme/widgets") || !f.app.TokenCovers(got.Token, "acme/plans") {
 		t.Fatal("the token does not read both the run's repository and the listed extra")
 	}
+	minted := f.app.Minted()
+	last := minted[len(minted)-1]
+	if !slices.Equal(last.RepositoryIDs, []int64{701, 702}) || len(last.Repositories) != 0 || len(last.Permissions) != 1 || last.Permissions["contents"] != "read" {
+		t.Fatalf("owner-approved source token widened: %+v", last)
+	}
 
 	f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: "acme/widgets"})
 	_, url := f.replica()
 	f.url = url
-	if got, code := f.sourceCredential(node, "run-widgets"); code != http.StatusConflict || !strings.Contains(got.Error, "acme/plans") {
+	if got, code := f.sourceCredential(node, "run-widgets"); code != http.StatusConflict || !strings.Contains(got.Message, "acme/plans") {
 		t.Fatalf("a listed repository the installation stopped covering = %d %+v, want 409 naming it", code, got)
+	}
+}
+
+func TestSourceCredential_ExtraConsentStaysWithSourceIDProperty(t *testing.T) {
+	property := func(value uint16) bool {
+		f := newAppFixture(t)
+		owner := f.ghUser(501, "olga")
+		f.connect(owner, 501, 7, acmeAdmin)
+		if code, out := f.setExtraRepos(owner, "acme/widgets", []string{"acme/plans"}); code != http.StatusOK {
+			t.Fatalf("approval = %d %v", code, out)
+		}
+		replacement := int64(value) + 1000
+		renamed := fmt.Sprintf("acme/widgets-%d", value)
+		f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: renamed}, githubapptest.Repo{ID: replacement, FullName: "acme/widgets"}, githubapptest.Repo{ID: 702, FullName: "acme/plans"})
+		other, _ := f.nodeClaim(owner, "replacement", "https://github.com/acme/widgets.git", replacement)
+		got, code := f.sourceCredential(other, "replacement")
+		if code != http.StatusOK || !f.app.TokenCovers(got.Token, "acme/widgets") || f.app.TokenCovers(got.Token, "acme/plans") {
+			return false
+		}
+		original, _ := f.nodeClaim(owner, "original", "https://github.com/"+renamed+".git", 701)
+		got, code = f.sourceCredential(original, "original")
+		return code == http.StatusOK && f.app.TokenCovers(got.Token, renamed) && f.app.TokenCovers(got.Token, "acme/plans") && !f.app.TokenCovers(got.Token, "acme/widgets")
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSourceCredential_RenamedRepositoryClearsExtraConsentProperty(t *testing.T) {
+	property := func(value uint16) bool {
+		f := newAppFixture(t)
+		owner := f.ghUser(501, "olga")
+		f.connect(owner, 501, 7, acmeAdmin)
+		if code, out := f.setExtraRepos(owner, "acme/widgets", []string{"acme/plans"}); code != http.StatusOK {
+			t.Fatalf("approval = %d %v", code, out)
+		}
+		renamed := fmt.Sprintf("acme/widgets-%d", value)
+		f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: renamed}, githubapptest.Repo{ID: int64(value) + 1000, FullName: "acme/widgets"}, githubapptest.Repo{ID: 702, FullName: "acme/plans"})
+		if code, out := f.setExtraRepos(owner, renamed, nil); code != http.StatusOK {
+			t.Fatalf("clear = %d %v", code, out)
+		}
+		original, _ := f.nodeClaim(owner, "original", "https://github.com/"+renamed+".git", 701)
+		got, code := f.sourceCredential(original, "original")
+		return code == http.StatusOK && f.app.TokenCovers(got.Token, renamed) && !f.app.TokenCovers(got.Token, "acme/plans") && !f.app.TokenCovers(got.Token, "acme/widgets")
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSourceCredential_AppSourceBeyondRepositoryListingLimit(t *testing.T) {
+	f := newAppFixture(t)
+	owner := f.ghUser(501, "olga")
+	f.connect(owner, 501, 7, acmeAdmin)
+	repos := make([]githubapptest.Repo, 1001)
+	for i := range repos {
+		repos[i] = githubapptest.Repo{ID: int64(1000 + i), FullName: fmt.Sprintf("acme/repo-%d", i)}
+	}
+	f.app.SetRepos(7, repos...)
+	node, _ := f.nodeClaim(owner, "large-installation", "https://github.com/acme/repo-1000.git", 2000)
+	got, code := f.sourceCredential(node, "large-installation")
+	if code != http.StatusOK || !f.app.TokenCovers(got.Token, "acme/repo-1000") || f.app.TokenCovers(got.Token, "acme/repo-0") {
+		t.Fatalf("source past listing limit = %d %+v", code, got)
 	}
 }

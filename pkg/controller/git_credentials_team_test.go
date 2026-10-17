@@ -1,7 +1,6 @@
 package controller_test
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type credFixture struct {
@@ -56,11 +54,11 @@ func (f *credFixture) put(who signedIn, body map[string]any) (controller.GitCred
 	return out, code
 }
 
-func (f *credFixture) cloudRun(owner signedIn, runID, repoURL string) string {
+func (f *credFixture) consentedRun(owner signedIn, runID, repoURL string) string {
 	f.t.Helper()
 	auth, prefix := f.nodeClaim(owner, runID, repoURL, 0)
-	if err := seedLegacyMeteredCredential(f.store, prefix); err != nil {
-		f.t.Fatal(err)
+	if code := f.call("PUT", "/api/v1/tokens/"+prefix+"/git-credentials", owner.auth, map[string]any{"enabled": true}, nil); code != http.StatusOK {
+		f.t.Fatalf("source consent = %d", code)
 	}
 	return auth
 }
@@ -89,25 +87,17 @@ func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 	if _, code := f.put(f.olga, map[string]any{"host": "github.com", "kind": "https", "token": "github_pat_x"}); code != http.StatusOK {
 		t.Fatalf("put = %d", code)
 	}
-	covered, prefix := f.nodeClaim(f.olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
-	if err := seedLegacyMeteredCredential(f.store, prefix); err != nil {
-		t.Fatal(err)
-	}
+	covered, _ := f.nodeClaim(f.olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
 	got, code := f.sourceCredential(covered, "run-widgets")
-	if code != http.StatusOK || got.Kind != "github_app" || got.Secret != "" || !f.app.TokenCovers(got.Token, "acme/widgets") {
+	if code != http.StatusOK || got.Kind != "github_app" || got.Secret == "" || got.Secret == "github_pat_x" || !f.app.TokenCovers(got.Secret, "acme/widgets") {
 		t.Fatalf("covered repository = %d %+v; want the App token", code, got)
 	}
 	if rels := f.releases(f.olga); len(rels) != 1 || rels[0].RunID != "run-widgets" {
 		t.Fatalf("audit = %+v; want the App token's row alone", rels)
 	}
-	uncovered := f.cloudRun(f.olga, "run-else", "https://github.com/someone/else.git")
-	got, code = f.sourceCredential(uncovered, "run-else")
+	unsubscribed := f.consentedRun(f.olga, "run-else", "https://github.com/acme/plans.git")
+	got, code = f.sourceCredential(unsubscribed, "run-else")
 	if code != http.StatusOK || got.Kind != "https" || got.Secret != "github_pat_x" {
-		t.Fatalf("uncovered repository = %d %+v; want the stored credential", code, got)
+		t.Fatalf("unsubscribed repository = %d %+v; want the stored credential", code, got)
 	}
-}
-
-func seedLegacyMeteredCredential(st *store.Store, prefix string) error {
-	_, err := st.DB().ExecContext(context.Background(), "UPDATE tokens SET metered=1 WHERE prefix=?", prefix)
-	return err
 }

@@ -61,11 +61,12 @@ type CronSchedule struct {
 	ID string `json:"id"`
 	// Team owns the schedule and every run it fires. It stays off the wire,
 	// because a caller only ever reads its own team's schedules.
-	Team                 Team   `json:"-"`
-	RepoPath             string `json:"repo_path"`
-	GitHubInstallationID int64  `json:"-"`
-	GitHubRepositoryID   int64  `json:"-"`
-	Pipeline             string `json:"pipeline"`
+	Team                 Team            `json:"-"`
+	RepoPath             string          `json:"repo_path"`
+	RepositoryKey        runspec.RepoKey `json:"-"`
+	GitHubInstallationID int64           `json:"-"`
+	GitHubRepositoryID   int64           `json:"-"`
+	Pipeline             string          `json:"pipeline"`
 	// Name distinguishes several schedules of one pipeline;
 	// [CronScheduleDefaultName] when the pipeline declares one.
 	Name    string `json:"name"`
@@ -95,10 +96,7 @@ type CronSchedule struct {
 	Paused   bool          `json:"paused"`
 	Declared bool          `json:"declared"`
 	ArmedAt  time.Time     `json:"armed_at"`
-	// ArmedBy names who armed the schedule, and its spelling says which lane
-	// did: `sparkwing crons arm` writes user@host, and a repository pushing
-	// its schedules to a controller writes the token principal that pushed
-	// them, which is the principal a controller launch creates its run as.
+	// ArmedBy records who armed the durable schedule.
 	ArmedBy   string    `json:"armed_by,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 	// CursorAt is the last due instant resolved, however it resolved,
@@ -246,6 +244,11 @@ const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, d
 // first team's row.
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
 
+// ScheduleRepositoryResolver resolves manual schedule identity without granting App authority.
+type ScheduleRepositoryResolver interface {
+	ResolveScheduleRepository(context.Context, Team, string) (runspec.Repository, error)
+}
+
 // ArmCronSchedule records the declaration on a host, returning the
 // stored row and whether it was created. A schedule is keyed by
 // repository path, pipeline and name, so one pipeline can carry several
@@ -269,8 +272,14 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 	}
 	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: sched.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: sched.GitHubRepositoryID > 0, Value: sched.GitHubRepositoryID}})
 	if err != nil {
+		if resolver, ok := t.s.intakePolicy.(ScheduleRepositoryResolver); ok {
+			repository, err = resolver.ResolveScheduleRepository(ctx, t.team, sched.RepoPath)
+		}
+	}
+	if err != nil {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: %w", err)
 	}
+	sched.RepositoryKey = repository.Key
 	if sched.Name == "" {
 		sched.Name = CronScheduleDefaultName
 	}
@@ -887,6 +896,7 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 		return CronSchedule{}, err
 	}
 	sched.Team = Team(team)
+	sched.RepositoryKey = runspec.RepoKey(repoKey)
 	sched.CatchUp = time.Duration(catchUpNS)
 	sched.Paused = paused != 0
 	sched.Declared = declared != 0

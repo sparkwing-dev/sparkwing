@@ -135,12 +135,8 @@ func (f *scheduleWriterFake) RunAuthorizedSchedule(ctx context.Context, a capabi
 	return sched.ID, admitted.RunID, admitted.Replayed, err
 }
 
-func (f *scheduleWriterFake) AdmitScheduledRun(ctx context.Context, id string, due time.Time) (store.AdmissionResult, error) {
-	sched, err := f.GetCronSchedule(ctx, id)
-	if err != nil {
-		return store.AdmissionResult{}, err
-	}
-	return f.admit(ctx, sched, id+"@"+due.UTC().Format(time.RFC3339Nano))
+func (f *scheduleWriterFake) AdmitScheduledRun(ctx context.Context, sched store.CronSchedule, due time.Time) (store.AdmissionResult, error) {
+	return f.admit(ctx, sched, sched.ID+"@"+due.UTC().Format(time.RFC3339Nano))
 }
 
 func (f *scheduleWriterFake) admit(ctx context.Context, sched store.CronSchedule, key string) (store.AdmissionResult, error) {

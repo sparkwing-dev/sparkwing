@@ -47,7 +47,7 @@ func TestScheduledIntakeCommitsOneSealedRunAndHistoryPerDueInstant(t *testing.T)
 		t.Fatal(err)
 	}
 	due := *row.NextDueAt
-	if _, err := tenant.AdmitScheduledRun(t.Context(), row.ID, due); err == nil {
+	if _, err := tenant.AdmitScheduledRun(t.Context(), row, due); err == nil {
 		t.Fatal("future instant admitted")
 	}
 	*now = due
@@ -56,7 +56,7 @@ func TestScheduledIntakeCommitsOneSealedRunAndHistoryPerDueInstant(t *testing.T)
 	var wg sync.WaitGroup
 	for i := range results {
 		wg.Add(1)
-		go func() { defer wg.Done(); results[i], failures[i] = tenant.AdmitScheduledRun(t.Context(), row.ID, due) }()
+		go func() { defer wg.Done(); results[i], failures[i] = tenant.AdmitScheduledRun(t.Context(), row, due) }()
 	}
 	wg.Wait()
 	for _, err := range failures {
@@ -92,7 +92,7 @@ func TestScheduleConsentAndReplayRequireCurrentAuthorityProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		*now = *row.NextDueAt
-		admitted, err := tenant.AdmitScheduledRun(t.Context(), row.ID, *now)
+		admitted, err := tenant.AdmitScheduledRun(t.Context(), row, *now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,9 +113,9 @@ func TestScheduleConsentAndReplayRequireCurrentAuthorityProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		_, replayErr := tenant.AdmitScheduledRun(t.Context(), row.ID, *now)
+		_, replayErr := tenant.AdmitScheduledRun(t.Context(), row, *now)
 		*now = now.Add(time.Minute)
-		_, nextErr := tenant.AdmitScheduledRun(t.Context(), row.ID, *now)
+		_, nextErr := tenant.AdmitScheduledRun(t.Context(), row, *now)
 		rewriteSchemaCount(t, tenant.s.db, "runs", 1)
 		stored, err := tenant.ReadRun(t.Context(), admitted.RunID)
 		return replayErr != nil && nextErr != nil && err == nil && reflect.DeepEqual(stored.Request, admitted.Request)
@@ -204,7 +204,7 @@ func TestScheduledSourceResolutionCannotOutliveConsentProperty(t *testing.T) {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET declared=0 WHERE team=? AND id=?`, tenant.team, row.ID)
 			}
 		}})
-		_, err = tenant.AdmitScheduledRun(t.Context(), row.ID, *now)
+		_, err = tenant.AdmitScheduledRun(t.Context(), row, *now)
 		rewriteSchemaCount(t, tenant.s.db, "runs", 0)
 		rewriteSchemaCount(t, tenant.s.db, "cron_fires", 0)
 		return err != nil
@@ -295,7 +295,83 @@ func TestScheduleRunNowPreservesCadenceWhilePaused(t *testing.T) {
 	if err != nil || resumed.Paused || !resumed.CursorAt.Equal(*now) || !resumed.NextDueAt.After(*now) {
 		t.Fatalf("resume retained paused due instants: %+v %v", resumed, err)
 	}
-	if _, err := tenant.AdmitScheduledRun(t.Context(), id, *before.NextDueAt); err == nil {
+	if _, err := tenant.AdmitScheduledRun(t.Context(), resumed, *before.NextDueAt); err == nil {
 		t.Fatal("resume replayed a paused due instant")
 	}
+}
+
+type scheduleFollowPolicy struct {
+	scheduleFixturePolicy
+	revision *string
+}
+
+func (p scheduleFollowPolicy) ResolveScheduleSource(ctx context.Context, row CronSchedule, request runspec.Request) (runspec.Request, error) {
+	request, err := p.scheduleFixturePolicy.ResolveScheduleSource(ctx, row, request)
+	request.Git.SHA = *p.revision
+	return request, err
+}
+func TestScheduleReplayKeepsFirstSealAfterFollowedRevisionMoves(t *testing.T) {
+	tenant, a, body, now := consentedScheduleFixture(t)
+	revision := "0123456789abcdef0123456789abcdef01234567"
+	tenant.s.SetIntakePolicy(scheduleFollowPolicy{scheduleFixturePolicy: tenant.s.intakePolicy.(scheduleFixturePolicy), revision: &revision})
+	body.Follow = true
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	*now = *row.NextDueAt
+	first, err := tenant.AdmitScheduledRun(t.Context(), row, *now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision = "abcdef0123456789abcdef0123456789abcdef0123"
+	replay, err := tenant.AdmitScheduledRun(t.Context(), row, *now)
+	if err != nil || !replay.Replayed || !reflect.DeepEqual(first.Request, replay.Request) {
+		t.Fatalf("followed revision changed replay: %+v %v", replay, err)
+	}
+	_, manual, replayed, err := tenant.RunAuthorizedSchedule(t.Context(), a, row.ID, "manual-follow")
+	if err != nil || replayed {
+		t.Fatalf("manual admission: %s %v", manual, err)
+	}
+	revision = "123456789abcdef0123456789abcdef0123456789a"
+	_, again, replayed, err := tenant.RunAuthorizedSchedule(t.Context(), a, row.ID, "manual-follow")
+	if err != nil || !replayed || manual != again {
+		t.Fatalf("manual followed replay: %s %t %v", again, replayed, err)
+	}
+	rewriteSchemaCount(t, tenant.s.db, "runs", 2)
+}
+
+func TestScheduleReplayStaysWithScheduleWhenArmerChanges(t *testing.T) {
+	tenant, a, body, now := consentedScheduleFixture(t)
+	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := tenant.GetCronSchedule(t.Context(), ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	*now = *row.NextDueAt
+	first, err := tenant.AdmitScheduledRun(t.Context(), row, *now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := authorityMember(t, tenant.s, "replacement-owner", RoleEditor)
+	replacement := teamAuthorization(t, tenant.s, actor, tenant.team, "PUT", "/api/v1/schedules/repos")
+	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), replacement, body); err != nil {
+		t.Fatal(err)
+	}
+	row, err = tenant.GetCronSchedule(t.Context(), row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := tenant.AdmitScheduledRun(t.Context(), row, *now)
+	if err != nil || !replay.Replayed || !reflect.DeepEqual(first.Request, replay.Request) {
+		t.Fatalf("armer changed schedule replay: %s %t %v", replay.RunID, replay.Replayed, err)
+	}
+	rewriteSchemaCount(t, tenant.s.db, "runs", 1)
 }

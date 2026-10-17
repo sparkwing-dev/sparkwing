@@ -275,3 +275,24 @@ func TestGitHubAppAutomationConfigErrorsAndManualOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubAppAutomationKeepsTheSignedDefaultBranch(t *testing.T) {
+	f := newAppFixture(t)
+	owner := f.ghUser(501, "olga")
+	f.connect(owner, 501, 7, acmeAdmin)
+	f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: "acme/widgets", DefaultBranch: "trunk"})
+	f.app.SetCommit("acme/widgets", "trunk", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(automationConfig))
+	enableAutomation(t, f, owner)
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	payload["repository"].(map[string]any)["default_branch"] = "main"
+	_, out := f.deliver("push", payload, "")
+	ids := startedRunIDs(t, out)
+	if len(ids) != 1 {
+		t.Fatalf("automation=%v", out)
+	}
+	git := f.sealedRequest(ids[0]).Git
+	if git.DefaultBranch.Value != "main" || git.App.Value.DefaultBranch != "main" || !git.App.Value.DefaultBranchPush || git.Ref != "refs/heads/main" {
+		t.Fatalf("signed default replaced by discovery=%+v", git)
+	}
+}

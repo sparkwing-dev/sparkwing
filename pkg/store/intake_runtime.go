@@ -46,19 +46,11 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if snapshot.request.RunID != "" {
 		pipeline = snapshot.request.Request.Pipeline
 	}
-	scope, err := stateHash(struct {
-		Subject  capability.Subject
-		Pipeline string
-	}{principal.Capability.Subject, pipeline})
+	scope, err := intakeScope(principal, pipeline)
 	if err != nil {
 		return AdmissionResult{}, err
 	}
-	if request.scheduleID != "" {
-		scope, err = scheduleIntakeScope(request.scheduleID)
-		if err != nil {
-			return AdmissionResult{}, err
-		}
-	}
+
 	// safety: serializing intake per team reserves the number without taking the team row before owner authority.
 	if err = advisoryLockTx(ctx, tx, "intake:"+string(team)); err != nil {
 		return AdmissionResult{}, err
@@ -422,4 +414,15 @@ func validateChildLineageTx(ctx context.Context, tx *storeTx, team Team, input r
 		id = ancestor.Lineage.ParentRunID
 	}
 	return nil
+}
+
+func intakeScope(principal capability.Principal, pipeline string) (string, error) {
+	subject := principal.Capability.Subject
+	if principal.Authority.Kind == "schedule" {
+		subject.ID, pipeline = principal.Authority.ID, ""
+	}
+	return stateHash(struct {
+		Subject  capability.Subject
+		Pipeline string
+	}{subject, pipeline})
 }

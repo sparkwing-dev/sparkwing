@@ -350,3 +350,29 @@ func (t *Tenant) cancelWaiter(ctx context.Context, key, runID, nodeID string, fe
 	}
 	return waiterDeleted || hn > 0, nil
 }
+
+// ConcurrencyHolder reads a legacy fixture holder by tenant.
+func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
+	return t.concurrencyHolder(ctx, key, holderID, now, holderLeaseLiveSQL(""))
+}
+
+func (t *Tenant) concurrencyHolder(ctx context.Context, key, holderID string, now time.Time, livePredicate string) (*ConcurrencyHolder, error) {
+	row := t.s.queryRow(ctx,
+		`SELECT `+holderColumns+`
+		   FROM concurrency_holders
+		  WHERE team = ?
+		    AND key = ?
+		    AND holder_id = ?
+		    AND `+livePredicate,
+		string(t.team), key, holderID, now.UnixNano(),
+	)
+	holder, err := scanHolder(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, notFound("concurrency holder", key+"/"+holderID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	scrubInheritedHolder(&holder)
+	return &holder, nil
+}

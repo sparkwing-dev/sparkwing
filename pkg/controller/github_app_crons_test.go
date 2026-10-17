@@ -34,14 +34,14 @@ const githubCronConfig = `pipelines:
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: controller
+        - cron: "0 3 * * *"
+          where: controller
   - name: local-only
     entrypoint: LocalOnly
     on:
       schedule:
-        cron: "0 4 * * *"
-        where: local
+        - cron: "0 4 * * *"
+          where: local
 `
 
 func TestGitHubAppDefaultPushArmsAndWithdrawsControllerSchedules(t *testing.T) {

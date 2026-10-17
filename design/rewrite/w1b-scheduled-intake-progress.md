@@ -102,3 +102,129 @@ inherited commit signing. A stale test assumed Tenant could not implement the
 writer and now supplies an explicitly missing resolver instead.
 
 STATUS: CONTINUE
+
+
+## Merge reconciliation continuation, 2026-10-17
+
+Adopted W1's private schedule proof and shared sealed intake. Removed the
+second scheduled admission implementation, its private IntakeRequest selector,
+separate idempotency scope and ScheduledSourceVerified path. The administration
+transactions remain because W1's adapter does not implement those six mutations.
+Automatic App schedules use their persisted declaration and current automation
+consent. API/local registrations retain captured source inputs and current armer
+authority checks. ArmedBy stays attribution through the schedule service proof.
+No credential or session is fabricated from it.
+
+The launcher reloads the tenant's stored schedule before admission and rejects
+missing or wrong-team transaction adapters. Local and Cloud schedule proofs pass
+through the concrete store. The local proof arms through the real local-peer
+router, advances the store clock to just before and exactly at due, ticks twice,
+and verifies one sealed run and one fire. The native variant uses api.sock.
+
+Replay uses the shared intake scope, keyed by schedule identity while retaining
+ArmedBy for rate attribution. Moving a followed branch retains the first seal.
+Changing pinned execution inputs conflicts. Replacing the armer cannot create a
+second run for the same due instant. Added regressions for followed automatic
+and manual replay and for armer replacement. The follow regression failed with
+idempotency conflict before the correction and passes afterward. Declaration,
+saved source consent and caller authority are checked under the final row lock.
+
+The concrete ConcurrencyStore remains the existing declared-group and read-edge
+transaction owner. Its HTTP, current-authority, holder-generation, cancellation,
+force-release, promotion and undeclared-edge properties pass. Removed the unused
+production ConcurrencyHolder reader. Legacy unit fixtures retain that reader in
+_test.go. Its sole controller-test caller now checks the exact holder, run and
+live expiry through the current group reader.
+
+### Security-test reconciliation
+
+Preserved both sides' generated schedule security tests. The retired raw helper
+test file stays deleted as on integration. Existing stronger replacements keep
+these incoming cases: raw node insertion cap -> plan insertion cap; runner
+creation -> tenant member admission and team runner claim; 404 route matrix ->
+foreign/missing response equality; lease-token environment stripping -> rejection
+of the entire untrusted environment surface. Reintroduced the incoming named
+child-ancestry case as a generated test on the current sealed child route. Own
+pipeline cycles refuse; foreign and missing ancestors return identical errors,
+reveal no private pipeline and commit no child.
+
+Reconciled six additional controller fixture groups without production changes:
+current token enrollment/revocation, console-only account deletion, the 60-second
+purge delay, current error envelopes, verified paid settlement, explicit source
+consent, signup active-team selection and stable-key checkout recovery. The
+retired self-deletion route refuses both fresh and old sessions without mutation.
+Retired refund routes stay absent; owners and runners cannot invoke console
+refunds and cannot change the paid ledger. Ambiguous checkout failures retain
+one reservation and retry it under the same key. The shared in-process identity
+fixture supplies http.NoBody, matching actual server requests.
+
+Generated docs/api-reference.md, api/openapi.yaml and the embedded mirror with
+bin/gen-api-docs.sh. Both operator object-store quota routes now carry the final
+policy metadata. internal/apiref and internal/apispec tests pass.
+
+### Verification and remaining handoff
+
+Whole-repository build and scoped vet pass. Store schedule/concurrency/guard
+selection passes (7.380s), as do the focused race checks (9.724s). Full
+internal/crons, internal/apiref, internal/apispec, pkg/store/teststore and
+internal/wingd/localcontroller suites pass. Schedule transport and concurrency
+HTTP acceptance selections pass (0.944s), and TestStoreScheduleBoundary passes
+(0.227s). Local/controller schedule, launcher and child-ancestry checks pass
+(1.206s). GitHub App cron groups pass (2.765s). The additional fixture selection
+passes (3.465s). Commentcheck and whitespace checks pass. No native acceptance
+cell is newly marked passed.
+
+HTTP fixture checks use a temporary standard-library httptest net.Pipe overlay.
+The actual controller/authenticator/store run, but this is component evidence.
+The unmodified native local schedule test fails at setsockopt with operation not
+permitted. The lead must run TestNativeLocalControllerScheduleFiresOneSealedRunAtDueInstant.
+The supplied native report still contains FAIL and remains the completion gate.
+
+Run-existence privacy tests remain unchanged and fail on this integration state.
+Decision 1 at 04:00 assigns that mechanism to W2, including
+TestTeamBoundaryOutputHidesRunExistenceProperty and
+TestTeamBoundary_EveryRunRouteHidesOtherTeamsResources. Native SSH host-key,
+listener write-timeout and metrics-listener tests also require the lead's sockets.
+Private remote branch lookup, HTTP box identity and memo namespace integration
+remain open as named in C1. No new foreign contract amendment is requested.
+
+All conflict contents are resolved. The Git index still records the merge paths
+because the swarm brief prohibits Git writes. The lead must stage resolutions
+and commit. Deleted integration files remain deleted. Lead-owned amendments and
+handoffs are untouched. C1/C2 record the unified schedule adapter and its amended
+signature. Shared caller edits are pkg/controller/crons.go, crons_tick_test.go,
+schedule_routes_test.go, intake_policy.go, schedule_intake_test.go,
+team_boundary_test.go, child_intake_reconciliation_test.go and
+identity_fixture_test.go, plus deletion_review_test.go, deletion_test.go,
+git_credentials_team_test.go, refund_authority_test.go, signup_gate_test.go and
+team_billing_test.go. Generated
+references and the reconciliation ledger are also shared edits.
+
+Own store edits after the merge baseline add 166 production lines and delete
+231, net -65. This removes the duplicate admission machinery and raw reader.
+Combined store is -1,397 production lines versus main under the lead's filter,
+still 2,853 over its -4,250 budget. The retained source/administration and
+concurrency adapters were missing concrete launch transactions. This session
+shrinks them; it does not claim the inherited overage is resolved. No new
+option, setting, service, cache or environment variable was introduced.
+
+Friction: native sockets are forbidden and Git staging belongs to the lead.
+The shared Git config has no user identity or core.worktree override. Scratch
+is removed at session end; /tmp/sw-gocache is retained.
+
+
+Final controller component selection: 669 top-level groups pass, zero top-level
+failures or skips, 87.829s. Selection excludes the other worker's original
+GitHubApp/GitHubRunner/GitHubOnboarding/Source/RunSource prefixes, native tests,
+the SSH host-key, dashboard listener and metrics listener groups, and the two
+unchanged W2 privacy groups named above. GitHub App cron checks run separately
+and pass. Existing PostgreSQL subtests still require the lead's configured
+server. No native success is inferred from this filtered component run.
+
+Final command uses -json -p 4 -timeout 180s and the temporary net.Pipe overlay.
+Its -skip expression is:
+`^(Test(Native|GitHubApp|GitHubRunner|GitHubOnboarding|Source|RunSource|ReadHostKey|DashboardStreams|MetricsAddr)|TestTeamBoundaryOutputHidesRunExistenceProperty$|TestTeamBoundary_EveryRunRouteHidesOtherTeamsResources$)`.
+Final controller vet also passes. The report and ledger retain results after
+scratch removal. The lead's native report remains unchanged and still fails.
+
+STATUS: CONTINUE

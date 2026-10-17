@@ -63,8 +63,20 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 		days = override
 	}
 	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
+	if request.Authority.Kind == "schedule" {
+		location, err := store.VerifiedScheduleIntake(ctx, resolver, request)
+		facts.SourceLocation = &location
+		return facts, err
+	}
 	if request.VerifiedDeliveryID != "" {
-		return facts, &apierr.Error{Code: apierr.Unavailable, Message: "verified App delivery facts are unavailable"}
+		delivery, err := store.VerifiedAppIntake(ctx, resolver, request)
+		if err != nil {
+			return facts, err
+		}
+		facts.Delivery, facts.RepositoryAuthorized = &delivery, true
+		location := request.Request.Source.Location
+		facts.SourceLocation = &location
+		return facts, nil
 	}
 	location := request.Request.Source.Location
 	if location == (runspec.SourceLocation{}) {
@@ -87,7 +99,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	}
 	if strings.HasPrefix(string(request.Request.Git.Repository.Key), "gh:") {
 		verified, ok := ctx.Value(verifiedIntakeSourceKey{}).(verifiedIntakeSource)
-		if (!ok || verified.location != location || verified.repository != request.Request.Git.Repository) && !store.ScheduledSourceVerified(ctx, resolver, request) {
+		if !ok || verified.location != location || verified.repository != request.Request.Git.Repository {
 			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "GitHub source requires verified intake repository identity"}
 		}
 	} else {

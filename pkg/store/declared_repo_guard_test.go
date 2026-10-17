@@ -13,11 +13,11 @@ import (
 // authorization may read it. Every file naming the field is listed with its
 // reason, because a new reader has to be argued for in a diff.
 var declaredRepoReaders = map[string]string{
-	"pkg/controller/github_app_webhook.go": "reporting displays the stored repository metadata without authorizing work",
-	"pkg/store/latest_run.go":              "the tenant reporting query filters the sealed repository projection",
-	"pkg/store/runfilter_http.go":          "the HTTP filter parser selects repository display metadata",
-	"pkg/store/store.go":                   "the sealed run reporting projection exposes repository metadata without granting authority",
-	"pkg/store/teststore/run.go":           "the reporting fixture seeds sealed display metadata without admitting work or granting authority",
+	"pkg/store/latest_run.go":        "the tenant reporting query filters the sealed repository projection",
+	"pkg/store/runfilter_http.go":    "the HTTP filter parser selects repository display metadata",
+	"pkg/store/store.go":             "the sealed run reporting projection exposes repository metadata without granting authority",
+	"pkg/store/teststore/run.go":     "the reporting fixture seeds sealed display metadata without admitting work or granting authority",
+	"pkg/store/teststore/trigger.go": "the trigger fixture copies repository display metadata into a reporting run without granting authority",
 }
 
 var declaredRepoPattern = regexp.MustCompile(`\bDeclaredRepos?\b|\bdeclared_repo\b`)

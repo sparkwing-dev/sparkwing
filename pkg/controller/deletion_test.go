@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type teamDeletionBody struct {
@@ -43,7 +44,7 @@ func (f *identityFixture) seedRun(team store.Team, id string) {
 		f.t.Fatal(err)
 	}
 	now := time.Now()
-	if err := tn.CreateTriggerWithRun(context.Background(),
+	if err := teststore.SeedTriggerWithRun(f.store, context.Background(), tn.Team(),
 		store.Trigger{ID: id, Pipeline: "build", CreatedAt: now},
 		store.Run{ID: id, Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		f.t.Fatal(err)
@@ -61,11 +62,14 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsRows(t *testing.T) {
 	editor := f.user("e", "eddie@example.com")
 	f.join(owner, editor, "eddie@example.com", "editor")
 	var minted struct {
-		Token string `json:"token"`
+		Token string `json:"capability"`
 	}
-	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
-		map[string]any{"scopes": machineScopes, "name": "box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/runners", owner.auth,
+		map[string]any{"name": "box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated || minted.Token == "" {
 		t.Fatalf("mint runner token = %d", code)
+	}
+	if code := f.call("GET", "/api/v1/auth/whoami", "Bearer "+minted.Token, nil, nil); code != http.StatusOK {
+		t.Fatalf("runner token before deletion = %d, want 200", code)
 	}
 	f.seedRun("acme", "run-acme")
 

@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"strings"
 	"time"
@@ -437,191 +435,20 @@ func (t *Tenant) DeleteAuthorizedSchedules(ctx context.Context, a capability.Aut
 	return count, err
 }
 
-func (t *Tenant) scheduleConsentTx(ctx context.Context, tx *storeTx, id string) (scheduleConsent, error) {
-	var raw string
-	var c scheduleConsent
-	err := tx.QueryRowContext(ctx, `SELECT consent_json FROM cron_schedules WHERE team=? AND id=?`+tx.forUpdate(), t.team, id).Scan(&raw)
-	if err != nil {
-		return c, err
-	}
-	if json.Unmarshal([]byte(raw), &c) != nil || c.Version != 1 || c.Authority.ID == "" {
-		return c, authorityError(apierr.Forbidden, "schedule has no arming consent")
-	}
-	_, err = t.scheduleAuthorityTx(ctx, tx, c.Authority)
-	return c, err
-}
-
-// AdmitScheduledRun seals at most one run for an authorized schedule's due instant.
-func (t *Tenant) AdmitScheduledRun(ctx context.Context, id string, due time.Time) (AdmissionResult, error) {
-	if due.IsZero() {
-		return AdmissionResult{}, ErrInvalidInput
-	}
-	return t.admitSchedule(ctx, capability.Authorized{}, id, "due:"+due.UTC().Format(time.RFC3339Nano), due)
-}
-
 // RunAuthorizedSchedule admits a run now with transactional request replay.
 func (t *Tenant) RunAuthorizedSchedule(ctx context.Context, a capability.Authorized, id, key string) (string, string, bool, error) {
 	if strings.TrimSpace(key) == "" {
 		return "", "", false, ErrInvalidInput
 	}
+	var row CronSchedule
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		if a.Target.Team != string(t.team) {
-			return bindingRefusal()
-		}
-		if _, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority); err != nil {
-			return err
-		}
-		row, err := t.resolveScheduleTx(ctx, tx, id)
-		if err == nil {
-			id = row.ID
-		}
+		var err error
+		row, err = t.resolveScheduleTx(ctx, tx, id)
 		return err
 	})
 	if err != nil {
 		return "", "", false, err
 	}
-	result, err := t.admitSchedule(ctx, a, id, "manual:"+key, time.Time{})
-	return id, result.RunID, result.Replayed, err
-}
-
-func (t *Tenant) scheduleAdmissionTx(ctx context.Context, tx *storeTx, a capability.Authorized, selector, key string) (CronSchedule, scheduleConsent, AdmissionResult, error) {
-	var row CronSchedule
-	var consent scheduleConsent
-	var result AdmissionResult
-	if a.Principal.Authority.ID != "" {
-		if a.Target.Team != string(t.team) {
-			return row, consent, result, bindingRefusal()
-		}
-		if _, err := t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority); err != nil {
-			return row, consent, result, err
-		}
-	}
-	row, err := t.resolveScheduleTx(ctx, tx, selector)
-	if err != nil {
-		return row, consent, result, err
-	}
-	consent, err = t.scheduleConsentTx(ctx, tx, row.ID)
-	if err != nil {
-		return row, consent, result, err
-	}
-	if !row.Declared || row.Paused && a.Principal.Authority.ID == "" {
-		return row, consent, result, authorityError(apierr.Conflict, "schedule is paused or withdrawn")
-	}
-	scope, err := scheduleIntakeScope(row.ID)
-	if err != nil {
-		return row, consent, result, err
-	}
-	var previous string
-	err = tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team=? AND idempotency_scope=? AND idempotency_key=?`, t.team, scope, key).Scan(&previous)
-	if err == nil {
-		result, err = admissionResultTx(ctx, tx, t.team, previous)
-	} else if errors.Is(err, sql.ErrNoRows) {
-		err = nil
-	}
-	return row, consent, result, err
-}
-
-func scheduleAdmissionHash(row CronSchedule, consent scheduleConsent) (string, error) {
-	return stateHash(struct {
-		Row     CronSchedule
-		Consent scheduleConsent
-	}{row, consent})
-}
-
-func (t *Tenant) admitSchedule(ctx context.Context, a capability.Authorized, selector, key string, due time.Time) (AdmissionResult, error) {
-	var row CronSchedule
-	var consent scheduleConsent
-	var result AdmissionResult
-	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		row, consent, result, err = t.scheduleAdmissionTx(ctx, tx, a, selector, key)
-		return err
-	})
-	if err != nil || result.Replayed {
-		return result, err
-	}
-	fence, err := scheduleAdmissionHash(row, consent)
-	if err != nil {
-		return result, err
-	}
-	policy, ok := t.s.intakePolicy.(ScheduleSourcePolicy)
-	if !ok {
-		return result, authorityError(apierr.Unavailable, "schedule source policy is unavailable")
-	}
-	request, err := policy.ResolveScheduleSource(ctx, row, consent.Request)
-	if err != nil {
-		return result, err
-	}
-	err = t.s.inTx(ctx, func(tx *storeTx) error {
-		current, authority, replay, err := t.scheduleAdmissionTx(ctx, tx, a, row.ID, key)
-		if err != nil {
-			return err
-		}
-		if replay.Replayed {
-			result = replay
-			return nil
-		}
-		hash, err := scheduleAdmissionHash(current, authority)
-		if err != nil {
-			return err
-		}
-		if hash != fence {
-			return authorityError(apierr.Conflict, "schedule changed during source resolution")
-		}
-		now := tx.now()
-		if !due.IsZero() {
-			next, err := scheduleNext(row, due.Add(-time.Nanosecond), 0)
-			if err != nil {
-				return err
-			}
-			if due.After(now) || !due.After(row.CursorAt) || next == nil || !next.Equal(due) {
-				return authorityError(apierr.Conflict, "schedule instant is not due")
-			}
-		}
-		request.RequestedArgs = row.Effective().Args
-		result, err = admitRun(ctx, tx, t.team, IntakeRequest{Authority: consent.Authority, Request: request, IdempotencyKey: key, scheduleID: row.ID}, now)
-		if err != nil {
-			return err
-		}
-		if _, err = t.scheduleAuthorityTx(ctx, tx, consent.Authority); err != nil {
-			return err
-		}
-		if a.Principal.Authority.ID != "" {
-			if _, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority); err != nil {
-				return err
-			}
-		}
-		fire := &CronFire{DueAt: due, DecidedAt: now, Outcome: CronOutcomeFired, RunID: result.RunID, Args: request.RequestedArgs}
-		cursor, next := row.CursorAt, row.NextDueAt
-		if due.IsZero() {
-			fire.DueAt, fire.Detail = now, "run now"
-		} else {
-			cursor = due
-			next, err = scheduleNext(row, now, 0)
-			if err != nil {
-				return err
-			}
-		}
-		return t.resolveCronDueTx(ctx, tx, row.ID, cursor, next, fire, now)
-	})
-	if err != nil {
-		return AdmissionResult{}, err
-	}
-	return result, nil
-}
-
-func scheduleIntakeScope(id string) (string, error) { return stateHash(struct{ Schedule string }{id}) }
-
-// ScheduledSourceVerified checks that the private admission path uses the persisted consent's repository.
-func ScheduledSourceVerified(ctx context.Context, resolver capability.AuthorityResolver, request IntakeRequest) bool {
-	tx, ok := resolver.(*storeTx)
-	if !ok || request.scheduleID == "" {
-		return false
-	}
-	var raw string
-	if tx.QueryRowContext(ctx, `SELECT consent_json FROM cron_schedules WHERE team=? AND id=?`, request.Request.Team, request.scheduleID).Scan(&raw) != nil {
-		return false
-	}
-	var consent scheduleConsent
-	return json.Unmarshal([]byte(raw), &consent) == nil && consent.Version == 1 && consent.Authority == request.Authority && consent.Request.Git.Repository == request.Request.Git.Repository && consent.Request.Source.Location == request.Request.Source.Location
+	result, err := t.admitSchedule(ctx, row, "manual:"+key, time.Time{}, &a)
+	return row.ID, result.RunID, result.Replayed, err
 }

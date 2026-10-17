@@ -3144,6 +3144,15 @@ trigger repository columns or issues one read per result.
 
 ## GitHub App administration transactions
 
+Tenant also implements C2 GitHubConnectWriter. Identity reads, nonce consumption
+and installation binding recheck the same live direct owner session, current
+team membership and exact account/team in a store-clock transaction. Binding
+rechecks the linked provider subject, derives the connector and preserves a
+foreign installation's ownership. Nonces commit once before provider redemption.
+Installation creation and update timestamps use nanoseconds. Raw installation
+binding and the unscoped connection nonce API are removed. Test fixtures use
+TestOnlySeedGitHubInstallation, which shares the binding statement.
+
 Tenant implements C2 GitHubAppWriter. All six mutations serialize on the team
 and recheck live authority, ancestry, membership and the selected team.admin
 access before commit. Subscription and automation writes lock and require the
@@ -3160,8 +3169,8 @@ The raw Tenant UnbindGitHubAppInstallation, PutGitHubAppTrigger,
 DeleteGitHubAppTrigger, PutGitHubAppAutomation, DeleteGitHubAppAutomation,
 SetGitHubAppExtraRepos and SetGitHubAppExtraRepoIDs are removed. Trusted provider
 uninstall still uses Operator and its existing transaction helper. Automatic
-schedule/App run admission still needs the committing origin contract described
-in the earlier intake handoff.
+schedule run admission still needs the committing origin contract described
+in the earlier intake handoff. App admission uses the trusted transaction below.
 
 
 ## Run-control transactions and sealed intake rate guards
@@ -3488,6 +3497,149 @@ capacity drops, retry sleeps and shutdown drain are removed. Pending, running
 and terminal intents all come from run transitions. Metrics and parent
 notification remain due for their unfinished consumers.
 
+Invalid sealed App completion facts call `Tenant.RejectRunEffect`: the existing
+revision-fenced transaction increments attempts once and consumes only that
+revision. The controller logs that failure once. Transient provider and storage
+errors retain the existing retry backoff. No completion SQL dialect change is made.
+
+
+## Verified GitHub App admission integration
+
+`Tenant.AdmitGitHubAppRun(ctx, GitHubAppAdmission)` is a trusted webhook adapter,
+not a customer route. C2 calls it only after HMAC verification, event binding,
+repository coverage and event/subscription selection. It supplies the exact
+installation snapshot and either the selected subscription or automation grant.
+
+The transaction attaches that proof privately to `storeTx` and calls the existing
+`admitRun`. Its `github_app` authority reference identifies the installation and
+numeric repository for accountability. It is neither a capability nor a session.
+Only that transaction resolves it. Ordinary intake and authentication cannot
+manufacture it, and no bearer is issued for it. `VerifiedAppIntake` exposes the
+proof to the existing C4 settings policy through its transaction resolver.
+
+Every authority check locks and rechecks the installation's team, suspension and
+connection generation, the bound signed event, and the exact subscription or
+consent generation. Admission retains the shared number allocation, rate guards,
+source location, owner unit, first seal and completion intent. Failed validation
+or effects roll all of them back. A retry of the signed body and pipeline returns
+the existing run without spending another number or admission slot.
+
+`github_app_deliveries.admitted_team` is an empty string until the first successful
+admission of that signed body. The same transaction binds it to the tenant.
+Partial deliveries retain that binding even while another pipeline is shed.
+Moving the installation cannot admit the body into a second tenant. The event
+row expires with the existing replay retention. No schema migration is added.
+
+Replay keys use the signed body digest plus pipeline and are selected inside the
+tenant. The processed-body marker still prevents replays across installations
+that move teams. `GitHubCommitRuns` replaces `GitHubCommitTriggers` and reads
+sealed requests in one query by tenant, numeric repository and exact SHA.
+Re-request selection uses those facts rather than removed trigger environment
+columns. OIDC classification uses the event in the seal, so expiry of the replay
+ledger does not erase the identity of a retained or retried run.
+
+`CronSchedule.RepositoryKey` is a read projection of derived identity, separate
+from App installation authority. `ArmCronSchedule` ignores the input key and
+canonicalizes the source using the verified App IDs or `ScheduleRepositoryResolver`
+on its existing intake policy. The controller implements that resolver through
+its shared run-intake identity lookup. Manual GitHub schedules acquire numeric
+identity without acquiring App authority. Manual/App conflicts compare those keys.
+Unresolved GitHub URLs fail before arming, including former names that cannot be
+resolved. The old alias comparison and its GitHub token mint are removed.
+
+Data authority maps a full GitHub branch ref and the App's short default-branch
+name into the same storage ref namespace. Only the exact verified pushed branch
+can receive default-branch trust. Tags, mismatched SHAs and non-default events
+remain untrusted. Generated tests cover these cases through live data authority.
+
+The raw automation-specific and generic trigger insertion APIs are removed.
+Controller schedules reach the same sealed intake through the adapter below.
+
+
+## Integration amendment: audited GitHub source release
+
+`Tenant.ReleaseGitHubSourceCredential(ctx, Authorized, GitHubSourceProvider)`
+returns a `githubapp.Token` only after the existing source-release audit commits.
+The provider interface contains only `InstallationTokenByIDs`, matching the
+existing GitHub client and store test fake. A short transaction resolves and
+validates source authority and consent. Minting runs with no transaction open.
+A second short transaction repeats authority, enrollment, consent and fence
+checks, requires the same installation and approved ID set, and writes the audit.
+GitHub verifies coverage while minting that ID set. Source release never lists
+installation repositories, so the listing's 1,000-repository bound cannot turn
+an authorized source into not_found. Refused coverage returns conflict; other
+mint failures return unavailable. The store derives the repository, ref, SHA, installation and executor from
+its authority chain and request seal. Verified App requests use their recorded
+installation. Typed requests require a current team subscription for their
+numeric repository ID. A live installation belongs to the same team. Every
+requested ID must be covered, and only `contents: read` is minted.
+
+`github_app_extra_repos.repository_id` is a positive source repository ID in the
+disposable baseline schema. Owner writes resolve it from the installation along
+with each extra ID. Release and replacement use this source ID, so neither a
+source nor an extra can transfer its approval to a replacement at the old name.
+Display slugs remain reporting fields. No migration or name-based fallback is
+added. The unused `GitHubAppExtraRepoRefs` reader and legacy `SourceCredential`
+and `SourceSpec` response declarations are removed. Their numeric-ID assertions
+now run through the release transaction and generated rename tests.
+
+The App and stored-credential paths share persisted source authority, fences and
+the audit writer. App tokens do not require machine-owner opt-in. Stored team
+credentials still require verified Cloud enrollment or the machine owner's
+consent. Both paths check the claim profile's Accept rule and require the root
+machine in the same team, except for verified Cloud placement. The App path
+checks authority and lease again after provider I/O. Audit
+failure returns no token. An upstream token minted before a refused audit stays
+unreturned, within the existing external-token revocation residual.
+
+
+## Integration amendment: scheduled origin and final trigger-writer cut
+
+`Tenant.AdmitScheduledRun(ctx, CronSchedule, due)` is the trusted controller-tick
+adapter. The persisted schedule is durable consent for unattended execution.
+Its private transaction authority is `schedule:<id>`, not a capability or session.
+`ArmedBy` remains attribution for the arming operation. It never fabricates a
+live account or bearer. The admission subject is a service attributed to `ArmedBy`, so all of that
+principal's schedules share the per-principal admission counter. The sealed
+authority reference still identifies the exact schedule.
+
+The transaction locks and rechecks the tenant, repository key and location,
+pipeline, effective declaration, arming identity and timestamp, pause and declared
+state. Mutable cursor and fire history do not change execution consent. A pending
+team deletion refuses admission. App-managed schedules also require the current
+same-team, unsuspended installation and repository automation consent. Admission
+rechecks the origin after shared intake effects and number allocation, before
+commit. A changed or removed origin returns no run and rolls back all effects.
+
+`VerifiedScheduleIntake` supplies the persisted source through the existing
+`IntakePolicy` resolver. Ordinary requests cannot manufacture that transaction
+proof. Source identity does not establish a verified App event, default-branch
+trust or automatic pool grants. The shared C4 policy still resolves settings,
+ceilings and retention. Run-now may use a paused schedule, as before.
+
+The shared intake seals the current source, effective arguments and schedule
+origin, allocates the number, writes the owner queue and completion intents,
+and applies run-rate guards. Its exact due key uses the schedule ID and UTC
+RFC3339Nano instant. Repetition returns the original execution. A changed
+execution declaration under the same key conflicts. The sealed authority ID
+traces the run to its schedule instead of a legacy trigger environment column.
+
+`Tenant.CreateTrigger`, `CreateTriggerWithRun`, `FindTriggerByIdempotencyKey`,
+`createTriggerTx`, `Store.createRunTx`, both duplicate-trigger sentinel errors,
+and controller `triggerIntake`, `triggerRows`, `triggerRunInvocation`,
+`triggerReqGit` and `CronIdempotencyKey` are removed. The context-selected
+`WithCreatingPrincipal` API is removed from production. Shared intake derives
+actors from its committing authority. Reporting fixtures seed current-schema
+rows through `teststore`, without acquiring executable authority.
+
+
+Scheduled source release uses the sealed schedule authority ID without inventing
+App event facts. If there is no ordinary subscription, the source transaction
+selects the same tenant, numeric repository, pipeline and live schedule's
+repository automation consent. It locks the installation before locking and
+rechecking that relation. Contents-only minting, exact repository and extra IDs,
+claim fencing and committing audit remain the existing source-release path.
+
 
 ## W1b child admission reconciliation
 
@@ -3507,29 +3659,40 @@ client's still-missing cross-repository source resolution.
 
 ## W1b scheduled intake and concurrency transactions
 
-Tenant implements C2's six `ScheduleWriter` mutations and
-`AdmitScheduledRun(ctx, scheduleID, due)`. `cron_schedules.consent_json` holds a
-version-one envelope containing the arming authority and request template.
-Replacement locks the tenant and commits declarations, consent, withdrawals and
-caps together. It preserves existing IDs, pauses, cursors, history and overrides.
-`CronOverride.TZSet` distinguishes an explicit empty zone from inheritance.
+Tenant implements C2's six `ScheduleWriter` mutations. Automatic and manual
+launches use W1's `AdmitScheduledRun(ctx, CronSchedule, due)` adapter and its
+private schedule authority proof. There is one call to the shared `admitRun`.
+The duplicate admission implementation, private intake selector and separate
+schedule source-verification API are removed.
 
-`ScheduleSourcePolicy.ResolveScheduleSource` resolves the persisted source intent.
-The controller implements it. Source I/O runs between consent checks. The final
-transaction compares the stored declaration and consent with the prepared
-snapshot, resolves full ancestry and membership again, and calls the existing
-sealed intake. The due instant must match the effective cadence and store clock.
-The run's idempotency scope derives from the schedule ID within its tenant.
-A due instant or manual request key returns the first committed seal even if a
-followed branch has moved. Replay still requires current consent. Run, number,
-queue unit, fire history and cursor commit together.
+The persisted declaration is unattended execution consent. App schedules also
+recheck live same-team installation and repository automation consent. API/local
+registration retains its request template and arming authority in
+`cron_schedules.consent_json`; those registrations recheck that authority and its
+membership, including replay. `ArmedBy` supplies attribution through the schedule
+service principal. It never creates a credential or a session.
 
-Local registration prepares pins and private environment snapshots before one
-`ReplaceAuthorizedLocalSchedules` transaction. Its seal carries the captured
-snapshot, checkout and configured entrypoint. Local pause, override and deletion
-use the same authorized writers under the controller's local schedule lock.
-GitHub repository IDs are resolved through the controller source identity reader.
-A schedule origin grants no App provenance or pool access.
+Replacement locks the tenant and commits declarations, captured inputs,
+withdrawals and caps together. It preserves IDs, pauses, cursors, history and
+overrides. `CronOverride.TZSet` preserves an explicit empty zone. Local
+registration prepares pins and environment snapshots before the transaction.
+Its request retains the captured environment, checkout and configured entrypoint.
+
+`ScheduleSourcePolicy` resolves source intent before admission. The final
+transaction locks and rechecks the declaration and saved inputs, then uses W1's
+source proof through the existing intake policy. API/local due instants must
+match the effective cadence and store clock. Manual runs can launch a paused
+schedule without moving its cursor. Run, sealed request, queue unit and fire
+history commit together.
+
+Shared intake scopes schedule replay by tenant and schedule authority ID while
+preserving `ArmedBy` for attribution and rate guards. Automatic keys include the
+exact UTC due instant. Manual keys occupy a separate namespace. Replay retains
+the first revision after a followed branch moves and still checks current
+consent. Changed pinned revisions or execution inputs conflict under one key.
+Replacing the armer cannot admit a second run for an already committed instant.
+The tick reloads the tenant's stored row before passing it to the writer, so
+caller-supplied schedule fields cannot replace persisted intent.
 
 Tenant also implements all eight `ConcurrencyStore` transactions. They consume
 C2's resolved selectors, current authority and accepted declarations. Acquisition
@@ -3548,11 +3711,9 @@ Cloud scheduling. The real api.sock test is
 transport counterpart runs the same assertions. Native evidence belongs to the
 lead harness.
 
-Open integration points: automatic App schedule discovery still uses the legacy
-arming path and supplies no persisted consent. Following a private remote branch
-needs audited controller source credentials during revision resolution. Pinned
-remote schedules use the existing post-admission source release. HTTP box groups
-need a persisted host identity, and memo requests need accepted namespace
-metadata. The concrete writer refuses those missing authorities. Native box
-admission remains available. The legacy scheduling and memo surfaces are not
-retired by this cut.
+Open integration points: following a private remote branch needs audited
+controller credentials during revision lookup. Pinned App schedules use the
+existing post-admission source release. HTTP box groups need persisted host
+identity, and memo requests need accepted namespace metadata. Missing authority
+is refused. Native box admission remains available. These gaps remain visible
+for the lead's launch integration work.

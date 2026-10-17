@@ -22,9 +22,9 @@ func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
 	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "schedule-owner"}
 	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
-		RepoURL: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		Branch: "main",
-		SHA:    "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: "https://git.example.com/acme/widgets.git",
+		Branch:  "main",
+		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
 			Pipeline: "nightly",
 			Name:     store.CronScheduleDefaultName,
@@ -55,10 +55,8 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	// instant exists without the test waiting a minute for the clock.
 	ahead := func() time.Time { return time.Now().Add(2 * time.Minute) }
 	alpha := New(st, nil)
-	ScheduleWriterFixture(t, alpha)
 	alpha.cronHolder, alpha.cronNow = "alpha", ahead
 	beta := New(st, nil)
-	ScheduleWriterFixture(t, beta)
 	beta.cronHolder, beta.cronNow = "beta", ahead
 
 	ctx := context.Background()
@@ -108,6 +106,13 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 		t.Fatalf("triggers = %d, want one", len(triggers))
 	}
 	trigger := triggers[0]
+	if trigger.TriggerSource != "schedule" {
+		t.Errorf("trigger source = %q, want %q", trigger.TriggerSource, "schedule")
+	}
+	sealed, err := teststore.ForTeam(t, st, store.DefaultTeam).ReadRun(ctx, trigger.ID)
+	if err != nil || sealed.Request.AuthorityRef.Kind != "schedule" || sealed.Request.AuthorityRef.ID != sched.ID {
+		t.Fatalf("sealed schedule origin = %+v, err=%v", sealed.Request.AuthorityRef, err)
+	}
 	if trigger.IdempotencyKey == "" {
 		t.Error("the launch carried no idempotency key")
 	}
@@ -144,7 +149,6 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 	sched := armPushedForTick(t, st)
 
 	srv := New(st, nil)
-	ScheduleWriterFixture(t, srv)
 	launcher := cronLauncher{server: srv}
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
 	first, err := launcher.Launch(context.Background(), sched, due)
@@ -226,9 +230,9 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 		t.Fatalf("ForTeam default: %v", err)
 	}
 	report, err := (&crons.Service{Store: st, Schedules: tenantB, ArmedBy: "team-b-owner"}).ArmPushed(ctx, crons.ArmPush{
-		RepoURL: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		Branch: "main",
-		SHA:    "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: "https://git.example.com/acme/widgets.git",
+		Branch:  "main",
+		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
 			Pipeline: "nightly",
 			Name:     store.CronScheduleDefaultName,
@@ -244,7 +248,6 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 	id := report.Schedules[0].ID
 
 	srv := New(st, nil)
-	ScheduleWriterFixture(t, srv)
 	srv.cronNow = func() time.Time { return time.Now().Add(2 * time.Minute) }
 	srv.cronTickOnce(ctx)
 
@@ -277,7 +280,6 @@ func TestCronLauncherUsesStoredTenantScheduleProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := New(st, nil)
-	ScheduleWriterFixture(t, srv)
 	launcher := srv.ScheduleLauncher()
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
 	first, err := launcher.Launch(t.Context(), sched, due)

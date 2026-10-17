@@ -269,9 +269,9 @@ func TestTeamBoundary_ConcurrencyHolderCannotCrossTeams(t *testing.T) {
 				t.Errorf("team B reached team A's concurrency holder through %s: %d", route, code)
 			}
 		}
-		holder, err := f.teamA.ConcurrencyHolder(context.Background(), "deploy", "holder-a", time.Now())
-		if err != nil || holder == nil || holder.RunID != f.runA {
-			t.Fatalf("team A holder changed: %+v, %v", holder, err)
+		state, err := f.teamA.GetConcurrencyState(t.Context(), "deploy")
+		if err != nil || len(state.Holders) != 1 || state.Holders[0].HolderID != "holder-a" || state.Holders[0].RunID != f.runA || !state.Holders[0].LeaseExpiresAt.After(time.Now()) {
+			t.Fatalf("team A holder changed: %+v, %v", state, err)
 		}
 	})
 }

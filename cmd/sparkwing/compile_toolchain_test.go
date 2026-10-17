@@ -81,6 +81,7 @@ if [ "$1" = env ]; then
  printf 'go1.26.6\ngo1.26.6\noff\n'
  exit 0
 fi
+if [ "$1" = mod ]; then exit 0; fi
 printf '%s\n' "$GOTOOLCHAIN" >> "$BUILD_LOG"
 while [ $# -gt 0 ]; do
  if [ "$1" = -o ]; then

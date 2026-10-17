@@ -235,32 +235,6 @@ type ConcurrencyState struct {
 	Waiters           []ConcurrencyWaiter
 }
 
-// ConcurrencyHolder returns an unexpired tenant holder, including superseded holders.
-func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
-	return t.concurrencyHolder(ctx, key, holderID, now, holderLeaseLiveSQL(""))
-}
-
-func (t *Tenant) concurrencyHolder(ctx context.Context, key, holderID string, now time.Time, livePredicate string) (*ConcurrencyHolder, error) {
-	row := t.s.queryRow(ctx,
-		`SELECT `+holderColumns+`
-		   FROM concurrency_holders
-		  WHERE team = ?
-		    AND key = ?
-		    AND holder_id = ?
-		    AND `+livePredicate,
-		string(t.team), key, holderID, now.UnixNano(),
-	)
-	holder, err := scanHolder(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, notFound("concurrency holder", key+"/"+holderID)
-	}
-	if err != nil {
-		return nil, err
-	}
-	scrubInheritedHolder(&holder)
-	return &holder, nil
-}
-
 func scrubInheritedHolder(holder *ConcurrencyHolder) {
 	if holder.DeclaredCapacity == inheritedHolderDeclaredCapacity {
 		holder.DeclaredCapacity = 0

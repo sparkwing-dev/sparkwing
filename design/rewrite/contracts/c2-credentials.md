@@ -268,8 +268,9 @@ snapshot, checks licensing, absolute lifetime, direct ancestry and the current
 WithOperatorAccounts configuration, then projects CredentialConsole with only
 OperatorConsole. Other routes retain CredentialSession and member grants. The
 session hash, active team, account ID and lifetime are preserved for CSRF.
-BindNone has no tenant relation for console authority, so deployment targets do
-not become limited to the account's active team. Other bindings still use C1.
+Console deployment settings use the explicit operator_settings binding for
+cross-team quota targets. BindNone cannot select a foreign team. Other bindings
+still use C1.
 C1's authority-bearing console mutation transactions remain required. The
 controller's proof projection does not implement those committing rechecks.
 
@@ -974,11 +975,12 @@ opener. Missing or failed decryption refuses acceptance. The controller/store
 tests use the shared validator to refuse decrypted secret identifiers before
 insertion. Native host and generated-expansion evidence remain separate.
 
-C1's audited release method returns confirmed stored SSH/HTTPS credentials.
-GitHub App minting and extra-repository release still need an audited C1
-contract before their runtime can be restored. W2 retains no unaudited App
-mint path. The source Access consumer in W3 and client projection in W9 must
-consume the new credential response with their existing sealed source facts.
+C1's audited release methods return confirmed stored SSH/HTTPS credentials or
+a narrowly scoped GitHub App token. `SourceController.GitHub` supplies the existing
+client through C1's `GitHubSourceProvider` interface. The default server adapter
+uses its configured App client. The App token is returned as `kind: github_app`,
+`host: github.com`, and `secret`. W3's source Access and W9's client consume that
+credential with the checkout facts already present in the seal.
 
 ### Identity linking and local HTTP composition
 
@@ -3325,8 +3327,9 @@ console proof, inside its transaction and rechecks before commit. Existing compu
 and storage setters share their transaction helpers with these authorized writers.
 SignUpSettingsChange lives in store, which owns its atomic patch and provenance.
 
-BindNone permits an unbound deployment credential to select a target team for
-operator quota policy. The shared route policy still requires the exact operator
+BindOperatorSettings (`operator_settings`) permits an unbound deployment or
+console credential to select a team only on the two operator quota settings
+routes. BindNone retains its ordinary team boundary. The shared route policy still requires the exact operator
 grant. Run and job selectors keep their bindings, and tenant credentials cannot
 select a foreign team. Relational authorization resolves console proof through the
 same transaction-local owner as issuance and settings writes.
@@ -3340,7 +3343,8 @@ same tenant and unsuspended. It mints only the exact repository ID with
 checks:write or statuses:write. `githubapp.Client.RepositoryByID` resolves the
 current name under that restricted token, so a rename or reused old name cannot
 redirect a report. Installation ownership is rechecked after that lookup.
-An invalid or unavailable identity keeps the revision due.
+Invalid committed App facts consume the failed revision once through C1's
+RejectRunEffect. Unavailable provider identity remains due with retry backoff.
 
 The shared completion worker calls the provider synchronously under the
 existing per-run report lock and acknowledges only a successful revision.
@@ -3351,6 +3355,37 @@ without job identifiers, arguments or private errors. The old queue-only
 Server.Shutdown API and its callers are removed because no reporter goroutine
 remains to drain.
 
+
+## Trusted App origin integration
+
+The verified webhook adapter now calls C1 `AdmitGitHubAppRun` with the selected
+installation and consent generation. C1 supplies `VerifiedAppIntake` only to that
+admission transaction. `Server.ResolveIntake` keeps the normal settings, ceilings
+and retention resolution and uses those trusted delivery/source facts.
+
+The transaction-local `github_app` authority reference is an accountability tag.
+It is not an accepted credential class, token spelling, authentication route or
+new issuance operation. Customer intake cannot supply its proof. Revocation,
+installation moves, consent replacement and partial-delivery replay are checked
+again in the committing transaction. Source credential release remains a separate
+claim-authorized operation.
+
+
+### Integration amendment: App credential provenance
+
+`SourceReleaseRequest.GitHubApp` is trusted provider provenance, set only by
+C1's App release transaction after current installation, subscription and ID
+coverage checks. It exempts App tokens from machine-owner stored-credential
+consent under frozen §2.5. It supplies no grants and bypasses no ancestry,
+repository, audience, binding or liveness check. It is never accepted from a
+source request body. Stored-credential requests leave it false.
+
+The source route keeps the existing response contract. Legacy `token`,
+`repositories`, SHA and checkout-policy fields do not return. Missing source
+credentials use the shared `not_found` error with a remedy. Missing grants or
+bindings use `forbidden`. Runner roots remain claim-only. Current source bodies
+are rejected, including caller-selected extra repositories. No route, flag,
+setting, environment variable or compatibility surface is added.
 
 ## W1b controller test reconciliation: preflight diagnostics and pricing errors
 
@@ -3406,12 +3441,12 @@ and App-origin intake still requires a verified delivery in the transaction.
 `ScheduledRunWriter` is the controller tick's tenant transaction interface:
 
 - `Team() store.Team`
-- `AdmitScheduledRun(context.Context, string, time.Time) (store.AdmissionResult, error)`
+- `AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)`
 
-The arguments after context are the stored schedule ID and due instant.
+The arguments after context are the tenant-loaded schedule snapshot and due instant.
 `WithScheduledRunWriter` supplies a resolver by tenant. The default requires
 `Tenant` to implement the interface. Missing and wrong-team adapters refuse with
-`policy_missing`. The controller passes a UTC instant and records activity only
+`policy_missing`. The controller reloads the stored row, passes a UTC instant and records activity only
 after a committed, nonempty run ID. It no longer builds legacy trigger/run rows
 or uses duplicate-trigger SQL as a replay path. `CronIdempotencyKey` is removed.
 
@@ -3427,5 +3462,4 @@ trust or pool access. Return the first committed result for a repeated instant.
 Tenant implements both interfaces with persisted arming consent and sealed
 intake. The concrete controller proofs cover local registration, Cloud firing,
 replay and current authority. The real api.sock proof remains assigned to the
-lead harness. C1 records the remaining automatic App, private follow, HTTP box
-and memo integration points.
+lead harness. App and API/local schedules now share W1's sealed intake. C1 records the remaining private-follow, HTTP box and memo integration points.

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"path"
 	"strconv"
@@ -17,7 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -62,16 +61,8 @@ type githubAppWebhookResp struct {
 	Runs   []githubAppRun `json:"runs,omitempty"`
 }
 
-// safety: the replay key covers the team, the pipeline and the signed body, so
-// a re-sent delivery is refused however its unsigned delivery header reads.
-func githubAppReplayKey(team store.Team, pipeline string, body []byte) string {
-	sum := sha256.New()
-	sum.Write([]byte("github-app"))
-	for _, part := range [][]byte{[]byte(team), []byte(pipeline), body} {
-		sum.Write([]byte{0})
-		sum.Write(part)
-	}
-	return hex.EncodeToString(sum.Sum(nil))
+func githubAppReplayKey(pipeline string, body []byte) string {
+	return githubAppDeliveryDigest(body) + ":" + pipeline
 }
 
 func githubAppIgnored(w http.ResponseWriter, reason string) {
@@ -633,7 +624,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	for _, sub := range subs {
 		manualPipelines[sub.Pipeline] = true
 		if githubAppSubscribes(sub, event, env.Action, intake.env, intake.branch) {
-			planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: intake})
+			planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: intake, subscription: &sub})
 		}
 	}
 	if grant, err := tenant.GitHubAppAutomation(ctx, in.InstallationID, repo.ID); err == nil && (event == "pull_request" || event == "push" && intake.branch != "") {
@@ -651,13 +642,10 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 					return
 				}
 			} else if preview.Enabled {
-				automaticIntake := intake
-				automaticIntake.env = maps.Clone(intake.env)
-				automaticIntake.env[EnvDefaultBranch] = preview.DefaultBranch
 				for _, decl := range preview.Pipelines {
 					// safety: an existing subscription owns its pipeline's event policy, including events it excludes.
 					if !manualPipelines[decl.Pipeline] && automationSubscribes(decl, event, env.Action, intake) {
-						planned = append(planned, githubAppPlannedRun{pipeline: decl.Pipeline, intake: automaticIntake, automation: &grant})
+						planned = append(planned, githubAppPlannedRun{pipeline: decl.Pipeline, intake: intake, automation: &grant})
 					}
 				}
 			}
@@ -715,7 +703,7 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	}
 	repoURL := "https://github.com/" + repo.Slug() + ".git"
 	svc := s.cronServiceFor(tenant, "github-app:"+strconv.FormatInt(in.InstallationID, 10))
-	if err := s.manualCronConflict(r.Context(), svc, in.InstallationID, repo, repoURL, entries); err != nil {
+	if err := s.manualCronConflict(r.Context(), svc, repo, entries); err != nil {
 		if _, werr := tenant.WithdrawGitHubCronRepository(r.Context(), in.InstallationID, repo.ID, time.Now()); werr != nil {
 			return http.StatusInternalServerError, "", fmt.Errorf("stop conflicting App schedule: %w", werr)
 		}
@@ -743,15 +731,11 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	return 0, "", nil
 }
 
-func (s *Server) manualCronConflict(ctx context.Context, svc *crons.Service, installationID int64,
-	repo store.GitHubRepo, repoURL string, entries []crons.Declared,
+func (s *Server) manualCronConflict(ctx context.Context, svc *crons.Service,
+	repo store.GitHubRepo, entries []crons.Declared,
 ) error {
 	if len(entries) == 0 {
 		return nil
-	}
-	wantRepo, err := sourceurl.Identity(repoURL)
-	if err != nil {
-		return fmt.Errorf("read schedule repository identity: %w", err)
 	}
 	want := map[string]bool{}
 	for _, entry := range entries {
@@ -765,33 +749,11 @@ func (s *Server) manualCronConflict(ctx context.Context, svc *crons.Service, ins
 		if row.GitHubRepositoryID != 0 || row.Where != store.CronWhereController || !want[row.Pipeline+"\x00"+row.Name] {
 			continue
 		}
-		gotRepo, err := sourceurl.Identity(row.RepoPath)
-		if err != nil {
-			return fmt.Errorf("cannot verify manually pushed schedule %s/%s; disarm it before App auto-arming: %w",
-				row.Pipeline, row.Name, err)
+		if row.RepositoryKey == "" {
+			return fmt.Errorf("manual schedule %s/%s has no resolved repository identity", row.Pipeline, row.Name)
 		}
-		if gotRepo == wantRepo {
+		if row.RepositoryKey == runspec.RepoKey(fmt.Sprintf("gh:%d", repo.ID)) {
 			return fmt.Errorf("a manually pushed schedule already owns %s/%s; disarm it before App auto-arming", row.Pipeline, row.Name)
-		}
-		host, slug, ok := strings.Cut(gotRepo, "/")
-		if !ok {
-			return fmt.Errorf("cannot verify manually pushed schedule %s/%s; disarm it before App auto-arming", row.Pipeline, row.Name)
-		}
-		if host != "github.com" && host != "github.com:443" && host != "ssh.github.com" {
-			continue
-		}
-		owner, name, ok := strings.Cut(slug, "/")
-		if !ok || owner == "" || name == "" {
-			return fmt.Errorf("cannot verify manually pushed schedule %s/%s; disarm it before App auto-arming", row.Pipeline, row.Name)
-		}
-		id, err := s.githubApp.client.RepositoryIDThroughAlias(ctx, installationID, repo.Name, owner, name)
-		if err != nil {
-			return fmt.Errorf("cannot prove manually pushed schedule %s/%s is another repository; disarm it before App auto-arming: %w",
-				row.Pipeline, row.Name, err)
-		}
-		if id == repo.ID {
-			return fmt.Errorf("a manually pushed schedule at an older URL already owns %s/%s; disarm it before App auto-arming",
-				row.Pipeline, row.Name)
 		}
 	}
 	return nil
@@ -937,9 +899,10 @@ func githubAppSubscribes(sub store.GitHubAppTrigger, event, action string, env m
 }
 
 type githubAppPlannedRun struct {
-	pipeline   string
-	intake     githubAppIntake
-	automation *store.GitHubAppAutomation
+	pipeline     string
+	subscription *store.GitHubAppTrigger
+	intake       githubAppIntake
+	automation   *store.GitHubAppAutomation
 }
 
 // safety: A signed App delivery starts its budgeted run set only once.
@@ -977,7 +940,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		sha := ""
 		for _, plan := range planned {
 			existing, err := tenant.FindTriggerByWebhookReplay(ctx,
-				githubAppReplayKey(tenant.Team(), plan.pipeline, body))
+				githubAppReplayKey(plan.pipeline, body))
 			if err == nil && existing != nil && existing.GitSHA != "" {
 				sha = existing.GitSHA
 				break
@@ -1005,7 +968,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		// safety: a run this delivery already started answers without spending,
 		// so a redelivery after a partial shed pays only for what was shed.
 		if existing, err := tenant.FindTriggerByWebhookReplay(ctx,
-			githubAppReplayKey(tenant.Team(), plan.pipeline, body)); err == nil && existing != nil {
+			githubAppReplayKey(plan.pipeline, body)); err == nil && existing != nil {
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
 		}
@@ -1021,7 +984,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "shed"})
 			continue
 		}
-		run, err := s.startGitHubAppRun(r, tenant, plan, repo, delivery, body)
+		run, err := s.startGitHubAppRun(r, tenant, in, plan, repo, body)
 		if err != nil {
 			if s.writeComputeLimitRefusal(w, r, err) {
 				return
@@ -1067,7 +1030,7 @@ func (s *Server) writeGitHubAppDuplicate(w http.ResponseWriter, r *http.Request,
 	for _, plan := range planned {
 		run := githubAppRun{Pipeline: plan.pipeline, Status: "duplicate"}
 		existing, err := tenant.FindTriggerByWebhookReplay(r.Context(),
-			githubAppReplayKey(tenant.Team(), plan.pipeline, body))
+			githubAppReplayKey(plan.pipeline, body))
 		if err == nil && existing != nil {
 			run.RunID = existing.ID
 		}
@@ -1077,50 +1040,39 @@ func (s *Server) writeGitHubAppDuplicate(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) startGitHubAppRun(
-	r *http.Request, tenant *store.Tenant, plan githubAppPlannedRun, repo store.GitHubRepo, delivery string, body []byte,
+	r *http.Request, tenant *store.Tenant, installation store.GitHubAppInstallation, plan githubAppPlannedRun, repo store.GitHubRepo, body []byte,
 ) (githubAppRun, error) {
-	ctx := r.Context()
-	pipeline, in := plan.pipeline, plan.intake
-	replayKey := githubAppReplayKey(tenant.Team(), pipeline, body)
-	runID := newRunID()
-	triggerEnv := map[string]string{"GITHUB_DELIVERY": delivery}
-	for k, v := range in.env {
-		triggerEnv[k] = v
-	}
-	trigger := sparkwing.TriggerInfo{Source: "github", User: in.user, PullRequest: in.prInfo}
+	in := plan.intake
 	now := time.Now()
-	trig := store.Trigger{
-		ID: runID, Pipeline: pipeline, TriggerSource: trigger.Source, TriggerUser: trigger.User,
-		TriggerEnv: triggerEnv, GitBranch: in.branch, GitSHA: in.sha, Repo: repo.Slug(),
-		GithubOwner: repo.Owner, GithubRepo: repo.Name, GithubRepoID: repo.ID,
-		WebhookDelivery: delivery + "/" + pipeline, WebhookReplayKey: replayKey,
-		CreatedAt: now,
+	ref := in.env["GITHUB_REF"]
+	key := runspec.RepoKey(fmt.Sprintf("gh:%d", repo.ID))
+	defaultBranch := in.env[EnvDefaultBranch]
+	request := runspec.Request{
+		Version: 1, Team: string(tenant.Team()), Pipeline: plan.pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost,
+		Actor: runspec.Actor{Kind: "github", ID: in.user, Display: in.user},
+		Git: runspec.Git{
+			Repository: runspec.Repository{Key: key, Display: repo.Slug()}, Ref: ref, SHA: in.sha,
+			DefaultBranch: runspec.Optional[string]{Set: defaultBranch != "", Value: defaultBranch},
+			App:           runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Event: in.env["GITHUB_EVENT_NAME"], Action: in.env["GITHUB_ACTION"], DeliveryKey: githubAppDeliveryDigest(body), InstallationID: installation.InstallationID, RepositoryID: repo.ID, Ref: ref, SHA: in.sha, DefaultBranch: defaultBranch, DefaultBranchPush: in.env["GITHUB_EVENT_NAME"] == "push" && ref == "refs/heads/"+defaultBranch, VerifiedAt: now}},
+		},
+		Source: runspec.Source{Ref: ref, Location: runspec.SourceLocation{RemoteURL: "https://github.com/" + repo.Slug() + ".git", PipelineDir: ".sparkwing"}},
 	}
-	run := store.Run{
-		ID: runID, Pipeline: pipeline, Status: "pending", TriggerSource: trigger.Source,
-		GitBranch: in.branch, GitSHA: in.sha, DeclaredRepo: repo.Slug(),
-		GithubOwner: repo.Owner, GithubRepo: repo.Name, CreatedAt: now, StartedAt: now,
-		Invocation: triggerRunInvocation(triggerEnv),
+	if in.prInfo != nil {
+		pr := in.prInfo
+		request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: int64(pr.Number), Action: pr.Action, BaseRepo: key, HeadRepo: key, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA, Label: in.env["GITHUB_LABEL"], Merged: runspec.Optional[bool]{Set: in.env["GITHUB_MERGED"] != "", Value: in.env["GITHUB_MERGED"] == "true"}}}
 	}
-	var err error
-	if plan.automation != nil {
-		err = tenant.CreateGitHubAutomationTriggerWithRun(ctx, trig, run, *plan.automation)
-	} else {
-		err = tenant.CreateTriggerWithRun(ctx, trig, run)
-	}
+	result, err := tenant.AdmitGitHubAppRun(r.Context(), store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event")})
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
-		return githubAppRun{Pipeline: pipeline, Status: "ignored"}, nil
-	}
-	if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
-		run := githubAppRun{Pipeline: pipeline, Status: "duplicate"}
-		if existing, ferr := tenant.FindTriggerByWebhookReplay(ctx, replayKey); ferr == nil && existing != nil {
-			run.RunID = existing.ID
-		}
-		return run, nil
+		return githubAppRun{Pipeline: plan.pipeline, Status: "ignored"}, nil
 	}
 	if err != nil {
-		return githubAppRun{}, fmt.Errorf("persist trigger: %w", err)
+		return githubAppRun{}, fmt.Errorf("admit App run: %w", err)
 	}
-	s.recordQueueActivity(time.Now())
-	return githubAppRun{Pipeline: pipeline, RunID: runID, Status: "dispatched"}, nil
+	status := "dispatched"
+	if result.Replayed {
+		status = "duplicate"
+	} else {
+		s.recordQueueActivity(now)
+	}
+	return githubAppRun{Pipeline: plan.pipeline, RunID: result.RunID, Status: status}, nil
 }

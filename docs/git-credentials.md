@@ -1,7 +1,10 @@
 # Team git credentials
 
-`POST /api/v1/runs/{run}/source-credential` releases the stored credential
-for a live claim's sealed source location. It takes no body. The response
+`POST /api/v1/runs/{run}/source-credential` releases a credential
+for a live claim's sealed source location. A covered GitHub repository uses an
+App token restricted to its numeric repository ID and `contents: read`. The
+response uses `kind: github_app` and carries the token in `secret`. A typed
+repository needs a team subscription before it can receive an App token. It takes no body. The response
 contains `kind`, `host`, `secret`, optional `username` and optional
 `known_hosts`. The host already has the checkout URL, SHA and policy in its
 sealed execution input.
@@ -22,8 +25,10 @@ Errors use the shared `{"error":{"code","message"}}` envelope.
 
 Team owners manage GitHub App extra-repository lists at
 `PUT /api/v1/team/github-app/extra-repos`. The server stores repository IDs
-with the list so a rename cannot transfer access to a reused name. Stored
-source release checks the sealed source repository against current enrollment.
+with the list so a rename cannot transfer access to a reused name. Both the source and extra repositories are bound by numeric ID. The store
+checks live installation ownership and coverage before minting. Revoked
+coverage of an approved extra returns 409 naming that repository. The request
+body cannot add repositories to the token.
 
 ## Store a credential
 
@@ -83,8 +88,9 @@ The store rechecks the account and machine under the same lock used by release.
 
 Each release records the repository, host, run, job, generation, machine,
 owner, capability prefix and store timestamp. Audit failure returns no
-credential. The source controller requires the bound secrets cipher before
-requesting a release.
+credential. Stored credentials require the bound secrets cipher before
+release. App tokens use the App signing configuration and are returned only
+after the release audit commits.
 
 ## Use the credential
 

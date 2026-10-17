@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -151,4 +152,47 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	}
 	engineSQL(t, e.Store, `UPDATE nodes SET generation=generation+1 WHERE team='a' AND run_id='run' AND node_id='job'`)
 	engineClaimHTTP(t, h, claim, "GET", path, "", 401)
+}
+
+func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
+	property := func(seed uint32) bool {
+		e, h, claim := childIntakeFixture(t)
+		team, err := e.Store.ForTeam(t.Context(), "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parent, err := team.ReadRun(t.Context(), "run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Store.AsOperator().CreateTeam(t.Context(), "foreign"); err != nil {
+			t.Fatal(err)
+		}
+		private := fmt.Sprintf("private-pipeline-%x", seed)
+		ancestor := fmt.Sprintf("ancestor-%x", seed)
+		if err := teststore.SeedRun(e.Store, t.Context(), "foreign", store.Run{ID: ancestor, Pipeline: private, Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+		cycle := childIntakeBody(t, parent.Request.Request.Pipeline, parent.Request.Request.Git)
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", cycle, 409)
+		body := childIntakeBody(t, private, parent.Request.Request.Git)
+		var replies []string
+		for _, id := range []string{ancestor, ancestor + "-missing"} {
+			raw, err := json.Marshal(runspec.Lineage{ParentRunID: id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, raw)
+			response := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 404)
+			replies = append(replies, response.Body.String())
+		}
+		var count int
+		if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM runs WHERE team='a'`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return replies[0] == replies[1] && !strings.Contains(replies[0], private) && count == 1
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+		t.Fatal(err)
+	}
 }
