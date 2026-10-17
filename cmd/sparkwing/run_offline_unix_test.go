@@ -78,8 +78,15 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first run failed after its modules downloaded: %v\n%s", err, firstOut)
 	}
-	if !strings.Contains(firstOut, "compiling .sparkwing/") {
+	builds := offlineBuildCount(t, toolPath)
+	if builds == 0 {
 		t.Fatalf("the first run did not compile the pipeline binary, so the second proves nothing:\n%s", firstOut)
+	}
+	stopCtx, stop := context.WithTimeout(t.Context(), offlineStopTimeout)
+	err = wingdclient.Stop(stopCtx, wingdclient.Options{Home: sparkwingHome})
+	stop()
+	if err != nil {
+		t.Fatalf("stop the connected controller before testing network denial: %v", err)
 	}
 
 	denier := offlineNewDenier(t)
@@ -93,7 +100,7 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if got := offlineMarkerLines(t, marker); len(got) != 2 || got[0] != offlineSparkGreeting || got[1] != offlineSparkGreeting {
 		t.Fatalf("pipeline body wrote %q, want the spark greeting once per run", got)
 	}
-	if strings.Contains(secondOut, "compiling .sparkwing/") {
+	if offlineBuildCount(t, toolPath) != builds {
 		t.Fatalf("the second run rebuilt the pipeline binary instead of reusing the cached one:\n%s", secondOut)
 	}
 	if reached := denier.since(cached); len(reached) > 0 {
@@ -105,12 +112,9 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the run history with no network reachable: %v\n%s", err, listing)
 	}
-	sources := offlineBinarySources(t, listing)
-	if len(sources) != 2 {
-		t.Fatalf("run history holds %d runs, want the compiled one and the cached one: %v", len(sources), sources)
-	}
-	if sources[0] != "cached" || sources[1] != "compiled" {
-		t.Fatalf("binary sources newest first = %v, want [cached compiled]", sources)
+	ids := offlineSuccessfulRunIDs(t, listing)
+	if len(ids) != 2 || ids[0] == ids[1] {
+		t.Fatalf("run history must hold two distinct successful runs: %v", ids)
 	}
 	if reached := denier.since(read); len(reached) > 0 {
 		t.Fatalf("reading the run history tried to reach the network: %v", reached)
@@ -138,7 +142,7 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("--sw-no-update did not carry a latest pin through an offline run: %v\n%s", err, skippedOut)
 	}
-	if !strings.Contains(skippedOut, "compiling .sparkwing/") {
+	if offlineBuildCount(t, toolPath) <= builds {
 		t.Fatalf("the offline compile did not happen, so it proves nothing about building without a proxy:\n%s", skippedOut)
 	}
 	if got := offlineMarkerLines(t, marker); len(got) != 3 {
@@ -216,11 +220,31 @@ func offlineToolPath(t *testing.T, tools ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, tool := range tools {
-		if err := os.Symlink(tool, filepath.Join(dir, filepath.Base(tool))); err != nil {
+		name := filepath.Base(tool)
+		if name == "go" {
+			name = "real-go"
+		}
+		if err := os.Symlink(tool, filepath.Join(dir, name)); err != nil {
 			t.Fatalf("place %s on the fixture PATH: %v", tool, err)
 		}
 	}
+	script := "#!/bin/sh\ntool_dir=${0%/*}\nif [ \"$1\" = build ]; then\n  printf 'build\\n' >> \"$tool_dir/builds\" || exit 1\nfi\nexec \"$tool_dir/real-go\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	return dir
+}
+
+func offlineBuildCount(t *testing.T, toolPath string) int {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(toolPath, "builds"))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Count(string(body), "build\n")
 }
 
 func offlineGoEnv(t *testing.T, name string) string {
@@ -254,7 +278,7 @@ func offlineBaseEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker s
 func offlineConnectedEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker string) []string {
 	t.Helper()
 	return append(offlineBaseEnv(t, fixtureHome, toolPath, sparkwingHome, marker),
-		"GOFLAGS=-mod=mod",
+		"GOFLAGS=-mod=readonly",
 		"GOPROXY="+offlineConnectedProxy(t),
 		"GOSUMDB=off",
 	)
@@ -324,18 +348,18 @@ func offlineRunTool(tool, dir string, env []string, args ...string) (string, err
 	return string(out), err
 }
 
-func offlineBinarySources(t *testing.T, listing string) []string {
+func offlineSuccessfulRunIDs(t *testing.T, listing string) []string {
 	t.Helper()
-	var sources []string
+	var ids []string
 	for _, line := range strings.Split(strings.TrimSpace(listing), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		var record struct {
-			Kind       string `json:"kind"`
-			Invocation struct {
-				BinarySource string `json:"binary_source"`
-			} `json:"invocation"`
+			Kind     string `json:"kind"`
+			ID       string `json:"id"`
+			Pipeline string `json:"pipeline"`
+			Status   string `json:"status"`
 		}
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("decode run record %q: %v", line, err)
@@ -343,9 +367,12 @@ func offlineBinarySources(t *testing.T, listing string) []string {
 		if record.Kind != "" {
 			continue
 		}
-		sources = append(sources, record.Invocation.BinarySource)
+		if record.ID == "" || record.Pipeline != "offline" || record.Status != "success" {
+			t.Fatalf("unexpected offline run: %s", line)
+		}
+		ids = append(ids, record.ID)
 	}
-	return sources
+	return ids
 }
 
 func offlineWriteFixture(t *testing.T, gitBin, toolPath, fixtureHome string) (repoDir, sparkwingDir string) {

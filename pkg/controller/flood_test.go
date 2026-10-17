@@ -21,7 +21,6 @@ type floodFixture struct{ *browserFixture }
 func newFloodServer(t *testing.T, policy controller.FloodPolicy) *floodFixture {
 	t.Helper()
 	f := newBrowserFixture(t, nil)
-	f.st.SetIntakePolicy(receiptPolicy{})
 	f.srv.WithFloodPolicy(policy)
 	f.h = f.srv.Handler()
 	return &floodFixture{f}
@@ -198,5 +197,44 @@ func TestFloodPolicyDedupeRechecksAuthorityAndReturnsHereBearerOnce(t *testing.T
 	}
 	if response := f.intake(f.token, body); response.Code != 401 {
 		t.Fatalf("revoked replay = %d %s", response.Code, response.Body)
+	}
+}
+
+func TestFloodPolicyReplaysNeverConsumeOrExhaustTheBucket(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(strconv.FormatBool(explicit), func(t *testing.T) {
+			f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1, DedupeWindow: time.Minute})
+			body := computeIntake("build")
+			if explicit {
+				body.IdempotencyKey = "replay"
+			}
+			first := floodRun(t, f.intake(f.token, body), 201)
+			replay := floodRun(t, f.intake(f.token, body), 200)
+			if first.RunID != replay.RunID {
+				t.Fatal("replay changed run")
+			}
+			if got := f.submit(f.token, "other", fortyHex(7)); got.Code != 429 {
+				t.Fatalf("new run bypassed cap: %d %s", got.Code, got.Body)
+			}
+			floodRun(t, f.intake(f.token, body), 200)
+		})
+	}
+}
+
+func TestFloodPolicyDedupeRetryAfterStoreRefusal(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{DedupeWindow: time.Minute})
+	if _, err := f.st.DB().Exec(`CREATE TRIGGER refuse_intake BEFORE INSERT ON runs BEGIN SELECT RAISE(ABORT,'intake refused'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.submit(f.token, "build", fortyHex(1)); got.Code != 500 {
+		t.Fatalf("store refusal: %d %s", got.Code, got.Body)
+	}
+	if _, err := f.st.DB().Exec(`DROP TRIGGER refuse_intake`); err != nil {
+		t.Fatal(err)
+	}
+	first := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 201)
+	replay := floodRun(t, f.submit(f.token, "build", fortyHex(1)), 200)
+	if first.RunID != replay.RunID {
+		t.Fatal("retry did not establish dedupe")
 	}
 }

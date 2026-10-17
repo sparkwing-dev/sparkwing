@@ -2,6 +2,7 @@ package projectconfig
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -19,6 +20,9 @@ var (
 // Validate validates typed checkout declarations for seal-point consumers.
 func Validate(cfg Config) error {
 	if cfg.Defaults != nil {
+		if err := validateRunRestrictions("defaults.run", cfg.Defaults.Run); err != nil {
+			return err
+		}
 		if err := validateGuards("defaults.guards", cfg.Defaults.Guards); err != nil {
 			return err
 		}
@@ -26,6 +30,9 @@ func Validate(cfg Config) error {
 	seen := map[string]bool{}
 	for i, p := range cfg.Pipelines {
 		key := fmt.Sprintf("pipelines[%d]", i)
+		if err := validateRunRestrictions(key+".run", p.Run); err != nil {
+			return err
+		}
 		if !pipelineName.MatchString(p.Name) {
 			return userconfig.Invalid(key+".name", "expected a pipeline name containing letters, numbers, dots, hyphens or underscores")
 		}
@@ -33,6 +40,9 @@ func Validate(cfg Config) error {
 			return userconfig.Invalid(key+".name", "duplicate pipeline name")
 		}
 		seen[p.Name] = true
+		if err := ValidateSourceFiles(p.SourceFiles); err != nil {
+			return userconfig.Invalid(key+".source_files", err.Error())
+		}
 		if strings.TrimSpace(p.Entrypoint) == "" {
 			return userconfig.Invalid(key+".entrypoint", "entrypoint is required")
 		}
@@ -52,6 +62,31 @@ func Validate(cfg Config) error {
 		}
 		if strings.TrimSpace(s.Version) == "" {
 			return userconfig.Invalid(key+".version", "version is required")
+		}
+	}
+	return nil
+}
+
+func validateRunRestrictions(key string, r *RunRestrictions) error {
+	if r == nil {
+		return nil
+	}
+	if r.Route != nil && *r.Route != "local" {
+		return userconfig.Invalid(key+".route", "repository routing may only require local execution")
+	}
+	return userconfig.ValidateRunRouting(key, &userconfig.RunRouting{LocalSecrets: r.LocalSecrets})
+}
+
+// ValidateSourceFiles checks literal repository-relative bundle file paths.
+func ValidateSourceFiles(paths []string) error {
+	for _, name := range paths {
+		if !filepath.IsLocal(name) || strings.ContainsAny(name, "\x00\\:") {
+			return fmt.Errorf("source files must be literal repository-relative paths outside .git")
+		}
+		for _, part := range strings.Split(name, "/") {
+			if strings.EqualFold(part, ".git") || part == ".." || part == "." || part == "" {
+				return fmt.Errorf("source files must be literal repository-relative paths outside .git")
+			}
 		}
 	}
 	return nil

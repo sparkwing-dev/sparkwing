@@ -134,36 +134,47 @@ func (t *Tenant) slotAuthorityTx(ctx context.Context, tx *storeTx, a capability.
 	return current, until, nil
 }
 
+// safety: slot mutations lock admission, controller lease, authority, owner unit, sorted runs/nodes, then group.
+// Claims take authority before work too, so neither path can wait for authority while holding the other's work.
 func authorizedConcurrency[T any](ctx context.Context, t *Tenant, a capability.Authorized, key, operation string, work func(*storeTx, capability.Authorized, time.Time) (T, error)) (T, error) {
 	var zero T
 	if key != a.Target.SlotKey {
 		return zero, bindingRefusal()
 	}
-	tx, err := t.s.beginTx(ctx)
+	readOnly := operation == "" || operation == "/holder"
+	begin := t.s.beginTx
+	if readOnly {
+		begin = t.s.beginSnapshotReadTx
+	}
+	tx, err := begin(ctx)
 	if err != nil {
 		return zero, err
 	}
 	defer rollbackOrLog(tx)
-	if err := advisoryLockTx(ctx, tx, fmt.Sprintf("capacity-admission:%d:%s:%s", len(t.team), t.team, key)); err != nil {
-		return zero, err
-	}
-	if err := lockClaimControllerTx(ctx, tx); err != nil {
-		return zero, err
-	}
-	if a.Binding.RunID != "" {
-		if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: capability.UnitTrigger, RunID: a.Binding.RunID}); err != nil {
+	if !readOnly {
+		if err := advisoryLockTx(ctx, tx, fmt.Sprintf("capacity-admission:%d:%s:%s", len(t.team), t.team, key)); err != nil {
 			return zero, err
 		}
-	}
-	if err := lockCapacityWorkTx(ctx, tx, t.team, key, NodeRef{a.Binding.RunID, a.Binding.NodeID}); err != nil {
-		return zero, err
-	}
-	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
-		return zero, err
+		if err := lockClaimControllerTx(ctx, tx); err != nil {
+			return zero, err
+		}
 	}
 	current, until, err := t.slotAuthorityTx(ctx, tx, a, operation)
 	if err != nil {
 		return zero, err
+	}
+	if !readOnly {
+		if a.Binding.RunID != "" {
+			if err := lockClaimOwnerTx(ctx, tx, t.team, UnitRef{Kind: current.Principal.Capability.Unit, RunID: current.Binding.RunID}); err != nil {
+				return zero, err
+			}
+		}
+		if err := lockCapacityWorkTx(ctx, tx, t.team, key, NodeRef{a.Binding.RunID, a.Binding.NodeID}); err != nil {
+			return zero, err
+		}
+		if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
+			return zero, err
+		}
 	}
 	result, err := work(tx, current, until)
 	if err != nil {
@@ -171,6 +182,9 @@ func authorizedConcurrency[T any](ctx context.Context, t *Tenant, a capability.A
 	}
 	if _, _, err := t.slotAuthorityTx(ctx, tx, a, operation); err != nil {
 		return zero, err
+	}
+	if readOnly {
+		return result, tx.Commit()
 	}
 	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
 		return zero, err
@@ -304,14 +318,9 @@ func (t *Tenant) ReleaseAuthorizedSlot(ctx context.Context, a capability.Authori
 		if id == "" || id != a.Target.SlotHolderID {
 			return false, bindingRefusal()
 		}
-		released, run, job, err := txReleaseHolder(ctx, tx, t.team, key, id)
+		released, _, _, err := txReleaseHolder(ctx, tx, t.team, key, id)
 		if err != nil {
 			return false, err
-		}
-		if coalesceFollowersCanInherit(outcome) {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM concurrency_waiters WHERE team=? AND key=? AND policy=? AND leader_run_id=? AND leader_node_id=?`, t.team, key, OnLimitCoalesce, run, job); err != nil {
-				return false, err
-			}
 		}
 		_, err = txPromoteWaiters(ctx, tx, t.team, key, tx.now().UnixNano(), tx.now().Add(DefaultConcurrencyLease).UnixNano())
 		return released, err

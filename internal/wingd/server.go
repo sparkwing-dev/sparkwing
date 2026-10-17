@@ -20,8 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-const defaultChargeCores = 1.0
-
 const maxCancelledRunTombstones = 4096
 
 type Daemon struct {
@@ -674,7 +672,7 @@ func (d *Daemon) handleLivenessAck(c *conn, ack *wingwire.LivenessAck) {
 
 func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	if r.Cores == 0 && r.MemoryBytes == 0 {
-		return wingwire.HostResources{Cores: defaultChargeCores}
+		return wingwire.HostResources{Cores: admission.DefaultChargeCores}
 	}
 	return r
 }

@@ -69,6 +69,7 @@ type ActorKind string
 const (
 	ActorRunHost    ActorKind = "run_host"
 	ActorHolder     ActorKind = "holder"
+	ActorClaimant   ActorKind = "claimant"
 	ActorController ActorKind = "controller"
 	ActorReaper     ActorKind = "reaper"
 	ActorOperator   ActorKind = "operator"
@@ -173,6 +174,7 @@ const (
 	CauseRelease         TransitionCause = "release"
 	CauseDependency      TransitionCause = "dependency"
 	CauseOwnerPolicy     TransitionCause = "owner_policy"
+	CauseUnpriced        TransitionCause = "unpriced"
 	CauseApprovalOpen    TransitionCause = "approval_open"
 	CauseApprovalResolve TransitionCause = "approval_resolve"
 	CauseApprovalTimeout TransitionCause = "approval_timeout"
@@ -186,6 +188,7 @@ const (
 	CauseLeaseLapse      TransitionCause = "lease_lapse"
 	CauseCancel          TransitionCause = "cancel"
 	CausePublish         TransitionCause = "publish"
+	CausePublishAttempt  TransitionCause = "publish_attempt"
 )
 
 // EdgeGuard names predicates that the transition re-checks after locking the row.
@@ -195,6 +198,7 @@ type EdgeGuard string
 const (
 	GuardOwner           EdgeGuard = "live_owner"
 	GuardOwnerPolicy     EdgeGuard = "typed_owner_policy"
+	GuardUnpriced        EdgeGuard = "authorized_unpriced_claim"
 	GuardUnclaimed       EdgeGuard = "unclaimed"
 	GuardHolder          EdgeGuard = "live_exact_holder"
 	GuardAward           EdgeGuard = "atomic_award"
@@ -228,7 +232,9 @@ func NodeTransitions() []NodeEdge {
 	owners := []ActorKind{ActorController, ActorRunHost}
 	cancellers := []ActorKind{ActorOperator, ActorController, ActorReaper}
 	return []NodeEdge{
+		{[]NodeState{NodePending, NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorClaimant}, CauseUnpriced, []EdgeGuard{GuardUnclaimed, GuardUnpriced}, false},
 		{[]NodeState{NodePending}, terminal, []ActorKind{ActorOperator}, CausePublish, []EdgeGuard{GuardPublication}, false},
+		{[]NodeState{NodePending}, []NodeState{NodePending}, []ActorKind{ActorOperator}, CausePublishAttempt, []EdgeGuard{GuardPublication}, false},
 		{[]NodeState{NodePending}, []NodeState{NodeReady}, owners, CauseRelease, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
 		{[]NodeState{NodePending}, []NodeState{NodeSkipped, NodeCancelled}, owners, CauseDependency, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
 		{[]NodeState{NodePending}, []NodeState{NodeSuccess, NodeFailed, NodeSkipped}, owners, CauseOwnerPolicy, []EdgeGuard{GuardOwner, GuardUnclaimed, GuardOwnerPolicy}, false},
@@ -283,6 +289,7 @@ type MaterializedResultSource struct {
 
 // TransitionExtra carries only the columns owned by a particular edge; mismatched fields are refused.
 type TransitionExtra struct {
+	Publication *runspec.PublishedAttempt
 	OwnerPolicy *OwnerPolicyResult
 	Result      *NodeResult
 	Materialize *MaterializeSource
@@ -424,9 +431,6 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err != nil {
 		return Applied{}, err
 	}
-	if err := validateResultProofTx(ctx, tx, team, change.Actor, change.Ref, row.Attempt); err != nil {
-		return Applied{}, err
-	}
 	from, err := nodeState(row)
 	if err != nil {
 		return Applied{}, err
@@ -447,6 +451,9 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 			}
 		}
 		return Applied{Replayed: true, CancelRequested: row.CancelRequestedAt != nil && row.Status != StatusDone, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
+	}
+	if err := validateResultProofTx(ctx, tx, team, change.Actor, change.Ref, row.Attempt); err != nil {
+		return Applied{}, err
 	}
 	if change.SourceAttempt != nil && *change.SourceAttempt != row.Attempt {
 		return Applied{}, holderRefusal()
@@ -612,6 +619,9 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 	if change.Extra.RetryAt != nil && change.Cause != CauseRetry {
 		return errors.New("unexpected retry time")
 	}
+	if change.Extra.Publication != nil && change.Cause != CausePublishAttempt {
+		return errors.New("unexpected publication attempt")
+	}
 	for _, guard := range edge.Guards {
 		switch guard {
 		case GuardOwner:
@@ -634,6 +644,10 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 		case GuardUnclaimed:
 			if row.ClaimedBy != "" {
 				return holderRefusal()
+			}
+		case GuardUnpriced:
+			if err := checkUnpricedClaimTx(ctx, tx, row, change); err != nil {
+				return err
 			}
 		case GuardOwnerPolicy:
 			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
@@ -711,6 +725,15 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 			if err := checkPublisherTx(ctx, tx, team, change.Actor, row.Ref.RunID); err != nil {
 				return err
 			}
+			if change.Cause == CausePublish && row.Attempt > 0 {
+				var outcome NodeState
+				if err := tx.QueryRowContext(ctx, `SELECT outcome FROM node_attempts WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=?`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation).Scan(&outcome); err != nil {
+					return err
+				}
+				if outcome != change.To {
+					return errors.New("publication result differs from its imported attempt")
+				}
+			}
 		default:
 			return errors.New("unsupported transition guard")
 		}
@@ -719,6 +742,9 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 }
 
 func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {
+	if change.Cause == CausePublishAttempt {
+		return importPublishedAttemptTx(ctx, tx, team, row, change)
+	}
 	if edge.RequestOnly {
 		if row.CancelRequestedAt == nil {
 			row.CancelRequestedAt = &now

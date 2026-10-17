@@ -2,8 +2,11 @@ package acceptance_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -67,28 +70,68 @@ func TestDataRecordClientVerifiedDefaultSelection(t *testing.T) {
 	p.Capability.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:12", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
 	authority := blob.Authority{CapabilityRef: p.Authority.ID, Principal: blob.Principal(p.Capability.Subject.ID), Repo: "gh:12"}
 	f.data.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) { return authority, nil }
-	key := blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: blob.MemoRecordName, Scope: blob.Scope{Repo: "gh:12", Pipeline: "ci", Job: "build", Key: "hash"}}
+	const body = "cache contents"
+	digest := blob.Digest(fmt.Sprintf("%x", sha256.Sum256([]byte(body))))
+	key := blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: blob.MemoRecordName, Scope: blob.Scope{Repo: "gh:12", Pipeline: "ci", Job: "build", Key: string(digest)}}
 	selected := key
 	selected.Scope.Ref = blob.RefScope{Ref: "main", Verified: true}
 	tx.lookupResult = blob.RecordLookupResult{Found: true, Record: blob.Record{
-		Key: selected, Digest: dataDigest(), Uploader: "private-uploader", Source: blob.UploadIdentity{CapabilityRef: "private-capability"},
+		Key: selected, Digest: digest, Uploader: "private-uploader", Source: blob.UploadIdentity{CapabilityRef: "private-capability"},
 		RefFacts: blob.RefFacts{Scope: selected.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "private-delivery", SHA: "private-sha"},
 	}}
 	h := f.handler()
-	_, records, err := client.NewDataClient(client.EngineOptions{URL: "https://controller.test", Bearer: func(context.Context) (string, error) { return f.boundary.raw, nil }, HTTP: &http.Client{Transport: surfaceTransport(func(r *http.Request) (*http.Response, error) {
+	f.data.ReadBlob = func(_ context.Context, a blob.Authority, d blob.Digest) (blob.Blob, error) {
+		if a != authority || d != digest {
+			t.Fatalf("foreign download: %+v %s", a, d)
+		}
+		return blob.Blob{Team: "team", Digest: d, Size: int64(len(body))}, nil
+	}
+	transport := surfaceTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "objects.example" {
+			if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
+				t.Fatal("profile credential reached object storage")
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if strings.Contains(w.Body.String(), "private-") {
 			t.Fatalf("private record authority escaped: %s", w.Body.String())
 		}
 		return w.Result(), nil
-	})}})
+	})
+	signer, records, err := client.NewDataClient(client.EngineOptions{URL: "https://controller.test", Bearer: func(context.Context) (string, error) { return f.boundary.raw, nil }, HTTP: &http.Client{Transport: transport}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := records.LookupRecord(t.Context(), blob.RecordLookup{Key: key, VerifiedDefaultOnly: true})
-	if err != nil || !result.Found || result.Record.Key != selected || result.Record.Digest != dataDigest() || !tx.lookup.VerifiedDefaultOnly || tx.lookup.Authority != authority {
+	if err != nil || !result.Found || result.Record.Key != selected || result.Record.Digest != digest || !tx.lookup.VerifiedDefaultOnly || tx.lookup.Authority != authority {
 		t.Fatalf("verified-default HTTP record: %+v %v lookup=%+v", result, err, tx.lookup)
+	}
+	if !result.VerifiedDefault || result.Record.RefFacts != (blob.RefFacts{}) || len(result.ReadSet.Edges) != 0 {
+		t.Fatalf("selection manufactured private source proof: %+v", result)
+	}
+	bytes := blob.NewSignedStore(blob.SignedStoreOptions{Signer: signer, HTTPClient: blob.TransferClient{Transport: transport}})
+	cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Repo: authority.Repo, Authority: authority, Records: records}, bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hit, err := cache.Memo(t.Context(), blob.MemoKey{Repo: authority.Repo, Pipeline: "ci", Job: "build", Hash: runspec.Hash(digest)}, blob.Budget{Deadline: time.Now().Add(time.Minute)})
+	if err != nil || !hit.Found || hit.Output.Value != digest {
+		t.Fatalf("remote memo over private HTTP projection: %+v %v", hit, err)
+	}
+	r, err := cache.Artifact(t.Context(), digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, readErr := io.ReadAll(r)
+	if err := r.Close(); readErr != nil || err != nil || !r.Verified() || string(got) != body {
+		t.Fatalf("verified artifact: %q %v %v", got, readErr, err)
+	}
+	p.Capability.RevokedAt = &f.boundary.snapshot.Now
+	if r, err := cache.Artifact(t.Context(), digest); err == nil {
+		_ = r.Close()
+		t.Fatal("prior verified selection bypassed credential revocation")
 	}
 }
 
@@ -103,7 +146,7 @@ func TestDataCacheHTTPUsesBoundScopeAndCopyDestination(t *testing.T) {
 	for _, operation := range []string{"memo/lookup", "depcache/lookup", "memo/copy"} {
 		t.Run(operation, func(t *testing.T) {
 			f, tx := newCacheHTTPFixture(t)
-			tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}}
+			tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}, ReadSet: blob.ReadSet{Reader: dataAuthority(dataAuthorized()).Attempt.Value}}
 			tx.depHit = blob.DepcacheHit{Found: true, Record: blob.Record{Digest: dataDigest()}, Source: blob.RestoreDefaultBranch}
 			w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation+"?team=foreign&ref=main", cacheBody(operation))
 			var result struct{ Found bool }
@@ -146,13 +189,17 @@ func TestDataCacheHTTPPrivateFactsNeverLeaveResponse(t *testing.T) {
 	property := func(value string, operationIndex uint8) bool {
 		f, tx := newCacheHTTPFixture(t)
 		secret := "private:" + value
-		tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}, ReadSet: blob.ReadSet{Reader: runspec.AttemptIdentity{Team: secret, RunID: secret, NodeID: secret}}}
+		tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}, ReadSet: blob.ReadSet{Reader: dataAuthority(dataAuthorized()).Attempt.Value, Edges: []blob.ReadEdge{{Source: runspec.AttemptIdentity{Team: secret, RunID: secret, NodeID: secret}}}}}
 		tx.depHit = blob.DepcacheHit{Found: true, Source: blob.RestoreDefaultBranch, Record: blob.Record{Digest: dataDigest(), Uploader: blob.Principal(secret), Source: blob.UploadIdentity{CapabilityRef: secret, Principal: blob.Principal(secret), Team: secret, RunID: secret}, RefFacts: blob.RefFacts{SHA: secret, AppDeliveryKey: secret}}, ReadSet: tx.memoHit.ReadSet}
 		operations := []string{"memo/lookup", "memo/copy", "depcache/lookup"}
 		operation := operations[int(operationIndex)%len(operations)]
 		w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation, cacheBody(operation))
 		var result map[string]json.RawMessage
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || len(result) != 3 {
+		wantFields := 4
+		if operation == "depcache/lookup" {
+			wantFields = 3
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || len(result) != wantFields || strings.Contains(w.Body.String(), "private:") {
 			return false
 		}
 		if operation == "depcache/lookup" {
@@ -327,5 +374,34 @@ func TestDataCacheHTTPMemoCopyCannotBorrowReadGrant(t *testing.T) {
 	assertEngineError(t, w, 403, apierr.Forbidden)
 	if len(*f.events) != 0 {
 		t.Fatalf("events=%v", *f.events)
+	}
+}
+
+func TestDataMemoHTTPRefusesForeignReader(t *testing.T) {
+	property := func(value string, field uint8, copyHit bool) bool {
+		f, tx := newCacheHTTPFixture(t)
+		reader := dataAuthority(dataAuthorized()).Attempt.Value
+		switch field % 5 {
+		case 0:
+			reader.Team += "private:" + value
+		case 1:
+			reader.RunID += "private:" + value
+		case 2:
+			reader.NodeID += "private:" + value
+		case 3:
+			reader.Generation++
+		case 4:
+			reader.Attempt++
+		}
+		tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}, ReadSet: blob.ReadSet{Reader: reader}}
+		operation := "memo/lookup"
+		if copyHit {
+			operation = "memo/copy"
+		}
+		w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation, cacheBody(operation))
+		return w.Code == 500 && !strings.Contains(w.Body.String(), "private:") && !strings.Contains(w.Body.String(), `"found":true`)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
 	}
 }

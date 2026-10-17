@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type bootstrapExchangeW8 struct {
@@ -61,7 +62,8 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 			}
 			binding := award.Binding
 			unit := controllerwire.ClaimedUnit{
-				Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect,
+				CloudResources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory},
+				Unit:           capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect,
 				UnitID: binding.UnitID, RunID: binding.RunID, JobID: binding.NodeID, Capability: "private-work-capability",
 				Binding:        capability.Binding{Kind: capability.BindingNode, RunID: binding.RunID, NodeID: binding.NodeID, Holder: binding.Holder, Generation: binding.Generation, Attempt: binding.Attempt},
 				Request:        runspec.SealedRequest{RunID: binding.RunID, Request: runspec.Request{Team: binding.Team}},

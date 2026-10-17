@@ -174,27 +174,6 @@ func (scheduleIntakePolicy) ResolveIntake(_ context.Context, _ capability.Author
 	return store.IntakePolicyFacts{Options: &request.Request.Options, SourceLocation: &request.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 }
 
-// ScheduleWriterFixture substitutes schedule consent while preserving real sealed intake and reads.
-func ScheduleWriterFixture(t *testing.T, s *Server) {
-	t.Helper()
-	s.store.SetIntakePolicy(scheduleIntakePolicy{})
-	writers := map[store.Team]*scheduleWriterFake{}
-	resolve := func(ctx context.Context, team store.Team) (*scheduleWriterFake, error) {
-		if writer := writers[team]; writer != nil {
-			return writer, nil
-		}
-		tenant, err := s.store.ForTeam(ctx, team)
-		if err != nil {
-			return nil, err
-		}
-		writer := &scheduleWriterFake{Tenant: tenant, s: s}
-		writers[team] = writer
-		return writer, nil
-	}
-	s.WithScheduleWriter(func(ctx context.Context, team store.Team) (ScheduleWriter, error) { return resolve(ctx, team) })
-	s.WithScheduledRunWriter(func(ctx context.Context, team store.Team) (ScheduledRunWriter, error) { return resolve(ctx, team) })
-}
-
 func (f *scheduleWriterFake) DeleteAuthorizedSchedule(ctx context.Context, a capability.Authorized, name string) (string, bool, error) {
 	svc := f.service(a)
 	sched, err := svc.Resolve(ctx, name)

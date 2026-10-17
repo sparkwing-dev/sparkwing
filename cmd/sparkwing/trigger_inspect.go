@@ -29,7 +29,10 @@ func inspectTriggerSource(ctx context.Context, selection preparedTriggerSource, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	masker := secrets.NewMasker()
+	masker := deps.options.Base.Masker
+	if masker == nil {
+		masker = secrets.NewMasker()
+	}
 	defer func() {
 		if resultErr != nil {
 			resultErr = &maskedCLIError{err: resultErr, masker: masker}

@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -64,14 +65,6 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	}
 	if writer == nil || writer.Team() != s.Team {
 		return "", missingEndpointPolicy()
-	}
-	tenant, err := l.server.tenantForTeam(ctx, s.Team)
-	if err != nil {
-		return "", err
-	}
-	s, err = tenant.GetCronSchedule(ctx, s.ID)
-	if err != nil {
-		return "", err
 	}
 	admitted, err := writer.AdmitScheduledRun(ctx, s, due)
 	if err != nil {
@@ -389,8 +382,8 @@ func cronRunStatus(ctx context.Context, tenant *store.Tenant, runID string) stri
 // team's repositories are bounded in count. Re-pushing a repository the team
 // already arms replaces its schedules and does not count as another.
 const (
-	maxCronSchedulesPerRepo = 20
-	maxCronReposPerTeam     = 10
+	maxCronSchedulesPerRepo = limits.MaxSchedulesPerRepo
+	maxCronReposPerTeam     = limits.MaxScheduledReposPerTeam
 )
 
 func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, repoURL string, githubRepoID int64, entries int) (int, error) {

@@ -100,13 +100,17 @@ func (f *floodRefusal) write(w http.ResponseWriter) {
 }
 
 func (s *Server) triggerFloodRefusal(ctx context.Context, tenant *store.Tenant, key, source string) *floodRefusal {
+	return s.floodRefusal(tenant.Team(), key, source, func() (int, error) { return s.flood.depth.read(ctx, tenant, time.Now()) })
+}
+
+func (s *Server) floodRefusal(team store.Team, key, source string, readDepth func() (int, error)) *floodRefusal {
 	f := s.flood
 	if f == nil {
 		return nil
 	}
 	now := time.Now()
 	if f.depth != nil {
-		depth, err := f.depth.read(ctx, tenant, now)
+		depth, err := readDepth()
 		if err != nil {
 			// safety: a depth this controller cannot read is not grounds to
 			// refuse work, so the submission proceeds and the cap still binds.
@@ -116,7 +120,7 @@ func (s *Server) triggerFloodRefusal(ctx context.Context, tenant *store.Tenant, 
 			}
 		} else if depth >= f.policy.ShedQueueDepth {
 			s.logger.Warn("trigger shed",
-				"principal", key, "team", tenant.Team(), "source", source,
+				"principal", key, "team", team, "source", source,
 				"reason", "team queue depth above the shed threshold",
 				"queue_depth", depth, "threshold", f.policy.ShedQueueDepth)
 			return &floodRefusal{
@@ -272,15 +276,12 @@ func (w *warnEvery) due() bool {
 	return true
 }
 
-func (s *Server) admissionFloodRefusal(ctx context.Context, a capability.Authorized) error {
-	if s.flood == nil {
+func (s *Server) admissionFloodRefusal(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest, p capability.Principal) error {
+	if s.flood == nil || request.Authority.Kind == "schedule" || request.VerifiedDeliveryID != "" || request.Request.Lineage.ParentRunID != "" {
 		return nil
 	}
-	tenant, err := s.tenantForTeam(ctx, store.Team(a.Target.Team))
-	if err != nil {
-		return engineLookupError(err)
-	}
-	refusal := s.triggerFloodRefusal(ctx, tenant, githubAppFloodKey(tenant.Team()), "api")
+	team := store.Team(p.Capability.Team)
+	refusal := s.floodRefusal(team, string(p.Authority.Kind)+":"+p.Authority.ID, "api", func() (int, error) { return store.IntakeQueueDepth(ctx, resolver, team) })
 	if refusal == nil {
 		return nil
 	}

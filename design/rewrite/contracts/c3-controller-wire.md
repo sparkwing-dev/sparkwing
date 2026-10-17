@@ -196,6 +196,8 @@ or ref evidence is accepted in a request.
 | POST `/api/v1/data/has-many` | `digests`, optional `deadline` | `present` |
 | GET `/api/v1/data/records` | flattened `kind`, `name`, `ref`, `pipeline`, `job`, `key`, `deadline`, `verified_default_only` query selectors | `found`, optional flat `record`, `members` |
 | POST `/api/v1/data/records` | flat logical record selectors, digest, optional manifest/expiry, members | flat canonical record |
+| POST `/api/v1/data/memo/lookup` | `pipeline`, `job`, `hash`, optional `deadline` | `found`, optional `output`, `manifest`, `reader`, and `members` |
+| POST `/api/v1/data/memo/copy` | same lookup selectors; destination comes from authenticated attempt | same memo result |
 
 Record handlers and the client use the shared DataRecordWriteRequest,
 DataRecordLookupResult, DataRecord and DataMember DTOs. A verified-default lookup
@@ -211,10 +213,27 @@ carry object headers only. Output upload, record commit, verified download and
 shared log publication are exercised through the real controller HTTP handlers
 with an in-process transport.
 
-Record, memo and depcache HTTP responses do not carry C1's canonical read-set
-proof or complete source metadata. Cache adapters fail with `policy_missing`
-until that foreign schema contract is completed; they do not reconstruct proof
-from caller selectors. Output reads use persisted record keys and verified bytes.
+Memo lookup and copy use shared DataMemoLookupRequest/DataMemoLookupResult.
+On a hit, the server checks C1's reader against its live authority and returns
+only that caller-owned attempt fence. The client requires the same reader,
+valid result digests and file metadata. It leaves ReadSet.Edges empty. Source
+identities, private ancestry, uploader authority and ref evidence stay on the
+controller. Each subsequent byte read is independently authorized there.
+Misses omit references and the reader. Copy requests never carry a destination,
+authority or read set; the server derives them. Explicit request budgets apply
+to lookup and copy through the shared transport.
+
+Record and depcache responses omit complete source facts and read-set proof.
+Record lookup hits selected under verified-default policy carry
+`verified_default:true`. Misses omit it. C1 and C2 validate persisted evidence
+with `blob.Record.VerifiedDefault`; the observation is never request authority.
+The client carries it as `RecordLookupResult.VerifiedDefault` and the read-only
+cache requires it plus unchanged record selectors and verified bytes. Private
+delivery keys, source SHAs, uploader identities and read-set edges remain absent.
+An omitted ref is selected by C1 from the live credential's authorized refs;
+remote-cache authorities always apply verified-default policy, even when the
+caller omits the query flag. Cross-profile credential construction remains
+separate. Output reads use persisted record keys and verified bytes.
 Upload and commit retries retain their original key/body. Explicit request
 budgets remain context deadlines and exhaust as `blob.ErrBudget`.
 
@@ -977,7 +996,214 @@ transport. A bundle containing the selected commit checks out directly; missing
 pinned source revisions use credentialed delta fetch. Git credentials are
 released only when a remote fetch, tags, submodules or LFS needs them.
 
+Cloud source initialization downloads that bundle before exchanging its bootstrap.
+The `/data/download` bootstrap alternate requires `source.read` and the
+`sourceBundle` binding. It admits only the bound run's sealed submitted bundle,
+without granting general `data.read`, writes or secrets. Node, Plan and Eval
+preparation share this path. Exchange consumes its source authority. Retried
+node awards carry no active execution attempt until NodeStart allocates the next
+ordinal. Exact-body transition proof evidence carries the body's source ordinal
+independently, so replay does not change the allocated ordinal.
+
 The production GitHub lookup is shared by CLI and controller. The controller
 verifies public repositories without requiring an App; private identities use
 its App or confirmed team HTTPS source credential. It never trusts a typed
 numeric ID or caller display name.
+
+## Launch burst vertical (decisions 112 and 116)
+
+`runspec.Request.Burst` seals `BurstPlacement`: ordered `PlacementStep` values
+(`target`, nanosecond `hold`) and optional `overflow_minutes`. Machine
+`run.routing` supplies authorization. Repository `defaults.run` and pipeline
+`run` can only require local execution and declare names. The CLI converts
+machine YAML durations once. Targets are `here`, `machines`, `cloud`,
+`name=NAME` and `pool=POOL`. Default route is local. Explicit Cloud routing sets
+RunnerHere and dispatch host. Cloud remains the sole run record owner, and the
+CLI hosts scheduling and public log attachment. Connection failure before intake
+falls back locally with a message. No post-intake error may submit a local copy.
+Source-upload network failures are marked as before intake and also fall back.
+The mark never covers run submission because a lost response can hide acceptance.
+
+`CreateRunRequest.LocalSecrets` is a private input-only map. The sealed
+`Request.LocalSecretNames` contains declared names only. Intake passes values to
+C1's volatile registry without serializing them into SQL, seals or responses.
+The requester resolver reads only configured names from the pipeline's complete
+SecretDeclaration list and captured environment. Native secret release uses the
+existing live, declared, masked claim path, rechecking sealed burst eligibility.
+The here owner re-supplies values through RenewalRequest.local_secrets on renewal,
+including after restart. Other claimants cannot supply them. Names must match
+the original request and resident values cannot change. A cancelled run ignores
+resupply from its still-live here owner and renews reporting authority for drain.
+It restores no values and grants no secret reads. Registry loss returns
+unavailable until the owner restores values. Retry requires fresh resolution. Cross-process secret delivery
+still needs a Cloud affinity or unpersisted relay contract.
+
+`ClaimRequest` adds optional `capacity`, `os` and `arch` for authenticated
+here capabilities and unbound registered machines. Existing available CPU/memory fields retain current free
+resources. `RenewalRequest.available` refreshes the here owner's availability.
+The CLI reads the local admission daemon's actual capacity and free resources,
+including explicit zero availability. `RemoteHostStore.Available` supplies
+renewal observations. Canonical store placement decides owner self-execution.
+Burst self-claims reserve machine compute before reconciliation.
+`ReconcileRequest.reserved` carries the actual acquired lease resources to that
+transaction. C1 adds them to the authenticated machine's current free-resource
+observation for this job only. The field is optional, bounded by physical
+capacity, and never saved as shared availability. Ordinary heartbeats continue
+to report free resources. Claim authority, selectors, fences and placement
+holds still apply.
+Here binding supplies the real shared native host, private HTTP state,
+source access, data, logs, process services and leases.
+
+Runner `RequestCapacity` callbacks now take context and return physical capacity,
+current availability and an error. The loop makes no controller claim when
+observation fails. Every claim carries the machine's OS and architecture.
+Physical capacity remains nonzero when contribution or keep-free settings leave
+zero availability. Registration identity, pools and repository grants still
+come from authenticated capabilities. Trusted profile ceilings remain enforced
+by the store matcher. All callback consumers use the new signature.
+
+`POST /runners` adds `personal`. It grants no extra pools or billing authority.
+C1 checks personal machine ownership from account subject provenance for every
+run claim. `GET /overflow` and `PUT /overflow` use OverflowControl and
+OverflowControlWrite under the authenticated account. Null means uncapped.
+Request caps only narrow the saved cap; team tier/ladder admission still applies.
+
+### Burst SDK subprocess verification
+
+Burst verification now also runs the shared SDK server in a subprocess over
+native request/frame pipes for here, personal-machine and exchanged Cloud
+awards. The subprocess resolves declared secrets through the real process
+service router and committing controller reader. A test-only FIFO transports
+HTTP messages where listeners are refused. The `rewrite_integration` variant
+uses a real loopback HTTP listener. Neither changes the runtime wire. Source
+acquisition and selected engine resolution remain separate from that SDK
+subprocess fixture.
+
+The CLI preparation acceptance also compiles a real Go SDK entry from tracked
+working-tree edits, uploads it through authorized source storage, admits a
+Cloud-owned here run, claims its owner, downloads the sealed bundle and installs
+and describes that SDK again. Declared extra files survive and undeclared `.env`
+does not. It uses the real development engine policy and selected installer.
+The public `rewrite_integration` probe uses the configured CLI, a real controller
+and the production here host to check successful execution, masked terminal
+logs, an admitted handle and absence of a second local run record.
+
+The public native probes also enroll a personal machine through
+`runners add --personal --session-stdin`, start the production runner entrypoint,
+and observe that machine's node award with a zero overflow cap. Separate here
+and personal variants interrupt the attached CLI after a streamed SDK marker
+and require the Cloud-owned run and job to finish cancelled. These probes use
+real loopback and local-controller sockets and remain unverified where the
+sandbox refuses listeners. They add no runtime transport or wire fields.
+The personal fixture uses one test executable for both production entrypoints
+because the local SDK replacement binds the installed executable's digest.
+It does not prove signed engine distribution or separate release binaries.
+
+### Overflow management client
+
+`controllerwire.OverflowManager` exposes `ReadOverflowControl` and
+`SetOverflowLimit` through `client.NewOverflowManager`. It uses the existing
+account-authenticated `GET /overflow` and `PUT /overflow` routes and their retry
+policies. A nil allowance sends an explicit `monthly_minutes:null`. Zero blocks
+new Cloud overflow. Negative or unrepresentable allowances fail before HTTP.
+Responses must include all shared fields and carry a non-negative allowance and
+usage plus a first-of-month UTC period. The client rejects malformed receipts.
+
+`NewSessionRunnerTokenManager(ctx, EngineOptions, session)` authenticates runner
+enrollment and token management with an existing account session. It rejects a
+simultaneous bearer callback, obtains CSRF from `GET /api/v1/auth/session`, and
+keeps the session and proof in memory. Mutations send Session authorization,
+the selected controller's Origin, and matching CSRF header and cookie. The
+client refuses redirects and never retries one-time enrollment. Session input
+cannot contain whitespace, control bytes or non-ASCII bytes. The controller
+still checks independent session ancestry and current membership on each write.
+
+`runners add --personal` requires `--session-stdin` before service preparation
+or enrollment. The flag reads an existing independent account-session
+presentation from stdin; it adds no login, bearer conversion or persisted
+session field. Only the issued runner credential is written to the private
+credential file. Failed installation revokes that credential through the same
+session transport and rolls back the local configuration.
+
+## Committed Cloud allocations and launch proof
+
+`ClaimedUnit.cloud_resources` carries the physical CPU and memory allocation
+from C1's committed billing reservation on Cloud awards, including sync and
+exchange. `Execution` continues to carry the sealed author settings. An absent
+CPU or memory request remains absent in those settings. The launcher requires
+the allocation, builds its Job from it, and refuses an exchange that changes it.
+Non-Cloud awards omit the field. The previous use of author settings as physical
+Cloud allocation is removed.
+
+The burst SDK acceptance drives real intake, claims and launcher publication
+through source init, one-use bootstrap exchange, native SDK pipes, secret
+masking, artifact upload/restoration and final Job/bootstrap cleanup. The
+Kubernetes client and measured isolation boundary are infrastructure fakes.
+The public CLI probes also declare and consume artifacts across separate jobs.
+These tests do not prove cluster enforcement or release-image execution.
+
+## Execution dependency-cache lookup
+
+DataDepcacheLookupRequest and DataDepcacheLookupResult move the existing
+`POST /data/depcache/lookup` shape into controllerwire. The client sends only
+name, key and an optional deadline. It checks its execution storage binding,
+then validates the returned repository, name, key, digest and selected own/PR
+base/default ref. Record keys are repository-scoped. The job attempt remains
+in authenticated upload provenance.
+
+Lookup returns public record metadata and RestoreSource. It carries no
+ReadSet, uploader or verified App facts. Signed downloads independently
+recompute the live data entitlement in the controller transaction. This
+implements ordinary execution dependency-cache reads. The separate cross-profile
+memo/provenance contract and its refusal stubs are unchanged.
+
+## Native burst handoff and local fallback
+
+The one-time `PurposeHere` credential reserves the named run and authorizes
+its first claim. The claim response is a `PurposeTrigger` execution award,
+with its own positive generation, holder and lease. Here hosting validates that
+award and the sealed RunnerHere selection. It never executes the reservation.
+The native fixture grants its observing member `logs.read` and enables account
+sessions with a signed multi-team license. Plain-HTTP fixtures select insecure
+cookies. Production enrollment still presents an independent account session
+and its CSRF proof. Pipeline arguments in the native interrupt probe follow `--`.
+
+Attached local execution starts the shared log follower beside the host and
+joins both. This also applies after a pre-intake Cloud connection failure.
+Detached submission keeps its existing receipt path. No wire field or route
+changes.
+
+## Profile publication transport
+
+JobTransitionRequest.Publication optionally carries runspec.PublishedAttempt on
+`publish_attempt`; every other cause rejects it. Job results still use `publish`.
+The token request optionally carries DataScope, and its one-time response includes
+principal. Data upload, commit and record POSTs accept the complete optional
+query selector `job`, `attempt`, `generation` for imported publication only.
+These are selectors, never asserted authority. Existing claim requests cannot
+use them. The verified-local-peer snapshot export adds optional
+publication_records to the private RunSnapshot shape.
+
+Local publication export also carries publication_results with the persisted
+reason, masked error, exit code and structured failure. JobResult.masked_error
+preserves an existing masked diagnostic without manufacturing a structured
+failure. It is bounded by ErrorBytes and must agree with a supplied failure.
+
+## Claimed artifact snapshot
+
+`localhostwire.LocalNodeSnapshot` embeds the ordinary execution snapshot and
+adds `artifact_sources`, a map from declared terminal producer IDs to manifest
+record keys. Nodes contains only the awarded job's complete row. The private
+client resolves cross-job artifact reads from that map. It never inserts partial
+producer rows into the persisted job namespace used by mask initialization.
+
+## Owner cancellation drain
+
+Once scheduling starts, owner renewal keeps its lease live after a run
+cancellation request. The persisted scheduling graph cancels each executor and
+waits for terminal results before owner completion. Cancellation during source
+preparation still stops preparation. Lost authority, renewal silence, the parent
+deadline and an explicit host stop still terminate the owner context. Claimed
+executor renewal continues to cancel its execution context on a cancellation beat.
+An owner waits for a holder with persisted cancellation intent instead of
+submitting the same cancellation again on each scheduling pass.

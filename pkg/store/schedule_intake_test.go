@@ -32,6 +32,13 @@ func scheduleIntakeFixture(t *testing.T, suffix uint32) (*Tenant, CronSchedule, 
 		location, err := VerifiedScheduleIntake(ctx, resolver, in)
 		return IntakePolicyFacts{SourceLocation: &location, RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 	}))
+	rewriteSchemaExec(t, s.db, `UPDATE cron_schedules SET github_installation_id=7,github_repository_id=701`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',1,'acme','Organization',1,1) ON CONFLICT DO NOTHING`)
+	rewriteSchemaExec(t, s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a',?,701,'acme/repo',7,'owner',1)`, sched.RepositoryKey)
+	sched, err = tenant.GetCronSchedule(t.Context(), sched.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return tenant, sched, now
 }
 
@@ -147,8 +154,8 @@ func TestScheduleAdmissionRechecksAppConsentProperty(t *testing.T) {
 		for mode := range 4 {
 			tenant, sched, now := scheduleIntakeFixture(t, suffix)
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET github_installation_id=7,github_repository_id=701,repo_key='gh:701',repo_path='https://github.com/acme/repo.git'`)
-			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',1,'acme','Organization',1,1)`)
-			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a','gh:701',701,'acme/repo',7,'owner',1)`)
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',1,'acme','Organization',1,1) ON CONFLICT DO NOTHING`)
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET repo_key='gh:701' WHERE team='a'`)
 			sched, err := tenant.GetCronSchedule(t.Context(), sched.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -192,7 +199,7 @@ func TestScheduleAdmissionCountsAllSchedulesAgainstArmedBy(t *testing.T) {
 	if _, err := tenant.AdmitScheduledRun(t.Context(), first, now); err != nil {
 		t.Fatal(err)
 	}
-	second, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "second", RepoPath: first.RepoPath, Pipeline: first.Pipeline, Name: "second", Cron: first.Cron, TZ: first.TZ, Where: first.Where, ArmedBy: first.ArmedBy}, now)
+	second, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "second", RepoPath: first.RepoPath, Pipeline: first.Pipeline, Name: "second", Cron: first.Cron, TZ: first.TZ, Where: first.Where, ArmedBy: first.ArmedBy, GitHubInstallationID: first.GitHubInstallationID, GitHubRepositoryID: first.GitHubRepositoryID}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,4 +209,26 @@ func TestScheduleAdmissionCountsAllSchedulesAgainstArmedBy(t *testing.T) {
 		t.Fatalf("second schedule bypassed armer's cap: %v", err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "runs", 1)
+}
+
+func TestScheduleTickRejectsPausedOrUnconsentedSchedule(t *testing.T) {
+	for _, paused := range []bool{false, true} {
+		t.Run(fmt.Sprint(paused), func(t *testing.T) {
+			tenant, row, now := scheduleIntakeFixture(t, 90)
+			if paused {
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET paused=1`)
+			} else {
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET consent_json='',github_installation_id=0,github_repository_id=0`)
+			}
+			row, err := tenant.GetCronSchedule(t.Context(), row.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := tenant.AdmitScheduledRun(t.Context(), row, now)
+			if err == nil || got.RunID != "" {
+				t.Fatalf("unconsented/paused schedule fired: %+v %v", got, err)
+			}
+			rewriteSchemaCount(t, tenant.s.db, "runs", 0)
+		})
+	}
 }

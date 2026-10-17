@@ -39,10 +39,15 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	in := scheduleAdmission{schedule: schedule, caller: caller}
 	var saved scheduleConsent
 	if err := t.s.queryRow(ctx, `SELECT consent_json FROM cron_schedules WHERE team=? AND id=?`, t.team, schedule.ID).Scan(&in.consent); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AdmissionResult{}, notFound("schedule", schedule.ID)
+		}
 		return AdmissionResult{}, err
 	}
-	input := runspec.Request{Version: 1, Team: string(t.team), Pipeline: schedule.Pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginSchedule, Dispatch: runspec.DispatchHost,
-		RequestedArgs: schedule.Effective().Args, Git: runspec.Git{Repository: runspec.Repository{Key: schedule.RepositoryKey, Display: schedule.RepoPath}, Ref: schedule.GitBranch, SHA: schedule.LockedRef}}
+	input := runspec.Request{
+		Version: 1, Team: string(t.team), Pipeline: schedule.Pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginSchedule, Dispatch: runspec.DispatchHost,
+		RequestedArgs: schedule.Effective().Args, Git: runspec.Git{Repository: runspec.Repository{Key: schedule.RepositoryKey, Display: schedule.RepoPath}, Ref: schedule.GitBranch, SHA: schedule.LockedRef},
+	}
 	if in.consent != "" {
 		if json.Unmarshal([]byte(in.consent), &saved) != nil || saved.Version != 1 {
 			return AdmissionResult{}, bindingRefusal()
@@ -114,7 +119,7 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 	var result AdmissionResult
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		tx.scheduleAdmission = &in
-		if !schedule.Declared || in.consent != "" && caller == nil && schedule.Paused {
+		if !schedule.Declared || caller == nil && schedule.Paused {
 			return bindingRefusal()
 		}
 		var err error
@@ -158,6 +163,9 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 
 func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capability.Principal, error) {
 	s := in.schedule
+	if in.consent == "" && s.GitHubInstallationID <= 0 {
+		return capability.Principal{}, bindingRefusal()
+	}
 	tenant := &Tenant{s: tx.store, team: s.Team}
 	if in.caller != nil {
 		if in.caller.Target.Team != string(s.Team) {
@@ -187,7 +195,7 @@ func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capabilit
 			return capability.Principal{}, err
 		}
 	}
-	current, err := scanCronSchedule(tx.QueryRowContext(ctx, `SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team=? AND id=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=? AND state=?)`+tx.forShare(), s.Team, s.ID, s.Team, TeamDeletionPending).Scan)
+	current, err := scanCronSchedule(tx.QueryRowContext(ctx, `SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team=? AND id=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=? AND state=?)`+tx.forUpdate(), s.Team, s.ID, s.Team, TeamDeletionPending).Scan)
 	if err != nil {
 		return capability.Principal{}, err
 	}

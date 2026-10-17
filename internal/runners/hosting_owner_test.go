@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -81,7 +82,10 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 							if actor.Authority != principal.Authority || computing != (renewals == 1) {
 								t.Error("owner renewal lost authority or current activity")
 							}
-							return store.LeaseBeat{CancelRequested: renewals == 2, CancelReason: "stop idle owner"}, nil
+							if renewals == 2 {
+								return store.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
+							}
+							return store.LeaseBeat{}, nil
 						},
 						Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return &source.Entry{}, nil },
 						Decide:  func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{} },
@@ -90,8 +94,7 @@ func TestHostingLeavesRenewalWithNativeOwner(t *testing.T) {
 				}, Close: func() error { closed = true; return authorities.Close() }}, principal, nil
 			},
 		}
-		var cancelled *lease.CancelError
-		if err := host.Host(t.Context(), unit); !errors.As(err, &cancelled) || cancelled.Reason != "stop idle owner" || renewals != 2 || confirmations != 1 || !closed {
+		if err := host.Host(t.Context(), unit); !errors.Is(err, lease.ErrLeaseLost) || renewals != 2 || confirmations != 1 || !closed {
 			t.Fatalf("renewals=%d confirmations=%d closed=%v: %v", renewals, confirmations, closed, err)
 		}
 	})

@@ -27,7 +27,7 @@ Manage runners
 
 Register a runner
 
-Use team credentials. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports credential metadata and service state without the bearer. Plain emits the runner name.
+Team runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name.
 
 ### Flags
 
@@ -38,6 +38,8 @@ Use team credentials. --reserved-for requires team-admin runner registration sup
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--runner RUNNER` | Runner name or selection. (required) |
+| `--personal` | Offer this machine only to your runs, including Cloud overflow. |
+| `--session-stdin` | Read an existing independent account session from stdin without saving it; required with --personal. |
 | `--repos PATTERN` | repos Repeatable; comma-separated values are accepted. |
 | `--label LABEL` | label Repeatable; comma-separated values are accepted. |
 | `--max-concurrent N` | max concurrent Must be at least 1. |

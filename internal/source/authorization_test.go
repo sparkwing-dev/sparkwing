@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,13 +20,15 @@ type deniedSourceAccess struct {
 
 func (a *deniedSourceAccess) BundleURL(context.Context, string) (string, error) {
 	a.signed++
-	return "", errors.New("unauthorized bundle signing")
+	return "", a.err
 }
 
 func FuzzSourceAuthorizationPrecedesBytes(f *testing.F) {
-	f.Add("git:8.8.8.8/team/repo", "revoked", true)
-	f.Add("gh:42", "not allowed", false)
-	f.Fuzz(func(t *testing.T, repo, refusal string, bundled bool) {
+	f.Add("git:8.8.8.8/team/repo", "revoked", true, true)
+	f.Add("gh:42", "not allowed", false, true)
+	f.Add("gh:42", "revoked", true, false)
+	f.Add("gh:42", "not allowed", false, false)
+	f.Fuzz(func(t *testing.T, repo, refusal string, bundled, fresh bool) {
 		if repo == "" {
 			return
 		}
@@ -36,14 +39,22 @@ func FuzzSourceAuthorizationPrecedesBytes(f *testing.F) {
 			spec.BundleDigest = strings.Repeat("b", 64)
 		}
 		workspace := t.TempDir()
+		if fresh {
+			workspace = filepath.Join(workspace, "new-workspace")
+		}
 		entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{Workspace: workspace, Access: a, Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
 		if entry != nil {
 			_ = entry.Close()
 		}
-		if entry != nil || !errors.Is(err, denied) || a.calls != 1 || a.signed != 0 {
+		calls, signatures := 1, 0
+		if bundled {
+			calls, signatures = 0, 1
+		}
+		if entry != nil || !errors.Is(err, denied) || a.calls != calls || a.signed != signatures {
 			t.Fatalf("denied source: entry=%v error=%v authorizations=%d signatures=%d", entry, err, a.calls, a.signed)
 		}
-		if entries, err := os.ReadDir(workspace); err != nil || len(entries) != 0 {
+		entries, err := os.ReadDir(workspace)
+		if fresh && !os.IsNotExist(err) || !fresh && (err != nil || len(entries) != 0) {
 			t.Fatalf("denied source created workspace: %v: %v", entries, err)
 		}
 	})

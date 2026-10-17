@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,7 +14,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
@@ -229,11 +233,60 @@ func TestProductionLocalQueueAdvertisesUsableCapacity(t *testing.T) {
 	if runner.RequestCapacity == nil {
 		t.Fatal("local queue cannot supply available CPU to matching")
 	}
-	cores, memory := runner.RequestCapacity()
-	available := match.Resources{Cores: cores, MemoryBytes: memory}
-	capacity := match.Resources{Cores: float64(runtime.NumCPU())}
+	capacity, available, err := runner.RequestCapacity(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if verdict := match.Fits(capacity, available, match.Resources{Cores: .25}); !verdict.OK() {
 		t.Fatalf("local queue refuses a fractional CPU job on this machine: %v", verdict)
+	}
+}
+
+func TestProductionLocalQueueChecksVersionWithoutNetwork(t *testing.T) {
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
+	home := t.TempDir()
+	requests := 0
+	transport := &http.Client{Transport: queueHostTransport(func(*http.Request) (*http.Response, error) {
+		requests++
+		return nil, errors.New("network denied")
+	})}
+	var queue *runners.Loop
+	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
+		services, err := bindLocalController(ctx, binding)
+		if err != nil {
+			return services, err
+		}
+		strict, err := engine.NewResolver(engine.Config{BuildVersion: "v1.2.3", CacheDirectory: filepath.Join(home, "engines"), HTTPClient: transport})
+		if err != nil {
+			return services, err
+		}
+		local, err := engine.NewResolver(engine.Config{BuildVersion: "v1.2.3", CacheDirectory: filepath.Join(home, "engines"), HTTPClient: transport, LocalOnly: true})
+		if err != nil {
+			return services, err
+		}
+		binding.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: strict}
+		binding.Controller.LocalRunnerPolicy = &controller.SignedEngineVersionPolicy{Resolver: local}
+		queue, err = runners.NewStoreRunner(binding.Controller, services.Runner)
+		return services, err
+	}}).Open(t.Context(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := owner.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := queue.CheckVersion(t.Context(), "v1.2.3"); err != nil {
+		t.Fatalf("local queue version check: %v", err)
+	}
+	response, err := queue.Controller.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}, AvailableCores: float64(runtime.NumCPU())})
+	if err != nil || response.Claim != nil {
+		t.Fatalf("empty local queue: %+v: %v", response, err)
+	}
+	if requests != 0 {
+		t.Fatalf("local queue made %d network requests", requests)
 	}
 }
 

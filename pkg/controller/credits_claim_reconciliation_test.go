@@ -47,8 +47,12 @@ func TestCredits_AClaimAboveTheLargestClassIsRefusedAtomically(t *testing.T) {
 		t.Fatalf("unpriced refusal: %s", w.Body)
 	}
 	node, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || node.Status != store.StatusPending || node.ClaimedBy != "" || node.FinishedAt != nil {
-		t.Fatalf("unpriced work mutated: %+v: %v", node, err)
+	if err != nil || node.Status != store.StatusDone || node.Outcome != store.NodeFailed || node.ClaimedBy != "" || node.FinishedAt == nil {
+		t.Fatalf("unpriced work did not fail fast: %+v: %v", node, err)
+	}
+	projected, err := tenant.GetNode(t.Context(), "run", "job")
+	if err != nil || projected.FailureReason != store.FailureUnpricedCPUClass {
+		t.Fatalf("pricing failure reason: %+v %v", projected, err)
 	}
 	for _, table := range []string{"credit_charges", "billing_awards", "node_attempts"} {
 		var count int

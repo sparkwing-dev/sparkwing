@@ -94,6 +94,11 @@ func checkEnrollmentNamesTx(ctx context.Context, tx *storeTx, spec capability.Pr
 }
 
 func enrolledClaimProfileTx(ctx context.Context, tx *storeTx, chain []authorityNode) (match.Profile, error) {
+	for _, ancestor := range chain {
+		if ancestor.principal.Capability.Purpose == capability.PurposeHere {
+			return match.Profile{}, nil
+		}
+	}
 	root := chain[len(chain)-1].principal
 	if root.Authority.Kind != capability.AuthorityCapability {
 		return match.Profile{}, authorityError(apierr.Unavailable, "claim enrollment is unavailable")

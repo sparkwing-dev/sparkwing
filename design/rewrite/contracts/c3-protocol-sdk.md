@@ -1,5 +1,83 @@
 # C3 protocol and SDK contract
 
+## Burst release and machine admission
+
+For a sealed burst request, the owner retains run/box concurrency before
+readiness without acquiring compute resources. Run resource settings still
+flow into each job's sealed settings. A self-claim acquires a job-specific machine lease before the shared store's
+fenced reconciliation. Waiting for machine capacity leaves the job unclaimed.
+A joined state follower cancels that wait when another claimant advances the
+job. Reconciliation still decides who executes after admission succeeds.
+No attempt starts before both admission and the award. Cleanup joins before release.
+
+Independently claimed burst jobs acquire compute resources without reacquiring
+the requester's logical concurrency. This also covers a registered runner on
+the requesting machine. The owner retains those semaphores until persisted job
+completion. Non-burst claimed-job admission keeps its existing concurrency rule.
+For independently awarded jobs, pre-execution machine-admission failure reports
+through the fenced setup result path, with attempt zero retained. A self-hosting
+owner's preclaim admission transport failure returns an error without claiming
+or finishing the job.
+
+An unclaimed burst job retains its logical concurrency while waiting for
+placement. The owner follows the existing state subscription and retries the
+fenced reconciliation after persisted state or its execution eligibility
+changes. `StateFollower.Wait` includes the private owner's execution projection
+in its change comparison. A capacity observation only wakes reconciliation.
+It never grants an execution award. `WaitNode` retains its state-sequence rule.
+
+The internal machine `Lease` exposes its actual granted `Resources`. Every
+production adapter and test lease implements this method. The owner carries that amount in `ReconcileRequest.Reserved`. The store adds
+it to observed free resources within that reconciliation transaction, bounded
+by the authenticated machine's physical capacity. This input does not update
+stored availability. Execution and ordinary heartbeats report only free
+resources. A concurrent heartbeat cannot erase a job's reservation. The additive
+`reserved` wire field adds no persistent reservation or claim-release route.
+
+## Declared requester secrets in composed execution
+
+Artifact publication, consumed-file staging, relative cache directories, cache
+key files and package-manager queries use the SDK execution working directory.
+An acquired entry's checkout root owns those paths. Its pipeline directory owns
+SDK source and installation. Runtime adapters use the existing
+`sdkWorkingDirectory` selector, including nested pipeline directories.
+
+The compiled-source burst proof acquires its uploaded bundle under the awarded
+claim, resolves and verifies the installed replacement-pin engine, builds the Go
+SDK through that engine's `__sdk-install` subprocess and executes it through real
+process pipes for here, personal and exchanged Cloud awards. Execution rechecks
+the accepted engine with the shared resolver. Closing the source removes the
+installation-owned executable. Secret release,
+masking, artifact publication and retrieval use the real controller and store.
+HTTP service transport uses test FIFOs. The test executable dispatches the
+installer entrypoint to the production installer. Kubernetes remains a fake.
+Public CLI, signed-engine distribution and native Cloud isolation require
+their separate native lanes.
+
+`source.PrepareCheckout` owns preparation of an absent absolute host workspace
+for remote source. It authorizes Git or bundle access first, then uses the
+existing private-directory policy and acquisition-owned temporary checkout.
+Denied access creates no workspace. Closing an entry removes its checkout while
+retaining the empty host workspace. CLI options only select that workspace.
+
+The native subprocess property generates requester values with multiline,
+quoted, binary-derived and Unicode content. Real intake, claim and process
+secret release precede SDK execution. Plaintext and base64 values are absent
+from the captured logs. The property uses pipe HTTP transport and does not
+establish native socket or Kubernetes isolation evidence.
+
+The process secret route resolves its `name` as a secret selector, independently
+of named pipeline routes. Controller value replies use the shared SecretValue
+shape, preserving empty values and false shared visibility. The native process
+client, process service and SDK all consume that value under the same live node
+award. The host registers masking before the SDK receives the secret.
+
+The composed burst proof now runs real Go SDK planning and step operations
+in-process from here, personal-machine and exchanged Cloud node awards. It
+retains real HTTP authorization, store transitions, process delegation and secret
+release. SDK process transport, selected-engine installation and native listeners
+remain separate native verification boundaries.
+
 Owner admission refusals use typed store policy results under the live owner and
 captured work generation. Job skip, failure and queue timeout finish the unreleased
 job. Plan refusal preserves completed work, finishes every remaining unreleased
@@ -149,6 +227,10 @@ Source acquisition consumes Source.Location from the request seal, separately
 from repo identity and checkout policy. RemoteURL contains no credential and
 remote acquisition uses the sealed SHA. LocalCheckout is authorized on the
 machine whose store admitted it. PipelineDir stays inside that checkout.
+An unsealed local checkout may have an unborn branch and no commit; its SHA
+remains empty. A supplied SHA still requires that exact commit. A detached
+HEAD without a commit or a broken branch object fails acquisition. Remote
+source always requires a SHA.
 Intake verifies that the location belongs to the sealed repository before any
 credential release. Repo display text is never a clone location. Source.Options.Base feeds procenv
 for Git and Install. Resolve the pin after acquisition, then call the selected
@@ -399,7 +481,11 @@ are part of this contract.
     concurrency holders live. Capacity whose lease lapsed cannot be revived.
 11. Source acquisition trusts sealed identity and exact SHA, not today's branch
     head. It discovers origin HEAD only when DefaultBranch was absent. A bundle
-    only seeds a verified checkout. Credentials are bound to their host.
+    only seeds a verified checkout. Before creating a remote workspace, acquisition
+    obtains live authority through `BundleURL` for bundled source or
+    `GitCredential` for remote source. A complete bundle needs no Git credential.
+    Missing commits, tags, submodules and LFS require live Git authority before
+    their remote fetch. Credentials are bound to their host.
     SSH uses the confirmed KnownHosts value. ExtraRepositories limits submodule
     reads. Kind is github_app, https or ssh; empty means owner credentials, whose
     use is fenced by the runner repository allow-list. Team release requires the
@@ -1068,3 +1154,47 @@ directory before installing with the selected engine. It preserves that checkout
 when closing. Eval never needs a new source-fetch grant after bootstrap exchange.
 For unaccepted remote sources, acquisition detects the SDK from the acquired directory.
 Accepted sources retain the SDK in their sealed engine identity.
+
+## Native artifact composition for burst execution
+
+Production native services bind `ArtifactRecords.Prepare` to the executor.
+Publication derives the manifest record from the current attempt's authenticated
+output binding. Consumption resolves the producer's persisted terminal manifest
+through the shared host store and stages it under the consumer's live authority.
+Here, registered machines and Cloud use this construction. Artifact publication
+failures prevent successful terminal reporting.
+
+Production native services also bind `DepcacheRecords.Prepare` to the executor.
+Cache uploads derive their team, repository, ref, pipeline, job and attempt from
+the same authenticated output binding. The cache declaration supplies its name
+and content key. After validating that complete upload binding, cache record
+commits omit pipeline and job because C1 namespaces dependency caches by
+repository, ref, name and content key. Upload provenance retains the job attempt.
+Package-manager directories resolve through the initialized
+process session's persisted job environment. Missing storage refuses declared
+caches. Restore and save failures retain the shared cold-cache warning policy.
+The native composition round-trip and generated scope-mutation property cover
+these bindings with fake storage and a fake listener.
+
+The composition regression reaches byte upload and record lookup through these
+returned services. Its property refuses generated run, job, attempt, generation,
+pipeline and repository mismatches before upload. Composed SDK tests verify
+actual artifact and declared-cache bytes through signed controller storage on
+all three placements. The uploaded-source variant uses ClaimedNodeHost for the
+initial renewal, source acquisition, selected-engine installation, execution and
+joined cleanup. Its SDK receives the filtered remote process environment.
+
+## Burst claimed-job machine admission
+
+`ClaimedNodeHost.Admission` optionally holds the existing machine admission
+lease around source preparation, SDK execution and joined cleanup. Native
+composition supplies it through `NativeHostConfig.ClaimAdmission` for registered
+machines with local admission enabled. Independently claimed jobs have separate
+job-specific holders, including when they belong to one run. Admission refusal
+before source acquisition reports the claim's terminal setup result without
+starting an attempt. Cloud Job execution keeps its existing physical allocation.
+
+Remote machine admission uses the controller-scoped holder codec in C4. It
+creates no local run record and gives the local controller no authority to read
+or cancel a Cloud run. Existing award renewal, masking and source authorization
+remain in force while a claimed job waits for machine admission.

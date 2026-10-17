@@ -44,4 +44,12 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 	if run.Request.Hash == "" || request.Origin != runspec.OriginSchedule || request.Dispatch != runspec.DispatchController || request.Actor.ID != "alice" || request.RequestedArgs["channel"] != "nightly" || request.Git.SHA != "0123456789abcdef0123456789abcdef01234567" || request.Source.Location.RemoteURL != "https://gitlab.com/acme/ci.git" || len(run.Request.AllowedPools) != 0 || request.Git.App.Set {
 		t.Fatalf("scheduled Cloud intake lost source or consent: %+v", run.Request)
 	}
+	response = f.serve(f.cookieRequest("PUT", "/api/v1/schedules/"+row.ID+"/override", `{"args":{"channel":"changed"}}`))
+	if response.Code != 200 {
+		t.Fatalf("override: %d %s", response.Code, response.Body)
+	}
+	now = now.Add(time.Minute)
+	if id, err := launcher.Launch(t.Context(), row, now); err == nil || id != "" {
+		t.Fatalf("stale tick listing fired updated inputs: %s %v", id, err)
+	}
 }

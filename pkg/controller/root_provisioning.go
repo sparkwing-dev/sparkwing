@@ -15,6 +15,7 @@ import (
 )
 
 type runnerEnrollmentRequest struct {
+	Personal      bool            `json:"personal,omitempty"`
 	Name          string          `json:"name"`
 	Repos         []string        `json:"repos"`
 	ReservedPools []string        `json:"reserved_pools,omitempty"`
@@ -32,6 +33,9 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 	var request runnerEnrollmentRequest
 	if err := decodeEngineRequest(r, &request); err != nil {
 		return err
+	}
+	if !request.Personal && !slices.Contains(a.Principal.Capability.Grants, capability.TeamAdmin) {
+		return apierr.Authorization(apierr.ReasonMissingGrant, "team runner enrollment requires team administration")
 	}
 	if !store.ValidRunnerName(request.Name) || len(request.Repos) == 0 || len(request.Repos) > maxRunnerRepos {
 		return invalidEngineBody("name must be 1 to 63 letters, digits, '-', '_' or '.'; repos must contain 1 to 32 patterns")
@@ -66,7 +70,7 @@ func (s *Server) handleEnrollRunner(w http.ResponseWriter, r *http.Request, a ca
 		}
 	}
 	return s.provisionRoot(w, r, capability.ProvisionSpec{
-		Kind: capability.ProvisionMachine, Authority: &a.Principal.Authority,
+		Kind: capability.ProvisionMachine, Personal: request.Personal, Authority: &a.Principal.Authority,
 		RegistrationID: "runner:" + a.Target.Team + ":" + request.Name,
 		Subject:        capability.Subject{Kind: capability.SubjectMachine, ID: request.Name}, Team: a.Target.Team,
 		Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},

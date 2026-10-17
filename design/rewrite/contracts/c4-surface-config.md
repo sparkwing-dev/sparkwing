@@ -1,5 +1,19 @@
 # C4: surface and configuration contracts
 
+## Overflow account controls
+
+`sparkwing overflow show --profile NAME` reads the authenticated account's
+allowance and current usage. `overflow set --profile NAME` requires exactly
+one of `--minutes N` or `--uncapped`. Zero prevents new Cloud overflow, and
+uncapped removes the saved cap. The existing team tier and billing ladder remain
+in force. Explicit profiles keep this Cloud account setting separate from local
+execution settings.
+
+JSON preserves `monthly_minutes` (including null), `used_seconds` and UTC
+`period_start`. Plain emits only the allowance in minutes or `uncapped`.
+Pretty labels the allowance, usage and period. Validation and controller errors
+emit no success receipt. The command adds no new routes, grants or settings.
+
 <!-- design:begin -->
 
 ## Amendment 1: environment, presence and managed units
@@ -84,6 +98,17 @@ newly minted authority and removes only files it created. W2/W6/W8/W9 share this
 contract. Cloud Job scratch remains the fixed aggregate 20 GiB including DinD,
 enforced by Kubernetes accounting/eviction. Real node/network evidence and full
 teardown remain W8 and deployment acceptance obligations.
+
+Local Go preparation resolves project sparks through the existing resolver before
+source installation and intake. Exact versions need no version lookup. Tracking
+versions fail with the existing `--sw-no-update` hint when resolution fails.
+That invocation flag skips resolution and keeps the current module pins and
+overlay. The selected engine still installs and verifies the SDK through C3.
+Foreground output uses the sealed output selection. It emits `run_start` after
+intake and `run_finish` with run ID, pipeline and actual status only after the
+host returns its committed terminal verdict. JSON uses event/attrs records.
+Plain and pretty output include the same run identity and status. Failed or
+cancelled outcomes keep their nonzero exit. Output failures remain errors.
 
 Status: process environments, limits, settings and both YAML schemas are implemented.
 Source location validation, Git environments, concurrency resolution, shared
@@ -912,6 +937,70 @@ storage and seals its digest into the trigger request. A source pinned to a
 different revision keeps that pipeline revision while the execution snapshot
 remains immutable. Snapshot scratch closes on success and failure.
 
+## Launch burst configuration
+
+Machine `run.routing` owns optional route, profile, ordered prefer entries,
+overflow_minutes, local_secrets source selection and source_files approval.
+Repository `defaults.run` and pipeline `run` use RunRestrictions, carrying only
+route:local and local_secrets name declarations. Repository restrictions cannot
+widen machine authorization. Repository secret names remain declarations and
+cannot change machine source selection or secret classification. Untracked
+repository source_files, including ignored
+paths, require exact machine run.routing.source_files approval. Source-file
+validation remains shared by capture. Route absence is local. Cloud requires a
+machine-configured profile. Prefer absence retains here/5s, machines/5s, cloud/0s.
+Empty preference lists, negative holds, invalid selectors and negative/overflowing
+minutes fail validation.
+
+Local preparation, including offline fallback, resolves configured local secret
+names against the selected pipeline's complete declarations and the requesting
+process's captured environment. It excludes those environment entries before
+capturing the private local environment snapshot or starting SDK inspection.
+Only the input-only `CreateRunRequest.LocalSecrets` map carries values to the
+local controller's existing volatile registry. The request seals resolved names.
+Local preparation and intake diagnostics mask the resolved values. Execution
+uses the existing masked secret-release path.
+
+`Pipeline.SourceFiles` (`source_files`) names literal repo-relative files to
+include beyond tracked paths. Shared ValidateSourceFiles rejects pathspec,
+traversal, Git metadata, directories and missing declared source at capture.
+The captured snapshot preserves tracked working-tree edits and exclusions.
+
+Cloud routing remains attached and captures the working tree. The CLI refuses
+committed revision flags with pipeline-trigger guidance before connecting, and
+preserves `--sw-run-handle-file` after retaining accepted here authority.
+Foreground local routing retains its existing lifecycle. Burst source metadata
+reads the invoking and default branches from the original checkout, because an
+inspection clone's detached HEAD and origin HEAD are not those source facts.
+
+Pre-intake connection setup failures use the same local fallback as the identity
+probe and source upload. Unavailable and network failures announce local
+execution. Authorization failures and cancellation remain failures. A failed
+connection owns no transport, so fallback does not call its close function.
+
+Generated command references retain level-three description headings. The run
+reference exposes a real `burst-and-overflow` section anchor. Level-one and
+level-two description headings stay escaped so command sections retain their
+ownership of those levels.
+
+Shared `source.PrepareCheckout` prepares its private host workspace after live
+source authorization and before creating the owned checkout. Every remote
+placement uses this path, including a fresh registered machine. CLI source
+options no longer create that directory independently.
+For Cloud-owned here runs, `hostSourceOptions` supplies the requesting machine's
+ambient environment through `procenv.Build`. Remote policy admits the existing
+minimal tool base plus `GOCACHE` and `GOMODCACHE`. Captured requester values,
+arbitrary user variables and credential-shaped names remain excluded. SDK
+installation and process execution use this same classified base. Local runs
+retain their captured environment policy.
+
+`runner.holder_prefix` saved by enrollment is registration display metadata.
+Starting that saved configuration does not select a claim holder or execution
+identity. Explicit `warm --holder-prefix` remains refused because the controller
+owns holder identity. Awarded runner names, labels and fences remain authoritative.
+The enrollment-to-startup regression uses real session enrollment and credential
+files. The runner-loop property varies saved names while preserving the awarded
+identity and claim selection.
 
 ## Cloud chart integration amendment
 
@@ -942,6 +1031,108 @@ The launcher does not induce Karpenter scale-up. Native sidecars,
 PodLevelResources, admission APIs and escaped-node network enforcement must be
 verified on the target cluster. A Helm render establishes no native proof.
 
+## Burst artifact execution and physical Cloud resources
+
+Burst execution uses the shared native artifact adapter for declaration capture
+and consumer staging. Public here and personal-runner probes now publish a file
+from the uploaded edited source and read it in a dependent job. Native listener
+refusal leaves those probes unverified.
+
+Cloud resource requests keep their sealed presence and origins. The physical
+allocation comes from the billing class committed at award, independently of
+those settings, and remains fixed across bootstrap exchange and price changes.
+No default route, per-user cap, configuration key or execution limit changes.
+
+## Burst machine admission continuation
+
+Registered runner capacity observes the existing machine sampler, including
+container limits, or the local admission queue when `local_admission` is enabled.
+`contribution` caps advertised headroom and `keep_free` subtracts the reserved
+share. The physical capacity and free resources remain distinct, including an
+explicit zero offer. Observation errors fail before a claim instead of reporting
+unknown capacity. Claim messages include OS and architecture.
+
+When enrollment-enabled local admission has no daemon, the runner resolves its
+own release's signed Sparkwing CLI through the existing engine resolver, then
+calls the existing detached lifecycle and waits for readiness. An unreachable
+existing owner is an error and never causes another owner to be started.
+Development builds have no published matching release. Their native fixture
+starts an independent local controller with the development CLI first.
+
+`NativeHostConfig.ClaimAdmission` composes the existing `LocalAdmission` into
+independently claimed jobs. `LocalAdmission.ClaimedNode` holds one job-specific
+machine lease before source preparation and through process cleanup. It uses
+the sealed job resources, without creating another run record. Ordinary claimed
+jobs also acquire their local concurrency. Burst jobs leave logical concurrency
+with the requesting owner, including when a registered runner shares its
+machine. Here burst owners retain semaphores through persisted completion and
+acquire compute before requesting a self-claim. While that admission waits,
+the job stays ready for other ranked claimants. Another claimant's progress
+cancels and joins the machine wait. The store still fences execution after the
+machine lease is acquired.
+
+Machine admission for a Cloud-owned run uses `wingwire.RemoteRunID` with the
+controller address and run ID encoded as separate base64url fields. Job and
+semaphore participants preserve that owner namespace. The local controller
+does not query or finalize those identities in its run store. Resource release,
+eviction and local queue cancellation still operate on the machine lease. The
+Cloud host owns its award and run cancellation. Local run lookup failures remain
+errors. No SQL schema, controller chaining, persisted credential, environment
+variable, public flag or new limit is introduced.
+
+The public personal-runner probe now uses a separate HOME, runtime home, cache
+and local controller from its requester. It still uses one development binary
+and a local SDK replacement, so it does not verify signed release distribution.
+
+## Attached local output
+
+The local run binding requires a log follower whenever hosting is attached.
+It uses the public controller log reader and selected output mode while the
+CLI hosts execution. Host and follower are joined before return. This preserves
+masked terminal output during offline Cloud fallback. No new flag or output
+format is added.
+
+## Local profile data construction and publication
+
+The CLI resolves --sw-cache-from against the checkout's canonical remote
+repository and origin default branch before sealing. It opens a temporary
+verified-default reader through the selected profile and revokes it on host
+cleanup. Background hosts keep the sealed repository identity and read the
+default-branch hint from the authorized local checkout, because intake clears
+requester-supplied default-branch metadata. The profile server still requires verified
+default-branch records. Both paths ignore inherited Git repository overrides.
+Refreshing a job's attempt storage preserves the read-only cache only for the
+sealed local opt-in. Background owner and independently claimed job awards
+construct the same profile cache before execution; queue claim order does not
+select cache availability.
+
+--publish runs after local completion. The profile admits publish-mode history,
+imports terminal local attempts, copies selected output/artifact bytes through
+signed storage and streams retained logs through the shared log uploader. Local
+history is exported through verified peer authentication. Publication failure
+warns without changing the local verdict. The background local host publishes
+on cleanup. Historical generated topology is flattened to explicit dependencies;
+closure generation does not run during import. The uploaded request and resolved
+spec exclude the private local environment snapshot, including names and digest.
+Burst intake uses an empty environment snapshot rather than the shell name list.
+
+The background queue reports host errors to the local controller's logger when
+hosting returns. Error reporting does not wait for controller shutdown.
+
+## Burst review integration rulings
+
+Burst claim eligibility and requester-secret release use the same sealed claimant
+set. Eligible executors are the run's here host, its requester's enrolled personal
+machines and Cloud executors when cloud is listed. Name/pool entries only narrow
+that eligible set. The here owner retains planning authority independently of
+job placement. Authenticated origin and ownership decide eligibility. Poll labels
+cannot grant it. Revoked or expired personal registrations do not hold placement.
+
+Burst scanning inspects changed/uncommitted snapshot blobs against HEAD. It skips
+values shorter than eight bytes and PEM armor patterns for this scan only.
+Masking retains all its patterns. Local publication reuses the private controller's
+45-second request deadline. The second interrupt cancels publication and reports
+local-only history without changing the local execution verdict.
 
 ## Verified App event snapshot integration
 

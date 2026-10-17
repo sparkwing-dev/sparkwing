@@ -20,8 +20,10 @@ import (
 
 func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
+	seedTickAppConsent(t, st, store.DefaultTeam)
 	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "schedule-owner"}
 	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
+		GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		RepoURL: "https://git.example.com/acme/widgets.git",
 		Branch:  "main",
 		SHA:     "0123456789abcdef0123456789abcdef01234567",
@@ -229,7 +231,9 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ForTeam default: %v", err)
 	}
+	seedTickAppConsent(t, st, "team-b")
 	report, err := (&crons.Service{Store: st, Schedules: tenantB, ArmedBy: "team-b-owner"}).ArmPushed(ctx, crons.ArmPush{
+		GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		RepoURL: "https://git.example.com/acme/widgets.git",
 		Branch:  "main",
 		SHA:     "0123456789abcdef0123456789abcdef01234567",
@@ -273,7 +277,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 	}
 }
 
-func TestCronLauncherUsesStoredTenantScheduleProperty(t *testing.T) {
+func TestCronLauncherRejectsChangedScheduleSnapshotsProperty(t *testing.T) {
 	st := newStoreForAuth(t)
 	sched := armPushedForTick(t, st)
 	if err := st.AsOperator().CreateTeam(t.Context(), "other"); err != nil {
@@ -291,8 +295,13 @@ func TestCronLauncherUsesStoredTenantScheduleProperty(t *testing.T) {
 		input.Pipeline, input.RepoPath, input.GitBranch, input.LockedRef, input.ArmedBy = forged, forged, forged, forged, forged
 		input.Args = map[string]string{"forged": forged}
 		runID, err := launcher.Launch(t.Context(), input, due.In(time.FixedZone("offset", 3600)))
+		if err == nil || runID != "" {
+			t.Errorf("changed schedule snapshot replayed: %s %v", runID, err)
+			return false
+		}
+		runID, err = launcher.Launch(t.Context(), sched, due.In(time.FixedZone("offset", 3600)))
 		if err != nil || runID != first {
-			t.Errorf("stored schedule replay = %s: %v", runID, err)
+			t.Errorf("unchanged snapshot did not replay: %s %v", runID, err)
 			return false
 		}
 		row, err := teststore.ForTeam(t, st, sched.Team).ReadRun(t.Context(), runID)
@@ -340,4 +349,10 @@ func TestCronLauncherRequiresTheTenantTransactionBackend(t *testing.T) {
 	if _, err := srv.ScheduleLauncher().Launch(t.Context(), sched, due); !errors.As(err, &missing) || missing.Code != apierr.PolicyMissing || len(other.runs) != 0 {
 		t.Fatalf("wrong-team backend = %v; runs=%v", err, other.runs)
 	}
+}
+
+func seedTickAppConsent(t *testing.T, st *store.Store, team store.Team) {
+	t.Helper()
+	engineSQL(t, st, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,?,1,'acme','Organization',1,1)`, team)
+	engineSQL(t, st, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES (?,'gh:701',701,'acme/widgets',7,'schedule-owner',1)`, team)
 }

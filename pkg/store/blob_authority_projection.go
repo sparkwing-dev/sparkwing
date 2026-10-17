@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"slices"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // ResolveDataAuthority returns the live sealed scope and exact uploader identity.
@@ -14,15 +17,17 @@ func (t *Tenant) ResolveDataAuthority(ctx context.Context, authorized capability
 		if ref.Kind != capability.AuthorityCapability || ref.ID == "" || authorized.Target.Team != string(t.team) {
 			return bindingRefusal()
 		}
-		p, err := tx.ResolveAuthority(ctx, ref)
-		if err != nil {
-			return err
-		}
 		grant := capability.DataRead
-		if p.Capability.Data != nil && p.Capability.Data.WriteRef != "" {
+		if slices.Contains(authorized.Access.Grants, capability.DataWrite) {
 			grant = capability.DataWrite
+		} else if authorized.Access.Binding == capability.BindSourceBundle && slices.Contains(authorized.Access.Grants, capability.SourceRead) {
+			grant = capability.SourceRead
 		}
-		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, blob.Authority{CapabilityRef: ref.ID}, grant)
+		selector := blob.Authority{CapabilityRef: ref.ID}
+		if c, target := authorized.Principal.Capability, authorized.Target.Data; c.Data != nil && c.Data.Use == capability.DataPublish && target != nil && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {
+			selector.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(t.team), RunID: target.RunID, NodeID: target.NodeID, Attempt: target.Attempt, Generation: target.Generation}}
+		}
+		a, err := resolveBlobAuthorityTx(ctx, tx, t.team, selector, grant)
 		authority = a.authority
 		return err
 	})

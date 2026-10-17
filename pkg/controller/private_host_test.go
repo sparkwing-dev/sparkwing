@@ -240,6 +240,12 @@ func TestLocalHostPrivateTransportDrainsCancelledOwner(t *testing.T) {
 	if err != nil || snapshot.Run.CancelRequestedAt == nil {
 		t.Fatalf("cancel snapshot: %v", err)
 	}
+	for replay := range 2 {
+		applied, err := host.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: engineActor(a), To: store.NodeCancelled, Cause: store.CauseCancel, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "cancel_requested"}}})
+		if err != nil || !applied.CancelRequested || applied.Replayed != (replay == 1) {
+			t.Fatalf("owner cancellation %d: %+v %v", replay, applied, err)
+		}
+	}
 	node, err := host.NodeController(t.Context(), ref)
 	if err != nil {
 		t.Fatal(err)

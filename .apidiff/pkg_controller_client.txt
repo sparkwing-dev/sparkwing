@@ -1,5 +1,6 @@
 # pkg/controller/client
 
+func CheckIdentity(ctx context.Context, options EngineOptions) error
 type CreateServiceTokenRequest struct {
 	Name      string
 	Grants    []string
@@ -8,8 +9,10 @@ type CreateServiceTokenRequest struct {
 type CreateTokenRequest struct {
 	Grants    []string
 	ExpiresAt *time.Time
+	Data      *capability.DataScope
 }
 type CreatedToken struct {
+	Principal  string
 	Capability string
 	Prefix     string
 	Team       string
@@ -24,6 +27,7 @@ type EngineOptions struct {
 	Launcher bool
 }
 type EnrollRunnerRequest struct {
+	Personal      bool
 	Name          string
 	Repos         []string
 	ReservedPools []string
@@ -72,6 +76,7 @@ func NewLocalScheduleManager(options EngineOptions) (controllerwire.LocalSchedul
 func NewLogReader(options EngineOptions) (controllerwire.LogReader, error)
 func NewNodeHostClient(options EngineOptions, runID, nodeID string) (*LocalHostClient, error)
 func NewOperatorManager(options EngineOptions) (controllerwire.OperatorManager, error)
+func NewOverflowManager(options EngineOptions) (controllerwire.OverflowManager, error)
 func NewPoolManager(options EngineOptions) (controllerwire.PoolManager, error)
 func NewQueueManager(options EngineOptions) (controllerwire.QueueManager, error)
 func NewRunPruner(options EngineOptions) (controllerwire.RunPruner, error)
@@ -82,9 +87,28 @@ func NewRunnerTokenManager(options EngineOptions) (RunnerTokenManager, error)
 func NewScheduleManager(options EngineOptions) (controllerwire.ScheduleManager, error)
 func NewScheduleRepositoryManager(options EngineOptions) (controllerwire.ScheduleRepositoryManager, error)
 func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, error)
+func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, session string) (RunnerTokenManager, error)
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error)
 func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (source.Access, error)
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error)
+func OpenProfileData(ctx context.Context, options EngineOptions, scope capability.DataScope) (ProfileData, error)
+type ProfileData struct {
+	Options   EngineOptions
+	Authority blob.Authority
+	Team      string
+}
+func (p ProfileData) Close(ctx context.Context) error
+func (p ProfileData) PublicationLogs(attempt runspec.AttemptIdentity) (logseg.Uploader, error)
+func (p ProfileData) PublicationStorage(attempt runspec.AttemptIdentity) (blob.Store, blob.RecordStore, blob.Authority, error)
+func (p ProfileData) RemoteCache(profile string) (blob.RemoteCache, error)
+type PublicationInput struct {
+	State    store.LocalPublication
+	OpenBlob func(context.Context, blob.Digest) (io.ReadCloser, int64, error)
+	Logs     controllerwire.LogReader
+}
+func PublishLocalRun(ctx context.Context, options EngineOptions, input PublicationInput) (_ string, resultErr error)
+func ReadLocalPublication(ctx context.Context, options EngineOptions, run string) (store.LocalPublication, error)
+func ResolveLocalSecrets(ctx context.Context, declarations []nodeproto.SecretDeclaration, lookup func(context.Context, string) (string, bool, error)) (map[string]string, error)
 type RotatedToken struct {
 	Capability   string
 	New          capability.Metadata
@@ -96,15 +120,16 @@ type RunnerTokenManager interface {
 	EnrollRunner(context.Context, EnrollRunnerRequest) (*CreatedToken, error)
 }
 func SweepLocalSessions(ctx context.Context, options EngineOptions, dryRun bool) ([]wingd.LocalDoctorFinding, error)
+func UploadSourceSnapshot(ctx context.Context, options EngineOptions, git runspec.Git, source runspec.Source, path string) (string, error)
 
 # methods on un-declared receiver types (likely a bug)
 func (c *dataClient) Commit(ctx context.Context, input blob.CommitUpload) (blob.Receipt, error)
 func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRequest) (blob.Record, error)
-func (c *dataClient) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error)
+func (c *dataClient) CopyMemo(ctx context.Context, input blob.CopyMemoRequest) (blob.MemoHit, error)
 func (c *dataClient) Download(ctx context.Context, input blob.GetRequest) (blob.SignedTransfer, error)
 func (c *dataClient) HasMany(ctx context.Context, input blob.HasManyRequest) (blob.Presence, error)
-func (c *dataClient) LookupDepcache(context.Context, blob.DepcacheLookup) (blob.DepcacheHit, error)
-func (c *dataClient) LookupMemo(context.Context, blob.MemoLookup) (blob.MemoHit, error)
+func (c *dataClient) LookupDepcache(ctx context.Context, input blob.DepcacheLookup) (blob.DepcacheHit, error)
+func (c *dataClient) LookupMemo(ctx context.Context, input blob.MemoLookup) (blob.MemoHit, error)
 func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) (blob.RecordLookupResult, error)
 func (c *dataClient) Upload(ctx context.Context, input blob.UploadIntent) (blob.UploadTicket, error)
 func (c *engineClient) AcceptExpansion(ctx context.Context, run, job string, input controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
@@ -115,6 +140,7 @@ func (c *engineClient) Cancel(ctx context.Context, run string, input controllerw
 func (c *engineClient) CancelJob(ctx context.Context, run, job string, input controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (c *engineClient) Claim(ctx context.Context, input controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 func (c *engineClient) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error)
+func (c *engineClient) CreateOperatorTeam(ctx context.Context, input controllerwire.OperatorTeamCreate) (controllerwire.OperatorTeamCreated, error)
 func (c *engineClient) CreateRun(ctx context.Context, input controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
 func (c *engineClient) DeleteRun(ctx context.Context, run string) error
 func (c *engineClient) DeleteSchedule(ctx context.Context, name string) (controllerwire.ScheduleDeletion, error)
@@ -137,6 +163,7 @@ func (c *engineClient) ReadFailure(ctx context.Context, run, job string, generat
 func (c *engineClient) ReadLogs(ctx context.Context, run string, q controllerwire.LogQuery) (controllerwire.LogPage, error)
 func (c *engineClient) ReadObjectStoreBreaker(ctx context.Context) (controllerwire.ObjectStoreBreaker, error)
 func (c *engineClient) ReadOperatorLimits(ctx context.Context) (controllerwire.OperatorLimits, error)
+func (c *engineClient) ReadOverflowControl(ctx context.Context) (controllerwire.OverflowControl, error)
 func (c *engineClient) ReadQueue(ctx context.Context) (wingwire.QueueState, error)
 func (c *engineClient) ReadQueueGroup(ctx context.Context, group string) (controllerwire.QueueGroup, error)
 func (c *engineClient) ReadReceipt(ctx context.Context, run string) (controllerwire.Receipt, error)
@@ -160,6 +187,7 @@ func (c *engineClient) RunSchedule(ctx context.Context, name, key string) (contr
 func (c *engineClient) SearchLogs(ctx context.Context, q controllerwire.LogSearchQuery) (controllerwire.LogSearchPage, error)
 func (c *engineClient) SetGroupPriority(ctx context.Context, group string, input controllerwire.QueuePriorityWrite) (controllerwire.QueuePriorityResult, error)
 func (c *engineClient) SetLocalSchedulePinned(ctx context.Context, name string, pin bool) (controllerwire.ScheduleView, error)
+func (c *engineClient) SetOverflowLimit(ctx context.Context, minutes *int64) (controllerwire.OverflowControl, error)
 func (c *engineClient) SetSchedulePaused(ctx context.Context, name string, pause bool) (controllerwire.ScheduleView, error)
 func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (c *engineClient) TickLocalSchedules(ctx context.Context, dryRun bool) (controllerwire.TickView, error)
@@ -169,6 +197,7 @@ func (c *engineClient) WriteSchedules(ctx context.Context, input controllerwire.
 func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.SecretWrite) (controllerwire.SecretWritten, error)
 func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Manifest) error
 func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segment, body []byte) error
+func (t *runnerSessionTransport) RoundTrip(request *http.Request) (*http.Response, error)
 func (s *sourceAccess) BundleURL(ctx context.Context, digest string) (string, error)
 func (s *sourceAccess) GitCredential(ctx context.Context, spec source.Spec) (source.Credential, error)
 func (c *tokenManager) CreateToken(ctx context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error)

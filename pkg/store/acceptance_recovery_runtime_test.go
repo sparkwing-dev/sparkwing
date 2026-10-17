@@ -98,7 +98,7 @@ func (f storeRecoveryFixture) expireHolder(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = f.s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`, now.UnixNano(), f.tenant.Team(), f.ref.RunID, f.ref.NodeID)
+	_, err = f.s.DB().ExecContext(ctx, storetest.Rebind(f.s, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id=? AND node_id=?`), now.UnixNano(), f.tenant.Team(), f.ref.RunID, f.ref.NodeID)
 	return err
 }
 
@@ -215,10 +215,10 @@ func checkRecoveryUnstarted(t *testing.T) error {
 		return fmt.Errorf("first execution after free lapses has ordinal %d generation %d", applied.Attempt, applied.Generation)
 	}
 	var attempts, runs int
-	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM node_attempts WHERE team=? AND run_id=? AND node_id='job'`, f.tenant.Team(), f.ref.RunID).Scan(&attempts); err != nil {
+	if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s, `SELECT COUNT(*) FROM node_attempts WHERE team=? AND run_id=? AND node_id='job'`), f.tenant.Team(), f.ref.RunID).Scan(&attempts); err != nil {
 		return err
 	}
-	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=?`, f.tenant.Team()).Scan(&runs); err != nil {
+	if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s, `SELECT COUNT(*) FROM runs WHERE team=?`), f.tenant.Team()).Scan(&runs); err != nil {
 		return err
 	}
 	if attempts != 1 || runs != 1 {
@@ -266,7 +266,7 @@ func checkRecoveryStartedCap(t *testing.T) error {
 		}
 		var outcome, reason string
 		var finished int64
-		if err := f.s.DB().QueryRowContext(ctx, `SELECT outcome,failure_reason,finished_at FROM node_attempts WHERE team=? AND run_id=? AND node_id='job' AND attempt=? AND generation=?`, f.tenant.Team(), f.ref.RunID, ordinal, started.Generation).Scan(&outcome, &reason, &finished); err != nil {
+		if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s, `SELECT outcome,failure_reason,finished_at FROM node_attempts WHERE team=? AND run_id=? AND node_id='job' AND attempt=? AND generation=?`), f.tenant.Team(), f.ref.RunID, ordinal, started.Generation).Scan(&outcome, &reason, &finished); err != nil {
 			return err
 		}
 		if outcome != "failed" || reason != "agent_lost" || finished <= 0 {
@@ -290,10 +290,10 @@ func checkRecoveryStartedCap(t *testing.T) error {
 		f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, Holder: next.Claim.Holder, Generation: next.Claim.Generation}
 	}
 	var attempts, runs int
-	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM node_attempts WHERE team=?`, f.tenant.Team(), f.ref.RunID).Scan(&attempts); err != nil {
+	if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s, `SELECT COUNT(*) FROM node_attempts WHERE team=?`), f.tenant.Team(), f.ref.RunID).Scan(&attempts); err != nil {
 		return err
 	}
-	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=?`, f.tenant.Team()).Scan(&runs); err != nil {
+	if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s, `SELECT COUNT(*) FROM runs WHERE team=?`), f.tenant.Team()).Scan(&runs); err != nil {
 		return err
 	}
 	if attempts != 3 || runs != 1 {
@@ -437,10 +437,10 @@ func checkRecoveryCancellation(t *testing.T) error {
 		return err
 	}
 	var runs, attempts int
-	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team=?`, f.tenant.Team()).Scan(&runs); err != nil {
+	if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s, `SELECT COUNT(*) FROM runs WHERE team=?`), f.tenant.Team()).Scan(&runs); err != nil {
 		return err
 	}
-	if err := f.s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM node_attempts WHERE team=? AND run_id=?`, f.tenant.Team(), f.ref.RunID).Scan(&attempts); err != nil {
+	if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s, `SELECT COUNT(*) FROM node_attempts WHERE team=? AND run_id=?`), f.tenant.Team(), f.ref.RunID).Scan(&attempts); err != nil {
 		return err
 	}
 	if runs != 1 || attempts != 1 {

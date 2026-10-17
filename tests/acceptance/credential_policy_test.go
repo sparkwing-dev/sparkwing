@@ -152,6 +152,8 @@ func policyFixture(credential, binding, audience string, grants []capability.Gra
 	case "account_session":
 		p.Class = capability.CredentialSession
 		p.Authority.Kind = capability.AuthoritySession
+	case "verified_local_peer":
+		p.Class, p.Capability.Subject.Kind = capability.CredentialPeer, capability.SubjectLocal
 	case "launcher_service":
 		p.Capability.Subject.Kind = capability.SubjectService
 	case "deployment_admin":
@@ -164,6 +166,10 @@ func policyFixture(credential, binding, audience string, grants []capability.Gra
 		p.Capability.Data = &capability.DataScope{Use: capability.DataPublish, RunID: "run", RepositoryKey: "repo"}
 	case "repo_cache_reader":
 		p.Capability.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "repo", VerifiedDefaultOnly: true}
+	}
+	if binding == "sourceBundle" {
+		p.Capability.Data = &capability.DataScope{Use: capability.DataClaim, RepositoryKey: "repo", RunID: "run", NodeID: "job", Generation: 2}
+		target.Data = &capability.DataTarget{Operation: capability.DataDownload, RunID: "run", NodeID: "job", Generation: 2, Digest: strings.Repeat("a", 64)}
 	}
 	return p, target
 }

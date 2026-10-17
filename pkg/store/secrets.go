@@ -16,6 +16,7 @@ import (
 // repository is a string its submitter typed and nothing proves the
 // submitter owns it.
 type Secret struct {
+	Ephemeral bool `json:"-"`
 	Name      string
 	Value     string
 	Principal string

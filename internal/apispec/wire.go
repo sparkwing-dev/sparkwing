@@ -6,8 +6,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -30,6 +32,8 @@ func query(name, kind string) schema {
 
 func wireOperations() map[string]wireOperation {
 	result := map[string]wireOperation{
+		"GET /api/v1/overflow":                                 operation("Read the account overflow allowance", nil, wire.OverflowControl{}),
+		"PUT /api/v1/overflow":                                 operation("Set the account overflow allowance", wire.OverflowControlWrite{}, wire.OverflowControl{}),
 		"GET /api/v1/operator/limits":                          operation("Read deployment operational guards", nil, wire.OperatorLimits{}),
 		"PUT /api/v1/operator/limits":                          operation("Set deployment operational guards", wire.OperatorLimitsWrite{}, wire.OperatorLimits{}),
 		"GET /api/v1/operator/object-store/breaker":            operation("Read object-store request budgets", nil, wire.ObjectStoreBreaker{}),
@@ -100,6 +104,9 @@ func wireOperations() map[string]wireOperation {
 		"POST /node/v1/summary":                                operation("Write a masked summary", nodeproto.SummaryRequest{}, nodeproto.ServiceAcknowledged{}),
 	}
 	result["POST /api/v1/operator/teams"] = operation("Create a team and its first administrator", wire.OperatorTeamCreate{}, wire.OperatorTeamCreated{})
+	result["GET /api/v1/runs/{run}/local-host/snapshot"] = operation("Read awarded execution state or export completed local history as the verified local peer", nil, store.LocalPublication{})
+	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared terminal artifact selectors", nil, localhostwire.LocalNodeSnapshot{})
+
 	result["POST /api/v1/operator/teams/{team}/refunds"] = operation("Record a completed provider refund", wire.OperatorRefund{}, wire.OperatorRefundRecorded{})
 	result["GET /api/v1/runs/{run}/jobs/{job}/output"] = operation("Read an authorized committed job output", nil, wire.JobOutput{})
 	result["GET /api/v1/runs/{run}/children/{child}/jobs/{job}/output"] = operation("Read an authorized child output", nil, wire.JobOutput{})
@@ -129,6 +136,17 @@ func wireOperations() map[string]wireOperation {
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", client.EnrollRunnerRequest{}, client.CreatedToken{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
 	result["POST /api/v1/data/records"] = operation("Commit a record", wire.DataRecordWriteRequest{}, wire.DataRecord{})
+	for _, path := range []string{"/api/v1/data/upload", "/api/v1/data/commit", "/api/v1/data/records"} {
+		op, ok := result["POST "+path]
+		if !ok {
+			op = operation("Commit a logical record", wire.DataRecordWriteRequest{}, wire.DataRecord{})
+		}
+		op.parameters = append(op.parameters, query("job", "string"), query("attempt", "integer"), query("generation", "integer"))
+		result["POST "+path] = op
+	}
+	result["POST /api/v1/data/depcache/lookup"] = operation("Look up an authorized dependency cache", wire.DataDepcacheLookupRequest{}, wire.DataDepcacheLookupResult{})
+	result["POST /api/v1/data/memo/lookup"] = operation("Look up authorized memo references", wire.DataMemoLookupRequest{}, wire.DataMemoLookupResult{})
+	result["POST /api/v1/data/memo/copy"] = operation("Copy memo references to the authenticated attempt", wire.DataMemoLookupRequest{}, wire.DataMemoLookupResult{})
 	addReadParameters(result)
 	return result
 }

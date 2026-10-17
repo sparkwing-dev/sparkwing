@@ -13,14 +13,18 @@ import (
 
 func FuzzRemoteCacheSelectsServerDefaultRef(f *testing.F) {
 	for _, ref := range []string{"", "main", "feature/x", "manual:main", "../main", "main\x00other"} {
-		f.Add(ref, false)
-		f.Add(ref, true)
+		f.Add(ref, false, true)
+		f.Add(ref, true, true)
+		f.Add(ref, true, false)
 	}
-	f.Fuzz(func(t *testing.T, ref string, verified bool) {
+	f.Fuzz(func(t *testing.T, ref string, verified, attested bool) {
 		authority := blob.Authority{CapabilityRef: "user", Principal: blob.Principal("reader:" + ref), Repo: "gh:123"}
 		d := digest("cached")
 		store := blob.NewSignedStore(blob.SignedStoreOptions{
 			Signer: &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
+				if !attested {
+					t.Fatal("unverified selection reached object signing")
+				}
 				if q.Authority != authority {
 					t.Fatalf("download lost bound authority: %+v", q.Authority)
 				}
@@ -38,9 +42,7 @@ func FuzzRemoteCacheSelectsServerDefaultRef(f *testing.F) {
 			}
 			key := q.Key
 			key.Team, key.Scope.Ref = "team", blob.RefScope{Ref: "main", Verified: true}
-			return blob.RecordLookupResult{Found: true, Record: blob.Record{Key: key, Digest: d, RefFacts: blob.RefFacts{
-				Scope: key.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "delivery", SHA: "sha",
-			}}}, nil
+			return blob.RecordLookupResult{Found: true, VerifiedDefault: attested, Record: blob.Record{Key: key, Digest: d}}, nil
 		}}
 		cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: authority, Repo: "gh:123", Records: r}, store)
 		if err != nil {
@@ -49,6 +51,12 @@ func FuzzRemoteCacheSelectsServerDefaultRef(f *testing.F) {
 		budget := blob.Budget{Deadline: time.Now().Add(time.Minute)}
 		localRef := blob.RefScope{Ref: ref, Verified: verified}
 		hit, err := cache.Memo(t.Context(), blob.MemoKey{Repo: "gh:123", Ref: localRef, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, budget)
+		if !attested {
+			if err != nil || hit.Found {
+				t.Fatalf("unverified memo selection: %+v %v", hit, err)
+			}
+			return
+		}
 		if err != nil || !hit.Found {
 			t.Fatalf("default memo lookup: %+v, %v", hit, err)
 		}

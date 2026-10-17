@@ -40,6 +40,22 @@ func (p *SignedRunnerAdmission) CheckRunner(ctx context.Context, version string)
 	return err
 }
 
+// CheckRunner revalidates the claimant and selects version policy from its persisted subject.
+func (s *EngineController) CheckRunner(ctx context.Context, authority capability.AuthorityRef, version string) (capability.Principal, error) {
+	if s.Store == nil || s.RunnerPolicy == nil {
+		return capability.Principal{}, &apierr.Error{Code: apierr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
+	}
+	principal, err := s.Store.ResolveAuthority(ctx, authority)
+	if err != nil {
+		return capability.Principal{}, err
+	}
+	policy := s.RunnerPolicy
+	if principal.Capability.Subject.Kind == capability.SubjectLocal && s.LocalRunnerPolicy != nil {
+		policy = s.LocalRunnerPolicy
+	}
+	return principal, policy.CheckRunner(ctx, version)
+}
+
 func (s *EngineController) claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	if authorized.Principal.Authority.Kind != capability.AuthorityCapability || authorized.Principal.Authority.ID == "" || authorized.Principal.Authority.ID != authorized.Principal.Capability.Prefix {
 		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires capability authority")
@@ -50,18 +66,8 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if len(body.Kinds) == 0 {
 		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires unit kinds")
 	}
-	if s.Store == nil || s.RunnerPolicy == nil {
-		return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
-	}
-	principal, err := s.Store.ResolveAuthority(ctx, authorized.Principal.Authority)
+	principal, err := s.CheckRunner(ctx, authorized.Principal.Authority, body.RunnerVersion)
 	if err != nil {
-		return controllerwire.ClaimResponse{}, err
-	}
-	policy := s.RunnerPolicy
-	if principal.Capability.Subject.Kind == capability.SubjectLocal && s.LocalRunnerPolicy != nil {
-		policy = s.LocalRunnerPolicy
-	}
-	if err := policy.CheckRunner(ctx, body.RunnerVersion); err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
 	profile, _, err := s.Store.ReadClaimProfile(ctx, principal.Authority)
@@ -72,7 +78,14 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
-	if principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
+	if principal.Capability.Purpose == capability.PurposeHere || principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
+		profile.OS, profile.Arch = body.OS, body.Arch
+		profile.Capacity = match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}
+		if body.Capacity != nil {
+			profile.Capacity = *body.Capacity
+		}
+	}
+	if principal.Capability.Purpose == capability.PurposeHere || principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
 		if err := s.Store.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
@@ -143,6 +156,10 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 		unit.Execution = &runspec.JobExecutionSettings{Resources: resources}
 	case capability.UnitTrigger:
 		unit.Execution = nil
+	}
+	unit.CloudResources, err = s.Store.CloudAwardResources(ctx, principal.Authority)
+	if err != nil {
+		return controllerwire.ClaimedUnit{}, err
 	}
 	if parent := principal.Capability.Parent; parent != nil {
 		p, err := s.Store.ResolveAuthority(ctx, *parent)

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -36,8 +38,9 @@ func CompatibilityFor(release engine.VersionInfo) Compatibility {
 
 // CreateRunRequest carries user input; authenticated authority and App facts are server-derived.
 type CreateRunRequest struct {
-	Request        runspec.Request `json:"request"`
-	IdempotencyKey string          `json:"idempotency_key"`
+	Request        runspec.Request   `json:"request"`
+	IdempotencyKey string            `json:"idempotency_key"`
+	LocalSecrets   map[string]string `json:"local_secrets,omitempty"`
 }
 
 // CreateRunResponse returns the accepted run and any first-intake here bearer.
@@ -67,6 +70,9 @@ type PlanAccepted struct {
 
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
+	Capacity             *match.Resources      `json:"capacity,omitempty"`
+	OS                   string                `json:"os,omitempty"`
+	Arch                 string                `json:"arch,omitempty"`
 	RunnerVersion        string                `json:"runner_version"`
 	Kinds                []capability.UnitKind `json:"kinds"`
 	Labels               []string              `json:"labels"`
@@ -78,6 +84,7 @@ type ClaimRequest struct {
 
 // ClaimedUnit carries the one-time private execution award over authenticated transport.
 type ClaimedUnit struct {
+	CloudResources         *match.Resources              `json:"cloud_resources,omitempty"`
 	Unit                   capability.UnitKind           `json:"unit"`
 	Purpose                capability.AwardPurpose       `json:"purpose"`
 	Delivery               capability.DeliveryPurpose    `json:"delivery"`
@@ -131,7 +138,9 @@ type ExchangeResponse struct {
 
 // RenewalRequest reports activity, never a replacement holder or generation.
 type RenewalRequest struct {
-	Executing bool `json:"executing"`
+	LocalSecrets map[string]string `json:"local_secrets,omitempty"`
+	Available    *match.Resources  `json:"available,omitempty"`
+	Executing    bool              `json:"executing"`
 }
 
 // RenewalResponse carries liveness, cancellation and watch state for every unit keeper.
@@ -145,21 +154,23 @@ type RenewalResponse struct {
 
 // JobResult references authorized records, so a raw digest cannot grant reachability.
 type JobResult struct {
-	Outcome  string                `json:"outcome"`
-	Reason   string                `json:"reason,omitempty"`
-	Failure  *nodeproto.JobFailure `json:"failure,omitempty"`
-	ExitCode *int                  `json:"exit_code,omitempty"`
-	Output   *blob.RecordKey       `json:"output,omitempty"`
-	Manifest *blob.RecordKey       `json:"manifest,omitempty"`
+	MaskedError string                `json:"masked_error,omitempty"`
+	Outcome     string                `json:"outcome"`
+	Reason      string                `json:"reason,omitempty"`
+	Failure     *nodeproto.JobFailure `json:"failure,omitempty"`
+	ExitCode    *int                  `json:"exit_code,omitempty"`
+	Output      *blob.RecordKey       `json:"output,omitempty"`
+	Manifest    *blob.RecordKey       `json:"manifest,omitempty"`
 }
 
 // JobTransitionRequest carries a transition and the observed source attempt without caller authority.
 type JobTransitionRequest struct {
-	To            string     `json:"to"`
-	Cause         string     `json:"cause"`
-	SourceAttempt *int64     `json:"source_attempt,omitempty"`
-	Result        *JobResult `json:"result,omitempty"`
-	RetryAt       *time.Time `json:"retry_at,omitempty"`
+	Publication   *runspec.PublishedAttempt `json:"publication,omitempty"`
+	To            string                    `json:"to"`
+	Cause         string                    `json:"cause"`
+	SourceAttempt *int64                    `json:"source_attempt,omitempty"`
+	Result        *JobResult                `json:"result,omitempty"`
+	RetryAt       *time.Time                `json:"retry_at,omitempty"`
 }
 
 type Applied struct {
@@ -208,9 +219,10 @@ type MaterializedResultSource struct {
 }
 
 type ReconcileRequest struct {
-	Policy          string       `json:"policy"`
-	Source          *ReuseSource `json:"source,omitempty"`
-	MaterializeOnly bool         `json:"materialize_only,omitempty"`
+	Reserved        *match.Resources `json:"reserved,omitempty"`
+	Policy          string           `json:"policy"`
+	Source          *ReuseSource     `json:"source,omitempty"`
+	MaterializeOnly bool             `json:"materialize_only,omitempty"`
 }
 
 type ReconcileResponse struct {

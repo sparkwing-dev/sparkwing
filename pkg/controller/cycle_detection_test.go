@@ -77,6 +77,13 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	parent, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Request.Request.Git != parent.Request.Request.Git || run.Request.Request.Source != parent.Request.Request.Source {
+		t.Fatal("implicit child did not inherit sealed parent source")
+	}
 	git := run.Request.Request.Git
 	if git.Repository.Key != "gh:1" || git.Ref != "main" || git.SHA != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("source: %+v", git)
@@ -88,6 +95,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 
 func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
+	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
 	expected := runspec.Git{Repository: runspec.Repository{Key: "gh:2", Display: "explicit-repo"}, Ref: "feature", SHA: "e0c11c1750000000000000000000000000000000"}
 	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", expected), 201)
 	var created struct {
@@ -108,6 +116,7 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 
 func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	e, h, claim := childIntakeFixture(t)
+	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
 	expected := runspec.Git{Repository: runspec.Repository{Key: "gh:2", Display: "acme/other"}, Ref: "main"}
 	w := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", expected), 201)
 	var created struct {
@@ -167,7 +176,8 @@ func setChildAncestor(t *testing.T, e *EngineController, id, parent string) {
 }
 
 func TestChildCycleIdentityIncludesRepository(t *testing.T) {
-	_, h, claim := childIntakeFixture(t)
+	e, h, claim := childIntakeFixture(t)
+	childSourceRepositories(t, e, claim, []string{"gh:1", "gh:2"})
 	engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "ci", runspec.Git{Repository: runspec.Repository{Key: "gh:2"}}), 201)
 }
 

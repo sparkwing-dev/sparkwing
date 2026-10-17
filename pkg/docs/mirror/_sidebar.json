@@ -55,6 +55,7 @@
       "label": "Operations",
       "slugs": [
         "observability",
+        "debugging",
         "diagnosing-admission",
         "security",
         "hotfix-runner",
@@ -63,6 +64,7 @@
         "auth",
         "oidc",
         "limits",
+        "billing",
         "hooks",
         "schedules",
         "api",
@@ -99,6 +101,7 @@
         "cli-examples",
         "cli-info",
         "cli-operator",
+        "cli-overflow",
         "cli-pipeline",
         "cli-pools",
         "cli-profiles",

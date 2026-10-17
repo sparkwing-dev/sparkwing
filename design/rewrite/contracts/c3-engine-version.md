@@ -74,6 +74,14 @@ warm reports. It does not authorize execution after the lease is released.
 Real Go fixtures cover missing checksums, overlays, undeclared SDK replacement refusal and
 execution after cache pruning. Native platform evidence remains separate.
 
+Dependency preparation runs `go list -deps` for the pipeline package, using
+the same workspace selection as compilation. Covering workspaces remain active.
+Unrelated workspaces are disabled for preparation. Outside a covering workspace,
+it uses `-mod=mod` and the effective modfile to prepare imported package
+checksums before computing the cache key. It no longer
+downloads every module archive in the graph. An unavailable unused archive
+cannot block a pipeline whose build dependencies are already available.
+
 Local dispatch consumes ReadPin, VersionForPin and Resolve for both SDKs. It
 rechecks policy on every invocation and stops re-executing only when the current
 and resolved executables are the same file. Info reads pin metadata without
@@ -209,6 +217,11 @@ network refresh. No cached policy yields `NoticePolicyUnavailable` and permits
 local execution. Cached restrictions and executable verification still apply.
 `EvaluateRunner` refuses a missing policy even if it came from a local resolver.
 The local controller selects its local policy only for a persisted local subject.
+The embedded queue's startup and refresh checks use the same
+`EngineController.CheckRunner` selection as claim admission. The queue
+authenticates its bearer before that check; claim admission still authorizes
+the requested work separately. A fresh local controller therefore needs no
+online runner policy to remain available after admitting a local run.
 Machine and service claims keep the strict runner policy. Compatibility and run
 status remain available without policy metadata for local execution.
 

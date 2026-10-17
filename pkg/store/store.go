@@ -90,6 +90,7 @@ const RetrySourceManual = "manual"
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
+	localSecrets     sync.Map
 	resultRecords    nodeResultRecords
 	materializations materializationRecords
 	claimProfiles    ClaimProfileResolver
@@ -103,7 +104,7 @@ type Store struct {
 	consolePolicy    consolePolicy
 	sourcePolicy     sourceReleaseContracts
 	clock            func() time.Time
-	pinnedClock      func() time.Time // safety: only fixtures may replace the database clock used by PostgreSQL leases.
+	pinnedClock      func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
 	db               *sql.DB
 	dialect          Dialect
 	cleanup          func() error
@@ -514,6 +515,7 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 
 // Close releases the underlying database handle and any private snapshot.
 func (s *Store) Close() error {
+	s.localSecrets.Clear()
 	dbErr := s.db.Close()
 	if s.cleanup == nil {
 		return dbErr
@@ -1605,7 +1607,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 5
+const expectedSchemaVersion = 6
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

@@ -1,9 +1,10 @@
 package controllerwire
 
 import (
+	"time"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"time"
 )
 
 // DataUploadRequest selects bytes; the controller derives uploader and scope.
@@ -84,9 +85,41 @@ type DataRecord struct {
 
 // DataRecordLookupResult carries a found record and its persisted members.
 type DataRecordLookupResult struct {
-	Found   bool         `json:"found"`
-	Record  *DataRecord  `json:"record,omitempty"`
-	Members []DataMember `json:"members"`
+	Found           bool         `json:"found"`
+	VerifiedDefault bool         `json:"verified_default,omitempty"`
+	Record          *DataRecord  `json:"record,omitempty"`
+	Members         []DataMember `json:"members"`
+}
+
+// DataMemoLookupRequest selects a memo within the authenticated repository.
+type DataMemoLookupRequest struct {
+	Pipeline string       `json:"pipeline"`
+	Job      string       `json:"job"`
+	Hash     runspec.Hash `json:"hash"`
+	Deadline *time.Time   `json:"deadline,omitempty"`
+}
+
+// DataMemoLookupResult carries result references and the caller's reader fence.
+type DataMemoLookupResult struct {
+	Found    bool                     `json:"found"`
+	Output   *blob.Digest             `json:"output,omitempty"`
+	Manifest *blob.Digest             `json:"manifest,omitempty"`
+	Members  []DataMember             `json:"members"`
+	Reader   *runspec.AttemptIdentity `json:"reader,omitempty"`
+}
+
+// DataDepcacheLookupRequest selects a declared cache within authenticated execution storage.
+type DataDepcacheLookupRequest struct {
+	Name     string     `json:"name"`
+	Key      string     `json:"key"`
+	Deadline *time.Time `json:"deadline,omitempty"`
+}
+
+// DataDepcacheLookupResult carries an authorized repository cache selection.
+type DataDepcacheLookupResult struct {
+	Found  bool               `json:"found"`
+	Record *DataRecord        `json:"record,omitempty"`
+	Source blob.RestoreSource `json:"source,omitempty"`
 }
 
 // DataRecordWriteRequest commits logical record selectors under server-derived scope.

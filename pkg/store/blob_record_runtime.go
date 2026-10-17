@@ -141,7 +141,7 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 	if key.Team != a.capability.Team || key.Scope.Repo != a.authority.Repo || key.Scope.Ref != a.authority.Ref.Scope || (key.Kind != blob.KindDepcache && key.Scope.Pipeline != a.pipeline) || key.Name == "" || !slices.Contains(blob.Kinds, key.Kind) {
 		return authorityError(apierr.Forbidden, "record key differs from sealed scope")
 	}
-	if blobIsCache(key.Kind) && blobLocalRepo(key.Scope.Repo) {
+	if blobIsCache(key.Kind) && !blobCacheRepositoryAllowed(a, key.Kind) {
 		return authorityError(apierr.Forbidden, "shared caches require a remote repository")
 	}
 	if a.source.Attempt.Set && key.Kind != blob.KindDepcache && key.Scope.Job != a.source.Attempt.Value.NodeID {

@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	goruntime "runtime"
+
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -15,9 +18,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type hereDependencies struct {
+	admitted    func(controllerwire.CreateRunResponse) error
+	capacity    func(context.Context) (match.Resources, match.Resources, error)
 	credentials func() (hereCredentials, error)
 	resolve     func(context.Context, client.EngineOptions) (hereRuntime, error)
 	version     string
@@ -37,6 +43,13 @@ type hereHostSession struct {
 
 func defaultHereDependencies(output string) hereDependencies {
 	return hereDependencies{
+		capacity: func(ctx context.Context) (match.Resources, match.Resources, error) {
+			home, err := wingd.HomeDir("")
+			if err != nil {
+				return match.Resources{}, match.Resources{}, err
+			}
+			return observeBurstCapacity(ctx, home)
+		},
 		credentials: localHereCredentials, version: installedVersion(), resolve: resolveHereRuntime,
 		attach: func(ctx context.Context, options client.EngineOptions, run string, host func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error) {
 			return attachHereRun(ctx, options, run, output, os.Stdout, host)
@@ -44,8 +57,21 @@ func defaultHereDependencies(output string) hereDependencies {
 	}
 }
 
-func resolveHereRuntime(context.Context, client.EngineOptions) (hereRuntime, error) {
-	return hereRuntime{}, &apierr.Error{Code: apierr.Unavailable, Message: "here run hosting is unavailable in this build", Hint: "the shared run host, source, storage and lease keeper require a native binding"}
+func resolveHereRuntime(ctx context.Context, options client.EngineOptions) (hereRuntime, error) {
+	if err := ctx.Err(); err != nil {
+		return hereRuntime{}, err
+	}
+	controller, err := client.NewEngineClient(options)
+	if err != nil {
+		return hereRuntime{}, err
+	}
+	return hereRuntime{controller: controller, bind: func(ctx context.Context, options client.EngineOptions, award controllerwire.ClaimedUnit) (hereHostSession, error) {
+		home, err := wingd.HomeDir("")
+		if err != nil {
+			return hereHostSession{}, err
+		}
+		return bindLocalRunHost(ctx, home, options, award)
+	}}, nil
 }
 
 func handoffHereRun(ctx context.Context, options client.EngineOptions, response controllerwire.CreateRunResponse, deps hereDependencies) error {
@@ -59,6 +85,11 @@ func handoffHereRun(ctx context.Context, options client.EngineOptions, response 
 	store = store.forController(options)
 	if response.HereBearer != "" {
 		if err := store.save(options.URL, response.RunID, response.HereBearer); err != nil {
+			return incompleteHereHandoff(response.RunID, err)
+		}
+	}
+	if deps.admitted != nil {
+		if err := deps.admitted(response); err != nil {
 			return incompleteHereHandoff(response.RunID, err)
 		}
 	}
@@ -115,7 +146,17 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 	if err := ctx.Err(); err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
-	response, err := runtime.controller.Claim(ctx, controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: deps.version})
+	claim := controllerwire.ClaimRequest{RunID: run, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: deps.version, AvailableCores: float64(goruntime.NumCPU()), OS: goruntime.GOOS, Arch: goruntime.GOARCH}
+	if deps.capacity != nil {
+		capacity, available, err := deps.capacity(ctx)
+		if err != nil {
+			return completion, incompleteHereHandoff(run, err)
+		}
+		claim.Capacity = &capacity
+		claim.AvailableCores = available.Cores
+		claim.AvailableMemoryBytes = available.MemoryBytes
+	}
+	response, err := runtime.controller.Claim(ctx, claim)
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
@@ -156,7 +197,7 @@ func hereRunInput(run string, award controllerwire.ClaimedUnit) (nodehost.RunInp
 	if !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
 		return nodehost.RunInput{}, localRunProtocolError("controller returned a different here runner selection")
 	}
-	return ownerRunInput(run, award, capability.PurposeHere)
+	return ownerRunInput(run, award, capability.PurposeTrigger)
 }
 
 func runHereResumeCommand(ctx context.Context, flags triggerFlags, out io.Writer,

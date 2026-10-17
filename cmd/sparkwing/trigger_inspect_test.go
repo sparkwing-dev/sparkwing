@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
@@ -277,4 +278,22 @@ func FuzzTriggerInspectionMasksProxyDiagnostics(f *testing.F) {
 			t.Fatal("proxy credential entered an inspection diagnostic")
 		}
 	})
+}
+
+func TestInspectionPreservesRequesterSecretMasker(t *testing.T) {
+	input, deps, _ := triggerInspectionFixture(t)
+	selection, err := prepareTriggerSource(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	masker := secrets.NewMasker()
+	masker.Register("private-local-value")
+	deps.options.Base.Masker = masker
+	deps.exec = func(context.Context, string, []string, string, ...string) ([]byte, error) {
+		return nil, errors.New("private-local-value")
+	}
+	_, err = inspectTriggerSource(t.Context(), selection, input.environment, deps)
+	if err == nil || strings.Contains(err.Error(), "private-local-value") {
+		t.Fatalf("inspection failure: %v", err)
+	}
 }

@@ -77,14 +77,17 @@ path, missing input or read failure returns an error.
 
 ### Storage
 
-Local runs keep archives under `$SPARKWING_HOME/depcache/`. Hosts with a signed
-data binding restore through it and refresh the binding after execution, so
+Local runs keep dependency-cache records and archives in the local controller,
+scoped to the checkout. A remote repository and Git branch are optional. Hosts
+restore through their signed data binding and refresh it after execution, so
 retries save under the final attempt. A refused binding runs cold or skips saving.
 Downloads verify length and SHA-256 and close before extraction publishes files.
 
 Remote cache records use repository-bound authority and signed `/data` transfers.
 The read-only cache contract permits verified default-branch memo, artifact and
 dependency-cache records. It has no write or pipeline-binary fetch operation.
+Attached and detached local runs use the checkout's origin default branch as a
+lookup hint. The controller verifies the producing run's default-branch trust.
 Local pipeline binaries stay on the machine that builds them.
 
 ## Pipeline binary cache

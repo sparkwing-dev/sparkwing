@@ -1,8 +1,10 @@
 package crons
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func localRegistrationFixture(t *testing.T) (*harness, controllerwire.LocalScheduleRegistration) {
@@ -222,5 +225,52 @@ func TestLocalProofCleanupFailuresReachArmingAndPinning(t *testing.T) {
 	compiler.failFor = input.Schedules[1].Pipeline
 	if _, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture, nil); !errors.Is(err, want) {
 		t.Fatalf("failed proof lost prior cleanup failure: %v", err)
+	}
+}
+
+func TestLocalRegistrationCommitFailureRestoresFiles(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprint(existing), func(t *testing.T) {
+			h, input := localRegistrationFixture(t)
+			compiler := newFakeCompiler(t)
+			before := map[string][]byte{}
+			if existing {
+				report, err := h.svc.RegisterLocal(t.Context(), input, compiler.prove, localCapture, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, row := range report.Schedules {
+					for _, path := range []string{row.LockedBinary, filepath.Join(h.home, "schedule-registrations", row.ID+".json")} {
+						data, err := os.ReadFile(path)
+						if err != nil {
+							t.Fatal(err)
+						}
+						before[path] = data
+					}
+				}
+			}
+			compiler.revision++
+			input.Environment = []string{"CAPTURE=changed"}
+			refused := errors.New("registration transaction refused")
+			_, err := h.svc.RegisterLocal(t.Context(), input, compiler.prove, localCapture, func(context.Context, []store.CronSchedule, LocalRegistration, bool) (ArmReport, error) {
+				return ArmReport{}, refused
+			})
+			if !errors.Is(err, refused) {
+				t.Fatalf("commit: %v", err)
+			}
+			for _, entry := range input.Schedules {
+				id := ScheduleID(input.RepoPath, entry.Pipeline, entry.Name)
+				for _, path := range []string{filepath.Join(h.svc.PinRoot, id, PinnedBinaryName), filepath.Join(h.home, "schedule-registrations", id+".json")} {
+					got, err := os.ReadFile(path)
+					if existing {
+						if err != nil || !bytes.Equal(got, before[path]) {
+							t.Fatalf("failed re-registration changed %s: %v", path, err)
+						}
+					} else if !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("failed registration left %s: %v", path, err)
+					}
+				}
+			}
+		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -93,7 +94,13 @@ func (t *Tenant) resolveScheduleTx(ctx context.Context, tx *storeTx, selector st
 	}
 	var found []CronSchedule
 	for _, row := range rows {
-		base := strings.TrimSuffix(filepath.Base(row.RepoPath), ".git") + "/" + row.Pipeline
+		repo := strings.TrimSuffix(filepath.Base(row.RepoPath), ".git")
+		if !filepath.IsAbs(row.RepoPath) {
+			if identity, err := sourceurl.Identity(row.RepoPath); err == nil {
+				_, repo, _ = strings.Cut(identity, "/")
+			}
+		}
+		base := repo + "/" + row.Pipeline
 		name := row.Pipeline
 		if row.Name != CronScheduleDefaultName {
 			base += "/" + row.Name
@@ -199,7 +206,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 				repos[row.RepoPath] = true
 			}
 		}
-		if p.Capability.Subject.Kind != capability.SubjectLocal && len(proposed) > 0 && !repos[repo] && len(repos) >= 10 {
+		if p.Capability.Subject.Kind != capability.SubjectLocal && len(proposed) > 0 && !repos[repo] && len(repos) >= limits.MaxScheduledReposPerTeam {
 			return authorityError(apierr.Conflict, "team schedule repository limit reached")
 		}
 		guards, err := computeLimitsTx(ctx, tx)
@@ -282,7 +289,7 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a capability.Aut
 				}
 			}
 		}
-		if p.Capability.Subject.Kind != capability.SubjectLocal && count > 20 {
+		if p.Capability.Subject.Kind != capability.SubjectLocal && count > limits.MaxSchedulesPerRepo {
 			return authorityError(apierr.BadRequest, "repository schedule limit reached")
 		}
 		_, err = t.scheduleAuthorityTx(ctx, tx, a.Principal.Authority)

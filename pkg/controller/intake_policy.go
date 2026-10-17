@@ -24,6 +24,12 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	if err != nil {
 		return store.IntakePolicyFacts{}, err
 	}
+	if request.Request.Lineage.ParentRunID != "" && !capability.RepositoryAllowed(principal.Capability.Repositories, capability.RepositoryIdentity{Key: string(request.Request.Git.Repository.Key), Display: request.Request.Git.Repository.Display}) {
+		return store.IntakePolicyFacts{}, &apierr.Error{Code: apierr.PlanInvalid, Message: "child repository is outside the parent's source authorization"}
+	}
+	if err := s.admissionFloodRefusal(ctx, resolver, request, principal); err != nil {
+		return store.IntakePolicyFacts{}, err
+	}
 	team := store.Team(principal.Capability.Team)
 	guards, funded, err := store.IntakeSettings(ctx, resolver, team)
 	if err != nil {

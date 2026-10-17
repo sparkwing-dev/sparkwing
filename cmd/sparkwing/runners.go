@@ -60,13 +60,15 @@ func runRunners(args []string) error {
 }
 
 type runnerEnrollment struct {
-	path        string
-	config      userconfig.RunnerConfig
-	force       bool
-	service     runnerServicePlan
-	profileName string
-	format      string
-	pools       []string
+	path         string
+	config       userconfig.RunnerConfig
+	force        bool
+	service      runnerServicePlan
+	profileName  string
+	format       string
+	pools        []string
+	personal     bool
+	sessionStdin bool
 }
 
 func runRunnersAdd(args []string) error {
@@ -77,11 +79,21 @@ func runRunnersAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	manager, err := runnerTokenManager(prof)
+	ctx := context.Background()
+	var manager client.RunnerTokenManager
+	if enrollment.sessionStdin {
+		session, readErr := readTokenStdin(os.Stdin, os.Stderr, "existing account session")
+		if readErr != nil {
+			return readErr
+		}
+		manager, err = client.NewSessionRunnerTokenManager(ctx, client.EngineOptions{URL: prof.ControllerURL()}, session)
+	} else {
+		manager, err = runnerTokenManager(prof)
+	}
 	if err != nil {
 		return err
 	}
-	return enrollRunner(context.Background(), manager, enrollment)
+	return enrollRunner(ctx, manager, enrollment)
 }
 
 func runnerTokenManager(prof *namedProfile) (client.RunnerTokenManager, error) {
@@ -129,6 +141,11 @@ func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, erro
 		maxConcurrent = &value
 	}
 	enrollment.pools = inv.Flags["reserved-for"]
+	enrollment.personal = inv.Bool("personal")
+	enrollment.sessionStdin = inv.Bool("session-stdin")
+	if enrollment.personal && !enrollment.sessionStdin {
+		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--personal requires --session-stdin with an existing independent account session"}
+	}
 	prof, err := resolveProfile(inv.Value("profile"))
 	if err != nil {
 		return enrollment, nil, err
@@ -152,7 +169,7 @@ func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, erro
 }
 
 func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enrollment runnerEnrollment) error {
-	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools})
+	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos, ReservedPools: enrollment.pools, Personal: enrollment.personal})
 	if err != nil {
 		return err
 	}
@@ -185,15 +202,16 @@ type runnerServiceResult struct {
 }
 
 type runnerEnrollmentResult struct {
-	Runner  string                       `json:"runner"`
-	Profile string                       `json:"profile"`
-	Config  string                       `json:"config"`
-	Token   controllerwire.TokenMetadata `json:"token"`
-	Service runnerServiceResult          `json:"service"`
+	Personal bool                         `json:"personal"`
+	Runner   string                       `json:"runner"`
+	Profile  string                       `json:"profile"`
+	Config   string                       `json:"config"`
+	Token    controllerwire.TokenMetadata `json:"token"`
+	Service  runnerServiceResult          `json:"service"`
 }
 
 func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.TokenMetadata, service runnerServiceResult) error {
-	result := runnerEnrollmentResult{Runner: *enrollment.config.HolderPrefix, Profile: enrollment.profileName, Config: enrollment.path, Token: token, Service: service}
+	result := runnerEnrollmentResult{Runner: *enrollment.config.HolderPrefix, Profile: enrollment.profileName, Config: enrollment.path, Token: token, Service: service, Personal: enrollment.personal}
 	switch enrollment.format {
 	case "json":
 		return json.NewEncoder(os.Stdout).Encode(result)
@@ -202,6 +220,9 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 		return err
 	}
 	fmt.Printf("minted runner token %s for %s on profile %s\n", token.Prefix, token.Principal, enrollment.profileName)
+	if enrollment.personal {
+		fmt.Println("personal capacity: accepts only your runs")
+	}
 	fmt.Printf("wrote the runner section of %s (mode 0600)\n", enrollment.path)
 	fmt.Printf("service: %s\n", service.Status)
 	if service.Detail != "" {

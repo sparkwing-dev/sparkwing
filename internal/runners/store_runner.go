@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // StoreRunnerConfig binds an embedded claimant and native hosts to the controller's store.
@@ -15,7 +16,7 @@ type StoreRunnerConfig struct {
 	Bearer          func(context.Context) (string, error)
 	Loop            LoopConfig
 	Bind            func(context.Context, StoreBinding) (NativeServices, error)
-	RequestCapacity func() (float64, int64)
+	RequestCapacity func(context.Context) (capacity, available match.Resources, err error)
 	OnError         func(error)
 }
 
@@ -29,9 +30,10 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 	}
 	cfg.Loop.Labels = slices.Clone(cfg.Loop.Labels)
 	cfg.Loop.Kinds = slices.Clone(cfg.Loop.Kinds)
+	client := StoreController{Engine: engine, Bearer: cfg.Bearer}
 	return &Loop{
-		Config: cfg.Loop, Controller: StoreController{Engine: engine, Bearer: cfg.Bearer},
-		Host: StoreHosting{Store: engine.Store, Bind: cfg.Bind}, CheckVersion: engine.RunnerPolicy.CheckRunner,
+		Config: cfg.Loop, Controller: client,
+		Host: StoreHosting{Store: engine.Store, Bind: cfg.Bind}, CheckVersion: client.checkVersion,
 		RequestCapacity: cfg.RequestCapacity, OnError: cfg.OnError,
 	}, nil
 }
@@ -40,6 +42,23 @@ func NewStoreRunner(engine *controller.EngineController, cfg StoreRunnerConfig) 
 type StoreController struct {
 	Engine *controller.EngineController
 	Bearer func(context.Context) (string, error)
+}
+
+func (c StoreController) checkVersion(ctx context.Context, version string) error {
+	raw, err := c.Bearer(ctx)
+	if err != nil {
+		return err
+	}
+	route, ok := capability.LookupRoute("POST", "/api/v1/runners/claim")
+	if !ok {
+		return errors.New("embedded controller route policy is unavailable")
+	}
+	authenticated, err := capability.NewAuthenticator(c.Engine.Store).Authenticate(ctx, capability.Presentation{Raw: raw, Class: capability.CredentialBearer}, route)
+	if err != nil {
+		return err
+	}
+	_, err = c.Engine.CheckRunner(ctx, authenticated.Principal.Authority, version)
+	return err
 }
 
 // Claim authorizes every selected kind before the controller issues an award.

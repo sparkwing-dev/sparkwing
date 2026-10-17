@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // EventKindSecretPreflightRefused records the plan a run's required secrets
@@ -107,14 +108,20 @@ func quoteList(names []string) string {
 // safety: judged by the same rule the claim's release applies (the pipeline's
 // own row, else a shared team-wide row), so a run that passes here is never
 // refused a declared secret later unless a row changes in between.
-func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, runID string, required []string) (err error) {
+func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, run RunRow, required []string) (err error) {
+	if run.Request.Request.Mode == runspec.IntakePublish {
+		return nil
+	}
 	if len(required) == 0 {
 		return nil
 	}
-	var pipeline string
-	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE team = ? AND id = ?`,
-		string(team), runID).Scan(&pipeline); err != nil {
-		return err
+	runID, pipeline := run.ID, run.Pipeline
+	readable := map[string]bool{}
+	for _, name := range run.Request.Request.LocalSecretNames {
+		if _, err := tx.store.localSecret(team, runID, name); err != nil {
+			return err
+		}
+		readable[name] = true
 	}
 	args := []any{string(team)}
 	for _, name := range required {
@@ -127,7 +134,6 @@ func secretPreflightTx(ctx context.Context, tx *storeTx, team Team, runID string
 		return err
 	}
 	defer closeRowsInto(rows, &err)
-	readable := map[string]bool{}
 	unshared := map[string]bool{}
 	others := map[string][]string{}
 	for rows.Next() {

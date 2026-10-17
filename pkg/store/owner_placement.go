@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -34,7 +35,11 @@ func OwnerCanExecute(owner capability.Principal) func(NodeRow) bool {
 }
 
 func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal) (UnitDemand, error) {
-	if tx.store.claimProfiles != nil {
+	here, err := hereObserverTx(ctx, tx, owner)
+	if err != nil {
+		return UnitDemand{}, err
+	}
+	if tx.store.claimProfiles != nil && !here {
 		profile, available, err := tx.store.claimProfiles.ResolveClaimProfile(ctx, owner)
 		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: profile.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: available}, err
 	}
@@ -43,7 +48,8 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		return UnitDemand{}, err
 	}
 	for _, ancestor := range chain {
-		if !registeredClaimant(ancestor.principal.Capability) || ancestor.principal.Capability.Subject != owner.Capability.Subject {
+		c := ancestor.principal.Capability
+		if (!registeredClaimant(c) && !(here && c.Binding.RunID == owner.Capability.Binding.RunID)) || c.Subject != owner.Capability.Subject {
 			continue
 		}
 		var body []byte
@@ -69,8 +75,21 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 	return UnitDemand{}, authorityError(apierr.Unavailable, "self-claim host observation is unavailable")
 }
 
-func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, ref NodeRef) (bool, error) {
+func reservedOwnerDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal, reserved *match.Resources) (UnitDemand, error) {
 	demand, err := ownerClaimDemandTx(ctx, tx, owner)
+	if err != nil || reserved == nil {
+		return demand, err
+	}
+	if !validMatchingResources(*reserved) || reserved.Cores > demand.Capacity.Cores || reserved.MemoryBytes > demand.Capacity.MemoryBytes || reserved.MemoryBytes > math.MaxInt64-demand.Available.MemoryBytes {
+		return UnitDemand{}, authorityError(apierr.BadRequest, "invalid owner machine reservation")
+	}
+	demand.Available.Cores += reserved.Cores
+	demand.Available.MemoryBytes += reserved.MemoryBytes
+	return demand, nil
+}
+
+func ownerExecutionEligibleTx(ctx context.Context, tx *storeTx, owner capability.Principal, ref NodeRef, reserved *match.Resources) (bool, error) {
+	demand, err := reservedOwnerDemandTx(ctx, tx, owner, reserved)
 	if err != nil {
 		var denied *apierr.Error
 		if errors.As(err, &denied) && denied.Code == apierr.Unavailable {

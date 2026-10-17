@@ -70,16 +70,12 @@ func (s *boundData) LookupRecord(ctx context.Context, request blob.RecordLookup)
 		if err := s.recordScope(authority, result.Record.Key, false); err != nil {
 			return blob.RecordLookupResult{}, dataProjectionError()
 		}
-		if request.VerifiedDefaultOnly && !verifiedDefaultRecord(result.Record) {
+		if request.VerifiedDefaultOnly && !result.Record.VerifiedDefault() {
 			return blob.RecordLookupResult{}, dataProjectionError()
 		}
+		result.VerifiedDefault = request.VerifiedDefaultOnly
 	}
 	return result, nil
-}
-
-func verifiedDefaultRecord(record blob.Record) bool {
-	facts := record.RefFacts
-	return facts.DefaultBranchVerified && facts.DefaultBranch != "" && facts.Scope.Verified && facts.Scope.Ref == facts.DefaultBranch && record.Key.Scope.Ref == facts.Scope
 }
 
 func (s *boundData) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error) {

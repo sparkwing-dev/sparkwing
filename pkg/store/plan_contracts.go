@@ -59,6 +59,13 @@ func (values planSecretValues) ContainsSecret(identifier string) bool {
 
 func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec) (planSecretValues, error) {
 	values := planSecretValues{}
+	for _, name := range spec.Request.Request.LocalSecretNames {
+		value, err := tx.store.localSecret(team, spec.Request.RunID, name)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
 	for _, name := range spec.Resolved.SecretArgs {
 		value, exists := spec.Resolved.Args[name]
 		if !exists {

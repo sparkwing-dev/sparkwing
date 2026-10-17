@@ -53,6 +53,9 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	if !cancelled && !expired && !lapsed && !queuedOut && owner.status != "failed" && owner.status != "done" {
 		return nil, nil
 	}
+	if lapsed || expired {
+		tx.finishedLocalSecrets = append(tx.finishedLocalSecrets, localSecretKey{target.team, run.ID})
+	}
 	if lapsed && owner.started.Valid && !cancelled && owner.disruptions < limits.MaxDisruptions {
 		owner.disruptions++
 	}

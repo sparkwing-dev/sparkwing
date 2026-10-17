@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -75,6 +78,12 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request, a cap
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
+	if a.Principal.Capability.Subject.Kind != capability.SubjectLocal && len(body.Schedules) > limits.MaxSchedulesPerRepo {
+		return &apierr.Error{Code: apierr.Conflict, Message: "repository schedule limit exceeded"}
+	}
+	if body.Mode == "" {
+		body.Mode = controllerwire.ScheduleReplace
+	}
 	repo, err := sourceurl.ValidateCloneURL(body.RepoURL)
 	if err != nil {
 		return invalidEngineBody("invalid repository URL")
@@ -104,6 +113,9 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request, a cap
 	}
 	ids, withdrawn, err := writer.ReplaceAuthorizedSchedules(r.Context(), a, body)
 	if err != nil {
+		if s.writeComputeLimitRefusal(w, r, err) {
+			return nil
+		}
 		return engineLookupError(err)
 	}
 	out := controllerwire.ScheduleRepoWritten{Schedules: []controllerwire.ScheduleView{}, Withdrawn: withdrawn}

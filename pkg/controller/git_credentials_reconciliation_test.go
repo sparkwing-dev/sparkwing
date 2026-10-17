@@ -155,7 +155,10 @@ func TestTeamGitCredentialSSHIsUnusableUntilConfirmed(t *testing.T) {
 	if stored.Host != "gitlab.example.com" || stored.Fingerprint != want || stored.Confirmed || !strings.HasPrefix(stored.PublicKey, "ssh-ed25519 ") || !strings.Contains(stored.HostKey, "gitlab.example.com ssh-ed25519 ") || strings.Contains(w.Body.String(), key) {
 		t.Fatalf("stored=%s", w.Body)
 	}
-	f.release(403)
+	refused := engineClaimHTTP(t, f.s.Handler(), f.claim, "POST", "/api/v1/runs/run/source-credential", "", 403)
+	if !strings.Contains(refused.Body.String(), `"reason":"credential_unconfirmed"`) {
+		t.Fatalf("unconfirmed host reason: %s", refused.Body)
+	}
 	f.audits(0)
 	f.request("POST", "/api/v1/team/git-credentials/gitlab.example.com/confirm", `{"fingerprint":"SHA256:wrong"}`, 409)
 	f.release(403)
@@ -173,7 +176,7 @@ func TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn(t *testing.T) {
 	f.release(403)
 	f.audits(0)
 	f.consent(true)
-	if got := f.release(200); got.Secret != "private-git-token" || got.Kind != "https" || got.Username != "x-access-token" {
+	if got := f.release(200); got.Secret != "private-git-token" || got.Kind != "https" || got.Username != "x-access-token" || got.Host != "gitlab.example.com" {
 		t.Fatal("opted-in source did not receive credential")
 	}
 	w := f.request("POST", "/api/v1/runners", `{"name":"idle","repos":["gitlab.example.com/acme/*"]}`, 201)
@@ -214,7 +217,7 @@ func TestTeamGitCredentialCloudNeedsNoMachineConsent(t *testing.T) {
 	}))
 	f := &gitReleaseFixture{t: t, s: s, session: session, csrf: csrf, claim: raw}
 	f.put("private-cloud-git")
-	if got := f.release(200); got.Secret != "private-cloud-git" {
+	if got := f.release(200); got.Secret != "private-cloud-git" || got.Host != "gitlab.example.com" {
 		t.Fatal("Cloud claim did not receive its team's credential")
 	}
 	var consents int

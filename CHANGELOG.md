@@ -27,11 +27,85 @@ unlock.
 - **controller:** Apply configured flood caps and queue shedding to sealed run submissions and retries
   Content deduplication replays one committed run without returning its one-time here bearer again.
 
+- **run:** Keep artifact input selectors separate from execution rows so
+  registered machines can start dependent jobs. Profile cache reads honor caller
+  cancellation when local execution has no extra lookup deadline. Keep the owner
+  renewing while interrupted remote jobs finish cancelling.
+
+- **local runs:** Construct temporary scoped profile credentials for cache reads
+  and publication. Publish completed local results, artifacts and logs through
+  the shared controller APIs without scheduling execution. Publication failures
+  warn and preserve the local result.
+
+- **data:** Preserve verified default-branch cache selection across controller
+  reads without exposing private source evidence. Resolve an omitted ref from
+  authorized cache refs.
+
+- **run:** Read and copy memo results through the controller client. Match each
+  returned result to the authenticated attempt without exposing private ancestry.
+
+- **run:** Stream attached local logs through the controller, including offline
+  Cloud fallback. Save and restore local dependency caches without requiring a
+  remote repository or a Git branch. Accept the execution award returned by a
+  here claim.
+
+- **run:** Keep burst jobs available to other ranked claimants while the
+  requesting machine waits for compute capacity. Reserve local compute before
+  claiming, and join the wait when another claimant advances the job.
+
+- **run:** Keep configured requester secrets available during offline fallback
+  through the local controller's masked secret path. Exclude those environment
+  entries from saved local environment snapshots.
+
+- **overflow:** Retain monthly usage when run history is deleted. Billing awards
+  retain the requesting account so pruning or reusing a run ID cannot erase or
+  transfer its usage. The rewrite store baseline advances to version 6 and
+  requires a fresh database.
+
+- **run:** Restore and save declared dependency caches through the shared native
+  host on this machine, registered runners and Cloud. Package-manager caches use
+  the persisted job environment and the current attempt's storage authority.
+  Repository-scoped cache records and authenticated lookup now work through the
+  real controller transport, including here and personal-machine bursts.
+
+- **run:** Capture artifacts, restore consumed files and resolve dependency
+  caches from the same repository working directory as SDK execution. Nested
+  pipeline directories no longer cause empty artifact manifests or cold caches.
+
+- **overflow:** Release ready jobs while this machine is busy. Match unhinted
+  jobs against the existing one-core admission charge, and acquire machine
+  capacity after a here claim. Registered burst runners share the requester's
+  concurrency slots without acquiring them twice.
+
+- **overflow:** Registered machines advertise measured resource headroom and
+  honor contribution and keep-free settings. Enrolled runners start a missing
+  admission controller with the verified matching CLI. Claimed jobs hold machine
+  capacity through cleanup, while Cloud-owned admission cannot change local runs.
+
+- **overflow:** Publish and consume declared artifacts through shared native
+  hosts. Cloud Jobs use the CPU and memory class committed at award, including
+  when the pipeline leaves resource settings unset.
+
+- **overflow:** Add explicit Cloud routing, tracked working-tree source bundles,
+  requester-resolved ephemeral secrets, personal runner capacity and per-user
+  overflow controls. Local execution remains the default. Pre-intake source
+  connection and source upload network failures fall back locally. Personal enrollment accepts an existing
+  independent account session through `runners add --session-stdin`.
+  `overflow show` reports your allowance and usage, and `overflow set` changes
+  or removes your saved monthly cap.
+- **run:** Prepare fresh source workspaces on here, personal and Cloud executors
+  and the filtered host tool environment for Cloud-routed here execution.
+  Go SDK installation resolves the pipeline's
+  imported packages without downloading unused module archives.
+- **store (Breaking):** Advance the rewrite baseline to schema 5 for account
+  provenance and overflow controls. [Migration](docs/migrations/_unreleased.md#explicit-cloud-overflow).
 - **storage:** Honor the configured S3 path prefix for uploads, downloads, logs, artifacts, source bundles and cleanup
 
 - **charts (Breaking):** Require repository and tag for every enabled image. Add a Cloud launcher Deployment, controller S3 values, and EKS/ExternalSecret examples. Cloud Jobs retain CPU-band tolerations and Karpenter disruption protection. See [migration guide](docs/migrations/_unreleased.md#cloud-helm-images-and-launcher).
 
 - **runners:** Connect installed start, warm, launch and Cloud bootstrap commands to the shared hosts, authenticated state and measured Kubernetes boundary. Plan and eval units retain their own leases. Owners use canonical placement and can report before a work attempt exists.
+- **runners:** Start saved personal and team runner configurations with their
+  registered display names while preserving server-issued claim identity.
 - **sdk:** Encode empty service collections as objects or arrays instead of null, so child pipelines without arguments pass host validation.
 - **cli:** Show every job's outcome and recorded failing steps and errors in `runs status`, including plain output.
 

@@ -3157,6 +3157,9 @@ column in the acceptance transaction. These records have separate owners, so
 finishing a run retains its accepted plan proof. Authentication reads the proof
 in the same snapshot as current ancestry and binding state. A terminal replay
 requires the same actor, route, resource, generation, attempt and body digest.
+Owner and publisher proofs name their issuing binding's attempt. They do not
+borrow the targeted job holder's ordinal. Node-holder proofs retain the
+captured source ordinal checked by C1.
 
 The native controller tests cover all nine data endpoints, including a signed
 filesystem upload, committed receipt, result record and download. Native result
@@ -3304,6 +3307,38 @@ through the intake transaction; policy refuses missing or changed proofs and
 does not open a second SQLite connection inside the transaction. The proof is
 absent from the wire and seal. CLI environment tokens stay at the GitHub API.
 
+## Profile data opt-ins
+
+POST /api/v1/tokens accepts optional `data` with the shared DataScope shape.
+An unbound account credential with runs.read can narrow to exactly data.read,
+one repository, nonempty ReadRefs and VerifiedDefaultOnly. It cannot name a
+run, job, attempt, generation or WriteRef. An account with runs.write can narrow
+to exactly data.write for its own publish-mode intake and its sealed repository
+and manual ref. These remain Delegate credentials parented to the presented
+profile or session. Current parent grants, repository scope, membership, expiry
+and revocation constrain every use through InheritedGrants. The response includes
+the accountable principal for constructing the private storage binding.
+
+The existing local-host snapshot route adds a verified_local_peer alternative
+with runs.read, no resource binding and ordinary credential liveness. Its
+completed-local export includes only the run's selected output and manifest
+records and their verified members. Account, machine and bearer presentations
+cannot select that alternative. Peer identity comes from the local connection.
+For publication, BindData on plan, result, log and finish routes verifies the
+publish intake even when there is no object selector. Signed data POSTs accept
+job, attempt and generation query selectors together only under DataPublish.
+C1 rechecks the imported terminal attempt and upload identity before each write.
+
+The node-bound snapshot carries `artifact_sources`, a producer-ID map of manifest
+record selectors for declared Consumes producers only once terminal. Its Nodes
+array contains only the awarded job's complete persisted row. Artifact selectors
+never enter the executable mask namespace. The map exposes no producer declaration,
+owner decision or credential.
+LocalHostClient.ReadNode resolves those projections through its own node snapshot;
+private reads, writes and credential selection for other nodes stay refused.
+
+Typed dependency outputs use the existing authorized output route rather than
+reading another job's private row in process-service composition.
 ## Credential inventory and debug-view reconciliation
 
 Credential inventory, rotation and revocation revalidate a presented console
@@ -3402,15 +3437,16 @@ event projection changes.
 
 UnpricedCPUClassError maps through engineLookupError to HTTP 409 conflict with
 details.reason=unpriced_cpu_class. It formerly escaped as HTTP 500. Claim refusal
-keeps the pending job, balance and attempts unchanged and creates no reservation
-or charge. The controller tests use committed checkout reservations and signed
-Stripe events for paid credit setup.
+fails the still-unclaimed job with unpriced_cpu_class, preserves its balance and
+attempts, and creates no reservation or charge. The controller tests use
+committed checkout reservations and signed Stripe events for paid credit setup.
 
 ### API flood integration
 
 Sealed API intake and retry use the existing per-controller flood limiter,
-sharing `team:<team>` with verified App intake. Queue shedding reads only that
-tenant's pending units. Both paths return canonical rate_limited/unavailable
+with one bucket per presenting token. Verified App intake keeps its separate
+team bucket. Queue shedding reads only that tenant's pending units through the
+admission transaction. Both paths return canonical rate_limited/unavailable
 errors with retry_after_ms. No new cap or default is introduced.
 
 Optional content deduplication gives normalized API requests a stable random
@@ -3418,7 +3454,9 @@ intake key for the configured window, scoped by the server-derived team and
 subject. It stores no bearer or response. C1 AdmitRun owns atomic commit, replay
 and current authority checks, including concurrent first requests. Explicit
 idempotency keys win. HTTP uses the current 201/200 CreateRunResponse contract;
-replay carries no here bearer. Each API request still spends its flood budget.
+replay carries no here bearer. Store replay lookup precedes flood charging,
+so replays spend no flood budget. Failed store transactions create no replay
+result and remain retryable inside the content window.
 
 
 ## W1b run-intake validation reconciliation
@@ -3463,3 +3501,20 @@ Tenant implements both interfaces with persisted arming consent and sealed
 intake. The concrete controller proofs cover local registration, Cloud firing,
 replay and current authority. The real api.sock proof remains assigned to the
 lead harness. App and API/local schedules now share W1's sealed intake. C1 records the remaining private-follow, HTTP box and memo integration points.
+
+
+## W1b review integration, 2026-10-17
+
+Child intake uses Server.ResolveIntake and the current bound claim's repository
+scope. A child outside that source authorization returns 422 plan_invalid.
+An authorized explicit source retains its own repository, ref and SHA. The
+implicit SDK path preserves the complete sealed parent source and lineage.
+Source credential refusals use C2's credential_unconfirmed reason. The removed
+legacy git_credential_unconfirmed envelope is not restored.
+
+Schedule PUT defaults to replacement and bounds nonlocal principals by
+MaxSchedulesPerRepo before resolving any source. Local principals keep their
+schedule-cap exemption. The handler maps cadence guards through
+writeComputeLimitRefusal to 429. Both schedule caps return 409. Tick launches
+retain their listing snapshot. Paused schedules require an authorized manual
+run-now call. A transaction conflict leaves the due instant available for retry.

@@ -308,6 +308,9 @@ func resultMatches(p Principal, record *RecordedResult, evidence RequestEvidence
 		return false
 	}
 	b, target := p.Capability.Binding, evidence.Target
+	if evidence.ResultAttempt != nil {
+		b.Attempt = *evidence.ResultAttempt
+	}
 	return record.Actor == p.Authority && record.Method == evidence.Method && record.Pattern == evidence.Pattern &&
 		record.RunID == target.RunID && record.NodeID == target.NodeID && record.ClaimID == target.ClaimID &&
 		record.Generation == b.Generation && record.Attempt == b.Attempt && record.Digest == evidence.ResultDigest

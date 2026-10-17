@@ -345,7 +345,11 @@ func newArtifactPublisher(upload JobUpload) *artifactPublisherFixture {
 		if p.mode == "commit" {
 			return blob.Record{}, outputRefused
 		}
-		if request.Key != p.upload.Key || request.Source != p.upload.Identity || request.Authority != p.upload.Authority {
+		expected := p.upload.Key
+		if expected.Kind == blob.KindDepcache {
+			expected.Scope.Pipeline, expected.Scope.Job = "", ""
+		}
+		if request.Key != expected || request.Source != p.upload.Identity || request.Authority != p.upload.Authority {
 			return blob.Record{}, blob.ErrDigestNotReadable
 		}
 		if _, ok := p.values[request.Digest]; !ok {

@@ -1,8 +1,12 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -213,6 +217,28 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	}
 	if _, err := controls.DeleteSchedule(t.Context(), id); err != nil {
 		t.Fatal(err)
+	}
+	body := controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: "https://gitlab.com/acme/local.git", Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}
+	for i := range 21 {
+		body.Schedules = append(body.Schedules, controllerwire.ScheduleDeclaration{Pipeline: fmt.Sprintf("local-%d", i), Cron: "0 1 * * *"})
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequestWithContext(t.Context(), "PUT", options.URL+"/api/v1/schedules/repos", bytes.NewReader(encoded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := options.HTTP.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, readErr := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+	if response.StatusCode != 200 || readErr != nil || closeErr != nil {
+		t.Fatalf("verified local principal was capped: %d %s %v %v", response.StatusCode, data, readErr, closeErr)
 	}
 }
 

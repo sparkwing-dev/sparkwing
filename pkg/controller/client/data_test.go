@@ -44,14 +44,33 @@ func TestDataClientAcceptsServerSelectedVerifiedDefaultRef(t *testing.T) {
 		if r.URL.Query().Get("verified_default_only") != "true" {
 			t.Fatal("lookup lost its verified-default selection")
 		}
-		return dataResponse(t, wire.DataRecordLookupResult{Found: true, Record: &wire.DataRecord{
+		return dataResponse(t, wire.DataRecordLookupResult{Found: true, VerifiedDefault: true, Record: &wire.DataRecord{
 			Kind: blob.KindMemo, Repo: "gh:42", Ref: "main", Pipeline: "ci", Job: "build", Key: "hash", Name: "output", Digest: "digest",
 		}, Members: []wire.DataMember{}}), nil
 	})
 	result, err := records.LookupRecord(t.Context(), blob.RecordLookup{Key: key, VerifiedDefaultOnly: true})
-	if err != nil || !result.Found || result.Record.Key.Scope.Ref != (blob.RefScope{Ref: "main", Verified: true}) || result.Record.Digest != "digest" {
+	if err != nil || !result.Found || !result.VerifiedDefault || result.Record.Key.Scope.Ref != (blob.RefScope{Ref: "main", Verified: true}) || result.Record.Digest != "digest" {
 		t.Fatalf("verified-default record: %+v %v", result, err)
 	}
+}
+
+func FuzzDataClientRequiresDefaultAttestation(f *testing.F) {
+	f.Add("main", true, true)
+	f.Add("main", false, true)
+	f.Add("main", true, false)
+	f.Fuzz(func(t *testing.T, ref string, attested, found bool) {
+		key := blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: "output", Scope: blob.Scope{Repo: "gh:42", Pipeline: "ci", Job: "build", Key: "hash"}}
+		_, records := testDataClient(t, func(*http.Request) (*http.Response, error) {
+			return dataResponse(t, wire.DataRecordLookupResult{Found: found, VerifiedDefault: attested, Record: &wire.DataRecord{
+				Kind: key.Kind, Repo: key.Scope.Repo, Ref: ref, Pipeline: "ci", Job: "build", Key: "hash", Name: "output", Digest: "digest",
+			}}), nil
+		})
+		result, err := records.LookupRecord(t.Context(), blob.RecordLookup{Key: key, VerifiedDefaultOnly: true})
+		want := attested && found && ref != "" && !strings.HasPrefix(ref, "manual:")
+		if want && (err != nil || !result.Found || !result.VerifiedDefault) || !want && (err == nil || result.Found) {
+			t.Fatalf("attested=%v found=%v ref=%q result=%+v err=%v", attested, found, ref, result, err)
+		}
+	})
 }
 
 func FuzzDataClientDefaultRefNeverChangesRecordSelectors(f *testing.F) {
@@ -80,7 +99,7 @@ func FuzzDataClientDefaultRefNeverChangesRecordSelectors(f *testing.F) {
 			record.Name = "other"
 		}
 		_, records := testDataClient(t, func(*http.Request) (*http.Response, error) {
-			return dataResponse(t, wire.DataRecordLookupResult{Found: true, Record: &record, Members: []wire.DataMember{}}), nil
+			return dataResponse(t, wire.DataRecordLookupResult{Found: true, VerifiedDefault: fallback, Record: &record, Members: []wire.DataMember{}}), nil
 		})
 		result, err := records.LookupRecord(t.Context(), blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback})
 		want := change%7 == 0 && (fallback && ref != "" && !strings.HasPrefix(ref, "manual:") || !fallback && ref == "manual:")
@@ -125,7 +144,7 @@ func TestDataClientStructuredErrorsAndRetry(t *testing.T) {
 }
 
 func TestDataClientBudgetsBoundTransport(t *testing.T) {
-	for _, operation := range []string{"has-many", "record"} {
+	for _, operation := range []string{"has-many", "record", "depcache", "memo", "copy-memo"} {
 		t.Run(operation, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				deadline := time.Now().Add(time.Second)
@@ -154,11 +173,14 @@ func TestDataClientBudgetsBoundTransport(t *testing.T) {
 				case "record":
 					_, err = records.LookupRecord(t.Context(), blob.RecordLookup{Budget: budget})
 				case "memo":
-					_, err = records.LookupMemo(t.Context(), blob.MemoLookup{Budget: budget})
+					authority := depcacheAuthority()
+					_, err = records.LookupMemo(t.Context(), blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "ci", Job: "build", Hash: "hash"}, Budget: budget})
 				case "depcache":
-					_, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Budget: budget})
+					authority := depcacheAuthority()
+					_, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: authority, Key: blob.DepcacheKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Name: "modules", Key: "dep-key"}, Budget: budget})
 				case "copy-memo":
-					_, err = records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: blob.MemoLookup{Budget: budget}})
+					authority := depcacheAuthority()
+					_, err = records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "ci", Job: "build", Hash: "hash"}, Budget: budget}, Destination: authority.Attempt.Value})
 				}
 				if !errors.Is(err, blob.ErrBudget) {
 					t.Fatalf("budget exhaustion = %v", err)

@@ -46,7 +46,7 @@ func (a ArtifactRecords) Prepare(ctx context.Context, layer LayerSpec, input Nod
 		if key.Kind != blob.KindManifest || key.Scope.Job != edge.Producer {
 			return nil, errors.New("artifact reference differs from its declared producer")
 		}
-		if _, err := a.Stage(ctx, blob.RecordLookup{Key: key, Authority: input.Storage.Authority}, input.Entry.Directory, edge.Into); err != nil {
+		if _, err := a.Stage(ctx, blob.RecordLookup{Key: key, Authority: input.Storage.Authority}, sdkWorkingDirectory(input.Entry), edge.Into); err != nil {
 			return nil, err
 		}
 	}
@@ -57,7 +57,7 @@ func (a ArtifactRecords) Prepare(ctx context.Context, layer LayerSpec, input Nod
 		if result.Outcome != store.NodeSuccess {
 			return nil
 		}
-		key, err := a.Publish(ctx, current, input.Entry.Directory, job.Artifacts, a.Warn)
+		key, err := a.Publish(ctx, current, sdkWorkingDirectory(input.Entry), job.Artifacts, a.Warn)
 		if err != nil {
 			return err
 		}

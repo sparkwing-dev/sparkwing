@@ -113,7 +113,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 			request := run.Request
 			request.Request.Origin = tc.origin
 			request.Request.Git.Ref = tc.ref
-			request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "verified-delivery", RepositoryID: 42, Ref: tc.ref, SHA: strings.Repeat("a", 40)}}
+			request.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "verified-delivery", Event: tc.event, RepositoryID: 42, Ref: tc.ref, SHA: strings.Repeat("a", 40)}}
 			if tc.verified {
 				request.Request.Git.App.Value.VerifiedAt = time.Now().UTC()
 			}
@@ -148,7 +148,22 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		})
 	}
 	engineSQL(t, e.Store, `DELETE FROM github_app_deliveries WHERE digest='verified-delivery'`)
-	engineClaimHTTP(t, handler, award.Claim.Capability, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`, 503)
+	response = engineClaimHTTP(t, handler, award.Claim.Capability, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`, 200)
+	var retained OIDCTokenResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &retained); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.Split(retained.Token, ".")[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	if claims["trigger"] != "delete" || claims["ref"] != "refs/heads/topic" || !strings.Contains(claims["sub"].(string), "repository_id:42:pipeline:") {
+		t.Fatalf("replay expiry changed sealed identity: %s", payload)
+	}
 	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(award.Claim.Capability)))
 	if err != nil {
 		t.Fatal(err)

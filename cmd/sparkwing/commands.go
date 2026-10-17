@@ -509,7 +509,7 @@ func descBlock(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
 		t := strings.TrimLeft(ln, " \t")
-		if strings.HasPrefix(t, "#") || strings.HasPrefix(t, ">") {
+		if strings.HasPrefix(t, "#") && !strings.HasPrefix(t, "### ") || strings.HasPrefix(t, ">") {
 			indent := ln[:len(ln)-len(t)]
 			lines[i] = indent + "\\" + t
 		}

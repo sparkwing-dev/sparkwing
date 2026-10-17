@@ -28,9 +28,9 @@ func floodMember(t *testing.T, f *floodFixture, team store.Team, name string) st
 	return raw
 }
 
-func TestFloodPolicy_ATeamsTokensShareOneCap(t *testing.T) {
-	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 2})
-	tokens := []string{f.token, floodMember(t, f, "default", "two"), floodMember(t, f, "default", "three")}
+func TestFloodPolicy_APISubmissionsAndRetriesUsePerTokenCaps(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	tokens := []string{f.token, floodMember(t, f, "default", "alice"), floodMember(t, f, "default", "alice")}
 	first := floodRun(t, f.submit(tokens[0], "build", fortyHex(1)), 201)
 	if err := teststore.SeedRunFinish(f.st, t.Context(), store.DefaultTeam, first.RunID, "failed", "boom"); err != nil {
 		t.Fatal(err)
@@ -46,14 +46,15 @@ func TestFloodPolicy_ATeamsTokensShareOneCap(t *testing.T) {
 		return f.serve(req)
 	}
 	floodRun(t, retry(tokens[1], "inside-cap"), 200)
-	if r := f.submit(tokens[2], "build", fortyHex(3)); r.Code != 429 {
-		t.Fatalf("third token = %d %s", r.Code, r.Body)
+	floodRun(t, f.submit(tokens[2], "build", fortyHex(3)), 201)
+	if r := f.submit(tokens[0], "build", fortyHex(4)); r.Code != 429 {
+		t.Fatalf("first token escaped its cap: %d %s", r.Code, r.Body)
 	}
 	if r := retry(tokens[2], "over-cap"); r.Code != 429 {
 		t.Fatalf("retry = %d %s", r.Code, r.Body)
 	}
 	runs, err := f.st.AsOperator().ListRuns(t.Context(), store.RunFilter{Limit: 10})
-	if err != nil || len(runs) != 2 {
+	if err != nil || len(runs) != 3 {
 		t.Fatalf("runs = %d: %v", len(runs), err)
 	}
 }

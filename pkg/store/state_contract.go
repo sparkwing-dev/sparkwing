@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts.
@@ -78,10 +79,11 @@ const (
 
 // ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit.
 type ReconcileRequest struct {
-	Ref    NodeRef
-	Actor  Actor
-	Policy SourcePolicy
-	Source *MaterializeSource
+	Reserved *match.Resources
+	Ref      NodeRef
+	Actor    Actor
+	Policy   SourcePolicy
+	Source   *MaterializeSource
 	// MaterializeOnly returns Dispatch on a source miss without awarding execution.
 	MaterializeOnly bool
 }
@@ -191,6 +193,7 @@ type StateEventRule struct {
 // Cancellation requests emit job_cancel_requested while preserving claimed/running state until the holder drains.
 func NodeEvents() []StateEventRule {
 	return []StateEventRule{
+		{false, CausePublishAttempt, NodePending, "job_attempt_imported"},
 		{false, CauseRelease, NodeReady, "job_ready"},
 		{false, CauseRelease, NodePending, "job_requeued"},
 		{false, CauseRevoke, NodePending, "job_revoked"},

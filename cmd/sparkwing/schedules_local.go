@@ -363,7 +363,7 @@ func localScheduleTransport(ctx context.Context, home string) (controllerwire.Lo
 }
 
 func proveLocalSchedule(ctx context.Context, home, root, pipeline string, environment []string) (crons.Proof, error) {
-	options, err := localSourceOptions(home, environment, secrets.NewMasker())
+	options, err := hostSourceOptions(home, environment, secrets.NewMasker(), true)
 	if err != nil {
 		return crons.Proof{}, err
 	}

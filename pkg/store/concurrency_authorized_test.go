@@ -17,13 +17,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 var _ controller.ConcurrencyStore = (*store.Tenant)(nil)
 
 func slotFixture(t *testing.T) *storeRecoveryFixture {
 	t.Helper()
-	return newStoreRecoveryFixtureAt(t, true, storetest.NewSQLite(t), func(doc *nodeproto.PlanDoc) {
+	return slotFixtureAt(t, storetest.New(t))
+}
+
+func slotFixtureAt(t *testing.T, target *storetest.Target) *storeRecoveryFixture {
+	t.Helper()
+	return newStoreRecoveryFixtureAt(t, true, target, func(doc *nodeproto.PlanDoc) {
 		scope, capacity, cost, policy := "global", 3, 2, "queue"
 		doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "deploy", Scope: &scope, Capacity: &capacity, Cost: &cost, OnLimit: &policy}}
 	})
@@ -272,7 +278,11 @@ func TestAuthorizedConcurrencyRechecksAuthorityBeforeCommit(t *testing.T) {
 		t.Run(mutation, func(t *testing.T) {
 			f := slotFixture(t)
 			a := slotAuthorization(t, f, "/acquire", "holder")
-			if _, err := f.s.DB().ExecContext(t.Context(), `CREATE TRIGGER change_slot_authority AFTER INSERT ON concurrency_holders BEGIN `+mutation+`; END`); err != nil {
+			statement := `CREATE TRIGGER change_slot_authority AFTER INSERT ON concurrency_holders BEGIN ` + mutation + `; END`
+			if f.s.Dialect() == store.DialectPostgres {
+				statement = `CREATE FUNCTION change_slot_authority() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN ` + mutation + `; RETURN NEW; END; $$; CREATE TRIGGER change_slot_authority AFTER INSERT ON concurrency_holders FOR EACH ROW EXECUTE FUNCTION change_slot_authority()`
+			}
+			if _, err := f.s.DB().ExecContext(t.Context(), statement); err != nil {
 				t.Fatal(err)
 			}
 			response, err := f.tenant.AcquireAuthorizedSlot(t.Context(), a, slotRequest(f, "holder"))
@@ -325,13 +335,13 @@ func TestAuthorizedConcurrencyMemberForceReleasePromotesWithinWorkLease(t *testi
 		t.Fatalf("force release did not atomically promote: %+v, %v", state, err)
 	}
 	var ownerLease int64
-	if err := f.s.DB().QueryRow(`SELECT lease_expires_at FROM triggers WHERE id=?`, competitor).Scan(&ownerLease); err != nil || state.Holders[0].LeaseExpiresAt.After(time.Unix(0, ownerLease)) {
+	if err := f.s.DB().QueryRow(storetest.Rebind(f.s, `SELECT lease_expires_at FROM triggers WHERE id=?`), competitor).Scan(&ownerLease); err != nil || state.Holders[0].LeaseExpiresAt.After(time.Unix(0, ownerLease)) {
 		t.Fatalf("promoted beyond recipient work lease: %+v, %v", state.Holders[0], err)
 	}
 	if out, err := f.tenant.ForceReleaseAuthorizedSlots(t.Context(), a, "global:deploy"); err != nil || len(out) != 0 {
 		t.Fatalf("idempotent force release: %+v, %v", out, err)
 	}
-	if _, err := f.s.DB().ExecContext(t.Context(), `UPDATE memberships SET role='reader' WHERE team=?`, f.tenant.Team()); err != nil {
+	if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `UPDATE memberships SET role='reader' WHERE team=?`), f.tenant.Team()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.tenant.ForceReleaseAuthorizedSlots(t.Context(), a, "global:deploy"); err == nil {
@@ -352,10 +362,10 @@ func TestAuthorizedConcurrencyGroupDoesNotDiscloseUndeclaredReadEdgesProperty(t 
 			leaderRun = fmt.Sprintf("foreign/%x", random.Uint64())
 		}
 		cache := fmt.Sprintf("memo/%x", random.Uint64())
-		if _, err := f.s.DB().ExecContext(t.Context(), `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES (?,'global:deploy',3,1) ON CONFLICT(team,key) DO NOTHING`, f.tenant.Team()); err != nil {
+		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO concurrency_entries(team,key,capacity,updated_at) VALUES (?,'global:deploy',3,1) ON CONFLICT(team,key) DO NOTHING`), f.tenant.Team()); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.s.DB().ExecContext(t.Context(), `INSERT INTO concurrency_waiters(team,key,run_id,node_id,holder_id,arrived_at,policy,cache_key_hash,leader_run_id,leader_node_id,generation,lease_expires_at) VALUES (?,'global:deploy',?,'job',?,?,'queue',?,?,'job',0,?)`, f.tenant.Team(), competitor, fmt.Sprintf("wait-%d", i), i+1, cache, leaderRun, time.Now().Add(time.Hour).UnixNano()); err != nil {
+		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO concurrency_waiters(team,key,run_id,node_id,holder_id,arrived_at,policy,cache_key_hash,leader_run_id,leader_node_id,generation,lease_expires_at) VALUES (?,'global:deploy',?,'job',?,?,'queue',?,?,'job',0,?)`), f.tenant.Team(), competitor, fmt.Sprintf("wait-%d", i), i+1, cache, leaderRun, time.Now().Add(time.Hour).UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		state, err := f.tenant.ReadAuthorizedGroup(t.Context(), slotAuthorization(t, f, "", ""), "global:deploy")
@@ -366,8 +376,33 @@ func TestAuthorizedConcurrencyGroupDoesNotDiscloseUndeclaredReadEdgesProperty(t 
 		if waiter.RunID != competitor || waiter.LeaderRunID != "" || waiter.LeaderNodeID != "" || waiter.CacheKeyHash != "" {
 			t.Fatalf("group disclosed undeclared edge: %+v", waiter)
 		}
-		if _, err := f.s.DB().ExecContext(t.Context(), `DELETE FROM concurrency_waiters WHERE team=? AND key='global:deploy'`, f.tenant.Team()); err != nil {
+		if _, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `DELETE FROM concurrency_waiters WHERE team=? AND key='global:deploy'`), f.tenant.Team()); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestAuthorizedReleaseIgnoresReportedOutcomeForPromotion(t *testing.T) {
+	for _, outcome := range []string{"success", "failed", "cancelled", "unknown"} {
+		t.Run(outcome, func(t *testing.T) {
+			f := slotFixture(t)
+			if _, err := f.tenant.AcquireAuthorizedSlot(t.Context(), slotAuthorization(t, f, "/acquire", "leader"), slotRequest(f, "leader")); err != nil {
+				t.Fatal(err)
+			}
+			if err := teststore.SeedNode(f.s, t.Context(), store.Node{RunID: f.ref.RunID, NodeID: "follower", Status: "pending"}); err != nil {
+				t.Fatal(err)
+			}
+			queued, err := f.tenant.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: "global:deploy", HolderID: "follower", RunID: f.ref.RunID, NodeID: "follower", Policy: store.OnLimitQueue, Capacity: 3, Cost: 2})
+			if err != nil || queued.Kind != store.AcquireQueued {
+				t.Fatalf("follower setup: %+v %v", queued, err)
+			}
+			if err := f.tenant.ReleaseAuthorizedSlot(t.Context(), slotAuthorization(t, f, "/release", "leader"), "global:deploy", "leader", outcome, "", "", 0); err != nil {
+				t.Fatal(err)
+			}
+			state, err := f.tenant.GetConcurrencyState(t.Context(), "global:deploy")
+			if err != nil || len(state.Holders) != 1 || state.Holders[0].HolderID != "follower" {
+				t.Fatalf("reported outcome changed promotion: %+v %v", state, err)
+			}
+		})
 	}
 }

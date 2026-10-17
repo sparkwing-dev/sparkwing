@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -49,18 +48,24 @@ func FuzzNativeDataBindingsRejectForeignAuthority(f *testing.F) {
 		if err == nil {
 			t.Fatal("foreign authority reached the unconfigured transport")
 		}
+		if _, err := data.LookupMemo(t.Context(), blob.MemoLookup{Authority: foreign}); err == nil {
+			t.Fatal("foreign memo authority reached the unconfigured transport")
+		}
+		if _, err := data.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: foreign}, Destination: foreign.Attempt.Value}); err == nil {
+			t.Fatal("foreign memo copy authority reached the unconfigured transport")
+		}
 	})
 }
 
-func TestNativeCachesRequireCanonicalReadProof(t *testing.T) {
+func TestNativeCachesRequireBoundSelectors(t *testing.T) {
 	data := &dataClient{}
-	if _, err := data.LookupMemo(context.Background(), blob.MemoLookup{}); err == nil {
-		t.Fatal("memo invented read proof")
+	if _, err := data.LookupMemo(t.Context(), blob.MemoLookup{}); err == nil {
+		t.Fatal("unbound memo reached transport")
 	}
-	if _, err := data.LookupDepcache(context.Background(), blob.DepcacheLookup{}); err == nil {
-		t.Fatal("depcache invented read proof")
+	if _, err := data.LookupDepcache(t.Context(), blob.DepcacheLookup{}); err == nil {
+		t.Fatal("unbound depcache reached transport")
 	}
-	if _, err := data.CopyMemo(context.Background(), blob.CopyMemoRequest{}); err == nil {
-		t.Fatal("memo copy invented read proof")
+	if _, err := data.CopyMemo(t.Context(), blob.CopyMemoRequest{}); err == nil {
+		t.Fatal("unbound memo copy reached transport")
 	}
 }

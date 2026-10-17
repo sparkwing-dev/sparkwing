@@ -57,6 +57,7 @@ func (d DepcacheRecords) save(ctx context.Context, input NodeInput, cache direct
 	if err := upload.put(ctx, input.Storage.Bytes, digest, size, file); err != nil {
 		return err
 	}
+	upload.Key.Scope.Pipeline, upload.Key.Scope.Job = "", ""
 	_, err = upload.commit(ctx, input.Storage.Records, digest, nil)
 	return err
 }

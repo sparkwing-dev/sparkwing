@@ -310,6 +310,7 @@ func (p scheduleFollowPolicy) ResolveScheduleSource(ctx context.Context, row Cro
 	request.Git.SHA = *p.revision
 	return request, err
 }
+
 func TestScheduleReplayKeepsFirstSealAfterFollowedRevisionMoves(t *testing.T) {
 	tenant, a, body, now := consentedScheduleFixture(t)
 	revision := "0123456789abcdef0123456789abcdef01234567"
@@ -374,4 +375,26 @@ func TestScheduleReplayStaysWithScheduleWhenArmerChanges(t *testing.T) {
 		t.Fatalf("armer changed schedule replay: %s %t %v", replay.RunID, replay.Replayed, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "runs", 1)
+}
+
+func TestScheduleRepositoryCapCommitsOnlyTenRepositories(t *testing.T) {
+	tenant, a, body, _ := consentedScheduleFixture(t)
+	for i := range 10 {
+		body.RepoURL = fmt.Sprintf("https://gitlab.com/acme/repo-%d.git", i)
+		if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body.RepoURL = "https://gitlab.com/acme/eleventh.git"
+	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err == nil {
+		t.Fatal("eleventh repository committed")
+	}
+	rows, err := tenant.ListCronSchedules(t.Context())
+	if err != nil || len(rows) != 10 {
+		t.Fatalf("cap changed declarations: %d %v", len(rows), err)
+	}
+	body.RepoURL = "https://gitlab.com/acme/repo-3.git"
+	if _, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body); err != nil {
+		t.Fatalf("replacement at cap: %v", err)
+	}
 }

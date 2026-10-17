@@ -17,7 +17,7 @@ func TestChargedResources(t *testing.T) {
 		in   wingwire.HostResources
 		want wingwire.HostResources
 	}{
-		{"unhinted charges default core", wingwire.HostResources{}, wingwire.HostResources{Cores: defaultChargeCores}},
+		{"unhinted charges default core", wingwire.HostResources{}, wingwire.HostResources{Cores: admission.DefaultChargeCores}},
 		{"declared cores pass through", wingwire.HostResources{Cores: 2}, wingwire.HostResources{Cores: 2}},
 		{"declared memory alone passes through", wingwire.HostResources{MemoryBytes: 100}, wingwire.HostResources{MemoryBytes: 100}},
 	}

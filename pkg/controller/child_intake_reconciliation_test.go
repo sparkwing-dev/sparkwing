@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,7 +19,6 @@ import (
 func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) {
 	t.Helper()
 	e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
-	e.Store.SetIntakePolicy(childIntakePolicy{})
 	engineSQL(t, e.Store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	var req runspec.SealedRequest
 	row, err := e.Store.ForTeam(t.Context(), "a")
@@ -56,12 +55,6 @@ func childIntakeBody(t *testing.T, pipeline string, git runspec.Git) string {
 		t.Fatal(err)
 	}
 	return string(body)
-}
-
-type childIntakePolicy struct{}
-
-func (childIntakePolicy) ResolveIntake(_ context.Context, _ capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
-	return store.IntakePolicyFacts{Options: &request.Request.Options, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 }
 
 func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
@@ -195,4 +188,65 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestChildIntakeCannotBroadenParentSourceAuthority(t *testing.T) {
+	e, h, claim := childIntakeFixture(t)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	property := func(seed uint32) bool {
+		git := parent.Request.Request.Git
+		git.Repository = runspec.Repository{Key: runspec.RepoKey(fmt.Sprintf("git:gitlab.com/foreign/repo-%x", seed))}
+		record := principal.Capability
+		record.Repositories = []string{string(parent.Request.Request.Git.Repository.Key)}
+		setScope := func() {
+			encoded, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: record})
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope, err := json.Marshal(record.Repositories)
+			if err != nil {
+				t.Fatal(err)
+			}
+			engineSQL(t, e.Store, `UPDATE capabilities SET authority_json=?,repo_scope=? WHERE prefix=?`, encoded, scope, record.Prefix)
+		}
+		setScope()
+		body := childIntakeBody(t, fmt.Sprintf("deploy-%x", seed), git)
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 422)
+		record.Repositories = append(record.Repositories, string(git.Repository.Key))
+		setScope()
+		engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", body, 201)
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func childSourceRepositories(t *testing.T, e *EngineController, claim string, repositories []string) {
+	t.Helper()
+	p, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Capability.Repositories = repositories
+	body, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: p.Capability})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := json.Marshal(repositories)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `UPDATE capabilities SET authority_json=?,repo_scope=? WHERE prefix=?`, body, scope, p.Capability.Prefix)
 }

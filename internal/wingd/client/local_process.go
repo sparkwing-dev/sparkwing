@@ -151,7 +151,8 @@ func (l *processLifecycle) InstallController(ctx context.Context, opts wingd.Loc
 	return l.LocalLifecycle.InstallController(ctx, opts)
 }
 
-func ensureLocalProcess(ctx context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+// EnsureLocalProcess starts the supplied controller executable and waits for readiness.
+func EnsureLocalProcess(ctx context.Context, opts wingd.LocalStartOptions) (wingd.LocalStatus, error) {
 	if opts.Standalone || !filepath.IsAbs(opts.Executable) || strings.TrimSpace(opts.Version) == "" {
 		return wingd.LocalStatus{}, errors.New("wingd/client: detached startup requires an absolute executable and version")
 	}

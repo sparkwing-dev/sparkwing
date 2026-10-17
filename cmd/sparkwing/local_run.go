@@ -5,11 +5,16 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -47,10 +52,6 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		return localRunRuntime{}, err
 	}
 	captured := os.Environ()
-	seal, err := snapshots.Capture(ctx, captured)
-	if err != nil {
-		return localRunRuntime{}, err
-	}
 	socket, err := wingd.APISocketPath(home)
 	if err != nil {
 		return localRunRuntime{}, err
@@ -66,6 +67,13 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	}
 	return localRunRuntime{
 		controller: controller,
+		openCache:  openLocalProfileCache,
+		publish: func(ctx context.Context, profile, run string) error {
+			return publishLocalProfile(ctx, home, transport, profile, run)
+		},
+		follow: func(ctx context.Context, run, format string, out io.Writer) error {
+			return followControllerRunLogs(ctx, transport, run, format, out)
+		},
 		ensureController: func(ctx context.Context) error {
 			_, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
 				return resolveLocalServicesAt(ctx, home)
@@ -74,7 +82,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		},
 		close: func() error { cleanup(); return nil },
 		prepare: func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
-			return prepareNativeLocalRun(ctx, home, directory, pipeline, seal, captured, snapshots)
+			return prepareNativeLocalRun(ctx, home, directory, pipeline, captured, snapshots, compileOptions{NoUpdate: flags.noUpdate})
 		},
 		bind: func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
 			return bindLocalRunHost(ctx, home, transport, award)
@@ -82,23 +90,87 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	}, nil
 }
 
-func localSourceOptions(home string, captured []string, masker *secrets.Masker) (source.Options, error) {
+func openLocalProfileCache(ctx context.Context, profile string, request *runspec.Request) (blob.RemoteCache, func() error, error) {
+	selected, err := prepareTriggerSource(ctx, triggerSourceInput{checkout: request.Source.Location.LocalCheckout, pipeline: request.Pipeline, environment: os.Environ(), githubID: func(ctx context.Context, remote string) (int64, error) {
+		return lookupTriggerGitHubID(ctx, remote, os.Environ())
+	}})
+	if err != nil {
+		return nil, nil, err
+	}
+	cache, closeCache, err := openProfileCache(ctx, profile, selected.git, request.Source.Location.LocalCheckout)
+	if err == nil {
+		request.Git.Repository, request.Git.Ref, request.Git.DefaultBranch = selected.git.Repository, selected.git.Ref, selected.git.DefaultBranch
+	}
+	return cache, closeCache, err
+}
+
+func openProfileCache(ctx context.Context, profile string, git runspec.Git, checkout string) (blob.RemoteCache, func() error, error) {
+	branch, err := checkoutDefaultBranch(ctx, checkout)
+	if err != nil {
+		return nil, nil, err
+	}
+	if branch == "" {
+		return nil, nil, errors.New("run: cache profile requires origin's default branch")
+	}
+	options, closeConnection, err := controllerOptions(ctx, profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	credential, err := client.OpenProfileData(ctx, options, capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: string(git.Repository.Key), ReadRefs: []string{branch}, VerifiedDefaultOnly: true})
+	if err != nil {
+		closeConnection()
+		return nil, nil, err
+	}
+	closeCache := func() error {
+		defer closeConnection()
+		return credential.Close(context.WithoutCancel(ctx))
+	}
+	cache, err := credential.RemoteCache(profile)
+	if err != nil {
+		return nil, nil, errors.Join(err, closeCache())
+	}
+	return cache, closeCache, nil
+}
+
+func hostSourceOptions(home string, captured []string, masker *secrets.Masker, local bool) (source.Options, error) {
 	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
 	if err != nil {
 		return source.Options{}, err
 	}
-	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, CacheDirectory: filepath.Join(home, "engines"), LocalOnly: true})
+	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, CacheDirectory: filepath.Join(home, "engines"), LocalOnly: local})
 	if err != nil {
 		return source.Options{}, err
 	}
 	return source.Options{
 		Engines: engines, SDK: engine.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: true, Captured: captured, Masker: masker},
+		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Ambient: os.Environ(), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}, Masker: masker},
 	}, nil
 }
 
-func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, seal runspec.EnvSnapshot, captured []string, snapshots *nodehost.FileEnvironmentSnapshots) (_ localRunPreparation, err error) {
+func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, captured []string, snapshots *nodehost.FileEnvironmentSnapshots, compile compileOptions) (_ localRunPreparation, err error) {
+	route, err := loadRunRouting(directory, pipeline)
+	if err != nil {
+		return localRunPreparation{}, err
+	}
+	masker := secrets.NewMasker()
+	environment := slices.DeleteFunc(slices.Clone(captured), func(item string) bool {
+		name, value, _ := strings.Cut(item, "=")
+		if !slices.Contains(route.LocalSecrets, name) {
+			return false
+		}
+		masker.Register(value)
+		return true
+	})
+	defer func() {
+		if err != nil {
+			err = &maskedCLIError{err: err, masker: masker}
+		}
+	}()
+	seal, err := snapshots.Capture(ctx, environment)
+	if err != nil {
+		return localRunPreparation{}, err
+	}
 	identity, err := pipelineIdentityAt(directory, pipeline)
 	if err != nil {
 		return localRunPreparation{}, err
@@ -111,8 +183,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil && !os.IsNotExist(err) {
 		return localRunPreparation{}, err
 	}
-	masker := secrets.NewMasker()
-	options, err := localSourceOptions(home, captured, masker)
+	options, err := hostSourceOptions(home, environment, masker, true)
 	if err != nil {
 		return localRunPreparation{}, err
 	}
@@ -120,6 +191,8 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		return localRunPreparation{}, err
 	} else if typescript {
 		options.SDK = engine.TypeScriptSDK
+	} else if err := resolveSparks(ctx, directory, compile); err != nil {
+		return localRunPreparation{}, err
 	}
 	root := filepath.Dir(directory)
 	repository, err := runspec.CanonicalRepository(runspec.RepoInput{AbsolutePath: root})
@@ -158,11 +231,15 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, err
 	}
+	localSecrets, err := resolveBurstSecrets(ctx, route.LocalSecrets, prepared.Description.Secrets, captured)
+	if err != nil {
+		return localRunPreparation{}, err
+	}
 	return localRunPreparation{
 		identity: identity, described: []nodeproto.PipelineDescription{prepared.Description},
 		git:         runspec.Git{Repository: repository, SHA: entry.SHA},
 		source:      runspec.Source{Ref: entry.SHA, Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: filepath.Base(directory)}},
-		environment: seal, machine: machine, machineFile: configFile,
+		environment: seal, localSecrets: localSecrets, machine: machine, machineFile: configFile,
 		settings: settings.Inputs{Context: settings.Context{Origin: runspec.OriginLocal, Submitter: true, Local: true, NumCPU: runtime.NumCPU()}},
 	}, nil
 }

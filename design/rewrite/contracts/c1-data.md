@@ -1,5 +1,50 @@
 # C1 data contract
 
+## Verified-default record observations
+
+`RecordLookupResult.VerifiedDefault` records a successful verified-default
+selection. C1 sets it only after persisted branch evidence and live record/member
+authorization pass. `Record.VerifiedDefault` validates the record's ref against
+its verified default-branch facts, including App delivery and SHA evidence.
+Remote-cache authorities enforce this policy even without a caller flag.
+An omitted ref selects among the live authority's permitted refs, preserving all
+other logical selectors. C3 exports only the boolean observation; each later
+download still resolves live authority and persisted read edges.
+
+## Source reads before an execution attempt
+
+A live node award may read its run's submitted `source_bundle` before its
+execution attempt starts, including a retry that retains an earlier attempt
+ordinal. `ResolveBlobAuthority` returns read authority without an attempt or
+upload identity for that pending node. Candidate edges permit only the bundle
+digest in the bound run's sealed request. Holder, generation, lease, cancellation,
+team and repository checks still apply. Output and cache reads, upload receipts
+and record writes continue to require an execution attempt.
+
+`ResolveDataAuthority` selects the grant required by the authorized operation,
+so a read does not acquire write authority from the capability's `WriteRef`.
+The HTTP policy router applies the existing data error projection to data binding
+refusals. An unreadable foreign digest returns `forbidden` rather than `internal`.
+The composed HTTP coverage is in `pkg/controller/burst_acceptance_test.go`.
+The source-read fence matrix is in `pkg/store/blob_source_setup_test.go`.
+
+Cloud source initialization precedes bootstrap exchange. A live Node, Plan or
+Eval bootstrap resolves `source.read` only for its sealed submitted source
+bundle. This projection has no attempt or upload identity. Store read-set
+construction derives the grant from persisted bootstrap delivery and excludes
+output, binary, cache and foreign-run edges. Generic `data.read`, `data.write`
+and all data operations except the exact bundle download remain unavailable.
+Exchange revokes the bootstrap's source authority with its other authority.
+
+Fresh node awards carry attempt zero in their data scope even when the node
+retains earlier attempt ordinals. Authentication reports no current execution
+attempt for a pending node that has not started. Starting execution allocates
+the next ordinal, which authentication then projects into the live award.
+Exact-body transition proofs use the decoded `source_attempt`, revalidated
+against the persisted source ordinal in the committing transaction. An identical
+actor and digest may replay before comparison with the advanced ordinal, after
+authority is rechecked. A changed source ordinal cannot reuse that proof.
+
 ## Committed retry selection
 
 `IntakeRequest.RetryMode` is separate from `Request`. An unset mode normalizes
@@ -2504,6 +2549,11 @@ method. Both dependency-archive backends use the same verified-download and stag
 extraction path. A copied memo without an explicit output digest is a miss,
 including for followers. Explicit empty output remains a valid hit.
 
+`blob.RemoteCache` accepts a zero optional lookup deadline for unbounded local
+hosts. Such reads retain caller cancellation and any context deadline. An
+explicit Budget deadline still bounds the entire lookup and byte verification.
+No cache package supplies a default timeout.
+
 Memo and depcache default-branch fallback apply `VerifiedDefaultOnly` before
 reading bytes or member metadata. A verified ref without default-branch evidence
 does not qualify. Memo uses own scope before default fallback and has no PR-base
@@ -3441,6 +3491,138 @@ Version 3 stores are refused by the existing baseline check; no migration or
 compatibility path is added. Native QA must use a fresh version-4 development
 store. This is a schema change within the assigned integration slice.
 
+## Burst requester secrets
+
+`runspec.Request.LocalSecretNames` seals only the requester-selected names.
+`IntakeRequest.LocalSecrets` carries their resolved values outside persisted
+JSON. Names and values must match exactly. Admission copies values into the
+Store process's run-and-team registry before its transaction commits. Failed
+admission removes only the entry it created. Identical active intake replays
+retain the first values. Changed values refuse with `spec_drift`.
+
+Plan acceptance requires every selected local name in the pipeline's declared
+secret names. Local values participate in identifier validation and satisfy
+secret preflight. The selected local value takes precedence over a stored team
+secret. Local values have no pool restriction inherited from that stored row.
+
+`Tenant.ReadSecret` returns local values only after the existing live authority,
+declaration and claim fences pass. It commits the same `secret_released` audit,
+then rechecks authority. Returned local rows have `Masked=true` and
+`Ephemeral=true`. The ephemeral marker is absent from JSON. Values never enter
+secret rows, run seals, events or source-bundle storage. Terminal run commit
+removes the registry entry. Team deletion and owner lease expiry also purge it.
+A rolled-back completion retains it. Store close clears the registry.
+
+Losing the registry fails with `unavailable`, even if a stored secret has the
+same name. Intake replay cannot restore lost values. Retry of a run with local
+secrets requires a new requester submission because retained seals have only
+names. The refusal directs the requester to submit a new run.
+
+The supported Cloud chart uses one controller replica and Recreate rollouts.
+That topology sends intake, plan validation and releases to the same in-memory
+registry. Multi-replica deployment needs a verified run-affinity or ephemeral
+relay contract before it can support local secrets. This amendment adds no
+relay or stored value. ResupplyHereSecrets accepts matching sealed names and values
+only from the run's live, fenced here owner. It restores a lost registry on its
+authenticated heartbeat. Existing values cannot be changed. After cancellation,
+resupply from the live, fenced here owner is a no-op so reporting renewal and
+drain can finish. It never restores values or permits a secret read. The owner
+and run locks serialize this check with cancellation. Burst job claims and
+secret reads independently restrict eligibility to the sealed here/personal/Cloud
+set. The here owner keeps planning authority. Publish-mode success never updates
+pipeline_success_pins.
+
+## Burst placement and per-user overflow
+
+`Request.Burst` seals ordered `PlacementStep{Target, Hold}` preferences and an optional narrowing `OverflowMinutes` cap. Targets resolve to authenticated here capacity, the requesting account's registered machines, Cloud or granted runner/pool selectors. Existing `ClaimPlacement` controls hold times for the same owner projections, reconciliation and claim paths. Burst nodes can overflow a here-hosted run without transferring its owner.
+
+The baseline is version 6. `runs.created_subject_kind` accompanies the authenticated creator ID so personal-machine ownership cannot confuse account and machine IDs. `overflow_controls(team, account_id, monthly_minutes)` stores optional monthly allowances. No row means no per-user cap. Account authority changes its own allowance through `SetOverflowLimit` and reads usage through `ReadOverflowControl`. Cloud admission observes the narrower stored/request cap as well as team billing admission. Existing work finishes and unmetered capacity remains eligible. Full field and verification details are in `design/rewrite/W9-BURST-PLACEMENT.md`.
+
+`billing_awards.requester_account` captures the authenticated account creator
+from the run at award time. Non-account creators store an empty value.
+Overflow usage reads that retained attribution with its retained charges and
+compute intervals, without joining run history. Deletion or reuse of a run ID
+cannot erase usage or transfer it to another account. No foreign key makes
+financial attribution depend on retained runs or accounts. Version-5 stores
+are refused and need a fresh baseline; no migration or backfill is added.
+
+## Cloud allocation projection for burst execution
+
+`Store.CloudAwardResources(ctx, authority)` reads live ancestry and the award's
+committed billing reservation in one snapshot. It returns no allocation for
+customer machines or here ownership. A Cloud award returns the CPU class
+recorded in its reservation charge and `CPUClassMemoryBytes` for that class.
+The current price table and authored resource settings cannot resize that award.
+Bootstrap exchange retains the reservation and its allocation. A consumed
+bootstrap cannot read it again. No new price, tier, limit or schema field is added.
+
+The allocation property starts with an implicit resource request, replaces the
+price table, and exchanges the bootstrap. Generated table changes retain the
+original class and memory. Customer machine awards retain no Cloud allocation.
+
+## Unhinted job matching
+
+Node matching resolves an all-zero resource request to the existing one-core
+machine admission charge. `internal/admission.DefaultChargeCores` owns that
+value for both the local queue and the shared matcher input. This projection
+does not change the seal or the Cloud allocation. It applies to direct claims,
+queued claims, owner self-claims and preference liveness through the same
+matching-input reader. Explicit CPU or memory requests retain their values.
+Trigger ownership keeps its existing request so a saturated here machine can
+still host scheduling and overflow.
+
+## Burst reservation before self-claim
+
+`ReconcileRequest.Reserved` is optional machine capacity already held for this
+job. The owner supplies its actual local admission grant. Within the same
+transaction as eligibility and self-claim, C1 adds that amount to the
+machine's observed free resources. Invalid, nonfinite, negative and
+above-capacity reservations refuse. The transaction still checks the current
+owner, claim fences, repository, selectors and placement. Private snapshot
+eligibility and ordinary claims see only free resources. The reservation never
+updates the stored observation, so concurrent heartbeats cannot erase it or
+advertise it to another job. Existing callers omit the field.
+
+## Local dependency-cache scope
+
+A live `SubjectLocal` execution with `DataClaim` authority may save and restore
+dependency caches under its sealed `local:` repository key in the local
+controller. Foreign repositories, account/machine subjects, publication and
+cross-profile cache authority cannot use that local namespace. Shared memo
+restrictions remain. Existing attempt, receipt, ref and read-edge checks apply.
+
+An absent unverified Git ref has the distinct namespace component `manual:`.
+Named refs escape their colons, so a literal `manual:` ref cannot alias it.
+An empty verified ref is invalid. The dependency-cache client preserves the
+absent unverified ref on lookup instead of rejecting a valid local hit.
+No table, credential grant or public API changes.
+
+## Imported local history
+
+CausePublishAttempt (`publish_attempt`) is a pending-to-pending operator edge
+under GuardPublication. TransitionExtra.Publication carries PublishedAttempt:
+positive ordinal and generation, completed timestamps, terminal outcome and
+executor name. Import creates one terminal local node_attempts row, without an
+award, live holder, lease, trigger or billing reservation. It rejects a second import
+with changed bytes. CausePublish must agree with that imported outcome. Imported
+results retain the normal receipt, exact-attempt record and member checks.
+Owner and publication result proofs use the issuing capability's attempt,
+separate from the job's execution attempt. Node-holder proofs use the captured
+source attempt and retain the committing transaction's ordinal check.
+Secret availability preflight applies to
+executable intake, while publish-mode plans require no execution secrets.
+
+Tenant.ReadLocalPublication reads terminal state and its selected result records
+and verified members. The controller exposes it only to the verified local peer
+on the existing private snapshot route. Local CAS readers use ObjectKey and an
+os.Root, and signed uploads verify the digest and size again.
+
+Local publication reuses the persisted result reader used by materialization,
+retaining failure reasons, masked errors, exit codes and structured failures.
+
+Publication attempts always store local for executor kind, name and location.
+The caller-supplied executor name cannot alter that provenance. Billing awards
+index (team, requester_account) for account-scoped overflow lookup.
 
 ## Profile completion delivery
 
@@ -3486,9 +3668,9 @@ has since accepted the checks permission. `ReportGitHubCheck` keeps its existing
 report lock and ID recording transaction. Failed ID persistence is retried by
 adopting the check with this run's external ID.
 
-This adds one column to the final schema and advances the disposable baseline
-to version 5. Version-4 stores are refused. There is no migration or backfill.
-Native QA needs a fresh version-5 store.
+This adds one column to the final schema. Combined with burst attribution and
+overflow controls, the disposable baseline is version 6. Earlier stores are
+refused. There is no migration or backfill. Native QA needs a fresh version-6 store.
 
 `Server.ReconcileRunEffects` replaces `ReconcileProfileFolds` in both controller
 compositions. It delivers the profile and GitHub lanes under the same lease,
@@ -3665,7 +3847,9 @@ private schedule authority proof. There is one call to the shared `admitRun`.
 The duplicate admission implementation, private intake selector and separate
 schedule source-verification API are removed.
 
-The persisted declaration is unattended execution consent. App schedules also
+A stored arming consent or a current App installation and automation grant is
+required for unattended execution. A raw declaration alone grants no execution.
+App schedules also
 recheck live same-team installation and repository automation consent. API/local
 registration retains its request template and arming authority in
 `cron_schedules.consent_json`; those registrations recheck that authority and its
@@ -3717,3 +3901,35 @@ existing post-admission source release. HTTP box groups need persisted host
 identity, and memo requests need accepted namespace metadata. Missing authority
 is refused. Native box admission remains available. These gaps remain visible
 for the lead's launch integration work.
+
+
+## W1b review integration, 2026-10-17
+
+Slot mutations take the admission key, controller lease, current authority chain,
+the bound unit's owner row, sorted runs and nodes, then the group. Owner locks
+use the current capability's UnitKind, including plan for controller dispatch.
+Group and holder reads use a read-only snapshot without admission or row locks.
+Release ignores the caller's outcome for inheritance. The unreachable legacy
+coalesce waiter deletion is removed. Real-store cross-team leader resolution
+returns 403 without disclosing outcomes.
+
+Scheduled intake locks its schedule FOR UPDATE before taking the intake lock.
+An aborted transaction does not write fire history or consume its due instant.
+The source and authority snapshots are rechecked at the committing boundary.
+Both schedule caps derive from internal/limits. Local principals retain their
+cap exemption.
+
+Unpriced job refusal now uses the existing node state owner. C1 adds the
+claimant actor and unpriced edge for an unclaimed pending or ready job. The edge
+also requires the private transaction proof carrying the failed poller's matching
+inputs. A public TransitionNode caller cannot manufacture it. Its guard rechecks live claimant ancestry, repository and unit scope, metered placement,
+matching policy and the current price table. Only a still-unpriced job can fail
+with unpriced_cpu_class. Claim issuance rolls back before that guarded edge,
+so no award, attempt or charge survives. Named and queued claims check pricing
+before resource fit. Pricing refusal does not limit unmetered self-hosted work.
+The guard is exercised by generated foreign, missing, revoked and repriced cases.
+
+IntakeQueueDepth reads the tenant queue from the same admission transaction.
+The controller's existing flood policy runs after C1 replay lookup. This removes
+nested store reads while holding the intake transaction and preserves replay
+and retry semantics.

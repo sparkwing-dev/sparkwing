@@ -276,6 +276,14 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 
 func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Team, policy IntakePolicyFacts) (runspec.Request, error) {
 	input := request.Request
+	if input.Burst != nil {
+		if p.Capability.Subject.Kind != capability.SubjectAccount {
+			return input, bindingRefusal()
+		}
+		if err := input.Burst.Validate(); err != nil {
+			return input, authorityError(apierr.BadRequest, err.Error())
+		}
+	}
 	if input.Pipeline == "" || input.Mode != runspec.IntakeExecute && input.Mode != runspec.IntakePublish || input.Dispatch != runspec.DispatchHost && input.Dispatch != runspec.DispatchController {
 		return input, authorityError(apierr.BadRequest, "invalid intake mode, dispatch or pipeline")
 	}

@@ -117,6 +117,14 @@ type fakeLease struct {
 	watchDone chan struct{}
 }
 
+func (l *fakeLease) Resources() wingwire.HostResources {
+	resources := l.req.Resources
+	if !l.req.SemaphoresOnly && resources == (wingwire.HostResources{}) {
+		resources.Cores = 1
+	}
+	return resources
+}
+
 func (l *fakeLease) Token() string { return "lease-" + string(l.req.RunID) }
 
 func (l *fakeLease) Release() error {

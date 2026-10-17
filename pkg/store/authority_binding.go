@@ -118,13 +118,16 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 		return bindingExpansionTx(ctx, tx, c, target)
 	case capability.BindSourceReport:
 		return bindingSourceReportTx(ctx, tx, c, target)
-	case capability.BindReadSet, capability.BindData:
+	case capability.BindReadSet, capability.BindData, capability.BindSourceBundle:
 		if target.Data != nil {
 			var checker capability.DataAccessChecker = tx
 			return checker.CheckDataAccess(ctx, capability.Authorized{Principal: p, Binding: b, Target: target}, *target.Data)
 		}
 		if rule == capability.BindReadSet {
 			return bindingDeclaredReadTx(ctx, tx, c, target)
+		}
+		if rule == capability.BindData && c.Data != nil && c.Data.Use == capability.DataPublish && target.RunID == c.Data.RunID {
+			return checkPublisherTx(ctx, tx, Team(c.Team), Actor{Kind: ActorOperator, Authority: p.Authority, CapabilityPrefix: c.Prefix}, target.RunID)
 		}
 	case capability.BindSource:
 		return bindingSourceTx(ctx, tx, c, target)

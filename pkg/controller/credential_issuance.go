@@ -17,8 +17,9 @@ type CredentialIssuer interface {
 }
 
 type credentialRequest struct {
-	Grants    []capability.Grant `json:"grants"`
-	ExpiresAt *time.Time         `json:"expires_at,omitempty"`
+	Grants    []capability.Grant    `json:"grants"`
+	ExpiresAt *time.Time            `json:"expires_at,omitempty"`
+	Data      *capability.DataScope `json:"data,omitempty"`
 }
 
 type credentialResponse struct {
@@ -27,6 +28,7 @@ type credentialResponse struct {
 	Team       string             `json:"team"`
 	Grants     []capability.Grant `json:"grants"`
 	ExpiresAt  *time.Time         `json:"expires_at,omitempty"`
+	Principal  string             `json:"principal,omitempty"`
 }
 
 // WithCredentialIssuer supplies the transactional issuer for embedded controllers and tests.
@@ -49,7 +51,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 	p := a.Principal
 	var issued capability.Issued
 	var err error
-	if p.DirectAccountSession() {
+	if p.DirectAccountSession() && request.Data == nil {
 		issued, err = s.credentialIssuer.ProvisionCapability(r.Context(), capability.ProvisionSpec{
 			Kind: capability.ProvisionMember, Authority: &p.Authority, Subject: p.Capability.Subject,
 			Team: a.Target.Team, Grants: request.Grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: request.ExpiresAt,
@@ -58,9 +60,17 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 		if request.ExpiresAt == nil {
 			request.ExpiresAt = p.Capability.ExpiresAt
 		}
+		binding, repositories := p.Capability.Binding, p.Capability.Repositories
+		if request.Data != nil {
+			repositories = []string{request.Data.RepositoryKey}
+			binding = capability.Binding{Kind: capability.BindingNone}
+			if request.Data.Use == capability.DataPublish {
+				binding = capability.Binding{Kind: capability.BindingRun, RunID: request.Data.RunID}
+			}
+		}
 		issued, err = s.credentialIssuer.DelegateCapability(r.Context(), capability.DelegateSpec{
-			Parent: p.Authority, Repositories: p.Capability.Repositories, Audience: capability.Controller, Grants: request.Grants,
-			Binding: p.Capability.Binding, ExpiresAt: request.ExpiresAt,
+			Parent: p.Authority, Repositories: repositories, Audience: capability.Controller, Grants: request.Grants,
+			Binding: binding, Data: request.Data, ExpiresAt: request.ExpiresAt,
 		})
 	}
 	if err != nil {
@@ -69,6 +79,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 	writeJSON(w, http.StatusCreated, credentialResponse{
 		Capability: issued.Raw, Prefix: issued.Capability.Prefix,
 		Team: issued.Capability.Team, Grants: append([]capability.Grant{}, issued.Capability.Grants...), ExpiresAt: issued.Capability.ExpiresAt,
+		Principal: issued.Capability.Subject.ID,
 	})
 	return nil
 }

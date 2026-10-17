@@ -60,7 +60,7 @@ func hereAward(t *testing.T) controllerwire.ClaimedUnit {
 		t.Fatal(err)
 	}
 	return controllerwire.ClaimedUnit{
-		Unit: capability.UnitTrigger, Purpose: capability.PurposeHere, Delivery: capability.DeliveryDirect,
+		Unit: capability.UnitTrigger, Purpose: capability.PurposeTrigger, Delivery: capability.DeliveryDirect,
 		RunID: "retry-run", UnitID: "owner-unit", Capability: "awarded-private-capability", Request: request,
 		Binding:        capability.Binding{Kind: capability.BindingTrigger, RunID: "retry-run", Generation: 7, Holder: "granted-holder"},
 		LeaseExpiresAt: time.Unix(900, 0),
@@ -280,7 +280,7 @@ func TestHereRejectsWrongAwardsBeforeHostConstruction(t *testing.T) {
 		"foreign fence": func(a *controllerwire.ClaimedUnit) { a.Binding.RunID = "foreign-run" },
 		"job":           func(a *controllerwire.ClaimedUnit) { a.JobID = "job" },
 		"unit":          func(a *controllerwire.ClaimedUnit) { a.Unit = capability.UnitPlan },
-		"purpose":       func(a *controllerwire.ClaimedUnit) { a.Purpose = capability.PurposeTrigger },
+		"purpose":       func(a *controllerwire.ClaimedUnit) { a.Purpose = capability.PurposeHere },
 		"bootstrap":     func(a *controllerwire.ClaimedUnit) { a.Delivery = capability.DeliveryBootstrap },
 		"holder":        func(a *controllerwire.ClaimedUnit) { a.Binding.Holder = "" },
 		"generation":    func(a *controllerwire.ClaimedUnit) { a.Binding.Generation = 0 },
@@ -611,6 +611,54 @@ func FuzzHerePreparationCannotReplaceAward(f *testing.F) {
 			})
 		if err != nil || !called || !closed {
 			t.Fatalf("hosted=%t closed=%t error=%v", called, closed, err)
+		}
+	})
+}
+
+func TestHereAdmissionCallbackRetainsAuthorityBeforePublishingHandle(t *testing.T) {
+	credentials := hereCredentials{dir: t.TempDir()}
+	options := client.EngineOptions{URL: "https://cloud.example"}
+	called := false
+	failure := errors.New("handle write failed")
+	err := handoffHereRun(t.Context(), options, controllerwire.CreateRunResponse{RunID: "burst", HereBearer: "private"}, hereDependencies{
+		credentials: func() (hereCredentials, error) { return credentials, nil },
+		admitted: func(response controllerwire.CreateRunResponse) error {
+			called = true
+			value, err := credentials.load(options.URL, response.RunID)
+			if err != nil || value != "private" {
+				t.Fatalf("authority missing at publication: %q %v", value, err)
+			}
+			return failure
+		},
+		resolve: func(context.Context, client.EngineOptions) (hereRuntime, error) {
+			t.Fatal("hosted after failed publication")
+			return hereRuntime{}, nil
+		},
+	})
+	if !called || !errors.Is(err, failure) {
+		t.Fatalf("called=%v err=%v", called, err)
+	}
+}
+
+func FuzzHereHostRequiresExecutionAward(f *testing.F) {
+	f.Add("owner", uint16(7))
+	f.Fuzz(func(t *testing.T, holder string, generation uint16) {
+		if holder == "" || len(holder) > 128 {
+			t.Skip()
+		}
+		award := hereAward(t)
+		award.Binding.Holder, award.Binding.Generation = holder, int64(generation)+1
+		if _, err := hereRunInput(award.RunID, award); err != nil {
+			t.Fatal(err)
+		}
+		award.Purpose = capability.PurposeHere
+		if _, err := hereRunInput(award.RunID, award); err == nil {
+			t.Fatal("reservation accepted as an execution award")
+		}
+		award.Purpose = capability.PurposeTrigger
+		award.Binding.RunID += "-foreign"
+		if _, err := hereRunInput(award.RunID, award); err == nil {
+			t.Fatal("foreign execution fence accepted")
 		}
 	})
 }

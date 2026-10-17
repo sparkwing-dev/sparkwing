@@ -270,6 +270,8 @@ result. The host scopes reuse by the accepted repository and trust policy.
 `sw.Npm()` declare standard caches. `sw.Dir(path, sw.KeyFromFile(lockfile))`
 declares a custom directory cache. `DirCache.Key(workdir)` computes its input key
 without granting storage access. A dependency-cache failure runs the job cold.
+Relative cache paths and key files use the repository working directory, as do
+package-manager cache queries.
 
 ```go
 sw.Job(plan, "test", func(ctx context.Context) error {
@@ -279,8 +281,9 @@ sw.Job(plan, "test", func(ctx context.Context) error {
 ```
 
 `Artifacts(globs...)` publishes files. `Consumes(producer, sw.Into(prefix))`
-stages the producer's artifacts and adds its dependency. Paths remain inside the
-workspace. Artifact staging failure fails the job.
+stages the producer's artifacts and adds its dependency. Patterns and staging
+destinations use the repository working directory and stay inside that workspace.
+Artifact staging failure fails the job.
 
 ```go
 build := sw.Job(plan, "build", Build{}).Artifacts("dist/**")

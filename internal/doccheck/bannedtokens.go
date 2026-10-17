@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 type bannedPattern struct {
@@ -165,8 +167,11 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 			return false
 		}
 		rel, _ := filepath.Rel(repoRoot, path)
-		patterns := append(append(append([]bannedPattern{}, banned...), bannedNarrative...), bannedGuideRecipes...)
 		for ln, line := range strings.Split(string(data), "\n") {
+			patterns := append(append([]bannedPattern{}, banned...), bannedNarrative...)
+			if path != filepath.Join(contentDir, "environment-variables.md") || !rejectedEnvironmentRow(line) {
+				patterns = append(patterns, bannedGuideRecipes...)
+			}
 			for _, b := range patterns {
 				if m := b.re.FindString(line); m != "" {
 					hits = append(hits, fmt.Sprintf("%s:%d: %q -- %s", rel, ln+1, m, b.want))
@@ -186,4 +191,28 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 	}
 	fmt.Println("\nNO DEAD TOKENS IN DOCS OR HELP")
 	return true
+}
+
+func rejectedEnvironmentRow(line string) bool {
+	if !strings.HasPrefix(line, "| `SPARKWING_") {
+		return false
+	}
+	for _, variable := range procenv.Registry {
+		if variable.Owner != "engine" || !strings.HasPrefix(variable.Doc, "Removed ") {
+			continue
+		}
+		class := ""
+		switch variable.Class {
+		case procenv.Protocol:
+			class = "Protocol"
+		case procenv.Credential:
+			class = "Credential"
+		default:
+			continue
+		}
+		if line == fmt.Sprintf("| `%s` | %s | %s |", variable.Name, class, variable.Doc) {
+			return true
+		}
+	}
+	return false
 }

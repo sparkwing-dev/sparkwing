@@ -38,6 +38,13 @@ returns the shared policy handlers, state projection and `StoreRunnerConfig`.
 The runner supplies `StoreHosting` over the owned handle. The controller needs its signed runner
 admission policy and the store needs its enrollment resolver. The bearer provider
 supplies a provisioned claimant credential.
+The embedded queue authenticates that credential before its startup and refresh
+version checks. Those checks and claim admission share
+`EngineController.CheckRunner`, which selects local policy only for a persisted
+local subject. Local checks use cached policy without network refresh, including
+when a new home has no cached policy. Machine and service claimants retain strict
+runner policy. Queue startup therefore cannot end a fresh local controller by
+applying online runner policy to its local claimant.
 The native service binder supplies W3's source, process, logging and storage
 services. Cleanup must accompany partially constructed services even when
 binding fails. It closes those services before the store. Missing runner services

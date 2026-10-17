@@ -123,8 +123,9 @@ separate work. Flushed log segments remain the persistence fallback.
 
 ### Run submission budgets
 
-The configured hourly flood cap is shared by a team's API submissions,
-retries and App deliveries. Queue shedding measures that team's pending work.
+The configured hourly flood cap gives each API token its own bucket for
+submissions and retries. App deliveries share their team's separate bucket.
+Queue shedding measures that team's pending work.
 Exhaustion returns `429`; queue shedding returns `503`. Both carry
 `Retry-After`. These process budgets complement the store's persistent limits.
 
@@ -133,7 +134,9 @@ same team and submitting identity share an intake key within that window. The st
 the commit and replay: the first response is `201`, and replay returns `200`
 with `replayed: true` and the same run ID. Replay never returns another here
 bearer. An explicit idempotency key takes precedence over content deduplication.
-The flood budget still applies to each API request, including a replay.
+Persisted replay runs before flood charging, so a replay does not spend the
+flood budget. A refused store transaction leaves no replay result. Retrying
+the same content inside the dedupe window can still create its first run.
 
 ### Limits profiles
 

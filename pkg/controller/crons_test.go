@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-const cronTestRepoURL = "https://github.com/acme/widgets.git"
+const cronTestRepoURL = "https://gitlab.com/acme/widgets.git"
 
 const cronTestSHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -55,7 +57,6 @@ func newCronsFixture(t *testing.T) *cronsFixture {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}
 	s := controller.New(st, nil)
-	controller.ScheduleWriterFixture(t, s)
 	return &cronsFixture{t: t, handler: s.Handler(), store: st, writer: writer, reader: reader, none: none}
 }
 
@@ -174,5 +175,31 @@ func TestControllerCrons_RunNowReplaysTheSameRequest(t *testing.T) {
 	runs, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListRuns(t.Context(), store.RunFilter{Limit: 10})
 	if err != nil || len(runs) != 1 || runs[0].ID != first.RunID {
 		t.Fatalf("replayed request persisted %d runs: %v", len(runs), err)
+	}
+}
+
+type scheduleSourceProbe struct {
+	store.IntakePolicy
+	calls int
+}
+
+func (p *scheduleSourceProbe) ResolveScheduleSource(context.Context, store.CronSchedule, runspec.Request) (runspec.Request, error) {
+	p.calls++
+	return runspec.Request{}, errors.New("source lookup reached")
+}
+
+func TestControllerCrons_BoundsEntriesBeforeResolvingSource(t *testing.T) {
+	f := newCronsFixture(t)
+	probe := &scheduleSourceProbe{}
+	f.store.SetIntakePolicy(probe)
+	body := cronPushBody()
+	entries := make([]map[string]any, 21)
+	for i := range entries {
+		entries[i] = map[string]any{"pipeline": fmt.Sprintf("job-%d", i), "cron": "0 3 * * *"}
+	}
+	body["schedules"] = entries
+	status := f.status(http.MethodPut, "/api/v1/schedules/repos", f.writer, body)
+	if status != 409 || probe.calls != 0 {
+		t.Fatalf("overfull declaration: status=%d source calls=%d", status, probe.calls)
 	}
 }

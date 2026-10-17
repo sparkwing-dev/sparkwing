@@ -16,6 +16,47 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 )
 
+func TestRunGoSDKNeedsOnlyThePipelineDependencyArchives(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
+	t.Setenv("GOMODCACHE", filepath.Join(root, "modules"))
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOSUMDB", "off")
+	t.Setenv("GOPROXY", "off")
+	dir := filepath.Join(root, "pipeline")
+	sdk := filepath.Join(root, "sdk")
+	for _, path := range []string{dir, sdk} {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeInput(t, sdk, "go.mod", []byte("module "+engine.GoModule+"\ngo 1.26\n"))
+	writeInput(t, dir, "go.mod", []byte("module fixture\ngo 1.26\nrequire (\n"+engine.GoModule+" v0.20.0\nexample.test/unused v1.0.0\n)\nreplace "+engine.GoModule+" => "+filepath.ToSlash(sdk)+"\n"))
+	writeInput(t, dir, "main.go", []byte("package main\nfunc main(){print(\"built offline\")}\n"))
+	request, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: engine.GoSDK, ExecutableDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output, diagnostics bytes.Buffer
+	if err := Run(t.Context(), "development", bytes.NewReader(request), &output, &diagnostics); err != nil {
+		t.Fatalf("unneeded module blocked pipeline installation: %v: %s", err, &diagnostics)
+	}
+	var installed engine.SDKCommand
+	if err := json.Unmarshal(output.Bytes(), &installed); err != nil {
+		t.Fatal(err)
+	}
+	result, err := exec.CommandContext(t.Context(), installed.Command[0]).CombinedOutput()
+	if err != nil || string(result) != "built offline" {
+		t.Fatalf("installed pipeline: %q %v", result, err)
+	}
+	writeInput(t, dir, "main.go", []byte("package main\nimport _ \"example.test/unused\"\nfunc main(){}\n"))
+	output.Reset()
+	diagnostics.Reset()
+	if err := Run(t.Context(), "development", bytes.NewReader(request), &output, &diagnostics); err == nil || output.Len() != 0 || !strings.Contains(diagnostics.String(), "example.test/unused") {
+		t.Fatalf("missing imported module did not refuse installation: %s %s %v", &output, &diagnostics, err)
+	}
+}
+
 func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
 	root := t.TempDir()
 	t.Cleanup(func() {

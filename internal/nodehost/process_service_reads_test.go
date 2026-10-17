@@ -62,6 +62,39 @@ func TestProcessServicesRegisterCompleteNegotiatedSurface(t *testing.T) {
 	}
 }
 
+func FuzzProcessServiceNamedSelectorsBelongOnlyToTheirRoute(f *testing.F) {
+	f.Add("TOKEN")
+	f.Add("pipeline/with?syntax")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, name string) {
+		if len(name) > 1024 {
+			t.Skip()
+		}
+		routes, _, _ := serviceFixture(t)
+		for _, endpoint := range routes.endpoints {
+			if endpoint.Method != http.MethodGet {
+				continue
+			}
+			request := httptest.NewRequest(http.MethodGet, "/", nil)
+			request.SetPathValue("name", name)
+			evidence, err := endpoint.Decode(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantSecret, wantPipeline := "", ""
+			switch endpoint.Pattern {
+			case "/node/v1/secrets/{name}":
+				wantSecret = name
+			case "/node/v1/pipelines/{name}/latest":
+				wantPipeline = name
+			}
+			if evidence.Target.SecretName != wantSecret || evidence.Target.Pipeline != wantPipeline {
+				t.Fatalf("%s confused its secret and pipeline selectors", endpoint.Pattern)
+			}
+		}
+	})
+}
+
 func TestProcessServicesReadUnderBoundAuthorityAndMaskBeforeDelivery(t *testing.T) {
 	routes, service, auth := serviceFixture(t)
 	service.Secrets = []string{"TOKEN", "REGION"}

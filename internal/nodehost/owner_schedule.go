@@ -153,6 +153,9 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			if !ok || row.Generation != action.Generation {
 				return RunCompletion{}, errors.New("decision does not match its persisted node")
 			}
+			if action.Kind == store.DecisionCancelHolder && row.CancelRequestedAt != nil {
+				continue
+			}
 			if action.Kind == store.DecisionExpand && expanded[action.NodeID] {
 				continue
 			}
@@ -176,13 +179,14 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				continue
 			}
 			local := h.Local != nil && h.Local(row)
+			burstConcurrency := spec.Request.Request.Burst != nil && h.retainRemote && hasLocalConcurrency(row.Execution.Concurrency)
 			if !local && (!h.retainRemote || !hasLocalConcurrency(row.Execution.Concurrency)) {
 				continue
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
 				launch(row.Ref.NodeID, func(ctx context.Context) error {
 					work := func(workCtx context.Context) error {
-						if !local {
+						if !local && !burstConcurrency {
 							return h.followRemote(workCtx, ctx, input.Owner, row)
 						}
 						return h.execute(workCtx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
@@ -322,6 +326,11 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		}
 	}
 	local := kind != store.DecisionApproval && h.Local != nil && h.Local(row)
+	spec, err := admissionSpec(accepted)
+	if err != nil {
+		return err
+	}
+	burstConcurrency := kind != store.DecisionApproval && spec.Request.Request.Burst != nil && h.retainRemote && hasLocalConcurrency(row.Execution.Concurrency)
 	parent := ctx
 	work := func(ctx context.Context) error {
 		change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeReady, Cause: store.CauseRelease}
@@ -331,7 +340,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		if _, err := h.Store.TransitionNode(ctx, change); err != nil {
 			return err
 		}
-		if local {
+		if local || burstConcurrency {
 			if err := next(ctx, request); err != nil {
 				return err
 			}
@@ -408,6 +417,13 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 	if h.Executor == nil || entry == nil {
 		return errors.New("self execution requires a node host and acquired entry")
 	}
+	spec, err := admissionSpec(accepted)
+	if err != nil {
+		return err
+	}
+	if spec.Request.Request.Burst != nil && h.claimAdmission != nil {
+		return h.executeBurst(ctx, run, accepted, entry, request)
+	}
 	result, err := FollowReconciliation(ctx, h.Store, request, h.WaitNode)
 	if err != nil {
 		return err
@@ -415,6 +431,10 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 	if result.Kind != store.Execute {
 		return nil
 	}
+	return h.executeAward(ctx, run, accepted, entry, result)
+}
+
+func (h *OwnerHost) executeAward(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, result store.ReconciledNode) error {
 	input, err := NewNodeInput(accepted, result.Node, entry.Engine, run.GrantedRunner)
 	if err != nil {
 		return err

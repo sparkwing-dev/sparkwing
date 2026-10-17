@@ -16,14 +16,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
-func seedBundle(ctx context.Context, client *gitClient, checkout, digest string, access Access) (err error) {
+func seedBundle(ctx context.Context, client *gitClient, checkout, digest, rawURL string) (err error) {
 	expected, err := hex.DecodeString(strings.TrimPrefix(digest, "sha256:"))
 	if err != nil || len(expected) != sha256.Size {
 		return errors.New("source bundle digest must be SHA-256")
-	}
-	rawURL, err := access.BundleURL(ctx, digest)
-	if err != nil {
-		return fmt.Errorf("authorize source bundle: %w", err)
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil {

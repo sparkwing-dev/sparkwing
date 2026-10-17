@@ -20,13 +20,12 @@ func TestBlobRecordsVerifiedDefaultLookupFiltersPersistedEvidence(t *testing.T) 
 	for _, tc := range []struct {
 		name  string
 		facts blob.RefFacts
-		found bool
 	}{
 		{name: "manual"},
 		{name: "verified feature", facts: blob.RefFacts{Scope: blob.RefScope{Ref: "feature", Verified: true}, SHA: "sha", AppDeliveryKey: "delivery", DefaultBranch: "main"}},
 		{name: "forged default flag", facts: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}, SHA: "sha", AppDeliveryKey: "delivery", DefaultBranch: "main", DefaultBranchVerified: true}},
 		{name: "missing event evidence", facts: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Verified: true}, DefaultBranch: "main", DefaultBranchVerified: true}},
-		{name: "verified default", facts: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Verified: true}, SHA: "sha", AppDeliveryKey: "delivery", DefaultBranch: "main", DefaultBranchVerified: true}, found: true},
+		{name: "verified facts in manual scope", facts: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Verified: true}, SHA: "sha", AppDeliveryKey: "delivery", DefaultBranch: "main", DefaultBranchVerified: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			facts, err := json.Marshal(tc.facts)
@@ -35,8 +34,8 @@ func TestBlobRecordsVerifiedDefaultLookupFiltersPersistedEvidence(t *testing.T) 
 			}
 			rewriteSchemaExec(t, s.db, "UPDATE blob_records SET ref_facts_json=?", facts)
 			got, err := records.LookupRecord(t.Context(), lookup)
-			if err != nil || got.Found != tc.found {
-				t.Fatalf("restricted lookup=%+v, want found=%v: %v", got, tc.found, err)
+			if err != nil || got.Found {
+				t.Fatalf("restricted lookup accepted invalid evidence: %+v: %v", got, err)
 			}
 		})
 	}

@@ -41,6 +41,12 @@ repeated selectors and unknown selectors fail with `bad_request`.
 A miss returns `{"found":false,"members":[]}`.
 A hit returns public record metadata and authorized member metadata. It omits
 private authority references, uploader identities and read-set snapshots.
+Verified-default selections include `verified_default:true`. The controller checks
+the persisted branch evidence before returning this observation. The shared cache
+reader requires it without receiving delivery keys, source SHAs or uploader facts.
+It grants no byte access; each download rechecks the current credential and edges.
+Misses omit the observation. With no ref selector, the store selects from the
+credential's authorized refs and accepts only persisted verified-default evidence.
 The `ref` selector and response metadata use `manual:<ref>` for submitter-vouched
 records and the plain ref for verified records. Each lookup requires the matching
 read grant. Selecting a plain ref never inherits a manual write's scope.
@@ -50,6 +56,8 @@ RFC3339 `deadline`. `POST /api/v1/data/depcache/lookup` takes `name`, `key`
 and optional `deadline`. The store applies memo's own-ref/default fallback
 and depcache's own-ref/PR-base/default order. Remote-cache credentials read
 only verified default-branch entries. Missing or corrupt cache data is a miss.
+An omitted cache deadline retains the caller's context and cancellation. An
+explicit deadline bounds both the lookup and verification of downloaded bytes.
 
 `POST /api/v1/data/memo/copy` takes the memo selectors. It requires both
 `data.read` and `data.write` and copies authorized output and manifest edges
@@ -57,6 +65,10 @@ to the claim's current attempt. The caller cannot choose the destination.
 
 These requests accept only unique, known string fields. Memo responses carry
 `found`, optional `output` and `manifest` digests, and public `members`.
+Memo hits also carry `reader`, the authenticated caller's attempt fence. The
+server checks that fence against its current binding, and the shared client
+rejects a different reader or invalid result metadata. Misses omit the reader
+and result references. Copy destination always comes from the authenticated claim.
 Depcache hits carry public `record` metadata and the winning restore `source`.
 Read-set snapshots and uploader identities stay private.
 
@@ -99,9 +111,10 @@ records, and never fetch executable pipeline binaries.
 Logs use a separate signed segment path and controller-proxied reads. Tagged
 subjects distinguish job attempts from trigger, plan and eval units.
 
-The `swcg` cache-grant protocol and `cache-grant-key` credential are removed.
-Authenticated data routes use live capabilities. There is no compatibility
-endpoint or cache-service fallback.
+Cloud source initialization downloads the run's sealed source bundle before
+exchanging its bootstrap. The bootstrap's `source.read` grant permits only that
+bundle through the download route. It grants no output, cache, secret or upload
+access. After exchange, execution uses the awarded claim and its current attempt.
 
 ## Local cache reads and publication
 

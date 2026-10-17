@@ -269,6 +269,15 @@ func Registry() []Command {
 			{Name: "ref", Argument: "REF"},
 			{Name: "pipeline-ref", Argument: "REF"},
 		}},
+		{Path: "sparkwing overflow", Flags: []Flag{}},
+		{Path: "sparkwing overflow show", Authority: TeamCredential, Rules: []string{"Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+		}},
+		{Path: "sparkwing overflow set", Authority: TeamCredential, Rules: []string{"Set your monthly Cloud allowance with --minutes, or remove your saved cap with --uncapped. Exactly one is required. Zero prevents new Cloud overflow while local and registered-machine work remain eligible. Running work finishes. JSON returns the saved allowance and usage. Plain prints the allowance in minutes or uncapped."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "minutes", Argument: "N", HasMinimum: true, Minimum: 0, Conflicts: []string{"uncapped"}},
+			{Name: "uncapped", Conflicts: []string{"minutes"}},
+		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
 		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},
@@ -338,7 +347,8 @@ func Registry() []Command {
 			{Name: "yes"},
 		}},
 		{Path: "sparkwing run", PipelineArgument: true, PipelineArgsAfterSeparator: true, Rules: []string{
-			"Always executes locally, including detached work on the local controller. --profile is refused.",
+			"Runs locally by default, including detached work on the local controller. Explicit user, repository or pipeline routing can select Cloud overflow. --profile is refused.",
+			"### Burst and overflow\n\nSet route: cloud and profile: NAME in machine run.routing to opt in. Repository defaults.run and pipelines[].run may only restrict routing to local and declare secret names. Machine configuration authorizes untracked source_files. The CLI hosts the Cloud-owned run and streams its logs. Ctrl-C requests cancellation. The default preference is here for 5s, then your registered personal machines for 5s, then Cloud. Other team runners cannot claim burst jobs. Prefer entries accept target and a non-negative hold duration. A controller that is unreachable before intake falls back to a local run and reports it. Authorization failures and a lost intake response remain failures because an accepted run keeps one owner. See [local execution](local-execution.md#burst-and-overflow) for configuration and secret handling.",
 			"Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.",
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
 			"--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.",
@@ -373,8 +383,10 @@ func Registry() []Command {
 			{Name: "target", Argument: "TARGET"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Use team credentials. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Team runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
+			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
+			{Name: "session-stdin", Meaning: "Read an existing independent account session from stdin without saving it; required with --personal."},
 			{Name: "repos", Argument: "PATTERN", Repeatable: true, CommaList: true},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
 			{Name: "max-concurrent", Argument: "N", Minimum: 1, HasMinimum: true},

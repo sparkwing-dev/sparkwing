@@ -5,7 +5,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type delegationContracts interface {
@@ -19,6 +21,17 @@ func delegateCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Dele
 	}
 	if err := capability.ValidateDelegation(parent, spec, tx.now()); err != nil {
 		return capability.Capability{}, err
+	}
+	if parent.Capability.Data == nil && spec.Data != nil && spec.Data.Use == capability.DataPublish {
+		run, err := readRunTx(ctx, tx, Team(parent.Capability.Team), spec.Data.RunID)
+		if err != nil {
+			return capability.Capability{}, err
+		}
+		request := run.Request.Request
+		if request.Mode != runspec.IntakePublish || request.Actor.ID != parent.Capability.Subject.ID || request.Actor.Kind != string(parent.Capability.Subject.Kind) ||
+			string(request.Git.Repository.Key) != spec.Data.RepositoryKey || spec.Data.WriteRef != "manual:"+request.Git.Ref {
+			return capability.Capability{}, authorityError(apierr.Forbidden, "publication scope differs from its intake")
+		}
 	}
 	if tx.store.delegation != nil {
 		if err := tx.store.delegation.ValidateDelegation(parent, spec, tx.now()); err != nil {
