@@ -33,11 +33,15 @@ SDK source and installation. Runtime adapters use the existing
 `sdkWorkingDirectory` selector, including nested pipeline directories.
 
 The compiled-source burst proof acquires its uploaded bundle under the awarded
-claim, builds the Go SDK with the shared installer and executes it through real
-process pipes for here, personal and exchanged Cloud awards. Secret release,
+claim, resolves and verifies the installed replacement-pin engine, builds the Go
+SDK through that engine's `__sdk-install` subprocess and executes it through real
+process pipes for here, personal and exchanged Cloud awards. Execution rechecks
+the accepted engine with the shared resolver. Closing the source removes the
+installation-owned executable. Secret release,
 masking, artifact publication and retrieval use the real controller and store.
-HTTP service transport uses test FIFOs. Engine resolution and Kubernetes remain
-fakes. Public CLI, signed-engine distribution and native Cloud isolation require
+HTTP service transport uses test FIFOs. The test executable dispatches the
+installer entrypoint to the production installer. Kubernetes remains a fake.
+Public CLI, signed-engine distribution and native Cloud isolation require
 their separate native lanes.
 
 `source.PrepareCheckout` owns preparation of an absent absolute host workspace
@@ -1132,8 +1136,16 @@ Publication derives the manifest record from the current attempt's authenticated
 output binding. Consumption resolves the producer's persisted terminal manifest
 through the shared host store and stages it under the consumer's live authority.
 Here, registered machines and Cloud use this construction. Artifact publication
-failures prevent successful terminal reporting. A missing cache adapter still
-refuses declared caches. Artifact wiring cannot silently skip them.
+failures prevent successful terminal reporting.
+
+Production native services also bind `DepcacheRecords.Prepare` to the executor.
+Cache uploads derive their team, repository, ref, pipeline, job and attempt from
+the same authenticated output binding. The cache declaration supplies its name
+and content key. Package-manager directories resolve through the initialized
+process session's persisted job environment. Missing storage refuses declared
+caches. Restore and save failures retain the shared cold-cache warning policy.
+The native composition round-trip and generated scope-mutation property cover
+these bindings with fake storage and a fake listener.
 
 The composition regression reaches byte upload and record lookup through these
 returned services. Its property refuses generated run, job, attempt, generation,

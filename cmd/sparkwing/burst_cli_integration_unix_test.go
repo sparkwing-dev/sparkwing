@@ -211,6 +211,9 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	if !interrupt && !strings.Contains(string(output), "burst-artifact-restored") {
 		t.Fatalf("native burst did not restore its published artifacts: %s", output)
 	}
+	if !interrupt && !strings.Contains(string(output), "burst-cache-restored") {
+		t.Fatalf("native burst did not restore its declared dependency cache: %s", output)
+	}
 	if personal && !personalAwarded.Load() {
 		t.Fatal("public burst did not award the job to its registered personal machine")
 	}

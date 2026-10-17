@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Restore and save declared dependency caches through the shared native
+  host on this machine, registered runners and Cloud. Package-manager caches use
+  the persisted job environment and the current attempt's storage authority.
+
 - **run:** Capture artifacts, restore consumed files and resolve dependency
   caches from the same repository working directory as SDK execution. Nested
   pipeline directories no longer cause empty artifact manifests or cold caches.

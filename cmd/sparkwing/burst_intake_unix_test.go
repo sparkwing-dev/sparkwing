@@ -266,14 +266,19 @@ func (pipeline) Plan(_ context.Context, p *sw.Plan, in inputs, _ sw.RunContext) 
             <-ctx.Done()
             return ctx.Err()
         }
+        if err := os.MkdirAll("modules", 0o700); err != nil { return err }
+        if err := os.WriteFile("modules/dependency", []byte("cached dependency\n"), 0o600); err != nil { return err }
         return os.WriteFile("burst-result.txt", []byte("artifact from edited source\n"), 0o640)
-    }).Artifacts("burst-result.txt")
+    }).Artifacts("burst-result.txt").Cache(sw.Dir("modules", sw.KeyFromFile("tracked.txt")))
     sw.Job(p, "consume", func(ctx context.Context) error {
         body, err := os.ReadFile("received/burst-result.txt")
         if err != nil || string(body) != "artifact from edited source\n" { return errors.New("missing burst artifact") }
+        cached, err := os.ReadFile("modules/dependency")
+        if err != nil || string(cached) != "cached dependency\n" { return errors.New("missing burst dependency cache") }
         sw.Info(ctx, "burst-artifact-restored")
+        sw.Info(ctx, "burst-cache-restored")
         return nil
-    }).Consumes(verify, sw.Into("received"))
+    }).Consumes(verify, sw.Into("received")).Cache(sw.Dir("modules", sw.KeyFromFile("tracked.txt")))
     return nil
 }
 func main() {

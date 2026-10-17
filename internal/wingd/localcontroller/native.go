@@ -179,6 +179,13 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		}
 		return *row.ManifestRecord, nil
 	}}
+	caches := nodehost.DepcacheRecords{Bind: func(ctx context.Context, input nodehost.NodeInput, key blob.DepcacheKey) (nodehost.JobUpload, error) {
+		upload, err := outputs.Bind(ctx, input)
+		upload.Key.Kind, upload.Key.Name, upload.Key.Scope.Key = blob.KindDepcache, key.Name, key.Key
+		return upload, err
+	}, Resolve: func(ctx context.Context, input nodehost.NodeInput, cache nodeproto.CacheSpec) (string, error) {
+		return processes.Session.Environments.CacheDirectory(ctx, input, cache)
+	}}
 	follower := nodehost.StateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	config := nodehost.NativeHostConfig{
 		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
@@ -190,8 +197,8 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},
 		Executor: nodehost.ExecutorDependencies{PublishOutput: outputs.PublishOutput, PrepareLayer: func(ctx context.Context, layer nodehost.LayerSpec, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
-			if layer.Name == "caches" && len(job.Caches) > 0 {
-				return nil, errors.New("executor layer caches has no storage adapter")
+			if layer.Name == "caches" {
+				return caches.Prepare(ctx, layer, input, job)
 			}
 			return artifacts.Prepare(ctx, layer, input, job)
 		}, BindStorage: func(ctx context.Context, input nodehost.NodeInput) (nodehost.StorageBinding, error) {

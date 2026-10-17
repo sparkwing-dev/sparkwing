@@ -84,6 +84,7 @@ func executeBurstSDK(t *testing.T, options client.EngineOptions, award controlle
 
 type burstSDKNativeExecution struct {
 	entry      *source.Entry
+	engines    *engine.Resolver
 	serviceURL func(http.Handler) string
 }
 
@@ -208,7 +209,10 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			logs.Write(frame.Attrs)
 			return nil
 		},
-		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		EnsureEngine: func(ctx context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+			if native != nil && native.engines != nil {
+				return native.engines.Ensure(ctx, identity, target)
+			}
 			return selected, nil
 		},
 		Bind: func(ctx context.Context, input nodehost.NodeInput) (nodehost.ProcessGrant, error) {

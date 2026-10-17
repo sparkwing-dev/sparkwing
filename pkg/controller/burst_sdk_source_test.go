@@ -3,9 +3,6 @@
 package controller_test
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,7 +14,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -38,7 +34,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("GOPROXY", "off")
-	repo, sha, selected := burstSDKSourceFixture(t)
+	repo, sha, engines, selected := burstSDKSourceFixture(t)
 	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +45,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 				Pipeline: burstSDKPipelineName, Plan: plan, Engine: selected.Identity,
 				Source: func(*testing.T) (string, string) { return repo, sha },
 				Execute: func(options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller) {
-					executeBurstUploadedSDK(t, selected, options, award, owner)
+					executeBurstUploadedSDK(t, engines, selected, options, award, owner)
 				},
 			}
 			if placement == "cloud" {
@@ -60,7 +56,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 	}
 }
 
-func burstSDKSourceFixture(t *testing.T) (string, string, sourceBuildEngine) {
+func burstSDKSourceFixture(t *testing.T) (string, string, *engine.Resolver, engine.Resolved) {
 	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
@@ -89,18 +85,18 @@ func burstSDKSourceFixture(t *testing.T) (string, string, sourceBuildEngine) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executable, err := os.Executable()
+	engines, err := engine.NewResolver(engine.Config{BuildVersion: "development", CacheDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := sourceBuildEngine{engine.Resolved{
-		Identity: engine.Identity{Version: "development", ManifestDigest: "verified", Pin: pin},
-		Target:   releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, Executable: executable,
-	}}
-	return repo, sha, selected
+	selected, err := engines.Resolve(t.Context(), pin, releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo, sha, engines, selected
 }
 
-func executeBurstUploadedSDK(t *testing.T, selected sourceBuildEngine, options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller) {
+func executeBurstUploadedSDK(t *testing.T, engines *engine.Resolver, selected engine.Resolved, options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller) {
 	t.Helper()
 	wire, err := client.NewEngineClient(options)
 	if err != nil {
@@ -129,22 +125,8 @@ func executeBurstUploadedSDK(t *testing.T, selected sourceBuildEngine, options c
 	}
 	entry, err := source.Acquire(t.Context(), spec, source.Options{
 		Workspace: t.TempDir(), Access: access, BundleTransport: options.HTTP.Transport,
-		Engines: selected, Target: selected.Target, SDK: engine.GoSDK,
+		Engines: engines, Target: selected.Target, SDK: engine.GoSDK,
 		Base: procenv.Base{Local: true, Captured: os.Environ()},
-		InstallSDK: func(ctx context.Context, _ engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
-			request.ExecutableDirectory = t.TempDir()
-			input, err := json.Marshal(request)
-			if err != nil {
-				return engine.SDKCommand{}, err
-			}
-			var output, diagnostics bytes.Buffer
-			if err := sdkinstall.Run(ctx, "development", bytes.NewReader(input), &output, &diagnostics); err != nil {
-				return engine.SDKCommand{}, fmt.Errorf("install SDK: %w: %s", err, &diagnostics)
-			}
-			var command engine.SDKCommand
-			err = json.Unmarshal(output.Bytes(), &command)
-			return command, err
-		},
 	})
 	if err != nil {
 		t.Fatalf("acquire uploaded SDK: %v", err)
@@ -153,9 +135,12 @@ func executeBurstUploadedSDK(t *testing.T, selected sourceBuildEngine, options c
 		if err := entry.Close(); err != nil {
 			t.Error(err)
 		}
+		if _, err := os.Stat(entry.Command[0]); !os.IsNotExist(err) {
+			t.Errorf("closed source retained SDK executable: %v", err)
+		}
 	}()
 	executeBurstSDKProcess(t, options, award, owner, &burstSDKNativeExecution{
-		entry: entry, serviceURL: func(handler http.Handler) string {
+		entry: entry, engines: engines, serviceURL: func(handler http.Handler) string {
 			url, paths := burstSDKPipeService(t, handler)
 			for i, name := range []string{".burst-requests", ".burst-responses"} {
 				if err := os.Symlink(paths[i], filepath.Join(entry.CheckoutDirectory(), name)); err != nil {
@@ -165,14 +150,4 @@ func executeBurstUploadedSDK(t *testing.T, selected sourceBuildEngine, options c
 			return url
 		},
 	})
-}
-
-type sourceBuildEngine struct{ engine.Resolved }
-
-func (e sourceBuildEngine) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
-	return e.Resolved, nil
-}
-
-func (e sourceBuildEngine) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
-	return e.Resolved, nil
 }

@@ -98,7 +98,7 @@ func (b *nativeArtifactBackend) LookupRecord(_ context.Context, input blob.Recor
 	return blob.RecordLookupResult{}, b.failure
 }
 
-func TestNativeServicesRefusesUnboundCacheLayer(t *testing.T) {
+func TestNativeServicesRefusesCacheWithoutStorage(t *testing.T) {
 	cfg, _ := nativeConfigFixture(t)
 	listener := &processListener{closed: make(chan struct{})}
 	services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) { return listener, nil })
@@ -111,6 +111,7 @@ func TestNativeServicesRefusesUnboundCacheLayer(t *testing.T) {
 		}
 	})
 	input, _ := nativeArtifactInput(t)
+	input.Storage = nodehost.StorageBinding{}
 	_, err = services.Config.Executor.PrepareLayer(t.Context(), nodehost.LayerSpec{Name: "caches"}, input, nodeproto.JobSpec{ID: "job", Caches: []nodeproto.CacheSpec{{Name: "modules", Path: "modules"}}})
 	if err == nil {
 		t.Fatal("artifact wiring silently skipped a declared dependency cache")
