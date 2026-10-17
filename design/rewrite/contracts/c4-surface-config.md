@@ -911,3 +911,26 @@ arguments, the production client commits the bundle through shared source
 storage and seals its digest into the trigger request. A source pinned to a
 different revision keeps that pipeline revision while the execution snapshot
 remains immutable. Snapshot scratch closes on success and failure.
+
+## Launch burst configuration
+
+Machine `run.routing`, checkout `defaults.run` and `pipelines[].run` carry the
+same `userconfig.RunRouting` fields: optional `route` (local/cloud), named
+`profile`, ordered `prefer` entries (`target`, duration-string `hold`), optional
+`overflow_minutes`, and `local_secrets` name lists. Merge is fieldwise from user
+to repository defaults to pipeline. Explicit lists replace lower lists. Route
+absence is local. Cloud requires a user-configured profile. Prefer absence uses
+here/5s, machines/5s, cloud/0s. Empty preference lists, negative holds, invalid
+selectors and negative/overflowing minutes fail configuration validation.
+
+`Pipeline.SourceFiles` (`source_files`) names literal repo-relative files to
+include beyond tracked paths. Shared ValidateSourceFiles rejects pathspec,
+traversal, Git metadata, directories and missing declared source at capture.
+The captured snapshot preserves tracked working-tree edits and exclusions.
+
+Cloud routing remains attached and captures the working tree. The CLI refuses
+committed revision flags with pipeline-trigger guidance before connecting, and
+preserves `--sw-run-handle-file` after retaining accepted here authority.
+Foreground local routing retains its existing lifecycle. Burst source metadata
+reads the invoking and default branches from the original checkout, because an
+inspection clone's detached HEAD and origin HEAD are not those source facts.

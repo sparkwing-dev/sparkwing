@@ -360,12 +360,14 @@ type Concurrency struct {
 // Raw requested argument values are restricted execution inputs, not a display document.
 // SecretArgs is unset before describe. Display must then redact every requested value.
 type Request struct {
+	Burst             *BurstPlacement       `json:"burst,omitempty"`
 	Version           int                   `json:"version"`
 	Team              string                `json:"team"`
 	Pipeline          string                `json:"pipeline"`
 	Mode              IntakeMode            `json:"mode"`
 	Origin            Origin                `json:"origin"`
 	Dispatch          Dispatch              `json:"dispatch"`
+	LocalSecretNames  []string              `json:"local_secret_names,omitempty"`
 	SecretArgs        Optional[[]string]    `json:"secret_args"`
 	RequestedArgs     map[string]string     `json:"requested_args"`
 	Git               Git                   `json:"git"`

@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"expireSourceUploadsTx":            "leased deployment maintenance selects expired source tickets across teams, then releases quota and deletes each exact tenant/ticket",
 	"releaseExpiredBlobUploadQuotasTx": "leased maintenance selects expired uploads across teams, then abandons each through its scoped transaction owner",
 	"revokeSetupAuthorityTx":           "first-administrator setup revokes the global seed and its complete capability/session descendant graph in one transaction",
 	"launcherReservationAwardTx":       "launcher reconciliation resolves the exact public unit fence across tenants before rechecking the launcher ancestry and reservation",

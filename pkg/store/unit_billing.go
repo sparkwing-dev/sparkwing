@@ -42,6 +42,12 @@ func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capabil
 			return err
 		}
 		if c.Billing.ExecutorClass == "cloud" {
+			if err := lockCreditLedgerTx(ctx, tx); err != nil {
+				return err
+			}
+			if err := checkOverflowTx(ctx, tx, Team(c.Team), c.Binding.RunID); err != nil {
+				return err
+			}
 			if err := admitCloudTx(ctx, tx, Team(c.Team), price.Cores); err != nil {
 				return err
 			}
@@ -74,6 +80,14 @@ func eligibleUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Uni
 		return false, err
 	}
 	if cloud {
+		err = checkOverflowTx(ctx, tx, team, unit.RunID)
+		var overflow *apierr.Error
+		if errors.As(err, &overflow) && overflow.Code == apierr.LockHeld {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
 		err = checkCloudCapacityTx(ctx, tx, team, price.Cores)
 		var refused *apierr.Error
 		if errors.As(err, &refused) && (refused.Code == apierr.BadRequest || refused.Code == apierr.LockHeld) || errors.Is(err, ErrInsufficientCredits) {

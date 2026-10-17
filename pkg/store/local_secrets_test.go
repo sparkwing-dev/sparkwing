@@ -1,0 +1,188 @@
+package store
+
+import (
+	"encoding/hex"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+)
+
+func localSecretFixture(t *testing.T, value string) (*Tenant, capability.Authorized) {
+	t.Helper()
+	tenant, plan, _ := planFixtureWithInput(t, runspec.DispatchHost, func(in *IntakeRequest) {
+		in.Request.LocalSecretNames = []string{"KEY"}
+		in.LocalSecrets = map[string]string{"KEY": value}
+	})
+	plan.Seal.Resolved.SecretNames = []string{"KEY"}
+	if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
+		t.Fatal(err)
+	}
+	p, err := tenant.s.ResolveAuthority(t.Context(), plan.Actor.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Capability.Grants = append(p.Capability.Grants, capability.SecretsRelease)
+	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM capabilities WHERE prefix=?`, p.Capability.Prefix)
+	authorityPersist(t, tenant.s, p.Capability)
+	p, err = tenant.s.ResolveAuthority(t.Context(), plan.Actor.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tenant, capability.Authorized{Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: "a", SecretName: "KEY"}, Access: capability.AccessRule{Credential: capability.CredentialClaim, Grants: []capability.Grant{capability.SecretsRelease}, Binding: capability.BindDeclaredSecret, Liveness: capability.LiveSensitive}}
+}
+
+func TestLocalSecretsIntakePlanAndLiveClaim(t *testing.T) {
+	tenant, a := localSecretFixture(t, "requester-private-value")
+	row, err := tenant.ReadSecret(t.Context(), a)
+	if err != nil || row == nil || row.Value != "requester-private-value" || !row.Masked || !row.Ephemeral {
+		t.Fatalf("local release: %#v %v", row, err)
+	}
+	events, err := tenant.ReadStateEvents(t.Context(), a.Binding.RunID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.Kind == "secret_released" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("missing release audit")
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET generation=generation+1 WHERE id=?`, a.Binding.RunID)
+	if row, err := tenant.ReadSecret(t.Context(), a); err == nil || row != nil {
+		t.Fatalf("stale claim released: %#v %v", row, err)
+	}
+}
+
+func TestLocalSecretsRejectMissingAndUndeclaredIntake(t *testing.T) {
+	for _, values := range []map[string]string{nil, {}, {"OTHER": "value"}, {"KEY": "value", "OTHER": "value"}} {
+		tenant, in, _ := intakeFixture(t)
+		in.Request.LocalSecretNames = []string{"KEY"}
+		in.LocalSecrets = values
+		if _, err := tenant.AdmitRun(t.Context(), in); err == nil {
+			t.Fatalf("admitted unmatched values: %#v", values)
+		}
+		rewriteSchemaCount(t, tenant.s.db, "runs", 0)
+	}
+}
+
+func TestLocalSecretsReplayRejectsChangedValues(t *testing.T) {
+	tenant, in, _ := intakeFixture(t)
+	in.IdempotencyKey = "one"
+	in.Request.LocalSecretNames = []string{"KEY"}
+	in.LocalSecrets = map[string]string{"KEY": "original"}
+	first, err := tenant.AdmitRun(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := tenant.AdmitRun(t.Context(), in); err != nil || !replay.Replayed || replay.RunID != first.RunID {
+		t.Fatalf("replay: %#v %v", replay, err)
+	}
+	initial := in.LocalSecrets["KEY"]
+	in.LocalSecrets["KEY"] = "changed"
+	if _, err := tenant.AdmitRun(t.Context(), in); err == nil {
+		t.Fatal("changed secret reseeded replay")
+	}
+	tenant.s.localSecrets.Clear()
+	in.LocalSecrets["KEY"] = initial
+	if _, err := tenant.AdmitRun(t.Context(), in); err == nil {
+		t.Fatal("replayed a run after its volatile secrets were lost")
+	}
+}
+
+func TestLocalSecretsLossFailsInsteadOfFallingBack(t *testing.T) {
+	tenant, a := localSecretFixture(t, "requester-private-value")
+	if err := seedSecret(t, tenant, Secret{Name: "KEY", Pipeline: "p", Value: "different", Masked: true}, tenant.s.now()); err != nil {
+		t.Fatal(err)
+	}
+	tenant.s.localSecrets.Clear()
+	row, err := tenant.ReadSecret(t.Context(), a)
+	if err == nil || row != nil {
+		t.Fatalf("lost local secret fell back: %#v %v", row, err)
+	}
+}
+
+func FuzzLocalSecretsNeverPersistOrEscapeTheirRun(f *testing.F) {
+	f.Add([]byte("seed"), uint8(0))
+	f.Add([]byte("other"), uint8(3))
+	f.Fuzz(func(t *testing.T, data []byte, attack uint8) {
+		if len(data) > 1024 {
+			return
+		}
+		value := "requester-private-" + hex.EncodeToString(data)
+		tenant, a := localSecretFixture(t, value)
+		run, err := tenant.ReadRun(t.Context(), a.Binding.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events, err := tenant.ReadStateEvents(t.Context(), a.Binding.RunID, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal([]any{run, events})
+		if err != nil || strings.Contains(string(raw), value) {
+			t.Fatal("secret reached persisted projection")
+		}
+		rewriteSchemaCount(t, tenant.s.db, "secrets", 0)
+		switch attack % 5 {
+		case 0:
+			a.Target.Team = "foreign"
+		case 1:
+			a.Target.RunID = "foreign"
+		case 2:
+			a.Target.SecretName = "UNDECLARED"
+		case 3:
+			a.Target.Pipeline = "foreign"
+		case 4:
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET cancel_requested_at=1 WHERE id=?`, a.Binding.RunID)
+		}
+		row, err := tenant.ReadSecret(t.Context(), a)
+		if err == nil || row != nil || strings.Contains(err.Error(), value) {
+			t.Fatal("secret escaped its live declared run")
+		}
+	})
+}
+
+func TestLocalSecretsReleasedOnlyAfterCommittedRunCompletion(t *testing.T) {
+	tenant, a := localSecretFixture(t, "requester-private-value")
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1 WHERE team='a' AND run_id=?`, a.Binding.RunID)
+	actor := Actor{Kind: ActorRunHost, Authority: a.Principal.Authority, CapabilityPrefix: a.Principal.Capability.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: a.Binding.RunID, Holder: a.Binding.Holder, Generation: a.Binding.Generation}}
+	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: a.Binding.RunID, To: RunRunning, Cause: RunStart, Actor: actor}); err != nil {
+		t.Fatal(err)
+	}
+	finish := FinishRunRequest{Unit: actor.Owner, Transition: RunTransition{RunID: a.Binding.RunID, To: RunSuccess, Cause: RunFinish, Actor: actor}}
+	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_local_finish BEFORE UPDATE ON triggers BEGIN SELECT RAISE(ABORT,'failed'); END`)
+	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
+		t.Fatal("finish ignored failed owner write")
+	}
+	if value, err := tenant.s.localSecret(tenant.team, a.Binding.RunID, "KEY"); err != nil || value != "requester-private-value" {
+		t.Fatal("rollback lost requester secret")
+	}
+	rewriteSchemaExec(t, tenant.s.db, `DROP TRIGGER refuse_local_finish`)
+	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tenant.s.localSecrets.Load(localSecretKey{tenant.team, a.Binding.RunID}); ok {
+		t.Fatal("completed run retained local secret")
+	}
+}
+
+func TestLocalSecretsRetryRequiresFreshRequesterResolution(t *testing.T) {
+	tenant, a := localSecretFixture(t, "requester-private-value")
+	request := IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}, Request: runspec.Request{Team: "a", Pipeline: "p", Lineage: runspec.Lineage{RetryOf: a.Binding.RunID}}}
+	_, err := tenant.AdmitRun(t.Context(), request)
+	if err == nil || !strings.Contains(err.Error(), "submit a new run") {
+		t.Fatalf("retry failed without requester action: %v", err)
+	}
+	request.Request.LocalSecretNames = []string{"KEY"}
+	request.LocalSecrets = map[string]string{"KEY": "replacement"}
+	if _, err := tenant.AdmitRun(t.Context(), request); err == nil {
+		t.Fatal("retry replaced the original secret snapshot")
+	}
+	rewriteSchemaCount(t, tenant.s.db, "runs", 1)
+}

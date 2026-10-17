@@ -115,7 +115,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/team/github-app/automation` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/team/github-app/extra-repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/team/members` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
-| `POST` | `/api/v1/runners` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/runners` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.write` / `none` / `credential` |
 | `DELETE` | `/api/v1/runners/{runner}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/runners/github` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/runners/github/{repository}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
@@ -174,6 +174,8 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `POST` | `/api/v1/team/billing/pay` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `PUT` | `/api/v1/team/billing/budget` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/team/members/{account}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `selfOrTeamAdmin` / `credential` |
+| `GET` | `/api/v1/overflow` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `PUT` | `/api/v1/overflow` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.write` / `none` / `credential` |
 | `GET` | `/api/v1/me` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
 | `GET` | `/api/v1/me/team-deletions` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
 | `POST` | `/api/v1/me/active-team` | `controller` | `account` | `capability` | `idempotency_key` | `account_session` / `` / `none` / `credential` |

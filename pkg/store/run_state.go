@@ -259,6 +259,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 		return Applied{}, err
 	}
 	if row.FinishedAt != nil {
+		tx.finishedLocalSecrets = append(tx.finishedLocalSecrets, localSecretKey{team, row.ID})
 		if err := releaseCapacityTx(ctx, tx, team, row.ID, ""); err != nil {
 			return Applied{}, err
 		}

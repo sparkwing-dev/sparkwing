@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"slices"
 	"time"
@@ -202,6 +203,18 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	}
 	if unit.Kind == capability.UnitEval {
 		claim.Owner = OwnerLeaseRef{Kind: OwnerEval, RunID: unit.RunID, SourceNodeID: unit.NodeID, SourceGeneration: unit.SourceGeneration, Holder: row.holder, Generation: row.generation}
+	}
+	if p.Capability.Purpose == capability.PurposeHere && unit.Kind == capability.UnitTrigger {
+		observation := demand
+		observation.CapabilityPrefix = claim.Award.CapabilityPrefix
+		observation.Labels = match.SelfAsserted(observation.Labels)
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
+		if err != nil {
+			return UnitClaim{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, body, tx.now().UnixNano(), team, observation.CapabilityPrefix); err != nil {
+			return UnitClaim{}, err
+		}
 	}
 	return claim, nil
 }

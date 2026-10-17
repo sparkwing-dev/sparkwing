@@ -423,7 +423,7 @@ func persistIssuedCapabilityTx(ctx context.Context, tx *storeTx, c capability.Ca
 	c.IssuedAt = tx.now()
 	var origin *CapabilityOrigin
 	if len(provision) > 0 && provision[0] != nil {
-		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID}
+		origin = &CapabilityOrigin{Kind: provision[0].Kind, RegistrationID: provision[0].RegistrationID, Personal: provision[0].Personal}
 	}
 	if err := persistCapabilityTx(ctx, tx, c, origin); err != nil {
 		return capability.Issued{}, err

@@ -221,6 +221,7 @@ type CPUClass struct {
 }
 func CPUClassMemoryBytes(cores int64) int64
 type CapabilityOrigin struct {
+	Personal       bool
 	Kind           capability.ProvisionKind
 	RegistrationID string
 }
@@ -440,6 +441,7 @@ func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authori
 func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized) (TeamDeletion, error)
 func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, reason string) (TeamCreditFreeze, error)
 func (c *Console) ConsoleGrantCredit(ctx context.Context, a capability.Authorized, req CreditGrantRequest) (CreditGrantResult, error)
+func (c *Console) ConsoleRefund(ctx context.Context, a capability.Authorized, req controllerwire.OperatorRefund, key string) (CreditReversal, error)
 func (c *Console) ConsoleSetBillingTrust(ctx context.Context, a capability.Authorized, change BillingTrustChange) (BillingStanding, error)
 func (c *Console) ConsoleSetCreditSettings(ctx context.Context, a capability.Authorized, up CreditSettingsUpdate) (CreditSettings, error)
 func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capability.Authorized, installation int64) (Team, error)
@@ -861,7 +863,6 @@ var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argu
 var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
-var ErrSourceAlreadyBound = errors.New("source bundle already used or expired; upload again")
 var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
@@ -1110,6 +1111,7 @@ type IntakeRequest struct {
 	Request            runspec.Request
 	IdempotencyKey     string
 	CapabilityPrefix   string
+	LocalSecrets       map[string]string
 	VerifiedDeliveryID string
 }
 func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, team Team) (ComputeLimits, bool, error)
@@ -1439,6 +1441,7 @@ func (o *Operator) DueCardCharges(ctx context.Context, now time.Time) (_ []CardC
 func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error)
 func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
 func (o *Operator) EgressUsageAcrossTeams(ctx context.Context, period string) (_ []EgressUsage, err error)
+func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease, limit int, objects blob.ObjectBackend) error
 func (o *Operator) FailCardAttempt(ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time) (team Team, first bool, err error)
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error
 func (o *Operator) GetCronTick(ctx context.Context) (tick CronTick, err error)
@@ -1503,6 +1506,11 @@ type OutputRef struct {
 	Key    string
 	Size   int64
 	SHA256 string
+}
+type OverflowControl struct {
+	MonthlyMinutes *int64
+	UsedSeconds    int64
+	PeriodStart    time.Time
 }
 func OwnerCanExecute(owner capability.Principal) func(NodeRow) bool
 const OwnerController OwnerLeaseKind = "controller"
@@ -2012,6 +2020,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "invitations", Owner: SchemaTenant},
 	{Name: "leases", Owner: SchemaOperator},
 	{Name: "memberships", Owner: SchemaTenant},
+	{Name: "overflow_controls", Owner: SchemaTenant},
 	{Name: "node_attempts", Owner: SchemaTenant},
 	{Name: "log_segments", Owner: SchemaTenant},
 	{Name: "log_streams", Owner: SchemaTenant},
@@ -2037,6 +2046,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "signup_admissions", Owner: SchemaOperator},
 	{Name: "signup_gate", Owner: SchemaOperator},
 	{Name: "sparkwing_schema_version", Owner: SchemaOperator},
+	{Name: "source_uploads", Owner: SchemaTenant},
 	{Name: "storage_month_usage", Owner: SchemaTenant},
 	{Name: "storage_quotas", Owner: SchemaTenant},
 	{Name: "storage_run_usage", Owner: SchemaTenant},
@@ -2068,6 +2078,7 @@ type SealedSecret struct {
 }
 func (s SealedSecret) Row() Secret
 type Secret struct {
+	Ephemeral bool
 	Name      string
 	Value     string
 	Principal string
@@ -2200,7 +2211,6 @@ type SourceCredential struct {
 	Secret       string
 	KnownHosts   string
 }
-func SourceKeyDigest(key string) (string, bool)
 const SourceManualRetry SourcePolicy = "manual_retry"
 const SourceMemo SourcePolicy = "memo"
 const SourceNone SourcePolicy = "none"
@@ -2211,6 +2221,18 @@ type SourceSpec struct {
 	Tags       bool
 	Submodules bool
 	LFS        bool
+}
+type SourceUpload struct {
+	ID          string
+	Scope       SourceUploadScope
+	Blob        blob.Blob
+	ExpiresAt   time.Time
+	CommittedAt int64
+}
+type SourceUploadScope struct {
+	Repository                runspec.RepoKey
+	RepositoryDisplay         string
+	ExecutionSHA, PipelineSHA string
 }
 type SpawnedChild struct {
 	ParentNodeID string
@@ -2366,6 +2388,7 @@ func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Tea
 func (s *Store) CreateAccountTeam(ctx context.Context, a capability.Authorized, input TeamInfo) (TeamInfo, error)
 func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
+func (s *Store) CreateOperatorTeam(ctx context.Context, a capability.Authorized, slug, displayName string) (capability.Issued, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error)
@@ -2394,6 +2417,7 @@ func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.Autho
 func (s *Store) ReadLauncherAwards(ctx context.Context, authority capability.AuthorityRef, reservations []capability.LeaseRef) ([]LauncherAward, error)
 func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error)
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
+func (s *Store) RecordHereAvailability(ctx context.Context, authority capability.AuthorityRef, available match.Resources) error
 func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
 func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capability.AuthorityRef, preparing []capability.LeaseRef) ([]capability.LeaseRef, error)
@@ -2471,6 +2495,7 @@ const TeamTierNone TeamStorageTier = "none"
 type Tenant struct {
 }
 func (t *Tenant) AbortBlobUpload(ctx context.Context, authority blob.Authority, id string) error
+func (t *Tenant) AbortSourceUpload(ctx context.Context, authority capability.AuthorityRef, id string) error
 func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmission) (AcceptedExpansion, error)
 func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (AcceptedPlan, error)
 func (t *Tenant) AcknowledgeRunEffect(ctx context.Context, delivery EffectDelivery) error
@@ -2493,6 +2518,7 @@ func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Auth
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCommit) (blob.Receipt, error)
 func (t *Tenant) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
+func (t *Tenant) CommitSourceUpload(ctx context.Context, authority capability.AuthorityRef, id string, verified blob.Blob, replica string) (SourceUpload, error)
 func (t *Tenant) CompleteAuthorizedBillingPage(ctx context.Context, a capability.Authorized, page capability.BillingPage) error
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, fingerprint string) (GitCredential, error)
@@ -2590,9 +2616,11 @@ func (t *Tenant) ReadCapability(ctx context.Context, a capability.Authorized) (c
 func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error)
 func (t *Tenant) ReadDataBlob(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error)
 func (t *Tenant) ReadFailure(ctx context.Context, source NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error)
+func (t *Tenant) ReadJobOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error)
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error)
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
 func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authorized) (capability.OIDCFacts, error)
+func (t *Tenant) ReadOverflowControl(ctx context.Context, authority capability.AuthorityRef) (OverflowControl, error)
 func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string) (RunSnapshot, error)
 func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[string][]string, error)
 func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error)
@@ -2600,6 +2628,7 @@ func (t *Tenant) ReadRunView(ctx context.Context, runID string) (RunView, error)
 func (t *Tenant) ReadRunners(ctx context.Context) (capability.RunnerSnapshot, error)
 func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secret, error)
 func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (RunSnapshot, error)
+func (t *Tenant) ReadSourceUpload(ctx context.Context, authority capability.AuthorityRef, id string) (SourceUpload, error)
 func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64, limit int) ([]StateEvent, error)
 func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error)
 func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error)
@@ -2628,6 +2657,7 @@ func (t *Tenant) RenewOwner(ctx context.Context, actor Actor) (LeaseBeat, error)
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error
 func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error)
 func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error)
+func (t *Tenant) ReserveSourceUpload(ctx context.Context, authority capability.AuthorityRef, u SourceUpload) (SourceUpload, error)
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (t *Tenant) ResolveAuthorizedApproval(ctx context.Context, a capability.Authorized, decision controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
@@ -2650,6 +2680,7 @@ func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declare
 func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
 func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
+func (t *Tenant) SetOverflowLimit(ctx context.Context, authority capability.AuthorityRef, minutes *int64) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capability.AuthorityRef, machine string, enabled bool) error
 func (t *Tenant) SetStorageAllowance(ctx context.Context, bytes int64) (StorageQuota, error)

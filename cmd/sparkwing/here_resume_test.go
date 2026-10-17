@@ -614,3 +614,28 @@ func FuzzHerePreparationCannotReplaceAward(f *testing.F) {
 		}
 	})
 }
+
+func TestHereAdmissionCallbackRetainsAuthorityBeforePublishingHandle(t *testing.T) {
+	credentials := hereCredentials{dir: t.TempDir()}
+	options := client.EngineOptions{URL: "https://cloud.example"}
+	called := false
+	failure := errors.New("handle write failed")
+	err := handoffHereRun(t.Context(), options, controllerwire.CreateRunResponse{RunID: "burst", HereBearer: "private"}, hereDependencies{
+		credentials: func() (hereCredentials, error) { return credentials, nil },
+		admitted: func(response controllerwire.CreateRunResponse) error {
+			called = true
+			value, err := credentials.load(options.URL, response.RunID)
+			if err != nil || value != "private" {
+				t.Fatalf("authority missing at publication: %q %v", value, err)
+			}
+			return failure
+		},
+		resolve: func(context.Context, client.EngineOptions) (hereRuntime, error) {
+			t.Fatal("hosted after failed publication")
+			return hereRuntime{}, nil
+		},
+	})
+	if !called || !errors.Is(err, failure) {
+		t.Fatalf("called=%v err=%v", called, err)
+	}
+}

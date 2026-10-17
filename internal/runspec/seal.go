@@ -12,6 +12,11 @@ import (
 
 // SealRequest snapshots authorized intake values without resolving their precedence.
 func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
+	if request.Burst != nil {
+		if err := request.Burst.Validate(); err != nil {
+			return SealedRequest{}, err
+		}
+	}
 	if request.Version != 1 {
 		return SealedRequest{}, errors.New("unsupported request version")
 	}

@@ -3264,3 +3264,28 @@ A private package context proof carries the resolved location and repository
 through the intake transaction; policy refuses missing or changed proofs and
 does not open a second SQLite connection inside the transaction. The proof is
 absent from the wire and seal. CLI environment tokens stay at the GitHub API.
+
+## Requester secret delivery
+
+Burst intake accepts resolved local values only as `CreateRunRequest.LocalSecrets`.
+They follow the authenticated requester into the sole intake transaction and
+never enter the run request or response. The persisted request contains only
+`LocalSecretNames`. The client resolver reads only declared names and replaces
+provider errors with a fixed refusal that cannot echo values.
+
+`GET /api/v1/secrets/{name}` releases ephemeral values through the existing
+claim-only declared-secret rule, live fence and transactional release audit.
+The value response always says `masked=true` and uses `Cache-Control: no-store`.
+The process host registers that value with its masker before answering the SDK.
+Member metadata reads cannot obtain an ephemeral value. The controller skips
+envelope decryption only for the store's authenticated ephemeral result.
+
+## Personal machines and overflow account authority
+
+Machine provisioning accepts `Personal` only from a direct account session. `CapabilityOrigin.Personal` preserves this classification across rotation. Claims from such a root require `runs.created_subject_kind=account` and an authenticated creator ID equal to the root's stored account owner. Labels, administrative grants and names cannot supply that ownership. Team-machine roots retain team capacity.
+
+`GET/PUT /api/v1/overflow` require member read/write authority and recheck the live account in the store. They read and update only that account's allowance within its team. The default is uncapped and null clears a cap. A sealed request may narrow the allowance.
+
+Authenticated here bootstrap claims can report their machine's fixed `Capacity`, `OS`, `Arch` and current available resources. Awarded here owners update availability through optional `RenewalRequest.Available`. Store verifies the trigger generation, holder, capability prefix and lease before storing that observation. These observations confer no runner identity, pool membership or cross-run access. The owner observation joins ordinary live eligible claimant checks in the shared placement matcher.
+
+Personal machine enrollment accepts `runs.write` on an independent account session, so editors can register their own machines. Team-machine enrollment requires team administration in both handler and store. A root member bearer cannot establish independent machine consent. The CLI enrollment transport needs independent session authentication or a reviewed bounded-ancestry contract before bearer-based personal enrollment is offered.

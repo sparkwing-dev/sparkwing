@@ -68,6 +68,8 @@ func (s *Server) capabilityEndpoints() []Endpoint {
 		e = &EngineController{Store: s.store}
 	}
 	return []Endpoint{
+		{Method: "GET", Pattern: "/api/v1/overflow", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleReadOverflow},
+		{Method: "PUT", Pattern: "/api/v1/overflow", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSetOverflow},
 		{Method: "POST", Pattern: "/api/v1/runners", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleEnrollRunner},
 		{Method: "GET", Pattern: "/api/v1/tokens", Authentication: capability.AuthCapability, Decode: capabilityListTarget, Handle: s.handleListCapabilities},
 		{Method: "POST", Pattern: "/api/v1/tokens", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIssueCredential},

@@ -34,7 +34,11 @@ func OwnerCanExecute(owner capability.Principal) func(NodeRow) bool {
 }
 
 func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Principal) (UnitDemand, error) {
-	if tx.store.claimProfiles != nil {
+	here, err := hereObserverTx(ctx, tx, owner)
+	if err != nil {
+		return UnitDemand{}, err
+	}
+	if tx.store.claimProfiles != nil && !here {
 		profile, available, err := tx.store.claimProfiles.ResolveClaimProfile(ctx, owner)
 		return UnitDemand{CapabilityPrefix: owner.Capability.Prefix, Labels: profile.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: available}, err
 	}
@@ -43,7 +47,8 @@ func ownerClaimDemandTx(ctx context.Context, tx *storeTx, owner capability.Princ
 		return UnitDemand{}, err
 	}
 	for _, ancestor := range chain {
-		if !registeredClaimant(ancestor.principal.Capability) || ancestor.principal.Capability.Subject != owner.Capability.Subject {
+		c := ancestor.principal.Capability
+		if (!registeredClaimant(c) && !(here && c.Binding.RunID == owner.Capability.Binding.RunID)) || c.Subject != owner.Capability.Subject {
 			continue
 		}
 		var body []byte

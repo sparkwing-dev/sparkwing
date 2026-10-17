@@ -1,6 +1,6 @@
 # Local execution
 
-`sparkwing run` hosts a pipeline on the invoking machine. `pipeline trigger`
+`sparkwing run` runs locally by default. Explicit routing can select a Cloud-owned run hosted on this machine. `pipeline trigger`
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
@@ -40,7 +40,7 @@ sparkwing pipeline trigger build-deploy --profile prod
 ```
 
 Engine flags precede `--`. Pipeline and job arguments follow it. Local `run`
-uses this machine's controller and accepts no connection profile. A profile
+uses this machine's controller unless Cloud routing is configured. It accepts no connection profile flag. A profile
 selects the controller for `pipeline trigger`, run observations and management.
 
 | Invocation | Execution and records |
@@ -375,3 +375,95 @@ Windows process cleanup uses kill-on-close Job Objects. Unix uses owned process
 sessions. Native Windows handle inheritance, cleanup and SDK execution require
 Windows acceptance runs. Linux fixtures and cross-compilation do not establish
 those behaviors. See [node protocol](node-protocol.md).
+
+
+## Burst and overflow
+
+Configure a Cloud connection in the user file, then opt in to routing through
+that profile. A checkout can reference a profile name but cannot supply its
+connection URL or credential.
+
+```yaml
+run:
+  routing:
+    route: cloud
+    profile: work
+    prefer:
+      - target: here
+        hold: 5s
+      - target: machines
+        hold: 10s
+      - target: pool=linux
+    local_secrets: [DEPLOY_TOKEN]
+    overflow_minutes: 120
+```
+
+The route defaults to `local`. The example gives this machine the first chance,
+then the user's registered machines, then the named Cloud pool. Holds apply
+while an eligible preferred claimant is live. An absent claimant does not delay
+later capacity. Omit `prefer` to use `here` for five seconds, `machines` for five
+seconds, then `cloud`. `name=NAME` selects a registered machine by name.
+Pool selectors preserve the team's existing pool authorization.
+
+Repository settings override the user file, and pipeline settings override the
+repository defaults. For example, keep deployment on this machine:
+
+```yaml
+defaults:
+  run:
+    route: cloud
+    profile: work
+pipelines:
+  - name: deploy
+    entrypoint: Deploy
+    run:
+      route: local
+```
+
+Cloud owns the run record. The invoking CLI hosts its scheduler, streams logs
+and requests cancellation on Ctrl-C. Nodes use the existing claim, lease and
+fencing rules. The local controller supplies this machine's admission only.
+Other machines register as runners with Cloud. `sparkwing runners add --runner NAME
+--personal --profile work` reserves a registered machine for that user's runs.
+Personal enrollment requires an independent account session. A profile backed
+only by a member token cannot enroll a personal machine.
+Cloud routing requires an attached terminal session. The default local route
+continues to support `--sw-detached`.
+Cloud overflow captures the working tree. Use `pipeline trigger` for explicit
+committed revisions instead of `--sw-ref` or `--sw-pipeline-ref`.
+
+An unreachable controller before intake produces a message and a local run.
+Authorization failures remain errors. After intake, a lost response or connection
+cannot start a second local run because the admitted run keeps its Cloud owner.
+
+The source bundle contains Git-tracked files with their working-tree edits and
+deletions. It excludes untracked files unless the pipeline lists their exact
+repository-relative paths in `source_files`. The bundle has no parent history.
+Secret files and any snapshot containing a resolved local secret are refused
+before upload. Bundle upload uses authorized content-addressed source storage.
+
+```yaml
+pipelines:
+  - name: test
+    entrypoint: Test
+    source_files: [generated/fixture.json]
+```
+
+Declare secrets in the pipeline, then list the names to resolve locally in
+`local_secrets`. The CLI reads those names from its captured environment at
+intake. Required missing values fail before submission. Other declared names
+use the team's normal secret provider. Values travel outside the sealed request
+and bundle, stay in controller memory, and are released only to the live
+claiming process with masking enabled. A controller restart loses those values.
+A run that needs them then fails explicitly and must be submitted again.
+Retry also requires a fresh submission so values can be resolved again.
+
+There is no per-user overflow cap by default. `overflow_minutes` narrows the
+user's monthly Cloud allowance for this run. The account's saved limit can only
+be tightened by the request. `GET /api/v1/overflow` reports `monthly_minutes`,
+`used_seconds` and the UTC `period_start`. `PUT /api/v1/overflow` saves
+`{"monthly_minutes":120}`, and `null` removes the saved cap. These operations
+use the selected account credential. Team standing tiers, owner budgets and the
+billing charge ladder still apply. Once the allowance is reached, new Cloud
+claims wait while local and registered-machine capacity remains eligible.
+Running work finishes.

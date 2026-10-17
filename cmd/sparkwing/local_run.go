@@ -82,19 +82,19 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	}, nil
 }
 
-func localSourceOptions(home string, captured []string, masker *secrets.Masker) (source.Options, error) {
+func hostSourceOptions(home string, captured []string, masker *secrets.Masker, local bool) (source.Options, error) {
 	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
 	if err != nil {
 		return source.Options{}, err
 	}
-	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, CacheDirectory: filepath.Join(home, "engines"), LocalOnly: true})
+	engines, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, CacheDirectory: filepath.Join(home, "engines"), LocalOnly: local})
 	if err != nil {
 		return source.Options{}, err
 	}
 	return source.Options{
 		Engines: engines, SDK: engine.GoSDK,
 		Target:    releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: true, Captured: captured, Masker: masker},
+		Workspace: filepath.Join(home, "workspaces"), Base: procenv.Base{Local: local, Captured: captured, Masker: masker},
 	}, nil
 }
 
@@ -112,7 +112,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 		return localRunPreparation{}, err
 	}
 	masker := secrets.NewMasker()
-	options, err := localSourceOptions(home, captured, masker)
+	options, err := hostSourceOptions(home, captured, masker, true)
 	if err != nil {
 		return localRunPreparation{}, err
 	}

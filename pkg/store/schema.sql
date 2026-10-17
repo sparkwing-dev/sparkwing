@@ -59,6 +59,7 @@ CREATE TABLE runs (
     intake_mode TEXT NOT NULL CHECK(intake_mode IN ('execute','publish')),
     admission TEXT NOT NULL DEFAULT '',
     allowed_pools BLOB NOT NULL,
+    created_subject_kind TEXT NOT NULL DEFAULT '',
     created_principal TEXT NOT NULL,
     created_at BIGINT NOT NULL,
     started_at BIGINT,
@@ -527,6 +528,13 @@ CREATE TABLE identities (
     created_at BIGINT NOT NULL,
     linked BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (provider, subject)
+);
+
+CREATE TABLE overflow_controls (
+    team TEXT NOT NULL REFERENCES teams(name),
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    monthly_minutes BIGINT NOT NULL CHECK (monthly_minutes >= 0),
+    PRIMARY KEY (team,account_id)
 );
 
 CREATE TABLE memberships (

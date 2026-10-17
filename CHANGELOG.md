@@ -20,6 +20,12 @@ unlock.
 
 ## [Unreleased]
 
+- **overflow:** Add explicit Cloud routing, tracked working-tree source bundles,
+  requester-resolved ephemeral secrets, personal runner capacity and per-user
+  overflow controls. Local execution remains the default.
+- **store (Breaking):** Advance the rewrite baseline to schema 5 for account
+  provenance and overflow controls. [Migration](docs/migrations/_unreleased.md#explicit-cloud-overflow).
+
 - **runners:** Connect installed start, warm, launch and Cloud bootstrap commands to the shared hosts, authenticated state and measured Kubernetes boundary. Plan and eval units retain their own leases. Owners use canonical placement and can report before a work attempt exists.
 - **sdk:** Encode empty service collections as objects or arrays instead of null, so child pipelines without arguments pass host validation.
 - **cli:** Show every job's outcome and recorded failing steps and errors in `runs status`, including plain output.

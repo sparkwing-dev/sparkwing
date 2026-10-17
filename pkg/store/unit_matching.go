@@ -37,7 +37,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	}
 	profile = authenticatedClaimProfile(p.Capability, profile, here)
 	profile.Labels, profile.OS, profile.Arch = slices.Clone(request.Labels), request.OS, request.Arch
-	if tx.store.claimProfiles == nil {
+	if tx.store.claimProfiles == nil || here {
 		profile.Capacity = request.Capacity
 	}
 	var team, repo, display string
@@ -63,8 +63,11 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if err := checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); err != nil {
 		return profile, match.Demand{}, err
 	}
+	if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
+		return profile, match.Demand{}, err
+	}
 	options := requestSeal.Request.Options
-	if options.Runner.Value.Kind == runspec.RunnerHere && !here {
+	if options.Runner.Value.Kind == runspec.RunnerHere && !here && (requestSeal.Request.Burst == nil || unit.Kind != capability.UnitNode) {
 		return profile, match.Demand{}, authorityError(apierr.Forbidden, "work is reserved for its here claimant")
 	}
 	if len(specBody) > 0 {

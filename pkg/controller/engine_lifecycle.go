@@ -32,8 +32,10 @@ func (s *EngineController) TransitionJob(ctx context.Context, a capability.Autho
 		if err != nil {
 			return controllerwire.Applied{}, err
 		}
-		change.Extra.Result = &store.NodeResult{Outcome: store.NodeState(body.Result.Outcome), Reason: body.Result.Reason,
-			Failure: body.Result.Failure, MaskedError: masked, ExitCode: body.Result.ExitCode, OutputRecord: body.Result.Output, ManifestRecord: body.Result.Manifest}
+		change.Extra.Result = &store.NodeResult{
+			Outcome: store.NodeState(body.Result.Outcome), Reason: body.Result.Reason,
+			Failure: body.Result.Failure, MaskedError: masked, ExitCode: body.Result.ExitCode, OutputRecord: body.Result.Output, ManifestRecord: body.Result.Manifest,
+		}
 	}
 	applied, err := tenant.TransitionNode(ctx, change)
 	return appliedResponse(applied), engineLookupError(err)
@@ -78,8 +80,10 @@ func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, b
 	if err := body.Validate(); err != nil {
 		return controllerwire.CreateRunResponse{}, err
 	}
-	return s.CreateRun(ctx, a, controllerwire.CreateRunRequest{IdempotencyKey: body.IdempotencyKey,
-		Request: runspec.Request{Version: 1, Team: a.Target.Team, Lineage: runspec.Lineage{RetryOf: a.Target.RunID}}})
+	return s.CreateRun(ctx, a, controllerwire.CreateRunRequest{
+		IdempotencyKey: body.IdempotencyKey,
+		Request:        runspec.Request{Version: 1, Team: a.Target.Team, Lineage: runspec.Lineage{RetryOf: a.Target.RunID}},
+	})
 }
 
 // UnitRenewer preserves the store's atomic unit liveness and execution-start boundary.
@@ -100,6 +104,14 @@ func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, b
 	if units == nil {
 		return controllerwire.RenewalResponse{}, missingEndpointPolicy()
 	}
+	if body.Available != nil {
+		if s.Store == nil {
+			return controllerwire.RenewalResponse{}, missingEndpointPolicy()
+		}
+		if err := s.Store.RecordHereAvailability(ctx, p.Authority, *body.Available); err != nil {
+			return controllerwire.RenewalResponse{}, err
+		}
+	}
 	beat, err := units.RenewUnit(ctx, p.Authority.ID, body.Executing)
 	if err != nil {
 		return controllerwire.RenewalResponse{}, engineLookupError(err)
@@ -111,8 +123,10 @@ func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, b
 }
 
 func appliedResponse(applied store.Applied) controllerwire.Applied {
-	return controllerwire.Applied{Replayed: applied.Replayed, CancelRequested: applied.CancelRequested,
-		StateSeq: applied.StateSeq, Generation: applied.Generation, Attempt: applied.Attempt}
+	return controllerwire.Applied{
+		Replayed: applied.Replayed, CancelRequested: applied.CancelRequested,
+		StateSeq: applied.StateSeq, Generation: applied.Generation, Attempt: applied.Attempt,
+	}
 }
 
 func engineMaskedError(failure *apierr.Error) (string, error) {
@@ -135,8 +149,10 @@ func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTran
 		SourceAttempt: body.SourceAttempt, Extra: store.TransitionExtra{RetryAt: body.RetryAt},
 	}
 	if result := body.Result; result != nil {
-		change.Extra.Result = &store.NodeResult{Outcome: store.NodeState(result.Outcome), Reason: result.Reason,
-			ExitCode: result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest, Failure: result.Failure}
+		change.Extra.Result = &store.NodeResult{
+			Outcome: store.NodeState(result.Outcome), Reason: result.Reason,
+			ExitCode: result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest, Failure: result.Failure,
+		}
 		if result.Failure != nil && result.Failure.Error != nil {
 			change.Extra.Result.MaskedError = result.Failure.Error.Message
 		}
@@ -152,8 +168,10 @@ func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) 
 	if a.Target.RunID == "" {
 		return store.FinishRunRequest{}, invalidEngineBody("finish requires a run")
 	}
-	change := store.RunTransition{RunID: a.Target.RunID, To: store.RunState(body.Outcome), Actor: engineActor(a),
-		Cause: store.RunFinish, Reason: body.Reason, MaskedError: masked}
+	change := store.RunTransition{
+		RunID: a.Target.RunID, To: store.RunState(body.Outcome), Actor: engineActor(a),
+		Cause: store.RunFinish, Reason: body.Reason, MaskedError: masked,
+	}
 	if a.Access.Credential == capability.CredentialPublisher {
 		change.Cause = store.RunPublish
 	}

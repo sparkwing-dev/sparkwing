@@ -110,6 +110,7 @@ type DebugConfig struct {
 // RunConfig grants no authority: allowed env still passes procenv filtering, and
 // cache reads still require the user's repo-bound data.read capability.
 type RunConfig struct {
-	SubmitEnvAllow []string `yaml:"submit_env_allow,omitempty" json:"submit_env_allow,omitempty"`
-	CacheFrom      *string  `yaml:"cache_from,omitempty" json:"cache_from,omitempty"`
+	Routing        *RunRouting `yaml:"routing,omitempty" json:"routing,omitempty"`
+	SubmitEnvAllow []string    `yaml:"submit_env_allow,omitempty" json:"submit_env_allow,omitempty"`
+	CacheFrom      *string     `yaml:"cache_from,omitempty" json:"cache_from,omitempty"`
 }

@@ -7,6 +7,7 @@ type Config struct {
 }
 func (c *Config) Registry() *pipelines.Config
 type Defaults struct {
+	Run      *userconfig.RunRouting
 	Args     map[string]string
 	Guards   *Guards
 	Requires []string
@@ -31,6 +32,7 @@ func Load(path string) (*Config, error)
 func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error)
 func Parse(raw []byte) (*Config, error)
 type Pipeline struct {
+	Run         *userconfig.RunRouting
 	Name        string
 	Entrypoint  string
 	Description *string
@@ -41,6 +43,7 @@ type Pipeline struct {
 	Guards      *Guards
 	Requires    []string
 	Prefers     []string
+	SourceFiles []string
 	On          *Events
 }
 func PipelineSource(repoDir, name string) (string, error)
@@ -67,4 +70,5 @@ type Spark struct {
 	Version string
 }
 func Validate(cfg Config) error
+func ValidateSourceFiles(paths []string) error
 func WriteSparksSection(path string, libs []sparks.Library) error

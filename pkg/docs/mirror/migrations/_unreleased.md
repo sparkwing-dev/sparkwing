@@ -2631,3 +2631,17 @@ The legacy claim-input operation is removed with its retired input-resolution
 API. Executors use committed result records through `/data`, and local node
 credential checks use the own-job data-authority route. Job and child output
 reads return verified JSON values through the shared capability policy.
+
+## Explicit Cloud overflow
+
+`sparkwing run` defaults to local execution. User `run.routing`, repository
+`defaults.run` and pipeline `run` settings can select Cloud ownership with ranked
+claimants and hold times. Cloud routing hosts the run in the invoking CLI and
+requires an attached session. Unreachable controllers fall back before intake.
+
+The intake wire adds `request.burst`, `request.local_secret_names` and a private
+`local_secrets` map outside the seal. Here claims add observed OS, architecture,
+capacity and availability. Renewal may refresh here availability. Personal
+runner enrollment adds `personal:true`. `GET` and `PUT /api/v1/overflow` manage
+the authenticated account's monthly allowance. The store baseline gains account
+subject-kind provenance and account overflow controls.

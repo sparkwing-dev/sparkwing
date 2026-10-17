@@ -107,15 +107,16 @@ func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
 }
 
 type storeTx struct {
-	clockErr     error
-	ctx          context.Context
-	deletingTeam Team
-	tx           *sql.Tx
-	dialect      Dialect
-	store        *Store
-	snapshotRead bool
-	rotatingRoot *capability.Capability
-	createdTeam  *TeamInfo
+	finishedLocalSecrets []localSecretKey
+	clockErr             error
+	ctx                  context.Context
+	deletingTeam         Team
+	tx                   *sql.Tx
+	dialect              Dialect
+	store                *Store
+	snapshotRead         bool
+	rotatingRoot         *capability.Capability
+	createdTeam          *TeamInfo
 }
 
 // SetTestClock overrides the SQLite store clock until the test ends.
@@ -231,7 +232,13 @@ func (t *storeTx) Commit() error {
 		_ = t.tx.Rollback()
 		return t.clockErr
 	}
-	return t.tx.Commit()
+	if err := t.tx.Commit(); err != nil {
+		return err
+	}
+	for _, key := range t.finishedLocalSecrets {
+		t.store.localSecrets.Delete(key)
+	}
+	return nil
 }
 func (t *storeTx) Rollback() error { return t.tx.Rollback() }
 

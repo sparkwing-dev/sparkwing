@@ -1,5 +1,6 @@
 # pkg/controller/client
 
+func CheckIdentity(ctx context.Context, options EngineOptions) error
 type CreateServiceTokenRequest struct {
 	Name      string
 	Grants    []string
@@ -24,6 +25,7 @@ type EngineOptions struct {
 	Launcher bool
 }
 type EnrollRunnerRequest struct {
+	Personal      bool
 	Name          string
 	Repos         []string
 	ReservedPools []string
@@ -85,6 +87,7 @@ func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, erro
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error)
 func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (source.Access, error)
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error)
+func ResolveLocalSecrets(ctx context.Context, declarations []nodeproto.SecretDeclaration, lookup func(context.Context, string) (string, bool, error)) (map[string]string, error)
 type RotatedToken struct {
 	Capability   string
 	New          capability.Metadata
@@ -96,6 +99,7 @@ type RunnerTokenManager interface {
 	EnrollRunner(context.Context, EnrollRunnerRequest) (*CreatedToken, error)
 }
 func SweepLocalSessions(ctx context.Context, options EngineOptions, dryRun bool) ([]wingd.LocalDoctorFinding, error)
+func UploadSourceSnapshot(ctx context.Context, options EngineOptions, git runspec.Git, source runspec.Source, path string) (string, error)
 
 # methods on un-declared receiver types (likely a bug)
 func (c *dataClient) Commit(ctx context.Context, input blob.CommitUpload) (blob.Receipt, error)
@@ -115,6 +119,7 @@ func (c *engineClient) Cancel(ctx context.Context, run string, input controllerw
 func (c *engineClient) CancelJob(ctx context.Context, run, job string, input controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (c *engineClient) Claim(ctx context.Context, input controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 func (c *engineClient) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error)
+func (c *engineClient) CreateOperatorTeam(ctx context.Context, input controllerwire.OperatorTeamCreate) (controllerwire.OperatorTeamCreated, error)
 func (c *engineClient) CreateRun(ctx context.Context, input controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
 func (c *engineClient) DeleteRun(ctx context.Context, run string) error
 func (c *engineClient) DeleteSchedule(ctx context.Context, name string) (controllerwire.ScheduleDeletion, error)

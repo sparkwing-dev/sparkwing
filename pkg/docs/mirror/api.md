@@ -321,3 +321,19 @@ and retain one `Idempotency-Key` for retries. The payment must belong to the
 path team. The response includes `team`, optional `grant_id`, `paid_micro`,
 `reversed_micro`, `balance_micro` and `created`. The audit names the operator.
 A later webhook for the same refund cannot debit the ledger again.
+
+## Cloud overflow controls
+
+`GET /api/v1/overflow` returns the authenticated account's `monthly_minutes`,
+`used_seconds` and UTC `period_start`. The default limit is null. `PUT` replaces
+the saved limit with `{"monthly_minutes":N}` or removes it with
+`{"monthly_minutes":null}`. A sealed `request.burst.overflow_minutes` can only
+narrow that account limit. Team billing admission still applies. Self-hosted and
+local capacity remains eligible when Cloud claims wait for budget.
+
+`CreateRunRequest.local_secrets` carries requester-resolved values only during
+intake. The sealed request retains `local_secret_names`. Responses omit the
+values. Secret release follows the existing live claim and declared-secret
+checks and returns `masked:true`. Values remain in the intake controller's
+memory and are removed after terminal completion. Loss of that memory returns
+`unavailable`; retry requires a fresh requester submission.

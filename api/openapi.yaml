@@ -482,10 +482,16 @@ components:
     internal.controllerwire.ClaimRequest:
       additionalProperties: true
       properties:
+        arch:
+          type: string
         available_cores:
           type: number
         available_memory_bytes:
           type: integer
+        capacity:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.match.Resources'
+            - type: "null"
         job_id:
           type: string
         kinds:
@@ -500,6 +506,8 @@ components:
                 type: string
               type: array
             - type: "null"
+        os:
+          type: string
         run_id:
           type: string
         runner_version:
@@ -614,6 +622,12 @@ components:
       properties:
         idempotency_key:
           type: string
+        local_secrets:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
         request:
           $ref: '#/components/schemas/internal.runspec.Request'
       required:
@@ -1940,6 +1954,35 @@ components:
             - type: "null"
       type: object
       x-sparkwing-go-type: controllerwire.OperatorUsage
+    internal.controllerwire.OverflowControl:
+      additionalProperties: true
+      properties:
+        monthly_minutes:
+          anyOf:
+            - type: integer
+            - type: "null"
+        period_start:
+          format: date-time
+          type: string
+        used_seconds:
+          type: integer
+      required:
+        - monthly_minutes
+        - used_seconds
+        - period_start
+      type: object
+      x-sparkwing-go-type: controllerwire.OverflowControl
+    internal.controllerwire.OverflowControlWrite:
+      additionalProperties: true
+      properties:
+        monthly_minutes:
+          anyOf:
+            - type: integer
+            - type: "null"
+      required:
+        - monthly_minutes
+      type: object
+      x-sparkwing-go-type: controllerwire.OverflowControlWrite
     internal.controllerwire.OverrideView:
       additionalProperties: true
       properties:
@@ -2419,6 +2462,10 @@ components:
     internal.controllerwire.RenewalRequest:
       additionalProperties: true
       properties:
+        available:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.match.Resources'
+            - type: "null"
         executing:
           type: boolean
       required:
@@ -4089,6 +4136,23 @@ components:
         - generation
       type: object
       x-sparkwing-go-type: runspec.AttemptIdentity
+    internal.runspec.BurstPlacement:
+      additionalProperties: true
+      properties:
+        overflow_minutes:
+          anyOf:
+            - type: integer
+            - type: "null"
+        preferences:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.runspec.PlacementStep'
+              type: array
+            - type: "null"
+      required:
+        - preferences
+      type: object
+      x-sparkwing-go-type: runspec.BurstPlacement
     internal.runspec.Ceilings:
       additionalProperties: true
       properties:
@@ -4586,6 +4650,18 @@ components:
         - on_failure
       type: object
       x-sparkwing-go-type: runspec.PauseSelection
+    internal.runspec.PlacementStep:
+      additionalProperties: true
+      properties:
+        hold:
+          type: integer
+        target:
+          type: string
+      required:
+        - target
+        - hold
+      type: object
+      x-sparkwing-go-type: runspec.PlacementStep
     internal.runspec.PullRequest:
       additionalProperties: true
       properties:
@@ -4636,6 +4712,10 @@ components:
       properties:
         actor:
           $ref: '#/components/schemas/internal.runspec.Actor'
+        burst:
+          anyOf:
+            - $ref: '#/components/schemas/internal.runspec.BurstPlacement'
+            - type: "null"
         dispatch:
           type: string
         env:
@@ -4646,6 +4726,12 @@ components:
           $ref: '#/components/schemas/internal.runspec.Git'
         lineage:
           $ref: '#/components/schemas/internal.runspec.Lineage'
+        local_secret_names:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
         mode:
           type: string
         options:
@@ -5176,6 +5262,8 @@ components:
             - type: "null"
         name:
           type: string
+        personal:
+          type: boolean
         repos:
           anyOf:
             - items:
@@ -5212,6 +5300,18 @@ components:
         - old_revoked_at
       type: object
       x-sparkwing-go-type: client.RotatedToken
+    pkg.match.Resources:
+      additionalProperties: true
+      properties:
+        cores:
+          type: number
+        memory_bytes:
+          type: integer
+      required:
+        - cores
+        - memory_bytes
+      type: object
+      x-sparkwing-go-type: match.Resources
     pkg.wingwire.BudgetState:
       additionalProperties: true
       properties:
@@ -7947,6 +8047,69 @@ paths:
             liveness: credential
         retry: idempotency_key
       x-sparkwing-wire: undocumented
+  /api/v1/overflow:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OverflowControl'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Read the account overflow allowance
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/overflow
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: safe
+    put:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.OverflowControlWrite'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OverflowControl'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Set the account overflow allowance
+      x-sparkwing-policy:
+        method: PUT
+        path: /api/v1/overflow
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.write
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/pipelines:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -8714,7 +8877,7 @@ paths:
         access:
           - credential: unbound_member_or_local
             grants:
-              - team.admin
+              - runs.write
             binding: none
             liveness: credential
         retry: never

@@ -8,7 +8,11 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 
 Invoke a pipeline
 
-Always executes locally, including detached work on the local controller. --profile is refused.
+Runs locally by default, including detached work on the local controller. Explicit user, repository or pipeline routing can select Cloud overflow. --profile is refused.
+
+\### Burst and overflow
+
+Set run.routing in the user config, defaults.run for a repository or pipelines[].run for one pipeline. Use route: cloud and profile: NAME to opt in. The CLI hosts the Cloud-owned run and streams its logs. Ctrl-C requests cancellation. The default preference is here for 5s, then your registered machines for 5s, then Cloud. Prefer entries accept target and a non-negative hold duration. A controller that is unreachable before intake falls back to a local run and reports it. Authorization failures and a lost intake response remain failures because an accepted run keeps one owner. See [local execution](local-execution.md#burst-and-overflow) for configuration and secret handling.
 
 Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.
 

@@ -338,7 +338,8 @@ func Registry() []Command {
 			{Name: "yes"},
 		}},
 		{Path: "sparkwing run", PipelineArgument: true, PipelineArgsAfterSeparator: true, Rules: []string{
-			"Always executes locally, including detached work on the local controller. --profile is refused.",
+			"Runs locally by default, including detached work on the local controller. Explicit user, repository or pipeline routing can select Cloud overflow. --profile is refused.",
+			"### Burst and overflow\n\nSet run.routing in the user config, defaults.run for a repository or pipelines[].run for one pipeline. Use route: cloud and profile: NAME to opt in. The CLI hosts the Cloud-owned run and streams its logs. Ctrl-C requests cancellation. The default preference is here for 5s, then your registered machines for 5s, then Cloud. Prefer entries accept target and a non-negative hold duration. A controller that is unreachable before intake falls back to a local run and reports it. Authorization failures and a lost intake response remain failures because an accepted run keeps one owner. See [local execution](local-execution.md#burst-and-overflow) for configuration and secret handling.",
 			"Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.",
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
 			"--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.",
@@ -373,8 +374,9 @@ func Registry() []Command {
 			{Name: "target", Argument: "TARGET"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Use team credentials. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Use team credentials. --personal registers capacity for only the signed-in user's runs; the default is a team runner. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
+			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "repos", Argument: "PATTERN", Repeatable: true, CommaList: true},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
 			{Name: "max-concurrent", Argument: "N", Minimum: 1, HasMinimum: true},

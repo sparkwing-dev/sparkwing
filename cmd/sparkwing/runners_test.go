@@ -717,6 +717,47 @@ func TestRunnersEnrollmentSendsReservedPoolProposal(t *testing.T) {
 	}
 }
 
+func TestRunnersEnrollmentRequestsPersonalCapacityOnlyWhenSelected(t *testing.T) {
+	for _, personal := range []bool{false, true} {
+		t.Run(fmt.Sprint(personal), func(t *testing.T) {
+			f := newRunnersFixture(t)
+			args := []string{"--profile", "prod", "--runner", "desk", "--config", f.config, "--no-service", "--output", "json"}
+			if personal {
+				args = append(args, "--personal")
+			}
+			enrollment, _, err := prepareRunnerEnrollment(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := captureStdout(t, func() {
+				if err := enrollRunner(t.Context(), f, enrollment); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if len(f.enrolled) != 1 || f.enrolled[0].Personal != personal {
+				t.Fatalf("enrollment scope: %+v", f.enrolled)
+			}
+			var result map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(out), &result); err != nil {
+				t.Fatal(err)
+			}
+			var received bool
+			if err := json.Unmarshal(result["personal"], &received); err != nil {
+				t.Fatal(err)
+			}
+			if received != personal {
+				t.Fatalf("reported personal=%v, want %v", received, personal)
+			}
+			if cfg, err := agentconfig.Load(f.config); err != nil || cfg.HolderPrefix != "desk" {
+				t.Fatalf("runner config: %+v %v", cfg, err)
+			}
+			if strings.Contains(out, "_secret") {
+				t.Fatal("enrollment bearer reached output")
+			}
+		})
+	}
+}
+
 func TestRunnersRemovalStopsBeforeRevocation(t *testing.T) {
 	f := newRunnersFixture(t)
 	captureStdout(t, func() {

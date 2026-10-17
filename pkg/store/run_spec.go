@@ -23,6 +23,7 @@ type IntakeRequest struct {
 	Request            runspec.Request
 	IdempotencyKey     string
 	CapabilityPrefix   string
+	LocalSecrets       map[string]string `json:"-"`
 	VerifiedDeliveryID string
 }
 
@@ -91,13 +92,23 @@ type AcceptedExpansion struct {
 // including when the caller supplies no idempotency key.
 // Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
+	if err := validateLocalSecrets(request.Request.LocalSecretNames, request.LocalSecrets); err != nil {
+		return AdmissionResult{}, err
+	}
 	var result AdmissionResult
+	var installed *localRunSecrets
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		var err error
 		result, err = admitRun(ctx, tx, t.team, request, tx.now())
+		if err == nil {
+			installed, err = t.s.installLocalSecrets(t.team, result, request.LocalSecrets)
+		}
 		return err
 	})
 	if err != nil {
+		if installed != nil {
+			t.s.localSecrets.CompareAndDelete(localSecretKey{t.team, result.RunID}, installed)
+		}
 		return AdmissionResult{}, err
 	}
 	return result, nil
@@ -326,7 +337,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,repo_key,repo_display,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, input.Git.Repository.Key, input.Git.Repository.Display, snapshot.lineage.RetryOf, lineage, snapshot.lineage.ParentRunID, snapshot.lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
+	_, err = tx.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,repo_key,repo_display,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_subject_kind,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, input.Git.Repository.Key, input.Git.Repository.Display, snapshot.lineage.RetryOf, lineage, snapshot.lineage.ParentRunID, snapshot.lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.Kind, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
 	if err != nil {
 		return err
 	}

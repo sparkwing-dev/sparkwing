@@ -1,0 +1,115 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+)
+
+type burstRunDependencies struct {
+	connect func(context.Context, string) (client.EngineOptions, func(), error)
+	probe   func(context.Context, client.EngineOptions) error
+	local   func(context.Context, string, runFlags, []string) error
+	cloud   func(context.Context, string, runFlags, []string, userconfig.RunRouting, client.EngineOptions) error
+}
+
+func resolveRunRouting(machine userconfig.Config, project *projectconfig.Config, pipeline string) userconfig.RunRouting {
+	var layers []*userconfig.RunRouting
+	if machine.Run != nil {
+		layers = append(layers, machine.Run.Routing)
+	}
+	if project != nil {
+		if project.Defaults != nil {
+			layers = append(layers, project.Defaults.Run)
+		}
+		for _, p := range project.Pipelines {
+			if p.Name == pipeline {
+				layers = append(layers, p.Run)
+				break
+			}
+		}
+	}
+	return userconfig.MergeRunRouting(layers...)
+}
+
+func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args []string, route userconfig.RunRouting, out io.Writer, deps burstRunDependencies) error {
+	if route.Route == nil || *route.Route == "local" {
+		return deps.local(ctx, pipeline, flags, args)
+	}
+	if err := validateLocalRunFlags(flags); err != nil {
+		return err
+	}
+	if flags.ref != "" || flags.pipelineRef != "" {
+		return errors.New("run: Cloud overflow captures the working tree; use pipeline trigger to select committed revisions")
+	}
+	if route.Profile == nil {
+		return errors.New("run: cloud routing requires a profile in run.routing or the repository's run settings")
+	}
+	if flags.detached {
+		return errors.New("run: a cloud-routed run hosts here and must remain attached")
+	}
+	options, closeConnection, err := deps.connect(ctx, *route.Profile)
+	if err != nil {
+		return err
+	}
+	defer closeConnection()
+	if err := deps.probe(ctx, options); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		var network net.Error
+		var failure *apierr.Error
+		if !errors.As(err, &network) && !(errors.As(err, &failure) && failure.Code == apierr.Unavailable) {
+			return err
+		}
+		if _, err := fmt.Fprintln(out, "Cloud controller is unreachable; running locally."); err != nil {
+			return err
+		}
+		return deps.local(ctx, pipeline, flags, args)
+	}
+	return deps.cloud(ctx, pipeline, flags, args, route, options)
+}
+
+func runConfiguredInvocation(pipeline string, flags runFlags, args []string) error {
+	directory, err := findSparkwingDir()
+	if err != nil {
+		return err
+	}
+	route, err := loadRunRouting(directory, pipeline)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	return runRoutedCommand(ctx, pipeline, flags, args, route, os.Stderr, burstRunDependencies{
+		connect: controllerOptions, probe: client.CheckIdentity,
+		local: func(ctx context.Context, pipeline string, flags runFlags, args []string) error {
+			return runLocalInvocation(pipeline, flags, args)
+		},
+		cloud: runNativeBurst,
+	})
+}
+
+func loadRunRouting(directory, pipeline string) (userconfig.RunRouting, error) {
+	path, err := userconfig.Path()
+	if err != nil {
+		return userconfig.RunRouting{}, err
+	}
+	machine, err := userconfig.ReadConfig(path)
+	if err != nil && !os.IsNotExist(err) {
+		return userconfig.RunRouting{}, err
+	}
+	project, err := projectconfig.Load(filepath.Join(directory, projectconfig.Filename))
+	if err != nil {
+		return userconfig.RunRouting{}, err
+	}
+	return resolveRunRouting(machine, project, pipeline), nil
+}

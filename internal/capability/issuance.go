@@ -183,6 +183,7 @@ const (
 
 // ProvisionSpec is trusted root-issuance input whose origin Store.Issue rechecks in its transaction.
 type ProvisionSpec struct {
+	Personal       bool
 	Seed           string `json:"-"`
 	Kind           ProvisionKind
 	ConsoleProof   *ConsoleProof

@@ -3401,3 +3401,36 @@ The source-upload schema advances the hard-cut rewrite baseline to version 4.
 Version 3 stores are refused by the existing baseline check; no migration or
 compatibility path is added. Native QA must use a fresh version-4 development
 store. This is a schema change within the assigned integration slice.
+
+## Burst requester secrets
+
+`runspec.Request.LocalSecretNames` seals only the requester-selected names.
+`IntakeRequest.LocalSecrets` carries their resolved values outside persisted
+JSON. Names and values must match exactly. Admission copies values into the
+Store process's run-and-team registry before its transaction commits. Failed
+admission removes only the entry it created. Identical active intake replays
+retain the first values. Changed values refuse with `spec_drift`.
+
+Plan acceptance requires every selected local name in the pipeline's declared
+secret names. Local values participate in identifier validation and satisfy
+secret preflight. The selected local value takes precedence over a stored team
+secret. Local values have no pool restriction inherited from that stored row.
+
+`Tenant.ReadSecret` returns local values only after the existing live authority,
+declaration and claim fences pass. It commits the same `secret_released` audit,
+then rechecks authority. Returned local rows have `Masked=true` and
+`Ephemeral=true`. The ephemeral marker is absent from JSON. Values never enter
+secret rows, run seals, events or source-bundle storage. Terminal run commit
+removes the registry entry. A rolled-back completion retains it. Store close
+clears the registry.
+
+Losing the registry fails with `unavailable`, even if a stored secret has the
+same name. Intake replay cannot restore lost values. Retry of a run with local
+secrets requires a new requester submission because retained seals have only
+names. The refusal directs the requester to submit a new run.
+
+## Burst placement and per-user overflow
+
+`Request.Burst` seals ordered `PlacementStep{Target, Hold}` preferences and an optional narrowing `OverflowMinutes` cap. Targets resolve to authenticated here capacity, the requesting account's registered machines, Cloud or granted runner/pool selectors. Existing `ClaimPlacement` controls hold times for the same owner projections, reconciliation and claim paths. Burst nodes can overflow a here-hosted run without transferring its owner.
+
+The baseline is version 5. `runs.created_subject_kind` accompanies the authenticated creator ID so personal-machine ownership cannot confuse account and machine IDs. `overflow_controls(team, account_id, monthly_minutes)` stores optional monthly allowances. No row means no per-user cap. Account authority changes its own allowance through `SetOverflowLimit` and reads usage through `ReadOverflowControl`. Cloud admission observes the narrower stored/request cap as well as team billing admission. Existing work finishes and unmetered capacity remains eligible. Full field and verification details are in `design/rewrite/W9-BURST-PLACEMENT.md`.

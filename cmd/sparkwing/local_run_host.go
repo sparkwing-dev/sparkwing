@@ -10,8 +10,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -53,17 +55,36 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		return hereHostSession{}, err
 	}
 	state.Finish = private.FinishRunAndUnit
-	source, err := localSourceOptions(home, nil, secrets.NewMasker())
+	if award.Request.Request.Burst != nil {
+		state.Available = func(ctx context.Context) (*match.Resources, error) {
+			_, available, err := observeBurstCapacity(ctx, home)
+			return &available, err
+		}
+	}
+	sourceOptions, err := hostSourceOptions(home, nil, secrets.NewMasker(), award.Request.Request.Source.Location.LocalCheckout != "")
 	if err != nil {
 		return hereHostSession{}, err
 	}
-	engines, ok := source.Engines.(*engine.Resolver)
+	if award.Request.Request.Source.Location.LocalCheckout == "" {
+		spec, err := source.ForRequest(award.Request)
+		if err != nil {
+			return hereHostSession{}, err
+		}
+		sourceOptions.Access, err = client.NewSourceAccess(options, award.RunID, spec)
+		if err != nil {
+			return hereHostSession{}, err
+		}
+		if options.HTTP != nil {
+			sourceOptions.BundleTransport = options.HTTP.Transport
+		}
+	}
+	engines, ok := sourceOptions.Engines.(*engine.Resolver)
 	if !ok {
 		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
 	services, err := localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
 		Home: home, Version: installedVersion(), Store: state, Parent: private, Bindings: private,
-		Principal: principal, Refresh: refresh, Source: source, Local: store.OwnerCanExecute(principal),
+		Principal: principal, Refresh: refresh, Source: sourceOptions, Local: store.OwnerCanExecute(principal),
 		Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 			return state.RenewOwner(ctx, store.Actor{}, computing)
 		},

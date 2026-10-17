@@ -25,6 +25,7 @@ type CapabilityRecord struct {
 
 // CapabilityOrigin retains the trusted provisioning kind and registration.
 type CapabilityOrigin struct {
+	Personal       bool                     `json:"personal,omitempty"`
 	Kind           capability.ProvisionKind `json:"kind"`
 	RegistrationID string                   `json:"registration_id,omitempty"`
 }

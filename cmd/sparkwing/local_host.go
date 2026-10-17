@@ -39,7 +39,7 @@ func newLocalNativeServices(ctx context.Context, home string, owned *store.Store
 			err = errors.Join(err, private.Close())
 		}
 	}()
-	source, err := localSourceOptions(home, nil, secrets.NewMasker())
+	source, err := hostSourceOptions(home, nil, secrets.NewMasker(), true)
 	if err != nil {
 		return runners.NativeServices{}, err
 	}

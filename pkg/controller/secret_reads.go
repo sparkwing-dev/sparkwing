@@ -61,10 +61,6 @@ func secretReadTarget(r *http.Request) (capability.RequestEvidence, error) {
 }
 
 func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	cipher, ok := s.secretsCipher.(BoundCipher)
-	if !ok || cipher == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "secret decryption is unavailable"}
-	}
 	reader, err := s.secretReader(r.Context(), a.Target.Team)
 	if err != nil {
 		return err
@@ -82,9 +78,16 @@ func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capa
 	if err := r.Context().Err(); err != nil {
 		return err
 	}
-	plain, err := openSecret(cipher, bindingForRow(reader.Team(), row), row.Value)
-	if err != nil {
-		return errors.New("stored secret did not open")
+	plain := row.Value
+	if !row.Ephemeral {
+		cipher, ok := s.secretsCipher.(BoundCipher)
+		if !ok || cipher == nil {
+			return &apierr.Error{Code: apierr.Unavailable, Message: "secret decryption is unavailable"}
+		}
+		plain, err = openSecret(cipher, bindingForRow(reader.Team(), row), row.Value)
+		if err != nil {
+			return errors.New("stored secret did not open")
+		}
 	}
 	noteAuditTarget(r.Context(), "secret_name", row.Name)
 	writeJSON(w, http.StatusOK, secretJSON{

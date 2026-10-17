@@ -981,3 +981,38 @@ The production GitHub lookup is shared by CLI and controller. The controller
 verifies public repositories without requiring an App; private identities use
 its App or confirmed team HTTPS source credential. It never trusts a typed
 numeric ID or caller display name.
+
+## Launch burst vertical (decisions 112 and 116)
+
+`runspec.Request.Burst` seals `BurstPlacement`: ordered `PlacementStep` values
+(`target`, nanosecond `hold`) and optional `overflow_minutes`. The CLI merges
+user `run.routing`, repository `defaults.run` and pipeline `run` fields, then
+converts YAML durations once. Targets are `here`, `machines`, `cloud`,
+`name=NAME` and `pool=POOL`. Default route is local. Explicit Cloud routing sets
+RunnerHere and dispatch host. Cloud remains the sole run record owner, and the
+CLI hosts scheduling and public log attachment. Connection failure before intake
+falls back locally with a message. No post-intake error may submit a local copy.
+
+`CreateRunRequest.LocalSecrets` is a private input-only map. The sealed
+`Request.LocalSecretNames` contains declared names only. Intake passes values to
+C1's volatile registry without serializing them into SQL, seals or responses.
+The requester resolver reads only configured names from the pipeline's complete
+SecretDeclaration list and captured environment. Native secret release uses the
+existing live, declared, masked claim path. Registry loss and retry return
+unavailable, requiring fresh requester resolution. Cross-process secret delivery
+still needs a Cloud affinity or unpersisted relay contract.
+
+`ClaimRequest` adds optional `capacity`, `os` and `arch` for the authenticated
+here capability. Existing available CPU/memory fields retain current free
+resources. `RenewalRequest.available` refreshes the here owner's availability.
+The CLI reads the local admission daemon's actual capacity and free resources,
+including explicit zero availability. `RemoteHostStore.Available` supplies
+renewal observations. Canonical store placement decides owner self-execution.
+Here binding now supplies the real shared native host, private HTTP state,
+source access, data, logs, process services and leases.
+
+`POST /runners` adds `personal`. It grants no extra pools or billing authority.
+C1 checks personal machine ownership from account subject provenance for every
+run claim. `GET /overflow` and `PUT /overflow` use OverflowControl and
+OverflowControlWrite under the authenticated account. Null means uncapped.
+Request caps only narrow the saved cap; team tier/ladder admission still applies.

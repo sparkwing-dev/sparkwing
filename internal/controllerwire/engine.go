@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -36,8 +38,9 @@ func CompatibilityFor(release engine.VersionInfo) Compatibility {
 
 // CreateRunRequest carries user input; authenticated authority and App facts are server-derived.
 type CreateRunRequest struct {
-	Request        runspec.Request `json:"request"`
-	IdempotencyKey string          `json:"idempotency_key"`
+	Request        runspec.Request   `json:"request"`
+	IdempotencyKey string            `json:"idempotency_key"`
+	LocalSecrets   map[string]string `json:"local_secrets,omitempty"`
 }
 
 // CreateRunResponse returns the accepted run and any first-intake here bearer.
@@ -67,6 +70,9 @@ type PlanAccepted struct {
 
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
+	Capacity             *match.Resources      `json:"capacity,omitempty"`
+	OS                   string                `json:"os,omitempty"`
+	Arch                 string                `json:"arch,omitempty"`
 	RunnerVersion        string                `json:"runner_version"`
 	Kinds                []capability.UnitKind `json:"kinds"`
 	Labels               []string              `json:"labels"`
@@ -131,7 +137,8 @@ type ExchangeResponse struct {
 
 // RenewalRequest reports activity, never a replacement holder or generation.
 type RenewalRequest struct {
-	Executing bool `json:"executing"`
+	Available *match.Resources `json:"available,omitempty"`
+	Executing bool             `json:"executing"`
 }
 
 // RenewalResponse carries liveness, cancellation and watch state for every unit keeper.

@@ -62,6 +62,10 @@ func captureWorktreeSnapshot(ctx context.Context, start string, allowedSecretFil
 }
 
 func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string) (*worktreeSnapshot, error) {
+	return captureSnapshot(ctx, start, limits, allowedSecretFiles, nil)
+}
+
+func captureSnapshot(ctx context.Context, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string, selection *burstSourceSelection) (*worktreeSnapshot, error) {
 	repoRoot, err := gitOutput(ctx, start, nil, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires a Git checkout: %w", err)
@@ -95,7 +99,14 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 	if sparse, _ := gitOutput(ctx, repoRoot, nil, "config", "--bool", "core.sparseCheckout"); strings.TrimSpace(sparse) == "true" {
 		return nil, fmt.Errorf("working-tree snapshot does not support sparse checkouts")
 	}
-	if err := rejectWorktreeFilters(ctx, repoRoot); err != nil {
+	var selectedPaths string
+	if selection != nil {
+		selectedPaths, err = selection.paths(ctx, repoRoot)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := rejectSelectedWorktreeFilters(ctx, repoRoot, selectedPaths, selection != nil); err != nil {
 		return nil, err
 	}
 
@@ -140,11 +151,11 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 
 	var tree string
 	for attempt := 0; attempt < 3; attempt++ {
-		first, terr := captureSnapshotTree(ctx, repoRoot, baseSHA, indexPath, objectEnv)
+		first, terr := captureSnapshotTree(ctx, repoRoot, baseSHA, indexPath, objectEnv, selectedPaths, selection != nil)
 		if terr != nil {
 			return fail(terr)
 		}
-		second, terr := captureSnapshotTree(ctx, repoRoot, baseSHA, indexPath, objectEnv)
+		second, terr := captureSnapshotTree(ctx, repoRoot, baseSHA, indexPath, objectEnv, selectedPaths, selection != nil)
 		if terr != nil {
 			return fail(terr)
 		}
@@ -273,15 +284,30 @@ func measureSnapshotTree(ctx context.Context, gitDir, tree string, limits worktr
 	return count, total, nil
 }
 
-func captureSnapshotTree(ctx context.Context, repoRoot, baseSHA, indexPath string, env []string) (string, error) {
+func captureSnapshotTree(ctx context.Context, repoRoot, baseSHA, indexPath string, env []string, selectedPaths string, selected bool) (string, error) {
 	if err := os.Remove(indexPath); err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("reset snapshot index: %w", err)
 	}
-	if _, err := gitOutput(ctx, repoRoot, env, "read-tree", baseSHA); err != nil {
+	seed := baseSHA
+	if selected {
+		seed = "--empty"
+	}
+	if _, err := gitOutput(ctx, repoRoot, env, "read-tree", seed); err != nil {
 		return "", fmt.Errorf("seed snapshot index: %w", err)
 	}
-	if _, err := gitOutput(ctx, repoRoot, env, "-c", "core.safecrlf=false", "add", "-A", "--", "."); err != nil {
-		return "", fmt.Errorf("capture working tree: %w", snapshotGitError(err))
+	if selected {
+		if selectedPaths != "" {
+			cmd := snapshotGitCommand(ctx, "--literal-pathspecs", "-C", repoRoot, "-c", "core.safecrlf=false", "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul")
+			cmd.Env = appendGitEnv(env)
+			cmd.Stdin = strings.NewReader(selectedPaths)
+			if _, err := cmd.CombinedOutput(); err != nil {
+				return "", fmt.Errorf("capture burst source: %w", snapshotGitError(err))
+			}
+		}
+	} else {
+		if _, err := gitOutput(ctx, repoRoot, env, "-c", "core.safecrlf=false", "add", "-A", "--", "."); err != nil {
+			return "", fmt.Errorf("capture working tree: %w", snapshotGitError(err))
+		}
 	}
 	if err := restoreRawSnapshotBlobs(ctx, repoRoot, env); err != nil {
 		return "", err
@@ -657,10 +683,14 @@ func normalizeSnapshotPath(path string) string {
 	return strings.TrimPrefix(cleaned, "/")
 }
 
-func rejectWorktreeFilters(ctx context.Context, repoRoot string) error {
-	out, err := gitOutput(ctx, repoRoot, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
-	if err != nil {
-		return fmt.Errorf("list snapshot files: %w", err)
+func rejectSelectedWorktreeFilters(ctx context.Context, repoRoot, selectedPaths string, selected bool) error {
+	out := selectedPaths
+	if !selected {
+		var err error
+		out, err = gitOutput(ctx, repoRoot, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+		if err != nil {
+			return fmt.Errorf("list snapshot files: %w", err)
+		}
 	}
 	if out == "" {
 		return nil
