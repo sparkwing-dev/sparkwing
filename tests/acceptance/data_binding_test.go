@@ -190,15 +190,19 @@ func TestDataRemoteCacheForcesVerifiedDefaultLookup(t *testing.T) {
 	_, err = binding.Records.LookupRecord(t.Context(), blob.RecordLookup{Authority: binding.Authority, Key: key})
 	assertPolicyCode(t, err, apierr.Forbidden)
 	key.Kind = blob.KindDepcache
-	for _, state := range []string{"verified", "manual", "unverified default", "foreign repo", "foreign team"} {
+	for _, state := range []string{"verified", "manual", "unverified default", "missing delivery", "missing SHA", "foreign repo", "foreign team"} {
 		t.Run(state, func(t *testing.T) {
-			record := blob.Record{Key: key, Digest: dataDigest(), RefFacts: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Verified: true}, DefaultBranch: "main", DefaultBranchVerified: true}}
+			record := blob.Record{Key: key, Digest: dataDigest(), RefFacts: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Verified: true}, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "verified-delivery", SHA: strings.Repeat("a", 40)}}
 			record.Key.Scope.Ref = record.RefFacts.Scope
 			switch state {
 			case "manual":
 				record.RefFacts.Scope.Verified, record.Key.Scope.Ref.Verified = false, false
 			case "unverified default":
 				record.RefFacts.DefaultBranchVerified = false
+			case "missing delivery":
+				record.RefFacts.AppDeliveryKey = ""
+			case "missing SHA":
+				record.RefFacts.SHA = ""
 			case "foreign repo":
 				record.Key.Scope.Repo = "gh:13"
 			case "foreign team":

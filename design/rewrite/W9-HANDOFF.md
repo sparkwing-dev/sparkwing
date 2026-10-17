@@ -1,6 +1,14 @@
 # W9 continuation: local integration and runner transport
 
-Latest continuation: [W9-BURST-DETACHED-DIAGNOSTICS.md](W9-BURST-DETACHED-DIAGNOSTICS.md).
+Latest continuation: [W9-BURST-DETACHED-CACHE-CONSTRUCTION.md](W9-BURST-DETACHED-CACHE-CONSTRUCTION.md).
+The queued cache constructor no longer requires default-branch metadata that
+intake clears. It reads the hint from the authorized checkout while retaining
+the sealed repository and server-side verified-default fence. The real-intake
+regression and generated Git-override property pass, including with -race.
+The authoritative native file still contains the detached-cache failure. The
+lead must rerun the native family before completion can be claimed.
+
+Earlier continuation: [W9-BURST-DETACHED-DIAGNOSTICS.md](W9-BURST-DETACHED-DIAGNOSTICS.md).
 The lead's latest native run passes attached profile-cache execution and both
 publication modes. Detached profile-cache execution still hangs in log following.
 Its cause is unproven. Background host errors now reach the controller log, and

@@ -64,7 +64,7 @@ func newLocalNativeServices(ctx context.Context, home string, owned *store.Store
 			return runners.NativeServices{}, errors.Join(err, services.Close())
 		}
 		if profile := run.Request.Request.Options.CacheFrom.Value; profile != "" {
-			cache, closeCache, err := openProfileCache(ctx, profile, run.Request.Request.Git)
+			cache, closeCache, err := openProfileCache(ctx, profile, run.Request.Request.Git, run.Request.Request.Source.Location.LocalCheckout)
 			if err != nil {
 				return runners.NativeServices{}, errors.Join(err, services.Close())
 			}

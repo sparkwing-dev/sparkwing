@@ -131,7 +131,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	defaultBranch, err := snapshot.defaultBranch(ctx)
+	defaultBranch, err := checkoutDefaultBranch(ctx, snapshot.RepoRoot)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

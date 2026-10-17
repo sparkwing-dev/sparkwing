@@ -97,22 +97,26 @@ func openLocalProfileCache(ctx context.Context, profile string, request *runspec
 	if err != nil {
 		return nil, nil, err
 	}
-	cache, closeCache, err := openProfileCache(ctx, profile, selected.git)
+	cache, closeCache, err := openProfileCache(ctx, profile, selected.git, request.Source.Location.LocalCheckout)
 	if err == nil {
 		request.Git.Repository, request.Git.Ref, request.Git.DefaultBranch = selected.git.Repository, selected.git.Ref, selected.git.DefaultBranch
 	}
 	return cache, closeCache, err
 }
 
-func openProfileCache(ctx context.Context, profile string, git runspec.Git) (blob.RemoteCache, func() error, error) {
-	if !git.DefaultBranch.Set || git.DefaultBranch.Value == "" {
+func openProfileCache(ctx context.Context, profile string, git runspec.Git, checkout string) (blob.RemoteCache, func() error, error) {
+	branch, err := checkoutDefaultBranch(ctx, checkout)
+	if err != nil {
+		return nil, nil, err
+	}
+	if branch == "" {
 		return nil, nil, errors.New("run: cache profile requires origin's default branch")
 	}
 	options, closeConnection, err := controllerOptions(ctx, profile)
 	if err != nil {
 		return nil, nil, err
 	}
-	credential, err := client.OpenProfileData(ctx, options, capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: string(git.Repository.Key), ReadRefs: []string{git.DefaultBranch.Value}, VerifiedDefaultOnly: true})
+	credential, err := client.OpenProfileData(ctx, options, capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: string(git.Repository.Key), ReadRefs: []string{branch}, VerifiedDefaultOnly: true})
 	if err != nil {
 		closeConnection()
 		return nil, nil, err

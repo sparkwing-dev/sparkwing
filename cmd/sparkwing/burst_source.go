@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -33,8 +34,16 @@ func (s *worktreeSnapshot) branch(ctx context.Context) (string, error) {
 	return strings.TrimSpace(branch), err
 }
 
-func (s *worktreeSnapshot) defaultBranch(ctx context.Context) (string, error) {
-	branch, err := gitOutput(ctx, s.RepoRoot, nil, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+func checkoutDefaultBranch(ctx context.Context, root string) (string, error) {
+	if !filepath.IsAbs(root) {
+		return "", errors.New("default branch lookup requires an absolute checkout")
+	}
+	environment, err := procenv.Build(procenv.Git, procenv.Base{Local: true, Captured: os.Environ()}, procenv.Runtime{})
+	if err != nil {
+		return "", err
+	}
+	reader := triggerCheckout{directory: root, environment: environment}
+	branch, err := reader.read(ctx, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
 	if gitExitCode(err, 1) {
 		return "", nil
 	}

@@ -292,7 +292,7 @@ func TestBurstSnapshotPreservesOriginalBranchFacts(t *testing.T) {
 	if branch, err := snapshot.branch(t.Context()); err != nil || branch != "feature" {
 		t.Fatalf("branch=%q err=%v", branch, err)
 	}
-	if branch, err := snapshot.defaultBranch(t.Context()); err != nil || branch != "main" {
+	if branch, err := checkoutDefaultBranch(t.Context(), snapshot.RepoRoot); err != nil || branch != "main" {
 		t.Fatalf("default branch=%q err=%v", branch, err)
 	}
 	runSnapshotGit(t, repo, "checkout", "--quiet", "--detach", sha)
@@ -300,14 +300,14 @@ func TestBurstSnapshotPreservesOriginalBranchFacts(t *testing.T) {
 		t.Fatalf("detached branch=%q err=%v", branch, err)
 	}
 	runSnapshotGit(t, repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
-	if branch, err := snapshot.defaultBranch(t.Context()); err != nil || branch != "" {
+	if branch, err := checkoutDefaultBranch(t.Context(), snapshot.RepoRoot); err != nil || branch != "" {
 		t.Fatalf("absent default branch=%q err=%v", branch, err)
 	}
 	snapshot.RepoRoot = filepath.Join(t.TempDir(), "missing-checkout")
 	if _, err := snapshot.branch(t.Context()); err == nil {
 		t.Fatal("missing original checkout silently became a detached branch")
 	}
-	if _, err := snapshot.defaultBranch(t.Context()); err == nil {
+	if _, err := checkoutDefaultBranch(t.Context(), snapshot.RepoRoot); err == nil {
 		t.Fatal("missing original checkout silently lost its default branch")
 	}
 }

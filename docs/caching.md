@@ -86,6 +86,8 @@ Downloads verify length and SHA-256 and close before extraction publishes files.
 Remote cache records use repository-bound authority and signed `/data` transfers.
 The read-only cache contract permits verified default-branch memo, artifact and
 dependency-cache records. It has no write or pipeline-binary fetch operation.
+Attached and detached local runs use the checkout's origin default branch as a
+lookup hint. The controller verifies the producing run's default-branch trust.
 Local pipeline binaries stay on the machine that builds them.
 
 ## Pipeline binary cache

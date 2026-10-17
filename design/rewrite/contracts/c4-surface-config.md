@@ -1082,8 +1082,12 @@ format is added.
 The CLI resolves --sw-cache-from against the checkout's canonical remote
 repository and origin default branch before sealing. It opens a temporary
 verified-default reader through the selected profile and revokes it on host
-cleanup. Background hosts use the sealed repository facts. Refreshing a job's
-attempt storage preserves the read-only cache only for the sealed local opt-in.
+cleanup. Background hosts keep the sealed repository identity and read the
+default-branch hint from the authorized local checkout, because intake clears
+requester-supplied default-branch metadata. The profile server still requires verified
+default-branch records. Both paths ignore inherited Git repository overrides.
+Refreshing a job's attempt storage preserves the read-only cache only for the
+sealed local opt-in.
 
 --publish runs after local completion. The profile admits publish-mode history,
 imports terminal local attempts, copies selected output/artifact bytes through
