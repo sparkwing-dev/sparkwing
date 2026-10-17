@@ -666,3 +666,12 @@ Test daemons from the run were left running and had to be killed by the lead: te
 ## Lead note 20:40: lock-order follow-up (for the final review)
 
 PostgreSQL testing found and fixed two lock-order deadlocks (3e7d8aabd): concurrent claims by one claimant (shared lock on the claimant capability row upgraded later under the run lock; fixed by lockClaimantTx taking the claimant row first) and sign-in versus identity unlink (team/account order). The same inversion (FOR SHARE on the claimant, then a later last_used_at update under the run lock) may exist in RenewUnit and observeUnitTx. The final review checks every transaction that touches capability rows and run rows for one global lock order.
+
+## 2026-10-17 01:15 lead decision: retry selection is committed execution intent
+
+Bug: `EngineController.Retry` validates Mode and then drops it before CreateRun, so changing `failed` to `all` under the same idempotency key replays the first execution (`TestReviewRetryModeIsPartOfCommittedReplay`). This is the second bug in this mechanism, so the two-strikes rule applies and the redesign is approved:
+- C1 owns one retry selector at admission. It commits the normalized mode and the selected source-result fences in the new execution's lineage. The idempotency digest includes the canonical source run ID plus the mode.
+- C2 carries the mode separately from the immutable request and spec seals; those hashes are unchanged.
+- W3 reads the committed selection after a restart instead of recomputing it.
+- Required proofs: a changed mode under the same key is a conflict; a numeric or ID alias replays exactly; failed and all each execute the right node set.
+- No CLI special case. Assigned to W3 (env 1081) under integration authority across C1, C2 and W3.
