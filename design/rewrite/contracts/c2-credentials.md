@@ -4,6 +4,32 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Credential files and proxy attribution
+
+`fssecure.OpenCredential(directory, name)` is the shared file boundary for
+credential values and keys. The resolved target stays inside the resolved
+configured directory, is regular, belongs to the process user or root and
+has no group or other write bit. Kubernetes `..data` links and other in-directory
+links are accepted. The opened handle is checked before any credential bytes
+are read. Windows uses the current user, LocalSystem or Administrators owner
+and refuses write grants to other principals. Operator configuration documents
+retain their stricter private-config policy.
+
+Directory credentials, Stripe API/webhook keys, runner and launcher tokens,
+local encryption keys, serve tokens, retained here credentials, CLI secret input
+files and filesystem secret sources
+use this boundary. Standalone file settings use their parent as the boundary.
+The redundant credentials.ReadPrivate and FileBearer machine-policy parameter
+are removed because both service and machine files share the same policy.
+
+`--trusted-proxy-cidrs` accepts a comma-separated IPv4/IPv6 CIDR list and the
+full chart exposes `controller.trustedProxyCIDRs` as a list. Empty ignores
+X-Forwarded-For. Invalid configuration fails startup. Only matching TCP peers
+can supply forwarded clients. Walk X-Forwarded-For right to left across trusted
+hops, select the first untrusted address and use it for request logs and all
+per-IP limits. Malformed hops in the trusted portion fall back to the TCP peer. The separate trusted
+listener retains its existing X-Real-IP contract.
+
 ### Operator team creation (decision 114)
 
 POST `/api/v1/operator/teams` is a deployment-owned AuthCapability route with

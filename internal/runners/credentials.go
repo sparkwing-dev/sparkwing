@@ -9,7 +9,7 @@ import (
 )
 
 // FileBearer reads agent-token once and retains it in a controller transport callback.
-func FileBearer(directory string, machine bool) (func(context.Context) (string, error), error) {
+func FileBearer(directory string) (func(context.Context) (string, error), error) {
 	if strings.TrimSpace(directory) == "" {
 		return nil, errors.New("runner credentials_dir is required")
 	}
@@ -17,11 +17,7 @@ func FileBearer(directory string, machine bool) (func(context.Context) (string, 
 	if err != nil {
 		return nil, err
 	}
-	read := dir.Read
-	if machine {
-		read = dir.ReadPrivate
-	}
-	raw, err := read("agent-token")
+	raw, err := dir.Read("agent-token")
 	if err != nil {
 		return nil, err
 	}

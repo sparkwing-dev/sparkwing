@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
@@ -113,9 +114,10 @@ type Server struct {
 	deletionHolderOnce sync.Once
 	deletionHolderID   string
 
-	metricsAddr      string
-	trustedProxyAddr string
-	metricsLn        net.Listener
+	metricsAddr       string
+	trustedProxyAddr  string
+	trustedProxyCIDRs []netip.Prefix
+	metricsLn         net.Listener
 
 	liveLogs  *liveLogs
 	placement placementPolicy
@@ -312,6 +314,12 @@ func (s *Server) WithTrustedProxyAddr(addr string) *Server {
 	return s
 }
 
+// WithTrustedProxyCIDRs configures proxy networks whose forwarded client addresses are trusted.
+func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server {
+	s.trustedProxyCIDRs = slices.Clone(prefixes)
+	return s
+}
+
 // WithPeerIdentity installs the transport's verified Unix uid or Windows SID identity.
 func (s *Server) WithPeerIdentity(fn func(*http.Request) capability.Subject) *Server {
 	s.peerIdentity = fn
@@ -333,11 +341,11 @@ func (s *Server) identifyPeer(r *http.Request) (capability.Presentation, error) 
 // Handler directly must call Shutdown to drain server-owned background work.
 // Engine and operator endpoints use RouteAuthorization. Health stays public.
 func (s *Server) Handler() http.Handler {
-	api := s.handler()
-	if s.dashboard == nil {
-		return api
+	var handler http.Handler = s.handler()
+	if s.dashboard != nil {
+		handler = s.browserHandler(handler)
 	}
-	return s.browserHandler(api)
+	return ratelimit.TrustedProxies(handler, s.trustedProxyCIDRs)
 }
 
 func (s *Server) handler() http.Handler {

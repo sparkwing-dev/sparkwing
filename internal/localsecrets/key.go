@@ -161,11 +161,8 @@ func newCipher(current, previous []byte) (*secrets.Cipher, error) {
 	return secrets.NewCipherWithPrevious(current, previous)
 }
 
-// safety: the key opens every local secret, so it is read only from an
-// owner-only regular file that is not a symlink and did not change while it
-// was opened.
 func readKeyFile(path string) ([]byte, error) {
-	f, err := fssecure.OpenPrivateConfig(path)
+	f, err := fssecure.OpenCredential(filepath.Dir(path), filepath.Base(path))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

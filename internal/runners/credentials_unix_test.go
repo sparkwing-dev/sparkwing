@@ -9,17 +9,17 @@ import (
 	"testing"
 )
 
-func TestMachineCredentialRefusesSharedFilesAndProjectedLinks(t *testing.T) {
+func TestCredentialRefusesWritableTargetsAndAcceptsProjectedLinks(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "agent-token")
 	const raw = "private-projected-credential"
-	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0640); err != nil {
+	if err := os.Chmod(path, 0o660); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FileBearer(directory, true); err == nil || strings.Contains(err.Error(), raw) {
+	if _, err := FileBearer(directory); err == nil || strings.Contains(err.Error(), raw) {
 		t.Fatalf("shared machine credential was accepted or exposed: %v", err)
 	}
 	if err := os.Rename(path, filepath.Join(directory, "projected-token")); err != nil {
@@ -28,10 +28,10 @@ func TestMachineCredentialRefusesSharedFilesAndProjectedLinks(t *testing.T) {
 	if err := os.Symlink("projected-token", path); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FileBearer(directory, true); err == nil {
-		t.Fatal("machine startup followed a credential link")
+	if err := os.Chmod(filepath.Join(directory, "projected-token"), 0o640); err != nil {
+		t.Fatal(err)
 	}
-	service, err := FileBearer(directory, false)
+	service, err := FileBearer(directory)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -151,7 +152,7 @@ func NewPaymentAuthenticator(config PaymentConfig) (PaymentAuthenticator, error)
 }
 
 func readPaymentSecret(path string) (string, error) {
-	f, err := fssecure.OpenPrivateConfig(path)
+	f, err := fssecure.OpenCredential(filepath.Dir(path), filepath.Base(path))
 	if err != nil {
 		return "", err
 	}

@@ -87,7 +87,7 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 		if options.Config.CredentialsDir != nil {
 			directory = *options.Config.CredentialsDir
 		}
-		options.Bearer, err = runners.FileBearer(directory, command == "start")
+		options.Bearer, err = runners.FileBearer(directory)
 		if err != nil {
 			return fmt.Errorf("runner credential: %w", err)
 		}

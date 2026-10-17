@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -84,6 +85,7 @@ func run(args []string) error {
 			"Empty uses --addr, with localhost for a wildcard listener.")
 	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
 		"lifetime of an OIDC ID token, from 1m to 1h")
+	trustedProxyCIDRs := fs.String("trusted-proxy-cidrs", "", "comma-separated proxy CIDRs allowed to supply X-Forwarded-For for request logs and per-IP limits; empty ignores it")
 	trustedProxyAddr := fs.String("trusted-proxy-addr", "",
 		"second address serving the same API, whose requests key login throttling, the bearer "+
 			"failure budget and the request log on X-Real-IP. Only a proxy that overwrites "+
@@ -294,6 +296,11 @@ func run(args []string) error {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
 
+	proxyCIDRs, err := parseTrustedProxyCIDRs(*trustedProxyCIDRs)
+	if err != nil {
+		return err
+	}
+
 	creds, err := readCredentials(*credentialsDir)
 	if err != nil {
 		return err
@@ -450,6 +457,7 @@ func run(args []string) error {
 	srv := controller.New(st, nil).
 		WithCloudDeployment(*limitsProfile == controller.LimitsProfileCloud || *limitsProfile == controller.LimitsProfileCloudFree).
 		WithTrustedProxyAddr(*trustedProxyAddr).
+		WithTrustedProxyCIDRs(proxyCIDRs).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
@@ -855,4 +863,19 @@ func parseLogRetention(raw string) (map[store.Team]int, error) {
 		out[store.Team(team)] = days
 	}
 	return out, nil
+}
+
+func parseTrustedProxyCIDRs(value string) ([]netip.Prefix, error) {
+	if value == "" {
+		return nil, nil
+	}
+	var prefixes []netip.Prefix
+	for _, raw := range strings.Split(value, ",") {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+		if err != nil || prefix.Addr().Is4In6() {
+			return nil, fmt.Errorf("invalid --trusted-proxy-cidrs entry %q: use an IPv4 or IPv6 CIDR", raw)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }

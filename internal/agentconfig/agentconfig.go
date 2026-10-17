@@ -55,7 +55,7 @@ func Load(path string) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		cfg.Token, err = dir.ReadPrivate("agent-token")
+		cfg.Token, err = dir.Read("agent-token")
 		if err != nil {
 			return nil, err
 		}

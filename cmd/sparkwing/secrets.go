@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
@@ -151,7 +154,13 @@ func readSecretValue(inv clisurface.Invocation, in io.Reader) (string, error) {
 		return inv.Value("value"), nil
 	}
 	if inv.Has("file") {
-		data, err := os.ReadFile(inv.Value("file"))
+		path := inv.Value("file")
+		file, err := fssecure.OpenCredential(filepath.Dir(path), filepath.Base(path))
+		if err != nil {
+			return "", fmt.Errorf("read secret file: %w", err)
+		}
+		data, readErr := io.ReadAll(file)
+		err = errors.Join(readErr, file.Close())
 		if err != nil {
 			return "", fmt.Errorf("read secret file: %w", err)
 		}

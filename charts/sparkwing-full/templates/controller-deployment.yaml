@@ -155,6 +155,9 @@ spec:
             - "--credentials-dir=/etc/sparkwing/credentials"
             {{- end }}
             {{- $c := .Values.controller }}
+            {{- if $c.trustedProxyCIDRs }}
+            - {{ printf "--trusted-proxy-cidrs=%s" (join "," $c.trustedProxyCIDRs) | quote }}
+            {{- end }}
             {{- range $setting := list
                   (dict "flag" "--external-url" "value" $c.externalURL)
                   (dict "flag" "--oauth-redirect-uris" "value" $c.oauthRedirectURIs)

@@ -175,3 +175,17 @@ registered machine credential through `controller.tokenSecret` in the bundle.
 `runner.alsoClaimTriggers` controls trigger claims. `runner.maxConcurrent` limits
 concurrent units. `runner.nodeSelector`, `tolerations` and `affinity` schedule pool
 pods. Cloud Job team ownership comes from the launcher, not pool runner values.
+
+## Trusted proxies
+
+Set `controller.trustedProxyCIDRs` to a list of the ingress proxy networks,
+for example `["10.0.0.0/8", "2001:db8:ffff::/48"]`. The chart passes
+`--trusted-proxy-cidrs` to the controller. Its empty default ignores
+`X-Forwarded-For`. Request logs and per-IP limits use the first untrusted
+address when walking the forwarded chain from the trusted TCP peer toward
+the client. Configure the ingress to append its observed peer or replace the
+header with a verified chain.
+
+Projected credential symlinks are accepted only when their resolved targets
+stay inside `/etc/sparkwing/credentials`. Targets must be regular files owned
+by the process user or root and have no group or other write bit.

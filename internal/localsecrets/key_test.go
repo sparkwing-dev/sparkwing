@@ -230,22 +230,22 @@ func TestKeyring_ReadsAKeyAnotherProcessCreatedLater(t *testing.T) {
 	}
 }
 
-func TestKeyring_RefusesAKeyFileOthersCanRead(t *testing.T) {
+func TestKeyring_RefusesAKeyFileOthersCanWrite(t *testing.T) {
 	path := keyFileIn(t, t.TempDir())
-	if err := os.WriteFile(path, bytes.Repeat([]byte{5}, secrets.KeySize), 0o644); err != nil {
+	if err := os.WriteFile(path, bytes.Repeat([]byte{5}, secrets.KeySize), 0o664); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o644); err != nil {
+	if err := os.Chmod(path, 0o664); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "owner-only") {
-		t.Fatalf("load with a group-readable key file = %v, want an owner-only refusal", err)
+	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "writable") {
+		t.Fatalf("load with a group-writable key file = %v, want a writable-target refusal", err)
 	}
 }
 
 func TestKeyring_RefusesAKeyFileSymlink(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "elsewhere.key")
+	target := filepath.Join(t.TempDir(), "elsewhere.key")
 	if err := os.WriteFile(target, bytes.Repeat([]byte{6}, secrets.KeySize), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestKeyring_RefusesAKeyFileSymlink(t *testing.T) {
 	if err := os.Symlink(target, path); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "symlink") {
+	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "outside") {
 		t.Fatalf("load through a symlinked key file = %v, want a symlink refusal", err)
 	}
 }

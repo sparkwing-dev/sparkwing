@@ -61,7 +61,7 @@ func (s hereCredentials) load(controller, run string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	f, err := fssecure.OpenPrivateConfig(path)
+	f, err := fssecure.OpenCredential(filepath.Dir(path), filepath.Base(path))
 	if err != nil {
 		return "", err
 	}
