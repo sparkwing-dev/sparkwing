@@ -25,11 +25,14 @@ func setComputeLimit(t *testing.T, f creditsFixture, name string, value int64) {
 
 func seedRunNodeFor(t *testing.T, f creditsFixture, principal, runID, nodeID string) {
 	t.Helper()
-	ctx := store.WithCreatingPrincipal(context.Background(), principal)
+	ctx := context.Background()
 	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
+	}
+	if _, err := f.store.DB().ExecContext(ctx, `UPDATE runs SET created_principal=? WHERE team=? AND id=?`, principal, store.DefaultTeam, runID); err != nil {
+		t.Fatal(err)
 	}
 	if err := teststore.SeedNode(f.store, ctx, store.Node{
 		RunID: runID, NodeID: nodeID, Status: "pending",

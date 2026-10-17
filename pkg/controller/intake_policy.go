@@ -63,6 +63,11 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 		days = override
 	}
 	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
+	if request.Authority.Kind == "schedule" {
+		location, err := store.VerifiedScheduleIntake(ctx, resolver, request)
+		facts.SourceLocation = &location
+		return facts, err
+	}
 	if request.VerifiedDeliveryID != "" {
 		delivery, err := store.VerifiedAppIntake(ctx, resolver, request)
 		if err != nil {

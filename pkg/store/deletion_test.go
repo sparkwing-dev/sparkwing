@@ -224,7 +224,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	cliTok := shared.MemberCapabilityForTest(t, leaver.Account.ID, now).Capability
-	runCtx := store.WithCreatingPrincipal(ctx, "leaver@example.com")
+	runCtx := store.FixtureWithCreatingPrincipal(ctx, "leaver@example.com")
 	if err := shared.TestOnlySeedTriggerWithRun(runCtx,
 		store.Trigger{ID: "run-l", Pipeline: "build", CreatedAt: now, TriggerUser: "leaver@example.com"},
 		store.Run{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {

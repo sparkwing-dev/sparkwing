@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -28,10 +27,6 @@ const cronTickOffer = 20 * time.Second
 // still runs.
 const cronTickLeaseTTL = 90 * time.Second
 
-// safety: the wire word a scheduled run carries, bare and without a host
-// suffix, because pipelines branch on it.
-const cronTriggerSource = "schedule"
-
 const cronDetailFires = 200
 
 const cronDetailUpcoming = 5
@@ -42,41 +37,18 @@ type cronLauncher struct {
 
 // Launch records one run for a due schedule instant.
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error) {
-	repoURL, err := sourceurl.ValidateCloneURL(s.RepoPath)
-	if err != nil {
-		return "", fmt.Errorf("the schedule's repository %q is not a clone URL: %w", s.RepoPath, err)
-	}
-	key := CronIdempotencyKey(s.ID, due)
-	runID := newRunID()
 	tenant, err := l.server.tenantForTeam(ctx, s.Team)
 	if err != nil {
 		return "", err
 	}
-	err = l.server.admitTrigger(store.WithCreatingPrincipal(ctx, s.ArmedBy), tenant, triggerIntake{
-		RunID:    runID,
-		Pipeline: s.Pipeline,
-		Args:     s.Effective().Args,
-		Source:   cronTriggerSource,
-		Env:      map[string]string{crons.ScheduleEnvKey: s.ID},
-		Git: triggerReqGit{
-			Branch:  s.GitBranch,
-			SHA:     s.LockedRef,
-			RepoURL: repoURL,
-		},
-		IdempotencyKey: key,
-		At:             time.Now(),
-	})
-	if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
-		existing, ferr := tenant.FindTriggerByIdempotencyKey(ctx, s.Pipeline, key)
-		if ferr != nil {
-			return "", fmt.Errorf("another tick already resolved %s, and its run could not be read: %w", key, ferr)
-		}
-		return existing.ID, nil
-	}
+	admitted, err := tenant.AdmitScheduledRun(ctx, s, due)
 	if err != nil {
 		return "", err
 	}
-	return runID, nil
+	if !admitted.Replayed {
+		l.server.recordQueueActivity(admitted.Request.AdmittedAt)
+	}
+	return admitted.RunID, nil
 }
 
 // Active reports whether a scheduled run is still pending or running. A run
@@ -105,13 +77,6 @@ func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runI
 		return time.Since(run.CreatedAt) <= staleAfter, nil
 	}
 	return false, nil
-}
-
-// CronIdempotencyKey is the deduplication token a scheduled launch carries: the
-// schedule and the instant it resolved, so two evaluators of one minute reach
-// one run.
-func CronIdempotencyKey(scheduleID string, due time.Time) string {
-	return scheduleID + "@" + due.UTC().Format(time.RFC3339)
 }
 
 // safety: Each tick launches a schedule in its own team, never the service's team.

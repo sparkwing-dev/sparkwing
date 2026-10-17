@@ -19,9 +19,9 @@ func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
 	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam)}
 	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
-		RepoURL: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		Branch: "main",
-		SHA:    "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: "https://git.example.com/acme/widgets.git",
+		Branch:  "main",
+		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
 			Pipeline: "nightly",
 			Name:     store.CronScheduleDefaultName,
@@ -103,11 +103,12 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 		t.Fatalf("triggers = %d, want one", len(triggers))
 	}
 	trigger := triggers[0]
-	if trigger.TriggerSource != cronTriggerSource {
-		t.Errorf("trigger source = %q, want %q", trigger.TriggerSource, cronTriggerSource)
+	if trigger.TriggerSource != "schedule" {
+		t.Errorf("trigger source = %q, want %q", trigger.TriggerSource, "schedule")
 	}
-	if trigger.TriggerEnv[crons.ScheduleEnvKey] != sched.ID {
-		t.Errorf("trigger env = %v, want the schedule id", trigger.TriggerEnv)
+	sealed, err := teststore.ForTeam(t, st, store.DefaultTeam).ReadRun(ctx, trigger.ID)
+	if err != nil || sealed.Request.AuthorityRef.Kind != "schedule" || sealed.Request.AuthorityRef.ID != sched.ID {
+		t.Fatalf("sealed schedule origin = %+v, err=%v", sealed.Request.AuthorityRef, err)
 	}
 	if trigger.IdempotencyKey == "" {
 		t.Error("the launch carried no idempotency key")
@@ -143,9 +144,6 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 	srv := New(st, nil)
 	launcher := cronLauncher{server: srv}
 	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
-	if key := CronIdempotencyKey(sched.ID, due); key != sched.ID+"@2026-03-01T03:00:00Z" {
-		t.Fatalf("idempotency key = %q", key)
-	}
 
 	first, err := launcher.Launch(context.Background(), sched, due)
 	if err != nil {
@@ -226,9 +224,9 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 		t.Fatalf("ForTeam default: %v", err)
 	}
 	report, err := (&crons.Service{Store: st, Schedules: tenantB}).ArmPushed(ctx, crons.ArmPush{
-		RepoURL: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
-		Branch: "main",
-		SHA:    "0123456789abcdef0123456789abcdef01234567",
+		RepoURL: "https://git.example.com/acme/widgets.git",
+		Branch:  "main",
+		SHA:     "0123456789abcdef0123456789abcdef01234567",
 		Entries: []crons.Declared{{
 			Pipeline: "nightly",
 			Name:     store.CronScheduleDefaultName,

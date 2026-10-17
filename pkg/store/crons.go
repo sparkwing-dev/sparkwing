@@ -96,10 +96,7 @@ type CronSchedule struct {
 	Paused   bool          `json:"paused"`
 	Declared bool          `json:"declared"`
 	ArmedAt  time.Time     `json:"armed_at"`
-	// ArmedBy names who armed the schedule, and its spelling says which lane
-	// did: `sparkwing crons arm` writes user@host, and a repository pushing
-	// its schedules to a controller writes the token principal that pushed
-	// them, which is the principal a controller launch creates its run as.
+	// ArmedBy records who armed the durable schedule.
 	ArmedBy   string    `json:"armed_by,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 	// CursorAt is the last due instant resolved, however it resolved,

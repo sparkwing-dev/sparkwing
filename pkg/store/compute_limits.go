@@ -424,18 +424,3 @@ func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/compute-guards")
 	return err
 }
-
-type creatingPrincipalKey struct{}
-
-// WithCreatingPrincipal names the authenticated principal creating a run, so
-// the per-principal guards measure the caller rather than the controller. A
-// context without one creates runs that belong to no principal, which is what
-// local work does.
-func WithCreatingPrincipal(ctx context.Context, principal string) context.Context {
-	return context.WithValue(ctx, creatingPrincipalKey{}, principal)
-}
-
-func creatingPrincipal(ctx context.Context) string {
-	principal, _ := ctx.Value(creatingPrincipalKey{}).(string)
-	return principal
-}

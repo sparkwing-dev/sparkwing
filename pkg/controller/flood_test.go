@@ -95,7 +95,7 @@ func TestFloodPolicy_ShedsAboveTheQueueDepthThreshold(t *testing.T) {
 	base, st := newFloodServer(t, controller.FloodPolicy{ShedQueueDepth: 2})
 	ctx := context.Background()
 	for i := range 2 {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
+		if err := teststore.SeedTrigger(st, ctx, store.DefaultTeam, store.Trigger{
 			ID: fmt.Sprintf("run-seed-%d", i), Pipeline: "build", CreatedAt: time.Now(),
 		}); err != nil {
 			t.Fatalf("seed trigger %d: %v", i, err)

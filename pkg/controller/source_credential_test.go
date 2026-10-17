@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -118,6 +119,43 @@ func (f *appFixture) setExtraRepos(who signedIn, repo string, extras []string) (
 	code := f.call("PUT", "/api/v1/team/github-app/extra-repos", who.auth,
 		map[string]any{"repository": repo, "extra_repos": extras}, &out)
 	return code, out
+}
+
+func TestSourceCredential_AppScheduleUsesLiveAutomationConsent(t *testing.T) {
+	f := newAppFixture(t)
+	owner := f.ghUser(501, "olga")
+	f.connect(owner, 501, 7, acmeAdmin)
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(automationConfig))
+	enableAutomation(t, f, owner)
+	tenant := teststore.ForTeam(t, f.store, store.Team(owner.team))
+	now := time.Now().UTC()
+	sched, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{
+		ID: "app-nightly", RepoPath: "https://github.com/acme/widgets.git", RepositoryKey: "gh:701", GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: store.CronWhereController, GitBranch: "main", LockedRef: headSHA,
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := tenant.AdmitScheduledRun(t.Context(), sched, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine, _ := f.teamRunner(owner, "schedule-host")
+	var award controllerwire.ClaimResponse
+	if code := f.call("POST", "/api/v1/runners/claim", machine, githubClaimBody(capability.UnitTrigger, admitted.RunID, ""), &award); code != http.StatusOK || award.Claim == nil || award.Claim.Request.Request.Git.App.Set || award.Claim.Request.Request.Git.DefaultBranch.Set {
+		t.Fatalf("schedule award=%+v status=%d", award, code)
+	}
+	claim := "Bearer " + award.Claim.Capability
+	if got, code := f.sourceCredential(claim, admitted.RunID); code != http.StatusOK || got.Secret == "" || !f.app.TokenCovers(got.Secret, "acme/widgets") || f.app.TokenCovers(got.Secret, "acme/plans") {
+		t.Fatalf("scheduled source=%+v status=%d", got, code)
+	}
+	if code := f.call("DELETE", "/api/v1/team/github-app/automation?repository_id=701", owner.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("revoke automation=%d", code)
+	}
+	if got, code := f.sourceCredential(claim, admitted.RunID); code != http.StatusNotFound || got.Secret != "" {
+		t.Fatalf("revoked schedule source=%+v status=%d", got, code)
+	}
 }
 
 // A run the App started gets a token that reads its repository, named by the

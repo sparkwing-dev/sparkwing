@@ -1,161 +1,154 @@
 # W1 test reconciliation-a progress
 
-The final assigned controller selection passes **96/96 groups**, with no failures
-or skips (22.796s). All 72 App groups still pass. This closes the ten remaining
-runner/source groups and adds one passing controller property. The native report
-still contains FAIL and reflects the last committed state. Completion is not
-claimed.
+All **97 assigned controller groups pass**, with no failures or skips (24.073s).
+This includes the 96 previously reconciled groups and the new App-schedule
+source regression. The supplied native report still contains FAIL. Its remaining
+failures are outside this worker's assigned controller prefixes. Completion is
+not claimed.
 
-## Implemented
+## Implemented and deleted
 
-The default source controller now connects its configured GitHub App client to
-an audited store transaction. It checks persisted live claim authority, exact
-sealed numeric repository identity, current tenant installation and subscription
-consent, and current provider coverage. Only the source ID and owner-approved
-extra IDs receive contents:read. An App request uses its sealed installation.
-A typed repository needs a live subscription. The transaction rechecks ancestry
-and the claim fence after provider work and commits an audit before returning
-the token. Audit, provider or authority failure returns no token.
+Controller schedules now enter the same `admitRun` transaction as other origins.
+The persisted schedule is the unattended execution consent. A private schedule
+service authority resolves only inside that transaction. It never fabricates a
+capability, account or session from `ArmedBy`. Admission locks and rechecks the
+current tenant, source, effective declaration and arming identity. Pending team
+deletion and changed declarations refuse admission. App-managed schedules also
+require the live same-team installation and automation consent.
 
-App tokens require live source authority. Stored team credentials retain their
-Cloud enrollment or machine-owner consent requirement. Both paths use the same
-source fence and audit writer. Missing credentials retain useful remedies in
-the shared error envelope. The response carries the App token in secret and
-uses the checkout facts already in the seal.
+The shared intake owns first sealing, settings and ceilings, run numbering,
+run-rate guards, queue rows and completion intents. Exact due instants replay.
+Different nanosecond instants stay distinct. Changed execution inputs under one
+key conflict. A failing completion write rolls back the whole admission. Manual
+run-now still accepts a paused schedule. Schedule history updates do not change
+execution consent.
 
-Owner approval now binds the source repository's numeric ID as well as each
-extra ID. A generated HTTP property reproduced approval transfer to a new
-repository at the source's old name. The corrected lookup follows the original
-ID through rename and excludes the replacement.
+A real controller-to-source test then reproduced a 404: the source release path
+recognized subscriptions but not schedule automation consent. Source release
+now reads the sealed schedule authority ID and checks its exact tenant,
+repository ID, pipeline and live automation relation. It locks the installation
+before locking and rechecking that relation. The existing contents-only mint,
+source/extra numeric-ID scope, claim fence and committing audit remain the only
+release path. No App event or default-branch trust is manufactured.
 
-Runner tests use current sealed requests, runner claim polling, named unit
-selection and awarded capabilities. All named/queued tenant, repository, branch
-and SHA exclusions remain. The SHA and checkout URL assertions now read the awarded request seal.
-The source tests retain owner-only approval, exact
-content-token scope, current coverage and claim-only release assertions.
-The route rejects runner-selected extras under its existing no-body contract.
+Removed the generic trigger writers and their stale-column SQL:
+`Tenant.CreateTrigger`, `CreateTriggerWithRun`, `FindTriggerByIdempotencyKey`,
+`createTriggerTx`, `Store.createRunTx`, the duplicate-trigger sentinel errors,
+controller `triggerIntake`, `triggerRows`, `triggerRunInvocation`,
+`triggerReqGit` and `CronIdempotencyKey`. `WithCreatingPrincipal` is removed from
+production. Its remaining reporting-fixture use is test-only. Required callers
+use explicit-team current-schema fixtures.
 
-## Deleted and budget
+Deleted the two tests for retired helper/error contracts. The tick tests now
+assert schedule identity in the sealed request, replacing removed trigger-env
+metadata. No security, tenant, masking or billing assertion was weakened.
 
-Deleted 55 production lines of retired surface: the 32-line SourceCredential /
-SourceSpec response file and the 23-line unused GitHubAppExtraRepoRefs reader.
-Its 25-line projection test is replaced by assertions through real release and
-rename properties. No security assertion was dropped or disabled.
+## Volume and contract changes
 
-Session production delta under the lead's exclusions is **+149** (222 added,
-73 deleted), including **+114** in store and +35 in shared controller/credential
-code. Store versus main is **-2,369**, which is 1,881 over the -4,250 W1+W1b
-budget. That budget remains open. The added path restores the App source release
-that the route cut left absent. Its committing authorization and audit cannot
-be replaced by an HTTP-only check or by opt-in to a stored team credential.
-The existing scheduled-origin cut remains the main legacy intake work left.
+Session production change is **-217 lines**: 163 added, 380 deleted under the
+lead's exclusions. This includes the 37-line teststore fixture file. Store is
+**-2,451 versus main**, still **1,799 over** the W1+W1b budget of -4,250.
+The remaining overage needs a separate store reduction/review. This session cuts
+more than it adds. The new production path is the missing scheduled-origin
+adapter and its source-consent integration, not an additional intake owner.
 
-## Contract changes made
+C1 records `AdmitScheduledRun`, `VerifiedScheduleIntake`, durable schedule
+consent, the transaction-only authority, exact-instant replay, source release
+and the final raw-writer cut. No schema, public wire type or C2 interface changed.
+The lead-owned amendments and handoffs remain untouched.
 
-C1 records ReleaseGitHubSourceCredential and the two-method GitHubSourceProvider
-interface used by the existing client and store fake. It records the positive
-source repository_id in github_app_extra_repos, numeric replacement/release,
-shared fences/audit and removal of the old response and reader. This changes
-the disposable baseline. No migration is added.
-
-C2 records trusted SourceReleaseRequest.GitHubApp provenance. Only the verified
-C1 App path sets it. It exempts App tokens from the additional stored-credential
-machine consent rule without supplying grants or relaxing source liveness,
-repository scope, audience or binding. SourceController.GitHub supplies the
-existing provider adapter. The wire response stays on kind/host/secret.
-
-Assumptions / mechanisms added: one provider interface is needed because the
-store must recheck authority after provider I/O before committing its audit.
-The smaller HTTP-only mint would lose that boundary. One provenance bit keeps
-the shared source policy's existing App/stored distinction. The source ID column
-makes name-reuse approval transfer impossible. Undo is to remove App release and
-these additions together, reopening the restored source tests. No new package,
-flag, setting, environment variable, quota, cache or compatibility path is added.
-Lead-owned amendments and handoffs are unchanged. The lead reviews the C1/C2
-amendments. No further contract change is requested.
+Mechanisms added: one private transaction proof and its field on `storeTx`, using
+the existing authority resolver. A browser session would expire unattended work.
+An armer string cannot prove a live credential. The raw writer bypassed sealing.
+The service subject is the schedule ID, so the existing per-principal guard
+counts that service. The deployment guard remains shared. The source lookup uses
+that sealed ID rather than adding event facts, a credential or a schema column.
+Undo removes this adapter and its policy/source branches together. There is no
+legacy fallback, new environment variable, setting, limit, cache or service.
 
 ## Verification
 
 All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false,
-GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and -p 4. Scratch and GOTMPDIR are under
-/tmp/sw-astra-W1.
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and at most -p 4. Scratch and GOTMPDIR stay
+under /tmp/sw-astra-W1.
 
-- Whole-repository go build ./... passes after the production edits.
-- Scoped vet passes for store, controller, controller/client, capability and source.
-- Final assigned controller selection passes 96/96 groups, zero skips, 22.796s.
-- Focused store source, consent, App mutation, push-boundary and two native-report
-  regressions pass in 7.292s. The source/push race selection passes in 102.271s.
-- Final strengthened source SHA/ID assertions pass in 3.798s.
-- Controller source and HTTP source acceptance checks pass after the last
-  controller simplification (5.088s and 0.046s).
-- Complete capability, controller/client and docs suites pass in 0.098s,
-  0.079s and 1.400s. Embedded docs match source docs.
-- cmd/sparkwing-controller and internal/web pass in 0.916s and 1.425s.
-- Baseline dialect-shape and rewrite-schema checks pass in 0.224s.
-- Commentcheck is clean. git diff --check passes.
-- The rename property fails before the source-ID change. A temporary source
-  overlay removing post-mint authority/lease rechecks makes the generated store
-  property fail at input mode 9. The real source passes. Overlays do not edit
-  production source and are removed with scratch.
+- Whole-repository build passes after the writer removal.
+- Final assigned controller selection: 97/97 groups pass, zero skips, 24.073s.
+- Scheduled intake, current tenant/declaration and App consent properties pass.
+  Removing the declaration fence in a temporary overlay makes the generated
+  property fail at the forged source. Production source is not edited by it.
+- Real controller policy, sealed queue and both migrated tick groups pass.
+- Schedule/tick/store-boundary race checks pass: store 64.761s, controller 4.592s.
+- Scheduled source and existing source-release checks pass: store 3.860s and
+  controller 0.257s. The HTTP regression fails with 404 before the source change.
+- Schedule transport, source HTTP audit/refusal/consent acceptance checks and
+  schema/dialect/SQL-scope checks pass. Existing store-sqlite schedule boundary
+  remains green. No native matrix cell is newly claimed.
+- teststore, controller CLI and web suites pass. Web uses the component overlay.
+- bin, cmd/sparkwing and internal/wingd test packages compile. Their suites were
+  not executed here, and no new native result is claimed.
+- Full docs suite passes with the component overlay (1.439s). Source docs and
+  embedded mirrors were synchronized through bin/sync-docs.sh.
+- Scoped vet, commentcheck and diff checks pass.
+- Final whole-repository build and scoped vet pass. Source-release race checks
+  pass in 87.349s. Commentcheck is clean across 2,688 files. Diff checks pass.
+- Final schedule/HTTP acceptance/schema selection passes: store 6.098s,
+  controller 0.166s and acceptance 0.070s.
 
-The controller/provider component checks use a temporary standard-library
-httptest overlay with net.Pipe and the default HTTP transport routed to those
-listeners. Real routers, provider fakes, authorization, issuance and SQLite
-transactions run. This is component evidence, not native socket proof.
-The lead owns native testing. No new acceptance-matrix native cell is claimed.
-The existing SourceReleaseHTTPUsesCommittedAuditBeforeOpening,
-SourceReleaseHTTPRefusalsNeverOpenCredential and SourceMachineConsentHTTPUsesAccountAuthority
-checks still pass with their full assertions.
+The controller/provider and web/docs component checks reuse the previous
+standard-library httptest overlay: net.Pipe listeners and default-transport
+routing only. Real routers, provider fakes, issuance, policy, source audits and
+SQLite transactions run. Unmodified socket-dependent web/docs tests refuse
+`listen` in this sandbox. That is an environment limit, not native passing proof.
 
-## Remaining work and real integration points
+## Remaining work and integration points
 
-No assigned controller failure remains in the local selection. The supplied
-native report has FAIL and must be refreshed after the lead commits. Other
-controller groups belong to the other worker and were not changed. Unchanged
-bin, cmd/sparkwing and internal/wingd suites were not repeated. Their native
-results remain with the harness.
+The scheduled-origin half of the 14:40 W1 handoff and its legacy insertion cut
+are implemented. The App-delivery half was completed earlier. Enrollment,
+rotation, ordered placement, Cloud metering and connection work are not repeated.
 
-Runner claim tests fake only enrolled resource observations and software policy.
-Real enrollment, signed runner-policy composition and native runtime execution
-remain separate integration evidence. Provider behavior uses the existing fake
-GitHub API, not a live installation. Native sockets, PostgreSQL and real-repo
-QA remain lead evidence.
+The lead's 2026-10-17 01:15 retry-selection handoff remains **OPEN**. Inspection
+confirms `EngineController.Retry` still validates and drops Mode before CreateRun.
+The next change must commit mode and selected source-result fences outside the
+immutable request/spec, canonicalize source aliases in the idempotency digest,
+and make host recovery consume the committed selection. This is the approved
+redesign, not another mode-only patch. It is not claimed fixed by this session.
 
-The earlier W1 scheduled-origin handoff stays open: schedules must enter the
-single sealed intake before the remaining generic trigger insertion APIs can
-be deleted. This session does not alter the other worker's failing cron groups.
-Completed enrollment, rotation, placement, metering and connection work is not
-repeated.
+The controller `ScheduleWriter` administration/run-now interface is still absent
+from Tenant. Its policy_missing route failures belong to the other reconciliation
+worker. This session exercises the production cron launcher and shared store
+adapter directly. Those handlers must call that owner inside their committing
+authorization transaction when they are connected. No successful fake is used to
+claim that HTTP integration is complete.
+
+Native sockets, live GitHub installations, PostgreSQL lock-order/concurrency,
+real runner execution and real-repository QA remain lead evidence. The source
+provider is the existing fake GitHub API. The native report must be refreshed
+after the lead commits. Its FAIL verdict and the store budget prevent COMPLETE.
 
 ## Shared files touched
 
-- design/rewrite/contracts/c1-data.md
-- design/rewrite/contracts/c2-credentials.md
-- design/rewrite/test-reconciliation.md
-- docs/git-credentials.md
-- docs/github-app.md
-- internal/capability/source.go
-- pkg/controller/claim_source_test.go
-- pkg/controller/github_app_extra_repos.go
-- pkg/controller/github_app_test.go
-- pkg/controller/github_claim_fixture_test.go
-- pkg/controller/github_runners_test.go
-- pkg/controller/source_controller.go
-- pkg/controller/source_credential_test.go
-- pkg/docs/mirror/git-credentials.md
-- pkg/docs/mirror/github-app.md
+- C1 contract, reconciliation ledger and this report.
+- docs/schedules.md, docs/migrations/_unreleased.md and generated mirrors.
+- pkg/controller/crons.go, handlers.go and intake_policy.go.
+- pkg/controller/schedule_intake_test.go and source_credential_test.go.
+- pkg/controller/crons_tick_test.go: required scheduled-intake caller migration.
+- pkg/controller/compute_limits_test.go, concurrency_team_test.go,
+  deletion_test.go, flood_team_test.go, flood_test.go, retry_team_test.go and
+  team_boundary_test.go: minimal removed-writer fixture migrations only.
+- pkg/controller/trigger_rows_internal_test.go: removed retired helper test.
 
-Store files changed: github_source_release.go and its new tests, source_release.go,
-github_app_extra_repos.go, schema.sql, github_app_authorization_fixture_test.go,
-github_app_mutations_test.go, github_app_automation_test.go and
-declared_repo_guard_test.go. source_credential.go and claim_source_test.go are
-removed. These are the release implementation, obsolete surface deletion,
-source-ID schema/approval change and minimal caller/fixture migrations.
+Store changes: schedule_intake.go and tests, github_source_release.go and its
+property, capabilities_contract.go, dialect.go, store.go, tenant_triggers.go,
+compute_limits.go, crons.go, reporting_fixture_test.go, deletion_test.go,
+identity_link_test.go, teststore/trigger.go and deletion of
+maintenance_result_test.go. No other worker's production implementation changed.
 
-Friction: socket restrictions require component transport substitution and
-lead-owned native evidence. The supplied native report still contains FAIL.
-No Git writes, external messages, Sparkwing candidate execution or harness
-memory writes occurred. The shared Git config has no identity or core.worktree
-overrides. Scratch is removed at the end; the shared Go cache is retained.
+Friction: sockets require component substitution and lead native evidence. The
+new schedule source regression first needed the fake provider's main ref and
+config installed before the real consent route would accept it. No Git write,
+Sparkwing candidate execution, external message or harness-memory write occurred.
+The shared Git config has no local identity or core.worktree override. Scratch is
+removed at session end. The shared Go cache is retained.
 
 STATUS: CONTINUE

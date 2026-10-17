@@ -107,16 +107,17 @@ func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
 }
 
 type storeTx struct {
-	clockErr     error
-	ctx          context.Context
-	deletingTeam Team
-	tx           *sql.Tx
-	dialect      Dialect
-	store        *Store
-	snapshotRead bool
-	appAdmission *GitHubAppAdmission
-	rotatingRoot *capability.Capability
-	createdTeam  *TeamInfo
+	clockErr          error
+	ctx               context.Context
+	deletingTeam      Team
+	tx                *sql.Tx
+	dialect           Dialect
+	store             *Store
+	snapshotRead      bool
+	appAdmission      *GitHubAppAdmission
+	scheduleAdmission *scheduleAdmission
+	rotatingRoot      *capability.Capability
+	createdTeam       *TeamInfo
 }
 
 // SetTestClock overrides the SQLite store clock until the test ends.

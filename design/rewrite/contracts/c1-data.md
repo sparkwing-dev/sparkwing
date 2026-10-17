@@ -3524,9 +3524,8 @@ name into the same storage ref namespace. Only the exact verified pushed branch
 can receive default-branch trust. Tags, mismatched SHAs and non-default events
 remain untrusted. Generated tests cover these cases through live data authority.
 
-The raw automation-specific trigger insertion API is removed. The legacy generic
-trigger insertion and controller schedule intake remain open until scheduled
-execution reaches `admitRun`.
+The raw automation-specific and generic trigger insertion APIs are removed.
+Controller schedules reach the same sealed intake through the adapter below.
 
 
 ## Integration amendment: audited GitHub source release
@@ -3556,3 +3555,49 @@ credentials still require verified Cloud enrollment or the machine owner's
 consent. The App path checks authority and lease again after provider I/O. Audit
 failure returns no token. An upstream token minted before a refused audit stays
 unreturned, within the existing external-token revocation residual.
+
+
+## Integration amendment: scheduled origin and final trigger-writer cut
+
+`Tenant.AdmitScheduledRun(ctx, CronSchedule, due)` is the trusted controller-tick
+adapter. The persisted schedule is durable consent for unattended execution.
+Its private transaction authority is `schedule:<id>`, not a capability or session.
+`ArmedBy` remains attribution for the arming operation. It never fabricates a
+live account or bearer. The admission subject is the schedule's service identity.
+
+The transaction locks and rechecks the tenant, repository key and location,
+pipeline, effective declaration, arming identity and timestamp, pause and declared
+state. Mutable cursor and fire history do not change execution consent. A pending
+team deletion refuses admission. App-managed schedules also require the current
+same-team, unsuspended installation and repository automation consent. Admission
+rechecks the origin after shared intake effects and number allocation, before
+commit. A changed or removed origin returns no run and rolls back all effects.
+
+`VerifiedScheduleIntake` supplies the persisted source through the existing
+`IntakePolicy` resolver. Ordinary requests cannot manufacture that transaction
+proof. Source identity does not establish a verified App event, default-branch
+trust or automatic pool grants. The shared C4 policy still resolves settings,
+ceilings and retention. Run-now may use a paused schedule, as before.
+
+The shared intake seals the current source, effective arguments and schedule
+origin, allocates the number, writes the owner queue and completion intents,
+and applies run-rate guards. Its exact due key uses the schedule ID and UTC
+RFC3339Nano instant. Repetition returns the original execution. A changed
+execution declaration under the same key conflicts. The sealed authority ID
+traces the run to its schedule instead of a legacy trigger environment column.
+
+`Tenant.CreateTrigger`, `CreateTriggerWithRun`, `FindTriggerByIdempotencyKey`,
+`createTriggerTx`, `Store.createRunTx`, both duplicate-trigger sentinel errors,
+and controller `triggerIntake`, `triggerRows`, `triggerRunInvocation`,
+`triggerReqGit` and `CronIdempotencyKey` are removed. The context-selected
+`WithCreatingPrincipal` API is removed from production. Shared intake derives
+actors from its committing authority. Reporting fixtures seed current-schema
+rows through `teststore`, without acquiring executable authority.
+
+
+Scheduled source release uses the sealed schedule authority ID without inventing
+App event facts. If there is no ordinary subscription, the source transaction
+selects the same tenant, numeric repository, pipeline and live schedule's
+repository automation consent. It locks the installation before locking and
+rechecking that relation. Contents-only minting, exact repository and extra IDs,
+claim fencing and committing audit remain the existing source-release path.

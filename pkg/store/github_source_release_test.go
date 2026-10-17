@@ -131,3 +131,67 @@ func TestGitHubSourceReleaseAuditPrecedesReturn(t *testing.T) {
 		t.Fatalf("audit: %s %s %s %s %s %s %d %d %v", team, repo, run, node, prefix, credential, generation, at, err)
 	}
 }
+
+func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
+	property := func(value uint16) bool {
+		for mode := range 8 {
+			extra := int64(value) + 10
+			tenant, auth, provider := githubSourceFixture(t, extra)
+			run, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sched, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
+				ID: "app-schedule", RepoPath: "https://github.com/acme/repo.git", RepositoryKey: "gh:1", GitHubInstallationID: 7, GitHubRepositoryID: 1,
+				Pipeline: run.Pipeline, Cron: "* * * * *", TZ: "UTC", Where: CronWhereController,
+			}, tenant.s.clock())
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_automation(team,repo_key,repository_id,repository,installation_id,enabled_by,enabled_at) VALUES ('a','gh:1',1,'acme/repo',7,'owner',1)`)
+			run.Request.AuthorityRef = capability.AuthorityRef{Kind: "schedule", ID: sched.ID}
+			run.Request.Request.Pipeline = run.Pipeline
+			run.Request.Request.Origin = runspec.OriginSchedule
+			run.Request.Request.Git.App = runspec.Optional[runspec.AppFacts]{}
+			switch mode {
+			case 1:
+				run.Request.AuthorityRef.ID += "-foreign"
+			case 2:
+				run.Request.Request.Origin = runspec.OriginTrigger
+			case 3:
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_automation SET team='b'`)
+			case 4:
+				rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_automation`)
+			case 5:
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET github_repository_id=999,repo_key='gh:999'`)
+			case 6:
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE cron_schedules SET team='b'`)
+			case 7:
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_installations SET suspended=1`)
+			}
+			body, err := json.Marshal(run.Request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
+			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
+			var audits int
+			if err := tenant.s.db.QueryRow(`SELECT COUNT(*) FROM git_credential_releases`).Scan(&audits); err != nil {
+				t.Fatal(err)
+			}
+			if mode == 0 {
+				if err != nil || token.Token == "" || audits != 1 || !reflect.DeepEqual(provider.ids, []int64{1, extra}) || !reflect.DeepEqual(provider.permissions, map[string]string{"contents": "read"}) {
+					t.Logf("scheduled release=%+v ids=%v err=%v", token, provider.ids, err)
+					return false
+				}
+			} else if err == nil || token.Token != "" || provider.calls != 0 || audits != 0 {
+				t.Logf("mode=%d refused release=%+v err=%v calls=%d", mode, token, err, provider.calls)
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 6}); err != nil {
+		t.Fatal(err)
+	}
+}
