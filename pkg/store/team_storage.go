@@ -28,7 +28,11 @@ func FreeCacheShare(allowance int64) int64 { return allowance / 4 * 3 }
 func FreeLogShare(allowance int64) int64 { return allowance / 16 * 3 }
 
 func execStatements(ctx context.Context, tx *storeTx, script string) error {
-	for _, stmt := range splitStatements(script) {
+	statements, err := splitStatements(script)
+	if err != nil {
+		return err
+	}
+	for _, stmt := range statements {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
 		}

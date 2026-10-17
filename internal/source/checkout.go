@@ -69,12 +69,9 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		if options.Access == nil {
 			return entry, errors.New("remote source requires live source access")
 		}
-		var credential Credential
-		if spec.BundleDigest == "" {
-			credential, err = options.Access.GitCredential(ctx, spec)
-			if err != nil {
-				return entry, fmt.Errorf("authorize source: %w", err)
-			}
+		credential, err := options.Access.GitCredential(ctx, spec)
+		if err != nil {
+			return entry, fmt.Errorf("authorize source: %w", err)
 		}
 		remote, err := credentialRemote(spec.RemoteURL, credential)
 		if err != nil {
@@ -179,19 +176,6 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 	_, presentErr := client.run(ctx, checkout, "", "cat-file", "-e", spec.SHA+"^{commit}")
 	needsFetch := spec.BundleDigest == "" || presentErr != nil
 	needsTags := policy.Tags != nil && *policy.Tags
-	needsCheckoutAccess := policy.Submodules != nil && *policy.Submodules || policy.LFS != nil && *policy.LFS
-	if spec.BundleDigest != "" && (needsFetch || needsTags || needsCheckoutAccess) {
-		credential, err := access.GitCredential(ctx, spec)
-		if err != nil {
-			return fmt.Errorf("authorize source: %w", err)
-		}
-		remote, err = credentialRemote(remote, credential)
-		if err != nil {
-			return err
-		}
-		client.credential = credential
-		args[len(args)-2] = remote
-	}
 	if needsFetch {
 		if _, err := client.run(ctx, checkout, remote, args...); err != nil {
 			return err

@@ -222,16 +222,6 @@ type SignInResult struct {
 	GateClosed *SignUpGate
 }
 
-func splitStatements(script string) []string {
-	var out []string
-	for _, stmt := range strings.Split(script, ";") {
-		if s := strings.TrimSpace(stmt); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 func newIdentityID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

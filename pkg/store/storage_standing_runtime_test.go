@@ -140,6 +140,7 @@ func FuzzStorageStandingTenantInventory(f *testing.F) {
 		rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,?,1),('b',?,?,1)", strings.Repeat("a", 64), int64(own), strings.Repeat("a", 64), int64(foreign))
 		commit := logCommit(actor, attempt)
 		commit.Segments[0].Size = int64(own) + 1
+		commit.Segments[0].StoredBytes = int64(own) + 1
 		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 			t.Fatal(err)
 		}

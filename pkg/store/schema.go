@@ -11,17 +11,75 @@ func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 		return "", errors.New("unsupported schema dialect")
 	}
 	var out strings.Builder
+	err := scanSQL(neutral, func(token string, kind sqlTokenKind) error {
+		if kind == sqlWord {
+			switch strings.ToUpper(token) {
+			case "PRAGMA", "AUTOINCREMENT", "SERIAL", "BYTEA":
+				return errors.New("schema contains non-neutral syntax")
+			case "BLOB":
+				if dialect == DialectPostgres {
+					token = "BYTEA"
+				}
+			}
+		}
+		out.WriteString(token)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return out.String(), nil
+}
+
+func splitStatements(script string) ([]string, error) {
+	var out []string
+	start, offset := 0, 0
+	hasSQL := false
+	err := scanSQL(script, func(token string, kind sqlTokenKind) error {
+		if token == ";" {
+			if hasSQL {
+				out = append(out, strings.TrimSpace(script[start:offset]))
+			}
+			start = offset + 1
+			hasSQL = false
+		} else if kind != sqlComment && strings.TrimSpace(token) != "" {
+			hasSQL = true
+		}
+		offset += len(token)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if hasSQL {
+		out = append(out, strings.TrimSpace(script[start:]))
+	}
+	return out, nil
+}
+
+type sqlTokenKind int
+
+const (
+	sqlOther sqlTokenKind = iota
+	sqlWord
+	sqlComment
+)
+
+func scanSQL(neutral string, visit func(token string, kind sqlTokenKind) error) error {
 	for i := 0; i < len(neutral); {
 		start := i
+		kind := sqlOther
 		switch {
 		case strings.HasPrefix(neutral[i:], "--"):
+			kind = sqlComment
 			for i < len(neutral) && neutral[i] != '\n' {
 				i++
 			}
 		case strings.HasPrefix(neutral[i:], "/*"):
+			kind = sqlComment
 			end := strings.Index(neutral[i+2:], "*/")
 			if end < 0 {
-				return "", errors.New("unterminated SQL comment")
+				return errors.New("unterminated SQL comment")
 			}
 			i += end + 4
 		case neutral[i] == '\'' || neutral[i] == '"':
@@ -41,26 +99,21 @@ func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 				i++
 			}
 			if !closed {
-				return "", errors.New("unterminated SQL quoted value")
+				return errors.New("unterminated SQL quoted value")
 			}
 		case neutral[i] >= 'A' && neutral[i] <= 'Z' || neutral[i] >= 'a' && neutral[i] <= 'z' || neutral[i] == '_':
+			kind = sqlWord
 			for i < len(neutral) && ((neutral[i] >= 'A' && neutral[i] <= 'Z') || (neutral[i] >= 'a' && neutral[i] <= 'z') || (neutral[i] >= '0' && neutral[i] <= '9') || neutral[i] == '_') {
 				i++
-			}
-			token := strings.ToUpper(neutral[start:i])
-			if token == "PRAGMA" || token == "AUTOINCREMENT" || token == "SERIAL" || token == "BYTEA" {
-				return "", errors.New("schema contains non-neutral syntax")
-			}
-			if token == "BLOB" && dialect == DialectPostgres {
-				out.WriteString("BYTEA")
-				continue
 			}
 		default:
 			i++
 		}
-		out.WriteString(neutral[start:i])
+		if err := visit(neutral[start:i], kind); err != nil {
+			return err
+		}
 	}
-	return out.String(), nil
+	return nil
 }
 
 // SchemaOwner distinguishes tenant tables from deployment authority.

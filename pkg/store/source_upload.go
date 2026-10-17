@@ -239,6 +239,10 @@ func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease
 	if limit <= 0 || objects == nil {
 		return ErrInvalidInput
 	}
+	teams, err := o.ListTeams(ctx)
+	if err != nil {
+		return err
+	}
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -247,47 +251,53 @@ func (o *Operator) ExpireSourceUploads(ctx context.Context, lease SingletonLease
 	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
 		return err
 	}
-	if err := expireSourceUploadsTx(ctx, tx, limit, objects); err != nil {
-		return err
+	for _, team := range teams {
+		count, err := expireSourceUploadsTx(ctx, tx, team, limit, objects)
+		if err != nil {
+			return err
+		}
+		limit -= count
+		if limit == 0 {
+			break
+		}
 	}
 	return tx.Commit()
 }
 
-func expireSourceUploadsTx(ctx context.Context, tx *storeTx, limit int, objects blob.ObjectBackend) error {
-	rows, err := tx.QueryContext(ctx, "SELECT team,id,committed_at FROM source_uploads WHERE expires_at<=? ORDER BY expires_at,team,id LIMIT ?"+tx.forUpdate(), tx.now().UnixNano(), limit)
+func expireSourceUploadsTx(ctx context.Context, tx *storeTx, team Team, limit int, objects blob.ObjectBackend) (int, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT id,committed_at FROM source_uploads WHERE team=? AND expires_at<=? ORDER BY expires_at,id LIMIT ?"+tx.forUpdate(), team, tx.now().UnixNano(), limit)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	type expired struct {
-		team      Team
 		id        string
 		committed int64
 	}
 	var entries []expired
 	for rows.Next() {
 		var e expired
-		if err := rows.Scan(&e.team, &e.id, &e.committed); err != nil {
-			return errors.Join(err, rows.Close())
+		if err := rows.Scan(&e.id, &e.committed); err != nil {
+			return 0, errors.Join(err, rows.Close())
 		}
 		entries = append(entries, e)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
+		return 0, err
 	}
 	for _, e := range entries {
-		if err := objects.DeleteObject(ctx, "teams/"+string(e.team)+"/pending/"+e.id); err != nil {
-			return err
+		if err := objects.DeleteObject(ctx, "teams/"+string(team)+"/pending/"+e.id); err != nil {
+			return 0, err
 		}
 		if e.committed == 0 {
-			if err := releaseBlobQuotaReservationTx(ctx, tx, e.team, blobUploadQuotaID(e.id)); err != nil {
-				return err
+			if err := releaseBlobQuotaReservationTx(ctx, tx, team, blobUploadQuotaID(e.id)); err != nil {
+				return 0, err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM source_uploads WHERE team=? AND id=?", e.team, e.id); err != nil {
-			return err
+		if _, err := tx.ExecContext(ctx, "DELETE FROM source_uploads WHERE team=? AND id=?", team, e.id); err != nil {
+			return 0, err
 		}
 	}
-	return nil
+	return len(entries), nil
 }
 
 // AbortSourceUpload rolls back a failed signing operation under current submission authority.
