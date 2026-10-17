@@ -43,6 +43,60 @@ func TestBurstPublicRunOverflowsToPersonalMachineWhileLocalCapacityIsHeld(t *tes
 	burstPublicRun(t, true, false, true)
 }
 
+func TestBurstPublicRunFallsBackLocallyWithRequesterSecrets(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		t.Skipf("native fallback requires local sockets: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := "http://" + listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cli := buildSubmitCLI(t)
+	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("TOKEN", burstIntakeSecret)
+	config := filepath.Join(home, "config.yaml")
+	t.Setenv("SPARKWING_CONFIG", config)
+	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: swu_offline_fixture\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n", endpoint)
+	if err := os.WriteFile(config, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo := burstIntakeRepository(t)
+	if err := os.Remove(filepath.Join(repo, ".env")); err != nil {
+		t.Fatal(err)
+	}
+	offlineStopDaemon(t, home)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	handlePath := filepath.Join(t.TempDir(), "run.json")
+	command := exec.CommandContext(ctx, cli, "run", "burst", "--sw-run-handle-file", handlePath, "-o=json")
+	command.Dir = repo
+	output, err := command.CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "Cloud controller is unreachable; running locally.") || !strings.Contains(string(output), "burst-edited-ok secret=*** encoded=***") || !strings.Contains(string(output), "burst-cache-restored") || !strings.Contains(string(output), "burst-artifact-restored") || bytes.Contains(output, []byte(burstIntakeSecret)) {
+		t.Fatalf("native local fallback: %v\n%s", err, output)
+	}
+	var handle orchestrator.RunHandle
+	body, err := os.ReadFile(handlePath)
+	if err != nil || json.Unmarshal(body, &handle) != nil || handle.RunID == "" {
+		t.Fatalf("fallback lost local ownership: %v", err)
+	}
+	read := exec.CommandContext(ctx, cli, "runs", "status", "--run", handle.RunID, "-o=json")
+	read.Dir = repo
+	body, err = read.Output()
+	var detail controllerwire.RunDetail
+	if err != nil || json.Unmarshal(body, &detail) != nil || detail.Status != "success" || len(detail.Jobs) != 2 {
+		t.Fatalf("fallback did not finish in local history: %v\n%s", err, body)
+	}
+}
+
 func TestBurstPublicRunInterruptCancelsHereAndPersonalWork(t *testing.T) {
 	for _, personal := range []bool{false, true} {
 		t.Run(map[bool]string{false: "here", true: "personal"}[personal], func(t *testing.T) {

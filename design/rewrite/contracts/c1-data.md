@@ -3482,7 +3482,15 @@ relay, stored value or change to restart behavior.
 
 `Request.Burst` seals ordered `PlacementStep{Target, Hold}` preferences and an optional narrowing `OverflowMinutes` cap. Targets resolve to authenticated here capacity, the requesting account's registered machines, Cloud or granted runner/pool selectors. Existing `ClaimPlacement` controls hold times for the same owner projections, reconciliation and claim paths. Burst nodes can overflow a here-hosted run without transferring its owner.
 
-The baseline is version 5. `runs.created_subject_kind` accompanies the authenticated creator ID so personal-machine ownership cannot confuse account and machine IDs. `overflow_controls(team, account_id, monthly_minutes)` stores optional monthly allowances. No row means no per-user cap. Account authority changes its own allowance through `SetOverflowLimit` and reads usage through `ReadOverflowControl`. Cloud admission observes the narrower stored/request cap as well as team billing admission. Existing work finishes and unmetered capacity remains eligible. Full field and verification details are in `design/rewrite/W9-BURST-PLACEMENT.md`.
+The baseline is version 6. `runs.created_subject_kind` accompanies the authenticated creator ID so personal-machine ownership cannot confuse account and machine IDs. `overflow_controls(team, account_id, monthly_minutes)` stores optional monthly allowances. No row means no per-user cap. Account authority changes its own allowance through `SetOverflowLimit` and reads usage through `ReadOverflowControl`. Cloud admission observes the narrower stored/request cap as well as team billing admission. Existing work finishes and unmetered capacity remains eligible. Full field and verification details are in `design/rewrite/W9-BURST-PLACEMENT.md`.
+
+`billing_awards.requester_account` captures the authenticated account creator
+from the run at award time. Non-account creators store an empty value.
+Overflow usage reads that retained attribution with its retained charges and
+compute intervals, without joining run history. Deletion or reuse of a run ID
+cannot erase usage or transfer it to another account. No foreign key makes
+financial attribution depend on retained runs or accounts. Version-5 stores
+are refused and need a fresh baseline; no migration or backfill is added.
 
 ## Cloud allocation projection for burst execution
 

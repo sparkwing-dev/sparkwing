@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Keep configured requester secrets available during offline fallback
+  through the local controller's masked secret path. Exclude those environment
+  entries from saved local environment snapshots.
+
+- **overflow:** Retain monthly usage when run history is deleted. Billing awards
+  retain the requesting account so pruning or reusing a run ID cannot erase or
+  transfer its usage. The rewrite store baseline advances to version 6 and
+  requires a fresh database.
+
 - **run:** Restore and save declared dependency caches through the shared native
   host on this machine, registered runners and Cloud. Package-manager caches use
   the persisted job environment and the current attempt's storage authority.

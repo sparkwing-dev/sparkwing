@@ -75,6 +75,9 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err != nil {
 		return err
 	}
+	for _, value := range prepared.localSecrets {
+		masker.Register(value)
+	}
 	request, err := prepareLocalRunRequest(ctx, prepared, flags, args)
 	if err != nil {
 		return err

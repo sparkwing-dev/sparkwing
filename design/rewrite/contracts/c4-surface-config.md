@@ -937,6 +937,15 @@ absence is local. Cloud requires a user-configured profile. Prefer absence uses
 here/5s, machines/5s, cloud/0s. Empty preference lists, negative holds, invalid
 selectors and negative/overflowing minutes fail configuration validation.
 
+Local preparation, including offline fallback, resolves configured local secret
+names against the selected pipeline's complete declarations and the requesting
+process's captured environment. It excludes those environment entries before
+capturing the private local environment snapshot or starting SDK inspection.
+Only the input-only `CreateRunRequest.LocalSecrets` map carries values to the
+local controller's existing volatile registry. The request seals resolved names.
+Local preparation and intake diagnostics mask the resolved values. Execution
+uses the existing masked secret-release path.
+
 `Pipeline.SourceFiles` (`source_files`) names literal repo-relative files to
 include beyond tracked paths. Shared ValidateSourceFiles rejects pathspec,
 traversal, Git metadata, directories and missing declared source at capture.

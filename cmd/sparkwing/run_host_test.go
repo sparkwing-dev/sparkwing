@@ -557,6 +557,52 @@ func FuzzDetachedIntakeDiagnosticsNeverExposeArguments(f *testing.F) {
 	})
 }
 
+func FuzzLocalIntakeDiagnosticsNeverExposeRequesterSecrets(f *testing.F) {
+	f.Add([]byte("requester credential"), false)
+	f.Add([]byte{0, 255, 34}, true)
+	f.Fuzz(func(t *testing.T, data []byte, canonical bool) {
+		if len(data) > 256 {
+			return
+		}
+		secret := "requester-secret-" + hex.EncodeToString(data)
+		var calls []string
+		deps := localRuntimeFor(t, localTestAward(t), true, &calls)
+		resolve := deps.resolve
+		deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+			runtime, err := resolve(ctx, options)
+			prepare := runtime.prepare
+			runtime.prepare = func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
+				input, err := prepare(ctx, pipeline, flags)
+				input.localSecrets = map[string]string{"TOKEN": secret}
+				return input, err
+			}
+			runtime.controller = localTestController{create: func(_ context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+				if request.LocalSecrets["TOKEN"] != secret || len(request.Request.LocalSecretNames) != 1 {
+					t.Fatal("intake lost its private requester secret")
+				}
+				var failure error = errors.New("intake failed: " + secret)
+				if canonical {
+					failure = &apierr.Error{Code: apierr.InvalidArgs, Message: "intake failed: " + secret}
+				}
+				return controllerwire.CreateRunResponse{}, failure
+			}}
+			return runtime, err
+		}
+		var output bytes.Buffer
+		err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, nil, &output, deps)
+		if err == nil || strings.Contains(err.Error(), secret) || strings.Contains(output.String(), secret) {
+			t.Fatal("requester secret escaped through intake diagnostics")
+		}
+		var structured *apierr.Error
+		if errors.As(err, &structured) {
+			body, err := json.Marshal(structured)
+			if err != nil || bytes.Contains(body, []byte(secret)) {
+				t.Fatal("structured intake diagnostic exposed requester secret")
+			}
+		}
+	})
+}
+
 func TestLocalOwnerResumePreservesAcceptedPlan(t *testing.T) {
 	award := localTestAward(t)
 	plan := json.RawMessage(`{"jobs":[]}`)

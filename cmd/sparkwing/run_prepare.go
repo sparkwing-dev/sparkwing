@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,18 +20,22 @@ import (
 )
 
 type localRunPreparation struct {
-	identity    clisurface.PipelineIdentity
-	described   []nodeproto.PipelineDescription
-	git         runspec.Git
-	source      runspec.Source
-	environment runspec.EnvSnapshot
-	machine     userconfig.Config
-	machineFile string
-	settings    settings.Inputs
+	identity     clisurface.PipelineIdentity
+	described    []nodeproto.PipelineDescription
+	git          runspec.Git
+	source       runspec.Source
+	environment  runspec.EnvSnapshot
+	localSecrets map[string]string
+	machine      userconfig.Config
+	machineFile  string
+	settings     settings.Inputs
 }
 
 func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flags runFlags, args []string) (_ controllerwire.CreateRunRequest, resultErr error) {
 	masker := secrets.NewMasker()
+	for _, value := range input.localSecrets {
+		masker.Register(value)
+	}
 	for _, token := range args {
 		masker.Register(token)
 		if _, value, found := strings.Cut(token, "="); found {
@@ -102,9 +108,10 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 			secretArgs = append(secretArgs, argument.Name)
 		}
 	}
-	return controllerwire.CreateRunRequest{IdempotencyKey: flags.idempotencyKey, Request: runspec.Request{
+	return controllerwire.CreateRunRequest{IdempotencyKey: flags.idempotencyKey, LocalSecrets: maps.Clone(input.localSecrets), Request: runspec.Request{
 		Version: 1, Pipeline: input.identity.Name, Mode: runspec.IntakeExecute, Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost,
-		RequestedArgs: requested, SecretArgs: runspec.Optional[[]string]{Set: true, Value: secretArgs},
+		LocalSecretNames: slices.Sorted(maps.Keys(input.localSecrets)),
+		RequestedArgs:    requested, SecretArgs: runspec.Optional[[]string]{Set: true, Value: secretArgs},
 		Git: input.git, Source: input.source, Env: input.environment, Options: options,
 	}}, nil
 }

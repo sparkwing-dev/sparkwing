@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -47,10 +49,6 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		return localRunRuntime{}, err
 	}
 	captured := os.Environ()
-	seal, err := snapshots.Capture(ctx, captured)
-	if err != nil {
-		return localRunRuntime{}, err
-	}
 	socket, err := wingd.APISocketPath(home)
 	if err != nil {
 		return localRunRuntime{}, err
@@ -74,7 +72,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		},
 		close: func() error { cleanup(); return nil },
 		prepare: func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
-			return prepareNativeLocalRun(ctx, home, directory, pipeline, seal, captured, snapshots)
+			return prepareNativeLocalRun(ctx, home, directory, pipeline, captured, snapshots)
 		},
 		bind: func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
 			return bindLocalRunHost(ctx, home, transport, award)
@@ -98,7 +96,29 @@ func hostSourceOptions(home string, captured []string, masker *secrets.Masker, l
 	}, nil
 }
 
-func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, seal runspec.EnvSnapshot, captured []string, snapshots *nodehost.FileEnvironmentSnapshots) (_ localRunPreparation, err error) {
+func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string, captured []string, snapshots *nodehost.FileEnvironmentSnapshots) (_ localRunPreparation, err error) {
+	route, err := loadRunRouting(directory, pipeline)
+	if err != nil {
+		return localRunPreparation{}, err
+	}
+	masker := secrets.NewMasker()
+	environment := slices.DeleteFunc(slices.Clone(captured), func(item string) bool {
+		name, value, _ := strings.Cut(item, "=")
+		if !slices.Contains(route.LocalSecrets, name) {
+			return false
+		}
+		masker.Register(value)
+		return true
+	})
+	defer func() {
+		if err != nil {
+			err = &maskedCLIError{err: err, masker: masker}
+		}
+	}()
+	seal, err := snapshots.Capture(ctx, environment)
+	if err != nil {
+		return localRunPreparation{}, err
+	}
 	identity, err := pipelineIdentityAt(directory, pipeline)
 	if err != nil {
 		return localRunPreparation{}, err
@@ -111,8 +131,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil && !os.IsNotExist(err) {
 		return localRunPreparation{}, err
 	}
-	masker := secrets.NewMasker()
-	options, err := hostSourceOptions(home, captured, masker, true)
+	options, err := hostSourceOptions(home, environment, masker, true)
 	if err != nil {
 		return localRunPreparation{}, err
 	}
@@ -158,11 +177,15 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 	if err != nil {
 		return localRunPreparation{}, err
 	}
+	localSecrets, err := resolveBurstSecrets(ctx, route.LocalSecrets, prepared.Description.Secrets, captured)
+	if err != nil {
+		return localRunPreparation{}, err
+	}
 	return localRunPreparation{
 		identity: identity, described: []nodeproto.PipelineDescription{prepared.Description},
 		git:         runspec.Git{Repository: repository, SHA: entry.SHA},
 		source:      runspec.Source{Ref: entry.SHA, Entrypoint: identity.Entrypoint, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: filepath.Base(directory)}},
-		environment: seal, machine: machine, machineFile: configFile,
+		environment: seal, localSecrets: localSecrets, machine: machine, machineFile: configFile,
 		settings: settings.Inputs{Context: settings.Context{Origin: runspec.OriginLocal, Submitter: true, Local: true, NumCPU: runtime.NumCPU()}},
 	}, nil
 }

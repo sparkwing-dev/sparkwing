@@ -500,6 +500,11 @@ Multiple controller replicas require an ephemeral secret relay or verified
 run affinity before they can support requester-resolved secrets.
 Retry also requires a fresh submission so values can be resolved again.
 
+Local routing and offline fallback resolve the same configured names at intake.
+Those environment entries are excluded from the saved local environment
+snapshot. The local controller releases their values through the same masked,
+volatile secret path.
+
 There is no per-user overflow cap by default. `overflow_minutes` narrows the
 user's monthly Cloud allowance for this run. The account's saved limit can only
 be tightened by the request. Read and change your saved allowance with:
@@ -520,3 +525,4 @@ use the selected account credential. Team standing tiers, owner budgets and the
 billing charge ladder still apply. Once the allowance is reached, new Cloud
 claims wait while local and registered-machine capacity remains eligible.
 Running work finishes.
+Deleting run history keeps its usage in the monthly total.

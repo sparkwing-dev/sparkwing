@@ -3,10 +3,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -32,6 +36,99 @@ import (
 )
 
 const burstIntakeSecret = "requester-only-credential-7c5d1f"
+
+func TestBurstLocalFallbackRetainsRequesterSecretsOutsideEnvironmentSnapshot(t *testing.T) {
+	burstLocalFallbackSecrets(t, burstIntakeSecret)
+}
+
+func FuzzBurstLocalFallbackSecretsNeverEnterEnvironmentSnapshots(f *testing.F) {
+	f.Add([]byte("private credential"))
+	f.Add([]byte{0, 255, 39, 10})
+	f.Fuzz(func(t *testing.T, value []byte) {
+		if len(value) > 128 {
+			return
+		}
+		burstLocalFallbackSecrets(t, "requester-only-"+hex.EncodeToString(value))
+	})
+}
+
+func burstLocalFallbackSecrets(t *testing.T, value string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("SPARKWING_HOME", home)
+	config := filepath.Join(home, "config.yaml")
+	t.Setenv("SPARKWING_CONFIG", config)
+	t.Setenv("TOKEN", value)
+	t.Setenv("BURST_ORDINARY", "retained")
+	if err := os.WriteFile(config, []byte("run:\n  routing:\n    route: cloud\n    profile: unreachable\n    local_secrets: [TOKEN]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo := burstIntakeRepository(t)
+	t.Chdir(repo)
+	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured := os.Environ()
+	route, err := loadRunRouting(filepath.Join(repo, ".sparkwing"), "burst")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request controllerwire.CreateRunRequest
+	var output bytes.Buffer
+	err = runRoutedCommand(t.Context(), "burst", runFlags{}, nil, route, &output, burstRunDependencies{
+		connect: func(context.Context, string) (client.EngineOptions, func(), error) {
+			return client.EngineOptions{}, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("unreachable")}
+		},
+		local: func(ctx context.Context, pipeline string, flags runFlags, args []string) error {
+			prepared, err := prepareNativeLocalRun(ctx, home, filepath.Join(repo, ".sparkwing"), pipeline, captured, snapshots)
+			if err == nil {
+				request, err = prepareLocalRunRequest(ctx, prepared, flags, args)
+			}
+			return err
+		},
+	})
+	if err != nil || request.LocalSecrets["TOKEN"] != value || len(request.Request.LocalSecretNames) != 1 || !strings.Contains(output.String(), "running locally") {
+		t.Fatalf("local fallback lost requester secret classification: names=%v error=%v", request.Request.LocalSecretNames, err)
+	}
+	environment, err := snapshots.Load(t.Context(), request.Request.Env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary := false
+	for _, item := range environment {
+		if strings.HasPrefix(item, "TOKEN=") || strings.Contains(item, value) {
+			t.Fatal("requester secret entered the persisted local environment")
+		}
+		ordinary = ordinary || item == "BURST_ORDINARY=retained"
+	}
+	if !ordinary {
+		t.Fatal("filtering requester secrets lost ordinary local environment")
+	}
+	files, err := os.ReadDir(filepath.Join(home, "environments"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		body, err := os.ReadFile(filepath.Join(home, "environments", file.Name()))
+		var entries [][]byte
+		if err != nil || json.Unmarshal(body, &entries) != nil {
+			t.Fatal("cannot inspect persisted environment snapshot")
+		}
+		if bytes.Contains(body, []byte(value)) {
+			t.Fatal("requester secret entered an environment snapshot file")
+		}
+		for _, entry := range entries {
+			if bytes.HasPrefix(entry, []byte("TOKEN=")) || bytes.Contains(entry, []byte(value)) {
+				t.Fatal("requester secret entered an encoded environment snapshot")
+			}
+		}
+	}
+}
 
 func FuzzBurstHostSourceEnvironmentExcludesRequesterValues(f *testing.F) {
 	f.Add("requester-credential", "arbitrary-user-value")

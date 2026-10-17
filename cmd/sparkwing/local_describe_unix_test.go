@@ -34,11 +34,7 @@ func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	captured := os.Environ()
-	seal, err := snapshots.Capture(t.Context(), captured)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", seal, captured, snapshots)
+	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", captured, snapshots)
 	if err != nil {
 		t.Fatal(err)
 	}

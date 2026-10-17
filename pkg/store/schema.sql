@@ -1297,6 +1297,7 @@ CREATE TABLE billing_awards (
     reservation_id TEXT NOT NULL,
     capability_prefix TEXT NOT NULL,
     run_id TEXT NOT NULL,
+    requester_account TEXT NOT NULL DEFAULT '',
     node_id TEXT NOT NULL DEFAULT '',
     generation BIGINT NOT NULL,
     payer_team TEXT NOT NULL REFERENCES teams(name),
