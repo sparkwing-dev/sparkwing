@@ -20,6 +20,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
@@ -28,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -416,5 +418,40 @@ func TestBurstFixtureSupportsPublicSessionEnrollment(t *testing.T) {
 	}
 	if _, err := manager.EnrollRunner(t.Context(), client.EnrollRunnerRequest{Name: "desktop", Repos: []string{"example.test/acme/*"}, Personal: true}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBurstNativePreparationRetainsAdvertisedRunOptions(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("TOKEN", burstIntakeSecret)
+	t.Chdir(burstIntakeRepository(t))
+	_, server, bearer := burstIntakeController(t, "http://controller.test")
+	handler := server.Handler()
+	connection := client.EngineOptions{URL: "http://controller.test", Bearer: func(context.Context) (string, error) { return bearer, nil }, HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w.Result(), nil
+	})}}
+	route := userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"TOKEN"}, SourceFiles: []string{"declared.txt"}}
+	for _, tc := range []struct {
+		mode string
+		want int
+	}{{"front", 1}, {"back", -1}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			inv, err := clisurface.Parse("sparkwing", []string{"run", "burst", "--sw-no-bincache", "--sw-hash-all-files", "--sw-priority", tc.mode})
+			if err != nil {
+				t.Fatal(err)
+			}
+			flags, args := runFlagsFromInvocation(inv)
+			request, err := prepareNativeBurst(t.Context(), "burst", flags, args, route, connection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !request.Request.Source.NoBincache || !request.Request.Source.HashAllFiles || request.Request.Options.Priority.Value != tc.want || request.Request.Options.Priority.Origin.Layer != runspec.LayerFlag {
+				t.Fatalf("run options lost before intake: source=%+v priority=%+v", request.Request.Source, request.Request.Options.Priority)
+			}
+		})
 	}
 }

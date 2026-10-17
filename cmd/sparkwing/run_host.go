@@ -135,15 +135,9 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		if !ok {
 			return &apierr.Error{Code: apierr.Unavailable, Message: "run: controller cannot resolve relative priority"}
 		}
-		state, err := queue.ReadQueue(ctx)
+		rank, err := resolveRelativeRunPriority(ctx, mode, queue)
 		if err != nil {
 			return err
-		}
-		rank := wingwire.ResolveRelativePriority(state.Waiters, mode)
-		for _, waiter := range state.Waiters {
-			if mode == wingwire.PriorityFront && rank <= waiter.Priority || mode == wingwire.PriorityBack && rank >= waiter.Priority {
-				return &apierr.Error{Code: apierr.InvalidArgs, Message: "run: relative priority exceeds the integer range"}
-			}
 		}
 		request.Request.Options.Priority.Value = rank
 	}
@@ -235,17 +229,8 @@ func validateLocalRunFlags(flags runFlags) error {
 			return err
 		}
 	}
-	for _, option := range []struct {
-		name string
-		set  bool
-	}{
-		{"sw-allow-unadmitted", flags.allowUnadmitted},
-		{"sw-index", flags.index != ""},
-		{"target", flags.target != ""},
-	} {
-		if option.set {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --" + option.name + " requires a retained source, admission or private-file binding before intake"}
-		}
+	if flags.allowUnadmitted {
+		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --sw-allow-unadmitted requires a standalone local admission binding before intake"}
 	}
 	if !flags.detached {
 		return refuseDetachedOnlyFlags(flags)
@@ -363,4 +348,18 @@ func runLocalInvocation(pipeline string, flags runFlags, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return runLocalCommand(ctx, pipeline, flags, args, os.Stdout, localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
+}
+
+func resolveRelativeRunPriority(ctx context.Context, mode string, queue controllerwire.QueueManager) (int, error) {
+	state, err := queue.ReadQueue(ctx)
+	if err != nil {
+		return 0, err
+	}
+	rank := wingwire.ResolveRelativePriority(state.Waiters, mode)
+	for _, waiter := range state.Waiters {
+		if mode == wingwire.PriorityFront && rank <= waiter.Priority || mode == wingwire.PriorityBack && rank >= waiter.Priority {
+			return 0, &apierr.Error{Code: apierr.InvalidArgs, Message: "run: relative priority exceeds the integer range"}
+		}
+	}
+	return rank, nil
 }

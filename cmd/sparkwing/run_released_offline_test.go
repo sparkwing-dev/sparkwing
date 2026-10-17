@@ -156,7 +156,27 @@ func main(){sw.Register("offline",func()sw.Pipeline[sw.NoInputs]{return pipeline
 	if err != nil || policyResult.Index.Policy().Latest != version {
 		t.Fatalf("offline run did not read signed policy: %+v: %v", policyResult, err)
 	}
-	if err := os.WriteFile(selected.Executable, []byte("corrupt"), 0o700); err != nil {
+	blocked := exec.Command(selected.Executable, "__sdk-install")
+	input, err := blocked.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := blocked.Start(); err != nil {
+		_ = input.Close()
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := input.Close(); err != nil {
+			t.Error(err)
+		}
+		if err := blocked.Wait(); err == nil {
+			t.Error("incomplete SDK installation unexpectedly succeeded")
+		}
+	}()
+	if err := os.WriteFile(selected.Executable+".corrupt", []byte("corrupt"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(selected.Executable+".corrupt", selected.Executable); err != nil {
 		t.Fatal(err)
 	}
 	if entry, err := source.Acquire(t.Context(), spec, options); err == nil {

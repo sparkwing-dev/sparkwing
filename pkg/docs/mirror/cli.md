@@ -55,7 +55,7 @@ sparkwing run deploy --sw-output json -- --environment staging
 
 Unknown engine flags fail before execution setup. Local `run` accepts no
 connection profile. Use `pipeline trigger --profile NAME` to submit to a remote
-controller. `--target` is an engine control, rather than an author argument.
+controller. The pipeline name selects the deployment shape.
 
 For local execution, `--sw-no-bincache` compiles a fresh Go pipeline executable with debug information.
 `--sw-hash-all-files` includes Git-ignored files in binary-cache keys, including

@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **cli:** Cloud overflow retains uncached builds, full source hashing and relative priority. Inspection uses the installed SDK entry through the shared planner.
+- **cli:** Local `run --sw-index` retains a private, self-contained Git index for detached hosting and retries. Startup rejects changed snapshot bytes.
+
+- **cli (Breaking):** Remove the restored `run --target` flag. The pipeline name selects the deployment shape, as in v0.6.0.
+
 - **run:** Local runs honor `--sw-no-bincache` and `--sw-hash-all-files` during
   inspection, detached hosting and retries. Uncached Go builds keep debug
   information. Resolve relative priority against the local controller queue.

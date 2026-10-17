@@ -110,7 +110,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 		}
 	}
 	options := source.Options{SDK: sdk, Engines: engines, PreparedCheckout: checkout, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
-	described, err := inspectTriggerSource(ctx, selected, captured, triggerInspection{options: options})
+	described, err := inspectTriggerSource(ctx, selected, captured, options)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

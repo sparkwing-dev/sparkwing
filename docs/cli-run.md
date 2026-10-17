@@ -58,6 +58,5 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--sw-allow-unadmitted` | Permit execution without local resource admission. |
 | `--sw-dry-run` | Preview the run without executing its jobs. |
 | `--sw-allow-risk LABEL[,LABEL...]` | Authorize the listed pipeline risks. Repeatable; comma-separated values are accepted. |
-| `--sw-index PATH` | Pipeline discovery index path. |
+| `--sw-index PATH` | Capture a Git index for local staged-content checks. |
 | `--sw-run-handle-file PATH` | Write the submitted run handle to this file. |
-| `--target TARGET` | Select a declared pipeline target. |

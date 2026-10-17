@@ -378,7 +378,6 @@ func Registry() []Command {
 			{Name: "sw-allow-risk", Argument: "LABEL[,LABEL...]", Repeatable: true, CommaList: true},
 			{Name: "sw-index", Argument: "PATH"},
 			{Name: "sw-run-handle-file", Argument: "PATH"},
-			{Name: "target", Argument: "TARGET"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
 		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Team runner registration requires team administration. --personal registers capacity for only your runs and requires --session-stdin with an existing independent account session. The session and its CSRF proof stay in memory. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{

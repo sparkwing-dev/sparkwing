@@ -278,7 +278,7 @@ func (w *localFailingEventWriter) Write(body []byte) (int, error) {
 }
 
 func TestLocalRunRejectsUnsupportedSelectionsBeforeAnyEffect(t *testing.T) {
-	for _, flags := range []runFlags{{detached: true, index: "/index"}} {
+	for _, flags := range []runFlags{{allowUnadmitted: true}} {
 		deps := localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
 			t.Fatal("unsupported input reached native composition")
 			return localRunRuntime{}, nil

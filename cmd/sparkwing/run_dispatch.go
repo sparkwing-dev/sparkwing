@@ -20,12 +20,12 @@ import (
 )
 
 type runFlags struct {
-	invocation                 clisurface.Invocation
-	parseErr                   error
-	ref                        string
-	publish, cacheFrom, target string
-	pauseBefore, pauseAfter    []string
-	pauseOnFailure             *bool
+	invocation              clisurface.Invocation
+	parseErr                error
+	ref                     string
+	publish, cacheFrom      string
+	pauseBefore, pauseAfter []string
+	pauseOnFailure          *bool
 
 	noUpdate bool
 	verbose  bool
@@ -88,7 +88,7 @@ func runFlagsFromInvocation(inv clisurface.Invocation) (runFlags, []string) {
 	}
 	return runFlags{
 		invocation: inv,
-		publish:    inv.Value("publish"), cacheFrom: inv.Value("sw-cache-from"), target: inv.Value("target"),
+		publish:    inv.Value("publish"), cacheFrom: inv.Value("sw-cache-from"),
 		pauseBefore: inv.Flags["sw-pause-before"], pauseAfter: inv.Flags["sw-pause-after"], pauseOnFailure: pause,
 		ref: inv.Value("sw-ref"), pipelineRef: inv.Value("sw-pipeline-ref"),
 		noUpdate: inv.Bool("sw-no-update"), verbose: inv.Bool("sw-verbose"),

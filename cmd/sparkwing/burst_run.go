@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -67,8 +66,8 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 	if err := validateLocalRunFlags(flags); err != nil {
 		return err
 	}
-	if flags.noBincache || flags.hashAllFiles || strings.TrimSpace(flags.priority) == "front" || strings.TrimSpace(flags.priority) == "back" {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: Cloud overflow requires retained binary policy and relative-priority bindings before intake"}
+	if flags.index != "" {
+		return errors.New("run: --sw-index requires local routing")
 	}
 	if flags.ref != "" || flags.pipelineRef != "" {
 		return errors.New("run: Cloud overflow captures the working tree; use pipeline trigger to select committed revisions")

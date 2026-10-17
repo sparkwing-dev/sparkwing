@@ -167,7 +167,7 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 			err = &maskedCLIError{err: err, masker: masker}
 		}
 	}()
-	seal, err := snapshots.Capture(ctx, environment)
+	seal, err := captureLocalRunEnvironment(ctx, home, filepath.Dir(directory), flags.index, environment, snapshots, masker)
 	if err != nil {
 		return localRunPreparation{}, err
 	}

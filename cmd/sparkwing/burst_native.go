@@ -155,7 +155,8 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	described, err := inspectTriggerSource(ctx, selected, captured, triggerInspection{options: options})
+	selected.source.NoBincache, selected.source.HashAllFiles = flags.noBincache, flags.hashAllFiles
+	described, err := inspectTriggerSource(ctx, selected, captured, options)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
@@ -195,6 +196,17 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 		return request, &burstBeforeIntakeError{err}
 	}
 	request.Request.Source.BundleDigest = runspec.Optional[string]{Set: true, Value: digest}
+	if mode := strings.TrimSpace(flags.priority); mode == "front" || mode == "back" {
+		queue, err := client.NewQueueManager(connection)
+		if err != nil {
+			return request, err
+		}
+		rank, err := resolveRelativeRunPriority(ctx, mode, queue)
+		if err != nil {
+			return request, err
+		}
+		request.Request.Options.Priority.Value = rank
+	}
 	return request, nil
 }
 

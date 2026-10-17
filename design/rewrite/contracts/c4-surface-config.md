@@ -1,5 +1,19 @@
 # C4: surface and configuration contracts
 
+## Retained run build policy
+
+Trigger and Cloud overflow inspection use the acquired SDK entry through the
+shared SDK planner. There is no second CLI preparation with default policy.
+`Source.NoBincache` and `HashAllFiles` govern that installation, hosting and retries.
+Local and Cloud relative priority use the same queue resolver immediately before
+intake. Overflow preparation resolves its rank after uploading the source bundle.
+
+## Run target selection
+
+`run --target` is removed. Pipeline names select deployment shapes, as recorded
+in the v0.6.0 migration. The registry, help and current run documentation carry
+no target flag. Author arguments named target remain opaque after `--`.
+
 ## Overflow account controls
 
 `sparkwing overflow show --profile NAME` reads the authenticated account's
@@ -34,7 +48,12 @@ emit no success receipt. The command adds no new routes, grants or settings.
   Execution and inactivity budgets remain distinct.
 - `procenv.Runtime.GateIndex` is an optional string path, projected only from
   a verified local snapshot. The path remains in private snapshot storage,
-  never a wire field; remote ambient input cannot bind a hook index.
+  never a wire field; remote ambient input cannot bind a hook index. CLI intake
+  copies `--sw-index` (or the hook index) into private environment storage after
+  Git normalizes it to a self-contained index. Its content hash names the file.
+  Each snapshot load checks its location, ownership, permissions and bytes before
+  process startup. Retries retain the index and environment identity. Cloud routing
+  refuses `--sw-index` because its path is local. Source inputs remain unchanged.
 - Network proxy settings are the existing passed-and-masked exception. Register
   credential components for URL and scheme-less proxy forms, including GOPROXY and
   PIP_INDEX_URL. A mask of only the whole string is insufficient when tools print

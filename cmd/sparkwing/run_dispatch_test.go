@@ -36,6 +36,7 @@ func TestParseRunFlagsRejectsInvalidBeforeExecution(t *testing.T) {
 		{"--profile=prod"},
 		{"--sw-profile=prod"},
 		{"--unknown"},
+		{"--target=prod"},
 		{"--sw-detached", "--sw-workers=1"},
 		{"--sw-request-id=id"},
 		{"--sw-consumer-idle=1m"},
@@ -48,8 +49,8 @@ func TestParseRunFlagsRejectsInvalidBeforeExecution(t *testing.T) {
 }
 
 func TestParseRunFlagsRetainsPublicationSelection(t *testing.T) {
-	flags, _ := parseRunFlagsArgs([]string{"--publish=ci", "--sw-cache-from=ci", "--target=arm64"})
-	if flags.parseErr != nil || flags.publish != "ci" || flags.cacheFrom != "ci" || flags.target != "arm64" {
+	flags, _ := parseRunFlagsArgs([]string{"--publish=ci", "--sw-cache-from=ci"})
+	if flags.parseErr != nil || flags.publish != "ci" || flags.cacheFrom != "ci" {
 		t.Fatalf("selection lost: %#v", flags)
 	}
 }
