@@ -126,6 +126,7 @@ Create teams under operator authority
 
 ### Subcommands
 
+- `show` -- Show a team and its protected node label
 - `create` -- Create a team and issue its first administrator credential
 
 ### Flags
@@ -155,6 +156,23 @@ JSON includes the one-time capability and account metadata. Plain and pretty pri
 | `--help-all` | Include uncommon flags in command help. |
 | `--team SLUG` | team (required) |
 | `--display-name NAME` | display name |
+| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+
+## `sparkwing operator teams show`
+
+Show a team and its protected node label
+
+Show the team's protected node label and value for its NodePool template.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--team SLUG` | team (required) |
 | `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
 
 ## `sparkwing operator tokens`

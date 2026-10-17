@@ -35,6 +35,7 @@ type CloudJobObservation struct {
 	JobUID        string
 	NodeUID       string
 	ReservationID string
+	Rejected      bool
 }
 
 // CloudJobState carries the controller's teardown decision for one immutable award.
@@ -96,9 +97,6 @@ func (l *Launcher) Run(ctx context.Context) error {
 // LaunchOne persists a suspended Job, creates its bootstrap Secret, then permits execution.
 func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.validate(); err != nil {
-		return false, err
-	}
-	if err := l.verifyAdmissionExemption(ctx); err != nil {
 		return false, err
 	}
 	award, err := l.Control.Claim(ctx)
@@ -172,9 +170,17 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
-	_, err = l.Kube.BatchV1().Jobs(l.Config.Namespace).Patch(ctx, created.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+	activated, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Patch(ctx, created.Name, types.MergePatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
+	}
+	expected := created.DeepCopy()
+	expected.Spec.Suspend, expected.Spec.ActiveDeadlineSeconds = ptr(false), &remaining
+	if err := validateAdmittedJob(expected, activated); err != nil {
+		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation))
+	}
+	if err := l.waitForJobPod(ctx, activated); err != nil {
+		return true, l.verificationFailure(ctx, activated, award.Binding, r.Reservation, err)
 	}
 	return true, nil
 }

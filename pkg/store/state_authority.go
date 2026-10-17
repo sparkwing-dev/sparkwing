@@ -155,6 +155,10 @@ func lockStateRunTx(ctx context.Context, tx *storeTx, team Team, id string) erro
 }
 
 func prepareStateActorTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor, now time.Time) error {
+	if actor.Kind == ActorLauncher {
+		_, err := checkLauncherActorTx(ctx, tx, team, runID, actor)
+		return err
+	}
 	if deletionActor(tx, team, actor) {
 		return nil
 	}

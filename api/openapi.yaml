@@ -1863,6 +1863,8 @@ components:
           $ref: '#/components/schemas/internal.controllerwire.LauncherJobRef'
         node_uid:
           type: string
+        rejected:
+          type: boolean
         reservation_id:
           type: string
       required:
@@ -8605,6 +8607,11 @@ paths:
         owner: deployment
         authentication: capability
         access:
+          - credential: deployment_admin
+            grants:
+              - operator.tokens
+            binding: operator_settings
+            liveness: credential
           - credential: operator_console_session
             grants:
               - operator.console

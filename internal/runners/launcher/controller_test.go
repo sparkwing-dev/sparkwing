@@ -503,3 +503,24 @@ func FuzzControllerSyncRetainsObservedIdentity(f *testing.F) {
 		}
 	})
 }
+
+func TestControllerForwardsPodRejection(t *testing.T) {
+	unit := wireAward(capability.UnitNode)
+	control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+		if len(request.Observed) != 1 || !request.Observed[0].Rejected {
+			t.Fatal("Pod rejection was lost on the wire")
+		}
+		return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{request.Observed[0].Job}}, nil
+	}}, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states, err := control.Sync(t.Context(), []CloudJobObservation{{Binding: binding, JobNamespace: "cloud", JobName: jobName(binding), JobUID: "uid", NodeUID: "node", Rejected: true}})
+	if err != nil || len(states) != 1 || !states[0].Delete {
+		t.Fatalf("rejection decision: %+v %v", states, err)
+	}
+}

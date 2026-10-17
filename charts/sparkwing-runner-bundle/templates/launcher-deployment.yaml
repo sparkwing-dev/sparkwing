@@ -18,6 +18,7 @@ spec:
     metadata:
       labels:
         {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "launcher") | nindent 8 }}
+        app: sparkwing-launcher
     spec:
       serviceAccountName: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . }}
       automountServiceAccountToken: true

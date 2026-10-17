@@ -53,7 +53,12 @@ func TestNativeLocalPreparationResolvesTrackingSparksBeforeInstallation(t *testi
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))
 	t.Setenv("GOPROXY", "http://127.0.0.1:1")
 	t.Setenv("GOPRIVATE", "")
-	dir := newSparksFixture(t, "libraries:\n  - name: dependency\n    source: example.com/dependency\n    version: latest\n")
+	repo := initSnapshotRepo(t)
+	dir := filepath.Join(repo, ".sparkwing")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSDKFixture(t, dir, "package main\nfunc main() {}\n")
 	writeFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: ci\n    entrypoint: CI\nsparks:\n  - name: dependency\n    source: example.com/dependency\n    version: latest\n")
 	snapshots, err := nodehost.NewFileEnvironmentSnapshots(t.TempDir())
 	if err != nil {

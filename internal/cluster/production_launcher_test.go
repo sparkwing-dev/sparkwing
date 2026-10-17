@@ -19,7 +19,7 @@ func TestProductionLauncherBindsKubernetesAndCloudBoundary(t *testing.T) {
 	t.Setenv("KUBECONFIG", kubeconfig)
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
 	cfg := launcher.CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 1, MemoryCeiling: 1 << 30}
-	runner, err := productionLauncher("dev")(t.Context(), cfg, "private-token")
+	runner, err := productionLauncher("dev")(t.Context(), cfg, fixedBearer("private-token"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestProductionLauncherBindsKubernetesAndCloudBoundary(t *testing.T) {
 	stop := errors.New("cancelled before Kubernetes")
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cancel(stop)
-	if _, err = productionLauncher("dev")(ctx, cfg, "private-token"); !errors.Is(err, stop) {
+	if _, err = productionLauncher("dev")(ctx, cfg, fixedBearer("private-token")); !errors.Is(err, stop) {
 		t.Fatalf("lost cancellation: %v", err)
 	}
 }

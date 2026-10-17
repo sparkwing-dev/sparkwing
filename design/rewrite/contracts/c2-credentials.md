@@ -758,8 +758,9 @@ that authority. Member run selectors resolve within the same tenant. Masked
 member reads return forbidden. Selection and the claim's secret_released event
 commit together before returning an envelope. A failed audit commits no release.
 
-The controller requires BoundCipher and binds decryption to the authenticated
-team and every stored row access field. It rejects wrong names and masked
+The controller requires BoundCipher before the transactional read and release
+audit, and binds decryption to the authenticated team and every stored row access
+field. Ephemeral requester secrets skip decryption. It rejects wrong names and masked
 member results before opening. Invalid envelopes and cipher diagnostics return
 a private internal error without values or partial output. A missing cipher
 returns unavailable. Missing or foreign-team readers return policy_missing.
@@ -3144,6 +3145,8 @@ property uses a fake for that boundary and claims no persisted ranking evidence.
 
 Every data endpoint decodes its operation and selectors before authorization.
 The authenticated data scope supplies the run, job, attempt and generation.
+Unrelated POST query fields cannot replace that scope. Publication parsing starts
+only when job, attempt or generation is present and requires the complete triple.
 Commit binding checks the selected upload ticket against its current uploader.
 Has-many binding checks live read authority before the handler filters each
 requested digest through the read set. Account data opt-ins retain only the
@@ -3528,3 +3531,13 @@ return the same `not_found` envelope before decoder diagnostics or grant checks.
 Expansion resolution then reads the source node in that tenant and preserves
 its generation for binding. Exact result-body digests and child lineage
 selectors remain part of the authorization evidence.
+
+
+## W8 operator node placement read (2026-10-17, integration)
+
+GET /api/v1/operator/teams/{team} also accepts current deployment authority with
+operator.tokens under BindOperatorSettings. That route returns only the stored
+team ID and display name to deployment credentials. Console callers retain their
+existing view. OperatorManager.ReadOperatorTeam consumes this safe projection.
+The CLI derives the protected node label value through the launcher's shared
+TeamNodeValue. The read grants no team credential or financial authority.

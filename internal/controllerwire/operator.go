@@ -105,6 +105,7 @@ type ObjectStoreBreaker struct {
 // OperatorManager manages team creation, operational guards and storage budgets under operator authority.
 type OperatorManager interface {
 	CreateOperatorTeam(context.Context, OperatorTeamCreate) (OperatorTeamCreated, error)
+	ReadOperatorTeam(context.Context, string) (OperatorTeam, error)
 	ReadOperatorLimits(context.Context) (OperatorLimits, error)
 	WriteOperatorLimits(context.Context, OperatorLimitsWrite) (OperatorLimits, error)
 	ReadObjectStoreBreaker(context.Context) (ObjectStoreBreaker, error)
@@ -142,4 +143,10 @@ type OperatorRefundRecorded struct {
 	ReversedMicro int64  `json:"reversed_micro"`
 	BalanceMicro  int64  `json:"balance_micro"`
 	Created       bool   `json:"created"`
+}
+
+// OperatorTeam reports the persisted team identity for infrastructure setup.
+type OperatorTeam struct {
+	Team        string `json:"team"`
+	DisplayName string `json:"display_name"`
 }

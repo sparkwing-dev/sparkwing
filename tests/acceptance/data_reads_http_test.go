@@ -93,6 +93,38 @@ func TestDataReadHTTPDownload(t *testing.T) {
 	}
 }
 
+func FuzzDataClaimQueryCannotReplaceAuthenticatedScope(f *testing.F) {
+	f.Add("foreign", uint8(0))
+	f.Add("job", uint8(1))
+	f.Add("", uint8(2))
+	f.Add("%zz", uint8(3))
+	f.Fuzz(func(t *testing.T, selector string, mutation uint8) {
+		fixture := newDataHTTPFixture()
+		query := url.Values{"team": {selector}, "ref": {selector}, "key": {selector}}
+		switch mutation % 4 {
+		case 1:
+			query = url.Values{"job": {selector}}
+		case 2:
+			query = url.Values{"job": {"job"}, "attempt": {"2"}, "generation": {"4"}}
+		}
+		encoded := query.Encode()
+		if mutation%4 == 3 {
+			encoded = "team=%zz"
+		}
+		w := authorityHTTP(fixture.handler(), fixture.boundary, "POST", "/api/v1/data/download?"+encoded, `{"digest":"`+string(dataDigest())+`"}`)
+		if mutation%4 != 0 {
+			if w.Code != 400 && w.Code != 403 || len(fixture.reads) != 0 || len(fixture.charges) != 0 || fixture.objects.signed.Key != "" {
+				t.Fatalf("query selected authority: HTTP %d %s", w.Code, w.Body.String())
+			}
+			return
+		}
+		target := fixture.boundary.bindingTarget.Data
+		if w.Code != 200 || target == nil || target.RunID != "run" || target.NodeID != "job" || target.Attempt != 2 || target.Generation != 4 || len(fixture.reads) != 1 || len(fixture.charges) != 1 {
+			t.Fatalf("query changed authenticated scope: target=%+v HTTP %d %s", target, w.Code, w.Body.String())
+		}
+	})
+}
+
 func TestDataReadHTTPHasMany(t *testing.T) {
 	for _, state := range []string{"mixed", "empty", "missing", "private error", "revoked", "expired budget"} {
 		t.Run(state, func(t *testing.T) {

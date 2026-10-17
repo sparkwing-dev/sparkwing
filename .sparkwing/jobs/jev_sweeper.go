@@ -431,5 +431,5 @@ func interpretJevSweep(candidates []jevSweepCandidate, response jevLintResponse)
 }
 
 func init() {
-	sparkwing.Register[JevSweeperArgs]("jev-sweeper", func() sparkwing.Pipeline[JevSweeperArgs] { return &JevSweeper{} })
+	sparkwing.Register[JevSweeperArgs]("JevSweeper", func() sparkwing.Pipeline[JevSweeperArgs] { return &JevSweeper{} })
 }

@@ -256,7 +256,7 @@ func TestPrepareTriggerRequestBindsAliasArgumentsAndIntake(t *testing.T) {
 		source: selection, settings: inputs,
 		args: []string{"-r", "us-east", "--image", "release", "--password", password},
 		described: []nodeproto.PipelineDescription{
-			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
+			{Name: "deploy-prod", Args: []nodeproto.ArgumentDescription{{Name: "unrelated", Type: "bool"}}},
 			{Name: "Deploy", Args: []nodeproto.ArgumentDescription{
 				{Name: "region", Short: "r", Type: "string", Required: true},
 				{Name: "image", Type: "string", JobID: "rollout", Required: true},

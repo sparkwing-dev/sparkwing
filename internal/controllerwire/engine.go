@@ -117,6 +117,7 @@ type LauncherObservation struct {
 	Job           LauncherJobRef      `json:"job,omitzero"`
 	NodeUID       string              `json:"node_uid"`
 	ReservationID string              `json:"reservation_id,omitempty"`
+	Rejected      bool                `json:"rejected,omitempty"`
 }
 
 // LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.

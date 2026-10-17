@@ -17,6 +17,7 @@ spec:
     metadata:
       labels:
         {{- include "sparkwing-full.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 8 }}
+        app: sparkwing-controller
     spec:
       serviceAccountName: {{ include "sparkwing-full.serviceAccountName" . }}
       automountServiceAccountToken: false

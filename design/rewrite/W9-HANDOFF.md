@@ -1,6 +1,14 @@
-# W9 continuation: cached local dependency preparation
+# W9 continuation: native registration and merge reconciliation
 
-Latest continuation: [W9-CACHED-LOCAL-DEPENDENCIES.md](W9-CACHED-LOCAL-DEPENDENCIES.md).
+Latest continuation: [W9-NATIVE-REGISTRATION-CONTINUATION.md](W9-NATIVE-REGISTRATION-CONTINUATION.md).
+The four delta fixes remain in place. This session migrates the repository's SDK
+registrations to their configured entrypoints, corrects failing native fixtures,
+updates Windows verification references and resolves the two contract conflict
+contents. Build, vet, focused real-path tests, acceptance cells and doccheck pass.
+The lead's latest native report still contains FAIL. The lead must stage the
+resolved contracts, finish the merge, review/commit and rerun native verification.
+
+Previous continuation: [W9-CACHED-LOCAL-DEPENDENCIES.md](W9-CACHED-LOCAL-DEPENDENCIES.md).
 Matching local binaries are leased before invoking Go. Cold preparation retains
 checksum and workspace behavior. The toolchain fixture verifies its override
 during preparation and compilation. Build, vet, focused tests and source/doc

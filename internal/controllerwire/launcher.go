@@ -45,7 +45,7 @@ func (o LauncherObservation) Validate() error {
 	switch o.Award.Kind {
 	case capability.UnitPlan, capability.UnitEval, capability.UnitNode:
 		if o.ReservationID != "" {
-			if o.Job != (LauncherJobRef{}) {
+			if o.Job != (LauncherJobRef{}) || o.Rejected {
 				return &apierr.Error{Code: apierr.BadRequest, Message: "launcher reservation observation cannot carry a Job reference"}
 			}
 			return nil

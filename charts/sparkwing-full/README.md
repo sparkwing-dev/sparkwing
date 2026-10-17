@@ -10,7 +10,7 @@ own controller is outside the launch offering.
 [examples/cloud.yaml](examples/cloud.yaml) is a secret-free input for ArgoCD on
 `kikd-prod`. It renders the controller, Service, nginx Ingress for
 `api.sparkwing.dev` and `console.sparkwing.dev`, launcher Deployment, launcher and
-customer ServiceAccounts, RBAC, admission guard and Job egress policies. It uses
+customer ServiceAccounts, RBAC and Job egress policies. It uses
 the existing `sparkwing-database` Secret's `dsn` key for RDS PostgreSQL.
 
 Replace the image coordinates, example digests, AWS role ARN, bucket/domain,
@@ -139,35 +139,54 @@ The example references an existing `sparkwing-tls` certificate Secret.
 
 The launcher runs on infrastructure nodes with its own Kubernetes identity. Job
 code runs as root with a privileged DinD sidecar under `sparkwing-customer-job`,
-which has no API token or cloud annotations. Each Job and its boundary probes
+which has no API token or cloud annotations. Do not attach an IRSA role or create
+a Pod Identity association for this account. Customer Pods with AWS credential
+injections are rejected. Each Job and its boundary probes
 carry `karpenter.sh/do-not-disrupt: "true"`. Jobs tolerate
 `sparkwing.dev/cpu-band:NoSchedule`, including the existing `small` band, and keep
 the fixed aggregate 20 GiB scratch budget including DinD.
 
 The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the following:
 
-- Each team's nodes have `sparkwing.dev/team-node` equal to `launcher.TeamNodeValue(team)`:
+- Each team's nodes have `node-restriction.kubernetes.io/sparkwing-team-node` equal to the `node_label_value` from
+  `sparkwing operator teams show --team <team> -o json`:
   `sha256-` plus the first 40 lowercase hex characters of SHA-256 of the team ID.
   A presence-only label or a shared `small` value cannot establish team ownership.
-- Set that exact value in the team's NodePool template metadata labels and retain
-  `sparkwing.dev/cpu-band=small:NoSchedule` in its template taints. Provision one
-  isolated node per concurrent Job. The launcher reserves existing Ready nodes
+- Set that exact value in the team's NodePool template metadata labels and in a
+  `node-restriction.kubernetes.io/sparkwing-team-node=<hash>:NoSchedule` taint. Retain the existing
+  `sparkwing.dev/cpu-band=small:NoSchedule` taint. Start from
+  [the team NodePool example](examples/team-nodepool.yaml). Provision one
+  isolated node per concurrent Job. Enable Node authorizer and NodeRestriction.
+  Reservation checks the node's owning NodeClaim, its node name/provider identity,
+  and its NodePool UID and template label. A protected first-use label permanently
+  binds the node to one team. Clearing a reservation retains that label.
+  A rejected Pod cordons the node and deletes its exact NodeClaim. The launcher reserves existing Ready nodes
   and does not create NodePools or request nodes from Karpenter. An empty pool
   that scales only in response to pending Pods must be provisioned externally.
 - Nodes need the awarded CPU/memory plus system overhead and at least 20 GiB of
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
-- The cluster must support native sidecars and `PodLevelResources`, and serve
-  `admissionregistration.k8s.io/v1` validating policies/bindings plus the mutating
-  admission policy binding API used by the launcher's exemption checks.
-- Use a namespace permitting privileged customer Jobs and boundary probes. Keep
-  it free of LimitRanges. Mutating webhooks touching Job/Pod CREATE or UPDATE,
-  and mutating policy bindings, must exclude it with the canonical namespace
-  name selector. See [runner-bundle](../sparkwing-runner-bundle/README.md).
+- The cluster must support native sidecars and `PodLevelResources`.
+- Use a namespace permitting privileged customer Jobs and boundary probes. Grant
+  Pod and Job creation only to the launcher identity. Pod verification allows
+  the named EKS injections and rejects other mutations. See
+  [runner-bundle](../sparkwing-runner-bundle/README.md).
 - Enforce default-deny egress from both Pod and escaped node contexts. Allow DNS,
   the API origin, S3/CloudFront, GitHub source/releases and required dependency
   registries. Block metadata, Kubernetes API, internal networks and DaemonSet
   ports. The example allows public HTTPS and cluster DNS at the Pod layer.
   Supply node/firewall enforcement and adapt destinations for your network.
+
+The Cloud example enables `volumePermissions` so the controller owns `/data`
+and can set its private mode to `0700`. `fsGroup: 65534` grants group access but
+cannot authorize that mode change on a root-owned emptyDir. The example also
+shows `trustedProxyCIDRs`. Replace the proxy CIDRs with the actual nginx source
+range.
+
+Infrastructure Pods carry component `app` labels. Customer Pods carry
+`app: sparkwing-job`. Baseline allow-all ingress/egress policies must exclude
+customer Pods and the fenced infrastructure components. On kikd, extend the
+baseline exclusions to `sparkwing-job` before enabling the launcher. Chart RBAC
+cannot remove privileges granted by other bindings.
 
 The chart's policies select customer Jobs and enforcement probes. The controller
 and launcher keep their infrastructure networking. Standard NetworkPolicy alone

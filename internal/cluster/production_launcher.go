@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -13,7 +14,7 @@ import (
 )
 
 func productionLauncher(version string) LauncherFactory {
-	return func(ctx context.Context, jobs launcher.CloudJobConfig, token string) (*launcher.Launcher, error) {
+	return func(ctx context.Context, jobs launcher.CloudJobConfig, bearer func(context.Context) (string, error)) (*launcher.Launcher, error) {
 		if err := context.Cause(ctx); err != nil {
 			return nil, err
 		}
@@ -25,10 +26,14 @@ func productionLauncher(version string) LauncherFactory {
 		if err != nil {
 			return nil, err
 		}
-		boundary, err := launcher.NewProductionBoundary(kube, jobs, config.Host)
+		karpenter, err := dynamic.NewForConfig(config)
 		if err != nil {
 			return nil, err
 		}
-		return launcher.NewLauncher(ctx, launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: jobs, Bearer: fixedBearer(token), Demand: controllerwire.ClaimRequest{RunnerVersion: version, Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: jobs.CPUCeiling, AvailableMemoryBytes: jobs.MemoryCeiling}})
+		boundary, err := launcher.NewProductionBoundary(kube, karpenter, jobs, config.Host)
+		if err != nil {
+			return nil, err
+		}
+		return launcher.NewLauncher(ctx, launcher.RuntimeConfig{Kube: kube, Boundary: boundary, Jobs: jobs, Bearer: bearer, Demand: controllerwire.ClaimRequest{RunnerVersion: version, Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: jobs.CPUCeiling, AvailableMemoryBytes: jobs.MemoryCeiling}})
 	}
 }

@@ -42,14 +42,18 @@ func (f *oidcFacts) ReadOIDCFacts(_ context.Context, a capability.Authorized) (c
 	f.actor = a
 	return f.facts, f.err
 }
+
 func oidcBoundary() (*credentialBoundary, *oidcFacts) {
 	b := newCredentialBoundary()
 	b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.OIDCMint)
-	f := &oidcFacts{facts: capability.OIDCFacts{Now: b.snapshot.Now, NotAfter: b.snapshot.Now.Add(5 * time.Minute),
+	f := &oidcFacts{facts: capability.OIDCFacts{
+		Now: b.snapshot.Now, NotAfter: b.snapshot.Now.Add(5 * time.Minute),
 		Team: "team", RunID: "run", Pipeline: "deploy", Trigger: "push", RunnerKind: "runner", Ref: "refs/heads/main",
-		SHA: strings.Repeat("a", 40), Repository: "github.com/acme/api", RepositoryID: 42}}
+		SHA: strings.Repeat("a", 40), Repository: "github.com/acme/api", RepositoryID: 42,
+	}}
 	return b, f
 }
+
 func oidcPrivate(t *testing.T) (*rsa.PrivateKey, []byte) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -58,6 +62,7 @@ func oidcPrivate(t *testing.T) (*rsa.PrivateKey, []byte) {
 	}
 	return key, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 }
+
 func oidcServer(t *testing.T, b *credentialBoundary, f *oidcFacts, private, published []byte) *controller.Server {
 	t.Helper()
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithEngineController(&controller.EngineController{
@@ -75,6 +80,7 @@ func oidcServer(t *testing.T, b *credentialBoundary, f *oidcFacts, private, publ
 	}
 	return s
 }
+
 func oidcResponse(t *testing.T, w *httptest.ResponseRecorder, key *rsa.PublicKey) (controller.OIDCTokenResponse, map[string]any) {
 	t.Helper()
 	var result controller.OIDCTokenResponse
@@ -99,6 +105,7 @@ func oidcResponse(t *testing.T, w *httptest.ResponseRecorder, key *rsa.PublicKey
 	}
 	return result, claims
 }
+
 func TestOIDCMintHTTPIdentityAndExpiryProperty(t *testing.T) {
 	b, f := oidcBoundary()
 	key, private := oidcPrivate(t)
@@ -131,6 +138,7 @@ func TestOIDCMintHTTPIdentityAndExpiryProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestOIDCMintHTTPRefusals(t *testing.T) {
 	_, private := oidcPrivate(t)
 	for _, state := range []string{"anonymous", "machine", "member", "session", "console", "peer", "bootstrap", "grant", "revoked", "ancestor", "expired", "cancelled", "ended", "binding", "backend", "transaction", "race", "provider", "private", "tenant", "run", "clock", "ceiling", "subject", "missing reader", "disabled"} {
@@ -151,6 +159,7 @@ func TestOIDCMintHTTPRefusals(t *testing.T) {
 				b = issuanceSession()
 			case "console":
 				b = consoleBoundary()
+				want = apierr.NotFound
 			case "peer":
 				b = authorityMember()
 				p = &b.snapshot.Authorities[0].Principal
@@ -231,6 +240,7 @@ func TestOIDCMintHTTPRefusals(t *testing.T) {
 		})
 	}
 }
+
 func TestOIDCMintHTTPInputAndBudget(t *testing.T) {
 	b, f := oidcBoundary()
 	_, private := oidcPrivate(t)
@@ -267,6 +277,7 @@ func TestOIDCMintHTTPInputAndBudget(t *testing.T) {
 		t.Fatalf("claim shares another claim's budget: %d", w.Code)
 	}
 }
+
 func TestOIDCMintHTTPKeyRotation(t *testing.T) {
 	b, f := oidcBoundary()
 	_, oldKey := oidcPrivate(t)
@@ -310,11 +321,16 @@ func TestOIDCMintHTTPCommittedSubjects(t *testing.T) {
 		event, ref, kind string
 		repositoryID     int64
 	}{
-		{"push", "refs/heads/main", "runner", 42}, {"pull_request", "refs/pull/7/head", "runner", 42},
-		{"push", "refs/tags/v1.2.3", "runner", 42}, {"release", "refs/tags/v1", "runner", 42},
-		{"create", "refs/heads/topic", "runner", 42}, {"delete", "refs/heads/topic", "runner", 42},
-		{"cron", "refs/heads/main", "service", 0}, {"manual", "", "user", 0},
-		{"push", "refs/heads/main", "github-actions", 42}, {"push", "refs/heads/main", "runner", 9001},
+		{"push", "refs/heads/main", "runner", 42},
+		{"pull_request", "refs/pull/7/head", "runner", 42},
+		{"push", "refs/tags/v1.2.3", "runner", 42},
+		{"release", "refs/tags/v1", "runner", 42},
+		{"create", "refs/heads/topic", "runner", 42},
+		{"delete", "refs/heads/topic", "runner", 42},
+		{"cron", "refs/heads/main", "service", 0},
+		{"manual", "", "user", 0},
+		{"push", "refs/heads/main", "github-actions", 42},
+		{"push", "refs/heads/main", "runner", 9001},
 	} {
 		b, f := oidcBoundary()
 		f.facts.Trigger, f.facts.Ref, f.facts.RunnerKind, f.facts.RepositoryID = tc.event, tc.ref, tc.kind, tc.repositoryID
@@ -331,7 +347,7 @@ func TestOIDCMintHTTPCommittedSubjects(t *testing.T) {
 
 func TestOIDCMintHTTPSubjectInjectionProperty(t *testing.T) {
 	_, private := oidcPrivate(t)
-	property := func(input []byte, field uint8, invalid uint8) bool {
+	property := func(input []byte, field, invalid uint8) bool {
 		b, f := oidcBoundary()
 		value := "private-subject-" + hex.EncodeToString(input) + []string{":trigger:push", "*", "?", " ", "\x00", "é"}[invalid%6]
 		fields := []*string{&f.facts.Pipeline, &f.facts.Trigger, &f.facts.RunnerKind, &f.facts.Ref}

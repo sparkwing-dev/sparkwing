@@ -91,7 +91,8 @@ that keeper. The owner supplies its current compute activity to the same renewal
 projection. Standalone hosts own their own keeper.
 
 The owner projects persisted job cancellation intent onto its active self-claimed
-work contexts. Unclaimed cancellation settles before stopping admission. Another
+work contexts. Unclaimed pending and ready jobs settle cancellation even when no
+local worker is active, before stopping admission. Another
 holder retains admission until its claim drains. Independent cleanup failures
 remain errors when execution is cancelled.
 

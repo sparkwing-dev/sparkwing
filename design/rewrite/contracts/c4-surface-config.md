@@ -1062,7 +1062,7 @@ with separate `launcher.tokenSecret` and Kubernetes ServiceAccount/RBAC.
 image requires repository and tag together. Job runner and Docker coordinates
 also require a SHA-256 digest. AppVersion never selects a runtime image.
 The launcher targets the release namespace, alongside its customer ServiceAccount,
-admission exemption guard and default-deny Job egress policy. Allowed egress is
+Pod verification and default-deny Job egress policy. Allowed egress is
 operator-supplied through `launcher.networkPolicy.egress`.
 
 BuildJob retains the exact TeamNodeValue label and adds a NoSchedule CPU-band
@@ -1072,7 +1072,7 @@ Admission validation preserves the Job template annotations as well as placement
 NodePool provisioning stays an infrastructure prerequisite: each Ready node must
 carry its exact team's hashed label, and one reservation occupies the whole node.
 The launcher does not induce Karpenter scale-up. Native sidecars,
-PodLevelResources, admission APIs and escaped-node network enforcement must be
+PodLevelResources and escaped-node network enforcement must be
 verified on the target cluster. A Helm render establishes no native proof.
 
 ## Burst artifact execution and physical Cloud resources
@@ -1237,6 +1237,25 @@ a plain pipeline name, or pretty guidance after dependency resolution succeeds.
 JSON receipt includes `request_id` when supplied. It is trace metadata. Only
 `--sw-idempotency-key` deduplicates submissions.
 
+## EKS launcher verification amendment (2026-10-17)
+
+This implements the 07:30 lead decision. Delete admission exemption discovery,
+policy builders and chart policy templates. The Job retains its requested template before API defaulting. The launcher
+compares created Pods against that spec after activation and at every reconciliation.
+Only Kubernetes defaults and the explicit EKS pod-identity, Pod ENI and
+load-balancer readiness mutations pass. A changed container/image/security
+field or volume fails the comparison. Rejection records `sparkwing.dev/pod-rejected`,
+UID-fences deletion and fails the exact award through the existing sync route.
+The Job finalizer holds reservation cleanup until rejection acknowledgement and
+container termination. Empty lists await the Job controller through subsequent
+reconciliation. This remains detection after creation, as approved by the lead.
+
+Chart Pod labels use `app: sparkwing-<component>`. Cloud Job Pods use
+`app: sparkwing-job`. Namespace administrators grant create on Pods/Jobs only
+to the launcher. NodePool templates set the exact team-node label and matching
+NoSchedule taint. The Cloud example mounts a separate launcher controller
+credential, enables controller data-volume ownership with fsGroup and the
+ownership initializer, and shows trusted proxy CIDRs.
 ## Child lineage reporting, 2026-10-17
 
 `Lineage.RepoInherited` uses optional JSON `repo_inherited`. True records that the
@@ -1270,3 +1289,31 @@ schedule registration marks captured provenance before saving its request.
 
 The documentation checker parses current migration destination commands in
 Before/After tables and fenced After examples. Before examples remain historical.
+
+## Launcher review reconciliation (2026-10-17, W8 integration)
+
+This supersedes the Pod Identity allowance and empty-Pod behavior in the earlier
+EKS amendment, following the lead's launcher review rulings. Customer Pods refuse
+all AWS credential injections. The account must have neither an IRSA role nor a
+Pod Identity association. Region, validated ENI data and load-balancer gates are
+the remaining EKS allowances. Active unsuspended Jobs require exactly one owned
+Pod. Activation polls briefly for creation. A typed mismatch alone rejects work.
+Transport errors retry during reconciliation. The explicit default list is in
+CLOUD-JOBS.md and is tested with API-defaulted fixtures, including globalDefault
+PriorityClass selection from the cluster.
+
+The placement/taint key is node-restriction.kubernetes.io/sparkwing-team-node.
+Reservation checks the node's NodeClaim UID, node name and provider identity,
+then the claim's NodePool UID and template label. A protected sparkwing-used-team
+label retains first use forever. Clear never assigns a new team. CloudBoundary
+adds Retire(ctx, reservation). It cordons the exact node and UID-fences deletion
+of its NodeClaim before reservation release. Retirement failures retain cleanup
+ownership. Malformed Job annotations trigger UID-fenced deletion, leaving orphan
+reservation cleanup subject to its current award and container vacancy.
+
+NewProductionBoundary requires the Karpenter dynamic client. LauncherFactory
+receives a bearer reader instead of a captured string. The installed launcher
+rereads its private credential file on every controller request. Charts grant
+NodeClaim get/delete, NodePool get and PriorityClass list. LimitRange list is
+removed. operator teams show --team reports node_label_key and node_label_value
+in JSON and the label assignment in plain/pretty output.

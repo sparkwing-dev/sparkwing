@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"net/url"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -62,5 +63,14 @@ func (c *engineClient) ResetObjectStoreBreaker(ctx context.Context, key string) 
 		return out, &apierr.Error{Code: apierr.InvalidArgs, Message: "breaker reset requires an idempotency key"}
 	}
 	err := c.request(ctx, "POST", "/api/v1/operator/object-store/reset-breaker", "/api/v1/operator/object-store/reset-breaker", key, nil, &out)
+	return out, err
+}
+
+func (c *engineClient) ReadOperatorTeam(ctx context.Context, team string) (controllerwire.OperatorTeam, error) {
+	var out controllerwire.OperatorTeam
+	err := c.request(ctx, "GET", "/api/v1/operator/teams/{team}", "/api/v1/operator/teams/"+url.PathEscape(team), "", nil, &out)
+	if err == nil && out.Team != team {
+		err = &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned a different team"}
+	}
 	return out, err
 }

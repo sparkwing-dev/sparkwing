@@ -157,12 +157,12 @@ func TestEachGitHookTierIsDeclaredExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestEveryDeclaredPipelineResolvesToARegisteredName(t *testing.T) {
+func TestEveryDeclaredPipelineResolvesToItsConfiguredEntrypoint(t *testing.T) {
 	t.Chdir(sourceTreeRoot())
 	host := newTestHost(t, sparkwingtest.Options{})
 	for _, p := range readPipelineConfig(t).Pipelines {
-		if _, err := host.Plan(t.Context(), p.Name, nil); err != nil && strings.Contains(err.Error(), "pipeline is not registered") {
-			t.Errorf("%s is declared but unregistered: %v", p.Name, err)
+		if _, err := host.Plan(t.Context(), p.Entrypoint, nil); err != nil && strings.Contains(err.Error(), "pipeline is not registered") {
+			t.Errorf("%s entrypoint %s is unregistered: %v", p.Name, p.Entrypoint, err)
 		}
 	}
 	if _, err := host.Plan(t.Context(), "push-checks", nil); err == nil || !strings.Contains(err.Error(), "pipeline is not registered") {

@@ -47,7 +47,9 @@ func rootFixture(service bool) (*credentialBoundary, string, string) {
 	if service {
 		return deploymentBoundary(capability.OperatorTokens), "/api/v1/operator/tokens", `{"name":"launcher","grants":["claims.launch"]}`
 	}
-	return authorityMember(), "/api/v1/runners", `{"name":"builder","repos":["GitHub.com/acme/*"],"reserved_pools":["trusted"]}`
+	b := authorityMember()
+	b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.RunsWrite)
+	return b, "/api/v1/runners", `{"name":"builder","repos":["GitHub.com/acme/*"],"reserved_pools":["trusted"]}`
 }
 
 func TestRootProvisioningHTTPOrigin(t *testing.T) {
@@ -59,6 +61,7 @@ func TestRootProvisioningHTTPOrigin(t *testing.T) {
 					b = consoleBoundary()
 				} else {
 					b = issuanceSession()
+					b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.RunsWrite)
 				}
 			}
 			f := &rootIssuer{}
@@ -87,7 +90,7 @@ func TestRootProvisioningHTTPOrigin(t *testing.T) {
 
 func TestRootProvisioningHTTPRefusals(t *testing.T) {
 	for _, service := range []bool{false, true} {
-		for _, fault := range []string{"absent", "expired", "revoked", "membership", "grant", "machine", "claim", "nodehost", "binding", "transaction", "private", "missing issuer"} {
+		for _, fault := range []string{"absent", "expired", "revoked", "membership", "grant", "non-admin", "machine", "claim", "nodehost", "binding", "transaction", "private", "missing issuer"} {
 			b, path, body := rootFixture(service)
 			f := &rootIssuer{}
 			code, calls := apierr.Forbidden, 0
@@ -106,6 +109,8 @@ func TestRootProvisioningHTTPRefusals(t *testing.T) {
 				b.snapshot.Authorities[0].MembershipValid, code = false, apierr.Unauthenticated
 			case "grant":
 				p.Capability.Grants = nil
+			case "non-admin":
+				p.Capability.Grants = []capability.Grant{capability.RunsRead, capability.RunsWrite}
 			case "machine":
 				p.Capability.Subject.Kind = capability.SubjectMachine
 			case "claim":
@@ -214,6 +219,7 @@ func TestRootProvisioningHTTPExpiryAndCSRF(t *testing.T) {
 			b = consoleBoundary()
 		} else {
 			b = issuanceSession()
+			b.snapshot.Authorities[0].Principal.Capability.Grants = append(b.snapshot.Authorities[0].Principal.Capability.Grants, capability.RunsWrite)
 		}
 		a := consoleAuthorization(b)
 		a.CheckCSRF = func(*http.Request, capability.Principal) error {

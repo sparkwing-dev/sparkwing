@@ -83,6 +83,7 @@ type CloudNetworkEvidence struct {
 type CloudBoundary interface {
 	Reserve(context.Context, CloudJobBinding, string) (CloudNodeReservation, CloudNetworkEvidence, error)
 	Release(context.Context, CloudNodeReservation) error
+	Retire(context.Context, CloudNodeReservation) error
 }
 
 // CloudJobResources couples Secret cleanup and node ownership with the Job it authorizes.

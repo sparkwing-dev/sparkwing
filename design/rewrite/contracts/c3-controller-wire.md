@@ -1233,6 +1233,16 @@ The ordinary request seal, intake persistence and retry clone retain it. It
 carries no authority and does not replace the intake idempotency key. No schema
 column is added because it lives in the existing request JSON.
 
+## Launcher Pod rejection amendment (2026-10-17, W8 integration)
+
+`LauncherObservation.Rejected` (`rejected`, omitted when false) reports failed
+Pod verification for an exact Job instance and award. Reservation-only
+observations cannot reject awards. `/launcher/sync` authenticates the existing
+claims.launch service credential. The store rechecks ancestry, original award
+identity, holder and generation in the write transaction. Only that launcher's
+current plan/eval/work award can fail. Replays acknowledge cleanup without
+changing a replacement claim. A rejected observation returns its Job in Remove.
+No additional credential or endpoint is introduced.
 ## Child repository omission, 2026-10-17
 
 The native child client carries `lineage.repo_inherited=true` when its repository
@@ -1255,3 +1265,10 @@ Source access admits only the captured execution projection or its exact
 sealed pipeline SHA without changing repository, remote or checkout policy.
 Both request the same live, run-bound source credential route. A changed
 repository, URL, commit or policy is refused before transport.
+
+## W8 operator placement read (2026-10-17, integration)
+
+OperatorManager adds ReadOperatorTeam(ctx, team) returning OperatorTeam with
+team and display_name. It uses the existing GET /api/v1/operator/teams/{team}
+route. C2 defines the deployment authorization and identity-only projection.
+The CLI derives node placement through the launcher's shared hash owner.

@@ -177,13 +177,17 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 			t.Fatal(err)
 		}
 		authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: requester.Prefix}
+		intake.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 	}
 	intake.Authority = authority
 	admitted, err := tenant.AdmitRun(ctx, intake)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim, err := database.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	if admitted.HereCapabilityPrefix != "" {
+		root = admitted.HereCapabilityPrefix
+	}
+	claim, err := database.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: root, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Capacity: match.Resources{Cores: 64, MemoryBytes: 64 << 30}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
 	if err != nil {
 		t.Fatal(err)
 	}

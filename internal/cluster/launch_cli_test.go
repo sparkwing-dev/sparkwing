@@ -25,7 +25,18 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := RunLaunchCLI(t.Context(), args,
-		func(_ context.Context, cfg launcher.CloudJobConfig, token string) (*launcher.Launcher, error) {
+		func(_ context.Context, cfg launcher.CloudJobConfig, bearer func(context.Context) (string, error)) (*launcher.Launcher, error) {
+			token, err := bearer(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(filepath.Join(dir, agentTokenCredential), []byte("rotated-root"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rotated, err := bearer(t.Context())
+			if err != nil || rotated != "rotated-root" {
+				t.Fatalf("credential rotation requires restart: %q %v", rotated, err)
+			}
 			if cfg.CPUCeiling != .5 || cfg.MemoryCeiling != 1<<30 || cfg.Namespace != "sparkwing-jobs" || cfg.DockerImage != image || token != "private-launcher-root" {
 				t.Fatalf("configuration lost at runtime boundary")
 			}
@@ -48,7 +59,7 @@ func TestLauncherCommandRejectsMemoryOverflowBeforeRuntime(t *testing.T) {
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
 	for _, memory := range []string{"18446744073709551617", "-18446744073709551615", "9223372036854775808"} {
 		t.Run(memory, func(t *testing.T) {
-			err := RunLaunchCLI(t.Context(), []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=" + memory, "--credentials-dir=" + t.TempDir()}, func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error) {
+			err := RunLaunchCLI(t.Context(), []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=" + memory, "--credentials-dir=" + t.TempDir()}, func(context.Context, launcher.CloudJobConfig, func(context.Context) (string, error)) (*launcher.Launcher, error) {
 				t.Error("overflow reached runtime factory")
 				return nil, nil
 			})

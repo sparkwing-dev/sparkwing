@@ -222,7 +222,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `POST` | `/api/v1/operator/tokens/{token}/rotate` | `controller` | `deployment` | `capability` | `never` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `GET` | `/api/v1/operator/teams` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `POST` | `/api/v1/operator/teams` | `controller` | `deployment` | `capability` | `never` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
-| `GET` | `/api/v1/operator/teams/{team}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/teams/{team}` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.tokens` / `operator_settings` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `DELETE` | `/api/v1/operator/teams/{team}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `POST` | `/api/v1/operator/teams/{team}/trust` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `POST` | `/api/v1/operator/teams/{team}/grants` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
