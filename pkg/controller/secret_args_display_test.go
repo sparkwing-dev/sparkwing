@@ -1,21 +1,18 @@
 package controller_test
 
 import (
-	"bytes"
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
-	"net/http/httptest"
-	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
-	"time"
+	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -25,215 +22,146 @@ const (
 	ctlVisibleValue = "prod"
 )
 
-func seedSecretArgRun(t *testing.T, st *store.Store, id string) {
+func secretArgRun(t *testing.T, f *browserFixture, private string, classified bool) store.AdmissionResult {
 	t.Helper()
-	seedSecretArgRunAs(t, st, id, "failed")
-}
-
-func seedSecretArgRunAs(t *testing.T, st *store.Store, id, status string) {
-	t.Helper()
-	err := teststore.SeedRun(st, context.Background(), store.DefaultTeam, store.Run{
-		ID:        id,
-		Pipeline:  "deploy",
-		Status:    status,
-		GitBranch: "main",
-		GitSHA:    "abc123",
-		Args:      map[string]string{"token": ctlSecretValue, "env": ctlVisibleValue},
-		Invocation: map[string]any{
-			"args":       map[string]string{"token": ctlSecretValue, "env": ctlVisibleValue},
-			"reproducer": "sparkwing run deploy --env=" + ctlVisibleValue + " --token=" + ctlSecretValue,
-			"flags":      map[string]any{"full": true},
-
-			store.InvocationSecretArgsKey: []string{"token"},
+	f.st.SetIntakePolicy(receiptPolicy{})
+	principal, err := f.st.LookupCapability(t.Context(), sha256.Sum256([]byte(f.token)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := teststore.ForTeam(t, f.st, store.DefaultTeam).AdmitRun(t.Context(), store.IntakeRequest{
+		Authority: principal.Authority,
+		Request: runspec.Request{
+			Version: 1, Team: string(store.DefaultTeam), Pipeline: "deploy", Mode: runspec.IntakeExecute,
+			Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: strings.Repeat("a", 40)},
+			RequestedArgs: map[string]string{"token": private, "env": ctlVisibleValue},
+			SecretArgs:    runspec.Optional[[]string]{Set: classified, Value: []string{"token"}},
 		},
-		StartedAt: time.Now().Add(-time.Minute),
 	})
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-}
-
-func secretArgController(t *testing.T) (*store.Store, *httptest.Server) {
-	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
-	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	t.Cleanup(srv.Close)
-	return st, srv
-}
-
-func getBody(t *testing.T, url string) string {
-	t.Helper()
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET %s: status=%d", url, resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	if err := teststore.SeedRunFinish(f.st, t.Context(), store.DefaultTeam, admitted.RunID, "success", ""); err != nil {
 		t.Fatal(err)
 	}
-	return string(body)
+	return admitted
 }
 
-func assertRedactedResponse(t *testing.T, surface, body string) {
+func secretArgBody(t *testing.T, f *browserFixture, path string) string {
 	t.Helper()
-	if strings.Contains(body, ctlSecretValue) {
-		t.Errorf("%s served the secret arg value to the client:\n%s", surface, body)
+	r := f.cookieRequest(http.MethodGet, path, "")
+	r.Header.Set("Accept", "application/json")
+	w := f.serve(r)
+	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("GET %s: HTTP %d %s", path, w.Code, w.Body)
 	}
-	if !strings.Contains(body, runspec.RedactedArgValue) {
-		t.Errorf("%s carries no %s marker:\n%s", surface, runspec.RedactedArgValue, body)
-	}
-	if !strings.Contains(body, ctlVisibleValue) {
-		t.Errorf("%s redacted the non-secret arg too:\n%s", surface, body)
+	return w.Body.String()
+}
+
+func assertRedactedResponse(t *testing.T, surface, body, private string, classified bool) {
+	t.Helper()
+	if strings.Contains(body, private) || !strings.Contains(body, runspec.RedactedArgValue) || strings.Contains(body, `"`+ctlVisibleValue+`"`) != classified {
+		t.Fatalf("%s did not retain classification: %s", surface, body)
 	}
 }
 
 func TestSecretArgs_ControllerListRunsRedacts(t *testing.T) {
-	st, srv := secretArgController(t)
-	seedSecretArgRun(t, st, "run-1")
-	assertRedactedResponse(t, "GET /api/v1/runs", getBody(t, srv.URL+"/api/v1/runs"))
+	f := newBrowserFixture(t, nil)
+	secretArgRun(t, f, ctlSecretValue, true)
+	assertRedactedResponse(t, "list", secretArgBody(t, f, "/api/v1/runs"), ctlSecretValue, true)
 }
 
 func TestSecretArgs_ControllerReceiptRedacts(t *testing.T) {
-	st, srv := secretArgController(t)
-	seedSecretArgRun(t, st, "run-1")
-	if _, err := st.DB().Exec(`UPDATE runs SET invocation_json = json_set(invocation_json, '$.inputs_hash', 'sha256:offline-oracle') WHERE id = 'run-1'`); err != nil {
-		t.Fatal(err)
-	}
-	body := getBody(t, srv.URL+"/api/v1/runs/run-1/receipt")
-	if strings.Contains(body, ctlSecretValue) {
-		t.Errorf("receipt served the secret arg value:\n%s", body)
-	}
-	if !strings.Contains(body, runspec.RedactedArgValue) {
-		t.Errorf("receipt carries no redaction marker:\n%s", body)
-	}
-	if strings.Contains(body, "offline-oracle") {
-		t.Errorf("receipt served a stored input-hash oracle:\n%s", body)
-	}
-	var rec struct {
-		Identity struct {
-			InputsHash string `json:"inputs_hash"`
-		} `json:"identity"`
-	}
-	if err := json.Unmarshal([]byte(body), &rec); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Identity.InputsHash != "" {
-		t.Errorf("receipt identity inputs_hash = %q, want empty for secret arguments", rec.Identity.InputsHash)
+	f := newBrowserFixture(t, nil)
+	admitted := secretArgRun(t, f, ctlSecretValue, true)
+	assertPrivateReceipt(t, secretArgBody(t, f, "/api/v1/runs/"+admitted.RunID+"/receipt"), ctlSecretValue)
+}
+
+func assertPrivateReceipt(t *testing.T, body, private string) {
+	t.Helper()
+	var rec controllerwire.Receipt
+	if err := json.Unmarshal([]byte(body), &rec); err != nil || rec.Identity.InputsHash != "" || rec.ReceiptSHA == "" || strings.Contains(body, private) || strings.Contains(body, "offline-oracle") || strings.Contains(body, `"invocation"`) {
+		t.Fatalf("receipt disclosed private inputs or a hash oracle: %s (%v)", body, err)
 	}
 }
 
 func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
-	st, srv := secretArgController(t)
-	body, err := json.Marshal(store.Run{
-		ID: "old-writer", Pipeline: "deploy", Status: "running", StartedAt: time.Now(),
-		Args: map[string]string{"token": ctlSecretValue},
-		Invocation: map[string]any{
-			"args":                        map[string]string{"token": ctlSecretValue},
-			"inputs_hash":                 "sha256:offline-oracle",
-			store.InvocationSecretArgsKey: []string{"token"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	f := newBrowserFixture(t, nil)
+	w := f.serve(f.cookieRequest(http.MethodPost, "/api/v1/runs", `{"id":"old-writer","pipeline":"deploy","invocation":{"inputs_hash":"sha256:offline-oracle","args":{"token":"s3cr3t-token-value"}}}`))
+	var failure apierr.Envelope
+	if w.Code != http.StatusBadRequest || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error.Code != apierr.BadRequest || strings.Contains(w.Body.String(), ctlSecretValue) || strings.Contains(w.Body.String(), "offline-oracle") {
+		t.Fatalf("old writer: HTTP %d %s", w.Code, w.Body)
 	}
-	resp, err := http.Post(srv.URL+"/api/v1/runs", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		got, _ := io.ReadAll(resp.Body)
-		t.Fatalf("POST /api/v1/runs status = %d, want 400: %s", resp.StatusCode, got)
-	}
-	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), "old-writer"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("GetRun error = %v, want ErrNotFound", err)
+	var count int
+	if err := f.st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("refused old writer inserted %d runs: %v", count, err)
 	}
 }
 
 func TestSecretArgs_ControllerPipelineLatestRedacts(t *testing.T) {
-	st, srv := secretArgController(t)
-	seedSecretArgRunAs(t, st, "run-1", "pending")
-	if err := teststore.SeedRunFinish(st, context.Background(), store.DefaultTeam, "run-1", "success", ""); err != nil {
-		t.Fatal(err)
-	}
-	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest",
-		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"))
+	f := newBrowserFixture(t, nil)
+	secretArgRun(t, f, ctlSecretValue, true)
+	assertRedactedResponse(t, "latest", secretArgBody(t, f, "/api/v1/pipelines/deploy/latest"), ctlSecretValue, true)
 }
 
 func TestSecretArgs_ControllerAttemptsRedacts(t *testing.T) {
-	st, srv := secretArgController(t)
-	seedSecretArgRun(t, st, "run-1")
-	assertRedactedResponse(t, "GET /api/v1/runs/{id}/attempts",
-		getBody(t, srv.URL+"/api/v1/runs/run-1/attempts"))
+	f := newBrowserFixture(t, nil)
+	admitted := secretArgRun(t, f, ctlSecretValue, true)
+	assertRedactedResponse(t, "attempts", secretArgBody(t, f, "/api/v1/runs/"+admitted.RunID+"/attempts"), ctlSecretValue, true)
 }
 
 func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
-	st, srv := secretArgController(t)
-	seedSecretArgRun(t, st, "run-1")
-
-	resp, err := http.Post(srv.URL+"/api/v1/runs/run-1/retry", "application/json", bytes.NewBufferString(""))
-	if err != nil {
-		t.Fatal(err)
+	f := newBrowserFixture(t, nil)
+	admitted := secretArgRun(t, f, ctlSecretValue, true)
+	w := f.serve(f.cookieRequest(http.MethodPost, "/api/v1/runs/"+admitted.RunID+"/retry", `{"mode":"all","idempotency_key":"private-input-retry"}`))
+	var response controllerwire.CreateRunResponse
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.RunID == "" || response.RunID == admitted.RunID {
+		t.Fatalf("retry: HTTP %d %s", w.Code, w.Body)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("retry status=%d, want 202", resp.StatusCode)
+	tenant := teststore.ForTeam(t, f.st, store.DefaultTeam)
+	for _, id := range []string{admitted.RunID, response.RunID} {
+		row, err := tenant.ReadRun(t.Context(), id)
+		if err != nil || row.Request.Request.RequestedArgs["token"] != ctlSecretValue || !row.Request.Request.SecretArgs.Set || len(row.Request.Request.SecretArgs.Value) != 1 || row.Request.Request.SecretArgs.Value[0] != "token" {
+			t.Fatalf("retry lost private execution inputs: %v", err)
+		}
+		if id == response.RunID && row.Lineage.RetryOf != admitted.RunID {
+			t.Fatalf("retry source=%s", row.Lineage.RetryOf)
+		}
+		assertRedactedResponse(t, "run detail", secretArgBody(t, f, "/api/v1/runs/"+id), ctlSecretValue, true)
 	}
-
-	ctx := context.Background()
-	src, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, "run-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if src.Args["token"] != ctlSecretValue {
-		t.Fatalf("source run args were mutated by a read path: %q", src.Args["token"])
-	}
-	if src.RetriedAs == "" {
-		t.Fatal("retry did not record RetriedAs")
-	}
-	retried, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, src.RetriedAs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if retried.Args["token"] != ctlSecretValue {
-		t.Errorf("retry run args[token] = %q, want plaintext %q -- the retry would execute with a literal %s",
-			retried.Args["token"], ctlSecretValue, runspec.RedactedArgValue)
-	}
-	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, src.RetriedAs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trig.Args["token"] != ctlSecretValue {
-		t.Errorf("retry trigger args[token] = %q, want plaintext", trig.Args["token"])
-	}
-
-	if got, _ := retried.Invocation[store.InvocationSecretArgsKey].([]any); len(got) != 1 || got[0] != "token" {
-		t.Fatalf("retry run classification = %v, want [token]", got)
-	}
-	assertRedactedResponse(t, "GET /api/v1/runs/{id} for a pending retry",
-		getBody(t, srv.URL+"/api/v1/runs/"+src.RetriedAs))
 }
 
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
-	st, srv := secretArgController(t)
-	seedSecretArgRunAs(t, st, "run-1", "pending")
-	if err := teststore.SeedRunFinish(st, context.Background(), store.DefaultTeam, "run-1", "success", ""); err != nil {
+	f := newBrowserFixture(t, nil)
+	admitted := secretArgRun(t, f, ctlSecretValue, true)
+	checkSecretArgViews(t, f, admitted.RunID, ctlSecretValue, true)
+}
+
+func checkSecretArgViews(t *testing.T, f *browserFixture, run, private string, classified bool) {
+	t.Helper()
+	for _, query := range []string{"", "?include=secret_values"} {
+		for _, path := range []string{"/api/v1/runs", "/api/v1/runs/" + run, "/api/v1/runs/" + run + "/attempts", "/api/v1/pipelines/deploy/latest"} {
+			assertRedactedResponse(t, path+query, secretArgBody(t, f, path+query), private, classified)
+		}
+		assertPrivateReceipt(t, secretArgBody(t, f, "/api/v1/runs/"+run+"/receipt"+query), private)
+		legacy := f.serve(f.cookieRequest(http.MethodGet, "/api/v1/runs"+query, ""))
+		if legacy.Code != http.StatusOK {
+			t.Fatalf("default run list: HTTP %d %s", legacy.Code, legacy.Body)
+		}
+		assertRedactedResponse(t, "default run list", legacy.Body.String(), private, classified)
+	}
+}
+
+func TestSecretArgsPublicReadsProperty(t *testing.T) {
+	property := func(value []byte, classified bool) bool {
+		f := newBrowserFixture(t, nil)
+		private := "private-argument-" + hex.EncodeToString(value)
+		admitted := secretArgRun(t, f, private, classified)
+		checkSecretArgViews(t, f, admitted.RunID, private, classified)
+		stored, err := teststore.ForTeam(t, f.st, store.DefaultTeam).ReadRun(t.Context(), admitted.RunID)
+		return err == nil && reflect.DeepEqual(stored.Request, admitted.Request) && !strings.Contains(f.logs.String(), private)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
 		t.Fatal(err)
 	}
-	const q = "?include=" + "secret_values"
-	assertRedactedResponse(t, "GET /api/v1/runs"+q, getBody(t, srv.URL+"/api/v1/runs"+q))
-	assertRedactedResponse(t, "GET /api/v1/runs/{id}/attempts"+q,
-		getBody(t, srv.URL+"/api/v1/runs/run-1/attempts"+q))
-	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest"+q,
-		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"+q))
-	assertRedactedResponse(t, "GET /api/v1/runs/{id}/receipt"+q,
-		getBody(t, srv.URL+"/api/v1/runs/run-1/receipt"+q))
 }

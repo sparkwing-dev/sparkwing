@@ -145,27 +145,14 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestOperatorDeletesAnAccountByEmailAndATeamBySlug`.
 - `pkg/controller`: `TestReadHostKeyTakesTheKeyTheServerPresents`.
 - `pkg/controller`: `TestRefundReportingRejectsTeamOwnerAndRunner`.
-- `pkg/controller`: `TestRunFiltersTreatSQLMetacharactersAsLiteral`.
 - `pkg/controller`: `TestRunSourceCredential_MintsTheApprovedRepositoriesByID`.
 - `pkg/controller`: `TestRunSourceCredential_NeedsTheGitHubApp`.
-- `pkg/controller`: `TestSecretArgs_ControllerAttemptsRedacts`.
-- `pkg/controller`: `TestSecretArgs_ControllerListRunsRedacts`.
-- `pkg/controller`: `TestSecretArgs_ControllerPipelineLatestRedacts`.
-- `pkg/controller`: `TestSecretArgs_ControllerReceiptRedacts`.
-- `pkg/controller`: `TestSecretArgs_ControllerRejectsOlderWriterInputHash`.
-- `pkg/controller`: `TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints`.
-- `pkg/controller`: `TestSecretArgs_RetryStillReceivesPlaintext`.
-- `pkg/controller`: `TestSecretMutationsTreatSQLMetacharactersAsLiteral`.
-- `pkg/controller`: `TestSecrets_EncryptionRoundTrip`.
-- `pkg/controller`: `TestSecrets_EnvelopeIsBoundToAccessFields`.
-- `pkg/controller`: `TestSecrets_EnvelopeIsBoundToNameAndPipeline`.
 - `pkg/controller`: `TestSignUpGateRoutesAreTheOperators`.
 - `pkg/controller`: `TestSignUpVelocityWarnsThenClosesTheGate`.
 - `pkg/controller`: `TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos`.
 - `pkg/controller`: `TestSourceCredential_AppTokenReadsTheVerifiedRepository`.
 - `pkg/controller`: `TestSourceCredential_NamesTheRemedy`.
 - `pkg/controller`: `TestSourceCredential_NeedsTheRunsOwnClaimToken`.
-- `pkg/controller`: `TestSourceCredential_RemovedRoutesAnswer404`.
 - `pkg/controller`: `TestSourceCredential_TypedRepositoryNeedsASubscription`.
 - `pkg/controller`: `TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam`.
 - `pkg/controller`: `TestTeamBillingCheckout_ReportsAnUnusableCheckoutService`.
@@ -210,7 +197,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestTrigger_ReservesGitHubProvenanceForTheWebhook`.
 - `pkg/controller`: `TestTrigger_StripsClientSuppliedLeaseTokenEnv`.
 - `pkg/controller`: `TestTrigger_ValidatesRepoURL`.
-- `pkg/controller`: `TestUpdatePlanSnapshot_BodyLimit`.
 - `pkg/controller`: `TestWaitlistedSignUpThroughTheAPI`.
 - `pkg/controller`: `TestYoungGitHubAccountsAreWaitlistedAtSignIn`.
 - `pkg/docs`: `TestWebClient_Versions_HappyPath`.
@@ -267,3 +253,23 @@ bound/unbound list metadata. Refused reads still require 500, sanitized errors,
 no plaintext and unchanged stored bytes. The remaining encryption-roundtrip and
 envelope relocation/access-field groups require declared-claim fixtures before
 their old operator/plaintext-read assumptions can be reconciled.
+
+Continuation 8 ports the three remaining envelope encryption groups and all
+seven secret-argument groups to recorder transport. Masked release uses live
+launcher-issued job claims with declared names and real transactional reads.
+Only the accepted run/spec facts are fixture seeds. Encryption transplantation
+properties include tenant, name, pipeline and both access flags, with correctly
+resealed positive controls. Public argument properties cover every read route
+and preserve persisted plaintext. None needs a native listener.
+
+The two SQL literal regression groups now use real capability authentication
+and tenant storage through recorders. Their SQLite lanes pass locally. Their
+PostgreSQL lanes and the two new SQL property lanes still require the lead's
+reachable database. PostgreSQL is not attempted where socket creation fails.
+No transport, webhook intake or PostgreSQL result is implied by recorder passes.
+
+Continuation 8 replaces raw plan snapshot body-size coverage with a real plan
+claim and controller-election transaction over recorders, including exact-limit
+acceptance and unchanged snapshots after live/retired-claim refusals. The two
+retired source-token/git-credential aliases are covered by the unregistered-route
+table. Their obsolete native listener fixture is deleted.

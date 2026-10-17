@@ -506,3 +506,73 @@ obligations. Only queue rendering uses the explicit fake read seam, as listed
 above. No Git writes or Sparkwing candidate execution occur. Local Git has no
 user identity or core.worktree override. W1b scratch is removed after checks,
 and the shared build cache is retained.
+
+
+## Continuation 8: envelope release and argument privacy
+
+- C pkg/controller: port TestSecrets_EncryptionRoundTrip to real owner-session writes and real launcher-issued job claims over recorders. Both variables and masked secrets stay encrypted and bound at rest, declaring claims receive exact plaintext with no-store, and member reads still refuse masked values. Accepted run/spec facts are fixture seeds. Claim issuance, authentication, declared-secret selection, transactional release and decryption are real.
+- C pkg/controller: port TestSecrets_EnvelopeIsBoundToNameAndPipeline and TestSecrets_EnvelopeIsBoundToAccessFields to authorized declaring claims. Relocated name, pipeline, unscoped fallback, shared and masked fields return sanitized 500 without plaintext or changed stored bytes. Each case also reseals to its selected metadata and requires a successful plaintext read, so policy refusal cannot hide a binding defect.
+- C pkg/controller: TestSecretsEnvelopeBindingProperty generates private values across all five envelope binding fields plus unscoped fallback, including cross-tenant transplantation. Invariant: changing a stored envelope's tenant, name, pipeline, shared flag or masked flag never releases its plaintext.
+- C pkg/controller: port all seven TestSecretArgs_* groups to real sealed intake, current member sessions and recorder reads. List/detail/latest/attempts retain the classified public argument and redact private values. Receipts expose neither raw invocation nor private input hashes under the current shared receipt projection. A legacy writer's hash-bearing body still returns bad_request without any admitted run. Retry uses explicit mode/idempotency and keeps plaintext plus classification in both private persisted requests, with redacted public detail.
+- C pkg/controller: TestSecretArgsPublicReadsProperty generates private argument values and known/unknown classifications across list/detail/latest/attempts/receipt, with and without include=secret_values. Invariant: public reads never disclose private arguments or their input-hash oracle, widen execution authority, or rewrite private execution inputs. Unknown classification masks every argument.
+- C pkg/controller: port TestRunFiltersTreatSQLMetacharactersAsLiteral and TestSecretMutationsTreatSQLMetacharactersAsLiteral to authenticated recorder transport through real per-tenant storage. Current status enums replace impossible injected status rows. Malicious status queries still select zero rows and a valid status selects exactly the tenant's rows. Preserve exact pipeline/branch/repository matching and count, exact replacement/deletion, absent-delete refusal, and all foreign-tenant rows. Invalid quoted secret names are refused on creation. Existing quoted rows still delete exactly, and valid-name SQL pipeline selectors still replace exactly. PostgreSQL lane remains enabled for native execution.
+- C pkg/controller: TestSecretMutationsInvalidNamesCannotChangeRowsProperty and TestRunFilterTenantLiteralsProperty generate SQL metacharacter inputs. Invariant: credential mutation and run selection treat input as data and cannot change or select another tenant's rows.
+- A/C pkg/controller: replace TestUpdatePlanSnapshot_BodyLimit and its obsolete postPlanSnapshot helper with TestPlanSubmissionBodyLimitPreservesCommittedPlan. A real launcher-issued plan claim and elected controller owner accept a valid submission exactly at the current request-body limit. A valid JSON body one byte over the limit returns bad_request while the claim is live. After acceptance the spent claim is refused as unauthenticated before decoding. Both refusals preserve the entire persisted snapshot. Arbitrary raw snapshot upserts are not restored.
+- A pkg/controller: delete TestSourceCredential_RemovedRoutesAnswer404. Its global pre-router claim-token 403 rule belongs to the retired credential surface. Extend TestBusinessRetiredRoutesAndExactMethods instead: source-token and git-credential aliases stay unregistered and return 404 under every tested method. Current release and repository-ID authority remain covered by TestSourceControllerUsesStoreAuditAndBoundCipher and the enabled source credential integration groups.
+
+
+### Continuation 8 verification and remaining work
+
+All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and TMPDIR/GOTMPDIR under
+/tmp/sw-astra-W1b. Normal tests use -p 4 and race checks use -p 2.
+
+- Whole-repository build passes. Final vet passes for controller and acceptance. Final commentcheck against main is clean across 2,674 files. git diff --check passes.
+- The full TestSecrets selection passes in 3.397s. Final TestSecretArgs selection passes in 1.252s, including the current JSON RunPage and the default list representation. The four SQL literal/property SQLite groups pass in 0.406s.
+- The changed secret/envelope/argument groups pass under the race detector in 45.788s. The four SQL SQLite groups pass under the race detector in 6.584s. The subsequently ported plan-size/retired-route selection passes normally and under the race detector (3.097s).
+- The broader controller selection passes in 75.654s: 556 top-level tests/fuzz-seed groups, 1,172 passing tests/subtests and zero skips. It excludes the socket inventory, eleven reproduced cron failures and the four separately exercised SQL dialect groups. That selection precedes the final plan-size and source-alias edits, which pass separately afterward. This is not a full controller-suite claim.
+- Full acceptance passes in 214.626s: 406 top-level tests, 5,386 passing tests/cells and 2,991 pre-existing skips. No native matrix cell is newly claimed complete.
+- Two temporary Go overlays prove the generated privacy checks can go red. Binding secret decryption to constant original metadata makes the shared-field property release plaintext and fail on its first input. Returning unredacted requested arguments makes the public-read property fail on its first input. Neither overlay changes repository source.
+- A fresh cron selection reproduces all eleven enabled failures: three tick cases still reach retired trigger SQL and eight schedule HTTP cases still need the committing ScheduleWriter. No cron assertion changes.
+- Fresh TCP and Unix socket-creation probes both return Operation not permitted. PostgreSQL is not attempted. The native controller/CLI/web/bin checks in test-reconciliation-sockets.md and the controller/acceptance PostgreSQL lanes remain for the lead. The four SQL groups retain their explicit postgres subtests. No test skip call is added or widened.
+
+The stale source-alias test group loses 23 lines, including its obsolete
+pre-router claim-token comment. Eight obsolete listener/body/fixture helpers
+lose 106 lines. Replacement tests and generated properties give net -1 Go
+line for this continuation (418 added, 419 removed). Production delta against
+session HEAD 7e4355b81 is zero. No production API, schema, credential policy,
+provider interface, setting or mechanism changes. No docs impact because the
+change reconciles tests without changing product behavior.
+
+The W1+W1b store area remains -2,685 production Go lines against main under
+the lead's budget exclusions, 1,565 over its -4,250 budget. The inherited
+overage remains open. This test-only continuation neither adds to nor closes it.
+
+Contract changes made: none. The handoff/amendment audit confirms the earlier
+M4 renewal, decision 112 policy table, provider settlement, materialization,
+store-harness relocation and legacy catalog/helper cuts remain implemented.
+Those completed assignments are not rebuilt. Schedule origin/consent through
+sealed intake, verified App intake composition, the concrete ConcurrencyStore
+adapter, metrics and notify_parent consumers remain production integration
+obligations. Signed-webhook intake, re-request, subscription/fork/binding/replay
+and run-budget fixtures still need reconciliation and native verification.
+Security, tenant-boundary, masking and billing assertions stay enabled.
+
+Shared files touched in this continuation:
+- design/rewrite/test-reconciliation.md
+- design/rewrite/test-reconciliation-sockets.md
+- pkg/controller/plan_snapshot_limit_test.go
+- pkg/controller/run_control_routes_test.go
+- pkg/controller/secret_args_display_test.go
+- pkg/controller/secrets_encryption_test.go
+- pkg/controller/source_credential_test.go
+- pkg/controller/sql_literals_test.go
+
+Friction: forbidden sockets prevent native transport and PostgreSQL proofs.
+The new encryption fixture seeds accepted run/spec facts but uses real claim
+issuance and release transactions. Argument intake uses the existing fake
+external intake-policy seam with real persistence and authentication. No
+production acceptance is claimed for those fixture seams. Lead-owned handoff
+and amendment files remain unchanged. No Git writes or Sparkwing candidate
+execution occurs. Local Git has no identity or core.worktree override. W1b
+scratch is removed after checks, and the shared build cache is retained.

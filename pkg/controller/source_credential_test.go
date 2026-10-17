@@ -269,26 +269,3 @@ func TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 		t.Fatalf("a listed repository the installation stopped covering = %d %+v, want 409 naming it", code, got)
 	}
 }
-
-// The source-token and git-credential routes are gone: a runner's bearer that
-// asks either gets the mux's 404, a node's claim token is refused before
-// routing, and nothing is minted.
-func TestSourceCredential_RemovedRoutesAnswer404(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	node, _ := f.nodeClaim(olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
-	machine, _ := f.teamRunner(olga, "asker")
-	before := len(f.app.Minted())
-	for _, route := range []string{"source-token", "git-credential"} {
-		if code := f.call("POST", "/api/v1/runs/run-widgets/"+route, machine, nil, nil); code != http.StatusNotFound {
-			t.Fatalf("%s with the machine's bearer = %d, want 404", route, code)
-		}
-		if code := f.call("POST", "/api/v1/runs/run-widgets/"+route, node, nil, nil); code != http.StatusForbidden {
-			t.Fatalf("%s with the node's claim token = %d, want 403", route, code)
-		}
-	}
-	if n := len(f.app.Minted()) - before; n != 0 {
-		t.Fatalf("the removed routes minted %d tokens", n)
-	}
-}
