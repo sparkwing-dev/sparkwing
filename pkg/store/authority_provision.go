@@ -82,7 +82,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 	}
 	c := p.Capability
-	if spec.Personal && (spec.Kind != capability.ProvisionMachine || !p.DirectAccountSession() || c.Subject.Kind != capability.SubjectAccount || !slices.Contains(c.Grants, capability.RunsRead)) {
+	if spec.Personal && (spec.Kind != capability.ProvisionMachine || !p.DirectAccountSession() || c.Subject.Kind != capability.SubjectAccount || !slices.Contains(c.Grants, capability.RunsWrite)) {
 		return bindingRefusal()
 	}
 	deployment := spec.Authority != nil && (capability.DeploymentAuthority(p) && slices.Contains(c.Grants, capability.OperatorTokens) || p.Class == capability.CredentialConsole && slices.Contains(c.Grants, capability.OperatorConsole))

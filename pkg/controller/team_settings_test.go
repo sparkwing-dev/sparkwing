@@ -40,14 +40,14 @@ func TestMachineTeamSettingsHTTP(t *testing.T) {
 		role := []string{"owner", "editor", "reader"}[roleIndex%3]
 		engineSQL(t, s.store, `UPDATE memberships SET role=? WHERE account_id='member'`, role)
 		for _, personal := range []bool{false, true} {
-			allowed := role == "owner" || enabled && personal
+			allowed := role == "owner" || enabled && personal && role != "reader"
 			status := 403
 			if allowed {
 				status = 201
 			}
 			body := fmt.Sprintf(`{"name":"r-%x-%t","repos":["github.com/acme/*"],"personal":%t}`, input, personal, personal)
 			w := call("POST", "/api/v1/runners", body, status)
-			if !allowed && personal && !strings.Contains(w.Body.String(), "members_can_add_machines") {
+			if !allowed && personal && role != "reader" && !strings.Contains(w.Body.String(), "members_can_add_machines") {
 				return false
 			}
 			if allowed {

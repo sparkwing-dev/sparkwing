@@ -24,8 +24,8 @@ func TestMachineEnrollmentTeamSettingProperty(t *testing.T) {
 		}
 		spec.Authority, spec.Personal, spec.ReservedPools = &member.Authority, personal, nil
 		issued, err := s.ProvisionCapability(t.Context(), spec)
-		allowed := role == RoleOwner || personal && enabled
-		if !allowed && personal && !strings.Contains(fmt.Sprint(err), "members_can_add_machines") {
+		allowed := role == RoleOwner || personal && enabled && role != RoleReader
+		if !allowed && personal && role != RoleReader && !strings.Contains(fmt.Sprint(err), "members_can_add_machines") {
 			return false
 		}
 		return (err == nil) == allowed && (issued.Raw != "") == allowed
