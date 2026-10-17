@@ -58,7 +58,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		Version: 1, Team: string(store.DefaultTeam), Pipeline: "steps", Mode: runspec.IntakeExecute,
 		Origin: runspec.OriginLocal, EnvironmentSource: runspec.EnvironmentCaptured, Dispatch: runspec.DispatchHost, Env: environment,
 		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: sha},
-		Source:        runspec.Source{Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: "."}},
+		Source:        runspec.Source{Ref: sha, WorkingTree: true, Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: "."}},
 		RequestedArgs: map[string]string{"set": "output"},
 	}
 	f := newStoreOwnerFixture(t, openStore(t), request)

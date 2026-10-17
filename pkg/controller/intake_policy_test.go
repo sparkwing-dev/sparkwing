@@ -27,7 +27,8 @@ func TestControllerIntakeSealsPersistedPolicyOnce(t *testing.T) {
 	digest := sha256.Sum256([]byte(session))
 	input := store.IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, IdempotencyKey: "same", Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginTrigger,
-		Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}},
+		Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"},
+		Source:  runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"},
 		Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 0}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "priority"}}},
 	}}
 	setSeconds := func(seconds int64) {
@@ -111,7 +112,8 @@ func TestControllerIntakePublishesCapturedLocalHistory(t *testing.T) {
 	digest := sha256.Sum256([]byte(session))
 	admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, Request: runspec.Request{
 		Version: 1, Team: "a", Pipeline: "historical", Mode: runspec.IntakePublish, Dispatch: runspec.DispatchHost, Origin: runspec.OriginLocal,
-		Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}},
+		Git:     runspec.Git{Repository: runspec.Repository{Key: "git:example.com/acme/repo"}, SHA: "0123456789abcdef0123456789abcdef01234567"},
+		Source:  runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"},
 		Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: 0}, Origin: runspec.SettingOrigin{Layer: runspec.LayerDefault, Key: "owner_execution"}}},
 	}})
 	if err != nil || admitted.OwnerUnit != nil || admitted.Request.Request.Options.OwnerExecutionTimeout.Value != 0 || admitted.Request.Request.Origin != runspec.OriginPublish {

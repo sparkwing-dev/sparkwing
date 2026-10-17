@@ -1084,7 +1084,7 @@ The old generated reference is not proof of the target API.
 | C1 | `MaterializeSource` must pass blob existence, integrity and read-set authorization. C3 does not mint a receipt or expand a read set. |
 | C2 | `apierr.Error`/`apierr.Code` own the object and registry. `Reply.Error`, `JobFailure.Error`, `RunResult.Error` and `EvalResult.Error` use `*apierr.Error`, validated by `DecodeInner`. Every typed `ErrorUses()` code belongs to that registry. |
 | C2 | `ProcessBinding.Routes` contains a nodehost-audience bearer. `ClaimAuthority` and `store.Actor` refer to authenticated capabilities, whose binding/liveness C2 and the store recheck. |
-| C2 | `source.Access` calls the live source-release policy. `lease.Keeper.Renew` errors expose canonical codes and Retry-After metadata. `Beat.WatchedNodes` encodes as watched_jobs to keep customer vocabulary. |
+| C2 | Execution-host `source.Access` calls the live source-release policy. Controller intake resolves child refs with controller-held credentials, without releasing them to a unit. `lease.Keeper.Renew` errors expose canonical codes and Retry-After metadata. `Beat.WatchedNodes` encodes as watched_jobs to keep customer vocabulary. |
 | C4 | `settings.ResolvePlan` returns sealed execution settings after `ValidatePlan`; both are mandatory inside acceptance. `lease.Keeper.Interval` comes from `limits.Renew`; renewal configuration passes `limits.CheckRenewal`. |
 | C4 | `EnvValue.Startup`, SDK `Startup()` and TypeScript `startup()` agree with `procenv`'s fixed startup names. Attempt and cleanup env agree, and credentials never enter Build output. |
 | C4 | `protofd.Arg` remains --sw-node-protocol; `protofd.HandlesArg` is --sw-protocol-handles followed by decimal request,frame on Windows. Both SDK transports parse that form and clear inheritance during initialization. Unix keeps fds 3 and 4. |
@@ -1153,7 +1153,7 @@ verifies its origin, sealed commit, clean tracked files, absent untracked and
 ignored files, and contained pipeline
 directory before installing with the selected engine. It preserves that checkout
 when closing. Eval never needs a new source-fetch grant after bootstrap exchange.
-For unaccepted remote sources, acquisition detects the SDK from the acquired directory.
+For unaccepted sources, acquisition detects the SDK from the acquired code directory.
 Accepted sources retain the SDK in their sealed engine identity.
 
 ## Native artifact composition for burst execution

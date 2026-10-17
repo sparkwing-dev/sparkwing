@@ -15,11 +15,14 @@ func ResolveRevisions(ctx context.Context, git runspec.Git, code runspec.Source,
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if commitID.MatchString(ref) {
+		if runspec.IsCommitID(ref) {
 			return strings.ToLower(ref), nil
 		}
+		if lookup == nil {
+			return "", &apierr.Error{Code: apierr.InvalidArgs, Message: "source revision requires resolution"}
+		}
 		sha, err := lookup(ref)
-		if err == nil && !commitID.MatchString(sha) {
+		if err == nil && !runspec.IsCommitID(sha) {
 			err = &apierr.Error{Code: apierr.InvalidArgs, Message: "source revision did not resolve to a commit"}
 		}
 		return strings.ToLower(sha), err

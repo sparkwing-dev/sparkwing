@@ -37,10 +37,11 @@ func TestPrepareCheckoutLocalPreservesWorkingTreeAndOriginHead(t *testing.T) {
 	}
 }
 
-func TestPrepareCheckoutKeepsSealedDefaultAndRefusesMovedLocalHEAD(t *testing.T) {
+func TestPrepareCheckoutKeepsSealedDefaultAndCommitAfterLocalHEADMoves(t *testing.T) {
 	dir, sha := sourcetest.Repository(t)
 	spec := source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir, SHA: sha, DefaultBranch: "release"}
-	entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
+	options := source.Options{Workspace: t.TempDir(), Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}
+	entry, err := source.PrepareCheckout(t.Context(), spec, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +52,16 @@ func TestPrepareCheckoutKeepsSealedDefaultAndRefusesMovedLocalHEAD(t *testing.T)
 	sourcetest.Write(t, filepath.Join(dir, "new"), "later")
 	sourcetest.Git(t, dir, "add", "new")
 	sourcetest.Git(t, dir, "commit", "-qm", "later")
-	if _, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}); err == nil {
-		t.Fatal("accepted a different local HEAD")
+	entry, err = source.PrepareCheckout(t.Context(), spec, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = entry.Close() })
+	if entry.SHA != sha || sourcetest.Git(t, entry.CheckoutDirectory(), "rev-parse", "HEAD") != sha || entry.DefaultBranch != "release" {
+		t.Fatalf("moved HEAD replaced sealed source: %+v", entry)
+	}
+	if _, err := os.Stat(filepath.Join(entry.CheckoutDirectory(), "new")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("later commit content reached sealed checkout: %v", err)
 	}
 }
 

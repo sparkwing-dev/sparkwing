@@ -12,12 +12,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -125,19 +123,6 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	}
 	if run.Run.Spec != nil {
 		sourceOptions.SDK = run.Run.Spec.Resolved.Engine.Pin.SDK
-	} else if run.Run.Request.Request.Source.Location.LocalCheckout != "" {
-		spec, err := source.ForRequest(run.Run.Request)
-		if err != nil {
-			return runners.NativeServices{}, err
-		}
-		typescript, err := pipelineentry.IsTypeScript(filepath.Join(spec.LocalCheckout, spec.PipelineDir))
-		if err != nil {
-			return runners.NativeServices{}, err
-		}
-		sourceOptions.SDK = engine.GoSDK
-		if typescript {
-			sourceOptions.SDK = engine.TypeScriptSDK
-		}
 	} else {
 		sourceOptions.SDK = ""
 	}

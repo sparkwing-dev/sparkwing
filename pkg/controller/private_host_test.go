@@ -347,7 +347,7 @@ func TestLocalHostChildIntakeResolvesCapturedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := controllerwire.CreateRunRequest{IdempotencyKey: "child", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "weather-report", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginChild, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Options: options, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "build"}}}
+	body := controllerwire.CreateRunRequest{IdempotencyKey: "child", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "weather-report", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: runspec.OriginChild, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}, Options: options, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "build"}}}
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)

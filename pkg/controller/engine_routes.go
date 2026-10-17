@@ -177,6 +177,9 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		if err := s.resolveIntakeSource(r.Context(), a.Target.Team, &body.Request); err != nil {
 			return err
 		}
+		if err := s.resolveChildRevisions(r.Context(), engine, a, &body.Request); err != nil {
+			return err
+		}
 		if err := s.dedupeIntake(a, &body); err != nil {
 			return err
 		}

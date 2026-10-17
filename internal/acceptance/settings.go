@@ -53,7 +53,7 @@ func acceptedSettings() (runspec.Spec, json.RawMessage, error) {
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
-	request, err := runspec.SealRequest(runspec.Request{Version: 1, Team: "team", Pipeline: "build", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost, Actor: runspec.Actor{ID: "original"}, Options: options, RequestedArgs: map[string]string{"mode": "test", "secret": "hidden-value"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42"}, SHA: "sha-a", Ref: "refs/heads/trunk", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{RepositoryID: 42, DefaultBranch: "trunk", DefaultBranchPush: true, SHA: "sha-a"}}}}, runspec.IntakeFacts{RunID: "run-a", AdmittedAt: time.Unix(100, 0)})
+	request, err := runspec.SealRequest(runspec.Request{Version: 1, Team: "team", Pipeline: "build", Mode: runspec.IntakeExecute, Origin: runspec.OriginApp, Dispatch: runspec.DispatchHost, Actor: runspec.Actor{ID: "original"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}, Options: options, RequestedArgs: map[string]string{"mode": "test", "secret": "hidden-value"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42"}, SHA: "0123456789abcdef0123456789abcdef01234567", Ref: "refs/heads/trunk", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{RepositoryID: 42, DefaultBranch: "trunk", DefaultBranchPush: true, SHA: "0123456789abcdef0123456789abcdef01234567"}}}}, runspec.IntakeFacts{RunID: "run-a", AdmittedAt: time.Unix(100, 0)})
 	if err != nil {
 		return runspec.Spec{}, nil, err
 	}
@@ -170,7 +170,7 @@ func retrySeals() error {
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(retry.Request, spec.Request) || !reflect.DeepEqual(retry.Spec.Value, spec) || string(retry.Plan) != string(plan) || retry.Lineage.Retrier.Value.ID != "retrier" || retry.Request.Request.Actor.ID != "original" || retry.Request.Request.Git.SHA != "sha-a" || !retry.Request.Request.Git.App.Value.DefaultBranchPush {
+	if !reflect.DeepEqual(retry.Request, spec.Request) || !reflect.DeepEqual(retry.Spec.Value, spec) || string(retry.Plan) != string(plan) || retry.Lineage.Retrier.Value.ID != "retrier" || retry.Request.Request.Actor.ID != "original" || retry.Request.Request.Git.SHA != "0123456789abcdef0123456789abcdef01234567" || !retry.Request.Request.Git.App.Value.DefaultBranchPush {
 		return errors.New("retry changed sealed facts or lost retrier lineage")
 	}
 	return nil

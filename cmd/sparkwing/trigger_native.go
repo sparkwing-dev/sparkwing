@@ -92,9 +92,11 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 				}
 			}
 		}
-		if _, err := selected.checkout.read(ctx, "checkout", "--quiet", "--detach", selected.git.SHA, "--"); err != nil {
+		checkout, err = triggerInspectionCheckout(ctx, selected.checkout.directory, selected.git.SHA, "", snapshot.tempDir)
+		if err != nil {
 			return result, err
 		}
+		selected.checkout.directory = checkout
 	}
 	home, err := wingd.HomeDir("")
 	if err != nil {
@@ -158,11 +160,8 @@ func snapshotTriggerCheckout(ctx context.Context, snapshot *worktreeSnapshot) (s
 
 func triggerInspectionCheckout(ctx context.Context, repo, sha, bundle, workspace string) (string, error) {
 	options := source.Options{Workspace: workspace, Base: procenv.Base{Local: true, Captured: os.Environ(), Masker: secrets.NewMasker()}}
-	committed := sha
-	if bundle != "" {
-		committed = ""
-	}
-	entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: committed, CommittedCheckout: true, PipelineDir: "."}, options)
+	options.LocalBundle = bundle
+	entry, err := source.PrepareCheckout(ctx, source.Spec{RepoKey: "inspection", LocalCheckout: repo, SHA: sha, CommittedCheckout: true, PipelineDir: "."}, options)
 	if err != nil {
 		return "", err
 	}
@@ -171,14 +170,6 @@ func triggerInspectionCheckout(ctx context.Context, repo, sha, bundle, workspace
 		return "", err
 	}
 	reader := triggerCheckout{directory: entry.CheckoutDirectory(), environment: environment}
-	if bundle != "" {
-		if _, err := reader.read(ctx, "bundle", "unbundle", bundle); err != nil {
-			return "", err
-		}
-		if _, err := reader.read(ctx, "checkout", "--quiet", "--detach", sha, "--"); err != nil {
-			return "", err
-		}
-	}
 	remote, err := (triggerCheckout{directory: repo, environment: environment}).read(ctx, "remote", "get-url", "origin")
 	if err != nil {
 		return "", err

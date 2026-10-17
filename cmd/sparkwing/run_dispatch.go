@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -119,69 +119,33 @@ func runOutput(inv clisurface.Invocation, environment string, terminal bool) (st
 }
 
 func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory string, cleanup func(), err error) {
-	repoRoot := filepath.Dir(sparkwingDir)
-
-	commit, err := orchestrator.ResolveRefCommit(context.Background(), repoRoot, ref, slog.Default())
+	root := filepath.Dir(sparkwingDir)
+	options := source.Options{Base: procenv.Base{Local: true, Captured: os.Environ()}}
+	spec := source.Spec{RepoKey: "inspection", LocalCheckout: root, PipelineDir: ".sparkwing", CommittedCheckout: true}
+	git, _, err := source.ResolveRevisions(context.Background(), runspec.Git{Ref: ref}, runspec.Source{}, "", func(ref string) (string, error) { return source.ResolveRef(context.Background(), spec, ref, options) })
 	if err != nil {
 		return "", "", nil, err
 	}
-
-	temporaryDir, err := os.MkdirTemp("", "sparkwing-from-*")
+	workspace, err := os.MkdirTemp("", "sparkwing-from-*")
 	if err != nil {
-		return "", "", nil, fmt.Errorf("mkdir tmp: %w", err)
+		return "", "", nil, err
 	}
-
-	// #nosec G702 -- the generated directory and resolved commit ID follow an explicit --.
-	out, err := exec.Command("git", "-C", repoRoot,
-		"worktree", "add", "--detach", "--quiet", "--", temporaryDir, string(commit)).CombinedOutput()
+	options.Workspace = workspace
+	spec.SHA = git.SHA
+	entry, err := source.PrepareCheckout(context.Background(), spec, options)
 	if err != nil {
-		if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
-			slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
-		}
-		return "", "", nil, fmt.Errorf("git worktree add %s: %w: %s",
-			ref, err, strings.TrimSpace(string(out)))
+		return "", "", nil, errors.Join(err, os.RemoveAll(workspace))
 	}
-
-	pipelineDirectory = filepath.Join(temporaryDir, ".sparkwing")
-	if fi, statErr := os.Stat(pipelineDirectory); statErr != nil || !fi.IsDir() {
-		if cleanupErr := exec.Command("git", "-C", repoRoot,
-			"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
-			slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
-		}
-		if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
-			slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
-		}
-		return "", "", nil, fmt.Errorf("ref %s has no .sparkwing/ directory", ref)
-	}
-
-	// safety: more than one caller runs this, and the second `worktree remove`
-	// of a gone path fails loudly.
-	var once sync.Once
-	cleanup = func() {
-		once.Do(func() {
-			// safety: Windows holds an open handle on a process's working
-			// directory, and the exec path leaves it inside the worktree being
-			// removed.
-			if wd, wdErr := os.Getwd(); wdErr == nil {
-				if rel, relErr := filepath.Rel(temporaryDir, wd); relErr == nil && !strings.HasPrefix(rel, "..") {
-					if chdirErr := os.Chdir(repoRoot); chdirErr != nil {
-						slog.Warn("could not leave the temporary worktree", "path", repoRoot, "error", chdirErr)
-					}
+	return entry.CheckoutDirectory(), entry.Directory, func() {
+		if wd, e := os.Getwd(); e == nil {
+			if rel, e := filepath.Rel(workspace, wd); e == nil && filepath.IsLocal(rel) {
+				if e := os.Chdir(root); e != nil {
+					slog.Warn("could not leave temporary checkout", "error", e)
 				}
 			}
-			if cleanupErr := exec.Command("git", "-C", repoRoot,
-				"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
-				slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
-			}
-			if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
-				slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
-			}
-			// safety: git keeps the registration under the origin repository, where a
-			// leftover one blocks adding the same path again.
-			if err := exec.Command("git", "-C", repoRoot, "worktree", "prune").Run(); err != nil {
-				slog.Default().Debug("ref worktree prune did not apply", "repo", repoRoot, "error", err)
-			}
-		})
-	}
-	return temporaryDir, pipelineDirectory, cleanup, nil
+		}
+		if e := errors.Join(entry.Close(), os.RemoveAll(workspace)); e != nil {
+			slog.Warn("could not remove temporary checkout", "error", e)
+		}
+	}, nil
 }

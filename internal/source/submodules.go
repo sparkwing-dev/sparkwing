@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -57,7 +58,7 @@ func checkoutSubmodules(ctx context.Context, client *gitClient, checkout, remote
 			return err
 		}
 		fields := strings.Fields(row)
-		if len(fields) < 3 || fields[0] != "160000" || fields[1] != "commit" || !commitID.MatchString(fields[2]) {
+		if len(fields) < 3 || fields[0] != "160000" || fields[1] != "commit" || !runspec.IsCommitID(fields[2]) {
 			return errors.New("source submodule is not a sealed gitlink")
 		}
 		destination := filepath.Join(checkout, relative)

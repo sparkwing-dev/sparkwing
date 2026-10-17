@@ -1,12 +1,15 @@
 package githooks
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 )
 
 const SelfTestEnv = "SPARKWING_HOOK_SELFTEST"
@@ -116,14 +119,12 @@ func attemptRefusedCommit(res FireResult, repoRoot, hooksDir string) FireResult 
 	defer func() { _ = os.RemoveAll(scratch) }()
 
 	worktree := filepath.Join(scratch, "worktree")
-	if out, err := runGitIn(repoRoot, nil, "worktree", "add", "--detach", "--no-checkout", worktree); err != nil {
-		res.Verdict, res.Detail = FireError, fmt.Sprintf("throwaway worktree: %v: %s", err, out)
+	closeWorktree, err := gitcmd.HookWorktree(context.Background(), repoRoot, worktree)
+	if err != nil {
+		res.Verdict, res.Detail = FireError, fmt.Sprintf("throwaway worktree: %v", err)
 		return res
 	}
-	defer func() {
-		_, _ = runGitIn(repoRoot, nil, "worktree", "remove", "--force", worktree)
-		_, _ = runGitIn(repoRoot, nil, "worktree", "prune")
-	}()
+	defer func() { _ = closeWorktree() }()
 
 	before, err := runGitIn(worktree, nil, "rev-parse", "HEAD")
 	if err != nil {

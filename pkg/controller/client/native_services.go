@@ -127,6 +127,8 @@ func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, a
 		request.Git.SHA = ""
 		request.Source.Ref, request.Source.RequestedRef = "", ""
 		request.Git.App = runspec.Optional[runspec.AppFacts]{}
+		request.Source.WorkingTree, request.Source.CommittedCheckout = false, true
+		request.Source.BundleDigest = runspec.Optional[string]{}
 	}
 	key := rand.Text()
 	var result controllerwire.CreateRunResponse

@@ -97,7 +97,7 @@ func intakeFixture(t *testing.T) (*Tenant, IntakeRequest, *time.Time) {
 		}
 		return IntakePolicyFacts{LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 	}))
-	request := IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}, Request: runspec.Request{Version: 1, Team: "a", Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, RequestedArgs: map[string]string{"message": "hello"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "original"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}}}}
+	request := IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "member"}, Request: runspec.Request{Version: 1, Team: "a", Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, RequestedArgs: map[string]string{"message": "hello"}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}, Source: runspec.Source{Ref: "0123456789abcdef0123456789abcdef01234567"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}}}}}
 	return &Tenant{s: s, team: "a"}, request, &now
 }
 
@@ -487,7 +487,7 @@ func TestPlanControllerHandoffRequiresLiveOwnerLease(t *testing.T) {
 
 func TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate(t *testing.T) {
 	tenant, plan, _ := planFixtureWithInput(t, runspec.DispatchHost, func(in *IntakeRequest) {
-		in.Request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42, BaseRepo: "gh:1", HeadRepo: "gh:1", BaseRef: "main", HeadRef: "feature", HeadSHA: "original"}}
+		in.Request.PullRequest = runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42, BaseRepo: "gh:1", HeadRepo: "gh:1", BaseRef: "main", HeadRef: "feature", HeadSHA: "0123456789abcdef0123456789abcdef01234567"}}
 	})
 	retrier := authorityRoot("retrier", "a")
 	retrier.Grants = []capability.Grant{capability.RunsControl}

@@ -10,7 +10,7 @@ import (
 
 func fixture(t *testing.T) Spec {
 	t.Helper()
-	req, err := SealRequest(Request{Version: 1, Team: "team", Pipeline: "build", Mode: IntakeExecute, Dispatch: DispatchHost, Origin: OriginApp, RequestedArgs: map[string]string{"token": "private-token", "count": "42"}, Git: Git{Repository: Repository{Key: "gh:42", Display: "owner/repo"}, SHA: "original-sha", DefaultBranch: Optional[string]{Set: true, Value: "main"}, App: Optional[AppFacts]{Set: true, Value: AppFacts{RepositoryID: 42, SHA: "original-sha", DefaultBranch: "main", DefaultBranchPush: true}}}, Actor: Actor{ID: "original"}, PullRequest: Optional[PullRequest]{Set: true, Value: PullRequest{Action: "synchronize", BaseSHA: "base-sha", Number: 3, BaseRef: "main", HeadRef: "feature", HeadSHA: "original-sha"}}}, IntakeFacts{RunID: "source", AdmittedAt: time.Unix(1, 0), AllowedPools: []string{"private"}})
+	req, err := SealRequest(Request{Version: 1, Team: "team", Pipeline: "build", Mode: IntakeExecute, Dispatch: DispatchHost, Origin: OriginApp, RequestedArgs: map[string]string{"token": "private-token", "count": "42"}, Git: Git{Repository: Repository{Key: "gh:42", Display: "owner/repo"}, SHA: strings.Repeat("a", 40), DefaultBranch: Optional[string]{Set: true, Value: "main"}, App: Optional[AppFacts]{Set: true, Value: AppFacts{RepositoryID: 42, SHA: strings.Repeat("a", 40), DefaultBranch: "main", DefaultBranchPush: true}}}, Source: Source{Ref: strings.Repeat("a", 40)}, Actor: Actor{ID: "original"}, PullRequest: Optional[PullRequest]{Set: true, Value: PullRequest{Action: "synchronize", BaseSHA: "base-sha", Number: 3, BaseRef: "main", HeadRef: "feature", HeadSHA: strings.Repeat("a", 40)}}}, IntakeFacts{RunID: "source", AdmittedAt: time.Unix(1, 0), AllowedPools: []string{"private"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestPullRequestFields(t *testing.T) {
 		t.Fatal("retry changed sealed inputs")
 	}
 	ctx := got.Spec.Value.RunContext()
-	if ctx.Actor.ID != "original" || ctx.PullRequest.Value.Number != 3 || ctx.PullRequest.Value.Action != "synchronize" || ctx.PullRequest.Value.BaseSHA != "base-sha" || ctx.PullRequest.Value.BaseRef != "main" || ctx.PullRequest.Value.HeadRef != "feature" || ctx.PullRequest.Value.HeadSHA != "original-sha" || !ctx.Git.App.Value.DefaultBranchPush || ctx.Git.SHA != "original-sha" {
+	if ctx.Actor.ID != "original" || ctx.PullRequest.Value.Number != 3 || ctx.PullRequest.Value.Action != "synchronize" || ctx.PullRequest.Value.BaseSHA != "base-sha" || ctx.PullRequest.Value.BaseRef != "main" || ctx.PullRequest.Value.HeadRef != "feature" || ctx.PullRequest.Value.HeadSHA != strings.Repeat("a", 40) || !ctx.Git.App.Value.DefaultBranchPush || ctx.Git.SHA != strings.Repeat("a", 40) {
 		t.Fatal("lost original facts")
 	}
 	ctx.Args["token"] = "mutated"
@@ -266,7 +266,7 @@ func TestProjectionAndContext(t *testing.T) {
 	s.Resolved.Settings.Options.DryRun = Setting[bool]{Optional: Optional[bool]{Set: true, Value: true}}
 	s.Resolved.Entrypoint = "ci/main.go"
 	p := Project(s)
-	if p.RepoKey != "gh:42" || p.SHA != "original-sha" || p.DefaultBranch != "main" || p.RequestHash != s.Request.Hash || p.SpecHash != s.Hash || p.PlanHash != s.PlanHash {
+	if p.RepoKey != "gh:42" || p.SHA != strings.Repeat("a", 40) || p.DefaultBranch != "main" || p.RequestHash != s.Request.Hash || p.SpecHash != s.Hash || p.PlanHash != s.PlanHash {
 		t.Fatalf("projection lost inputs: %+v", p)
 	}
 	p.AllowedPools[0] = "mutated"
@@ -344,13 +344,16 @@ func TestGitHubIdentityRequiresResolvedID(t *testing.T) {
 func TestRequestRefusesEmbeddedSourceCredentials(t *testing.T) {
 	request := fixture(t).Request.Request
 	for _, ref := range []string{"https://user:private-password@example.com/repo.git", "https://example.com/repo.git?access_token=private-password", "ssh://git:private-password@example.com/repo"} {
-		request.Source.Ref = ref
+		request.Source.Ref = strings.Repeat("a", 40)
+		request.Source.RequestedRef = ref
 		_, err := SealRequest(request, IntakeFacts{RunID: "run"})
 		if err == nil || strings.Contains(err.Error(), "private-password") {
 			t.Fatalf("source credential accepted or echoed: %v", err)
 		}
 	}
-	request.Source.Ref = "ssh://git@example.com/repo"
+	request.Source.Ref = strings.Repeat("a", 40)
+	request.Source.Location.RemoteURL = "ssh://git@example.com/repo"
+	request.Source.RequestedRef = "ssh://git@example.com/repo"
 	if _, err := SealRequest(request, IntakeFacts{RunID: "run"}); err != nil {
 		t.Fatal("SSH transport username refused", err)
 	}

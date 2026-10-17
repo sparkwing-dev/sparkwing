@@ -29,8 +29,14 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 	if request.Dispatch != DispatchHost && request.Dispatch != DispatchController {
 		return SealedRequest{}, errors.New("invalid dispatch")
 	}
-	if strings.Contains(request.Source.Ref, "://") {
-		source, err := url.Parse(request.Source.Ref)
+	if request.Mode == IntakeExecute && (!IsCommitID(request.Git.SHA) || !IsCommitID(request.Source.Ref)) {
+		return SealedRequest{}, &apierr.Error{Code: apierr.InvalidArgs, Message: "executable intake requires resolved execution and code commits"}
+	}
+	for _, ref := range []string{request.Source.RequestedRef, request.Source.Ref} {
+		if !strings.Contains(ref, "://") {
+			continue
+		}
+		source, err := url.Parse(ref)
 		if err != nil {
 			return SealedRequest{}, errors.New("invalid source reference")
 		}

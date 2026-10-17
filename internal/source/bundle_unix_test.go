@@ -1,6 +1,6 @@
 //go:build !windows
 
-package bincache
+package source_test
 
 import (
 	"context"
@@ -8,23 +8,24 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 func TestSourceBundlePreservesCancellationDuringGit(t *testing.T) {
+	spec, options, _ := bundleFixture(t)
 	bin := t.TempDir()
-	script := "#!/bin/sh\nkill -USR1 $PPID\nwhile :; do :; done\n"
-	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nkill -USR1 $PPID\nwhile :; do :; done\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGUSR1)
 	defer signal.Stop(signals)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -34,11 +35,12 @@ func TestSourceBundlePreservesCancellationDuringGit(t *testing.T) {
 		case <-done:
 		}
 	}()
-	data, transport := sourceBundleFixture([]byte("bundle"))
-	dir := t.TempDir()
-	_, err := FetchSourceBundle(ctx, data, transport.want, strings.Repeat("a", 40), "", dir)
-	assertEmptyDirectory(t, dir)
+	_, err := source.PrepareCheckout(ctx, spec, options)
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancellation is not preserved: %v", err)
+		t.Fatal("lost Git cancellation", err)
+	}
+	entries, err := os.ReadDir(options.Workspace)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("cancelled Git left files", entries, err)
 	}
 }

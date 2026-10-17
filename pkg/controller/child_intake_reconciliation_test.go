@@ -34,6 +34,7 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 	req.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}
 	req.Request.Git.Ref = "main"
 	req.Request.Git.SHA = "0123456789abcdef0123456789abcdef01234567"
+	req.Request.Source.Ref = req.Request.Git.SHA
 	raw, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +51,10 @@ func childIntakeFixture(t *testing.T) (*EngineController, http.Handler, string) 
 
 func childIntakeBody(t *testing.T, pipeline string, git runspec.Git) string {
 	t.Helper()
-	body, err := json.Marshal(controllerwire.CreateRunRequest{IdempotencyKey: "child-" + pipeline, Request: runspec.Request{Version: 1, Team: "a", Pipeline: pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Origin: runspec.OriginChild, Git: git, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}}})
+	if git.SHA == "" {
+		git.SHA = "0123456789abcdef0123456789abcdef01234567"
+	}
+	body, err := json.Marshal(controllerwire.CreateRunRequest{IdempotencyKey: "child-" + pipeline, Request: runspec.Request{Version: 1, Team: "a", Pipeline: pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Origin: runspec.OriginChild, Git: git, Source: runspec.Source{Ref: git.SHA}, Lineage: runspec.Lineage{ParentRunID: "run", ParentJobID: "job"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -81,25 +81,13 @@ func (s *Server) intakeGitHubRepositoryID(ctx context.Context, team, slug string
 		}
 		return repo.ID, nil
 	}
-	tenant, err := s.store.ForTeam(ctx, store.Team(team))
+	credential, err := s.intakeStoredCredential(ctx, store.Team(team), "github.com", store.GitCredentialHTTPS)
 	if err != nil {
-		return 0, engineLookupError(err)
-	}
-	credential, err := tenant.GitCredentialForHost(ctx, "github.com")
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return 0, engineLookupError(err)
+		return 0, err
 	}
 	token := ""
-	if err == nil && credential.Kind == store.GitCredentialHTTPS && credential.ConfirmedAt != nil {
-		cipher, ok := s.secretsCipher.(BoundCipher)
-		if !ok {
-			return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub identity lookup requires the configured source credential cipher"}
-		}
-		token, err = openSecret(cipher, gitCredentialBinding(credential.Team, credential.Host), credential.Secret)
-		if err != nil || token == "" {
-			return 0, &apierr.Error{Code: apierr.Unavailable, Message: "GitHub source identity credential could not be opened"}
-		}
-		s.masker.Register(token)
+	if credential.Kind == store.GitCredentialHTTPS {
+		token = credential.Secret
 	}
 	return sourceurl.GitHubRepositoryID(ctx, "https://github.com/"+slug, token)
 }

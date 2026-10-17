@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -148,6 +149,12 @@ func newStoreOwnerFixture(t *testing.T, database *store.Store, request runspec.R
 
 func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake store.IntakeRequest) *storeHostFixture {
 	t.Helper()
+	if intake.Request.Git.SHA == "" {
+		intake.Request.Git.SHA = strings.Repeat("a", 40)
+	}
+	if intake.Request.Source.Ref == "" {
+		intake.Request.Source.Ref = intake.Request.Git.SHA
+	}
 	ctx := t.Context()
 	database.SetIntakePolicy(hostIntakePolicy{})
 	database.SetClaimProfileResolver(hostEnrollment{})

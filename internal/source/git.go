@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/source/gitcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -44,7 +45,7 @@ func (g *gitClient) run(ctx context.Context, directory, remote string, args ...s
 	}
 	cmd := exec.CommandContext(ctx, "git", append(commandArgs, args...)...)
 	cmd.Env = env
-	out, err := commandOutput(ctx, cmd)
+	out, err := gitcmd.Output(ctx, cmd, false)
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()

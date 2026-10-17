@@ -20,6 +20,7 @@ func (p scheduleFixturePolicy) ResolveScheduleSource(_ context.Context, row Cron
 	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: row.RepoPath})
 	request.Version = 1
 	request.Git = runspec.Git{Repository: repository, Ref: row.GitBranch, SHA: row.LockedRef}
+	request.Source.Ref = request.Git.SHA
 	request.Source.Location = runspec.SourceLocation{RemoteURL: row.RepoPath, PipelineDir: ".sparkwing"}
 	return request, err
 }
@@ -308,6 +309,7 @@ type scheduleFollowPolicy struct {
 func (p scheduleFollowPolicy) ResolveScheduleSource(ctx context.Context, row CronSchedule, request runspec.Request) (runspec.Request, error) {
 	request, err := p.scheduleFixturePolicy.ResolveScheduleSource(ctx, row, request)
 	request.Git.SHA = *p.revision
+	request.Source.Ref = request.Git.SHA
 	return request, err
 }
 
@@ -329,7 +331,7 @@ func TestScheduleReplayKeepsFirstSealAfterFollowedRevisionMoves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision = "abcdef0123456789abcdef0123456789abcdef0123"
+	revision = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	replay, err := tenant.AdmitScheduledRun(t.Context(), row, *now)
 	if err != nil || !replay.Replayed || !reflect.DeepEqual(first.Request, replay.Request) {
 		t.Fatalf("followed revision changed replay: %+v %v", replay, err)
@@ -338,7 +340,7 @@ func TestScheduleReplayKeepsFirstSealAfterFollowedRevisionMoves(t *testing.T) {
 	if err != nil || replayed {
 		t.Fatalf("manual admission: %s %v", manual, err)
 	}
-	revision = "123456789abcdef0123456789abcdef0123456789a"
+	revision = "cccccccccccccccccccccccccccccccccccccccc"
 	_, again, replayed, err := tenant.RunAuthorizedSchedule(t.Context(), a, row.ID, "manual-follow")
 	if err != nil || !replayed || manual != again {
 		t.Fatalf("manual followed replay: %s %t %v", again, replayed, err)

@@ -29,7 +29,7 @@ type Spec struct {
 	BundleDigest string
 }
 
-// Access supplies live, audited source authority without environment credentials.
+// Access supplies host-owned source authority without environment credentials.
 type Access interface {
 	GitCredential(context.Context, Spec) (Credential, error)
 	BundleURL(context.Context, string) (string, error)
@@ -54,6 +54,7 @@ type EngineResolver interface {
 // Options supplies host-owned workspace and authority separately from sealed source data.
 type Options struct {
 	PreparedCheckout string
+	LocalBundle      string
 	Workspace        string
 	Access           Access
 	Engines          EngineResolver
