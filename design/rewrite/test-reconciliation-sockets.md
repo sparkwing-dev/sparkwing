@@ -17,7 +17,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestAnUnreadableFreeTierWaitlistsNewAccounts`.
 - `pkg/controller`: `TestAnUnwiredFreeTierLogsOnceAtStartup`.
 - `pkg/controller`: `TestApprovingTheOldestRunsTheNotifier`.
-- `pkg/controller`: `TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot`.
 - `pkg/controller`: `TestBillingTrust_OperatorGrantsAndRevokes`.
 - `pkg/controller`: `TestCardBilling_OwnerSetsABudget`.
 - `pkg/controller`: `TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt`.
@@ -30,16 +29,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestComputeLimits_ShowAndSet`.
 - `pkg/controller`: `TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal`.
 - `pkg/controller`: `TestControllerFixturesKeepCredentialsAndRunsSeparate`.
-- `pkg/controller`: `TestController_ConcurrencyStateIncludesQueueArrivedAtForPromotedHolder`.
-- `pkg/controller`: `TestController_ConcurrencyStateOmitsQueueArrivedAtForImmediateHolder`.
-- `pkg/controller`: `TestController_GetRun_IncludeNodes`.
-- `pkg/controller`: `TestController_GetRun_IncludeNodes_Decorations`.
-- `pkg/controller`: `TestController_GetRun_IncludeNodes_NoSnapshot`.
-- `pkg/controller`: `TestController_Health`.
-- `pkg/controller`: `TestController_HealthDoesNotExposeRunFailures`.
-- `pkg/controller`: `TestController_HealthHidesDatabaseErrors`.
-- `pkg/controller`: `TestController_RunLifecycle`.
-- `pkg/controller`: `TestController_ValidationErrors`.
 - `pkg/controller`: `TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin`.
 - `pkg/controller`: `TestCreditSettings_ReadsTheDefaultRateLadder`.
 - `pkg/controller`: `TestCreditSettings_RefusesARateTableTheLedgerCannotPrice`.
@@ -148,11 +137,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestLegacyMultiTeamLicenseAdvertisesBilling`.
 - `pkg/controller`: `TestMetricsAddr_FailsStartupWhenTheMetricsPortIsTaken`.
 - `pkg/controller`: `TestMetricsAddr_MovesMetricsOffTheAPIListener`.
-- `pkg/controller`: `TestMetrics_BucketCeilingIsExported`.
-- `pkg/controller`: `TestMetrics_BucketCeilingReportsAnIncompleteMeasurement`.
-- `pkg/controller`: `TestMetrics_ObjectStoreBudgetIsExported`.
-- `pkg/controller`: `TestObjectStoreHealth_NamesTrippedClassesWithoutTheirLimits`.
-- `pkg/controller`: `TestObjectStoreHealth_ReportsAFrozenCeilingWithoutItsTotals`.
 - `pkg/controller`: `TestOperatorConsoleRejectsRetiredDollarOverrides`.
 - `pkg/controller`: `TestOperatorConsole_FindsATeamAndActsOnItWithAReason`.
 - `pkg/controller`: `TestOperatorConsole_KeepsARevocationAndDisputeHolds`.
@@ -161,8 +145,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestOperatorDeletesAnAccountByEmailAndATeamBySlug`.
 - `pkg/controller`: `TestReadHostKeyTakesTheKeyTheServerPresents`.
 - `pkg/controller`: `TestRefundReportingRejectsTeamOwnerAndRunner`.
-- `pkg/controller`: `TestRoutes_RejectSimpleRequestContentTypes`.
-- `pkg/controller`: `TestRoutes_RejectUnknownJSONFields`.
 - `pkg/controller`: `TestRunFiltersTreatSQLMetacharactersAsLiteral`.
 - `pkg/controller`: `TestRunSourceCredential_MintsTheApprovedRepositoriesByID`.
 - `pkg/controller`: `TestRunSourceCredential_NeedsTheGitHubApp`.
@@ -174,16 +156,9 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints`.
 - `pkg/controller`: `TestSecretArgs_RetryStillReceivesPlaintext`.
 - `pkg/controller`: `TestSecretMutationsTreatSQLMetacharactersAsLiteral`.
-- `pkg/controller`: `TestSecrets_DashboardSessionsWriteSecretsAndReadVariables`.
 - `pkg/controller`: `TestSecrets_EncryptionRoundTrip`.
 - `pkg/controller`: `TestSecrets_EnvelopeIsBoundToAccessFields`.
 - `pkg/controller`: `TestSecrets_EnvelopeIsBoundToNameAndPipeline`.
-- `pkg/controller`: `TestSecrets_EveryResponseIsNoStore`.
-- `pkg/controller`: `TestSecrets_ListNamesUnboundRows`.
-- `pkg/controller`: `TestSecrets_ListOpensAVariablesEnvelope`.
-- `pkg/controller`: `TestSecrets_MaskedValuesReachOnlyTheOperatorBearer`.
-- `pkg/controller`: `TestSecrets_PlaintextRowFailsClosedOnceEncrypted`.
-- `pkg/controller`: `TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding`.
 - `pkg/controller`: `TestSignUpGateRoutesAreTheOperators`.
 - `pkg/controller`: `TestSignUpVelocityWarnsThenClosesTheGate`.
 - `pkg/controller`: `TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos`.
@@ -221,10 +196,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestTeamLogReadsAreNotRefusedPastTheDownloadCap`.
 - `pkg/controller`: `TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries`.
 - `pkg/controller`: `TestTeamPurgeWaitsForDeletionDelay`.
-- `pkg/controller`: `TestTrends_AvgWaitMs`.
-- `pkg/controller`: `TestTrends_AvgWaitMs_ExcludesLegacyRows`.
-- `pkg/controller`: `TestTrends_BucketsRuns`.
-- `pkg/controller`: `TestTrends_PipelineFilter`.
 - `pkg/controller`: `TestTriggerAndCreateRunRejectAGitSHAThatIsNotAnObjectID`.
 - `pkg/controller`: `TestTriggerRecordsTheRunFlagsOnTheRunRow`.
 - `pkg/controller`: `TestTrigger_CreatesPendingRunRow`.
@@ -272,3 +243,27 @@ The paused alias and arbitrary node-creation success tests are deleted because
 their surfaces are retired. TestPlanTopologyStrangerLearnsNothingProperty
 replaces the latter route's stranger-token security assertion at the current
 plan acceptance boundary. Those obligations no longer require a listener.
+
+Continuation 7 ports public health, trends, current RunDetail, content types,
+unknown fields, secret/variable envelope listing, private cache headers and
+object-store/bucket metrics to recorders. The current safe RunDetail replaces
+the retired include=nodes wrapper and raw execution decorations. Retired public
+run/node writers and their validation expectations are removed.
+
+The two queue-arrival rendering tests use real member authentication and the
+declared ConcurrencyStore read seam backed by a tenant snapshot. Tenant still
+lacks the production ConcurrencyStore adapter. These prove transport/rendering,
+not native authorization revalidation or queue mutations.
+
+The remaining two dashboard secret groups now use real owner/editor/reader
+sessions, CSRF and bearer credentials with recorder transport. The retired
+operator-bearer plaintext bypass becomes explicit deployment-credential refusal
+under C2. Generated masked values remain absent from member reads, lists and
+logs. Envelope transplantation and claim release tests still need their own
+reconciliation/native run as listed above.
+
+Continuation 7 also ports legacy-envelope/plaintext-row read refusal and
+bound/unbound list metadata. Refused reads still require 500, sanitized errors,
+no plaintext and unchanged stored bytes. The remaining encryption-roundtrip and
+envelope relocation/access-field groups require declared-claim fixtures before
+their old operator/plaintext-read assumptions can be reconciled.

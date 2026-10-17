@@ -427,3 +427,82 @@ external seams and does not count them as production acceptance. No lead-owned
 amendment or handoff file is edited. No Git writes or Sparkwing candidate
 execution is performed. Local Git has no identity or core.worktree override.
 W1b scratch is removed after checks and the shared cache is retained.
+
+
+## Continuation 7: public read reconciliation
+
+- B OPEN pkg/controller: reproduce all eleven cron failures before edits. Three still call retired trigger SQL and eight still lack the committing ScheduleWriter. No cron assertion changes. The scheduled origin must retain the arming authority and revalidate it inside the sole sealed intake transaction.
+- C pkg/controller: port TestController_Health, TestController_HealthHidesDatabaseErrors and TestController_HealthDoesNotExposeRunFailures to the real public handler through a recorder. Retain status, object-store health, sanitized database failure and zero workload-history disclosure. TestControllerPublicHealthHidesWorkloadProperty generates private pipeline/error/argument values and running/failed states. Invariant: unauthenticated health reveals deployment availability without private workload identity or content.
+- C pkg/controller: port TestTrends_BucketsRuns, TestTrends_AvgWaitMs, TestTrends_AvgWaitMs_ExcludesLegacyRows and TestTrends_PipelineFilter to real runs.read authentication through the recorder. Preserve exact run counts, wait averages, missing-created-at exclusion and pipeline filtering. Decode failures now fail loudly. Delete the unauthenticated httpGet helper.
+- C/B OPEN pkg/controller: port both TestController_ConcurrencyState queue-arrival groups to /queue/groups/{group}, real runs.read authentication and a fake implementing the declared ConcurrencyStore read seam, backed by a seeded tenant snapshot. Preserve omitted versus exact nanosecond arrival and verify the forwarded tenant, group and viewer authority. The concrete Tenant still does not implement ConcurrencyStore. Its committing adapter remains a real integration obligation, not a passing native proof.
+- C pkg/controller: TestController_GetRun_IncludeNodes becomes TestController_GetRunIncludesJobs and TestController_GetRun_IncludeNodes_NoSnapshot becomes TestController_GetRunBeforePlanning. Seed reporting state without retired public run/node writers. Assert the shared top-level RunDetail, jobs, stable response under legacy include queries, no raw run/node wrapper and populated empty collections before planning.
+- A pkg/controller: delete TestController_GetRun_IncludeNodes_Decorations. It required raw plan execution declarations (work, modifiers, groups) in the public status response. C3 defines JobDetail as a safe status projection and RunDetail as the shared display boundary. Existing engine detail/classification properties retain private-input exclusion. No public raw-declaration alias is restored.
+- A pkg/controller: delete TestController_RunLifecycle and TestController_ValidationErrors. They assert client-selected run IDs/state, arbitrary node insertion, the old nodes/start/finish routes and the old mutable plan snapshot. Their missing-id refusal is invalid under server-allocated run IDs. Current intake, plan, job/run transition, event, dependency and replay obligations remain in TestEngineIntakeHTTP, TestEnginePlanHTTP, TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences and TestEngineOwnerReconcilesExecutesAndFinishes.
+- C pkg/controller: port TestRoutes_RejectSimpleRequestContentTypes to authenticated token creation, own-token rotation and secret creation. Reject missing/plain/form/multipart types, preserve authentication-before-decode, and assert no capability issuance/revocation or secret write. Logout no longer accepts a caller-selected session JSON body. Its current body/CSRF/refusal behavior remains in TestSessionFlowHTTP* and TestBrowserLogoutHTTP*.
+- C pkg/controller: port TestRoutes_RejectUnknownJSONFields to the current grants array and canonical bad_request envelope, with no credential mutation and a real successful JSON issuance as control. TestRoutesUnknownJSONFieldsProperty generates adversarial field names/values and asserts zero mutation or private-value/bearer disclosure. Invariant: an unknown credential field cannot create, rotate or expose credentials.
+- C pkg/controller: port both object-store public health groups and the three object-store/bucket metric export groups to recorders. Metrics use the existing operator.limits policy fixture. Preserve all numeric metric values and public-health exclusion of configured limits and stored totals. Delete unused scrape and public server helpers plus mustPost, mustPostJSON, mustPostRaw and postAs.
+- C pkg/controller: port TestSecrets_ListOpensAVariablesEnvelope to a real account session, CSRF, bound cipher and committing writer. Assert both secret and variable are encrypted and bound at rest, the variable opens on list, and the secret stays absent.
+- C pkg/controller: port TestSecrets_EveryResponseIsNoStore and TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot to real session/CSRF transport and current /tokens, RunDetail and /jobs/{job} routes. Pin success, masked-read refusal and absent-delete statuses while retaining no-store/no-cache and secret exclusion. Public health returns 200 and JWKS returns its documented 404 without a signing key. Neither carries the private cache header.
+- C pkg/controller: port TestSecrets_DashboardSessionsWriteSecretsAndReadVariables to real owner/editor/reader account sessions and CSRF through recorders. Preserve masked-list and direct-read secrecy, plaintext variable reads, scoped metadata, owner deletion, editor/reader write/delete refusal and unchanged rows after refusals. Match canonical forbidden instead of the retired write_only text.
+- A/C pkg/controller: replace TestSecrets_MaskedValuesReachOnlyTheOperatorBearer with TestSecrets_MaskedValuesStayWriteOnlyForMembersAndDeploymentCredentials. C2's exact secret-route alternatives grant tenant members and live declared claims, not a deployment operator bypass. Preserve owner-bearer writes, masked-read refusal and variable reads. Require deployment credentials to receive 403 on reads and writes with no plaintext or inserted row. TestSecretsDashboardMaskedValuesProperty generates masked values across owner/editor/reader sessions and shared/pipeline scope. Invariant: masked values appear in neither member lists, member reads nor request logs.
+- A pkg/controller: extend TestBusinessRetiredRoutesAndExactMethods to require the old nodes/{job}/start, nodes/{job}/finish and concurrency/{group}/state routes to remain unregistered. The current plan and state-transition boundaries retain their authorization tests.
+- C pkg/controller: port TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding and TestSecrets_PlaintextRowFailsClosedOnceEncrypted to authenticated recorder reads through the real credential reader. Preserve 500, zero plaintext or storage-state disclosure and unchanged stored bytes. The stable private error is the current canonical internal/request failed envelope, replacing the retired string-only error.
+- C pkg/controller: port TestSecrets_ListNamesUnboundRows to the real session, CSRF and bound writer. Preserve both exact bound flags, reject missing/duplicate/unexpected rows and exclude both plaintext values from the entire list response.
+- C pkg/controller: TestSecretsMalformedEnvelopeReadsProperty generates plaintext and pre-binding encrypted bytes. Every read retains the exact stored bytes, returns canonical 500 and excludes the generated plaintext from response and request logs. Invariant: a credential read never releases or rewrites an envelope lacking its current tenant/name/pipeline/access binding.
+
+
+### Continuation 7 verification and remaining work
+
+All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and TMPDIR/GOTMPDIR under
+/tmp/sw-astra-W1b. Normal tests use -p 4 and race tests use -p 2.
+
+- Whole-repository build passes. Final vet passes for controller and acceptance. Final commentcheck against main is clean across 2,674 files. git diff --check passes.
+- The initial focused public-read selection passes in 1.121s. The expanded read/credential/object-store selection passes in 1.225s. Final dashboard-secret selection passes in 0.880s. The legacy-envelope/plaintext/list selection passes in 0.166s.
+- The changed read/credential/secret/object-store groups pass under the race detector in 14.582s. The subsequently ported malformed-envelope/list groups and their generated property pass under the race detector in 3.058s.
+- The final broader controller selection passes in 61.842s: 544 top-level tests/fuzz-seed groups and 1,149 passing tests/subtests, with zero skips in that selection. It excludes the named socket inventory and the eleven reproduced cron failures. This is not a full controller-suite claim. No source skip is added or widened.
+- Full acceptance passes in 201.436s: 406 top-level tests, 5,386 passing tests/cells and 2,991 pre-existing skips. No native matrix cell is newly claimed complete.
+- A temporary source overlay removes DisallowUnknownFields from the engine request decoder. TestRoutesUnknownJSONFieldsProperty fails on its first generated input. The final unmodified source passes. The overlay never changes production files and is removed with scratch.
+- Fresh TCP and Unix bind probes both return Operation not permitted. PostgreSQL is not attempted. The named native controller/CLI/web/bin checks and controller/acceptance PostgreSQL lanes still need the lead's environment. Recorder tests here use SQLite.
+
+Three retired test groups lose 160 lines. Seven dead HTTP/server helpers lose
+87 lines. Across Go tests this continuation adds 500 lines and removes 750,
+net -250. Production delta against session HEAD c69141102 is zero.
+No production API, schema, credential policy, provider interface, setting or
+mechanism is added or changed. The W1+W1b store area remains -2,685 production
+Go lines against main under the lead's budget exclusions, 1,565 over its -4,250
+budget. That inherited overage remains open.
+
+Contract changes made: none. The handoff audit found the older M4 renewal rule
+in unit_renewal.go, decision 112's single rung/tier table in billing_policy.go,
+non-checkout settlement in payment_provider_settlement.go and the committed
+materialization owner in blob_materialize.go. Those completed items are not
+reimplemented. Lead-owned amendments and handoffs are unchanged.
+
+Remaining production work: the committing ScheduleWriter and retained arming
+origin/consent through sealed intake, verified App intake composition, the
+concrete ConcurrencyStore adapter, and metrics/notify_parent outbox consumers.
+All eleven cron failures remain enabled. Signed-webhook intake, re-request,
+subscription/fork/binding/replay/run-budget fixtures and the three remaining
+encryption roundtrip/relocation/access-field groups still need reconciliation
+at their current declared-claim boundary. Their security assertions remain.
+No security, tenant-boundary, masking or billing assertion is relaxed to pass.
+
+Shared files touched in this continuation:
+- design/rewrite/test-reconciliation.md
+- design/rewrite/test-reconciliation-sockets.md
+- pkg/controller/content_type_test.go
+- pkg/controller/objectstore_test.go
+- pkg/controller/prom_test.go
+- pkg/controller/run_control_routes_test.go
+- pkg/controller/secrets_dashboard_test.go
+- pkg/controller/secrets_encryption_test.go
+- pkg/controller/server_test.go
+- pkg/controller/trends_test.go
+
+Friction: forbidden sockets prevent native transport and PostgreSQL proofs.
+The missing committing schedule and concurrency adapters are implementation
+obligations. Only queue rendering uses the explicit fake read seam, as listed
+above. No Git writes or Sparkwing candidate execution occur. Local Git has no
+user identity or core.worktree override. W1b scratch is removed after checks,
+and the shared build cache is retained.

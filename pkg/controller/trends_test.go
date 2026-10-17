@@ -3,7 +3,6 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -16,22 +15,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func httpGet(url string) ([]byte, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
+func readReport(t *testing.T, f *cronsFixture, path string) []byte {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("Authorization", "Bearer "+f.reader)
+	w := httptest.NewRecorder()
+	f.handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET %s: HTTP %d: %s", path, w.Code, w.Body)
 	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	return w.Body.Bytes()
 }
 
 func TestTrends_BucketsRuns(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
+	f := newCronsFixture(t)
+	st := f.store
 
 	ctx := context.Background()
 	now := time.Now()
@@ -67,13 +65,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 		}
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-
-	resp, err := httpGet(srv.URL + "/api/v1/trends?hours=24")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := readReport(t, f, "/api/v1/trends?hours=24")
 	var body struct {
 		Points []controller.TrendPoint `json:"points"`
 	}
@@ -97,12 +89,8 @@ func TestTrends_BucketsRuns(t *testing.T) {
 }
 
 func TestTrends_AvgWaitMs(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
+	f := newCronsFixture(t)
+	st := f.store
 
 	ctx := context.Background()
 	now := time.Now()
@@ -124,13 +112,7 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 		}
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-
-	resp, err := httpGet(srv.URL + "/api/v1/trends?hours=24")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := readReport(t, f, "/api/v1/trends?hours=24")
 	var body struct {
 		Points []controller.TrendPoint `json:"points"`
 	}
@@ -149,12 +131,8 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 }
 
 func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
+	f := newCronsFixture(t)
+	st := f.store
 
 	ctx := context.Background()
 	now := time.Now()
@@ -187,17 +165,13 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-
-	resp, err := httpGet(srv.URL + "/api/v1/trends?hours=24")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := readReport(t, f, "/api/v1/trends?hours=24")
 	var body struct {
 		Points []controller.TrendPoint `json:"points"`
 	}
-	_ = json.Unmarshal(resp, &body)
+	if err := json.Unmarshal(resp, &body); err != nil {
+		t.Fatalf("decode trends: %v; body=%s", err, resp)
+	}
 	var got int64
 	for _, p := range body.Points {
 		if p.AvgWaitMs > got {
@@ -210,12 +184,8 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 }
 
 func TestTrends_PipelineFilter(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
+	f := newCronsFixture(t)
+	st := f.store
 
 	ctx := context.Background()
 	now := time.Now()
@@ -234,18 +204,14 @@ func TestTrends_PipelineFilter(t *testing.T) {
 		}
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-
-	resp, err := httpGet(srv.URL + "/api/v1/trends?hours=24&pipeline=alpha")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := readReport(t, f, "/api/v1/trends?hours=24&pipeline=alpha")
 	var body struct {
 		Points   []controller.TrendPoint `json:"points"`
 		Pipeline string                  `json:"pipeline"`
 	}
-	_ = json.Unmarshal(resp, &body)
+	if err := json.Unmarshal(resp, &body); err != nil {
+		t.Fatalf("decode trends: %v; body=%s", err, resp)
+	}
 	if body.Pipeline != "alpha" {
 		t.Errorf("pipeline echo=%q want alpha", body.Pipeline)
 	}

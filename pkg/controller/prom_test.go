@@ -67,17 +67,6 @@ func TestMetrics_CardinalityGuard(t *testing.T) {
 	}
 }
 
-func scrape(t *testing.T, base string) string {
-	t.Helper()
-	resp := mustGet(t, base+"/metrics")
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read metrics: %v", err)
-	}
-	return string(body)
-}
-
 func TestMetrics_HTTPRequestInstrumentation(t *testing.T) {
 	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
 	metricsHTTPResponse(t, h, http.MethodGet, "/api/v1/health", "")
