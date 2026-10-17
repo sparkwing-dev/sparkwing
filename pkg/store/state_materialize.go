@@ -120,6 +120,15 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 	if err != nil {
 		return NodeResult{}, err
 	}
+	if source.Kind == SourceManualRetry {
+		if run.Retry == nil || run.Retry.Mode != "failed" {
+			return NodeResult{}, holderRefusal()
+		}
+		selected, ok := run.Retry.Results[target.Ref.NodeID]
+		if !ok || selected.Ref != ref || selected.StateSeq != node.StateSeq {
+			return NodeResult{}, holderRefusal()
+		}
+	}
 	if node.Status != StatusDone || node.SpecHash == "" || node.SpecHash != target.SpecHash {
 		return NodeResult{}, authorityError(apierr.IllegalTransition, "materialization source is not a matching terminal attempt")
 	}

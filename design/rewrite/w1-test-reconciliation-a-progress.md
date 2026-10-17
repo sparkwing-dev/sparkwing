@@ -1,6 +1,69 @@
 # W1 test reconciliation-a progress
 
-## Current continuation: Opus review rulings
+## Current continuation: integration merge reconciliation
+
+Resolved both conflicting working files before further implementation.
+`pkg/store/store.go` keeps the integration branch's pinned-clock safety annotation.
+`pkg/controller/secret_args_display_test.go` keeps W1's private-input retry proof
+against the incoming committed retry selector. No deleted integration file or
+API was restored. Lead-owned amendments and handoffs remain unchanged.
+The index still records both conflicts because the swarm brief forbids worker
+Git writes. The lead must stage these resolved contents and finish the merge.
+
+Opus rulings 1-8 were already implemented and tested in the prior session.
+Ruling 9 still leaves PostgreSQL completion SQL to the lead. No production fix
+was repeated. The amendment and handoff audit found no unfinished entry in this
+reconciliation slice. Retry selection belongs to W3. Concrete ScheduleWriter,
+ScheduledRunWriter and ConcurrencyStore launch integration belongs to W1b under
+the latest lead ruling.
+
+The merged tree builds, and all ten packages named in the latest native setup
+failure report compile their tests. Focused store regressions pass (23.129s),
+including source release, live consent and executor properties, repository-ID
+extras, derived schedule identity, ArmedBy caps, deployment binding and committed
+retry materialization. Retry action, alias and principal-limit tests pass
+(0.599s). All secret-argument tests pass (2.786s). Store GitHub connection,
+automation-consent and completion selections pass (2.339s).
+
+A further browser selection reproduced one stale expectation:
+`TestGitHubBrowserConnectionRequiresTransaction` expected a missing default
+writer, but Tenant now implements that writer. Clearing the injected factory
+correctly reached the concrete store and refused an unlinked account with 403.
+The test now injects a missing writer explicitly and retains its 500/policy_missing
+assertion. No authorization assertion was relaxed. The new
+`TestGitHubBrowserConnectionUsesStoreTransactions` proves default composition,
+unlinked-account refusal before provider I/O, linked identity, OAuth return,
+committed installation ownership and nonce replay refusal. The full browser
+connection selection passes (1.104s), with no socket overlay.
+
+Whole-repository build, scoped store/controller/host/capability vet and whitespace
+checks pass. Commentcheck against main is clean across 2,691 files. Focused
+controller race checks pass (13.370s): secret-argument properties, default GitHub
+connection transactions and committed retry aliases. All Go commands use
+GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4,
+at most -p 4 and temporary paths under /tmp/sw-astra-W1.
+
+No production behavior, API, schema, contract or documentation claim changed.
+No acceptance matrix cell was newly enabled, no archived test was newly ported,
+and no production code or test was deleted. Session production net delta is zero.
+The store cumulative delta is **+23,788/-26,136, net -2,348 versus main**, using
+the lead's exclusions, **1,902 over** the -4,250 combined W1/W1b budget. This
+continuation adds no mechanism, setting, cache, limit or environment variable.
+
+Shared files touched: `pkg/controller/secret_args_display_test.go` for conflict
+resolution and `pkg/controller/browser_github_app_routes_test.go` for fixture
+reconciliation and the real-store proof. Store's only source edit resolves the
+clock annotation. This report records the remaining handoff. No new contract
+change or production caller migration is needed.
+
+The latest lead native file still reports FAIL/setup failed for ten packages.
+Local compilation clears those setup failures, but supplies no native verdict.
+Real sockets, GitHub, PostgreSQL lock behavior and completion SQL, runner execution
+and real-repository QA remain lead evidence. The inherited area budget also
+prevents COMPLETE. No Git writes ran. Scratch is removed after checks and the
+shared /tmp/sw-gocache is retained.
+
+## Previous continuation: Opus review rulings
 
 Implemented rulings 1-8, with 6 covered by 2. Each finding ran red through its
 new or adjusted regression before the production change. Ruling 9 leaves
