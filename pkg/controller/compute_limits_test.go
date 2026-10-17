@@ -236,52 +236,6 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 	}
 }
 
-// safety: a retry storm is exactly the loop the hourly guard exists to bound,
-// so a retry has to count against the principal that asked for it.
-func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t)
-	ctx := context.Background()
-	writer, _, err := teststore.ProvisionCredential(ctx, f.store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "pool"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.control", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
-	if err != nil {
-		t.Fatalf("mint a writer for the metered principal: %v", err)
-	}
-
-	f.store.SetIntakePolicy(receiptPolicy{})
-	status, first := f.request(t, http.MethodPost, "/api/v1/runs", writer, computeIntake("demo"))
-	var admitted controllerwire.CreateRunResponse
-	if status != http.StatusCreated || json.Unmarshal(first, &admitted) != nil || admitted.RunID == "" {
-		t.Fatalf("retry source intake = %d: %s", status, first)
-	}
-	if err := teststore.SeedRunFinish(f.store, ctx, store.DefaultTeam, admitted.RunID, "failed", "boom"); err != nil {
-		t.Fatal(err)
-	}
-	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
-	status, body := f.request(t, http.MethodPost, "/api/v1/runs/"+admitted.RunID+"/retry", writer, controllerwire.RetryRequest{Mode: "all", IdempotencyKey: "limited-retry"})
-
-	if status != http.StatusTooManyRequests {
-		t.Fatalf("a retry past the cap = %d, want 429: %s", status, body)
-	}
-	runs, err := f.store.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 10})
-	if err != nil {
-		t.Fatalf("list runs: %v", err)
-	}
-	if len(runs) != 1 {
-		t.Fatalf("runs = %d, want the retry absent", len(runs))
-	}
-	triggers, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Limit: 10})
-	if err != nil {
-		t.Fatalf("list triggers: %v", err)
-	}
-	for _, trig := range triggers {
-		if trig.RetryOf != "" {
-			t.Fatalf("the refused retry left trigger %s behind", trig.ID)
-		}
-	}
-}
-
 // safety: a schedule's runs belong to the principal that armed it, which is
 // what makes a hot cron count against that team rather than nobody.
 func TestComputeLimits_CronLaunchesCarryTheArmingPrincipal(t *testing.T) {

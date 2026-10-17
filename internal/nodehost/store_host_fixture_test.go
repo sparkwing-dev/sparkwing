@@ -142,6 +142,11 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 
 func newStoreOwnerFixture(t *testing.T, database *store.Store, request runspec.Request) *storeHostFixture {
 	t.Helper()
+	return newStoreOwnerIntakeFixture(t, database, store.IntakeRequest{Request: request})
+}
+
+func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake store.IntakeRequest) *storeHostFixture {
+	t.Helper()
 	ctx := t.Context()
 	database.SetIntakePolicy(hostIntakePolicy{})
 	database.SetClaimProfileResolver(hostEnrollment{})
@@ -165,7 +170,8 @@ func newStoreOwnerFixture(t *testing.T, database *store.Store, request runspec.R
 		}
 	}
 	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}
-	admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: authority, Request: request})
+	intake.Authority = authority
+	admitted, err := tenant.AdmitRun(ctx, intake)
 	if err != nil {
 		t.Fatal(err)
 	}

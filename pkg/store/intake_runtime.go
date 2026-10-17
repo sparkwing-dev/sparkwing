@@ -19,6 +19,7 @@ type admittedSnapshot struct {
 	spec    *runspec.Spec
 	plan    json.RawMessage
 	lineage runspec.Lineage
+	retry   *RetrySelection
 }
 
 func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, now time.Time) (AdmissionResult, error) {
@@ -26,14 +27,18 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err != nil {
 		return AdmissionResult{}, err
 	}
-	digest, err := tx.store.planServices().CanonicalHash(struct {
-		Request  runspec.Request
-		Delivery string
-	}{request.Request, request.VerifiedDeliveryID})
+	snapshot, err := retryIntakeTx(ctx, tx, team, request, principal)
 	if err != nil {
 		return AdmissionResult{}, err
 	}
-	snapshot, err := retryIntakeTx(ctx, tx, team, request, principal)
+	var identity any = struct {
+		Request  runspec.Request
+		Delivery string
+	}{request.Request, request.VerifiedDeliveryID}
+	if snapshot.retry != nil {
+		identity = struct{ SourceRunID, Mode string }{snapshot.lineage.RetryOf, snapshot.retry.Mode}
+	}
+	digest, err := tx.store.planServices().CanonicalHash(identity)
 	if err != nil {
 		return AdmissionResult{}, err
 	}
@@ -63,6 +68,11 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	}
 	if tx.store.intakePolicy == nil {
 		return AdmissionResult{}, authorityError(apierr.Unavailable, "intake policy is not configured")
+	}
+	if snapshot.retry != nil {
+		if err := selectRetryTx(ctx, tx, team, snapshot.lineage.RetryOf, snapshot.retry); err != nil {
+			return AdmissionResult{}, err
+		}
 	}
 	policy, err := tx.store.intakePolicy.ResolveIntake(ctx, tx, request)
 	if err != nil {
@@ -226,7 +236,20 @@ func intakeAuthorityTx(ctx context.Context, tx *storeTx, team Team, request Inta
 
 func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, p capability.Principal) (admittedSnapshot, error) {
 	if request.Request.Lineage.RetryOf == "" {
+		if request.RetryMode != "" {
+			return admittedSnapshot{}, authorityError(apierr.BadRequest, "retry mode requires a source run")
+		}
 		return admittedSnapshot{}, nil
+	}
+	mode := request.RetryMode
+	if mode == "" {
+		mode = "failed"
+	}
+	if mode != "failed" && mode != "all" {
+		return admittedSnapshot{}, authorityError(apierr.BadRequest, "unknown retry mode")
+	}
+	if err := lockStateRunTx(ctx, tx, team, request.Request.Lineage.RetryOf); err != nil {
+		return admittedSnapshot{}, err
 	}
 	source, err := readRunTx(ctx, tx, team, request.Request.Lineage.RetryOf)
 	if err != nil {
@@ -246,7 +269,7 @@ func retryIntakeTx(ctx context.Context, tx *storeTx, team Team, request IntakeRe
 	if err != nil {
 		return admittedSnapshot{}, err
 	}
-	out := admittedSnapshot{request: carried.Request, plan: carried.Plan, lineage: carried.Lineage}
+	out := admittedSnapshot{request: carried.Request, plan: carried.Plan, lineage: carried.Lineage, retry: &RetrySelection{Mode: mode}}
 	if carried.Spec.Set {
 		out.spec = &carried.Spec.Value
 	}

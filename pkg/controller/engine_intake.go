@@ -90,7 +90,11 @@ func (s *EngineController) CreateRun(ctx context.Context, authorized capability.
 	if err != nil {
 		return controllerwire.CreateRunResponse{}, err
 	}
-	tenant, err := s.runTransactions(ctx, authorized.Target.Team)
+	return s.admitRun(ctx, authorized.Target.Team, request)
+}
+
+func (s *EngineController) admitRun(ctx context.Context, team string, request store.IntakeRequest) (controllerwire.CreateRunResponse, error) {
+	tenant, err := s.runTransactions(ctx, team)
 	if err != nil {
 		return controllerwire.CreateRunResponse{}, err
 	}

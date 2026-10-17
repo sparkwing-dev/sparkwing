@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -24,6 +25,7 @@ import (
 func retryActionFixture(t *testing.T, value string, accepted bool) (*Server, client.EngineOptions, string, store.RunRow) {
 	t.Helper()
 	s, session := credentialSessionServer(t)
+	s.WithEngineController(&EngineController{Store: s.store, VersionPolicy: engineVersionPolicy(&engineVersionFake{})})
 	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.control'`)
 	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	sealed, err := runspec.SealRequest(runspec.Request{
@@ -44,7 +46,7 @@ func retryActionFixture(t *testing.T, value string, accepted bool) (*Server, cli
 	if accepted {
 		plan := json.RawMessage(`{"jobs":[{"id":"job"}]}`)
 		spec, err := runspec.SealSpec(runspec.SealInput{Request: sealed, Plan: plan, Now: time.Unix(2, 0), Resolved: runspec.Resolved{
-			Args: sealed.Request.RequestedArgs, SecretArgs: []string{"secret"}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": {}}},
+			Engine: engine.Identity{Version: "v1.2.3"}, Args: sealed.Request.RequestedArgs, SecretArgs: []string{"secret"}, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": {}}},
 		}})
 		if err != nil {
 			t.Fatal(err)
@@ -89,6 +91,12 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 				if result.RunID == parent || result.RunID == "" || result.Number != int64(attempt+2) || result.Replayed || result.HereBearer != "" || !reflect.DeepEqual(result.Request, original.Request) {
 					t.Fatalf("retry changed the seal or execution identity: %+v", result)
 				}
+				for _, id := range []string{"run", result.RunID} {
+					display, err := control.ReadRun(t.Context(), id)
+					if err != nil || display.Inputs.RequestedArgs["secret"] != runspec.RedactedArgValue || display.Inputs.RequestedArgs["public"] != "visible" || accepted && display.Inputs.Args["secret"] != runspec.RedactedArgValue {
+						t.Fatalf("public retry inputs lost classification: %+v %v", display.Inputs, err)
+					}
+				}
 				row, err := tenant.ReadRun(t.Context(), result.RunID)
 				if err != nil || row.State != store.RunPending || row.StartedAt != nil || row.FinishedAt != nil || row.Lineage.RetryOf != parent || !row.Lineage.Retrier.Set || row.Lineage.Retrier.Value.ID != "member" || !reflect.DeepEqual(row.Request, original.Request) || !reflect.DeepEqual(row.Spec, original.Spec) || !bytes.Equal(row.Plan, original.Plan) {
 					t.Fatalf("retry did not retain execution inputs and independent lineage: %+v %v", row, err)
@@ -102,6 +110,65 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 					t.Fatalf("retry has no pending executable owner: %s %s %v", unitKind, unitState, err)
 				}
 				selector, parent = result.RunID, result.RunID
+			}
+		})
+	}
+}
+
+func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
+	s, options, _, _ := retryActionFixture(t, "private-value", false)
+	control, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.AsOperator().SetComputeLimits(t.Context(), map[string]int64{store.ComputeLimitRunsPerHour: 1}); err != nil {
+		t.Fatal(err)
+	}
+	input := controllerwire.RetryRequest{Mode: controllerwire.RetryFailed, IdempotencyKey: "first"}
+	first, err := control.Retry(t.Context(), "run", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := control.Retry(t.Context(), "1", input)
+	if err != nil || !replay.Replayed || replay.RunID != first.RunID {
+		t.Fatalf("replay spent another slot: %+v %v", replay, err)
+	}
+	input.IdempotencyKey = "second"
+	_, err = control.Retry(t.Context(), "run", input)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.RateLimited {
+		t.Fatalf("retry past retrier's cap: %v", err)
+	}
+	runs, err := s.store.AsOperator().ListRuns(t.Context(), store.RunFilter{Limit: 10})
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("refused retry left an execution: %d %v", len(runs), err)
+	}
+}
+
+func TestRetryAliasesReplayCommittedMode(t *testing.T) {
+	for _, mode := range []controllerwire.RetryMode{controllerwire.RetryFailed, controllerwire.RetryAll} {
+		t.Run(string(mode), func(t *testing.T) {
+			s, options, _, source := retryActionFixture(t, "private-value", true)
+			control, err := client.NewEngineClient(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := controllerwire.RetryRequest{Mode: mode, IdempotencyKey: "retry"}
+			first, err := control.Retry(t.Context(), "1", request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replay, err := control.Retry(t.Context(), "run", request)
+			if err != nil || !replay.Replayed || replay.RunID != first.RunID || replay.Number != first.Number || replay.HereBearer != "" || !reflect.DeepEqual(replay.Request, source.Request) {
+				t.Fatalf("alias changed committed execution: %+v %v", replay, err)
+			}
+			tenant, err := s.store.ForTeam(t.Context(), "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, err := tenant.ReadRun(t.Context(), first.RunID)
+			if err != nil || row.Retry == nil || row.Retry.Mode != string(mode) || !reflect.DeepEqual(row.Request, source.Request) || !reflect.DeepEqual(row.Spec, source.Spec) {
+				t.Fatalf("selection was not committed outside seals: %+v %v", row, err)
 			}
 		})
 	}

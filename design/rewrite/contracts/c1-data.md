@@ -1,5 +1,24 @@
 # C1 data contract
 
+## Committed retry selection
+
+`IntakeRequest.RetryMode` is separate from `Request`. An unset mode normalizes
+to `failed`. Other accepted modes are `failed` and `all`. A mode without a retry
+source is refused. Retry replay hashes the canonical source run ID and normalized
+mode under the existing tenant, subject and pipeline scope.
+
+Admission locks the source run and commits `RetrySelection` in `lineage_json.retry`.
+`failed` records each successful or memoized source job's `MaterializedResultSource`
+fence. `all` records an empty result map. Selection runs only for a new admission,
+after checking replay. Original request, spec, plan and their hashes stay unchanged.
+
+`RunRow.Retry` exposes that selection in private execution snapshots. Manual retry
+materialization requires `failed` and an exact committed result fence. A source
+job that succeeds after admission cannot become a reuse candidate. Missing result
+bytes remain a materialization miss under the existing record-copy policy.
+
+The integration amendment implements the lead's 2026-10-17 retry-selection decision.
+
 ## Operator team creation (decision 114)
 
 Store.CreateOperatorTeam(ctx, Authorized, slug, displayName) returns one
@@ -3173,7 +3192,9 @@ rolls back the receipt and all state. This adds no runtime-mask propagation.
 AdmitRun applies the configured hourly guards after idempotent and App replay
 selection, before inserting either the run or its owner. The single per-principal
 guard uses the authenticated subject kind and ID within its tenant, including
-unmetered members. An account and machine sharing an ID have separate budgets. The global guard covers every team. Both read committed run admissions
+unmetered members. Retry admissions use the committed retrier lineage for the
+subject kind because the source request retains its original actor. An account
+and machine sharing an ID have separate budgets. The global guard covers every team. Both read committed run admissions
 under the shared store serialization, never summed usage counters. Refusals preserve ErrComputeLimit and expose canonical rate_limited with the
 existing five-second retry delay. Replay spends no second slot. Raw pending-run attribution and token metering are not intake
 inputs. The unused OldestWaitingReadyNodeForPrincipal diagnostic is removed.
