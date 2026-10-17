@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
@@ -61,6 +62,22 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	sparkwingHome := t.TempDir()
 	t.Setenv("SPARKWING_HOME", sparkwingHome)
 	offlineStopDaemon(t, sparkwingHome)
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		path, err := wingd.LogPath(sparkwingHome)
+		if err != nil {
+			t.Logf("resolve local controller log: %v", err)
+			return
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Logf("read local controller log: %v", err)
+			return
+		}
+		t.Logf("local controller log (%s):\n%s", path, body)
+	})
 
 	// safety: a sparkwing on the developer's PATH would host the admission
 	// daemon for this home, and the operator's binary is not this test's to
