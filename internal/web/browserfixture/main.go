@@ -148,11 +148,6 @@ func main() {
 		// safety: the fixture serves plain HTTP on loopback, so its cookies drop Secure.
 		InsecureCookies: true,
 	})
-	defer func() {
-		if err := srv.Shutdown(context.Background()); err != nil {
-			log.Printf("browser fixture shutdown: %v", err)
-		}
-	}()
 
 	dashboardListener, dashboardServer, err := listen(srv.Handler())
 	if err != nil {

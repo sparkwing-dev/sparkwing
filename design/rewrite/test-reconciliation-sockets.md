@@ -65,7 +65,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestDeleteTeamClosesItAtOnceAndThePassRemovesItsRows`.
 - `pkg/controller`: `TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold`.
 - `pkg/controller`: `TestDeleteTeamRefusesTheOnlyTeam`.
-- `pkg/controller`: `TestDrainGitHubChecks_DoesNotInheritASpentBudget`.
 - `pkg/controller`: `TestFloodPolicy_ATeamsTokensShareOneCap`.
 - `pkg/controller`: `TestFloodPolicy_CapsRunsPerPrincipalHour`.
 - `pkg/controller`: `TestFloodPolicy_DedupeIsScopedToThePrincipal`.
@@ -75,7 +74,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestFloodPolicy_UnsetCapAdmitsEverySubmission`.
 - `pkg/controller`: `TestFloodPolicy_UnsetWindowDedupesNothing`.
 - `pkg/controller`: `TestGitHubAppAdditionalEventsRequireSubscription`.
-- `pkg/controller`: `TestGitHubAppAdoptsACheckRunWhoseRecordWasLost`.
 - `pkg/controller`: `TestGitHubAppAutomationConfigErrorsAndManualOverride`.
 - `pkg/controller`: `TestGitHubAppAutomationFailsClosedAndRemovalRevokesConsent`.
 - `pkg/controller`: `TestGitHubAppAutomationRequiresConsentAndUsesDefaultBranch`.
@@ -87,7 +85,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestGitHubAppCheckRunRerequestedRerunsItsPipeline`.
 - `pkg/controller`: `TestGitHubAppCheckRunSummaryIsBounded`.
 - `pkg/controller`: `TestGitHubAppCheckRunSummaryKeepsPrivateRunDataInConsole`.
-- `pkg/controller`: `TestGitHubAppCheckRunSurvivesGitHubErrors`.
 - `pkg/controller`: `TestGitHubAppCheckSuiteRerequestedNeedsEachPipelinesOwnRun`.
 - `pkg/controller`: `TestGitHubAppCheckSuiteRerequestedRerunsEveryPipeline`.
 - `pkg/controller`: `TestGitHubAppConnectBindsAnInstallationItsOrgAdminProves`.
@@ -104,7 +101,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestGitHubAppCronRenameKeepsIdentityAndPauseAtRepoCap`.
 - `pkg/controller`: `TestGitHubAppCronTransferWithdrawsFormerTeamBeforeNewArm`.
 - `pkg/controller`: `TestGitHubAppDefaultPushArmsAndWithdrawsControllerSchedules`.
-- `pkg/controller`: `TestGitHubAppDelayedQueuedUpdateLeavesARunningCheck`.
 - `pkg/controller`: `TestGitHubAppEventOlderThanTheReplayWindowIsRefused`.
 - `pkg/controller`: `TestGitHubAppExistingInstallationPicker`.
 - `pkg/controller`: `TestGitHubAppExistingPickerHidesVisibleInstallationWithoutAdminMembership`.
@@ -116,7 +112,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestGitHubAppInstallationEventNamesThisApp`.
 - `pkg/controller`: `TestGitHubAppLargeInstallationKeepsSchedulesPastTheListingCap`.
 - `pkg/controller`: `TestGitHubAppLateRemovalKeepsARepositoryTheCutListingShows`.
-- `pkg/controller`: `TestGitHubAppOverlappingControllersCreateOneCheckRun`.
 - `pkg/controller`: `TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit`.
 - `pkg/controller`: `TestGitHubAppPullRequestBaseBranchSubscription`.
 - `pkg/controller`: `TestGitHubAppPushBranchSubscription`.
@@ -132,15 +127,12 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestGitHubAppRerequestedNeedsTheBinding`.
 - `pkg/controller`: `TestGitHubAppRerequestedSpendsTheRunBudget`.
 - `pkg/controller`: `TestGitHubAppRerequestedUsesCurrentBranchFilter`.
-- `pkg/controller`: `TestGitHubAppRunFinishLeavesAnotherTeamsCheckUnderTheSameID`.
 - `pkg/controller`: `TestGitHubAppRunLimitRefusesWithoutConsumingDelivery`.
 - `pkg/controller`: `TestGitHubAppRunNeedsTheRepositoryStillCovered`.
 - `pkg/controller`: `TestGitHubAppRunRecordsTheDefaultBranch`.
 - `pkg/controller`: `TestGitHubAppRunReportsOneCheckRun`.
 - `pkg/controller`: `TestGitHubAppSignedBodyKeepsItsEvent`.
 - `pkg/controller`: `TestGitHubAppStaleCronPushStillStartsSubscribedPipeline`.
-- `pkg/controller`: `TestGitHubAppStaleQueuedUpdateKeepsATimedOutConclusion`.
-- `pkg/controller`: `TestGitHubAppStaleUpdateNeverReopensAFinishedRun`.
 - `pkg/controller`: `TestGitHubAppSubscriptionRejectsInvalidBranchPatterns`.
 - `pkg/controller`: `TestGitHubAppTagBooleanRejected`.
 - `pkg/controller`: `TestGitHubAppTagPatternsFilterPushes`.
@@ -259,3 +251,20 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestWaitlistedSignUpThroughTheAPI`.
 - `pkg/controller`: `TestYoungGitHubAccountsAreWaitlistedAtSignIn`.
 - `pkg/docs`: `TestWebClient_Versions_HappyPath`.
+
+## Continuation 5
+
+The seven GitHub reporting cases for foreign tenants, concurrent controllers,
+stale terminal phases, timeout conclusions, lost check IDs, delivery failures and delayed queued
+updates now run as recorder tests in github_completion_test.go. The retired
+in-memory queue drain test is replaced by durable cancellation/retry coverage.
+Those former names are removed from this socket inventory. No remaining
+native test is skipped.
+
+GitHub App webhook intake and re-request integration tests still need a native
+run after the verified-App intake owner is connected. Their fake GitHub server
+needs TCP. Full controller HTTP, CLI/daemon and PostgreSQL controller/acceptance
+lanes also remain unverified here. TCP and Unix bind probes both return EPERM.
+The new store GitHubCommitStatusMode tests and the existing ReportGitHubCheck
+lock tests must also run on the lead's PostgreSQL store. The new controller
+recorder fixtures use the existing SQLite engine fixture.

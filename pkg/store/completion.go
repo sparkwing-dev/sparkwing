@@ -38,11 +38,13 @@ type DesiredRunEffect struct {
 	Effect       Effect
 	Phase        EffectPhase
 	State        RunState
+	Reason       string
 	Payload      json.RawMessage
 	DesiredRev   int64
 	DeliveredRev int64
 	Attempts     int64
 	NextAt       time.Time
+	ObservedAt   time.Time
 }
 
 // EffectDelivery acknowledges only the revision actually sent, leaving a newer desired revision due.
@@ -63,6 +65,11 @@ func (o *Operator) DueProfileFolds(ctx context.Context, lease SingletonLease, li
 	return o.dueRunEffects(ctx, lease, EffectProfileFold, limit)
 }
 
+// DueGitHubChecks selects GitHub work without starvation by other effect types.
+func (o *Operator) DueGitHubChecks(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error) {
+	return o.dueRunEffects(ctx, lease, EffectGitHubCheck, limit)
+}
+
 func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effect Effect, limit int) ([]DesiredRunEffect, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("effect limit must be positive")
@@ -76,7 +83,8 @@ func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effe
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
-r.pipeline,r.git_sha,r.git_branch,r.error FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
+r.pipeline,r.git_sha,r.git_branch,r.error,
+(SELECT v.payload FROM events v WHERE v.team=r.team AND v.run_id=r.id AND v.node_id='' AND v.state_seq=r.state_seq AND v.kind IN ('run_success','run_failed','run_cancelled') ORDER BY v.seq DESC LIMIT 1) FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
 WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?) ORDER BY e.next_at,e.team,e.run_id,e.effect LIMIT ?`, tx.now().UnixNano(), effect, effect, limit)
 	if err != nil {
 		return nil, err
@@ -86,10 +94,21 @@ WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?
 		var effect DesiredRunEffect
 		var next int64
 		var pipeline, sha, branch, runError string
-		if err := rows.Scan(&effect.Team, &effect.RunID, &effect.Effect, &effect.State, &effect.DesiredRev, &effect.DeliveredRev, &effect.Attempts, &next, &pipeline, &sha, &branch, &runError); err != nil {
+		var event []byte
+		if err := rows.Scan(&effect.Team, &effect.RunID, &effect.Effect, &effect.State, &effect.DesiredRev, &effect.DeliveredRev, &effect.Attempts, &next, &pipeline, &sha, &branch, &runError, &event); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
+		var terminal struct {
+			Reason string `json:"reason"`
+		}
+		if len(event) > 0 {
+			if err := json.Unmarshal(event, &terminal); err != nil {
+				return nil, errors.Join(err, rows.Close())
+			}
+		}
+		effect.Reason = terminal.Reason
 		effect.NextAt = time.Unix(0, next)
+		effect.ObservedAt = tx.now()
 		effect.Phase = effectPhase(effect.State)
 		effect.Payload, err = json.Marshal(struct {
 			Version  int      `json:"version"`
@@ -99,7 +118,8 @@ WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?
 			SHA      string   `json:"git_sha"`
 			Branch   string   `json:"git_branch"`
 			Error    string   `json:"error"`
-		}{1, effect.RunID, pipeline, effect.State, sha, branch, runError})
+			Reason   string   `json:"reason,omitempty"`
+		}{1, effect.RunID, pipeline, effect.State, sha, branch, runError, effect.Reason})
 		if err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}

@@ -57,7 +57,6 @@ func newGHFixture(t *testing.T) *ghFixture {
 		WithDashboard(controller.Dashboard{})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	return &ghFixture{
 		identityFixture: &identityFixture{t: t, url: ts.URL, store: st, google: google, admin: admin},
 		gh:              gh,

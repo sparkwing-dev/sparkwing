@@ -165,7 +165,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 			return errors.Join(claimant.Close(), objects.Close())
 		},
 		Maintain: server.MaintainStorage,
-		Complete: server.ReconcileProfileFolds,
+		Complete: server.ReconcileRunEffects,
 		Runner: runners.StoreRunnerConfig{
 			Bearer:          claimant.Bearer,
 			Loop:            runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},

@@ -121,7 +121,6 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	f := &tenancyFixture{t: t, srv: srv, url: ts.URL, st: st}
 
 	alice, teamA := signUp(t, st, "alice")

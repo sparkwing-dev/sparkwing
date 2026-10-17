@@ -86,7 +86,6 @@ func TestBrowserPagesRequireSignInBeforeBootstrap(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{Bundle: pageBundle})
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, dashOrigin+"/", nil))
 	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/login?next=") {
@@ -199,7 +198,6 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{Paths: paths.PathsAt(t.TempDir())})
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	ts := httptest.NewUnstartedServer(srv.Handler())
 	// safety: the stream polls every quarter second, so a millisecond write timeout has long expired by the time
 	// the event below is sent unless the stream extends its own deadline.

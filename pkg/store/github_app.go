@@ -465,6 +465,29 @@ func (t *Tenant) GitHubCheckRun(ctx context.Context, runID string) (int64, error
 	return id, err
 }
 
+// GitHubCommitStatuses reports the committed fallback mode for this run.
+func (t *Tenant) GitHubCommitStatuses(ctx context.Context, runID string) (bool, error) {
+	var fallback int
+	err := t.s.queryRow(ctx, `SELECT github_status_fallback FROM triggers WHERE team=? AND id=?`, t.team, runID).Scan(&fallback)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, notFound("run", runID)
+	}
+	return fallback == 1, err
+}
+
+// UseGitHubCommitStatuses persists the mode before a fallback status can reach GitHub.
+func (t *Tenant) UseGitHubCommitStatuses(ctx context.Context, runID string) error {
+	result, err := t.s.exec(ctx, `UPDATE triggers SET github_status_fallback=1 WHERE team=? AND id=?`, t.team, runID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err == nil && changed != 1 {
+		return notFound("run", runID)
+	}
+	return err
+}
+
 // RecordGitHubCheckRun records checkRun as the GitHub check run reporting
 // t's run runID unless one is already recorded, and returns the one recorded.
 func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRun int64) (int64, error) {

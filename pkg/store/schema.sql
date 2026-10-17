@@ -201,6 +201,7 @@ CREATE TABLE triggers (
     webhook_delivery TEXT NOT NULL DEFAULT '',
     webhook_replay_key TEXT NOT NULL DEFAULT '',
     github_check_run_id BIGINT NOT NULL DEFAULT 0,
+    github_status_fallback BIGINT NOT NULL DEFAULT 0 CHECK(github_status_fallback IN (0,1)),
     UNIQUE(team,id),
     FOREIGN KEY(team,id) REFERENCES runs(team,id) ON DELETE CASCADE
 );

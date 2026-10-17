@@ -3319,3 +3319,23 @@ operator quota policy. The shared route policy still requires the exact operator
 grant. Run and job selectors keep their bindings, and tenant credentials cannot
 select a foreign team. Relational authorization resolves console proof through the
 same transaction-local owner as issuance and settings writes.
+
+## GitHub completion identity
+
+Completion reads the sealed run request's verified App facts, never trigger
+environment strings. The numeric repository ID must agree with its repository
+key, execution SHA and ref. Delivery needs the installation still bound to the
+same tenant and unsuspended. It mints only the exact repository ID with
+checks:write or statuses:write. `githubapp.Client.RepositoryByID` resolves the
+current name under that restricted token, so a rename or reused old name cannot
+redirect a report. Installation ownership is rechecked after that lookup.
+An invalid or unavailable identity keeps the revision due.
+
+The shared completion worker calls the provider synchronously under the
+existing per-run report lock and acknowledges only a successful revision.
+Stale pending and running deliveries cannot regress the persisted phase.
+Timeout conclusions derive from the committed terminal event reason. Summary
+payloads contain aggregate outcomes and the authenticated dashboard link,
+without job identifiers, arguments or private errors. The old queue-only
+Server.Shutdown API and its callers are removed because no reporter goroutine
+remains to drain.

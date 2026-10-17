@@ -105,7 +105,6 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	controller.ConfigureConsoleFixture(srv)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin, srv: srv}
 }
 

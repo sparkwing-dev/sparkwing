@@ -80,7 +80,6 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 		}
 		ts := httptest.NewServer(srv.Handler())
 		t.Cleanup(ts.Close)
-		t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 		return srv, ts.URL
 	}
 	srv, url := replica()

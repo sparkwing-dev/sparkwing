@@ -71,7 +71,6 @@ func TestIntakeSourceNumericIdentityProperty(t *testing.T) {
 			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 		})}}
 		s.WithGitHubApp(cfg)
-		t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
 		transaction := &intakeSourceTransaction{}
 		s.WithEngineController(&EngineController{Store: s.store, ResolveTenant: func(context.Context, store.Team) (RunTransactions, error) { return transaction, nil }})
 		request := runspec.Request{Version: 1, Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Display: input}, Ref: "main"}, Source: runspec.Source{Ref: "main", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}}}

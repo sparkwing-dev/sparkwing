@@ -3428,7 +3428,7 @@ the writes before commit. The profile observation transaction helper is shared
 with `RecordProfileObservation`; no second folding algorithm exists.
 
 The completion implementation lives in `pkg/store/completion.go`. Its former
-contract scaffold is removed. `Server.ReconcileProfileFolds(ctx)` consumes the
+contract scaffold is removed. `Server.ReconcileRunEffects(ctx)` consumes the
 profile lane with current tenant handles, retrying failed reads or commits
 through the existing outbox. Corrupt metric reads fail the entire observation
 batch. The HTTP controller calls the reconciler from its existing maintenance loop.
@@ -3436,5 +3436,33 @@ The elected local runtime calls the same reconciler through
 `localcontroller.Services.Complete func(context.Context) error` on its existing
 maintenance cadence, after readiness and while owning the store. The CLI binds
 that callback to the concrete server. Local completion failures join the
-existing worker shutdown path. GitHub, metrics and parent notification delivery
-remain separate unfinished lanes of the same completion outbox.
+existing worker shutdown path. GitHub delivery shares the same worker as described below. Metrics and parent
+notification delivery remain unfinished lanes of the same completion outbox.
+
+## GitHub completion delivery
+
+`Operator.DueGitHubChecks` selects the GitHub lane under the existing completion
+lease. `DesiredRunEffect.ObservedAt` is the store-clock observation used for
+retry deadlines. `Reason` is read from the exact run state event, including
+queue_timeout and timeout. The payload carries that committed reason. A late
+acknowledgement still advances only its delivered revision.
+
+`triggers.github_status_fallback` records the per-run commit-status fallback as
+0 or 1. `Tenant.GitHubCommitStatuses` reads it and
+`Tenant.UseGitHubCommitStatuses` commits it before any fallback status is sent.
+It is independent of the positive GitHub check ID and scoped to the same tenant
+and run. A controller replacement continues that mode even if the installation
+has since accepted the checks permission. `ReportGitHubCheck` keeps its existing
+report lock and ID recording transaction. Failed ID persistence is retried by
+adopting the check with this run's external ID.
+
+This adds one column to the final schema and advances the disposable baseline
+to version 5. Version-4 stores are refused. There is no migration or backfill.
+Native QA needs a fresh version-5 store.
+
+`Server.ReconcileRunEffects` replaces `ReconcileProfileFolds` in both controller
+compositions. It delivers the profile and GitHub lanes under the same lease,
+with each lane receiving its own bounded batch. The in-memory GitHub queue,
+capacity drops, retry sleeps and shutdown drain are removed. Pending, running
+and terminal intents all come from run transitions. Metrics and parent
+notification remain due for their unfinished consumers.

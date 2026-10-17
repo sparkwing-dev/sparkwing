@@ -1,7 +1,6 @@
 package controller_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -69,7 +68,6 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 	if d != nil {
 		srv.WithDashboard(*d)
 	}
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	return &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), token: issued.Raw, sessID: sessID, csrf: csrf, logs: logs}
 }
 

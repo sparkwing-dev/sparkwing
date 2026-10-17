@@ -239,3 +239,121 @@ admitRun. Run-now must also recheck the requesting runs.control authority and
 its replay key there. Browser-session expiry versus durable schedule consent
 needs an explicit contract choice. This proposal is recorded for lead review;
 no synthetic credential, auth bypass or compatibility trigger schema was added.
+
+## Continuation 5: GitHub completion delivery
+
+- B pkg/controller: TestGitHubCompletionFromRealTerminalTransition failed with zero outbound checks after a real successful owner finish. The shared completion worker now reads GitHub revisions and profile work under one lease. Delivery errors retain the exact revision for a retry.
+- B pkg/controller: generated authority and summary-privacy tests exercise sealed numeric identity, current installation ownership, suspension, repository renames, forged source facts and private node/error text through a recorder transport. No socket test is skipped.
+- B pkg/store: per-run GitHub commit-status fallback moves from a process map to triggers.github_status_fallback. The hard-cut baseline is version 5. No migration or compatibility path is added.
+- A pkg/controller: remove the in-memory GitHub queue, its bounded retry/drop loop and queue shutdown lifecycle. TestDrainGitHubChecks_DoesNotInheritASpentBudget and its 138-line helper file assert that retired queue. TestGitHubCompletionCancellationLeavesDurableWork replaces its delivery-survival obligation.
+- C shared callers: bind local completion to ReconcileRunEffects and remove the deleted controller queue Shutdown calls from test fixtures and internal/web/browserfixture. The HTTP controller calls the same worker on its existing maintenance cadence.
+- B OPEN cron: the focused census reproduces all eleven previously recorded failures. They remain enabled. The committed schedule-origin/consent contract described above is still required. No caller-selected actor or synthetic credential is added.
+- C pkg/controller: port TestGitHubAppRunFinishLeavesAnotherTeamsCheckUnderTheSameID to TestGitHubCompletionRejectsForeignTenant and the generated installation property. The final schema has global run IDs, so the old duplicate-ID trigger fixture cannot exist.
+- C pkg/controller: port TestGitHubAppOverlappingControllersCreateOneCheckRun to TestGitHubCompletionTwoControllersDeliverOnce. Keep the existing SQLite/PostgreSQL ReportGitHubCheck lock tests. The real completion election admits only one reporter.
+- C pkg/controller: port TestGitHubAppStaleUpdateNeverReopensAFinishedRun and TestGitHubAppDelayedQueuedUpdateLeavesARunningCheck to generated check/status phase cases and a recorder test for a delayed pending update.
+- B/C pkg/controller: port TestGitHubAppStaleQueuedUpdateKeepsATimedOutConclusion to TestGitHubCompletionReaperPreservesTimeoutConclusion. The worker derives timed_out from committed timeout reasons instead of accepting a caller-selected outcome.
+- C pkg/controller: port TestGitHubAppAdoptsACheckRunWhoseRecordWasLost to TestGitHubCompletionAdoptsUnrecordedCreate. A SQLite trigger refuses the check-ID write after GitHub accepted the create. Retry adopts that external ID and acknowledges only after the ID persists.
+- B pkg/store: TestGitHubCommitStatusModeSurvivesReopen and TestGitHubCommitStatusModeIsScopedProperty preserve fallback state independently of check ID, reject foreign tenants and generated nonexistent IDs, and run through the suite-selected store dialect.
+- C internal/githubapp/githubapptest and pkg/controller/onlyCheckTokens: support restricted numeric repository metadata lookup in the fake and require repository_ids [701] with checks:write alone. The old name-based token expectation is removed.
+- C pkg/controller: port TestGitHubAppCheckRunSurvivesGitHubErrors to TestGitHubCompletionRetriesAfterControllerReplacement. Two 502s retain due work, obey the store-clock backoff and log each failed delivery. Neither changes the successful run. A replacement controller delivers the check on retry. The old immediate retry-and-drop expectation is retired by frozen v4 section 3.9.
+- B pkg/controller: TestGitHubCompletionUnverifiedRunReportsNothing acknowledges non-App work without calling GitHub. TestGitHubCompletionMissingAppKeepsTerminalDue leaves verified work due while profile delivery continues, then delivers after the App configuration is restored.
+
+
+### Continuation 5 verification
+
+All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and
+TMPDIR/GOTMPDIR=/tmp/sw-astra-W1b. Normal tests use -p 4 and race tests -p 2.
+
+- Whole-repository build passes. Vet passes for controller, store, GitHub client/fake, browserfixture, both CLI packages, localcontroller and acceptance. Commentcheck is clean across 2,672 files. The docs source is updated and its mirror regenerated with bin/sync-docs.sh. Both --check and TestPkgDocsContentMatchesDocsRoot pass.
+- The focused completion, sealed GitHub identity and report-lock selection passes in controller (8.850s) and store (1.272s). The initial race selection passes in controller (41.914s) and store (11.133s). The expanded race selection covering status-mode persistence, generated scoping, both real reaper timeout paths, unverified runs and missing App configuration passes in controller (4.113s) and store (5.617s). The final two-failure retry test passes (0.238s).
+- Local service/composition and version-schema selections pass in localcontroller (1.298s) and cmd/sparkwing (0.046s). These are recorder/component proofs, not native socket startup.
+- Full acceptance passes in 226.600s, with 406 top-level tests, 5,386 passing tests/cells and 2,991 pre-existing skips. No skip is added or widened. No native matrix skeleton is newly unskipped.
+- TCP and Unix bind probes both return Operation not permitted. PostgreSQL is not attempted. The named remaining transport checks and PostgreSQL obligations are in test-reconciliation-sockets.md. The new controller recorder fixtures use the existing SQLite engine fixture. The new store fallback tests and existing report-lock tests use the selected store dialect and still need the PostgreSQL lane.
+
+### Continuation 5 contracts, budget and open work
+
+Contract changes made: C1 records DueGitHubChecks, the store-clock ObservedAt,
+committed terminal Reason, durable status fallback, the version-5 baseline and
+the shared ReconcileRunEffects owner. C2 records sealed numeric GitHub delivery
+and the removal of the queue Shutdown API. No lead-owned handoff or amendment
+file is edited. No environment variable, compatibility path or timer is added.
+
+Assumptions/mechanisms: one boolean moves existing per-run fallback state from
+memory into the store because otherwise a restart after permission acceptance
+leaves the old pending commit status unresolved. The existing report lock
+serializes its use. Terminal timeout reasons come from the exact committed
+state event. The existing worker and outbox own retries. Reverting this slice
+means restoring the queue and its callers, not retaining a second delivery
+owner. The warning-once map retains only diagnostic state.
+
+Production delta against session HEAD 46f407598 is +286/-424, net -138 Go lines,
+including the moved completion worker and the shared GitHub test fake under the
+lead's counting rules. The retired queue drain test/helper file loses 138
+lines. Seven native report groups are ported to recorder tests and removed
+from github_checks_test.go, whose net size drops from 808 to 567 lines. The
+replacement property and integration tests retain tenant, masking, source,
+phase, retry and billing assertions. No financial or authorization guard is
+weakened.
+
+The W1+W1b store area is -2,685 production Go lines against main, versus the
+-4,250 budget, or 1,565 over. This continuation adds 43 store lines for durable
+fallback, committed terminal reason and store-clock retry observations, while
+removing 138 production lines across the repository. This work is within the
+completion reconciler already sized in frozen v4 section 3.9, but does not
+close the inherited store overage.
+
+Remaining real integration: eleven enabled cron failures still need the
+committed arming-origin and consent transaction. Verified App intake still
+refuses in Server.ResolveIntake, and the old webhook launch path still calls
+retired intake. The new tests seed sealed App source facts, then drive real
+owner finish or reaper transitions, the real outbox and the real provider
+adapter with a recorder transport. They do not prove HMAC webhook-to-intake
+composition. The remaining native GitHub run lifecycle, permission fallback,
+summary and re-request fixtures still need their retired runner HTTP calls
+ported. Keep their source, fork, binding, replay and run-budget assertions.
+Metrics and parent-notification consumers remain unfinished. No acceptance or
+PostgreSQL completion claim is made for these gaps.
+
+Shared files and caller migrations touched in this continuation:
+- cmd/sparkwing-controller/github_app_test.go
+- cmd/sparkwing/local_services.go
+- design/rewrite/contracts/c1-data.md
+- design/rewrite/contracts/c2-credentials.md
+- design/rewrite/test-reconciliation-sockets.md
+- design/rewrite/test-reconciliation.md
+- docs/github-app.md
+- internal/githubapp/githubapp.go
+- internal/githubapp/githubapptest/githubapptest.go
+- internal/web/browserfixture/main.go
+- pkg/controller/browser_pages_test.go
+- pkg/controller/browser_session_test.go
+- pkg/controller/completion.go
+- pkg/controller/export_test.go
+- pkg/controller/finish_run_followups_test.go
+- pkg/controller/github_app.go
+- pkg/controller/github_app_test.go
+- pkg/controller/github_app_webhook.go
+- pkg/controller/github_checks.go
+- pkg/controller/github_checks_test.go
+- pkg/controller/github_completion_test.go
+- pkg/controller/github_runners_test.go
+- pkg/controller/identity_fixture_test.go
+- pkg/controller/intake_source_test.go
+- pkg/controller/profile_completion.go
+- pkg/controller/profile_completion_test.go
+- pkg/controller/server.go
+- pkg/controller/team_boundary_test.go
+- pkg/docs/mirror/github-app.md
+- pkg/store/completion.go
+- pkg/store/github_app.go
+- pkg/store/github_status_mode_test.go
+- pkg/store/schema.sql
+- pkg/store/store.go
+
+Friction: native sockets remain forbidden, so no PostgreSQL connection, native
+HTTP/CLI gate or Sparkwing candidate execution was attempted. The missing
+schedule authority and verified-App intake owners are real integration work,
+not retired assertions. No Git writes are performed. Local Git has no identity
+or core.worktree override. W1b scratch is removed after all checks, and the
+shared build cache is retained.

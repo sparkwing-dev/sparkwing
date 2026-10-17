@@ -449,6 +449,16 @@ func (c *Client) InstallationRepositories(ctx context.Context, installation int6
 	return out, fmt.Errorf("%w: installation %d", ErrTooManyRepositories, installation)
 }
 
+// RepositoryByID resolves the current name under an already restricted token.
+func (c *Client) RepositoryByID(ctx context.Context, token string, id int64) (Repository, error) {
+	if id <= 0 {
+		return Repository{}, errors.New("githubapp: repository id must be positive")
+	}
+	var repo Repository
+	err := c.getJSON(ctx, "/repositories/"+strconv.FormatInt(id, 10), "token "+token, &repo)
+	return repo, err
+}
+
 // ResolveCommit reads the commit selected by a branch or tag with a token
 // restricted to that repository.
 func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, repo, ref string) (string, error) {

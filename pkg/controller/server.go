@@ -570,35 +570,13 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 				s.logger.Warn("controller HTTP shutdown incomplete", "addr", l.Addr, "err", err)
 			}
 		}
-		s.drainGitHubChecks(ctx)
 		return nil
 	case err := <-errCh:
-		s.drainGitHubChecks(ctx)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
 	}
-}
-
-// safety: the queue holds the terminal check run a finished run has no other
-// producer for, so its drain owns a budget rather than inheriting whatever
-// the listener's shutdown left of one.
-func (s *Server) drainGitHubChecks(parent context.Context) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), controllerShutdownBudget)
-	defer cancel()
-	if err := s.Shutdown(ctx); err != nil {
-		s.logger.Warn("github check run shutdown incomplete", "err", err)
-	}
-}
-
-// Shutdown drains server-owned background work until ctx expires. ServeWith
-// calls Shutdown automatically; callers serving Handler directly must call it.
-func (s *Server) Shutdown(ctx context.Context) error {
-	if s.githubApp == nil {
-		return nil
-	}
-	return s.githubApp.checks.shutdown(ctx)
 }
 
 // WithExternalURL declares the externally reachable controller base URL.
@@ -640,8 +618,8 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ticker.C:
 			s.reapLeased(ctx)
 			s.reconcileOwnedRuns(ctx)
-			if err := s.ReconcileProfileFolds(ctx); err != nil && ctx.Err() == nil {
-				s.logger.Error("profile completion failed", "err", err)
+			if err := s.ReconcileRunEffects(ctx); err != nil && ctx.Err() == nil {
+				s.logger.Error("run completion failed", "err", err)
 			}
 			s.sampleOperationalSeries(ctx)
 		}

@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/url"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
@@ -49,8 +47,7 @@ func githubCheckConclusion(runStatus string) string {
 
 type githubCheckUpdate struct {
 	installation int64
-	owner        string
-	repo         string
+	repository   int64
 	sha          string
 	pipeline     string
 	runID        string
@@ -60,326 +57,122 @@ type githubCheckUpdate struct {
 
 func (u githubCheckUpdate) phase() githubCheckPhase { return githubCheckPhaseFor(u.runStatus) }
 
-type githubCheckJob struct {
-	want     githubCheckUpdate
-	logger   *slog.Logger
-	inFlight bool
-	queued   bool
-}
-
-const (
-	githubCheckCapacity = 256
-	// safety: the attempts and their waits bound how long one run's update
-	// holds the queue while GitHub fails, at about four request timeouts.
-	githubCheckAttempts  = 4
-	githubCheckBackoff   = 250 * time.Millisecond
-	githubStatusRunLimit = 4096
-)
-
-// safety: updates for one run coalesce and never move a check run backwards, and a write GitHub
-// keeps refusing is logged and dropped, so no run waits on GitHub.
 type githubCheckReporter struct {
-	client       *githubapp.Client
-	store        *store.Store
-	dashboardURL string
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wake         chan struct{}
-	done         chan struct{}
-
-	mu        sync.Mutex
-	accepting bool
-	jobs      map[string]*githubCheckJob
-	order     []string
-	changed   chan struct{}
-	// safety: runs that began on commit statuses because their installation lacked the checks
-	// permission finish there too, so a commit never keeps a pending status beside a check run.
-	statusRuns map[string]bool
-	warned     map[int64]bool
+	client        *githubapp.Client
+	store         *store.Store
+	dashboardURL  string
+	missingChecks func()
 }
 
-func newGitHubCheckReporter(client *githubapp.Client, st *store.Store, dashboardURL string) *githubCheckReporter {
-	ctx, cancel := context.WithCancel(context.Background())
-	r := &githubCheckReporter{
-		client: client, store: st, dashboardURL: dashboardURL,
-		ctx: ctx, cancel: cancel,
-		wake: make(chan struct{}, 1), done: make(chan struct{}),
-		accepting: true, jobs: map[string]*githubCheckJob{}, changed: make(chan struct{}),
-		statusRuns: map[string]bool{}, warned: map[int64]bool{},
-	}
-	go r.run()
-	return r
-}
-
-func (r *githubCheckReporter) enqueue(logger *slog.Logger, u githubCheckUpdate) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.accepting {
-		return
-	}
-	job := r.jobs[u.runID]
-	if job == nil {
-		if len(r.jobs) >= githubCheckCapacity {
-			logger.Warn("github check run update dropped", "run_id", u.runID, "pipeline", u.pipeline,
-				"run_status", u.runStatus, "reason", "capacity")
-			return
-		}
-		job = &githubCheckJob{}
-		r.jobs[u.runID] = job
-	} else if u.phase() <= job.want.phase() {
-		return
-	}
-	job.want, job.logger = u, logger
-	if !job.inFlight && !job.queued {
-		job.queued = true
-		r.order = append(r.order, u.runID)
-		r.signalLocked()
-	}
-}
-
-func (r *githubCheckReporter) signalLocked() {
-	select {
-	case r.wake <- struct{}{}:
-	default:
-	}
-	close(r.changed)
-	r.changed = make(chan struct{})
-}
-
-func (r *githubCheckReporter) run() {
-	defer close(r.done)
-	for {
-		job, exit := r.take()
-		if job != nil {
-			phase := r.deliver(job.logger, job.want)
-			r.finish(job.want.runID, phase)
-			continue
-		}
-		if exit {
-			return
-		}
-		select {
-		case <-r.ctx.Done():
-			return
-		case <-r.wake:
-		}
-	}
-}
-
-func (r *githubCheckReporter) take() (*githubCheckJob, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.ctx.Err() != nil {
-		return nil, true
-	}
-	if len(r.order) == 0 {
-		return nil, !r.accepting
-	}
-	id := r.order[0]
-	r.order = r.order[1:]
-	job := r.jobs[id]
-	job.queued, job.inFlight = false, true
-	cp := *job
-	return &cp, false
-}
-
-func (r *githubCheckReporter) finish(runID string, sent githubCheckPhase) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	job := r.jobs[runID]
-	job.inFlight = false
-	switch {
-	case job.want.phase() > sent:
-		job.queued = true
-		r.order = append(r.order, runID)
-	default:
-		delete(r.jobs, runID)
-		if sent == githubCheckCompleted {
-			delete(r.statusRuns, runID)
-		}
-	}
-	r.signalLocked()
-}
-
-func (r *githubCheckReporter) shutdown(ctx context.Context) error {
-	r.mu.Lock()
-	r.accepting = false
-	r.signalLocked()
-	r.mu.Unlock()
-	defer r.cancel()
-	select {
-	case <-r.done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (r *githubCheckReporter) stop() {
-	r.mu.Lock()
-	r.accepting = false
-	r.mu.Unlock()
-	r.cancel()
-}
-
-// safety: returns u's own phase even when GitHub never took it, so a failing write is not
-// retried past its attempts.
-func (r *githubCheckReporter) deliver(logger *slog.Logger, u githubCheckUpdate) githubCheckPhase {
-	r.mu.Lock()
-	onStatuses := r.statusRuns[u.runID]
-	r.mu.Unlock()
-	// safety: a commit status has no running state; the pending one the run
-	// already posted stands for it.
-	if onStatuses && u.phase() == githubCheckInProgress {
-		return u.phase()
-	}
-	if !onStatuses {
-		err := r.retry(logger, u, "check run", func(ctx context.Context) error { return r.writeCheckRun(ctx, u) })
-		if err == nil || !errors.Is(err, githubapp.ErrPermissionMissing) {
-			if err != nil {
-				logger.Warn("github check run update failed", "run_id", u.runID, "pipeline", u.pipeline,
-					"run_status", u.runStatus, "err", err)
-			}
-			return u.phase()
-		}
-		r.fallBackToStatuses(logger, u)
-	}
-	if err := r.retry(logger, u, "commit status", func(ctx context.Context) error { return r.writeCommitStatus(ctx, u) }); err != nil {
-		logger.Warn("github commit status update failed", "run_id", u.runID, "pipeline", u.pipeline,
-			"run_status", u.runStatus, "err", err)
-	}
-	return u.phase()
-}
-
-func (r *githubCheckReporter) fallBackToStatuses(logger *slog.Logger, u githubCheckUpdate) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if u.phase() != githubCheckCompleted && len(r.statusRuns) < githubStatusRunLimit {
-		r.statusRuns[u.runID] = true
-	}
-	if !r.warned[u.installation] {
-		r.warned[u.installation] = true
-		logger.Warn("github app installation has not accepted the checks permission; its runs report commit statuses until it does",
-			"installation_id", u.installation, "repo", u.owner+"/"+u.repo)
-	}
-}
-
-func (r *githubCheckReporter) retry(logger *slog.Logger, u githubCheckUpdate, what string, write func(context.Context) error) error {
-	wait := githubCheckBackoff
-	for attempt := 1; ; attempt++ {
-		ctx, cancel := context.WithTimeout(r.ctx, githubStatusTimeout)
-		err := write(ctx)
-		cancel()
-		if err == nil || attempt == githubCheckAttempts || !githubRetryable(err) {
-			return err
-		}
-		logger.Warn("github "+what+" write will be retried", "run_id", u.runID, "pipeline", u.pipeline,
-			"attempt", attempt, "err", err)
-		select {
-		case <-r.ctx.Done():
-			return err
-		case <-time.After(wait):
-		}
-		wait *= 2
-	}
-}
-
-func githubRetryable(err error) bool {
-	var apiErr *githubapp.APIError
-	switch {
-	case errors.As(err, &apiErr):
-		return apiErr.Temporary()
-	case errors.Is(err, githubapp.ErrPermissionMissing), errors.Is(err, githubapp.ErrNotInstalled),
-		errors.Is(err, githubapp.ErrRejected), errors.Is(err, errGitHubCheckRunUnrecorded),
-		errors.Is(err, store.ErrNotFound), errors.Is(err, context.Canceled):
-		return false
-	}
-	return true
-}
-
-func (r *githubCheckReporter) writeCheckRun(ctx context.Context, u githubCheckUpdate) error {
-	tok, err := r.client.InstallationToken(ctx, u.installation, []string{u.repo}, map[string]string{"checks": "write"})
-	if err != nil {
-		return err
-	}
+func (r *githubCheckReporter) deliver(ctx context.Context, u githubCheckUpdate) error {
 	tenant, err := r.store.ForTeam(ctx, u.team)
 	if err != nil {
 		return err
 	}
-	// safety: the lock spans the read of the recorded id through recording a
-	// new one, so of two controllers reporting the same run one creates the
-	// check run and the other updates it.
-	var created int64
-	err = tenant.ReportGitHubCheck(ctx, u.runID, func(ctx context.Context, id int64) (int64, error) {
-		run, stale := staleForRun(ctx, tenant, u)
-		if stale {
+	return tenant.ReportGitHubCheck(ctx, u.runID, func(ctx context.Context, id int64) (int64, error) {
+		run, err := tenant.GetRun(ctx, u.runID)
+		if err != nil {
+			return 0, err
+		}
+		if u.phase() < githubCheckPhaseFor(run.Status) {
 			return 0, nil
 		}
-		check := r.checkRun(ctx, tenant, u, run)
-		adopted := int64(0)
-		if id == 0 {
-			// safety: a create GitHub took whose record rolled back left a check
-			// run carrying this run's id, so it is adopted rather than doubled.
-			found, err := r.client.FindCheckRun(ctx, tok.Token, u.owner, u.repo, u.sha, check.Name, u.runID)
-			if err != nil {
+		statuses, err := tenant.GitHubCommitStatuses(ctx, u.runID)
+		if err != nil {
+			return 0, err
+		}
+		if !statuses {
+			created, err := r.writeCheckRun(ctx, tenant, u, run, id)
+			if !errors.Is(err, githubapp.ErrPermissionMissing) {
+				return created, err
+			}
+			if err := tenant.UseGitHubCommitStatuses(ctx, u.runID); err != nil {
 				return 0, err
 			}
-			id, adopted = found, found
+			if r.missingChecks != nil {
+				r.missingChecks()
+			}
 		}
-		if id != 0 {
-			return adopted, r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
-		}
-		id, err := r.client.CreateCheckRun(ctx, tok.Token, u.owner, u.repo, check)
-		created = id
-		return id, err
+		return 0, r.writeCommitStatus(ctx, u)
 	})
-	if err != nil && created != 0 {
-		return fmt.Errorf("%w: check run %d: %w", errGitHubCheckRunUnrecorded, created, err)
-	}
-	return err
 }
 
-// safety: a run's status only moves forward, so an update ranked below it is
-// one another controller already passed and is dropped under the report lock.
-// A final update is sent as it is, since the store keeps a timed_out run as failed.
-func staleForRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate) (*store.Run, bool) {
-	run, err := tenant.GetRun(ctx, u.runID)
+func (r *githubCheckReporter) repository(ctx context.Context, u githubCheckUpdate, permission string) (string, string, string, error) {
+	in, err := r.store.AsOperator().GitHubAppInstallationTeam(ctx, u.installation)
 	if err != nil {
-		return nil, false
+		return "", "", "", err
 	}
-	return run, u.phase() < githubCheckPhaseFor(run.Status)
+	if in.Team != u.team || in.Suspended {
+		return "", "", "", fmt.Errorf("GitHub installation is not active for the run's team")
+	}
+	tok, err := r.client.InstallationTokenByIDs(ctx, u.installation, []int64{u.repository}, map[string]string{permission: "write"})
+	if err != nil {
+		return "", "", "", err
+	}
+	repo, err := r.client.RepositoryByID(ctx, tok.Token, u.repository)
+	if err != nil {
+		return "", "", "", err
+	}
+	name, valid := store.ParseGitHubRepo(repo.FullName)
+	if repo.ID != u.repository || !valid {
+		return "", "", "", fmt.Errorf("GitHub repository identity does not match the sealed run")
+	}
+	in, err = r.store.AsOperator().GitHubAppInstallationTeam(ctx, u.installation)
+	if err != nil {
+		return "", "", "", err
+	}
+	if in.Team != u.team || in.Suspended {
+		return "", "", "", fmt.Errorf("GitHub installation is not active for the run's team")
+	}
+	return tok.Token, name.Owner, name.Name, nil
 }
 
-// safety: a check run GitHub created but the store did not record is not
-// written again, since a second create would put a second check run beside it.
-var errGitHubCheckRunUnrecorded = errors.New("the check run was created but not recorded")
+func (r *githubCheckReporter) writeCheckRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run, id int64) (int64, error) {
+	token, owner, repo, err := r.repository(ctx, u, "checks")
+	if err != nil {
+		return 0, err
+	}
+	check, err := r.checkRun(ctx, tenant, u, run)
+	if err != nil {
+		return 0, err
+	}
+	if id == 0 {
+		id, err = r.client.FindCheckRun(ctx, token, owner, repo, u.sha, check.Name, u.runID)
+		if err != nil {
+			return 0, err
+		}
+		if id == 0 {
+			id, err = r.client.CreateCheckRun(ctx, token, owner, repo, check)
+		} else {
+			err = r.client.UpdateCheckRun(ctx, token, owner, repo, id, check)
+		}
+		if err != nil {
+			return 0, err
+		}
+		return id, nil
+	}
+	return 0, r.client.UpdateCheckRun(ctx, token, owner, repo, id, check)
+}
 
 func (r *githubCheckReporter) writeCommitStatus(ctx context.Context, u githubCheckUpdate) error {
-	tok, err := r.client.InstallationToken(ctx, u.installation, []string{u.repo}, map[string]string{"statuses": "write"})
+	if u.phase() == githubCheckInProgress {
+		return nil
+	}
+	token, owner, repo, err := r.repository(ctx, u, "statuses")
 	if err != nil {
 		return err
 	}
-	tenant, err := r.store.ForTeam(ctx, u.team)
-	if err != nil {
-		return err
+	status := "pending"
+	if u.phase() == githubCheckCompleted {
+		status = u.runStatus
 	}
-	return tenant.ReportGitHubCheck(ctx, u.runID, func(ctx context.Context, _ int64) (int64, error) {
-		if _, stale := staleForRun(ctx, tenant, u); stale {
-			return 0, nil
-		}
-		status := "pending"
-		if u.phase() == githubCheckCompleted {
-			status = u.runStatus
-		}
-		state, description := githubCommitState(status)
-		return 0, r.client.CreateCommitStatus(ctx, tok.Token, u.owner, u.repo, u.sha, githubCommitStatusRequest{
-			State: state, TargetURL: githubRunTargetURL(r.dashboardURL, u.runID),
-			Description: description, Context: "sparkwing/" + u.pipeline,
-		})
+	state, description := githubCommitState(status)
+	return r.client.CreateCommitStatus(ctx, token, owner, repo, u.sha, githubCommitStatusRequest{
+		State: state, TargetURL: githubRunTargetURL(r.dashboardURL, u.runID), Description: description, Context: "sparkwing/" + u.pipeline,
 	})
 }
 
-func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run) githubapp.CheckRun {
+func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate, run *store.Run) (githubapp.CheckRun, error) {
 	link := githubRunTargetURL(r.dashboardURL, u.runID)
 	check := githubapp.CheckRun{
 		Name: "sparkwing/" + u.pipeline, HeadSHA: u.sha, DetailsURL: link, ExternalID: u.runID,
@@ -406,7 +199,7 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant
 		var nodes []*store.Node
 		if run != nil {
 			if nodes, err = tenant.ListNodes(ctx, u.runID); err != nil {
-				nodes = nil
+				return githubapp.CheckRun{}, err
 			}
 		}
 		check.Output = &githubapp.CheckRunOutput{
@@ -414,7 +207,7 @@ func (r *githubCheckReporter) checkRun(ctx context.Context, tenant *store.Tenant
 			Summary: githubCheckSummary(run, nodes, check.Conclusion, link),
 		}
 	}
-	return check
+	return check, nil
 }
 
 func githubCheckTitle(conclusion string) string {
@@ -526,17 +319,4 @@ func githubRunTargetURL(baseURL, runID string) string {
 	q.Set("run", runID)
 	u.RawQuery = q.Encode()
 	return u.String()
-}
-
-func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus string) {
-	if s.githubApp == nil {
-		return
-	}
-	trigger, err := s.runTrigger(ctx, runID)
-	if err != nil || trigger.TriggerEnv[envGitHubAppInstallation] == "" {
-		return
-	}
-	if update, ok := s.githubAppCheckUpdate(ctx, trigger, runStatus); ok {
-		s.githubApp.checks.enqueue(s.logger, update)
-	}
 }

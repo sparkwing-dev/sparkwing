@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,12 +18,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func (f *appFixture) drainChecks() {
+func (f *appFixture) reconcileChecks() {
 	f.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := controller.DrainGitHubChecks(ctx, f.srv); err != nil {
-		f.t.Fatalf("drain check runs: %v", err)
+	if err := f.srv.ReconcileRunEffects(ctx); err != nil {
+		f.t.Fatalf("reconcile check runs: %v", err)
 	}
 }
 
@@ -157,8 +156,8 @@ func onlyCheckTokens(t *testing.T, app *githubapptest.GitHub) {
 	t.Helper()
 	for _, m := range app.Minted() {
 		if _, checks := m.Permissions["checks"]; checks &&
-			(len(m.Repositories) != 1 || m.Repositories[0] != "widgets" || len(m.Permissions) != 1 || m.Permissions["checks"] != "write") {
-			t.Fatalf("check run token request = %+v, want widgets with checks:write only", m)
+			(len(m.Repositories) != 0 || len(m.RepositoryIDs) != 1 || m.RepositoryIDs[0] != 701 || len(m.Permissions) != 1 || m.Permissions["checks"] != "write") {
+			t.Fatalf("check run token request = %+v, want repository 701 with checks:write only", m)
 		}
 	}
 }
@@ -171,7 +170,7 @@ func TestGitHubAppRunReportsOneCheckRun(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", nil)
 	runID := f.pushRun(headSHA)
-	f.drainChecks()
+	f.reconcileChecks()
 
 	calls := f.app.CheckRunCalls()
 	if len(calls) != 1 {
@@ -185,11 +184,11 @@ func TestGitHubAppRunReportsOneCheckRun(t *testing.T) {
 	}
 
 	runner := f.startRun(olga, runID)
-	f.drainChecks()
+	f.reconcileChecks()
 	f.addNode(runID, "compile", "success", "")
 	f.addNode(runID, "unit-tests", "failed", "3 tests failed")
 	f.finishRun(runner, runID, "failed", "node unit-tests failed")
-	f.drainChecks()
+	f.reconcileChecks()
 
 	calls = f.app.CheckRunCalls()
 	if len(calls) != 3 {
@@ -224,45 +223,12 @@ func TestGitHubAppCheckRunConclusions(t *testing.T) {
 	} {
 		runID := f.pushRun(strings.Repeat(string(rune('a'+i)), 40))
 		f.finishRun(f.startRun(olga, runID), runID, c.status, "")
-		f.drainChecks()
+		f.reconcileChecks()
 		calls := f.app.CheckRunCalls()
 		last := calls[len(calls)-1]
 		if last.ExternalID != runID || last.Status != "completed" || last.Conclusion != c.conclusion {
 			t.Fatalf("run finished %s: last write %+v, want conclusion %s", c.status, last, c.conclusion)
 		}
-	}
-}
-
-// GitHub failing a check run write is retried, and a write that never lands
-// neither fails the delivery nor stops the run.
-func TestGitHubAppCheckRunSurvivesGitHubErrors(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-
-	f.app.FailCheckRuns(2)
-	f.pushRun(headSHA)
-	f.drainChecks()
-	if calls := f.app.CheckRunCalls(); len(calls) != 1 || calls[0].Status != "queued" {
-		t.Fatalf("after two 502s the writes = %+v, want the queued create retried into place", calls)
-	}
-
-	f.app.FailCheckRuns(1000)
-	runID := f.pushRun(strings.Repeat("5", 40))
-	f.drainChecks()
-	if n := len(f.app.CheckRunCalls()); n != 1 {
-		t.Fatalf("a GitHub that answers only 502 recorded %d writes", n)
-	}
-	if !strings.Contains(f.logs.String(), "github check run update failed") {
-		t.Fatalf("a check run given up on logged nothing:\n%s", f.logs.String())
-	}
-	f.app.FailCheckRuns(0)
-	f.finishRun(f.startRun(olga, runID), runID, "success", "")
-	f.drainChecks()
-	calls := f.app.CheckRunCalls()
-	if last := calls[len(calls)-1]; last.ExternalID != runID || last.Conclusion != "success" {
-		t.Fatalf("the run whose create failed ended with writes %+v, want a completed check run", calls)
 	}
 }
 
@@ -276,10 +242,10 @@ func TestGitHubAppWithoutChecksPermissionPostsStatuses(t *testing.T) {
 	f.app.SetChecksGranted(7, false)
 
 	first := f.pushRun(headSHA)
-	f.drainChecks()
+	f.reconcileChecks()
 	f.finishRun(f.startRun(olga, first), first, "success", "")
 	f.pushRun(strings.Repeat("6", 40))
-	f.drainChecks()
+	f.reconcileChecks()
 
 	if calls := f.app.CheckRunCalls(); len(calls) != 0 {
 		t.Fatalf("check runs %+v on an installation without the permission", calls)
@@ -300,7 +266,7 @@ func TestGitHubAppWithoutChecksPermissionPostsStatuses(t *testing.T) {
 
 	f.app.SetChecksGranted(7, true)
 	f.pushRun(strings.Repeat("7", 40))
-	f.drainChecks()
+	f.reconcileChecks()
 	if calls := f.app.CheckRunCalls(); len(calls) != 1 || calls[0].Status != "queued" {
 		t.Fatalf("after the owner accepted, writes = %+v, want a check run", calls)
 	}
@@ -322,7 +288,7 @@ func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
 		f.addNode(runID, "node-"+strings.Repeat("x", 40)+"-"+strconv.Itoa(i), "failed", strings.Repeat("é", 500))
 	}
 	f.finishRun(runner, runID, "failed", strings.Repeat("ü", 100_000))
-	f.drainChecks()
+	f.reconcileChecks()
 	calls := f.app.CheckRunCalls()
 	done := calls[len(calls)-1]
 	if done.Status != "completed" {
@@ -348,7 +314,7 @@ func TestGitHubAppCheckRunSummaryKeepsPrivateRunDataInConsole(t *testing.T) {
 	runner := f.startRun(olga, runID)
 	f.addNode(runID, "secret-node-name", "failed", "ghp_secret-looking-node-error")
 	f.finishRun(runner, runID, "failed", "ghp_secret-looking-run-error")
-	f.drainChecks()
+	f.reconcileChecks()
 	calls := f.app.CheckRunCalls()
 	summary := calls[len(calls)-1].Summary
 	for _, secret := range []string{"secret-node-name", "ghp_secret-looking-node-error", "ghp_secret-looking-run-error"} {
@@ -372,7 +338,7 @@ func TestGitHubAppCheckRunRerequestedRerunsItsPipeline(t *testing.T) {
 	f.subscribe(olga, "acme/widgets", "build", nil)
 	f.subscribe(olga, "acme/widgets", "test", nil)
 	f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
-	f.drainChecks()
+	f.reconcileChecks()
 	var build githubapptest.CheckRunCall
 	for _, c := range f.app.CheckRunCalls() {
 		if c.Name == "sparkwing/build" {
@@ -404,7 +370,7 @@ func TestGitHubAppCheckRunRerequestedRerunsItsPipeline(t *testing.T) {
 	if n := len(f.triggers(olga.team)); n != 3 {
 		t.Fatalf("the team has %d runs, want the push's 2 and one re-run", n)
 	}
-	f.drainChecks()
+	f.reconcileChecks()
 	calls := f.app.CheckRunCalls()
 	if last := calls[len(calls)-1]; last.Method != "create" || last.Name != "sparkwing/build" || last.ExternalID != ids[0] {
 		t.Fatalf("the re-run's check run = %+v, want a new one", last)
@@ -461,7 +427,7 @@ func TestGitHubAppRerequestedNeedsPriorEventsSubscription(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", nil)
 	f.pushRun(headSHA)
-	f.drainChecks()
+	f.reconcileChecks()
 	build := f.app.CheckRunCalls()[0]
 	f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "pull_request": true})
 	for _, event := range []string{"check_run", "check_suite"} {
@@ -483,7 +449,7 @@ func TestGitHubAppRerequestedUsesCurrentBranchFilter(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", nil)
 	f.pushRun(headSHA)
-	f.drainChecks()
+	f.reconcileChecks()
 	build := f.app.CheckRunCalls()[0]
 	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"branches": []string{"release/*"}}); code != http.StatusOK {
 		t.Fatalf("update subscription = %d", code)
@@ -513,7 +479,7 @@ func TestGitHubAppRerequestedForkOrForeignCommitStartsNothing(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": true, "pull_request": true})
 	f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
-	f.drainChecks()
+	f.reconcileChecks()
 	build := f.app.CheckRunCalls()[0]
 
 	fork := []any{map[string]any{
@@ -563,7 +529,7 @@ func TestGitHubAppRerequestedNeedsTheBinding(t *testing.T) {
 	f.connect(bob, 502, 8, nil)
 	f.subscribe(olga, "acme/widgets", "build", nil)
 	f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), "")
-	f.drainChecks()
+	f.reconcileChecks()
 	build := f.app.CheckRunCalls()[0]
 
 	if _, out := f.deliver("check_run", checkRunPayload(99, "rerequested", build), ""); out["status"] != "ignored" {
@@ -594,215 +560,8 @@ func TestGitHubAppRerequestedSpendsTheRunBudget(t *testing.T) {
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", nil)
 	f.pushRun(headSHA)
-	f.drainChecks()
+	f.reconcileChecks()
 	if code, _ := f.deliver("check_run", checkRunPayload(7, "rerequested", f.app.CheckRunCalls()[0]), ""); code != http.StatusTooManyRequests {
 		t.Fatalf("rerequested past the team's cap = %d, want 429", code)
-	}
-}
-
-// A run's outcome goes to the check of the trigger in the run's own team;
-// another team's GitHub trigger under the same id is not touched.
-func TestGitHubAppRunFinishLeavesAnotherTeamsCheckUnderTheSameID(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	ctx := context.Background()
-	in, err := f.store.AsOperator().GitHubAppInstallationTeam(ctx, 7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner, err := f.store.ForTeam(ctx, in.Team)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := owner.CreateTrigger(ctx, store.Trigger{
-		ID: "shared", Pipeline: "build", GithubOwner: "acme", GithubRepo: "widgets", GitSHA: headSHA,
-		TriggerEnv: map[string]string{"GITHUB_APP_INSTALLATION_ID": "7"}, CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.store.AsOperator().CreateTeam(ctx, "other"); err != nil {
-		t.Fatal(err)
-	}
-	other, err := f.store.ForTeam(ctx, "other")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := teststore.SeedRun(f.store, ctx, other.Team(), store.Run{ID: "shared", Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-
-	controller.ReportGitHubRunState(ctx, f.srv, "shared", "failed")
-	f.drainChecks()
-
-	if calls := f.app.CheckRunCalls(); len(calls) != 0 {
-		t.Fatalf("check run writes = %+v, want none for another team's trigger", calls)
-	}
-}
-
-// Two controllers reporting the same run while a deploy overlaps them create
-// one check run between them: the second waits for the first's create and
-// updates the check run it recorded.
-func TestGitHubAppOverlappingControllersCreateOneCheckRun(t *testing.T) {
-	f := newAppFixture(t)
-	other, _ := f.replica()
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-
-	arrived, minted, release := f.app.HoldCheckRunCreates()
-	t.Cleanup(release)
-	runID := f.pushRun(headSHA)
-	<-arrived
-	for len(minted) > 0 {
-		<-minted
-	}
-	controller.ReportGitHubRunState(context.Background(), other, runID, "pending")
-	<-minted
-	// safety: the yields let the second controller reach its read of the
-	// recorded id before the first records one, which is the interleaving
-	// that made two creates; they bias the race and decide nothing.
-	for range 1000 {
-		runtime.Gosched()
-	}
-	release()
-	f.drainChecks()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := controller.DrainGitHubChecks(ctx, other); err != nil {
-		t.Fatalf("drain the second controller: %v", err)
-	}
-
-	calls := f.app.CheckRunCalls()
-	if len(calls) != 2 || calls[0].Method != "create" || calls[1].Method != "update" || calls[1].ID != calls[0].ID {
-		t.Fatalf("check run writes = %+v, want one create and an update of it", calls)
-	}
-}
-
-// A controller holding a non-final update for a run that has finished drops
-// it, so a finished check run or commit status never goes back to running or
-// pending.
-func TestGitHubAppStaleUpdateNeverReopensAFinishedRun(t *testing.T) {
-	for _, checks := range []bool{true, false} {
-		t.Run(map[bool]string{true: "check run", false: "commit status"}[checks], func(t *testing.T) {
-			f := newAppFixture(t)
-			other, _ := f.replica()
-			olga := f.ghUser(501, "olga")
-			f.connect(olga, 501, 7, acmeAdmin)
-			f.subscribe(olga, "acme/widgets", "build", nil)
-			f.app.SetChecksGranted(7, checks)
-
-			runID := f.pushRun(headSHA)
-			f.finishRun(f.startRun(olga, runID), runID, "failed", "")
-			f.drainChecks()
-			controller.ReportGitHubRunState(context.Background(), other, runID, "running")
-			controller.ReportGitHubRunState(context.Background(), other, runID, "pending")
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := controller.DrainGitHubChecks(ctx, other); err != nil {
-				t.Fatalf("drain the second controller: %v", err)
-			}
-
-			if checks {
-				calls := f.app.CheckRunCalls()
-				if last := calls[len(calls)-1]; last.Status != "completed" || last.Conclusion != "failure" {
-					t.Fatalf("check run writes = %+v, want the last one to stay completed failure", calls)
-				}
-				return
-			}
-			statuses := f.app.Statuses()
-			if last := statuses[len(statuses)-1]; last.State != "failure" {
-				t.Fatalf("statuses = %+v, want the last one to stay failure", statuses)
-			}
-		})
-	}
-}
-
-// Queue expiry stores a run as failed and reports it timed_out; a queued update
-// another controller still holds arrives afterwards and leaves the timed_out
-// conclusion in place.
-func TestGitHubAppStaleQueuedUpdateKeepsATimedOutConclusion(t *testing.T) {
-	f := newAppFixture(t)
-	other, _ := f.replica()
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	runID := f.pushRun(headSHA)
-	f.drainChecks()
-
-	ctx := context.Background()
-	team, err := f.store.AsOperator().RunTeam(ctx, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tenant, err := f.store.ForTeam(ctx, team)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := teststore.SeedRunFinish(f.store, ctx, tenant.Team(), runID, "failed", "reaped: queue deadline"); err != nil {
-		t.Fatal(err)
-	}
-	controller.ReportGitHubRunState(ctx, f.srv, runID, "timed_out")
-	f.drainChecks()
-	controller.ReportGitHubRunState(ctx, other, runID, "pending")
-	drain, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if err := controller.DrainGitHubChecks(drain, other); err != nil {
-		t.Fatalf("drain the second controller: %v", err)
-	}
-
-	calls := f.app.CheckRunCalls()
-	if last := calls[len(calls)-1]; last.Status != "completed" || last.Conclusion != "timed_out" {
-		t.Fatalf("check run writes = %+v, want the last one to stay completed timed_out", calls)
-	}
-}
-
-// A check run GitHub created whose id the store lost is found by its external
-// id and adopted, so the next update edits it rather than creating another.
-func TestGitHubAppAdoptsACheckRunWhoseRecordWasLost(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	runID := f.pushRun(headSHA)
-	f.drainChecks()
-	if _, err := f.store.DB().Exec(`UPDATE triggers SET github_check_run_id = 0 WHERE id = ?`, runID); err != nil {
-		t.Fatal(err)
-	}
-
-	f.startRun(olga, runID)
-	f.drainChecks()
-	calls := f.app.CheckRunCalls()
-	if len(calls) != 2 || calls[1].Method != "update" || calls[1].ID != calls[0].ID || calls[1].Status != "in_progress" {
-		t.Fatalf("check run writes = %+v, want the lost check run updated, not a second create", calls)
-	}
-	var recorded int64
-	if err := f.store.DB().QueryRow(`SELECT github_check_run_id FROM triggers WHERE id = ?`, runID).Scan(&recorded); err != nil || recorded != calls[0].ID {
-		t.Fatalf("recorded check run = %d, %v; want the adopted %d", recorded, err, calls[0].ID)
-	}
-}
-
-// A queued update another controller delivers after the run started is dropped,
-// so the check run stays in_progress.
-func TestGitHubAppDelayedQueuedUpdateLeavesARunningCheck(t *testing.T) {
-	f := newAppFixture(t)
-	other, _ := f.replica()
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	runID := f.pushRun(headSHA)
-	f.startRun(olga, runID)
-	f.drainChecks()
-
-	ctx := context.Background()
-	controller.ReportGitHubRunState(ctx, other, runID, "pending")
-	drain, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if err := controller.DrainGitHubChecks(drain, other); err != nil {
-		t.Fatalf("drain the second controller: %v", err)
-	}
-	calls := f.app.CheckRunCalls()
-	if last := calls[len(calls)-1]; last.Status != "in_progress" {
-		t.Fatalf("check run writes = %+v, want the last one to stay in_progress", calls)
 	}
 }

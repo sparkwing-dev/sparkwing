@@ -1122,6 +1122,5 @@ func (s *Server) startGitHubAppRun(
 		return githubAppRun{}, fmt.Errorf("persist trigger: %w", err)
 	}
 	s.recordQueueActivity(time.Now())
-	s.reportGitHubRunState(context.WithoutCancel(ctx), runID, "pending")
 	return githubAppRun{Pipeline: pipeline, RunID: runID, Status: "dispatched"}, nil
 }

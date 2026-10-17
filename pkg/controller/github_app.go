@@ -34,14 +34,14 @@ const githubAppStateTTL = 10 * time.Minute
 type githubAppState struct {
 	client   *githubapp.Client
 	stateKey []byte
-	checks   *githubCheckReporter
 	cronMu   sync.Mutex
 
 	// safety: GitHub's answer for which installation covers a repository is
 	// read on every run and token, so it is kept briefly rather than asked
 	// for each time.
-	mu       sync.Mutex
-	covering map[string]coveringEntry
+	mu           sync.Mutex
+	covering     map[string]coveringEntry
+	warnedChecks map[int64]bool
 }
 
 type coveringEntry struct {
@@ -55,13 +55,10 @@ type coveringEntry struct {
 // repository.
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 	client := githubapp.New(cfg)
-	if s.githubApp != nil {
-		s.githubApp.checks.stop()
-	}
 	s.githubApp = &githubAppState{
 		client: client, stateKey: client.StateKey(),
-		checks:   newGitHubCheckReporter(client, s.store, s.dashboardURL),
-		covering: map[string]coveringEntry{},
+		covering:     map[string]coveringEntry{},
+		warnedChecks: map[int64]bool{},
 	}
 	return s
 }
@@ -753,31 +750,40 @@ func (s *Server) teamInstallationFor(ctx context.Context, t *store.Tenant, repo 
 	return in, true, nil
 }
 
-// safety: a run reports only while the installation it arrived through is still bound
-// to the run's team.
-func (s *Server) githubAppCheckUpdate(ctx context.Context, trigger *store.Trigger, runStatus string) (githubCheckUpdate, bool) {
-	if s.githubApp == nil || trigger.Pipeline == "" || trigger.GithubOwner == "" || trigger.GithubRepo == "" {
-		return githubCheckUpdate{}, false
+func (s *Server) warnMissingChecks(installation int64) {
+	s.githubApp.mu.Lock()
+	defer s.githubApp.mu.Unlock()
+	if !s.githubApp.warnedChecks[installation] {
+		s.githubApp.warnedChecks[installation] = true
+		s.logger.Warn("github app installation has not accepted the checks permission; its runs report commit statuses until it does", "installation_id", installation)
 	}
-	installation, err := strconv.ParseInt(trigger.TriggerEnv[envGitHubAppInstallation], 10, 64)
+}
+
+func (s *Server) githubAppCheckUpdate(ctx context.Context, tenant *store.Tenant, effect store.DesiredRunEffect) (githubCheckUpdate, bool, error) {
+	run, err := tenant.ReadRun(ctx, effect.RunID)
 	if err != nil {
-		return githubCheckUpdate{}, false
+		return githubCheckUpdate{}, false, err
 	}
-	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, installation)
-	if err != nil || in.Team != store.NormalizeTeam(trigger.Team) || in.Suspended {
-		return githubCheckUpdate{}, false
+	input := run.Request.Request
+	if !input.Git.App.Set {
+		return githubCheckUpdate{}, false, nil
 	}
-	sha := trigger.GitSHA
-	if head := trigger.TriggerEnv["GITHUB_HEAD_SHA"]; trigger.TriggerEnv["GITHUB_EVENT_NAME"] == "pull_request" && head != "" {
-		sha = head
+	app := input.Git.App.Value
+	if app.InstallationID <= 0 || app.RepositoryID <= 0 || string(input.Git.Repository.Key) != fmt.Sprintf("gh:%d", app.RepositoryID) || app.DeliveryKey == "" || app.VerifiedAt.IsZero() || app.SHA != input.Git.SHA || app.Ref != input.Git.Ref || !githubCommit(app.SHA) {
+		return githubCheckUpdate{}, false, errors.New("GitHub completion requires sealed verified repository facts")
 	}
-	if !githubCommit(strings.ToLower(sha)) {
-		return githubCheckUpdate{}, false
+	sha := app.SHA
+	if input.PullRequest.Set {
+		sha = input.PullRequest.Value.HeadSHA
 	}
-	return githubCheckUpdate{
-		installation: installation, owner: trigger.GithubOwner, repo: trigger.GithubRepo, sha: sha,
-		pipeline: trigger.Pipeline, runID: trigger.ID, runStatus: runStatus, team: in.Team,
-	}, true
+	if !githubCommit(sha) {
+		return githubCheckUpdate{}, false, errors.New("GitHub completion requires a verified commit")
+	}
+	status := string(effect.State)
+	if effect.State == store.RunFailed && (effect.Reason == "timeout" || effect.Reason == "queue_timeout") {
+		status = "timed_out"
+	}
+	return githubCheckUpdate{installation: app.InstallationID, repository: app.RepositoryID, sha: sha, pipeline: run.Pipeline, runID: run.ID, runStatus: status, team: tenant.Team()}, true, nil
 }
 
 // perf: Reuse a covering installation briefly rather than call GitHub for every run.
