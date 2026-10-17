@@ -49,7 +49,7 @@ func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capabil
 		if err != nil {
 			return err
 		}
-		request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run)
+		request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run, true)
 		if err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func checkSourceReleaseFenceTx(ctx context.Context, tx *storeTx, c capability.Ca
 	return nil
 }
 
-func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []authorityNode, run RunRow) (capability.SourceExecutor, error) {
+func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []authorityNode, run RunRow, requireConsent bool) (capability.SourceExecutor, error) {
 	if t.s.claimProfiles == nil {
 		return capability.SourceExecutor{}, authorityError(apierr.Unavailable, "source executor enrollment is unavailable")
 	}
@@ -180,7 +180,7 @@ func (t *Tenant) sourceExecutorTx(ctx context.Context, tx *storeTx, chain []auth
 		return capability.SourceExecutor{}, err
 	}
 	executor.OwnerOptedIn = executor.OwnerAccountID != "" && consent == 1
-	if !executor.OwnerOptedIn {
+	if requireConsent && !executor.OwnerOptedIn {
 		return capability.SourceExecutor{}, bindingRefusal()
 	}
 	return executor, nil

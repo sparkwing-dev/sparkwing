@@ -27,6 +27,7 @@ type BindingRule string
 
 const (
 	BindNone               BindingRule = "none"
+	BindOperatorSettings   BindingRule = "operator_settings"
 	BindRun                BindingRule = "run"
 	BindOwnNode            BindingRule = "ownNode"
 	BindRunOfTrigger       BindingRule = "runOfTrigger"
@@ -471,7 +472,7 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 	b := p.Capability.Binding
 	run := b.RunID != "" && b.RunID == t.RunID
 	switch rule {
-	case BindNone, BindOwnToken, BindMachineOwner, BindSelfOrTeamAdmin:
+	case BindNone, BindOperatorSettings, BindOwnToken, BindMachineOwner, BindSelfOrTeamAdmin:
 		return true
 	case BindRun:
 		return run
@@ -572,7 +573,7 @@ func validateRoutePolicy(route RoutePolicy) error {
 			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialOwnerProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery,
 		}, access.Credential) ||
 			!slices.Contains([]BindingRule{
-				BindNone, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
+				BindNone, BindOperatorSettings, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
 				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindData, BindExpansion, BindClaimSelection, BindOwnToken, BindMachineOwner,
 				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval, BindSourceReport,
 			}, access.Binding) ||

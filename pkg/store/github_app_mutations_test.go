@@ -126,7 +126,7 @@ func TestGitHubAppMutationsCommitActorTimeAndConsentGeneration(t *testing.T) {
 	if rows, err := tenant.GitHubAppTriggers(ctx); err != nil || len(rows) != 0 {
 		t.Fatalf("unbound subscriptions=%+v: %v", rows, err)
 	}
-	if _, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "acme/app", nil, nil); err != nil {
+	if _, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "acme/app", nil, map[string]int64{"acme/app": 701}); err != nil {
 		t.Fatalf("clear after unbind: %v", err)
 	}
 	if rows, err := tenant.GitHubAppAutomations(ctx); err != nil || len(rows) != 0 {

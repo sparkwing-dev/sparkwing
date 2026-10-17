@@ -3476,6 +3476,11 @@ capacity drops, retry sleeps and shutdown drain are removed. Pending, running
 and terminal intents all come from run transitions. Metrics and parent
 notification remain due for their unfinished consumers.
 
+Invalid sealed App completion facts call `Tenant.RejectRunEffect`: the existing
+revision-fenced transaction increments attempts once and consumes only that
+revision. The controller logs that failure once. Transient provider and storage
+errors retain the existing retry backoff. No completion SQL dialect change is made.
+
 
 ## Verified GitHub App admission integration
 
@@ -3512,10 +3517,12 @@ Re-request selection uses those facts rather than removed trigger environment
 columns. OIDC classification uses the event in the seal, so expiry of the replay
 ledger does not erase the identity of a retained or retried run.
 
-`CronSchedule.RepositoryKey` carries resolved identity separately from App
-installation authority. `ArmCronSchedule` validates and stores that key, and the
-scanner returns it. Manual GitHub schedules require a resolved numeric identity
-without acquiring App authority. Manual/App conflicts compare those keys.
+`CronSchedule.RepositoryKey` is a read projection of derived identity, separate
+from App installation authority. `ArmCronSchedule` ignores the input key and
+canonicalizes the source using the verified App IDs or `ScheduleRepositoryResolver`
+on its existing intake policy. The controller implements that resolver through
+its shared run-intake identity lookup. Manual GitHub schedules acquire numeric
+identity without acquiring App authority. Manual/App conflicts compare those keys.
 Unresolved GitHub URLs fail before arming, including former names that cannot be
 resolved. The old alias comparison and its GitHub token mint are removed.
 
@@ -3532,9 +3539,15 @@ Controller schedules reach the same sealed intake through the adapter below.
 
 `Tenant.ReleaseGitHubSourceCredential(ctx, Authorized, GitHubSourceProvider)`
 returns a `githubapp.Token` only after the existing source-release audit commits.
-The provider interface has `InstallationRepositories` and
-`InstallationTokenByIDs`, matching the existing GitHub client and the store test
-fake. The store derives the repository, ref, SHA, installation and executor from
+The provider interface contains only `InstallationTokenByIDs`, matching the
+existing GitHub client and store test fake. A short transaction resolves and
+validates source authority and consent. Minting runs with no transaction open.
+A second short transaction repeats authority, enrollment, consent and fence
+checks, requires the same installation and approved ID set, and writes the audit.
+GitHub verifies coverage while minting that ID set. Source release never lists
+installation repositories, so the listing's 1,000-repository bound cannot turn
+an authorized source into not_found. Refused coverage returns conflict; other
+mint failures return unavailable. The store derives the repository, ref, SHA, installation and executor from
 its authority chain and request seal. Verified App requests use their recorded
 installation. Typed requests require a current team subscription for their
 numeric repository ID. A live installation belongs to the same team. Every
@@ -3552,7 +3565,9 @@ now run through the release transaction and generated rename tests.
 The App and stored-credential paths share persisted source authority, fences and
 the audit writer. App tokens do not require machine-owner opt-in. Stored team
 credentials still require verified Cloud enrollment or the machine owner's
-consent. The App path checks authority and lease again after provider I/O. Audit
+consent. Both paths check the claim profile's Accept rule and require the root
+machine in the same team, except for verified Cloud placement. The App path
+checks authority and lease again after provider I/O. Audit
 failure returns no token. An upstream token minted before a refused audit stays
 unreturned, within the existing external-token revocation residual.
 
@@ -3563,7 +3578,9 @@ unreturned, within the existing external-token revocation residual.
 adapter. The persisted schedule is durable consent for unattended execution.
 Its private transaction authority is `schedule:<id>`, not a capability or session.
 `ArmedBy` remains attribution for the arming operation. It never fabricates a
-live account or bearer. The admission subject is the schedule's service identity.
+live account or bearer. The admission subject is a service attributed to `ArmedBy`, so all of that
+principal's schedules share the per-principal admission counter. The sealed
+authority reference still identifies the exact schedule.
 
 The transaction locks and rechecks the tenant, repository key and location,
 pipeline, effective declaration, arming identity and timestamp, pause and declared

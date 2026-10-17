@@ -243,6 +243,11 @@ const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, d
 // first team's row.
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
 
+// ScheduleRepositoryResolver resolves manual schedule identity without granting App authority.
+type ScheduleRepositoryResolver interface {
+	ResolveScheduleRepository(context.Context, Team, string) (runspec.Repository, error)
+}
+
 // ArmCronSchedule records the declaration on a host, returning the
 // stored row and whether it was created. A schedule is keyed by
 // repository path, pipeline and name, so one pipeline can carry several
@@ -264,20 +269,14 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 		sched.GitHubInstallationID < 0 || sched.GitHubRepositoryID < 0 {
 		return CronSchedule{}, false, errors.New("ArmCronSchedule: GitHub installation and repository ids must both be positive or both zero")
 	}
-	repoID := sched.GitHubRepositoryID
-	if strings.HasPrefix(string(sched.RepositoryKey), "gh:") && repoID == 0 {
-		var err error
-		repoID, err = strconv.ParseInt(strings.TrimPrefix(string(sched.RepositoryKey), "gh:"), 10, 64)
-		if err != nil || repoID <= 0 {
-			return CronSchedule{}, false, ErrInvalidInput
+	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: sched.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: sched.GitHubRepositoryID > 0, Value: sched.GitHubRepositoryID}})
+	if err != nil {
+		if resolver, ok := t.s.intakePolicy.(ScheduleRepositoryResolver); ok {
+			repository, err = resolver.ResolveScheduleRepository(ctx, t.team, sched.RepoPath)
 		}
 	}
-	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: sched.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: repoID > 0, Value: repoID}})
 	if err != nil {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: %w", err)
-	}
-	if sched.RepositoryKey != "" && sched.RepositoryKey != repository.Key {
-		return CronSchedule{}, false, ErrInvalidInput
 	}
 	sched.RepositoryKey = repository.Key
 	if sched.Name == "" {

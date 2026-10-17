@@ -203,15 +203,15 @@ func TestDeploymentBindingAllowsOnlyUnboundTeamSelectionProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		target := capability.Target{Team: fmt.Sprintf("target-%d", input)}
-		if err := s.CheckBinding(t.Context(), p, capability.BindNone, target); err != nil {
+		if err := s.CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err != nil {
 			return false
 		}
 		target.RunID = fmt.Sprintf("run-%d", input)
-		if err := s.CheckBinding(t.Context(), p, capability.BindNone, target); err == nil {
+		if err := s.CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err == nil {
 			return false
 		}
 		target.RunID, target.NodeID = "", fmt.Sprintf("job-%d", input)
-		if err := s.CheckBinding(t.Context(), p, capability.BindNone, target); err == nil {
+		if err := s.CheckBinding(t.Context(), p, capability.BindOperatorSettings, target); err == nil {
 			return false
 		}
 		tenant := authorityRoot("tenant", "a")
@@ -222,9 +222,27 @@ func TestDeploymentBindingAllowsOnlyUnboundTeamSelectionProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		target.NodeID = ""
-		return s.CheckBinding(t.Context(), p, capability.BindNone, target) != nil
+		return s.CheckBinding(t.Context(), p, capability.BindOperatorSettings, target) != nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeploymentBindNoneRefusesCrossTeamProperty(t *testing.T) {
+	property := func(value uint16) bool {
+		s := authorityStore(t)
+		root := authorityRoot("ops", "")
+		root.Subject.Kind = capability.SubjectOperator
+		root.Grants = []capability.Grant{capability.OperatorObjectStore}
+		authorityPersist(t, s, root)
+		p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.CheckBinding(t.Context(), p, capability.BindNone, capability.Target{Team: fmt.Sprintf("target-%d", value)}) != nil
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
 		t.Fatal(err)
 	}
 }

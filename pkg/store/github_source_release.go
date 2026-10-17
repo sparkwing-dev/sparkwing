@@ -18,67 +18,42 @@ import (
 
 // GitHubSourceProvider verifies coverage and mints repository-ID-scoped read tokens.
 type GitHubSourceProvider interface {
-	InstallationRepositories(context.Context, int64) ([]githubapp.Repository, error)
 	InstallationTokenByIDs(context.Context, int64, []int64, map[string]string) (githubapp.Token, error)
 }
 
-// ReleaseGitHubSourceCredential commits live claim and owner-consent checks before returning a token.
+// ReleaseGitHubSourceCredential rechecks live consent and commits an audit after minting outside database transactions.
 func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized capability.Authorized, provider GitHubSourceProvider) (githubapp.Token, error) {
-	var token githubapp.Token
+	if provider == nil {
+		return githubapp.Token{}, ErrNotFound
+	}
+	var before githubSourceRelease
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		request, err := t.sourceReleaseRequestTx(ctx, tx, authorized)
+		var err error
+		before, err = t.githubSourceReleaseTx(ctx, tx, authorized)
+		return err
+	})
+	if err != nil {
+		return githubapp.Token{}, err
+	}
+	token, err := provider.InstallationTokenByIDs(ctx, before.installation, before.ids, map[string]string{"contents": "read"})
+	if errors.Is(err, githubapp.ErrNotInstalled) {
+		return githubapp.Token{}, authorityError(apierr.Conflict, "install the team's GitHub App on the approved repositories or update the owner's extras: "+strings.Join(before.names, ", "))
+	}
+	if err != nil {
+		return githubapp.Token{}, errors.Join(authorityError(apierr.Unavailable, "GitHub source token mint failed"), err)
+	}
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		current, err := t.githubSourceReleaseTx(ctx, tx, authorized)
 		if err != nil {
 			return err
 		}
-		if request.Host != "github.com" || provider == nil {
-			return ErrNotFound
-		}
-		run, err := readRunTx(ctx, tx, t.team, request.Authorization.Binding.RunID)
-		if err != nil {
-			return err
-		}
-		id, err := strconv.ParseInt(strings.TrimPrefix(request.RepositoryKey, "gh:"), 10, 64)
-		if err != nil || id <= 0 {
+		if current.installation != before.installation || !slices.Equal(current.ids, before.ids) {
 			return bindingRefusal()
-		}
-		installation, slug, err := t.githubSourceInstallationTx(ctx, tx, run.Request, id)
-		if err != nil {
-			return err
-		}
-		ids, names, err := t.githubSourceRepositoriesTx(ctx, tx, slug, id)
-		if err != nil {
-			return err
-		}
-		repositories, err := provider.InstallationRepositories(ctx, installation)
-		if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
-			return err
-		}
-		for i, required := range ids {
-			if !slices.ContainsFunc(repositories, func(repo githubapp.Repository) bool { return repo.ID == required }) {
-				if i == 0 {
-					return githubSourceMissing("install the team's GitHub App on " + slug)
-				}
-				return &apierr.Error{Code: apierr.Conflict, Message: "the installation no longer covers " + names[i]}
-			}
-		}
-		request.GitHubApp, request.CredentialID = true, fmt.Sprintf("github_app:%d", installation)
-		if _, err := capability.AuthorizeSourceRelease(request, tx.now()); err != nil {
-			return err
-		}
-		token, err = provider.InstallationTokenByIDs(ctx, installation, ids, map[string]string{"contents": "read"})
-		if err != nil {
-			return err
 		}
 		if token.Token == "" || !token.ExpiresAt.After(tx.now()) {
 			return authorityError(apierr.Unavailable, "GitHub returned no live source token")
 		}
-		if _, err := authorityChainTx(ctx, tx, authorized.Principal.Authority, false); err != nil {
-			return err
-		}
-		if err := checkSourceReleaseFenceTx(ctx, tx, request.Authorization.Principal.Capability); err != nil {
-			return err
-		}
-		audit, err := capability.AuthorizeSourceRelease(request, tx.now())
+		audit, err := capability.AuthorizeSourceRelease(current.request, tx.now())
 		if err != nil {
 			return err
 		}
@@ -88,6 +63,53 @@ func (t *Tenant) ReleaseGitHubSourceCredential(ctx context.Context, authorized c
 		return githubapp.Token{}, err
 	}
 	return token, nil
+}
+
+type githubSourceRelease struct {
+	request      capability.SourceReleaseRequest
+	installation int64
+	ids          []int64
+	names        []string
+}
+
+func (t *Tenant) githubSourceReleaseTx(ctx context.Context, tx *storeTx, authorized capability.Authorized) (githubSourceRelease, error) {
+	var out githubSourceRelease
+	request, err := t.sourceReleaseRequestTx(ctx, tx, authorized)
+	if err != nil {
+		return out, err
+	}
+	if request.Host != "github.com" {
+		return out, ErrNotFound
+	}
+	run, err := readRunTx(ctx, tx, t.team, request.Authorization.Binding.RunID)
+	if err != nil {
+		return out, err
+	}
+	chain, err := authorityChainTx(ctx, tx, authorized.Principal.Authority, true)
+	if err != nil {
+		return out, err
+	}
+	request.Executor, err = t.sourceExecutorTx(ctx, tx, chain, run, false)
+	if err != nil {
+		return out, err
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(request.RepositoryKey, "gh:"), 10, 64)
+	if err != nil || id <= 0 {
+		return out, bindingRefusal()
+	}
+	installation, slug, err := t.githubSourceInstallationTx(ctx, tx, run.Request, id)
+	if err != nil {
+		return out, err
+	}
+	ids, names, err := t.githubSourceRepositoriesTx(ctx, tx, slug, id)
+	if err != nil {
+		return out, err
+	}
+	request.GitHubApp, request.CredentialID = true, fmt.Sprintf("github_app:%d", installation)
+	if _, err := capability.AuthorizeSourceRelease(request, tx.now()); err != nil {
+		return out, err
+	}
+	return githubSourceRelease{request, installation, ids, names}, nil
 }
 
 func githubSourceMissing(remedy string) error {

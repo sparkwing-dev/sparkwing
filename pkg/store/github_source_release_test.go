@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type githubSourceFake struct {
@@ -19,6 +20,8 @@ type githubSourceFake struct {
 	ids          []int64
 	permissions  map[string]string
 	calls        int
+	lists        int
+	listErr      error
 	before       func()
 	token        githubapp.Token
 	err          error
@@ -28,7 +31,8 @@ func (f *githubSourceFake) InstallationRepositories(_ context.Context, installat
 	if installation != 7 {
 		return nil, errors.New("wrong installation")
 	}
-	return f.repositories, nil
+	f.lists++
+	return f.repositories, f.listErr
 }
 
 func (f *githubSourceFake) InstallationTokenByIDs(_ context.Context, installation int64, ids []int64, permissions map[string]string) (githubapp.Token, error) {
@@ -87,7 +91,7 @@ func TestGitHubSourceReleaseCannotEscapeClaimOrConsentProperty(t *testing.T) {
 		case 7:
 			rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=1`)
 		case 8:
-			provider.repositories = provider.repositories[:1]
+			provider.err = githubapp.ErrNotInstalled
 		case 9:
 			node, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
 			if err != nil {
@@ -142,7 +146,7 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			sched, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{
-				ID: "app-schedule", RepoPath: "https://github.com/acme/repo.git", RepositoryKey: "gh:1", GitHubInstallationID: 7, GitHubRepositoryID: 1,
+				ID: "app-schedule", RepoPath: "https://github.com/acme/repo.git", GitHubInstallationID: 7, GitHubRepositoryID: 1,
 				Pipeline: run.Pipeline, Cron: "* * * * *", TZ: "UTC", Where: CronWhereController,
 			}, tenant.s.clock())
 			if err != nil {
@@ -187,6 +191,103 @@ func TestGitHubScheduledSourceCannotEscapeConsentProperty(t *testing.T) {
 			} else if err == nil || token.Token != "" || provider.calls != 0 || audits != 0 {
 				t.Logf("mode=%d refused release=%+v err=%v calls=%d", mode, token, err, provider.calls)
 				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 6}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGitHubSourceReleaseRequiresMatchingSameTeamMachineProperty(t *testing.T) {
+	property := func(value uint16) bool {
+		for mode := range 3 {
+			tenant, auth, provider := githubSourceFixture(t, int64(value)+10)
+			switch mode {
+			case 0:
+				tenant.s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Location: "remote", Accept: deniedSource(t)}})
+			case 1:
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET subject_kind='service' WHERE prefix='runner'`)
+			case 2:
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET team='b' WHERE prefix='runner'`)
+			}
+			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
+			if err == nil || token.Token != "" || provider.calls != 0 {
+				t.Logf("mode=%d token=%+v calls=%d err=%v", mode, token, provider.calls, err)
+				return false
+			}
+			rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 0)
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func deniedSource(t *testing.T) match.RepoFilter {
+	t.Helper()
+	filter, err := match.ParseAccept([]string{"github.com/foreign/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filter
+}
+
+func TestGitHubSourceReleaseMintsOutsideTransactionsAndRechecksProperty(t *testing.T) {
+	property := func(value uint16) bool {
+		for mode := range 6 {
+			tenant, auth, provider := githubSourceFixture(t, int64(value)+10)
+			if mode == 5 {
+				run, err := tenant.ReadRun(t.Context(), "run")
+				if err != nil {
+					t.Fatal(err)
+				}
+				run.Request.Request.Git.App = runspec.Optional[runspec.AppFacts]{}
+				body, err := json.Marshal(run.Request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=? WHERE id='run'`, body)
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO github_app_triggers(team,repository_id,pipeline,repository,installation_id,created_at,repo_key) VALUES ('a',1,'p','acme/repo',7,1,'gh:1')`)
+			}
+			provider.before = func() {
+				if n := tenant.s.db.Stats().InUse; n != 0 {
+					t.Errorf("GitHub called with %d database connections held", n)
+					return
+				}
+				switch mode {
+				case 1:
+					rewriteSchemaExec(t, tenant.s.db, `UPDATE github_app_installations SET suspended=1`)
+				case 2:
+					rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET generation=generation+1`)
+				case 3:
+					rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_extra_repos`)
+				case 4:
+					rewriteSchemaExec(t, tenant.s.db, `UPDATE capabilities SET revoked_at=1 WHERE prefix='runner'`)
+				case 5:
+					rewriteSchemaExec(t, tenant.s.db, `DELETE FROM github_app_triggers`)
+				}
+			}
+			provider.listErr = githubapp.ErrTooManyRepositories
+			token, err := tenant.ReleaseGitHubSourceCredential(t.Context(), auth, provider)
+			if provider.lists != 0 {
+				t.Errorf("enumerated repository coverage %d times", provider.lists)
+				return false
+			}
+			if mode == 0 {
+				if err != nil || token.Token == "" {
+					t.Logf("scoped mint beyond listing: %v", err)
+					return false
+				}
+				rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 1)
+			} else {
+				if err == nil || token.Token != "" {
+					t.Logf("mode=%d token=%+v err=%v", mode, token, err)
+					return false
+				}
+				rewriteSchemaCount(t, tenant.s.db, "git_credential_releases", 0)
 			}
 		}
 		return true

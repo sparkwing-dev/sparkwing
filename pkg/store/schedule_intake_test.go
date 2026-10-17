@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -181,4 +182,24 @@ func TestScheduleAdmissionRechecksAppConsentProperty(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 6}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestScheduleAdmissionCountsAllSchedulesAgainstArmedBy(t *testing.T) {
+	tenant, first, now := scheduleIntakeFixture(t, 1)
+	if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.AdmitScheduledRun(t.Context(), first, now); err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := tenant.ArmCronSchedule(t.Context(), CronSchedule{ID: "second", RepoPath: first.RepoPath, Pipeline: first.Pipeline, Name: "second", Cron: first.Cron, TZ: first.TZ, Where: first.Where, ArmedBy: first.ArmedBy}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tenant.AdmitScheduledRun(t.Context(), second, now)
+	var refusal *ComputeLimitError
+	if !errors.As(err, &refusal) || refusal.Principal != first.ArmedBy || refusal.Observed != 1 {
+		t.Fatalf("second schedule bypassed armer's cap: %v", err)
+	}
+	rewriteSchemaCount(t, tenant.s.db, "runs", 1)
 }

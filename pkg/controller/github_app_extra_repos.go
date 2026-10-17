@@ -64,13 +64,9 @@ func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Req
 	if len(req.ExtraRepos) > store.MaxGitHubAppExtraRepos {
 		return githubAppRequestError(http.StatusBadRequest, fmt.Errorf("at most %d extra repositories per repository", store.MaxGitHubAppExtraRepos))
 	}
-	var ids map[string]int64
-	if len(req.ExtraRepos) > 0 {
-		var status int
-		var err error
-		if ids, status, err = s.extraReposCovered(r.Context(), t, repo, req.ExtraRepos); err != nil {
-			return githubAppRequestError(status, err)
-		}
+	ids, status, err := s.extraReposCovered(r.Context(), t, repo, req.ExtraRepos)
+	if err != nil {
+		return githubAppRequestError(status, err)
 	}
 	writer, err := s.githubAppWriter(r, a)
 	if err != nil {

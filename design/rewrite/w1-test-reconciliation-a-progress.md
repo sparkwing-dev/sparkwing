@@ -1,36 +1,89 @@
 # W1 test reconciliation-a progress
 
-## Current continuation
+## Current continuation: Opus review rulings
 
-The lead's native report after session 5 (2026-10-17 03:00:59 MDT) lists
-**86 failing top-level groups**, all in `pkg/controller` and outside this
-worker's assigned prefixes. It lists no assigned controller failure and no
-failure outside `pkg/controller`. The previous declared-repository guard failure
-is absent. No further code reconciliation is indicated by that report.
+Implemented rulings 1-8, with 6 covered by 2. Each finding ran red through its
+new or adjusted regression before the production change. Ruling 9 leaves
+PostgreSQL completion SQL unchanged for the lead's native run.
 
-No code, test, assertion, contract or acceptance cell changed this session.
-No test was deleted, skipped or ported. The amendment and handoff entries were
-checked against the previous report. No unfinished item was found within this
-reconciliation slice. Retry selection remains assigned to W3. The remaining
-controller routes and authentication fixtures belong to the other worker.
+| Ruling | Result and invariant |
+| --- | --- |
+| 1 | Clearing a renamed source's extra repositories resolves its numeric ID even for an empty list. Replacement, deletion and per-source reads use repository_id. Generated HTTP tests prove later tokens lose the old extras and cannot follow a reused name. |
+| 2, 6 | Source release validates in a short transaction, mints by exact IDs with no transaction open, then rechecks installation, subscription or schedule consent, approved IDs, enrollment and claim fences before auditing. Generated tests mutate those facts during minting. A source beyond the listing's first 1,000 repositories succeeds. Uncovered ID sets return 409; other mint failures return 503. |
+| 3 | Both source paths enforce the profile Accept match and same-team machine root, except verified Cloud placement. App tokens remain exempt from owner opt-in. Generated foreign-team, service-root and nonmatching-profile cases return no token or audit. |
+| 4 | Only the two operator quota routes use operator_settings to select another team. BindNone refuses cross-team targets. The existing settings positive property and the new refusal property pass. |
+| 5 | ArmCronSchedule derives identity and ignores the caller's RepositoryKey. Manual GitHub schedules use the existing intake policy's server-owned source resolver. App schedules use verified IDs. Manual conflict tests now resolve through production. The webhook already passed IDs without a RepositoryKey. |
+| 7 | Scheduled runs use ArmedBy for attribution, retaining the schedule ID in the sealed authority. Two schedules armed by one principal share its hourly cap. |
+| 8 | Invalid committed App facts record one failed attempt and consume only that revision. The controller logs once. Transient provider failures retain exponential backoff. Generated tests include invalid execution and pull-request SHAs and a second reconciliation. |
 
-Whole-repository `go build -p 4 ./...` passes. The declared-repository guard
-passes without a transport overlay (0.349s). Commentcheck against main is clean
-across 2,688 files. These commands use GOWORK=off, GOFLAGS=-buildvcs=false,
-GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and scratch under /tmp/sw-astra-W1.
-The unchanged socket-dependent suites were not rerun in the sandbox. The native
-report remains the source for their current failure verdict.
+## Verification
 
-Session production delta is **0**. Deleted production lines: **0**. The inherited
-store delta remains **-2,451 versus main**, **1,799 over** the -4,250 budget.
-No new integration point, contract request or open design question was added.
-Only this report and the append-only reconciliation ledger changed. Independent
-review was waived because these changes record existing test evidence only.
-The shared Git config has no user identity or core.worktree override. No Git
-write occurred. Scratch is removed at session end. The shared build cache stays.
+Whole-repository build passes. Scoped vet, commentcheck against main and diff
+checks pass. Commentcheck is clean across 2,688 files. All Go commands used
+GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and
+at most -p 4, with temporary files under /tmp/sw-astra-W1.
 
-The native report still contains FAIL. The lead's overall native rerun and the
-inherited store budget overage remain open. Completion is not claimed.
+- Final controller selection: **126 top-level groups pass**, no failures or
+  skips, 38.677s. It includes App, runner, onboarding, source, completion,
+  operator-settings, route-policy and tick tests.
+- Focused store selection passes, 18.507s. It covers source release, scheduled
+  consent, attribution, derived identity, extra repositories, binding,
+  settings and completion. The final manual identity selection passes, 0.782s.
+- Source/consent HTTP acceptance tests pass, 0.041s. The store schedule boundary
+  and declared-repository guard pass, 1.048s. No native matrix cell is claimed.
+- Focused store race selection passes, **141.544s**. It covers source minting,
+  consent/fence changes, scheduled source, attribution and binding properties.
+- Full internal/crons, internal/capability and pkg/docs suites pass (4.587s,
+  0.094s and 1.481s). Source docs and embedded mirrors match.
+
+HTTP component checks use a temporary standard-library net.Pipe overlay only.
+The real handlers, authorization, SQLite transactions and fake GitHub provider
+run. The Cloud source fixture now reports Cloud enrollment instead of an empty
+location. Its two pre-fix refusals disappeared without changing production checks.
+No test was removed, skipped or newly ported from the legacy inventory.
+
+## Contracts, volume and handoff
+
+C1 records the reduced GitHubSourceProvider interface, three-step release,
+repository-ID reads, derived schedule identity, ArmedBy attribution and
+RejectRunEffect. C2 records operator_settings and terminal invalid completion
+facts. No other contract change is requested. Lead-owned amendments and handoffs
+remain untouched. Earlier assigned handoffs are implemented or reassigned as
+recorded below. Retry selection remains assigned to W3.
+
+Session production change is **+42 lines**: **128 added, 86 deleted**. Removed
+the in-transaction GitHub listing/mint flow, caller-key identity fallback and
+slug-based extra selection. No production file was deleted. Store growth is
++30 lines. The cumulative store delta is **-2,421 versus main**, **1,829 over**
+the -4,250 budget. This review slice adds no new policy options, cache, setting,
+environment variable or schema. The inherited area reduction remains open.
+
+Mechanisms added: one named binding rule confines quota targeting; the existing
+intake policy optionally implements ScheduleRepositoryResolver so manual GitHub
+schedules reuse production identity lookup instead of caller assertions; and
+RejectRunEffect uses the existing revision-fenced delivery transaction. Removing
+the resolver would leave manual GitHub schedules unable to derive identity.
+Undo removes its interface, controller method and arming assertion together.
+
+Shared files touched: internal/capability/policy.go and routes.go;
+pkg/controller/completion.go, github_app.go, github_app_extra_repos.go,
+intake_source.go and their route/source/completion tests; claim_source_test.go
+and github_claim_fixture_test.go for the Cloud enrollment fixture;
+github_app_crons_identity_test.go for production identity resolution; C1, C2,
+docs/github-app.md, its embedded mirror, this report and the reconciliation
+ledger. No foreign production caller required migration after the provider
+interface reduction. Store's GitHubAppExtraRepos test callers now pass numeric
+IDs, and its clearing fixture supplies a resolved source ID.
+
+The latest native report contains only its session-0 header and opening fence.
+It supplies no completed verdict. Live sockets, GitHub, PostgreSQL lock behavior,
+completion SQL (ruling 9), runner execution and real-repository QA remain lead
+integration evidence. The separate ScheduleWriter route integration belongs to
+the other worker. These limits and the budget prevent COMPLETE.
+
+No Git write occurred. The local Git config has no user identity or core.worktree
+override. Independent review and commit remain with the lead. Scratch is removed
+at session end and /tmp/sw-gocache is retained.
 
 ## Previous continuation (committed in 8e20b3733)
 

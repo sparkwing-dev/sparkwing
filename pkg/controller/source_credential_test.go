@@ -131,7 +131,7 @@ func TestSourceCredential_AppScheduleUsesLiveAutomationConsent(t *testing.T) {
 	tenant := teststore.ForTeam(t, f.store, store.Team(owner.team))
 	now := time.Now().UTC()
 	sched, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "app-nightly", RepoPath: "https://github.com/acme/widgets.git", RepositoryKey: "gh:701", GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		ID: "app-nightly", RepoPath: "https://github.com/acme/widgets.git", GitHubInstallationID: 7, GitHubRepositoryID: 701,
 		Pipeline: "nightly", Cron: "* * * * *", TZ: "UTC", Where: store.CronWhereController, GitBranch: "main", LockedRef: headSHA,
 	}, now)
 	if err != nil {
@@ -240,6 +240,12 @@ func TestSourceCredential_NamesTheRemedy(t *testing.T) {
 			runID := "run-" + strings.ReplaceAll(name, " ", "-")
 			node, _ := f.nodeClaim(olga, runID, tc.repo, tc.id)
 			got, code := f.sourceCredential(node, runID)
+			if name == "uncovered github" {
+				if code != http.StatusConflict || got.Error != "conflict" || got.Secret != "" || !strings.Contains(got.Message, "someone/else") {
+					t.Fatalf("uncovered mint = %d %+v", code, got)
+				}
+				return
+			}
 			if code != http.StatusNotFound || got.Error != "not_found" || !strings.Contains(got.Message, tc.want) {
 				t.Fatalf("source credential = %d %+v, want not_found naming %q", code, got, tc.want)
 			}
@@ -374,5 +380,43 @@ func TestSourceCredential_ExtraConsentStaysWithSourceIDProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSourceCredential_RenamedRepositoryClearsExtraConsentProperty(t *testing.T) {
+	property := func(value uint16) bool {
+		f := newAppFixture(t)
+		owner := f.ghUser(501, "olga")
+		f.connect(owner, 501, 7, acmeAdmin)
+		if code, out := f.setExtraRepos(owner, "acme/widgets", []string{"acme/plans"}); code != http.StatusOK {
+			t.Fatalf("approval = %d %v", code, out)
+		}
+		renamed := fmt.Sprintf("acme/widgets-%d", value)
+		f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: renamed}, githubapptest.Repo{ID: int64(value) + 1000, FullName: "acme/widgets"}, githubapptest.Repo{ID: 702, FullName: "acme/plans"})
+		if code, out := f.setExtraRepos(owner, renamed, nil); code != http.StatusOK {
+			t.Fatalf("clear = %d %v", code, out)
+		}
+		original, _ := f.nodeClaim(owner, "original", "https://github.com/"+renamed+".git", 701)
+		got, code := f.sourceCredential(original, "original")
+		return code == http.StatusOK && f.app.TokenCovers(got.Token, renamed) && !f.app.TokenCovers(got.Token, "acme/plans") && !f.app.TokenCovers(got.Token, "acme/widgets")
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 8}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSourceCredential_AppSourceBeyondRepositoryListingLimit(t *testing.T) {
+	f := newAppFixture(t)
+	owner := f.ghUser(501, "olga")
+	f.connect(owner, 501, 7, acmeAdmin)
+	repos := make([]githubapptest.Repo, 1001)
+	for i := range repos {
+		repos[i] = githubapptest.Repo{ID: int64(1000 + i), FullName: fmt.Sprintf("acme/repo-%d", i)}
+	}
+	f.app.SetRepos(7, repos...)
+	node, _ := f.nodeClaim(owner, "large-installation", "https://github.com/acme/repo-1000.git", 2000)
+	got, code := f.sourceCredential(node, "large-installation")
+	if code != http.StatusOK || !f.app.TokenCovers(got.Token, "acme/repo-1000") || f.app.TokenCovers(got.Token, "acme/repo-0") {
+		t.Fatalf("source past listing limit = %d %+v", code, got)
 	}
 }

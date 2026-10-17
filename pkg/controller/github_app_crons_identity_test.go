@@ -151,7 +151,7 @@ func TestGitHubAppCronConflictsWithManualControllerSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "crn_manual", RepoPath: "git@github.com:acme/widgets.git", RepositoryKey: "gh:701", Pipeline: "nightly", Name: "default",
+		ID: "crn_manual", RepoPath: "git@github.com:acme/widgets.git", Pipeline: "nightly", Name: "default",
 		Cron: "0 3 * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour,
 		Where: store.CronWhereController,
 	}, time.Now()); err != nil {
@@ -175,18 +175,18 @@ func TestGitHubAppCronRenameConflictStopsOldAppRow(t *testing.T) {
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
 	f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), "")
+	f.app.SetRepos(7, githubRepo(701, "acme/renamed"), githubRepo(702, "acme/plans"))
 	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "crn_manual_renamed", RepoPath: "https://github.com/acme/renamed.git", RepositoryKey: "gh:701",
+		ID: "crn_manual_renamed", RepoPath: "https://github.com/acme/renamed.git",
 		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
 	}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	f.app.SetRepos(7, githubRepo(701, "acme/renamed"), githubRepo(702, "acme/plans"))
 	if code, _ := f.deliver("repository", map[string]any{
 		"action": "renamed", "installation": map[string]any{"id": 7},
 		"repository": map[string]any{"id": 701, "full_name": "acme/renamed"},
@@ -213,7 +213,7 @@ func TestGitHubAppCronRefusesManualScheduleAtOldRedirectedURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "crn_manual_old_url", RepoPath: "git@github.com:acme/widgets.git", RepositoryKey: "gh:701",
+		ID: "crn_manual_old_url", RepoPath: "git@github.com:acme/widgets.git",
 		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
 	}, time.Now()); err != nil {

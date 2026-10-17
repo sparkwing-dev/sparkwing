@@ -16,13 +16,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-type githubClaimEnvironment struct{}
+type githubClaimEnvironment struct{ location string }
 
 func (githubClaimEnvironment) CheckRunner(context.Context, string) error { return nil }
 
-func (githubClaimEnvironment) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+func (env githubClaimEnvironment) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
 	capacity := match.Resources{Cores: 8, MemoryBytes: 8 << 30}
-	return match.Profile{Capacity: capacity, OS: "linux", Arch: "amd64"}, capacity, nil
+	return match.Profile{Location: env.location, Capacity: capacity, OS: "linux", Arch: "amd64"}, capacity, nil
 }
 
 func configureGitHubClaims(s *controller.Server, st *store.Store) *controller.Server {
@@ -36,7 +36,8 @@ func seedSourceRun(t *testing.T, st *store.Store, team, run, remote, key, ref, s
 	if err := teststore.SeedRun(st, t.Context(), store.Team(team), store.Run{ID: run, Pipeline: "build", Status: "pending", CreatedAt: now, RepoURL: remote, GitBranch: ref, GitSHA: sha}); err != nil {
 		t.Fatal(err)
 	}
-	seal := runspec.SealedRequest{Version: 1, RunID: run, AdmittedAt: now, Request: runspec.Request{Version: 1, Team: team, Pipeline: "build", Mode: runspec.IntakeExecute, Dispatch: dispatch,
+	seal := runspec.SealedRequest{Version: 1, RunID: run, AdmittedAt: now, Request: runspec.Request{
+		Version: 1, Team: team, Pipeline: "build", Mode: runspec.IntakeExecute, Dispatch: dispatch,
 		Git:    runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey(key), Display: remote}, Ref: ref, SHA: sha},
 		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: remote}},
 	}}

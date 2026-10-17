@@ -23,20 +23,20 @@ func TestGitHubAppExtraReposAreAPerSourceListOfTheTeams(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, err := acme.GitHubAppExtraRepos(ctx, "acme/app"); err != nil || len(got) != 0 {
+	if got, err := acme.GitHubAppExtraRepos(ctx, 701); err != nil || len(got) != 0 {
 		t.Fatalf("before any list = %v, %v; want none", got, err)
 	}
 	got, err := acme.SetAuthorizedGitHubExtraRepos(ctx, githubAppAuthorization(t, st, acme), "Acme/App", []string{"acme/proto", "Acme/Lib", "acme/lib", "acme/app"}, githubExtraIDs([]string{"acme/proto", "Acme/Lib", "acme/lib", "acme/app"}))
 	if want := []string{"acme/lib", "acme/proto"}; err != nil || !slices.Equal(got, want) {
 		t.Fatalf("set = %v, %v; want %v, folded, sorted and without the source", got, err, want)
 	}
-	if got, err := acme.GitHubAppExtraRepos(ctx, "acme/app"); err != nil || len(got) != 2 {
+	if got, err := acme.GitHubAppExtraRepos(ctx, 701); err != nil || len(got) != 2 {
 		t.Fatalf("read back = %v, %v", got, err)
 	}
-	if got, err := acme.GitHubAppExtraRepos(ctx, "acme/other"); err != nil || len(got) != 0 {
+	if got, err := acme.GitHubAppExtraRepos(ctx, 999); err != nil || len(got) != 0 {
 		t.Fatalf("another source repository = %v, %v; want none", got, err)
 	}
-	if got, err := other.GitHubAppExtraRepos(ctx, "acme/app"); err != nil || len(got) != 0 {
+	if got, err := other.GitHubAppExtraRepos(ctx, 701); err != nil || len(got) != 0 {
 		t.Fatalf("another team reads acme's list = %v, %v", got, err)
 	}
 	all, err := acme.AllGitHubAppExtraRepos(ctx)
@@ -59,7 +59,7 @@ func TestGitHubAppExtraReposAreAPerSourceListOfTheTeams(t *testing.T) {
 	if _, err := acme.SetAuthorizedGitHubExtraRepos(ctx, githubAppAuthorization(t, st, acme), "acme/app", nil, githubExtraIDs(nil)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := acme.GitHubAppExtraRepos(ctx, "acme/app"); err != nil || len(got) != 0 {
+	if got, err := acme.GitHubAppExtraRepos(ctx, 701); err != nil || len(got) != 0 {
 		t.Fatalf("after clearing = %v, %v; want none", got, err)
 	}
 }

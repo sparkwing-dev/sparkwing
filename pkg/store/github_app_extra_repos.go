@@ -53,11 +53,11 @@ func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, reposit
 		}
 		canonical[key] = id
 	}
-	if len(list) > 0 && canonical[source] <= 0 {
+	if canonical[source] <= 0 {
 		return nil, ErrInvalidInput
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_extra_repos WHERE team = ? AND (repository = ? OR repository_id = ?)`,
-		string(t.team), source, canonical[source]); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_extra_repos WHERE team = ? AND repository_id = ?`,
+		string(t.team), canonical[source]); err != nil {
 		return nil, err
 	}
 	for _, x := range list {
@@ -73,12 +73,11 @@ func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, reposit
 	return list, nil
 }
 
-// GitHubAppExtraRepos is the extra repositories an owner listed for
-// repository, sorted; empty when none.
-func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repository string) (_ []string, err error) {
+// GitHubAppExtraRepos returns approved extras for a numeric source repository ID.
+func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repositoryID int64) (_ []string, err error) {
 	rows, err := t.s.query(ctx, `
-		SELECT extra_repo FROM github_app_extra_repos WHERE team = ? AND repository = ? ORDER BY extra_repo`,
-		string(t.team), strings.ToLower(repository))
+		SELECT extra_repo FROM github_app_extra_repos WHERE team = ? AND repository_id = ? ORDER BY extra_repo`,
+		string(t.team), repositoryID)
 	if err != nil {
 		return nil, err
 	}

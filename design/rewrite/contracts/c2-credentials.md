@@ -259,8 +259,9 @@ snapshot, checks licensing, absolute lifetime, direct ancestry and the current
 WithOperatorAccounts configuration, then projects CredentialConsole with only
 OperatorConsole. Other routes retain CredentialSession and member grants. The
 session hash, active team, account ID and lifetime are preserved for CSRF.
-BindNone has no tenant relation for console authority, so deployment targets do
-not become limited to the account's active team. Other bindings still use C1.
+Console deployment settings use the explicit operator_settings binding for
+cross-team quota targets. BindNone cannot select a foreign team. Other bindings
+still use C1.
 C1's authority-bearing console mutation transactions remain required. The
 controller's proof projection does not implement those committing rechecks.
 
@@ -3315,8 +3316,9 @@ console proof, inside its transaction and rechecks before commit. Existing compu
 and storage setters share their transaction helpers with these authorized writers.
 SignUpSettingsChange lives in store, which owns its atomic patch and provenance.
 
-BindNone permits an unbound deployment credential to select a target team for
-operator quota policy. The shared route policy still requires the exact operator
+BindOperatorSettings (`operator_settings`) permits an unbound deployment or
+console credential to select a team only on the two operator quota settings
+routes. BindNone retains its ordinary team boundary. The shared route policy still requires the exact operator
 grant. Run and job selectors keep their bindings, and tenant credentials cannot
 select a foreign team. Relational authorization resolves console proof through the
 same transaction-local owner as issuance and settings writes.
@@ -3330,7 +3332,8 @@ same tenant and unsuspended. It mints only the exact repository ID with
 checks:write or statuses:write. `githubapp.Client.RepositoryByID` resolves the
 current name under that restricted token, so a rename or reused old name cannot
 redirect a report. Installation ownership is rechecked after that lookup.
-An invalid or unavailable identity keeps the revision due.
+Invalid committed App facts consume the failed revision once through C1's
+RejectRunEffect. Unavailable provider identity remains due with retry backoff.
 
 The shared completion worker calls the provider synchronously under the
 existing per-run report lock and acknowledges only a successful revision.

@@ -69,7 +69,7 @@ func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capabilit
 	if current.RepoPath != s.RepoPath || current.RepositoryKey != s.RepositoryKey || current.Pipeline != s.Pipeline || current.GitHubInstallationID != s.GitHubInstallationID || current.GitHubRepositoryID != s.GitHubRepositoryID || !current.ArmedAt.Equal(s.ArmedAt) || current.ArmedBy != s.ArmedBy || current.Paused != s.Paused || current.Declared != s.Declared || !reflect.DeepEqual(current.Effective(), s.Effective()) {
 		return capability.Principal{}, authorityError(apierr.Forbidden, "schedule declaration changed before admission")
 	}
-	return capability.Principal{Authority: in.authority(), Capability: capability.Capability{Team: string(s.Team), Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectService, ID: s.ID}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}}}, nil
+	return capability.Principal{Authority: in.authority(), Capability: capability.Capability{Team: string(s.Team), Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectService, ID: s.ArmedBy}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}}}, nil
 }
 
 // VerifiedScheduleIntake returns source facts only from the locked schedule admission transaction.
