@@ -880,6 +880,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.DataRecord'
             - type: "null"
+        verified_default:
+          type: boolean
       required:
         - found
         - members

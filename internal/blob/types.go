@@ -450,10 +450,17 @@ type RecordLookup struct {
 // safety: RecordLookupResult distinguishes a cache miss from a record with required missing bytes.
 // All returned members have passed existence and edge checks before their digests enter ReadSet.
 type RecordLookupResult struct {
-	Found   bool
-	Record  Record
-	Members []Member
-	ReadSet ReadSet
+	Found           bool
+	VerifiedDefault bool
+	Record          Record
+	Members         []Member
+	ReadSet         ReadSet
+}
+
+// VerifiedDefault reports whether the record retains verified default-branch evidence.
+func (r Record) VerifiedDefault() bool {
+	f := r.RefFacts
+	return f.DefaultBranchVerified && f.DefaultBranch != "" && f.Scope.Verified && f.Scope.Ref == f.DefaultBranch && r.Key.Scope.Ref == f.Scope && f.AppDeliveryKey != "" && f.SHA != ""
 }
 
 // safety: DepcacheHit records the winning fallback so provenance remains visible after a restore.

@@ -85,9 +85,10 @@ type DataRecord struct {
 
 // DataRecordLookupResult carries a found record and its persisted members.
 type DataRecordLookupResult struct {
-	Found   bool         `json:"found"`
-	Record  *DataRecord  `json:"record,omitempty"`
-	Members []DataMember `json:"members"`
+	Found           bool         `json:"found"`
+	VerifiedDefault bool         `json:"verified_default,omitempty"`
+	Record          *DataRecord  `json:"record,omitempty"`
+	Members         []DataMember `json:"members"`
 }
 
 // DataMemoLookupRequest selects a memo within the authenticated repository.

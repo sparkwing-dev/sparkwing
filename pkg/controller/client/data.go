@@ -149,7 +149,7 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 		return blob.RecordLookupResult{}, err
 	}
 	if !result.Found {
-		if result.Record != nil {
+		if result.Record != nil || result.VerifiedDefault || len(result.Members) != 0 {
 			return blob.RecordLookupResult{}, dataProtocolError("missing record includes a payload")
 		}
 		return blob.RecordLookupResult{}, nil
@@ -160,7 +160,7 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 	record := decodeDataRecord(*result.Record, input.Key.Team)
 	expected := input.Key
 	if input.VerifiedDefaultOnly {
-		if !record.Key.Scope.Ref.Verified || record.Key.Scope.Ref.Ref == "" {
+		if !result.VerifiedDefault || !record.Key.Scope.Ref.Verified || record.Key.Scope.Ref.Ref == "" {
 			return blob.RecordLookupResult{}, dataProtocolError("record lookup did not select a verified default ref")
 		}
 		expected.Scope.Ref = record.Key.Scope.Ref
@@ -176,7 +176,7 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 	for _, member := range result.Members {
 		members = append(members, blob.Member{Team: key.Team, ManifestDigest: manifest, Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
 	}
-	return blob.RecordLookupResult{Found: true, Record: record, Members: members}, nil
+	return blob.RecordLookupResult{Found: true, VerifiedDefault: result.VerifiedDefault, Record: record, Members: members}, nil
 }
 
 func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRequest) (blob.Record, error) {

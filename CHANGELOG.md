@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **data:** Preserve verified default-branch cache selection across controller
+  reads without exposing private source evidence. Resolve an omitted ref from
+  authorized cache refs.
+
 - **run:** Read and copy memo results through the controller client. Match each
   returned result to the authenticated attempt without exposing private ancestry.
 

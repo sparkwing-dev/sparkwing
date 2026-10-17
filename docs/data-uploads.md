@@ -41,6 +41,12 @@ repeated selectors and unknown selectors fail with `bad_request`.
 A miss returns `{"found":false,"members":[]}`.
 A hit returns public record metadata and authorized member metadata. It omits
 private authority references, uploader identities and read-set snapshots.
+Verified-default selections include `verified_default:true`. The controller checks
+the persisted branch evidence before returning this observation. The shared cache
+reader requires it without receiving delivery keys, source SHAs or uploader facts.
+It grants no byte access; each download rechecks the current credential and edges.
+Misses omit the observation. With no ref selector, the store selects from the
+credential's authorized refs and accepts only persisted verified-default evidence.
 The `ref` selector and response metadata use `manual:<ref>` for submitter-vouched
 records and the plain ref for verified records. Each lookup requires the matching
 read grant. Selecting a plain ref never inherits a manual write's scope.

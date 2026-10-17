@@ -224,9 +224,16 @@ authority or read set; the server derives them. Explicit request budgets apply
 to lookup and copy through the shared transport.
 
 Record and depcache responses omit complete source facts and read-set proof.
-Cross-profile remote-cache construction still needs a verified-default response
-projection that preserves this privacy boundary. Output reads use persisted
-record keys and verified bytes.
+Record lookup hits selected under verified-default policy carry
+`verified_default:true`. Misses omit it. C1 and C2 validate persisted evidence
+with `blob.Record.VerifiedDefault`; the observation is never request authority.
+The client carries it as `RecordLookupResult.VerifiedDefault` and the read-only
+cache requires it plus unchanged record selectors and verified bytes. Private
+delivery keys, source SHAs, uploader identities and read-set edges remain absent.
+An omitted ref is selected by C1 from the live credential's authorized refs;
+remote-cache authorities always apply verified-default policy, even when the
+caller omits the query flag. Cross-profile credential construction remains
+separate. Output reads use persisted record keys and verified bytes.
 Upload and commit retries retain their original key/body. Explicit request
 budgets remain context deadlines and exhaust as `blob.ErrBudget`.
 

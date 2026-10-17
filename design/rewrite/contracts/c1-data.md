@@ -1,5 +1,16 @@
 # C1 data contract
 
+## Verified-default record observations
+
+`RecordLookupResult.VerifiedDefault` records a successful verified-default
+selection. C1 sets it only after persisted branch evidence and live record/member
+authorization pass. `Record.VerifiedDefault` validates the record's ref against
+its verified default-branch facts, including App delivery and SHA evidence.
+Remote-cache authorities enforce this policy even without a caller flag.
+An omitted ref selects among the live authority's permitted refs, preserving all
+other logical selectors. C3 exports only the boolean observation; each later
+download still resolves live authority and persisted read edges.
+
 ## Source reads before an execution attempt
 
 A live node award may read its run's submitted `source_bundle` before its

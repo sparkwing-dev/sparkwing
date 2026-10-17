@@ -29,10 +29,9 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 	manifestBody := fmt.Sprintf(`{"entries":[{"path":"out","digest":"%s","size":8,"mode":420}]}`, member)
 	manifest := digest(manifestBody)
 	key := blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}
-	result := blob.RecordLookupResult{Found: true, Record: blob.Record{
+	result := blob.RecordLookupResult{Found: true, VerifiedDefault: true, Record: blob.Record{
 		Key:    blob.RecordKey{Team: "team", Kind: blob.KindMemo, Name: blob.MemoRecordName, Scope: blob.Scope{Repo: key.Repo, Ref: blob.RefScope{Ref: "main", Verified: true}, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}},
 		Digest: d, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest},
-		RefFacts: blob.RefFacts{Scope: blob.RefScope{Ref: "main", Verified: true}, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "verified-delivery", SHA: "sealed-sha"},
 	}, Members: []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "out", Size: 8, Mode: 0o644}}}
 	bodies := map[blob.Digest]string{d: "bytes", manifest: manifestBody, member: "artifact"}
 	s := &signer{download: func(q blob.GetRequest) (blob.SignedTransfer, error) {
@@ -95,15 +94,15 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 	if _, err = cache.Artifact(t.Context(), digest("foreign")); !errors.Is(err, blob.ErrDigestNotReadable) {
 		t.Fatal("unrelated artifact was readable")
 	}
-	for _, mutation := range []string{"manual", "false_default", "foreign_team", "foreign_repo", "foreign_pipeline", "foreign_job", "foreign_hash", "foreign_name", "missing_delivery", "different_default", "foreign_member", "member_size", "member_path", "member_mode", "manifest_members", "corrupt"} {
+	for _, mutation := range []string{"manual", "false_default", "foreign_team", "foreign_repo", "foreign_pipeline", "foreign_job", "foreign_hash", "foreign_name", "empty_ref", "foreign_member", "member_size", "member_path", "member_mode", "manifest_members", "corrupt"} {
 		t.Run(mutation, func(t *testing.T) {
 			bad := result
 			bad.Members = append([]blob.Member(nil), result.Members...)
 			switch mutation {
 			case "manual":
-				bad.Record.RefFacts.Scope.Verified = false
+				bad.Record.Key.Scope.Ref.Verified = false
 			case "false_default":
-				bad.Record.RefFacts.DefaultBranchVerified = false
+				bad.VerifiedDefault = false
 			case "foreign_team":
 				bad.Record.Key.Team = "other"
 			case "foreign_repo":
@@ -116,10 +115,8 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 				bad.Record.Key.Scope.Key = string(digest("other"))
 			case "foreign_name":
 				bad.Record.Key.Name = "other"
-			case "missing_delivery":
-				bad.Record.RefFacts.AppDeliveryKey = ""
-			case "different_default":
-				bad.Record.RefFacts.DefaultBranch = "release"
+			case "empty_ref":
+				bad.Record.Key.Scope.Ref.Ref = ""
 			case "foreign_member":
 				bad.Members[0].Team = "other"
 			case "member_size":
@@ -193,9 +190,7 @@ func TestRemoteMemoVerifiesBeforeGrantingArtifacts(t *testing.T) {
 				}
 				key := q.Key
 				key.Team, key.Scope.Ref = "team", blob.RefScope{Ref: "main", Verified: true}
-				return blob.RecordLookupResult{Found: true, Record: blob.Record{Key: key, Digest: d, RefFacts: blob.RefFacts{
-					Scope: key.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "delivery", SHA: "sha",
-				}}}, nil
+				return blob.RecordLookupResult{Found: true, VerifiedDefault: true, Record: blob.Record{Key: key, Digest: d}}, nil
 			}}
 			cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: records}, bytes)
 			if err != nil {
@@ -228,7 +223,7 @@ func TestRemoteDepcacheArchiveIsReadableAfterTrustedLookup(t *testing.T) {
 		key := q.Key
 		key.Team = "team"
 		key.Scope.Ref = blob.RefScope{Ref: "main", Verified: true}
-		return blob.RecordLookupResult{Found: true, Record: blob.Record{Key: key, Digest: d, RefFacts: blob.RefFacts{Scope: key.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "delivery", SHA: "sha"}}}, nil
+		return blob.RecordLookupResult{Found: true, VerifiedDefault: true, Record: blob.Record{Key: key, Digest: d}}, nil
 	}}
 	cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: r}, bytes)
 	if err != nil {
