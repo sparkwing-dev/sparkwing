@@ -2,6 +2,15 @@
 
 <!-- design:begin -->
 
+Team machine enrollment settings share controllerwire.TeamSettings with the
+store, HTTP routes and concrete client.TeamSettingsClient. ReadTeamSettings
+uses GET `/api/v1/team/settings` under `runs.read`; SetTeamSettings uses PUT
+under current `team.admin` with an explicit `members_can_add_machines` boolean.
+The default is true. Personal issuance still needs an independent account
+session and claims only its owner's work. Shared runners always require
+administration to enroll, rotate or revoke. Settings changes audit atomically
+and do not revoke existing machines.
+
 ## Operator team creation (decision 114)
 
 OperatorManager.CreateOperatorTeam(ctx, OperatorTeamCreate) returns

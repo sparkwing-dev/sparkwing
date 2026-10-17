@@ -42,6 +42,9 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if !inventoryOwned(p, team, c, previous.CreatedBy) {
 			return bindingRefusal()
 		}
+		if err := machineAdministrationTx(ctx, tx, p, c); err != nil {
+			return err
+		}
 		if c.RevokedAt != nil || c.ExpiresAt != nil && !tx.now().Before(*c.ExpiresAt) {
 			return authorityError(apierr.LockHeld, "credential has ended or already has a successor")
 		}

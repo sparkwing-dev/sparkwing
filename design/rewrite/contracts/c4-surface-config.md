@@ -16,6 +16,16 @@ emit no success receipt. The command adds no new routes, grants or settings.
 
 <!-- design:begin -->
 
+The machine-registration decision adds `sparkwing team settings show --profile
+NAME` and `team settings set --profile NAME --members-can-add-machines true|false`.
+Both use the authenticated team settings routes. Set requires current team
+administration and commits an audit. JSON returns `members_can_add_machines`.
+The default is true. Personal enrollment requires an independent account session,
+and members may use it while this setting permits it. Shared runner enrollment,
+token rotation and revocation always require administration. The console exposes
+the setting and personal/shared enrollment through the same routes. Disabling
+enrollment preserves existing machine authority and owner-only claim scope.
+
 ## Amendment 1: environment, presence and managed units
 
 [Amendments 1](amendments-1.md) records the cross-area consumers.

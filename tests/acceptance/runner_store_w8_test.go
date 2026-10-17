@@ -154,6 +154,26 @@ func storedRunnerClientW8(ctx context.Context, server *controller.EngineControll
 	return &storedRunnerW8{server: server, authorized: capability.Authorized{Principal: principal, Binding: c.Binding, Target: capability.Target{Team: c.Team, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID}}}, nil
 }
 
+func revokeStoredRunnerW8(t *testing.T, s *store.Store, target capability.AuthorityRef) {
+	t.Helper()
+	for _, query := range []string{
+		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('runner-admin','runner-admin@example.test',1,1)`,
+		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','runner-admin','owner',1)`,
+		`INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('runner-admin','runner-admin','runs.read,team.admin',1,4102444800000000000,'default','runner-admin')`,
+	} {
+		if _, err := s.DB().ExecContext(t.Context(), query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tenant, err := s.ForTeam(t.Context(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "runner-admin"}}, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 	server, root := newStoredRunnerW8(t, capability.UnitTrigger)
 	claimant, err := storedRunnerClientW8(t.Context(), server, root.Raw)
@@ -165,13 +185,7 @@ func TestRunnerStoreRevocationPreventsPreparationW8Components(t *testing.T) {
 		t.Fatal(err)
 	}
 	rootRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}
-	tenant, err := server.Store.ForTeam(t.Context(), store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: rootRef, CapabilityPrefix: rootRef.ID}, rootRef); err != nil {
-		t.Fatal(err)
-	}
+	revokeStoredRunnerW8(t, server.Store, rootRef)
 	host := runners.Hosting{ControllerURL: "https://controller.example", NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
 		bearer, err := options.Bearer(t.Context())
 		if err != nil {

@@ -195,6 +195,7 @@ func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("personal enrollment: %v", err)
 	}
+	engineSQL(t, e.Store, `UPDATE teams SET members_can_add_machines=0 WHERE name='a'`)
 	request, err := json.Marshal(runspec.SealedRequest{Request: runspec.Request{Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}}}})
 	if err != nil {
 		t.Fatal(err)

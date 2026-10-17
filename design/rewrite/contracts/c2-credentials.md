@@ -519,14 +519,34 @@ caller and response use the new route, grants and timestamp representation.
 
 ### Machine and deployment service provisioning
 
-POST `/api/v1/runners` uses PolicyRouter with member `team.admin` and
-BindNone. It accepts `name`, `repos`, optional `reserved_pools`, optional
+POST `/api/v1/runners` uses PolicyRouter with member `runs.read` and
+BindNone. It accepts `name`, `repos`, optional `personal`, optional `reserved_pools`, optional
 `grants` and optional absolute `expires_at`. The existing machine-name grammar
 and 32-pattern bound remain. Repository patterns use sourceurl's shared parser.
 Omitted grants select nodes.claim and triggers.claim. Explicit grants narrow
 to a nonempty unique subset of those two. A root has no reporting or sensitive
 release grants. Pool names are unique and nonempty; the origin policy checks
 that the registering team admin may assign them.
+
+The approved machine-registration decision adds team `members_can_add_machines`,
+default true. A live independent account session may enroll its own personal
+machine when the setting permits it or the account has current `team.admin`.
+Any member role qualifies. Shared enrollment always requires current
+`team.admin`, as do shared-runner token rotation and revocation. The store
+rechecks the setting with current membership inside root issuance, under the
+same team lock as setting changes. Personal ownership and claim matching keep
+their existing persisted origin relation. Disabling enrollment revokes nothing.
+
+GET `/api/v1/team/settings` requires `runs.read`. PUT requires `team.admin`
+and one explicit boolean `members_can_add_machines`; missing, null or unknown
+fields refuse. Tenant.SetAuthorizedTeamSettings rechecks current administration
+and commits an actual change with a `team.settings_changed` business event,
+including actor, old/new values and store time. Audit failure rolls back the
+change. Repeating the saved value creates no extra event. Existing machines
+continue under their original owner scope. The console exposes the setting
+and personal enrollment. CLI `team settings show/set --profile NAME` shares
+these routes. `runners add --personal --session-stdin` names the setting on
+refusal. The native baseline gains the checked column, with no legacy adapter.
 
 The authenticated team selects the machine's team. Its subject is machine/name
 and its trusted registration selector is `runner:<team>:<name>`. The request

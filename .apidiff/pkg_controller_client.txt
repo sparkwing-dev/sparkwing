@@ -90,6 +90,7 @@ func NewSecretManager(options EngineOptions) (controllerwire.SecretManager, erro
 func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, session string) (RunnerTokenManager, error)
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error)
 func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (source.Access, error)
+func NewTeamSettingsClient(options EngineOptions) (*TeamSettingsClient, error)
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error)
 func OpenProfileData(ctx context.Context, options EngineOptions, scope capability.DataScope) (ProfileData, error)
 type ProfileData struct {
@@ -120,6 +121,9 @@ type RunnerTokenManager interface {
 	EnrollRunner(context.Context, EnrollRunnerRequest) (*CreatedToken, error)
 }
 func SweepLocalSessions(ctx context.Context, options EngineOptions, dryRun bool) ([]wingd.LocalDoctorFinding, error)
+type TeamSettingsClient struct{}
+func (c *TeamSettingsClient) ReadTeamSettings(ctx context.Context) (controllerwire.TeamSettings, error)
+func (c *TeamSettingsClient) SetTeamSettings(ctx context.Context, settings controllerwire.TeamSettings) (controllerwire.TeamSettings, error)
 func UploadSourceSnapshot(ctx context.Context, options EngineOptions, git runspec.Git, source runspec.Source, path string) (string, error)
 
 # methods on un-declared receiver types (likely a bug)

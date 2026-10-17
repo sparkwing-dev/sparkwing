@@ -3885,6 +3885,15 @@ components:
         - source_attempt
       type: object
       x-sparkwing-go-type: controllerwire.StepReportRequest
+    internal.controllerwire.TeamSettings:
+      additionalProperties: true
+      properties:
+        members_can_add_machines:
+          type: boolean
+      required:
+        - members_can_add_machines
+      type: object
+      x-sparkwing-go-type: controllerwire.TeamSettings
     internal.controllerwire.TickView:
       additionalProperties: true
       properties:
@@ -9887,7 +9896,7 @@ paths:
         access:
           - credential: unbound_member_or_local
             grants:
-              - runs.write
+              - runs.read
             binding: none
             liveness: credential
         retry: never
@@ -15167,6 +15176,69 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/team/settings:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.TeamSettings'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Read team machine enrollment settings
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/team/settings
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: safe
+    put:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.TeamSettings'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.TeamSettings'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Change and audit team machine enrollment settings
+      x-sparkwing-policy:
+        method: PUT
+        path: /api/v1/team/settings
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/teams:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

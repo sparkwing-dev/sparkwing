@@ -24,6 +24,20 @@ func ValidRunnerName(name string) bool {
 	return true
 }
 
+func machineAdministrationTx(ctx context.Context, tx *storeTx, p capability.Principal, c capability.Capability) error {
+	if c.Subject.Kind != capability.SubjectMachine || c.Binding.Kind != capability.BindingNone || c.Unit != "" || slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
+		return nil
+	}
+	record, err := loadCapabilityRecordTx(ctx, tx, c.Prefix)
+	if err != nil {
+		return err
+	}
+	if record.Origin == nil || !record.Origin.Personal {
+		return authorityError(apierr.Forbidden, "shared runner management requires team administration")
+	}
+	return nil
+}
+
 func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
 	allowed := []capability.Grant{capability.ClaimsLaunch, capability.OperatorLimits, capability.OperatorObjectStore, capability.OperatorTokens}
 	if spec.Kind == capability.ProvisionMachine {

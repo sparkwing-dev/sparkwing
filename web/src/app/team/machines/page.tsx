@@ -21,6 +21,7 @@ import {
   canManageTeam,
   cliTokenStartsRuns,
   listMembers,
+  getTeamSettings,
   listTeamTokens,
   memberLabel,
   memberScopesForRole,
@@ -43,10 +44,12 @@ function Machines({ me }: { me: Me }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [membersCanAddMachines, setMembersCanAddMachines] = useState(false);
 
   const load = useCallback(async () => {
     try {
       setTokens(await listTeamTokens());
+      setMembersCanAddMachines((await getTeamSettings()).members_can_add_machines);
       setLoadError("");
     } catch (err) {
       setLoadError(errorText(err));
@@ -108,22 +111,20 @@ function Machines({ me }: { me: Me }) {
   const machines = tokens?.filter((t) => t.subject.kind === "machine") ?? null;
   const cliTokens = tokens?.filter((t) => t.subject.kind === "account") ?? null;
 
-  // An editor may revoke only the tokens they minted; the controller decides,
-  // so the button is offered to editors and a refusal is shown as it comes back.
-  const mayRevoke = role === "owner" || role === "editor";
+  const mayRevoke = role !== undefined;
 
   return (
     <>
-      {canConnectMachines(role) ? (
-        <ConnectForm team={me.active_team.display_name} onMinted={load} />
+      {canConnectMachines(role, membersCanAddMachines) ? (
+        <ConnectForm team={me.active_team.display_name} admin={owner} onMinted={load} />
       ) : (
         <div className="mb-6 text-sm text-[var(--muted)]">
-          An owner connects machines to this team.
+          Personal enrollment requires an administrator while members_can_add_machines is off.
         </div>
       )}
       <Panel
         title="Machine tokens"
-        hint="Each token lets one machine claim this team's work. Revoke a token to disconnect its machine. A machine gets the team's git credentials only when an owner turns them on for it."
+        hint="Personal machines accept only their owner's work. Shared runners accept team work and require an administrator to revoke. A machine gets team git credentials only when an owner turns them on for it."
       >
         {loadError ? (
           <div className="p-4 text-sm text-red-300">{loadError}</div>
@@ -354,14 +355,17 @@ function CLIAccess({
 
 function ConnectForm({
   team,
+  admin,
   onMinted,
 }: {
   team: string;
+  admin: boolean;
   onMinted: () => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [repos, setRepos] = useState("");
   const [minting, setMinting] = useState(false);
+  const [personal, setPersonal] = useState(true);
   const [minted, setMinted] = useState<
     (MintedMachineToken & { name: string; repos: string[] }) | null
   >(null);
@@ -374,7 +378,7 @@ function ConnectForm({
     if (!n || repoPatterns.length === 0) return;
     setMinting(true);
     try {
-      const out = await mintMachineToken(n, repoPatterns);
+      const out = await mintMachineToken(n, repoPatterns, personal);
       setMinted({ ...out, name: n, repos: repoPatterns });
       setName("");
       setRepos("");
@@ -393,9 +397,15 @@ function ConnectForm({
   return (
     <Panel
       title="Connect a machine"
-      hint={`Run sparkwing-runner on a laptop or server so it picks up ${team}'s work.`}
+      hint={personal ? "This personal machine accepts only your work." : `This shared runner accepts ${team}'s work.`}
     >
       <form onSubmit={submit} className="flex flex-col gap-2 p-4">
+        {admin ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={personal} onChange={(e) => setPersonal(e.target.checked)} />
+            Personal machine (only my work)
+          </label>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <input
             required

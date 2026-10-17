@@ -445,6 +445,17 @@ Other machines register as runners with Cloud. `sparkwing runners add --runner N
 session from stdin and reserves the machine for that user's runs. The session
 and its CSRF proof stay in memory. The command saves only the new runner
 credential. A profile backed only by a member token cannot enroll a personal machine.
+The team's `members_can_add_machines` setting defaults to true. Any member
+can enroll a personal machine while it is on. When it is off, personal
+enrollment requires team administration. Shared runners always require team
+administration to enroll, mint tokens for or revoke.
+
+Administrators change this setting in the console's team settings or with
+`sparkwing team settings set --profile work --members-can-add-machines false`.
+`sparkwing team settings show --profile work` reads it. Changes are audited.
+Turning the setting off preserves registered machines and their owner-only
+claim scope. An administrator can revoke a machine explicitly.
+
 Cloud routing requires an attached terminal session. The default local route
 continues to support `--sw-detached`.
 

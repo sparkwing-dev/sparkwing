@@ -82,7 +82,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 	}
 	c := p.Capability
-	if spec.Personal && (spec.Kind != capability.ProvisionMachine || !p.DirectAccountSession() || c.Subject.Kind != capability.SubjectAccount || !slices.Contains(c.Grants, capability.RunsWrite)) {
+	if spec.Personal && (spec.Kind != capability.ProvisionMachine || !p.DirectAccountSession() || c.Subject.Kind != capability.SubjectAccount || !slices.Contains(c.Grants, capability.RunsRead)) {
 		return bindingRefusal()
 	}
 	deployment := spec.Authority != nil && (capability.DeploymentAuthority(p) && slices.Contains(c.Grants, capability.OperatorTokens) || p.Class == capability.CredentialConsole && slices.Contains(c.Grants, capability.OperatorConsole))
@@ -169,13 +169,17 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 	}
 	if spec.Team != "" {
 		var team string
+		var membersCanAddMachines bool
 		lock := ""
 		if lockRegistry {
 			lock = tx.forShare()
 		}
-		err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`+lock, spec.Team, TeamDeletionPending).Scan(&team)
+		err := tx.QueryRowContext(ctx, `SELECT name,members_can_add_machines FROM teams WHERE name=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=teams.name AND state=?)`+lock, spec.Team, TeamDeletionPending).Scan(&team, &membersCanAddMachines)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrUnknownTeam
+		}
+		if err == nil && spec.Personal && !membersCanAddMachines && !slices.Contains(c.Grants, capability.TeamAdmin) {
+			return authorityError(apierr.Forbidden, "personal machine enrollment requires team administration while members_can_add_machines is off")
 		}
 		return err
 	}
