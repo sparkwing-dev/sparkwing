@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -43,7 +44,7 @@ func TestRateTableRoundsACPURequestUpToItsClass(t *testing.T) {
 		{cores: 33, want: 64},
 		{cores: 64, want: 64},
 	} {
-		class, err := table.ClassForResource(store.ExecutorResource{Cores: tc.cores})
+		class, err := table.ClassForResource(match.Resources{Cores: tc.cores})
 		if err != nil {
 			t.Fatalf("ClassForResource(%g): %v", tc.cores, err)
 		}
@@ -54,7 +55,7 @@ func TestRateTableRoundsACPURequestUpToItsClass(t *testing.T) {
 }
 
 func TestRateTableRefusesARequestAboveItsLargestClass(t *testing.T) {
-	_, err := githubRateTable().ClassForResource(store.ExecutorResource{Cores: 96})
+	_, err := githubRateTable().ClassForResource(match.Resources{Cores: 96})
 	if !errors.Is(err, store.ErrUnpricedCPUClass) {
 		t.Fatalf("ClassForResource(96) = %v, want ErrUnpricedCPUClass", err)
 	}
@@ -253,7 +254,7 @@ func TestClassForResource_NeverGivesAMemoryPinLessThanItAsked(t *testing.T) {
 		{gib: 15, want: 8},
 	} {
 		pin := int64(tc.gib * (1 << 30))
-		class, err := table.ClassForResource(store.ExecutorResource{Cores: 1, MemoryBytes: pin})
+		class, err := table.ClassForResource(match.Resources{Cores: 1, MemoryBytes: pin})
 		if err != nil {
 			t.Fatalf("%g GiB: %v", tc.gib, err)
 		}
@@ -263,7 +264,7 @@ func TestClassForResource_NeverGivesAMemoryPinLessThanItAsked(t *testing.T) {
 		}
 	}
 
-	_, err := table.ClassForResource(store.ExecutorResource{Cores: 1, MemoryBytes: 30 << 30})
+	_, err := table.ClassForResource(match.Resources{Cores: 1, MemoryBytes: 30 << 30})
 	var unpriced *store.UnpricedCPUClassError
 	if !errors.As(err, &unpriced) || unpriced.Cores != 9 ||
 		!strings.Contains(err.Error(), fmt.Sprint(store.CPUClassMemoryBytes(8))) {

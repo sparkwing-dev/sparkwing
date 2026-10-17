@@ -282,3 +282,118 @@ URL. Git writes remain prohibited, so the lead must stage and commit. All writes
 are within this worktree or task scratch. Scratch is removed and the shared build cache retained.
 
 STATUS: CONTINUE
+
+
+## Continuation after native session 2, 2026-10-17
+
+### Implemented and deleted
+
+The four review blockers and real-policy/store replacements were already committed
+at 40bd95239647d3199109e45fceca34845fdf5c97. The session-2 native report passes
+both store lanes, the focused controller lane and local-controller/native
+packages. Its remaining failures are the run-existence privacy properties
+assigned to W2. Those tests and their expectations are unchanged here.
+
+Invariant: a reported output digest comes from that job's exact committed result
+selector. Foreign team/job selectors reveal no digest. GetNode and ListNodes now
+resolve the selected record. Receipts use its digest, including after memo
+materialization and deletion of the source run and memo. The first real-store
+reporting test ran red on both readers with a missing digest, then green.
+Generated cases exercise foreign selectors, including an existing unrelated
+job's real committed record. Collected records omit the digest.
+
+Removed OutputRef, output-prefix helpers and unused writers for the deleted
+node_outputs/data_objects tables. Removed direct-upload key/SHA validators with
+no remaining callers. Replaced the private-reference limit fuzz with a real
+Tenant.CommitRecord fuzz, including boundary values and rollback on oversize.
+The memo-limit and manifest tests remain. Empty blobs follow the current blob
+contract's nonnegative-size rule.
+
+Removed unused nodeChargeTx, old-plan decoding and profile-fallback pricing, and
+three tests of that retired reader. The real-claim resource-pricing property now
+sets a conflicting 96-core profile pin before each claim and still proves exact
+sealed class, reservation, immutable rate, settlement and ledger survival after
+run deletion. Removed the ExecutorResource alias and migrated its callers to
+match.Resources. Removed unused lockTeamStorageTx and NodeLogSealGrace. Moved
+the test-only holder lease predicate out of production.
+
+Moved implemented step/annotation/summary declarations into result_metadata.go,
+removed its three forwarding wrappers and deleted result_contract.go. The public
+methods now are the existing transaction implementations. Their behavior is
+unchanged.
+
+### Verification
+
+Commands use env GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache,
+GOTMPDIR=/tmp/sw-astra-W1b/go-tmp TMPDIR=/tmp/sw-astra-W1b GOMAXPROCS=4,
+go -C /home/bombuntu/.xwing/envs/1088/sparkwing and test -p 4.
+
+- Whole-repository build passes after the API removals and wrapper cut.
+- Scoped vet passes for pkg/store, pkg/controller and receipt.
+- Full SQLite pkg/store passes in 318.224s. This run began before the behavior-
+  preserving result wrapper cut. The focused Result/Step/Annotation/Summary/
+  OutputReporting selection passes after that cut in 0.686s. The final foreign-
+  selector fixture strengthens the property with a real unrelated record and
+  passes in 0.199s.
+- Output/BlobResult/MaterializedResult/MeteredAward/RateTable/ClassForResource/
+  Storage/Retained/TenantSQL selection passes in 5.734s. The replacement output
+  limit fuzz seeds pass in 0.185s. The real pricing property also passed before
+  removing the obsolete reader in 0.424s.
+- Controller ChildIntake/ClaimRun_Child/NativeChild/ConcurrencyHTTP/
+  TeamBoundary_Concurrency/Cron/ControllerCrons/Schedule/Dedupe/IntakeFlood/
+  Unpriced selection passes in 2.519s.
+- Focused race checks for output reporting, materialized bytes and receipts,
+  sealed pricing and result metadata pass: store 23.844s, receipt 1.018s.
+- Full controller/client, receipt, apiref, apispec and apidiff tests pass.
+- Acceptance selection API|Drift|Snapshot|Concurrency|Child|PortInventory|
+  MaterializedResult passes in 0.983s. No new acceptance cell was enabled.
+- API snapshot regenerated. The OpenAPI generator output remains identical.
+  Documentation mirror and whitespace checks pass. Commentcheck is clean across
+  2,799 files.
+
+The existing PostgreSQL tests use real concurrent transactions. All three lock
+regressions skip here because SPARKWING_TEST_PG_URL is unset. No PostgreSQL pass
+is inferred from a skip. The latest native report remains the lead's session-2
+report and still contains FAIL. Its next run must judge this uncommitted tree.
+
+### Contracts and shared files
+
+C1 records Node.OutputDigest, removal of the obsolete output and pricing APIs,
+and the implemented result file. Public docs and CHANGELOG describe the cut.
+The port inventory records the replacement limit fuzz, new reporting property
+and the retained real-claim pricing proof. No lead-owned handoff or amendment
+file changed.
+
+Shared caller changes outside pkg/store: internal/orchestrator/receipt/receipt.go
+and receipt_test.go. Shared store edits: store.go (report projection),
+unit_billing.go (resource type only), concurrency.go (move a test-only predicate)
+and tenant_sql_scope_guard_test.go (delete only the retired reader's exemption).
+Other shared artifacts: .apidiff/pkg_store.txt, docs/api.md, CHANGELOG.md and their
+embedded mirrors. All other production changes are the W1b legacy cuts above.
+
+Remaining real integration points from the prior report remain open: native
+child cross-repository/ref resolution, audited credentials before private
+followed-branch lookup, persisted HTTP box identity and accepted memo namespace
+metadata. Missing authority still refuses. There are no new foreign contract
+requests, settings, services, environment variables or execution mechanisms.
+W2 owns the native privacy failures. The lead retains PostgreSQL/socket proof,
+independent review, commit and landing.
+
+### Volume and friction
+
+Production Go patch including the deleted contract scaffold: +82/-312, net -230.
+Using the lead's metric, which excludes contract-named files: +82/-259, net -177.
+The completed result declarations now count as production. Combined W1/W1b
+store versus main (244d71bd238ffb5f4349b0a9980687c3a5a98988) is -783,
+3,467 lines over the -4,250 budget. No budget waiver or completion is claimed.
+
+The small reporting query replaces dead output-key writers because the accepted
+result selector already owns the record identity. It adds no alternate output
+storage or source of authority. The obsolete profile billing fallback has no
+live caller, so it is deleted rather than adapted.
+
+Friction: this sandbox has no PostgreSQL URL and cannot supply the lead's native
+socket proof. No Git writes were made. Task scratch is removed at handoff and
+/tmp/sw-gocache is retained.
+
+STATUS: CONTINUE

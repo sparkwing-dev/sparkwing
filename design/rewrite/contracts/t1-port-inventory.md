@@ -2902,3 +2902,23 @@ sixteen-core class and its exact rate. Publication fixtures carry valid hex SHAs
 TestSourceSnapshotRealClientStorageAndIntake now needs no stored Git credential
 for a complete bundle and requires zero release audits. It still proves source
 sealing, exact checkout SHA, unique-byte charging and fenced bundle reads.
+
+
+## W1b output and pricing reader retirement, 2026-10-17
+
+The unused OutputRef validity helper and its FuzzOutputReferenceUsesSharedLimit
+are removed. FuzzOutputRecordUsesSharedLimit exercises Tenant.CommitRecord over
+real store records at generated sizes and proves oversized outputs leave no
+record. Empty blobs follow the current blob contract's nonnegative size rule.
+Existing real-store memo limit, oversized-memo miss and manifest tests remain.
+TestOutputReportingUsesCommittedResult covers both reporting readers.
+TestOutputReportingNeverRevealsAnotherResultProperty generates foreign selectors.
+TestMaterializedResultCopiesBytesThroughControllerAndHost now also checks the
+receipt's exact output hash after deletion of the source run and memo.
+
+The three nodeChargeFromSnapshot tests are retired with that unused old-plan
+reader. TestMeteredAwardPricesPinnedResourcesProperty still drives real claim,
+renewal and release transactions, verifies immutable class/rate/reservation and
+survival of financial rows after run deletion, and now sets a conflicting
+96-core profile pin before each claim. Old profile fallback arithmetic no longer
+participates in billing. Current profile-learning tests remain.

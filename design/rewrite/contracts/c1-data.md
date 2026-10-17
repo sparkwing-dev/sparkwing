@@ -934,8 +934,8 @@ reporting the persisted seal, and never changes the job result.
 
 `Segment`, `SegmentCommit`, `LogSegments`, `RecordSegments` and `ReadLogSegments`
 live in `pkg/store/result_logs.go`. Log subject validation uses
-`blob.LogSubject.Validate`. The remaining declarations in `result_contract.go`
-cover steps, annotations and summaries.
+`blob.LogSubject.Validate`. Step, annotation and summary types and transactions
+live in `result_metadata.go`. The completed result contract scaffold is removed.
 
 The controller tests drive the final SQLite claim, start, segment commit and
 terminal transition through the reader. Revoking its capability refuses the next
@@ -2781,7 +2781,7 @@ schema version is added.
 | Create | `pkg/store/capacity_adoption.go` |
 | Create | `pkg/store/maintenance_contract.go` |
 | Create | `pkg/store/node_state.go` |
-| Create | `pkg/store/result_contract.go` |
+| Implement | `pkg/store/result_metadata.go` |
 | Create | `pkg/store/rewrite_schema_test.go` |
 | Create | `pkg/store/run_spec.go` |
 | Create | `pkg/store/run_state.go` |
@@ -3022,7 +3022,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.ReserveQuota` | ReserveQuota locks one shared team/quota row; log reads are exempt from download quota. |
 | `Tenant.SettleQuota` | SettleQuota commits actual usage or releases the reservation in one transaction. |
 
-### pkg/store/result_contract.go
+### pkg/store/result_metadata.go
 
 | Export | Purpose |
 |---|---|
@@ -3963,3 +3963,21 @@ native harness still owns PostgreSQL and socket verification.
 
 The implemented capacity-adoption types and transaction now live in
 `pkg/store/capacity_adoption.go`. The completed contract scaffold is removed.
+
+
+## W1b committed output reporting and retired readers, 2026-10-17
+
+`Node.OutputDigest` replaces `Node.OutputRef`. GetNode and ListNodes select the
+exact committed output record under that tenant, run and job. A missing record
+has no digest. A malformed or foreign selector fails closed. Receipts hash these
+digests for executed and materialized results. No physical object key is exposed.
+The obsolete OutputRef type, output-prefix helpers and writers for the deleted
+node_outputs/data_objects tables are removed, along with direct-upload key and
+SHA validators with no callers. Current record and upload authority is unchanged.
+
+CreditRateTable.ClassForResource takes match.Resources directly. The unused
+ExecutorResource alias and nodeChargeTx/profile-fallback reader are removed.
+Billing still prices the resources sealed for the awarded unit. Later profile
+pins cannot reprice it. Storage inventory's unused lockTeamStorageTx and the
+unused legacy NodeLogSealGrace constant are also removed. The current blob,
+retained-storage and log transactions remain their respective writers.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func meteredPlacement(claimant, root capability.Capability) bool {
@@ -66,7 +67,7 @@ func billingUnitKind(kind capability.UnitKind) capability.BillingUnit {
 	return ""
 }
 
-func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources ExecutorResource) (CreditRate, error) {
+func unitBillingPriceTx(ctx context.Context, tx *storeTx, resources match.Resources) (CreditRate, error) {
 	table, err := creditRateTableTx(ctx, tx)
 	if err != nil {
 		return CreditRate{}, err

@@ -28,6 +28,13 @@ func TestMeteredAwardPricesPinnedResourcesProperty(t *testing.T) {
 				t.Fatal(err)
 			}
 			rewriteSchemaExec(t, s.db, "UPDATE nodes SET execution_json=?", []byte(fmt.Sprintf(`{"resources":{"set":true,"value":{"cores":{"set":true,"value":%g},"memory_bytes":{"set":true,"value":%d}}}}`, pin.cores, pin.memory)))
+			sealedRun, err := (&Tenant{s: s, team: "a"}).GetRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := (&Tenant{s: s, team: "a"}).UpsertProfilePin(t.Context(), sealedRun.Pipeline, "job", 96, 1<<40); err != nil {
+				t.Fatal(err)
+			}
 			demand.Available, demand.Capacity = match.Resources{Cores: 128, MemoryBytes: 1 << 40}, match.Resources{Cores: 128, MemoryBytes: 1 << 40}
 			claim, _ := meteredUnitClaim(t, s, demand)
 			tenant := &Tenant{s: s, team: claim.Team}

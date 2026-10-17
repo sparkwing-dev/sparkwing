@@ -102,8 +102,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).PruneEgressUsage": "expires every team's egress reports under the maintenance lease",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
-	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
-		"run's team",
 
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",

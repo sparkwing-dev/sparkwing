@@ -6,6 +6,10 @@ Run receipts use the same response on HTTP and the local API socket. Each step
 identifies its job with `job_id`. Receipts omit raw invocation metadata and local
 store locations.
 
+Job reports expose `output_digest` from the job's committed output record.
+Receipts include that digest as `sha256:<digest>` in `identity.outputs_hash`,
+including outputs copied from a memo. Collected records omit the digest.
+
 Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
 
 Schedule reads and writes use `/api/v1/schedules`. Repository replacement uses

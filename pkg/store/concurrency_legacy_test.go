@@ -318,3 +318,7 @@ func (t *Tenant) concurrencyHolder(ctx context.Context, key, holderID string, no
 	}
 	return &holder, nil
 }
+
+func holderLeaseLiveSQL(alias string) string {
+	return alias + "lease_expires_at > ?"
+}

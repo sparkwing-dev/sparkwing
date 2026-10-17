@@ -533,7 +533,7 @@ type CreditRate struct {
 const CreditRateBaseClassCores = 4
 type CreditRateTable []CreditRate
 func (t CreditRateTable) BaseRate() int64
-func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error)
+func (t CreditRateTable) ClassForResource(res match.Resources) (CreditRate, error)
 func (t CreditRateTable) RateFor(cores int64) int64
 func (t CreditRateTable) Sorted() CreditRateTable
 func (t CreditRateTable) Validate() error
@@ -917,7 +917,6 @@ type ExecutionAttempt struct {
 	FailureReason     string
 	RetryRunID        string
 }
-type ExecutorResource = match.Resources
 const ExpansionAbsent ExpansionState = ""
 const ExpansionAccepted ExpansionState = "accepted"
 const ExpansionExpected ExpansionState = "expected"
@@ -1249,15 +1248,15 @@ const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second)
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 type Node struct {
-	RunID      string
-	NodeID     string
-	Status     string
-	Outcome    string
-	Deps       []string
-	Error      string
-	OutputRef  *OutputRef
-	StartedAt  *time.Time
-	FinishedAt *time.Time
+	RunID        string
+	NodeID       string
+	Status       string
+	Outcome      string
+	Deps         []string
+	Error        string
+	OutputDigest string
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
 
 	ReadyAt            *time.Time
 	ClaimedBy          string
@@ -1349,7 +1348,6 @@ type NodeEdge struct {
 }
 func NodeEvents() []StateEventRule
 const NodeFailed NodeState = "failed"
-const NodeLogSealGrace = 60 * time.Second
 const NodeMemoized NodeState = "memoized"
 const NodePending NodeState = "pending"
 const NodeReady NodeState = "ready"
@@ -1525,12 +1523,6 @@ type OperatorStore interface {
 	DueRunEffects(context.Context, SingletonLease, int) ([]DesiredRunEffect, error)
 	MaintainRetention(context.Context, RetentionRequest) (RetentionResult, error)
 	MaintainConcurrency(context.Context, SingletonLease, ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
-}
-func OutputKeyPrefix(runID, nodeID string) string
-type OutputRef struct {
-	Key    string
-	Size   int64
-	SHA256 string
 }
 type OverflowControl struct {
 	MonthlyMinutes *int64

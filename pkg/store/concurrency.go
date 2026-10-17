@@ -19,10 +19,6 @@ func holderLiveSQL(alias string) string {
 	return alias + "superseded = 0 AND " + alias + "lease_expires_at > ?"
 }
 
-func holderLeaseLiveSQL(alias string) string {
-	return alias + "lease_expires_at > ?"
-}
-
 func holderCountsForBudget(superseded bool, leaseExpiresNS, nowNS int64) bool {
 	return !superseded && leaseExpiresNS > nowNS
 }

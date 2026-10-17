@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Report committed output digests in jobs and receipts
+  Replace `Node.OutputRef` with `Node.OutputDigest` and remove `OutputRef`,
+  `OutputKeyPrefix` and `NodeLogSealGrace`. `CreditRateTable.ClassForResource`
+  takes `match.Resources` directly instead of the removed `ExecutorResource` alias.
+
 - **schedules:** Remove the controller's retired trigger insertion path. Scheduled execution requires a tenant scheduled-intake transaction and refuses a missing or wrong-team adapter.
 
 - **api:** Restore Git object ID validation on sealed run submissions and reject child pipeline cycles within a repository. A child request naming another team returns `forbidden`.
