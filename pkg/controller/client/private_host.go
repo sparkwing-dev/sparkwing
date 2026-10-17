@@ -133,14 +133,15 @@ func (c *LocalHostClient) ReadNode(ctx context.Context, ref store.NodeRef) (stor
 		return result, localHostClientRefusal()
 	}
 	if c.node != "" && ref.NodeID != c.node {
-		snapshot, err := c.ReadSnapshot(ctx, c.run)
-		if err != nil {
+		var snapshot localhostwire.LocalNodeSnapshot
+		if err := c.request(ctx, "GET", "/snapshot", "", nil, &snapshot); err != nil {
 			return result, err
 		}
-		for _, node := range snapshot.Nodes {
-			if node.Ref == ref {
-				return node, nil
-			}
+		if snapshot.Run.ID != c.run {
+			return result, localHostClientRefusal()
+		}
+		if key, ok := snapshot.ArtifactSources[ref.NodeID]; ok {
+			return store.NodeRow{Ref: ref, Status: store.StatusDone, ManifestRecord: &key}, nil
 		}
 		return result, localHostClientRefusal()
 	}

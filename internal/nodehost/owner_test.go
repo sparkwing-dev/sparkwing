@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/quick"
 	"testing/synctest"
 	"time"
 
@@ -85,6 +87,99 @@ func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
 			if got := <-beats; got != want {
 				t.Fatalf("renewal executing=%v, want %v", got, want)
 			}
+		}
+	})
+}
+
+func TestOwnerHostCancellationWaitsForRemoteAttemptCompletion(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		state, host, input := newOwnerFixture(t, true)
+		state.snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: input.RunID, NodeID: "remote"}, Status: store.StatusRunning, ClaimedBy: "personal-machine"}}
+		host.Lease.Interval = time.Second
+		var beats atomic.Int64
+		observed := make(chan struct{}, 1)
+		host.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
+			return store.LeaseBeat{CancelRequested: beats.Add(1) > 1}, nil
+		}
+		host.Lease.Observe = func(lease.Beat) {
+			if beats.Load() == 2 {
+				observed <- struct{}{}
+			}
+		}
+		host.Decide = func(snapshot store.ScheduleSnapshot) store.ScheduleDecision {
+			if snapshot.Nodes[0].Status == string(store.StatusDone) {
+				return store.ScheduleDecision{Outcome: "cancelled"}
+			}
+			return store.ScheduleDecision{}
+		}
+		host.Wait = func(ctx context.Context, _ store.RunSnapshot) error {
+			now := time.Now()
+			state.mu.Lock()
+			state.snapshot.Run.CancelRequestedAt = &now
+			state.mu.Unlock()
+			<-observed
+			if err := context.Cause(ctx); err != nil {
+				return err
+			}
+			state.mu.Lock()
+			state.snapshot.Nodes[0].Status, state.snapshot.Nodes[0].Outcome = store.StatusDone, store.NodeCancelled
+			state.mu.Unlock()
+			state.record("remote-joined")
+			return nil
+		}
+		completion, err := host.Run(t.Context(), input)
+		if err != nil || completion.Outcome != "cancelled" || state.finished.Transition.To != store.RunCancelled || !slices.Contains(state.trace, "remote-joined") {
+			t.Fatalf("owner abandoned cancellation before its remote attempt joined: %+v %v trace=%v", completion, err, state.trace)
+		}
+	})
+}
+
+func TestOwnerHostAuthorityLossStopsWhileWaitingForRemoteAttempt(t *testing.T) {
+	property := func(selector uint8) bool {
+		synctest.Test(t, func(t *testing.T) {
+			state, host, input := newOwnerFixture(t, true)
+			host.Lease.Interval = time.Second
+			var beats atomic.Int64
+			host.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
+				if beats.Add(1) > 1+int64(selector%4) {
+					codes := []apierr.Code{apierr.LockHeld, apierr.Unauthenticated, apierr.Forbidden}
+					return store.LeaseBeat{}, &apierr.Error{Code: codes[selector%3]}
+				}
+				return store.LeaseBeat{}, nil
+			}
+			host.Decide = func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{} }
+			host.Wait = func(ctx context.Context, _ store.RunSnapshot) error {
+				<-ctx.Done()
+				return context.Cause(ctx)
+			}
+			_, err := host.Run(t.Context(), input)
+			if !errors.Is(err, lease.ErrLeaseLost) || slices.Contains(state.trace, "finish") {
+				t.Fatalf("lost owner finished its run: %v trace=%v", err, state.trace)
+			}
+		})
+		return !t.Failed()
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOwnerHostCancellationStopsSourcePreparation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		state, host, input := newOwnerFixture(t, false)
+		host.Lease.Interval = time.Second
+		var beats atomic.Int64
+		host.Renew = func(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
+			return store.LeaseBeat{CancelRequested: beats.Add(1) > 1}, nil
+		}
+		host.Acquire = func(ctx context.Context, _ RunInput) (*source.Entry, error) {
+			<-ctx.Done()
+			return nil, context.Cause(ctx)
+		}
+		_, err := host.Run(t.Context(), input)
+		var cancelled *lease.CancelError
+		if !errors.As(err, &cancelled) || state.finished.Transition.To != store.RunCancelled || slices.Contains(state.trace, "prepare") {
+			t.Fatalf("cancelled preparation reached planning: %v trace=%v", err, state.trace)
 		}
 	})
 }

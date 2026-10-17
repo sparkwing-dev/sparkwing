@@ -3313,9 +3313,11 @@ publish intake even when there is no object selector. Signed data POSTs accept
 job, attempt and generation query selectors together only under DataPublish.
 C1 rechecks the imported terminal attempt and upload identity before each write.
 
-The node-bound snapshot adds minimal rows for declared Consumes producers only
-once terminal: node identity, status, outcome, attempt/generation and manifest
-record selector. It exposes no producer declaration, owner decision or credential.
+The node-bound snapshot carries `artifact_sources`, a producer-ID map of manifest
+record selectors for declared Consumes producers only once terminal. Its Nodes
+array contains only the awarded job's complete persisted row. Artifact selectors
+never enter the executable mask namespace. The map exposes no producer declaration,
+owner decision or credential.
 LocalHostClient.ReadNode resolves those projections through its own node snapshot;
 private reads, writes and credential selection for other nodes stay refused.
 

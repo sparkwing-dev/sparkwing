@@ -427,7 +427,9 @@ pipelines:
 ```
 
 Cloud owns the run record. The invoking CLI hosts its scheduler, streams logs
-and requests cancellation on Ctrl-C. Nodes use the existing claim, lease and
+and requests cancellation on Ctrl-C. The first interrupt keeps the owner alive
+until local and remote jobs finish cancelling. A second interrupt stops hosting.
+Nodes use the existing claim, lease and
 fencing rules. The local controller supplies this machine's admission only.
 Other machines register as runners with Cloud. `sparkwing runners add --runner NAME
 --personal --session-stdin --profile work` reads an existing independent account

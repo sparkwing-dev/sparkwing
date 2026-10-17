@@ -1182,3 +1182,20 @@ Local publication export also carries publication_results with the persisted
 reason, masked error, exit code and structured failure. JobResult.masked_error
 preserves an existing masked diagnostic without manufacturing a structured
 failure. It is bounded by ErrorBytes and must agree with a supplied failure.
+
+## Claimed artifact snapshot
+
+`localhostwire.LocalNodeSnapshot` embeds the ordinary execution snapshot and
+adds `artifact_sources`, a map from declared terminal producer IDs to manifest
+record keys. Nodes contains only the awarded job's complete row. The private
+client resolves cross-job artifact reads from that map. It never inserts partial
+producer rows into the persisted job namespace used by mask initialization.
+
+## Owner cancellation drain
+
+Once scheduling starts, owner renewal keeps its lease live after a run
+cancellation request. The persisted scheduling graph cancels each executor and
+waits for terminal results before owner completion. Cancellation during source
+preparation still stops preparation. Lost authority, renewal silence, the parent
+deadline and an explicit host stop still terminate the owner context. Claimed
+executor renewal continues to cancel its execution context on a cancellation beat.

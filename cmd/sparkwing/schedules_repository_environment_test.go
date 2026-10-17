@@ -14,7 +14,7 @@ func TestScheduleDiscoverySupportsAuthenticatedProxy(t *testing.T) {
 		t.Skip("POSIX executable fixture")
 	}
 	dir := t.TempDir()
-	script := "#!/bin/sh\ncase \"$3\" in\nremote) echo https://github.com/acme/repo.git;;\nsymbolic-ref) echo main;;\nesac\n"
+	script := "#!/bin/sh\nfor arg do\ncase \"$arg\" in\nremote) echo https://github.com/acme/repo.git; exit 0;;\nsymbolic-ref) echo main; exit 0;;\nesac\ndone\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

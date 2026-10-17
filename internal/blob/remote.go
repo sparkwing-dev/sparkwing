@@ -27,11 +27,11 @@ func (c *remoteCache) lookup(ctx context.Context, key RecordKey, budget Budget) 
 	if key.Scope.Repo != c.options.Repo {
 		return RecordLookupResult{}, ErrDigestNotReadable
 	}
-	if budget.Deadline.IsZero() {
-		return RecordLookupResult{}, ErrBudget
+	if !budget.Deadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, budget.Deadline)
+		defer cancel()
 	}
-	ctx, cancel := context.WithDeadline(ctx, budget.Deadline)
-	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return RecordLookupResult{}, budgetError(err)
 	}

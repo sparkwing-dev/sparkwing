@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Keep artifact input selectors separate from execution rows so
+  registered machines can start dependent jobs. Profile cache reads honor caller
+  cancellation when local execution has no extra lookup deadline. Keep the owner
+  renewing while interrupted remote jobs finish cancelling.
+
 - **local runs:** Construct temporary scoped profile credentials for cache reads
   and publication. Publish completed local results, artifacts and logs through
   the shared controller APIs without scheduling execution. Publication failures

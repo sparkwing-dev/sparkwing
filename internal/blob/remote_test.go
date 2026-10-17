@@ -196,7 +196,7 @@ func TestRemoteMemoVerifiesBeforeGrantingArtifacts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			hit, err := cache.Memo(ctx, blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, blob.Budget{Deadline: time.Now().Add(time.Minute)})
+			hit, err := cache.Memo(ctx, blob.MemoKey{Repo: "gh:123", Ref: blob.RefScope{Ref: "feature"}, Pipeline: "build", Job: "job", Hash: runspec.Hash(digest("key"))}, blob.Budget{})
 			if hit.Found || (ctx.Err() != nil && !errors.Is(err, context.Canceled)) || (ctx.Err() == nil && err != nil) {
 				t.Fatalf("failed memo = %+v, %v", hit, err)
 			}

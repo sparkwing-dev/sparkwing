@@ -56,6 +56,8 @@ RFC3339 `deadline`. `POST /api/v1/data/depcache/lookup` takes `name`, `key`
 and optional `deadline`. The store applies memo's own-ref/default fallback
 and depcache's own-ref/PR-base/default order. Remote-cache credentials read
 only verified default-branch entries. Missing or corrupt cache data is a miss.
+An omitted cache deadline retains the caller's context and cancellation. An
+explicit deadline bounds both the lookup and verification of downloaded bytes.
 
 `POST /api/v1/data/memo/copy` takes the memo selectors. It requires both
 `data.read` and `data.write` and copies authorized output and manifest edges

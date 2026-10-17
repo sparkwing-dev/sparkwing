@@ -2530,6 +2530,11 @@ method. Both dependency-archive backends use the same verified-download and stag
 extraction path. A copied memo without an explicit output digest is a miss,
 including for followers. Explicit empty output remains a valid hit.
 
+`blob.RemoteCache` accepts a zero optional lookup deadline for unbounded local
+hosts. Such reads retain caller cancellation and any context deadline. An
+explicit Budget deadline still bounds the entire lookup and byte verification.
+No cache package supplies a default timeout.
+
 Memo and depcache default-branch fallback apply `VerifiedDefaultOnly` before
 reading bytes or member metadata. A verified ref without default-branch evidence
 does not qualify. Memo uses own scope before default fallback and has no PR-base

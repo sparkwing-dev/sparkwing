@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -147,9 +148,53 @@ func profilePublication(t *testing.T, outcome string) {
 	if err != nil || !page.Complete || len(page.Records) != 1 || !strings.Contains(page.Records[0].Line, "masked local output ***") {
 		t.Fatalf("published retained logs: %+v %v", page, err)
 	}
+	if outcome == "success" {
+		profileCacheRead(t, s.store, options, *snapshot.Nodes[0].OutputRecord, *snapshot.Nodes[0].ManifestRecord)
+	}
 	var active int
 	if err := s.store.DB().QueryRowContext(t.Context(), `SELECT count(*) FROM capabilities WHERE bind_run=? AND revoked_at IS NULL`, run).Scan(&active); err != nil || active != 0 {
 		t.Fatalf("publication left live credentials: %d %v", active, err)
+	}
+}
+
+func profileCacheRead(t *testing.T, state *store.Store, options client.EngineOptions, output, manifest blob.RecordKey) {
+	t.Helper()
+	key := blob.RecordKey{Team: output.Team, Kind: blob.KindMemo, Name: blob.MemoRecordName, Scope: output.Scope}
+	key.Scope.Key, key.Scope.Ref = strings.Repeat("a", 64), blob.RefScope{Ref: "main", Verified: true}
+	namespace, err := blob.RecordNamespace(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts, err := json.Marshal(blob.RefFacts{Scope: key.Scope.Ref, SHA: "verified-sha", AppDeliveryKey: "verified-delivery", DefaultBranch: "main", DefaultBranchVerified: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputScope, err := blob.RecordNamespace(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestScope, err := blob.RecordNamespace(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, state, `INSERT INTO blob_records(team,kind,scope,name,digest,manifest_digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at)
+		SELECT team,'memo',?,'output',digest,(SELECT digest FROM blob_records WHERE team=? AND kind='manifest' AND scope=? AND name='result'),repo_key,'main',uploader_principal,provenance,source_identity_json,source_kind,source_run_id,1,1,'verified-sha',?,pipeline,created_at FROM blob_records WHERE team=? AND kind='output' AND scope=? AND name='result'`, namespace, key.Team, manifestScope, facts, key.Team, outputScope)
+	reader, err := client.OpenProfileData(t.Context(), options, capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: string(key.Scope.Repo), ReadRefs: []string{"main"}, VerifiedDefaultOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := reader.Close(t.Context()); err != nil {
+			t.Error(err)
+		}
+	}()
+	cache, err := reader.RemoteCache("cloud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hit, err := cache.Memo(t.Context(), blob.MemoKey{Repo: key.Scope.Repo, Pipeline: key.Scope.Pipeline, Job: key.Scope.Job, Hash: runspec.Hash(key.Scope.Key)}, blob.Budget{})
+	if err != nil || !hit.Found || !hit.Output.Set || !hit.Manifest.Set || len(hit.Members) != 1 {
+		t.Fatalf("profile did not read verified default output and artifact bytes: %+v %v", hit, err)
 	}
 }
 

@@ -22,8 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -100,6 +102,23 @@ func TestBurstPublicRunFallsBackLocallyWithRequesterSecrets(t *testing.T) {
 }
 
 func TestBurstPublicRunPublishesCompletedLocalHistory(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "attached", true: "detached"}[detached], func(t *testing.T) {
+			burstPublicLocalProfile(t, detached, false)
+		})
+	}
+}
+
+func TestBurstPublicRunReadsProfileCacheBeforeNativeExecution(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "attached", true: "detached"}[detached], func(t *testing.T) {
+			burstPublicLocalProfile(t, detached, true)
+		})
+	}
+}
+
+func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		t.Skipf("native publication requires sockets: %v", err)
@@ -122,7 +141,15 @@ func TestBurstPublicRunPublishesCompletedLocalHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, controller, bearer := burstIntakeController(t, endpoint)
-	server := httptest.NewUnstartedServer(controller.Handler())
+	published := make(chan struct{})
+	var finished sync.Once
+	handler := controller.Handler()
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r)
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/finish") && !strings.Contains(r.URL.Path, "/local-host/") {
+			finished.Do(func() { close(published) })
+		}
+	}))
 	if err := server.Listener.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -131,24 +158,69 @@ func TestBurstPublicRunPublishesCompletedLocalHistory(t *testing.T) {
 	t.Cleanup(server.Close)
 	config := filepath.Join(home, "config.yaml")
 	t.Setenv("SPARKWING_CONFIG", config)
-	if err := os.WriteFile(config, []byte(fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: local\n    local_secrets: [TOKEN]\n", endpoint, bearer)), 0o600); err != nil {
-		t.Fatal(err)
+	writeConfig := func(route string) {
+		t.Helper()
+		if err := os.WriteFile(config, []byte(fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: %s\n    profile: cloud\n    local_secrets: [TOKEN]\n", endpoint, bearer, route)), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
+	writeConfig("local")
 	offlineStopDaemon(t, home)
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, cli, "run", "burst", "--publish", "cloud", "-o=json")
-	command.Dir = repo
-	output, err := command.CombinedOutput()
-	if err != nil || !bytes.Contains(output, []byte("burst-edited-ok secret=*** encoded=***")) || bytes.Contains(output, []byte("publication failed")) || bytes.Contains(output, []byte(burstIntakeSecret)) {
-		t.Fatalf("public local publication: %v\n%s", err, output)
+	invoke := func(args ...string) []byte {
+		t.Helper()
+		command := exec.CommandContext(ctx, cli, args...)
+		command.Dir = repo
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("public profile CLI %v: %v\n%s", args, err, output)
+		}
+		return output
+	}
+	args := []string{"run", "burst", "--publish", "cloud", "-o=json"}
+	wantRuns := 1
+	if cache {
+		writeConfig("cloud")
+		invoke("run", "burst", "-o=json")
+		burstVerifyDefaultCache(t, state, repo)
+		writeConfig("local")
+		source := strings.Replace(burstIntakePipeline, `if err := os.MkdirAll("modules", 0o700); err != nil { return err }`, `cached, err := os.ReadFile("modules/dependency")
+        if err != nil || string(cached) != "cached dependency\n" { return errors.New("profile cache was not restored before the first step") }
+        sw.Info(ctx, "burst-profile-cache-restored")
+        if err := os.MkdirAll("modules", 0o700); err != nil { return err }`, 1)
+		writeSnapshotFile(t, repo, ".sparkwing/main.go", source, 0o600)
+		args = append(args, "--sw-cache-from", "cloud")
+		wantRuns++
+	}
+	handleFile := filepath.Join(t.TempDir(), "local-run.json")
+	args = append(args, "--sw-run-handle-file", handleFile)
+	if detached {
+		args = append(args, "--sw-detached")
+	}
+	output := invoke(args...)
+	if detached {
+		var handle orchestrator.RunHandle
+		body, err := os.ReadFile(handleFile)
+		if err != nil || json.Unmarshal(body, &handle) != nil || handle.RunID == "" {
+			t.Fatalf("detached profile run lost its identity: %s %v", body, err)
+		}
+		output = invoke("runs", "logs", "--run", handle.RunID, "--follow", "-o=json")
+		select {
+		case <-published:
+		case <-ctx.Done():
+			t.Fatalf("detached run never published completed history: %v\n%s", ctx.Err(), output)
+		}
+	}
+	if !bytes.Contains(output, []byte("burst-edited-ok secret=*** encoded=***")) || bytes.Contains(output, []byte("publication failed")) || bytes.Contains(output, []byte(burstIntakeSecret)) || cache && !bytes.Contains(output, []byte("burst-profile-cache-restored")) {
+		t.Fatalf("public local profile lost its masked execution or cache: %s", output)
 	}
 	reader, err := client.NewRunReader(client.EngineOptions{URL: endpoint, Bearer: func(context.Context) (string, error) { return bearer, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	page, err := reader.ListRuns(ctx, controllerwire.RunQuery{Pipeline: "burst", Limit: 10})
-	if err != nil || len(page.Runs) != 1 || page.Runs[0].Status != "success" {
+	if err != nil || len(page.Runs) != wantRuns || page.Runs[0].Status != "success" {
 		t.Fatalf("published local history: %+v %v\n%s", page, err, output)
 	}
 	tenant, err := state.ForTeam(ctx, "default")
@@ -158,6 +230,32 @@ func TestBurstPublicRunPublishesCompletedLocalHistory(t *testing.T) {
 	snapshot, err := tenant.ReadSnapshot(ctx, page.Runs[0].ID)
 	if err != nil || snapshot.Run.Owner != nil || snapshot.Run.Request.Request.Mode != "publish" || len(snapshot.Nodes) != 2 || snapshot.Nodes[0].ManifestRecord == nil {
 		t.Fatalf("publication lost local result graph: %+v %v", snapshot, err)
+	}
+}
+
+func burstVerifyDefaultCache(t *testing.T, state *store.Store, repo string) {
+	t.Helper()
+	branch := runSnapshotGit(t, repo, "symbolic-ref", "--short", "HEAD")
+	runSnapshotGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+branch)
+	key, err := depcachekey.Bytes("modules", "modules", []byte("edited\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := blob.RefScope{Ref: branch, Verified: true}
+	namespace, err := blob.RecordNamespace(blob.RecordKey{Team: "default", Kind: blob.KindDepcache, Name: "modules", Scope: blob.Scope{Repo: "git:example.test/acme/burst", Ref: ref, Key: key}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts, err := json.Marshal(blob.RefFacts{Scope: ref, SHA: runSnapshotGit(t, repo, "rev-parse", "HEAD"), AppDeliveryKey: "fixture-app-delivery", DefaultBranch: branch, DefaultBranchVerified: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := state.DB().ExecContext(t.Context(), `UPDATE blob_records SET scope=?,ref_scope=?,verified_ref=1,verified_default_branch=1,ref_facts_json=? WHERE team='default' AND kind='depcache' AND name='modules'`, namespace, branch, facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		t.Fatalf("fixture did not produce one Cloud dependency archive: %d %v", count, err)
 	}
 }
 

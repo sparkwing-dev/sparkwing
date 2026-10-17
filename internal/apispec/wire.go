@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -104,6 +105,7 @@ func wireOperations() map[string]wireOperation {
 	}
 	result["POST /api/v1/operator/teams"] = operation("Create a team and its first administrator", wire.OperatorTeamCreate{}, wire.OperatorTeamCreated{})
 	result["GET /api/v1/runs/{run}/local-host/snapshot"] = operation("Read awarded execution state or export completed local history as the verified local peer", nil, store.LocalPublication{})
+	result["GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot"] = operation("Read awarded job state and declared terminal artifact selectors", nil, localhostwire.LocalNodeSnapshot{})
 
 	result["POST /api/v1/operator/teams/{team}/refunds"] = operation("Record a completed provider refund", wire.OperatorRefund{}, wire.OperatorRefundRecorded{})
 	result["GET /api/v1/runs/{run}/jobs/{job}/output"] = operation("Read an authorized committed job output", nil, wire.JobOutput{})

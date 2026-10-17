@@ -3985,6 +3985,39 @@ components:
         - inputs_digest
       type: object
       x-sparkwing-go-type: engine.Pin
+    internal.localhostwire.LocalNodeSnapshot:
+      additionalProperties: true
+      properties:
+        Expansions:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.store.AcceptedExpansionRow'
+              type: array
+            - type: "null"
+        Nodes:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/pkg.store.NodeRow'
+              type: array
+            - type: "null"
+        Run:
+          $ref: '#/components/schemas/pkg.store.RunRow'
+        StoreNow:
+          format: date-time
+          type: string
+        artifact_sources:
+          anyOf:
+            - additionalProperties:
+                $ref: '#/components/schemas/internal.blob.RecordKey'
+              type: object
+            - type: "null"
+      required:
+        - Run
+        - Nodes
+        - Expansions
+        - StoreNow
+      type: object
+      x-sparkwing-go-type: localhostwire.LocalNodeSnapshot
     internal.nodeproto.AnnotationRequest:
       additionalProperties: true
       properties:
@@ -12701,7 +12734,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/nodes/{job}/snapshot:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -12714,13 +12746,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.localhostwire.LocalNodeSnapshot'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/local-host/nodes/{job}/snapshot
+      summary: Read awarded job state and declared terminal artifact selectors
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/local-host/nodes/{job}/snapshot
@@ -12744,7 +12782,6 @@ paths:
             binding: run
             liveness: expansion
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/local-host/nodes/{job}/transition:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

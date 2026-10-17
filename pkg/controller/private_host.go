@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -48,15 +49,15 @@ func (s *Server) localNodeSnapshot(w http.ResponseWriter, r *http.Request, a cap
 			if err := json.Unmarshal(node.Spec, &job); err != nil {
 				return err
 			}
-			visible := []store.NodeRow{node}
+			sources := map[string]blob.RecordKey{}
 			for _, source := range snapshot.Nodes {
-				if source.Ref == node.Ref || source.Status != store.StatusDone || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return edge.Producer == source.Ref.NodeID }) {
+				if source.Ref == node.Ref || source.Status != store.StatusDone || source.ManifestRecord == nil || !slices.ContainsFunc(job.Consumes, func(edge nodeproto.ArtifactInput) bool { return edge.Producer == source.Ref.NodeID }) {
 					continue
 				}
-				visible = append(visible, store.NodeRow{Ref: source.Ref, Status: source.Status, Outcome: source.Outcome, Generation: source.Generation, Attempt: source.Attempt, ManifestRecord: source.ManifestRecord})
+				sources[source.Ref.NodeID] = *source.ManifestRecord
 			}
-			snapshot.Nodes = visible
-			writeJSON(w, http.StatusOK, snapshot)
+			snapshot.Nodes = []store.NodeRow{node}
+			writeJSON(w, http.StatusOK, localhostwire.LocalNodeSnapshot{RunSnapshot: snapshot, ArtifactSources: sources})
 			return nil
 		}
 	}

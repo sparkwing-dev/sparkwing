@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -35,6 +36,16 @@ func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer host.Close()
+	snapshot, err := host.ReadSnapshot(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range snapshot.Nodes {
+		var declaration nodeproto.JobSpec
+		if json.Unmarshal(row.Spec, &declaration) != nil || declaration.ID != row.Ref.NodeID {
+			t.Fatalf("persisted mask namespace has an invalid job: %s", row.Ref.NodeID)
+		}
+	}
 	property := func(value string, declared, terminal bool) bool {
 		producer := "other"
 		if declared {
@@ -51,6 +62,10 @@ func TestClaimedHostReadsOnlyDeclaredProducerManifestSelectors(t *testing.T) {
 			status, outcome, finished, manifest = "done", "success", int64(1), raw
 		}
 		engineSQL(t, e.Store, `UPDATE nodes SET status=?,outcome=?,finished_at=?,manifest_record=? WHERE run_id='run' AND node_id='producer'`, status, outcome, finished, manifest)
+		snapshot, err := host.ReadSnapshot(t.Context(), "run")
+		if err != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].Ref.NodeID != "reader" || string(snapshot.Nodes[0].Spec) != string(spec) {
+			return false
+		}
 		row, err := host.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "producer"})
 		if !declared || !terminal {
 			return err != nil
