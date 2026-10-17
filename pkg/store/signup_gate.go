@@ -530,3 +530,19 @@ func approveOneTx(ctx context.Context, tx *storeTx, id, actor string, now time.T
 	}
 	return acct, true, nil
 }
+
+// SignUpSettingsChange preserves omitted fields for one atomic settings transaction.
+type SignUpSettingsChange struct {
+	Mode                 *string `json:"mode"`
+	Reason               string  `json:"reason"`
+	HourlyLimit          *int    `json:"hourly_limit"`
+	DailyLimit           *int    `json:"daily_limit"`
+	HourlyWarn           *int    `json:"hourly_warn"`
+	GitHubMinAccountDays *int    `json:"github_min_account_days"`
+	FreeTeamMembers      *int    `json:"free_team_members"`
+}
+
+// LimitsChanged reports whether a sign-up threshold was supplied.
+func (req SignUpSettingsChange) LimitsChanged() bool {
+	return req.HourlyLimit != nil || req.DailyLimit != nil || req.HourlyWarn != nil || req.GitHubMinAccountDays != nil || req.FreeTeamMembers != nil
+}

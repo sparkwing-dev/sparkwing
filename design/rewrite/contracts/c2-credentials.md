@@ -2871,7 +2871,7 @@ receives Authorized. W1 supplies these methods on Operator. Recheck current
 ancestry, deployment grants or the configured direct-console-session gate inside
 the committing transaction. Never accept an actor from the body. Derive target
 teams from Authorized and resolve team existence inside quota transactions.
-WriteSignUpSettings takes SignUpSettingsChange, preserving omitted patch fields.
+WriteSignUpSettings takes store.SignUpSettingsChange, preserving omitted patch fields.
 It validates and commits all supplied mode/limit changes and their audit together,
 using the store clock. Quota writes preserve allowance and return the committed
 projection. Allowance writes preserve other quota fields. Any failed validation,
@@ -3304,3 +3304,18 @@ supply its committed snapshot and attempts through the existing
 `Tenant.ReadRunView`. The projection validates the selected run/team, nonempty
 job identities and current attempt fences before returning public fields.
 No route grants, credential classes or wire fields change.
+
+
+## Operator settings composition reconciliation
+
+Operator implements the five OperatorSettingsWriter methods. Each mutation resolves
+live ancestry and the exact deployment grant, or the current configured direct
+console proof, inside its transaction and rechecks before commit. Existing compute
+and storage setters share their transaction helpers with these authorized writers.
+SignUpSettingsChange lives in store, which owns its atomic patch and provenance.
+
+BindNone permits an unbound deployment credential to select a target team for
+operator quota policy. The shared route policy still requires the exact operator
+grant. Run and job selectors keep their bindings, and tenant credentials cannot
+select a foreign team. Relational authorization resolves console proof through the
+same transaction-local owner as issuance and settings writes.

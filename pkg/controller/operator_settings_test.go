@@ -30,9 +30,11 @@ type operatorSettingsFixture struct {
 func (f *operatorSettingsFixture) ComputeLimits(context.Context) (store.ComputeLimits, error) {
 	return f.limits, f.failure
 }
+
 func (f *operatorSettingsFixture) ComputeUsage(context.Context) (store.ComputeUsage, error) {
 	return store.ComputeUsage{Runners: 3, ByPrincipal: map[string]int64{"other-team": 3}}, f.failure
 }
+
 func (f *operatorSettingsFixture) WriteComputeLimits(_ context.Context, a capability.Authorized, updates map[string]int64) (store.ComputeLimits, error) {
 	f.seen = a
 	if f.failure != nil {
@@ -50,13 +52,16 @@ func (f *operatorSettingsFixture) WriteComputeLimits(_ context.Context, a capabi
 	f.limits.GlobalRunners = updates[store.ComputeLimitGlobalRunners]
 	return f.limits, nil
 }
+
 func (f *operatorSettingsFixture) SignUpGate(context.Context) (store.SignUpGate, error) {
 	return f.gate, f.failure
 }
+
 func (f *operatorSettingsFixture) SignUpCounts(context.Context, time.Time) (store.SignUpCounts, error) {
 	return store.SignUpCounts{LastHour: 2, LastDay: 3, Waitlisted: 1}, f.failure
 }
-func (f *operatorSettingsFixture) WriteSignUpSettings(_ context.Context, a capability.Authorized, req SignUpSettingsChange) error {
+
+func (f *operatorSettingsFixture) WriteSignUpSettings(_ context.Context, a capability.Authorized, req store.SignUpSettingsChange) error {
 	f.seen = a
 	if f.failure != nil {
 		return f.failure
@@ -78,9 +83,11 @@ func (f *operatorSettingsFixture) WriteSignUpSettings(_ context.Context, a capab
 	f.writes++
 	return nil
 }
+
 func (f *operatorSettingsFixture) StorageSettings(context.Context) (store.StorageSettings, error) {
 	return f.settings, f.failure
 }
+
 func (f *operatorSettingsFixture) WriteStorageSettings(_ context.Context, a capability.Authorized, settings store.StorageSettings) error {
 	f.seen = a
 	if f.failure != nil {
@@ -90,12 +97,15 @@ func (f *operatorSettingsFixture) WriteStorageSettings(_ context.Context, a capa
 	f.settings = settings
 	return nil
 }
+
 func (f *operatorSettingsFixture) ListStorageQuotas(context.Context) ([]store.StorageQuota, error) {
 	return []store.StorageQuota{f.quota}, f.failure
 }
+
 func (f *operatorSettingsFixture) TopStorageTeams(context.Context, string, int) ([]store.StorageTeamUsage, error) {
 	return []store.StorageTeamUsage{{Team: "customer", Bytes: 100, Objects: 2}}, f.failure
 }
+
 func (f *operatorSettingsFixture) WriteStorageQuota(_ context.Context, a capability.Authorized, quota store.StorageQuota) (store.StorageQuota, error) {
 	f.seen = a
 	if f.failure != nil {
@@ -106,6 +116,7 @@ func (f *operatorSettingsFixture) WriteStorageQuota(_ context.Context, a capabil
 	f.quota = quota
 	return quota, nil
 }
+
 func (f *operatorSettingsFixture) WriteStorageAllowance(_ context.Context, a capability.Authorized, size int64) (store.StorageQuota, error) {
 	f.seen = a
 	if f.failure != nil {
@@ -127,6 +138,7 @@ func (f *operatorAuthorityFixture) ReadAuthentication(_ context.Context, lookup 
 	}
 	return capability.AuthenticationSnapshot{Now: time.Now(), Authorities: []capability.AuthorityState{{Principal: f.principal, MembershipValid: true}}}, nil
 }
+
 func (*operatorAuthorityFixture) CheckBinding(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {
 	return nil
 }
@@ -137,9 +149,11 @@ func newOperatorSettingsFixture(t *testing.T) (*Server, *operatorSettingsFixture
 	raw := "swk_" + base64.RawURLEncoding.EncodeToString(secret[:])
 	a := &operatorAuthorityFixture{raw: raw, principal: capability.Principal{
 		Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "ops"},
-		Capability: capability.Capability{Prefix: "ops", Digest: sha256.Sum256([]byte(raw)), Audience: capability.Controller,
+		Capability: capability.Capability{
+			Prefix: "ops", Digest: sha256.Sum256([]byte(raw)), Audience: capability.Controller,
 			Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator-account"}, Binding: capability.Binding{Kind: capability.BindingNone},
-			Grants: []capability.Grant{capability.OperatorLimits, capability.OperatorObjectStore}},
+			Grants: []capability.Grant{capability.OperatorLimits, capability.OperatorObjectStore},
+		},
 	}}
 	f := &operatorSettingsFixture{gate: store.SignUpGate{Mode: store.SignUpOpen}, quota: store.StorageQuota{Team: "customer", AllowanceBytes: 32}}
 	s := New(nil, nil).WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(a), Bindings: a})
@@ -213,7 +227,9 @@ func TestOperatorSettingsHTTPInvalidBodiesDoNotWrite(t *testing.T) {
 		{"limits", `{"limits":{"max_global_runners":null},"limits":{"runner_alarm":3}}`},
 		{"limits", `{"limits":{"max_global_runners":7,"max_run_seconds":-1}}`},
 		{"limits", `{"limits":{"unknown":1}}`},
-		{"signups", `{}`}, {"signups", `{"mode":"invalid"}`}, {"signups", `{"mode":"waitlist","actor":"forged"}`},
+		{"signups", `{}`},
+		{"signups", `{"mode":"invalid"}`},
+		{"signups", `{"mode":"waitlist","actor":"forged"}`},
 		{"object-store/settings", `{"run_retention_days":-1}`},
 		{"object-store/settings", `{"default_tier":"unknown"}`},
 		{"object-store/quotas/customer", `{"principal":"other-team"}`},
@@ -233,10 +249,14 @@ func TestOperatorSettingsHTTPStoreFailuresStayPrivate(t *testing.T) {
 		f.failure = failure
 		h := s.Handler()
 		for _, tc := range [][3]string{
-			{"GET", "limits", ""}, {"PUT", "limits", `{"limits":{"max_global_runners":7}}`},
-			{"GET", "signups", ""}, {"PUT", "signups", `{"mode":"waitlist","reason":"review"}`},
-			{"GET", "object-store", ""}, {"PUT", "object-store/settings", `{}`},
-			{"PUT", "object-store/quotas/customer", `{}`}, {"PUT", "object-store/quotas/customer/allowance", `{}`},
+			{"GET", "limits", ""},
+			{"PUT", "limits", `{"limits":{"max_global_runners":7}}`},
+			{"GET", "signups", ""},
+			{"PUT", "signups", `{"mode":"waitlist","reason":"review"}`},
+			{"GET", "object-store", ""},
+			{"PUT", "object-store/settings", `{}`},
+			{"PUT", "object-store/quotas/customer", `{}`},
+			{"PUT", "object-store/quotas/customer/allowance", `{}`},
 		} {
 			want := 500
 			if errors.As(failure, new(*apierr.Error)) {

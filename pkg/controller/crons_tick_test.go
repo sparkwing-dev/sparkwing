@@ -142,7 +142,10 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 
 	srv := New(st, nil)
 	launcher := cronLauncher{server: srv}
-	due := time.Now().UTC().Truncate(time.Minute)
+	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
+	if key := CronIdempotencyKey(sched.ID, due); key != sched.ID+"@2026-03-01T03:00:00Z" {
+		t.Fatalf("idempotency key = %q", key)
+	}
 
 	first, err := launcher.Launch(context.Background(), sched, due)
 	if err != nil {

@@ -27,7 +27,11 @@ func validateStorageQuota(q StorageQuota) error {
 // SetStorageQuota replaces this team's write limits and preserves its retained allowance.
 // A named tier with zero write limits selects that tier's limits.
 func (t *Tenant) SetStorageQuota(ctx context.Context, q StorageQuota) error {
-	if q.Team != "" && q.Team != t.team {
+	return t.s.inTx(ctx, func(tx *storeTx) error { return setStorageQuotaTx(ctx, tx, t.team, q) })
+}
+
+func setStorageQuotaTx(ctx context.Context, tx *storeTx, team Team, q StorageQuota) error {
+	if q.Team != "" && q.Team != team {
 		return fmt.Errorf("%w: quota belongs to another team", ErrInvalidInput)
 	}
 	if err := validateStorageQuota(q); err != nil {
@@ -36,9 +40,9 @@ func (t *Tenant) SetStorageQuota(ctx context.Context, q StorageQuota) error {
 	if q.Tier != "" && q.Unlimited() {
 		q, _ = TierQuota(q.Tier)
 	}
-	_, err := t.s.exec(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,updated_at)
+	_, err := tx.ExecContext(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,updated_at)
 VALUES (?,?,?,?,?,?) ON CONFLICT(team) DO UPDATE SET tier=excluded.tier,max_bytes_per_run=excluded.max_bytes_per_run,max_bytes_per_month=excluded.max_bytes_per_month,max_objects_per_run=excluded.max_objects_per_run,updated_at=excluded.updated_at`,
-		t.team, q.Tier, q.MaxBytesPerRun, q.MaxBytesPerMonth, q.MaxObjectsPerRun, t.s.now().UnixNano())
+		team, q.Tier, q.MaxBytesPerRun, q.MaxBytesPerMonth, q.MaxObjectsPerRun, tx.now().UnixNano())
 	return err
 }
 
@@ -82,24 +86,29 @@ func scanStorageQuota(row rowScanner) (StorageQuota, error) {
 // SetStorageAllowance changes retained bytes without replacing this team's write limits.
 // Zero leaves retained bytes uncapped. The returned quota is from the write transaction.
 func (t *Tenant) SetStorageAllowance(ctx context.Context, bytes int64) (StorageQuota, error) {
-	if bytes < 0 {
-		return StorageQuota{}, errors.New("storage: the allowance must not be negative")
-	}
 	var q StorageQuota
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		prior, err := storageQuotaForTeamTx(ctx, tx, t.team)
-		if err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,storage_allowance_bytes,updated_at) VALUES (?,?,?,?,?,?,?)
-ON CONFLICT(team) DO UPDATE SET storage_allowance_bytes=excluded.storage_allowance_bytes,updated_at=excluded.updated_at`, t.team, prior.Tier, prior.MaxBytesPerRun, prior.MaxBytesPerMonth, prior.MaxObjectsPerRun, bytes, tx.now().UnixNano())
-		if err != nil {
-			return err
-		}
-		q, err = storageQuotaForTeamTx(ctx, tx, t.team)
+		var err error
+		q, err = setStorageAllowanceTx(ctx, tx, t.team, bytes)
 		return err
 	})
 	return q, err
+}
+
+func setStorageAllowanceTx(ctx context.Context, tx *storeTx, team Team, bytes int64) (StorageQuota, error) {
+	if bytes < 0 {
+		return StorageQuota{}, errors.New("storage: the allowance must not be negative")
+	}
+	prior, err := storageQuotaForTeamTx(ctx, tx, team)
+	if err != nil {
+		return StorageQuota{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO storage_quotas(team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,storage_allowance_bytes,updated_at) VALUES (?,?,?,?,?,?,?)
+ON CONFLICT(team) DO UPDATE SET storage_allowance_bytes=excluded.storage_allowance_bytes,updated_at=excluded.updated_at`, team, prior.Tier, prior.MaxBytesPerRun, prior.MaxBytesPerMonth, prior.MaxObjectsPerRun, bytes, tx.now().UnixNano())
+	if err != nil {
+		return StorageQuota{}, err
+	}
+	return storageQuotaForTeamTx(ctx, tx, team)
 }
 
 // ListStorageQuotas returns every explicit team quota in team order.

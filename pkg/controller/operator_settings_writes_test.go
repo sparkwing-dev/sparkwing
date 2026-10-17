@@ -76,6 +76,7 @@ type storeSettingsWriterFake struct {
 func (f storeSettingsWriterFake) WriteStorageSettings(ctx context.Context, _ capability.Authorized, value store.StorageSettings) error {
 	return f.store.AsOperator().SetStorageSettings(ctx, value)
 }
+
 func (f storeSettingsWriterFake) WriteStorageQuota(ctx context.Context, a capability.Authorized, value store.StorageQuota) (store.StorageQuota, error) {
 	tenant, err := f.store.ForTeam(ctx, store.Team(a.Target.Team))
 	if err != nil {
@@ -86,10 +87,43 @@ func (f storeSettingsWriterFake) WriteStorageQuota(ctx context.Context, a capabi
 	}
 	return tenant.StorageQuota(ctx)
 }
+
 func (f storeSettingsWriterFake) WriteStorageAllowance(ctx context.Context, a capability.Authorized, value int64) (store.StorageQuota, error) {
 	tenant, err := f.store.ForTeam(ctx, store.Team(a.Target.Team))
 	if err != nil {
 		return store.StorageQuota{}, err
 	}
 	return tenant.SetStorageAllowance(ctx, value)
+}
+
+func TestOperatorSettingsConsoleCommitsThroughHTTP(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "reader")
+	if err := s.store.AsOperator().CreateTeam(t.Context(), "b"); err != nil {
+		t.Fatal(err)
+	}
+	s.WithOperatorAccounts([]string{"member"})
+	for _, route := range [][2]string{
+		{"limits", `{"limits":{"max_global_runners":7}}`},
+		{"signups", `{"mode":"waitlist","hourly_limit":12}`},
+		{"object-store/settings", `{"run_retention_days":7}`},
+		{"object-store/quotas/b", `{"max_bytes_per_run":22}`},
+		{"object-store/quotas/b/allowance", `{"storage_allowance_bytes":45}`},
+	} {
+		reviewSessionRequest(t, s, raw, csrf, "PUT", "/api/v1/operator/"+route[0], route[1], 200)
+		s.WithOperatorAccounts(nil)
+		reviewSessionRequest(t, s, raw, csrf, "PUT", "/api/v1/operator/"+route[0], route[1], 403)
+		s.WithOperatorAccounts([]string{"member"})
+	}
+	gate, err := s.store.SignUpGate(t.Context())
+	if err != nil || gate.SetBy != "member" || gate.Mode != store.SignUpWaitlist || gate.Limits.HourlyLimit != 12 {
+		t.Fatalf("signup provenance=%+v: %v", gate, err)
+	}
+	tenant, err := s.store.ForTeam(t.Context(), "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quota, err := tenant.StorageQuota(t.Context())
+	if err != nil || quota.MaxBytesPerRun != 22 || quota.AllowanceBytes != 45 {
+		t.Fatalf("console target quota=%+v: %v", quota, err)
+	}
 }

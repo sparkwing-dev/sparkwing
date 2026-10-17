@@ -1,19 +1,15 @@
-package controller_test
+package controller
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
+func TestFoldRunProfilesPartialSamplesRaiseOnly(t *testing.T) {
 	cases := []struct {
 		name      string
 		marker    store.MetricKind
@@ -63,19 +59,23 @@ func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: "partial", NodeID: "build"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
 				t.Fatal(err)
 			}
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/runs/partial/finish", strings.NewReader(`{"status":"success","error":""}`))
-			request.Header.Set("Content-Type", "application/json")
-			response := httptest.NewRecorder()
-			controller.New(st, nil).Handler().ServeHTTP(response, request)
-			if response.Code != http.StatusNoContent {
-				t.Fatalf("finish run: status %d, %s", response.Code, response.Body.String())
+			if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "partial", "success", ""); err != nil {
+				t.Fatal(err)
 			}
-			p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "build")
+			tenant := teststore.ForTeam(t, st, store.DefaultTeam)
+			run, err := tenant.GetRun(ctx, "partial")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p.SampleCount != tc.wantCount || p.PeakCores != tc.wantCores || p.PeakMemoryBytes != tc.wantMem {
-				t.Fatalf("node profile = %+v, want count %d cores %v memory %d", p, tc.wantCount, tc.wantCores, tc.wantMem)
+			New(st, nil).foldRunProfiles(ctx, tenant, run)
+			for _, id := range []string{"build", ""} {
+				p, err := tenant.GetPipelineProfile(ctx, "demo", id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if p == nil || p.SampleCount != tc.wantCount || p.PeakCores != tc.wantCores || p.PeakMemoryBytes != tc.wantMem {
+					t.Fatalf("profile %q = %+v, want count %d cores %v memory %d", id, p, tc.wantCount, tc.wantCores, tc.wantMem)
+				}
 			}
 		})
 	}

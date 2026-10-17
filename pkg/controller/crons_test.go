@@ -74,6 +74,7 @@ func (f *cronsFixture) call(method, path, token string, body any, want int, out 
 		f.t.Fatalf("build request: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", method+":"+path)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -163,32 +164,18 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	}
 }
 
-func TestControllerCrons_ASecondLaunchOfOneDueInstantReachesTheFirstRun(t *testing.T) {
+func TestControllerCrons_RunNowReplaysTheSameRequest(t *testing.T) {
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
-
-	ctx := context.Background()
-	svc := &crons.Service{Store: f.store, Schedules: teststore.ForTeam(t, f.store, store.DefaultTeam)}
-	sched, err := svc.Resolve(ctx, "acme/widgets/nightly")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	const path = "/api/v1/schedules/acme%2Fwidgets%2Fnightly/run"
+	var first, second controllerwire.ScheduleRun
+	f.call(http.MethodPost, path, f.writer, nil, http.StatusOK, &first)
+	f.call(http.MethodPost, path, f.writer, nil, http.StatusOK, &second)
+	if first.RunID == "" || first.Replayed || second.RunID != first.RunID || !second.Replayed {
+		t.Fatalf("schedule replay: first=%+v second=%+v", first, second)
 	}
-	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
-	key := controller.CronIdempotencyKey(sched.ID, due)
-	if key != sched.ID+"@2026-03-01T03:00:00Z" {
-		t.Fatalf("idempotency key = %q", key)
-	}
-	first := "run_first"
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
-		ID: first, Pipeline: sched.Pipeline, CreatedAt: time.Now(), IdempotencyKey: key,
-	}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-	found, err := teststore.ForTeam(t, f.store, store.DefaultTeam).FindTriggerByIdempotencyKey(ctx, sched.Pipeline, key)
-	if err != nil {
-		t.Fatalf("FindTriggerByIdempotencyKey: %v", err)
-	}
-	if found.ID != first {
-		t.Errorf("resolved run = %s, want %s", found.ID, first)
+	runs, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListRuns(t.Context(), store.RunFilter{Limit: 10})
+	if err != nil || len(runs) != 1 || runs[0].ID != first.RunID {
+		t.Fatalf("replayed request persisted %d runs: %v", len(runs), err)
 	}
 }

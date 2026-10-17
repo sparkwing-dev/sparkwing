@@ -53,7 +53,7 @@ func (f *deploymentWrites) WriteComputeLimits(_ context.Context, a capability.Au
 	return store.ComputeLimits{}, nil
 }
 
-func (f *deploymentWrites) WriteSignUpSettings(_ context.Context, a capability.Authorized, _ controller.SignUpSettingsChange) error {
+func (f *deploymentWrites) WriteSignUpSettings(_ context.Context, a capability.Authorized, _ store.SignUpSettingsChange) error {
 	f.seen = append(f.seen, a)
 	return nil
 }

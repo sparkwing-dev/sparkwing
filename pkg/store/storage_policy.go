@@ -91,6 +91,10 @@ func validateStorageSettings(in StorageSettings) error {
 
 // SetStorageSettings replaces the policy atomically. Invalid or sealed settings refuse the batch.
 func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) error {
+	return o.s.inTx(ctx, func(tx *storeTx) error { return setStorageSettingsTx(ctx, tx, in) })
+}
+
+func setStorageSettingsTx(ctx context.Context, tx *storeTx, in StorageSettings) error {
 	if err := validateStorageSettings(in); err != nil {
 		return err
 	}
@@ -98,19 +102,17 @@ func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) e
 	if err != nil {
 		return err
 	}
-	return o.s.inTx(ctx, func(tx *storeTx) error {
-		for _, field := range []struct{ key, value string }{
-			{storageRunRetentionKey, strconv.FormatInt(in.RunRetentionDays, 10)},
-			{storageMetricRetentionKey, strconv.FormatInt(in.NodeMetricRetentionDays, 10)},
-			{metaKeyDatabaseAlarmBytes, strconv.FormatInt(in.DatabaseAlarmBytes, 10)},
-			{metaKeyDefaultStorageTier, string(tier)},
-		} {
-			if err := setCreditSettingTx(ctx, tx, field.key, field.value); err != nil {
-				return err
-			}
+	for _, field := range []struct{ key, value string }{
+		{storageRunRetentionKey, strconv.FormatInt(in.RunRetentionDays, 10)},
+		{storageMetricRetentionKey, strconv.FormatInt(in.NodeMetricRetentionDays, 10)},
+		{metaKeyDatabaseAlarmBytes, strconv.FormatInt(in.DatabaseAlarmBytes, 10)},
+		{metaKeyDefaultStorageTier, string(tier)},
+	} {
+		if err := setCreditSettingTx(ctx, tx, field.key, field.value); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // SeedRunRetention supplies a deployment default only when no value exists.

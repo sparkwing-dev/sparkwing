@@ -211,6 +211,16 @@ func validateComputeLimit(name string, value int64) error {
 // SetComputeLimits validates and writes every named guard in one transaction.
 // A value of zero removes that ceiling.
 func (o *Operator) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error) {
+	var out ComputeLimits
+	err = o.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		out, err = setComputeLimitsTx(ctx, tx, updates)
+		return err
+	})
+	return out, err
+}
+
+func setComputeLimitsTx(ctx context.Context, tx *storeTx, updates map[string]int64) (ComputeLimits, error) {
 	if len(updates) == 0 {
 		return ComputeLimits{}, fmt.Errorf("%w: name at least one guard", ErrInvalidComputeLimitSetting)
 	}
@@ -219,11 +229,6 @@ func (o *Operator) SetComputeLimits(ctx context.Context, updates map[string]int6
 			return ComputeLimits{}, err
 		}
 	}
-	tx, err := o.s.beginTx(ctx)
-	if err != nil {
-		return ComputeLimits{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
 	// safety: Postgres locks metadata rows as it updates them, so overlapping
 	// batches use one key order and cannot wait on each other in reverse.
 	for _, name := range ComputeLimitNames() {
@@ -235,11 +240,7 @@ func (o *Operator) SetComputeLimits(ctx context.Context, updates map[string]int6
 			return ComputeLimits{}, err
 		}
 	}
-	out, err := computeLimitsTx(ctx, tx)
-	if err != nil {
-		return ComputeLimits{}, err
-	}
-	return out, tx.Commit()
+	return computeLimitsTx(ctx, tx)
 }
 
 func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err error) {

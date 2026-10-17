@@ -10,7 +10,7 @@ import (
 // OperatorSettingsWriter rechecks current deployment authority in each committing transaction.
 type OperatorSettingsWriter interface {
 	WriteComputeLimits(context.Context, capability.Authorized, map[string]int64) (store.ComputeLimits, error)
-	WriteSignUpSettings(context.Context, capability.Authorized, SignUpSettingsChange) error
+	WriteSignUpSettings(context.Context, capability.Authorized, store.SignUpSettingsChange) error
 	WriteStorageSettings(context.Context, capability.Authorized, store.StorageSettings) error
 	WriteStorageQuota(context.Context, capability.Authorized, store.StorageQuota) (store.StorageQuota, error)
 	WriteStorageAllowance(context.Context, capability.Authorized, int64) (store.StorageQuota, error)
@@ -27,9 +27,7 @@ func (s *Server) settingsWriter() (OperatorSettingsWriter, error) {
 		return s.operatorSettingsWrites, nil
 	}
 	if s.store != nil {
-		if writer, ok := any(s.store.AsOperator()).(OperatorSettingsWriter); ok {
-			return writer, nil
-		}
+		return s.store.AsOperator(), nil
 	}
 	return nil, missingEndpointPolicy()
 }
