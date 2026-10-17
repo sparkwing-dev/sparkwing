@@ -482,3 +482,22 @@ func FuzzTriggerRepositoryCredentialsNeverReachIntake(f *testing.F) {
 		}
 	})
 }
+
+func TestPrepareTriggerSourceSurfacesGitDiagnostics(t *testing.T) {
+	repo, _ := triggerPreparationRepo(t)
+	runSnapshotGit(t, repo, "remote", "remove", "origin")
+	_, err := prepareTriggerSource(t.Context(), triggerPreparationInput(repo))
+	if err == nil || !strings.Contains(err.Error(), "No such remote 'origin'") {
+		t.Fatalf("git cause lost: %v", err)
+	}
+}
+
+func TestTriggerGitDiagnosticsRedactCredentials(t *testing.T) {
+	detail := gitDiagnostic([]byte("fatal: unable to access 'https://deploy:pw-secret@github.com/acme/app.git/': denied\n"))
+	if strings.Contains(detail, "pw-secret") || !strings.Contains(detail, "github.com/acme/app.git") {
+		t.Fatalf("diagnostic = %q", detail)
+	}
+	if long := gitDiagnostic([]byte(strings.Repeat("x", 4096))); len(long) > maxGitDiagnostic+len("...") {
+		t.Fatalf("diagnostic is unbounded: %d bytes", len(long))
+	}
+}
