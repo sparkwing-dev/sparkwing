@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -8,6 +9,45 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
+
+type sourceExpiryObjects struct {
+	blob.ObjectBackend
+	keys []string
+}
+
+func (o *sourceExpiryObjects) DeleteObject(_ context.Context, key string) error {
+	o.keys = append(o.keys, key)
+	return nil
+}
+
+func FuzzSourceUploadExpiryTenantScope(f *testing.F) {
+	f.Add("same-id", false)
+	f.Add("same' OR 1=1 --", true)
+	f.Fuzz(func(t *testing.T, id string, reverse bool) {
+		s := authorityStore(t)
+		team, other := Team("a"), Team("b")
+		if reverse {
+			team, other = other, team
+		}
+		for _, key := range []Team{team, other} {
+			rewriteSchemaExec(t, s.db, `INSERT INTO source_uploads(team,id,authority_kind,authority_id,repo_key,repo_display,execution_sha,pipeline_sha,digest,size,expires_at,committed_at) VALUES (?,?,'capability','actor','gh:1','','sha','sha','digest',0,1,1)`, key, id)
+		}
+		tx, err := s.beginTx(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rollbackOrLog(tx)
+		objects := &sourceExpiryObjects{}
+		count, err := expireSourceUploadsTx(t.Context(), tx, team, 10, objects)
+		if err != nil || count != 1 || len(objects.keys) != 1 || objects.keys[0] != "teams/"+string(team)+"/pending/"+id {
+			t.Fatalf("expiry crossed team: count=%d objects=%v: %v", count, objects.keys, err)
+		}
+		var remaining Team
+		if err := tx.QueryRowContext(t.Context(), "SELECT team FROM source_uploads WHERE id=?", id).Scan(&remaining); err != nil || remaining != other {
+			t.Fatalf("foreign upload changed: team=%s: %v", remaining, err)
+		}
+	})
+}
 
 func TestSourceUploadQuotaExpiryAndUniqueAccounting(t *testing.T) {
 	tenant, intake, now := intakeFixture(t)
