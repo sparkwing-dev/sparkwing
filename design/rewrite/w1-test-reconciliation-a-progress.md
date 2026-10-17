@@ -2,6 +2,38 @@
 
 ## Current continuation
 
+The lead's native report after session 5 (2026-10-17 03:00:59 MDT) lists
+**86 failing top-level groups**, all in `pkg/controller` and outside this
+worker's assigned prefixes. It lists no assigned controller failure and no
+failure outside `pkg/controller`. The previous declared-repository guard failure
+is absent. No further code reconciliation is indicated by that report.
+
+No code, test, assertion, contract or acceptance cell changed this session.
+No test was deleted, skipped or ported. The amendment and handoff entries were
+checked against the previous report. No unfinished item was found within this
+reconciliation slice. Retry selection remains assigned to W3. The remaining
+controller routes and authentication fixtures belong to the other worker.
+
+Whole-repository `go build -p 4 ./...` passes. The declared-repository guard
+passes without a transport overlay (0.349s). Commentcheck against main is clean
+across 2,688 files. These commands use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and scratch under /tmp/sw-astra-W1.
+The unchanged socket-dependent suites were not rerun in the sandbox. The native
+report remains the source for their current failure verdict.
+
+Session production delta is **0**. Deleted production lines: **0**. The inherited
+store delta remains **-2,451 versus main**, **1,799 over** the -4,250 budget.
+No new integration point, contract request or open design question was added.
+Only this report and the append-only reconciliation ledger changed. Independent
+review was waived because these changes record existing test evidence only.
+The shared Git config has no user identity or core.worktree override. No Git
+write occurred. Scratch is removed at session end. The shared build cache stays.
+
+The native report still contains FAIL. The lead's overall native rerun and the
+inherited store budget overage remain open. Completion is not claimed.
+
+## Previous continuation (committed in 8e20b3733)
+
 The lead's native report after session 4 has no failures under the assigned
 controller prefixes. Its one failure outside `pkg/controller` is
 `TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField`. The focused command
