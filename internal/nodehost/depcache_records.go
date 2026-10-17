@@ -65,7 +65,7 @@ func (d DepcacheRecords) Prepare(ctx context.Context, layer LayerSpec, input Nod
 }
 
 func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declaration nodeproto.CacheSpec) (directoryCache, error) {
-	key, err := directoryCacheKey(ctx, input.Entry.Directory, declaration)
+	key, err := directoryCacheKey(ctx, sdkWorkingDirectory(input.Entry), declaration)
 	if err != nil {
 		return directoryCache{}, err
 	}
@@ -83,7 +83,7 @@ func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declarati
 		return directoryCache{}, errors.New("cache directory is empty")
 	}
 	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(input.Entry.Directory, dir)
+		dir = filepath.Join(sdkWorkingDirectory(input.Entry), dir)
 	}
 	cache := directoryCache{dir: dir, key: blob.DepcacheKey{Repo: input.Storage.Authority.Repo, Ref: input.Storage.Authority.Ref.Scope, Name: declaration.Name, Key: key}}
 	entries, err := os.ReadDir(dir)

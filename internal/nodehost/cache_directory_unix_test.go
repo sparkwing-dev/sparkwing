@@ -17,8 +17,9 @@ func TestCacheDirectoryQueriesToolsWithSealedJobEnvironment(t *testing.T) {
 	for _, resolver := range []string{"go-modules", "npm"} {
 		t.Run(resolver, func(t *testing.T) {
 			input, state, _, _ := executorFixture(t)
-			input.Entry.Directory = t.TempDir()
-			tools := filepath.Join(input.Entry.Directory, "tools")
+			input.Entry = acquiredLayerEntry(t, 1)
+			workspace := input.Entry.CheckoutDirectory()
+			tools := filepath.Join(workspace, "tools")
 			if err := os.Mkdir(tools, 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -34,7 +35,7 @@ func TestCacheDirectoryQueriesToolsWithSealedJobEnvironment(t *testing.T) {
 			state.row.Spec, _ = json.Marshal(job)
 			environments := SDKEnvironment{Store: state, Base: procenv.Base{Ambient: []string{"SPARKWING_CLAIM_TOKEN=private-host-credential", "PATH=/nonexistent", "HOME=/nonexistent"}, Masker: secrets.NewMasker()}}
 			dir, err := environments.CacheDirectory(t.Context(), input, nodeproto.CacheSpec{Resolver: resolver})
-			if err != nil || dir != filepath.Join(input.Entry.Directory, "cache") {
+			if err != nil || dir != filepath.Join(workspace, "cache") {
 				t.Fatalf("tool cache=%q, %v", dir, err)
 			}
 		})

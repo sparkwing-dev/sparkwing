@@ -54,6 +54,7 @@ type BurstExecutionProof struct {
 	Pipeline      string
 	Plan          nodeproto.PlanDoc
 	Engine        engine.Identity
+	Source        func(*testing.T) (string, string)
 	Execute       func(client.EngineOptions, controllerwire.ClaimedUnit, controllerwire.Controller)
 	ClaimCloud    func(client.EngineOptions) controllerwire.ClaimedUnit
 	ExchangeCloud func(client.EngineOptions, controllerwire.ClaimedUnit) controllerwire.ClaimedUnit
@@ -105,6 +106,9 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 
 	bundle := filepath.Join(t.TempDir(), "snapshot.bundle")
 	repo, sha := sourcetest.Repository(t)
+	if proof != nil && proof.Source != nil {
+		repo, sha = proof.Source(t)
+	}
 	sourcetest.Git(t, repo, "bundle", "create", bundle, "HEAD")
 	input.Git.SHA, input.Source.Ref = sha, sha
 	input.Git.Repository.Display = "https://example.test/acme/repo"

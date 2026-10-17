@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Capture artifacts, restore consumed files and resolve dependency
+  caches from the same repository working directory as SDK execution. Nested
+  pipeline directories no longer cause empty artifact manifests or cold caches.
+
 - **overflow:** Release ready jobs while this machine is busy. Match unhinted
   jobs against the existing one-core admission charge, and acquire machine
   capacity after a here claim. Registered burst runners share the requester's

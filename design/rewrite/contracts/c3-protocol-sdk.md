@@ -26,6 +26,20 @@ It never grants an execution award. `WaitNode` retains its state-sequence rule.
 
 ## Declared requester secrets in composed execution
 
+Artifact publication, consumed-file staging, relative cache directories, cache
+key files and package-manager queries use the SDK execution working directory.
+An acquired entry's checkout root owns those paths. Its pipeline directory owns
+SDK source and installation. Runtime adapters use the existing
+`sdkWorkingDirectory` selector, including nested pipeline directories.
+
+The compiled-source burst proof acquires its uploaded bundle under the awarded
+claim, builds the Go SDK with the shared installer and executes it through real
+process pipes for here, personal and exchanged Cloud awards. Secret release,
+masking, artifact publication and retrieval use the real controller and store.
+HTTP service transport uses test FIFOs. Engine resolution and Kubernetes remain
+fakes. Public CLI, signed-engine distribution and native Cloud isolation require
+their separate native lanes.
+
 `source.PrepareCheckout` owns preparation of an absent absolute host workspace
 for remote source. It authorizes Git or bundle access first, then uses the
 existing private-directory policy and acquisition-owned temporary checkout.
