@@ -113,6 +113,9 @@ func failureAttrs(err error) []any {
 		if failure.Hint != "" {
 			attrs = append(attrs, "hint", failure.Hint)
 		}
+		if id, ok := failure.Details["request_id"].(string); ok {
+			attrs = append(attrs, "controller_request", id)
+		}
 	}
 	return attrs
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"reflect"
 	"strings"
@@ -141,6 +142,13 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 		}
 		if failure == nil {
 			return false, fmt.Errorf("controller error is null")
+		}
+		if id := resp.Header.Get("X-Request-Id"); id != "" && resp.StatusCode >= http.StatusInternalServerError {
+			failure.Details = maps.Clone(failure.Details)
+			if failure.Details == nil {
+				failure.Details = map[string]any{}
+			}
+			failure.Details["request_id"] = id
 		}
 		retry := resp.StatusCode == http.StatusServiceUnavailable && failure.Code == apierr.Unavailable || resp.StatusCode == http.StatusTooManyRequests && failure.Code == apierr.RateLimited
 		return retry, failure
