@@ -125,7 +125,7 @@ func TestDataClientStructuredErrorsAndRetry(t *testing.T) {
 }
 
 func TestDataClientBudgetsBoundTransport(t *testing.T) {
-	for _, operation := range []string{"has-many", "record"} {
+	for _, operation := range []string{"has-many", "record", "depcache"} {
 		t.Run(operation, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				deadline := time.Now().Add(time.Second)
@@ -156,7 +156,8 @@ func TestDataClientBudgetsBoundTransport(t *testing.T) {
 				case "memo":
 					_, err = records.LookupMemo(t.Context(), blob.MemoLookup{Budget: budget})
 				case "depcache":
-					_, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Budget: budget})
+					authority := depcacheAuthority()
+					_, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: authority, Key: blob.DepcacheKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Name: "modules", Key: "dep-key"}, Budget: budget})
 				case "copy-memo":
 					_, err = records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: blob.MemoLookup{Budget: budget}})
 				}

@@ -131,6 +131,7 @@ func wireOperations() map[string]wireOperation {
 	result["POST /api/v1/runners"] = operation("Enroll a runner once", client.EnrollRunnerRequest{}, client.CreatedToken{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
 	result["POST /api/v1/data/records"] = operation("Commit a record", wire.DataRecordWriteRequest{}, wire.DataRecord{})
+	result["POST /api/v1/data/depcache/lookup"] = operation("Look up an authorized dependency cache", wire.DataDepcacheLookupRequest{}, wire.DataDepcacheLookupResult{})
 	addReadParameters(result)
 	return result
 }

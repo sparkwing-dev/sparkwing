@@ -341,7 +341,7 @@ func TestHereCredentialsRefuseTamperingAndMalformedFiles(t *testing.T) {
 	}
 }
 
-func TestHereCredentialsRefusePublicFilesAndSymlinks(t *testing.T) {
+func TestHereCredentialsRefuseWritableTargetsAndEscapingSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix mode and symlink check")
 	}
@@ -353,7 +353,7 @@ func TestHereCredentialsRefusePublicFilesAndSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o644); err != nil {
+	if err := os.Chmod(path, 0o664); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.load("https://one.example", "run"); err == nil {

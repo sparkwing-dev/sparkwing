@@ -22,7 +22,7 @@ func (p Paths) ServeTokenFile() string { return filepath.Join(p.Root, "serve-tok
 // ServeToken reads the local dashboard's bearer. The error wraps
 // [os.ErrNotExist] when no dashboard has created one under this home.
 func (p Paths) ServeToken() (string, error) {
-	f, err := fssecure.OpenFile(p.ServeTokenFile(), os.O_RDONLY)
+	f, err := fssecure.OpenCredential(p.Root, "serve-token")
 	if err != nil {
 		return "", err
 	}

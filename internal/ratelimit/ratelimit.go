@@ -180,10 +180,11 @@ func FromTrustedListener(r *http.Request) bool {
 	return trusted
 }
 
-// ClientIP returns the address a limiter, an audit record or a relay
-// should attribute r to: the single X-Real-IP of a request accepted on
-// a trusted listener, and the TCP peer otherwise.
+// ClientIP returns the trusted forwarded client or TCP peer for logs and per-IP limits.
 func ClientIP(r *http.Request) string {
+	if client, ok := r.Context().Value(proxyClientKey{}).(string); ok {
+		return client
+	}
 	peer, ok := remoteIP(r.RemoteAddr)
 	if !ok {
 		return r.RemoteAddr

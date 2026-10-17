@@ -137,8 +137,28 @@ these file names, mounted whole.
 | `stripe-api-key` | Stripe API credential matching `--payment-mode test` or `live` | a configured payment callback refuses to start |
 | `stripe-webhook-secret` | Signature key for `/webhooks/stripe` | a configured payment callback refuses to start |
 
-Keep the directory readable by the controller's user alone (`0700`, files
-`0600`); a Kubernetes projected volume with `defaultMode: 0400` does this.
+Credential targets must be regular files owned by the process user or root,
+with no group or other write bit. Symlinks are accepted when their resolved
+target stays inside the configured credentials directory, including Kubernetes
+`..data` projections. Escaping links and writable targets stop startup. On
+Windows, targets must belong to the process user, LocalSystem or local
+administrators, and their ACL must grant no write access to other principals.
+Use `0700` directories and `0600` files for private local storage. Kubernetes
+projected volumes can use `defaultMode: 0400`.
+
+### Client addresses behind proxies
+
+Set `--trusted-proxy-cidrs=10.0.0.0/8,2001:db8:ffff::/48` to the networks of
+proxies that connect to the controller. The full chart takes the same networks
+as a list in `controller.trustedProxyCIDRs`. The empty default ignores
+`X-Forwarded-For`.
+
+The controller accepts that header only when its TCP peer belongs to a configured
+network. It walks the chain from right to left across trusted proxies and uses
+the first untrusted address for request logs and per-IP limits. Proxies must
+append the address they observed or replace the header with their verified
+chain. Trust only proxy networks because every address in those networks can
+assert a forwarded client. Malformed hops in the trusted portion fall back to the TCP peer.
 
 ### Signed downloads through CloudFront
 

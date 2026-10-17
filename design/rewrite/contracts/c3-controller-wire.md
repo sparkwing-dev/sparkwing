@@ -1109,3 +1109,18 @@ masking, artifact upload/restoration and final Job/bootstrap cleanup. The
 Kubernetes client and measured isolation boundary are infrastructure fakes.
 The public CLI probes also declare and consume artifacts across separate jobs.
 These tests do not prove cluster enforcement or release-image execution.
+
+## Execution dependency-cache lookup
+
+DataDepcacheLookupRequest and DataDepcacheLookupResult move the existing
+`POST /data/depcache/lookup` shape into controllerwire. The client sends only
+name, key and an optional deadline. It checks its execution storage binding,
+then validates the returned repository, name, key, digest and selected own/PR
+base/default ref. Record keys are repository-scoped. The job attempt remains
+in authenticated upload provenance.
+
+Lookup returns public record metadata and RestoreSource. It carries no
+ReadSet, uploader or verified App facts. Signed downloads independently
+recompute the live data entitlement in the controller transaction. This
+implements ordinary execution dependency-cache reads. The separate cross-profile
+memo/provenance contract and its refusal stubs are unchanged.

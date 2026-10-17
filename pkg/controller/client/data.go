@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"net/url"
 	"reflect"
@@ -223,8 +224,55 @@ func (c *dataClient) LookupMemo(context.Context, blob.MemoLookup) (blob.MemoHit,
 	return blob.MemoHit{}, missingDataProof()
 }
 
-func (c *dataClient) LookupDepcache(context.Context, blob.DepcacheLookup) (blob.DepcacheHit, error) {
-	return blob.DepcacheHit{}, missingDataProof()
+func (c *dataClient) LookupDepcache(ctx context.Context, input blob.DepcacheLookup) (blob.DepcacheHit, error) {
+	if err := c.checkAuthority(input.Authority); err != nil {
+		return blob.DepcacheHit{}, err
+	}
+	authority, key := input.Authority, input.Key
+	team := authority.Attempt.Value.Team
+	if team == "" && authority.Upload.Set {
+		team = authority.Upload.Value.Team
+	}
+	if team == "" || key.Repo != authority.Repo || key.Ref != authority.Ref.Scope {
+		return blob.DepcacheHit{}, localHostClientRefusal()
+	}
+	body := wire.DataDepcacheLookupRequest{Name: key.Name, Key: key.Key, Deadline: dataDeadline(input.Budget)}
+	var result wire.DataDepcacheLookupResult
+	err := c.withBudget(ctx, input.Budget, func(ctx context.Context) error {
+		return c.post(ctx, "depcache/lookup", "", body, &result)
+	})
+	if err != nil {
+		return blob.DepcacheHit{}, err
+	}
+	if !result.Found {
+		if result.Record != nil || result.Source != "" {
+			return blob.DepcacheHit{}, dataProtocolError("missing cache includes a payload")
+		}
+		return blob.DepcacheHit{}, nil
+	}
+	if result.Record == nil {
+		return blob.DepcacheHit{}, dataProtocolError("cache lookup has no payload")
+	}
+	record := decodeDataRecord(*result.Record, team)
+	ref := key.Ref
+	switch result.Source {
+	case blob.RestoreOwnRef:
+	case blob.RestorePRBase:
+		if !authority.Ref.PullRequestBase.Set {
+			return blob.DepcacheHit{}, dataProtocolError("cache lookup selected an unknown PR base")
+		}
+		ref = blob.RefScope{Ref: authority.Ref.PullRequestBase.Value, Verified: true}
+	case blob.RestoreDefaultBranch:
+		ref = blob.RefScope{Ref: authority.Ref.DefaultBranch, Verified: true}
+	default:
+		return blob.DepcacheHit{}, dataProtocolError("cache lookup selected an unknown source")
+	}
+	expected := blob.RecordKey{Team: team, Kind: blob.KindDepcache, Name: key.Name, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Key: key.Key}}
+	digest, digestErr := hex.DecodeString(string(record.Digest))
+	if ref.Ref == "" || record.Key != expected || digestErr != nil || len(digest) != 32 || string(record.Digest) != strings.ToLower(string(record.Digest)) {
+		return blob.DepcacheHit{}, dataProtocolError("cache lookup changed selected key or digest")
+	}
+	return blob.DepcacheHit{Found: true, Record: record, Source: result.Source}, nil
 }
 
 func (c *dataClient) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error) {

@@ -23,6 +23,8 @@ unlock.
 - **run:** Restore and save declared dependency caches through the shared native
   host on this machine, registered runners and Cloud. Package-manager caches use
   the persisted job environment and the current attempt's storage authority.
+  Repository-scoped cache records and authenticated lookup now work through the
+  real controller transport, including here and personal-machine bursts.
 
 - **run:** Capture artifacts, restore consumed files and resolve dependency
   caches from the same repository working directory as SDK execution. Nested
@@ -55,6 +57,8 @@ unlock.
   imported packages without downloading unused module archives.
 - **store (Breaking):** Advance the rewrite baseline to schema 5 for account
   provenance and overflow controls. [Migration](docs/migrations/_unreleased.md#explicit-cloud-overflow).
+- **storage:** Honor the configured S3 path prefix for uploads, downloads, logs, artifacts, source bundles and cleanup
+
 - **charts (Breaking):** Require repository and tag for every enabled image. Add a Cloud launcher Deployment, controller S3 values, and EKS/ExternalSecret examples. Cloud Jobs retain CPU-band tolerations and Karpenter disruption protection. See [migration guide](docs/migrations/_unreleased.md#cloud-helm-images-and-launcher).
 
 - **runners:** Connect installed start, warm, launch and Cloud bootstrap commands to the shared hosts, authenticated state and measured Kubernetes boundary. Plan and eval units retain their own leases. Owners use canonical placement and can report before a work attempt exists.

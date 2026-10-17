@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
@@ -28,18 +30,29 @@ type S3 struct {
 	client  *s3.Client
 	presign *s3.PresignClient
 	bucket  string
+	prefix  string
 }
 
-// NewS3 uses the controller's S3 client and bucket, without a cache-service protocol.
-func NewS3(client *s3.Client, bucket string) (*S3, error) {
+// NewS3 scopes the controller's S3 client to the configured bucket and path prefix.
+func NewS3(client *s3.Client, bucket, prefix string) (*S3, error) {
 	if client == nil || bucket == "" {
 		return nil, fmt.Errorf("S3 requires a client and bucket")
+	}
+	prefix = strings.Trim(prefix, "/")
+	if prefix != "" {
+		if !fs.ValidPath(prefix) || prefix == "." || strings.ContainsRune(prefix, '\\') || strings.ContainsFunc(prefix, unicode.IsControl) {
+			return nil, fmt.Errorf("invalid S3 storage prefix")
+		}
+		prefix += "/"
 	}
 	presign := s3.NewPresignClient(client, func(o *s3.PresignOptions) {
 		o.Presigner = v4.NewSigner(func(s *v4.SignerOptions) { s.DisableHeaderHoisting = true })
 	})
-	return &S3{client: client, presign: presign, bucket: bucket}, nil
+	return &S3{client: client, presign: presign, bucket: bucket, prefix: prefix}, nil
 }
+
+// PhysicalKey locates a validated backend-relative key under the configured storage prefix.
+func (s *S3) PhysicalKey(key string) string { return s.prefix + key }
 
 // Sign binds size and checksum to PUT and names one immutable object for GET.
 func (s *S3) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error) {
@@ -56,11 +69,11 @@ func (s *S3) Sign(ctx context.Context, object capability.ObjectToSign) (capabili
 			return capability.SignedObject{}, decodeErr
 		}
 		signed, err = s.presign.PresignPutObject(ctx, &s3.PutObjectInput{
-			Bucket: aws.String(s.bucket), Key: aws.String(object.Key), ContentLength: aws.Int64(object.Size),
+			Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(object.Key)), ContentLength: aws.Int64(object.Size),
 			ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(raw)),
 		}, options)
 	} else {
-		signed, err = s.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(object.Key)}, options)
+		signed, err = s.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(object.Key))}, options)
 	}
 	if err != nil {
 		return capability.SignedObject{}, err
@@ -80,7 +93,7 @@ func signedHeaders(signed http.Header) map[string]string {
 }
 
 func (s *S3) verify(ctx context.Context, key string, expected Blob) (string, error) {
-	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(key))})
 	if s3Error(err, "NoSuchKey", "NotFound") {
 		return "", ErrNotFound
 	}
@@ -119,7 +132,7 @@ func (s *S3) CommitObject(ctx context.Context, pending string, expected Blob) er
 		return fmt.Errorf("staging object has no version fence")
 	}
 	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{
-		Bucket: aws.String(s.bucket), Key: aws.String(final), CopySource: aws.String(url.PathEscape(s.bucket + "/" + pending)),
+		Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(final)), CopySource: aws.String(url.PathEscape(s.bucket + "/" + s.PhysicalKey(pending))),
 		CopySourceIfMatch: aws.String(etag), IfNoneMatch: aws.String("*"), MetadataDirective: types.MetadataDirectiveReplace,
 	})
 	if err != nil && !s3Error(err, "PreconditionFailed") {
@@ -134,7 +147,7 @@ func (s *S3) DeleteObject(ctx context.Context, key string) error {
 	if err := validateDeleteKey(key); err != nil {
 		return err
 	}
-	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(key))})
 	if s3Error(err, "NoSuchKey", "NotFound") {
 		return nil
 	}
@@ -161,7 +174,7 @@ func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(key))})
 	if s3Error(err, "NoSuchKey", "NotFound") {
 		return nil, ErrNotFound
 	}

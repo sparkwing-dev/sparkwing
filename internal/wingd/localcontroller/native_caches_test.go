@@ -127,7 +127,7 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 		return
 	}
 	key := backend.committed.Key
-	if backend.committed.Authority != input.Storage.Authority || backend.committed.Source != input.Storage.Authority.Upload.Value || key.Kind != blob.KindDepcache || key.Team != "default" || key.Scope.Pipeline != "burst" || key.Scope.Job != "job" || key.Scope.Repo != input.Storage.Authority.Repo || key.Name != name || key.Scope.Key == "" {
+	if backend.committed.Authority != input.Storage.Authority || backend.committed.Source != input.Storage.Authority.Upload.Value || key.Kind != blob.KindDepcache || key.Team != "default" || key.Scope.Pipeline != "" || key.Scope.Job != "" || key.Scope.Repo != input.Storage.Authority.Repo || key.Name != name || key.Scope.Key == "" {
 		t.Fatalf("cache publication lost its awarded scope: %+v", backend.committed)
 	}
 	if err := os.RemoveAll(directory); err != nil {

@@ -5,6 +5,18 @@ downloads and presence queries. The caller supplies authority in memory.
 `TransferClient` sends only the signed headers to the object URL and refuses
 redirects. It supports S3 and filesystem signing through the same HTTP path.
 
+All physical keys are relative to the configured storage root. For
+`--cache-blob-store=s3://bucket/controller`, CAS blobs, artifact members and
+manifests, source bundles, pipeline binaries, staged uploads and logs live under
+`controller/`. Records remain database rows referring to those bytes. S3 copy
+sources, signed downloads (including CloudFront), log listings and deletion use
+that same prefix. Set bucket measurement to the same URL and scope IAM object
+permissions to `controller/*`. Log lifecycle rules cover
+`controller/logs/<class>/`. CloudFront uses an empty origin path because its
+signed paths include the prefix. The filesystem backend anchors every key to
+its configured data directory through one directory handle.
+
+
 Uploads check the signed digest and size, consume and verify the source, then
 commit the ticket. The returned receipt must match the signed uploader and
 digest. Downloads verify size and SHA-256 at EOF. Reading the expected number

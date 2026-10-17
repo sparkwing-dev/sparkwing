@@ -15,12 +15,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -51,8 +53,14 @@ func (burstSDKPipeline) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, _ 
 			return errors.New("SDK lost requester secrets or granted runner")
 		}
 		sw.Info(ctx, "secret=%s encoded=%s", value, base64.StdEncoding.EncodeToString([]byte(value)))
+		if err := os.MkdirAll("modules", 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile("modules/dependency", []byte("cached burst dependency\n"), 0o600); err != nil {
+			return err
+		}
 		return os.WriteFile("burst-result.txt", []byte("artifact from burst SDK\n"), 0o640)
-	}).Artifacts("burst-result.txt")
+	}).Artifacts("burst-result.txt").Cache(sw.Dir("modules", sw.KeyFromFile("source-marker.txt")))
 	return nil
 }
 
@@ -86,6 +94,8 @@ type burstSDKNativeExecution struct {
 	entry      *source.Entry
 	engines    *engine.Resolver
 	serviceURL func(http.Handler) string
+	source     *source.Options
+	acquire    func(context.Context, source.Spec, source.Options) (*source.Entry, error)
 }
 
 func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller, native *burstSDKNativeExecution) {
@@ -100,7 +110,8 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := nodehost.NewRemoteHostStore(wire, private, award.UnitID, func() bool { return true })
+	var processes nodehost.NativeProcesses
+	state, err := nodehost.NewRemoteHostStore(wire, private, award.UnitID, func() bool { return processes.Computing(award.RunID) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +143,11 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	} else {
 		t.Chdir(input.Entry.Directory)
 	}
+	if input.Entry != nil {
+		if err := os.WriteFile(filepath.Join(input.Entry.Directory, "source-marker.txt"), []byte("uploaded edited source\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	masker := secrets.NewMasker()
 	masks := nodehost.NewMaskRegistry(masker)
 	authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: private, Bindings: private})
@@ -143,11 +159,17 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if err := nodehost.RegisterProcessServices(router, authorities.Resolve); err != nil {
 		t.Fatal(err)
 	}
-	processes := nodehost.NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://127.0.0.1:1"}
+	processes = nodehost.NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://127.0.0.1:1"}
 	var logs burstSDKLogs
 	if native != nil {
-		processes.URL = native.serviceURL(router)
+		if native.source == nil {
+			processes.URL = native.serviceURL(router)
+		}
 		processes.Session.Environments = nodehost.SDKEnvironment{Store: state, Masks: masks}
+		if native.source != nil {
+			native.source.Base.Masker = masker
+			processes.Session.Environments.Base = native.source.Base
+		}
 	}
 	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
 		logs.WriteString(frame.Message)
@@ -165,6 +187,11 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 		authority := input.Storage.Authority
 		return nodehost.JobUpload{Identity: authority.Upload.Value, Authority: authority, Key: blob.ResultRecordKey(authority.Attempt.Value, authority.Repo, authority.Ref.Scope, burstSDKPipelineName, blob.KindManifest)}, nil
 	}}
+	caches := nodehost.DepcacheRecords{Bind: func(ctx context.Context, input nodehost.NodeInput, key blob.DepcacheKey) (nodehost.JobUpload, error) {
+		upload, err := artifacts.Bind(ctx, input)
+		upload.Key.Kind, upload.Key.Name, upload.Key.Scope.Key = blob.KindDepcache, key.Name, key.Key
+		return upload, err
+	}}
 	destination := t.TempDir()
 	executor, err := nodehost.NewNodeExecutor(nodehost.ExecutorDependencies{
 		BindStorage: func(ctx context.Context, _ nodehost.NodeInput) (nodehost.StorageBinding, error) {
@@ -176,6 +203,9 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 			return nodehost.StorageBinding{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority}, err
 		},
 		PrepareLayer: func(ctx context.Context, layer nodehost.LayerSpec, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
+			if layer.Name == "caches" {
+				return caches.Prepare(ctx, layer, input, job)
+			}
 			finish, err := artifacts.Prepare(ctx, layer, input, job)
 			if err != nil || finish == nil {
 				return finish, err
@@ -198,6 +228,21 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 				body, err := os.ReadFile(filepath.Join(destination, "received", "burst-result.txt"))
 				if err != nil || string(body) != "artifact from burst SDK\n" {
 					return errors.New("restored burst artifact differs from the SDK output")
+				}
+				workspace := current.Entry.CheckoutDirectory()
+				if workspace == "" {
+					workspace = current.Entry.Directory
+				}
+				directory := filepath.Join(workspace, "modules")
+				if err := os.RemoveAll(directory); err != nil {
+					return err
+				}
+				if _, err := caches.Prepare(ctx, nodehost.LayerSpec{Name: "caches"}, current, job); err != nil {
+					return err
+				}
+				body, err = os.ReadFile(filepath.Join(directory, "dependency"))
+				if err != nil || string(body) != "cached burst dependency\n" {
+					return errors.New("restored native cache differs from SDK output")
 				}
 				return nil
 			}, nil
@@ -235,7 +280,24 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := executor.Execute(ctx, input); err != nil {
+	execute := executor.Execute
+	if native != nil && native.source != nil {
+		host := &nodehost.ClaimedNodeHost{
+			Store: state, Lease: lease.Keeper{Lease: time.Minute, Interval: 20 * time.Second},
+			Source: *native.source, Executor: executor, Mask: masker.Mask, Masks: masks,
+			Acquire: func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
+				entry, err := native.acquire(ctx, spec, options)
+				if err == nil {
+					native.entry = entry
+					processes.URL = native.serviceURL(router)
+				}
+				return entry, err
+			},
+		}
+		input.Entry = nil
+		execute = host.Execute
+	}
+	if err := execute(ctx, input); err != nil {
 		t.Fatalf("SDK execution: %v; logs: %s", err, logs.String())
 	}
 	_, err = state.ReadNode(ctx, row.Ref)

@@ -85,3 +85,33 @@ func TestFilesystemDataStartupRefusesInvalidConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestS3DataStartupPreservesURLPrefix(t *testing.T) {
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("AWS_ACCESS_KEY_ID", "fixture")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "fixture")
+	t.Setenv("AWS_ENDPOINT_URL_S3", "https://objects.invalid")
+	for _, prefix := range []string{"", "controller/", "deployment/nested-root/", "space here/%2e%2e/"} {
+		t.Run(prefix, func(t *testing.T) {
+			storageURL := (&url.URL{Scheme: "s3", Host: "bucket", Path: "/" + prefix}).String()
+			objects, err := openS3Data(t.Context(), storageURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, method := range []string{http.MethodPut, http.MethodGet} {
+				key := "teams/acme/pending/ticket"
+				if method == http.MethodGet {
+					key = "teams/acme/cas/" + strings.Repeat("a", 64)
+				}
+				signed, err := objects.Sign(t.Context(), capability.ObjectToSign{Method: method, Key: key, Size: 1, SHA256: strings.Repeat("a", 64), ExpiresAt: time.Now().Add(time.Minute)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				u, err := url.Parse(signed.URL)
+				if err != nil || u.Path != "/bucket/"+prefix+key {
+					t.Fatalf("%s prefix %q: %s: %v", method, prefix, signed.URL, err)
+				}
+			}
+		})
+	}
+}

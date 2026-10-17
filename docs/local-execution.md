@@ -470,7 +470,9 @@ A missing or corrupt artifact fails the consumer.
 Declared dependency caches restore before the job and save successful cold
 directories through its current storage authority. This applies here, on personal
 machines and in Cloud. Package-manager cache paths use the persisted job
-environment. Cache transfer failures warn and leave the next job to run cold.
+environment. Jobs share matching dependency caches within the same repository
+and ref, while every write retains its originating job attempt for authorization.
+Cache transfer failures warn and leave the next job to run cold.
 
 Cloud allocates the CPU class selected by the team's price table and the
 memory that comes with that class. This also covers jobs without explicit

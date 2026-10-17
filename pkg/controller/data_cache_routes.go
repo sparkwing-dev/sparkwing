@@ -22,12 +22,6 @@ type dataMemoResponse struct {
 	Members  []controllerwire.DataMember `json:"members"`
 }
 
-type dataDepcacheResponse struct {
-	Found  bool                       `json:"found"`
-	Record *controllerwire.DataRecord `json:"record,omitempty"`
-	Source blob.RestoreSource         `json:"source,omitempty"`
-}
-
 func decodeCacheRequest(r *http.Request, required ...string) (map[string]string, blob.Budget, error) {
 	raw, err := readEngineBody(r)
 	if err != nil {
@@ -126,7 +120,7 @@ func (s *Server) handleDataDepcache(w http.ResponseWriter, r *http.Request, a ca
 	if err != nil {
 		return dataRouteError(err)
 	}
-	response := dataDepcacheResponse{Found: hit.Found}
+	response := controllerwire.DataDepcacheLookupResult{Found: hit.Found}
 	if hit.Found {
 		record := dataRecordResponse(hit.Record)
 		response.Record, response.Source = &record, hit.Source

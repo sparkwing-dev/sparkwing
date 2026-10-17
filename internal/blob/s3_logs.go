@@ -27,7 +27,7 @@ func (s *S3) SignLogPut(ctx context.Context, key string, expiry time.Time) (stri
 		return "", nil, fmt.Errorf("invalid log upload expiry")
 	}
 	put, err := s.presign.PresignPutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(s.bucket), Key: aws.String(key), IfNoneMatch: aws.String("*"),
+		Bucket: aws.String(s.bucket), Key: aws.String(s.PhysicalKey(key)), IfNoneMatch: aws.String("*"),
 	}, func(o *s3.PresignOptions) { o.Expires = lifetime })
 	if err != nil {
 		return "", nil, err

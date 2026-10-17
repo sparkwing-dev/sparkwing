@@ -332,7 +332,7 @@ func prepareRunnerRemoval(args []string) (runnerRemoval, *namedProfile, error) {
 	if raw.CredentialsDir == nil || strings.TrimSpace(*raw.CredentialsDir) == "" {
 		return removal, nil, fmt.Errorf("%s: runner.credentials_dir is required", path)
 	}
-	credential, err := fssecure.OpenPrivateConfig(filepath.Join(*raw.CredentialsDir, "agent-token"))
+	credential, err := fssecure.OpenCredential(*raw.CredentialsDir, "agent-token")
 	if err != nil {
 		return removal, nil, err
 	}

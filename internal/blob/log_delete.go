@@ -104,15 +104,16 @@ func (s *S3) DeleteLogs(ctx context.Context, team, run string) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	logsPrefix := s.PhysicalKey("logs/")
 	var deleted int64
 	var token *string
 	for {
-		page, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s.bucket), Prefix: aws.String("logs/"), Delimiter: aws.String("/"), ContinuationToken: token})
+		page, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s.bucket), Prefix: aws.String(logsPrefix), Delimiter: aws.String("/"), ContinuationToken: token})
 		if err != nil {
 			return deleted, err
 		}
 		for _, class := range page.CommonPrefixes {
-			name, ok := strings.CutPrefix(aws.ToString(class.Prefix), "logs/")
+			name, ok := strings.CutPrefix(aws.ToString(class.Prefix), logsPrefix)
 			if !ok {
 				return deleted, fmt.Errorf("invalid log class listing")
 			}
@@ -120,7 +121,7 @@ func (s *S3) DeleteLogs(ctx context.Context, team, run string) (int64, error) {
 			if err != nil {
 				continue
 			}
-			n, err := s.deleteLogPrefix(ctx, prefix)
+			n, err := s.deleteLogPrefix(ctx, s.PhysicalKey(prefix))
 			deleted += n
 			if err != nil {
 				return deleted, err

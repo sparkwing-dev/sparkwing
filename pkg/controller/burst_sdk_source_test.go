@@ -3,6 +3,7 @@
 package controller_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -34,6 +36,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("GOPROXY", "off")
+	t.Setenv("TOKEN", "ambient-requester-value-never-forward")
 	repo, sha, engines, selected := burstSDKSourceFixture(t)
 	_, plan, err := sdkserve.DefaultOperations.Plan(t.Context(), burstSDKPipelineName, map[string]string{}, nodeproto.RunContext{Pipeline: burstSDKPipelineName})
 	if err != nil {
@@ -98,6 +101,17 @@ func burstSDKSourceFixture(t *testing.T) (string, string, *engine.Resolver, engi
 
 func executeBurstUploadedSDK(t *testing.T, engines *engine.Resolver, selected engine.Resolved, options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller) {
 	t.Helper()
+	var renewed atomic.Bool
+	transport := options.HTTP.Transport
+	connection := *options.HTTP
+	connection.Transport = burstSourceRoundTrip(func(request *http.Request) (*http.Response, error) {
+		response, err := transport.RoundTrip(request)
+		if err == nil && response.StatusCode == http.StatusOK && strings.HasSuffix(request.URL.Path, "/heartbeat") {
+			renewed.Store(true)
+		}
+		return response, err
+	})
+	options.HTTP = &connection
 	wire, err := client.NewEngineClient(options)
 	if err != nil {
 		t.Fatal(err)
@@ -123,31 +137,40 @@ func executeBurstUploadedSDK(t *testing.T, engines *engine.Resolver, selected en
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, err := source.Acquire(t.Context(), spec, source.Options{
-		Workspace: t.TempDir(), Access: access, BundleTransport: options.HTTP.Transport,
-		Engines: engines, Target: selected.Target, SDK: engine.GoSDK,
-		Base: procenv.Base{Local: true, Captured: os.Environ()},
-	})
-	if err != nil {
-		t.Fatalf("acquire uploaded SDK: %v", err)
-	}
-	defer func() {
-		if err := entry.Close(); err != nil {
-			t.Error(err)
-		}
-		if _, err := os.Stat(entry.Command[0]); !os.IsNotExist(err) {
-			t.Errorf("closed source retained SDK executable: %v", err)
-		}
-	}()
-	executeBurstSDKProcess(t, options, award, owner, &burstSDKNativeExecution{
-		entry: entry, engines: engines, serviceURL: func(handler http.Handler) string {
-			url, paths := burstSDKPipeService(t, handler)
-			for i, name := range []string{".burst-requests", ".burst-responses"} {
-				if err := os.Symlink(paths[i], filepath.Join(entry.CheckoutDirectory(), name)); err != nil {
-					t.Fatal(err)
-				}
-			}
-			return url
+	native := &burstSDKNativeExecution{
+		engines: engines,
+		source: &source.Options{
+			Workspace: t.TempDir(), Access: access, BundleTransport: options.HTTP.Transport,
+			Engines: engines, Target: selected.Target, SDK: engine.GoSDK,
+			Base: procenv.Base{Ambient: os.Environ(), SubmitEnvAllow: []string{"GOCACHE", "GOMODCACHE"}},
 		},
-	})
+		acquire: func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
+			if !renewed.Load() {
+				t.Error("uploaded source installation preceded the awarded job's first renewal")
+			}
+			return source.Acquire(ctx, spec, options)
+		},
+	}
+	native.serviceURL = func(handler http.Handler) string {
+		url, paths := burstSDKPipeService(t, handler)
+		for i, name := range []string{".burst-requests", ".burst-responses"} {
+			if err := os.Symlink(paths[i], filepath.Join(native.entry.CheckoutDirectory(), name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return url
+	}
+	executeBurstSDKProcess(t, options, award, owner, native)
+	if native.entry == nil {
+		t.Fatal("claimed host did not acquire source")
+	}
+	if _, err := os.Stat(native.entry.Command[0]); !os.IsNotExist(err) {
+		t.Fatalf("closed source retained SDK executable: %v", err)
+	}
+}
+
+type burstSourceRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f burstSourceRoundTrip) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }

@@ -668,6 +668,38 @@ components:
         - upload_id
       type: object
       x-sparkwing-go-type: controllerwire.DataCommitRequest
+    internal.controllerwire.DataDepcacheLookupRequest:
+      additionalProperties: true
+      properties:
+        deadline:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        key:
+          type: string
+        name:
+          type: string
+      required:
+        - name
+        - key
+      type: object
+      x-sparkwing-go-type: controllerwire.DataDepcacheLookupRequest
+    internal.controllerwire.DataDepcacheLookupResult:
+      additionalProperties: true
+      properties:
+        found:
+          type: boolean
+        record:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.DataRecord'
+            - type: "null"
+        source:
+          type: string
+      required:
+        - found
+      type: object
+      x-sparkwing-go-type: controllerwire.DataDepcacheLookupResult
     internal.controllerwire.DataDownloadRequest:
       additionalProperties: true
       properties:
@@ -6215,15 +6247,26 @@ paths:
         retry: exact_body
   /api/v1/data/depcache/lookup:
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.DataDepcacheLookupRequest'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DataDepcacheLookupResult'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/data/depcache/lookup
+      summary: Look up an authorized dependency cache
       x-sparkwing-policy:
         method: POST
         path: /api/v1/data/depcache/lookup
@@ -6247,7 +6290,6 @@ paths:
             binding: data
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/data/download:
     post:
       requestBody:

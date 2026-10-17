@@ -1,9 +1,10 @@
 package controllerwire
 
 import (
+	"time"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"time"
 )
 
 // DataUploadRequest selects bytes; the controller derives uploader and scope.
@@ -87,6 +88,20 @@ type DataRecordLookupResult struct {
 	Found   bool         `json:"found"`
 	Record  *DataRecord  `json:"record,omitempty"`
 	Members []DataMember `json:"members"`
+}
+
+// DataDepcacheLookupRequest selects a declared cache within authenticated execution storage.
+type DataDepcacheLookupRequest struct {
+	Name     string     `json:"name"`
+	Key      string     `json:"key"`
+	Deadline *time.Time `json:"deadline,omitempty"`
+}
+
+// DataDepcacheLookupResult carries an authorized repository cache selection.
+type DataDepcacheLookupResult struct {
+	Found  bool               `json:"found"`
+	Record *DataRecord        `json:"record,omitempty"`
+	Source blob.RestoreSource `json:"source,omitempty"`
 }
 
 // DataRecordWriteRequest commits logical record selectors under server-derived scope.

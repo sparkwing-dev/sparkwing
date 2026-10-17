@@ -1,41 +1,34 @@
 # C2 credentials contract
 
-## Process secret selector and value transport
-
-Node-host route decoding derives named selectors from the registered route.
-`GET /node/v1/secrets/{name}` supplies only `SecretName`. It supplies no pipeline
-selector. `GET /node/v1/pipelines/{name}/latest` supplies only `Pipeline`.
-Unrelated selectors stay absent. The existing store declaration, run, pipeline,
-claim and parent-authority checks remain authoritative.
-
-Controller value reads encode the shared `controllerwire.SecretValue`, including
-explicit false `shared` and an explicit `value` even when empty. Metadata fields
-retain the same meaning. The native process client can consume requester values
-through its existing live award. A wire omission cannot silently become a
-missing secret or suppress execution. No grant or release fence is widened.
-
 <!-- design:begin -->
 
 ## Amendment 1: selected routes and trusted adapters
 
-### Bootstrap source bundles and transition source ordinals
+### Credential files and proxy attribution
 
-`POST /api/v1/data/download` also accepts `pod_bootstrap` with `source.read`,
-`sourceBundle` binding and sensitive liveness. `BootstrapGrants` remains exactly
-`source.read` and `claim.exchange`. The alternate permits only the submitted
-bundle digest in the bootstrap's bound run seal. It rechecks owner/generation,
-lease, ancestry, expiry, cancellation and the source fence before signing bytes.
-The run, node and generation come from the persisted capability. The caller
-supplies only the digest. Plan and Eval bootstrap preparation use the same rule.
-Secrets, output/cache reads, general existence queries, uploads and records stay
-unavailable before exchange. Consumed bootstraps cannot fetch another signed URL.
+`fssecure.OpenCredential(directory, name)` is the shared file boundary for
+credential values and keys. The resolved target stays inside the resolved
+configured directory, is regular, belongs to the process user or root and
+has no group or other write bit. Kubernetes `..data` links and other in-directory
+links are accepted. The opened handle is checked before any credential bytes
+are read. Windows uses the current user, LocalSystem or Administrators owner
+and refuses write grants to other principals. Operator configuration documents
+retain their stricter private-config policy.
 
-New node awards bind holder and generation with attempt zero. Their retained
-node-wide attempt counter is historical until execution starts. The internal
-`RequestEvidence.ResultAttempt` carries the transition body's `source_attempt`
-for exact-body proof creation and replay, separately from current execution
-identity. C1 checks the source ordinal and authority together before applying a
-new transition. Exact replay preserves the new ordinal and state sequence.
+Directory credentials, Stripe API/webhook keys, runner and launcher tokens,
+local encryption keys, serve tokens, retained here credentials, CLI secret input
+files and filesystem secret sources
+use this boundary. Standalone file settings use their parent as the boundary.
+The redundant credentials.ReadPrivate and FileBearer machine-policy parameter
+are removed because both service and machine files share the same policy.
+
+`--trusted-proxy-cidrs` accepts a comma-separated IPv4/IPv6 CIDR list and the
+full chart exposes `controller.trustedProxyCIDRs` as a list. Empty ignores
+X-Forwarded-For. Invalid configuration fails startup. Only matching TCP peers
+can supply forwarded clients. Walk X-Forwarded-For right to left across trusted
+hops, select the first untrusted address and use it for request logs and all
+per-IP limits. Malformed hops in the trusted portion fall back to the TCP peer. The separate trusted
+listener retains its existing X-Real-IP contract.
 
 ### Operator team creation (decision 114)
 
@@ -3289,11 +3282,6 @@ current run's persisted seal and its source-submission record. It remains under
 ordinary live awarded data authority. It grants no cross-run, cross-tenant,
 cache, binary or App trust. HTTPS and HTTP signed transfers follow the same
 configured endpoint contract as other shared data objects.
-Before an attempt starts, a live node award can read only this sealed source
-bundle. It has no result, output or upload identity until execution starts.
-Data authority resolves the route's read or write grant rather than treating
-the capability's write scope as a request to write. Data binding refusals use
-the canonical data error mapping before the handler runs.
 
 GitHub identity is verified before admission using the configured App, a
 confirmed team HTTPS source credential, or the public repository API. Bound
@@ -3302,28 +3290,3 @@ A private package context proof carries the resolved location and repository
 through the intake transaction; policy refuses missing or changed proofs and
 does not open a second SQLite connection inside the transaction. The proof is
 absent from the wire and seal. CLI environment tokens stay at the GitHub API.
-
-## Requester secret delivery
-
-Burst intake accepts resolved local values only as `CreateRunRequest.LocalSecrets`.
-They follow the authenticated requester into the sole intake transaction and
-never enter the run request or response. The persisted request contains only
-`LocalSecretNames`. The client resolver reads only declared names and replaces
-provider errors with a fixed refusal that cannot echo values.
-
-`GET /api/v1/secrets/{name}` releases ephemeral values through the existing
-claim-only declared-secret rule, live fence and transactional release audit.
-The value response always says `masked=true` and uses `Cache-Control: no-store`.
-The process host registers that value with its masker before answering the SDK.
-Member metadata reads cannot obtain an ephemeral value. The controller skips
-envelope decryption only for the store's authenticated ephemeral result.
-
-## Personal machines and overflow account authority
-
-Machine provisioning accepts `Personal` only from a direct account session. `CapabilityOrigin.Personal` preserves this classification across rotation. Claims from such a root require `runs.created_subject_kind=account` and an authenticated creator ID equal to the root's stored account owner. Labels, administrative grants and names cannot supply that ownership. Team-machine roots retain team capacity.
-
-`GET/PUT /api/v1/overflow` require member read/write authority and recheck the live account in the store. They read and update only that account's allowance within its team. The default is uncapped and null clears a cap. A sealed request may narrow the allowance.
-
-Authenticated here bootstrap claims can report their machine's fixed `Capacity`, `OS`, `Arch` and current available resources. Awarded here owners update availability through optional `RenewalRequest.Available`. Store verifies the trigger generation, holder, capability prefix and lease before storing that observation. These observations confer no runner identity, pool membership or cross-run access. The owner observation joins ordinary live eligible claimant checks in the shared placement matcher.
-
-Personal machine enrollment accepts `runs.write` on an independent account session, so editors can register their own machines. Team-machine enrollment requires team administration in both handler and store. A root member bearer cannot establish independent machine consent. `runners add --personal --session-stdin` reads an existing independent account session without saving it. The client obtains its CSRF proof from `GET /api/v1/auth/session`, then presents `Authorization: Session`, same-controller Origin and matching CSRF header/cookie for enrollment and rollback revocation. It never exchanges a member bearer for independent consent. Capability-derived sessions retain their parent and cannot enroll personal machines. The default cookie prefix follows HTTPS; an HTTP deployment must configure insecure cookies.

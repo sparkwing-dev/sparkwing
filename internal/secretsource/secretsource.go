@@ -14,11 +14,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/dotenv"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -162,7 +164,7 @@ func (f *fileResolver) Resolve(_ context.Context, name string) (string, bool, er
 }
 
 func (f *fileResolver) load() {
-	raw, err := os.Open(f.spec.Path)
+	raw, err := fssecure.OpenCredential(filepath.Dir(f.spec.Path), filepath.Base(f.spec.Path))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			f.cache = map[string]string{}

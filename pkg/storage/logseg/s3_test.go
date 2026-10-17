@@ -34,7 +34,7 @@ func s3LogBackend(t *testing.T, requests s3LogHTTP) *blob.S3 {
 		}),
 		HTTPClient: requests,
 	})
-	backend, err := blob.NewS3(client, "bucket")
+	backend, err := blob.NewS3(client, "bucket", "")
 	if err != nil {
 		t.Fatal(err)
 	}

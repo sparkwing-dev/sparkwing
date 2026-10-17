@@ -1141,7 +1141,10 @@ failures prevent successful terminal reporting.
 Production native services also bind `DepcacheRecords.Prepare` to the executor.
 Cache uploads derive their team, repository, ref, pipeline, job and attempt from
 the same authenticated output binding. The cache declaration supplies its name
-and content key. Package-manager directories resolve through the initialized
+and content key. After validating that complete upload binding, cache record
+commits omit pipeline and job because C1 namespaces dependency caches by
+repository, ref, name and content key. Upload provenance retains the job attempt.
+Package-manager directories resolve through the initialized
 process session's persisted job environment. Missing storage refuses declared
 caches. Restore and save failures retain the shared cold-cache warning policy.
 The native composition round-trip and generated scope-mutation property cover
@@ -1150,7 +1153,10 @@ these bindings with fake storage and a fake listener.
 The composition regression reaches byte upload and record lookup through these
 returned services. Its property refuses generated run, job, attempt, generation,
 pipeline and repository mismatches before upload. Composed SDK tests verify
-actual artifact bytes through signed controller storage on all three placements.
+actual artifact and declared-cache bytes through signed controller storage on
+all three placements. The uploaded-source variant uses ClaimedNodeHost for the
+initial renewal, source acquisition, selected-engine installation, execution and
+joined cleanup. Its SDK receives the filtered remote process environment.
 
 ## Burst claimed-job machine admission
 
