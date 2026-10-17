@@ -15,6 +15,8 @@ func TestLauncherRefusesAdmissionChangesBeforeBootstrap(t *testing.T) {
 		mutate func(*batchv1.Job)
 	}{
 		{"node", func(j *batchv1.Job) { j.Spec.Template.Spec.NodeName = "shared-node" }},
+		{"disruption", func(j *batchv1.Job) { delete(j.Spec.Template.Annotations, doNotDisrupt) }},
+		{"cpu_band", func(j *batchv1.Job) { j.Spec.Template.Spec.Tolerations = nil }},
 		{"team", func(j *batchv1.Job) { j.Spec.Template.Spec.NodeSelector = nil }},
 		{"service_account", func(j *batchv1.Job) { j.Spec.Template.Spec.ServiceAccountName = "controller" }},
 		{"api_token", func(j *batchv1.Job) { j.Spec.Template.Spec.AutomountServiceAccountToken = ptr(true) }},

@@ -2651,3 +2651,17 @@ Personal enrollment uses `sparkwing runners add --runner NAME --personal
 session on stdin. A member token cannot create independent machine authority.
 The session and CSRF proof stay in memory. Failed installation revokes the new
 runner credential before returning an error.
+
+## Cloud Helm images and launcher
+
+Helm no longer falls back to `appVersion` for empty image tags. Set repository
+and tag for every enabled controller, runner or launcher image. The Cloud Job
+runner and DinD images also require `sha256:` digests.
+
+Use [the Cloud values example](../../charts/sparkwing-full/examples/cloud.yaml)
+with `sparkwing-full`. It enables the launcher and disables the pool runner.
+Provide its separate `launcher.tokenSecret`, RDS `databaseSecret`, bootstrap,
+encryption and file-named credentials Secrets before startup. See the
+[chart README](../../charts/sparkwing-full/README.md) for SSM mappings and the
+team-node, admission API and network prerequisites. Existing pool deployments
+keep `runner.enabled=true` and explicitly pin their runner image.

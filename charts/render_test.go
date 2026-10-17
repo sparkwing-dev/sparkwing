@@ -26,8 +26,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.2.1" {
-		t.Fatalf("full chart version = %q, want 0.2.1", chart.Version)
+	if chart.Version != "0.2.2" {
+		t.Fatalf("full chart version = %q, want 0.2.2", chart.Version)
 	}
 }
 
@@ -36,10 +36,12 @@ func tokenSecretDefaults(chart string) []string {
 	var controller []string
 	if strings.Contains(chart, "sparkwing-full") {
 		prefix = "sparkwing-runner-bundle."
-		controller = []string{"controller.allowOpenBootstrap=true"}
+		controller = []string{"controller.allowOpenBootstrap=true", "controller.image.repository=registry.example/controller", "controller.image.tag=test"}
 	}
 	return append(controller,
 		prefix+"controller.tokenSecret.name=sparkwing-token",
+		prefix+"runner.image.repository=registry.example/runner",
+		prefix+"runner.image.tag=test",
 	)
 }
 
@@ -773,7 +775,7 @@ func TestControllerAboveOneReplicaFailsToRender(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.replicas=2")
-	for _, want := range []string{"controller.replicas above 1", "local SQLite state DB"} {
+	for _, want := range []string{"controller.replicas above 1", "one replica is supported with SQLite or PostgreSQL"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render error = %q, want it to name %q", out, want)
 		}

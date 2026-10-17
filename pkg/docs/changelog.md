@@ -23,12 +23,13 @@ unlock.
 - **overflow:** Add explicit Cloud routing, tracked working-tree source bundles,
   requester-resolved ephemeral secrets, personal runner capacity and per-user
   overflow controls. Local execution remains the default. Pre-intake source
-  upload network failures can fall back locally. Personal enrollment accepts an existing
+  connection and source upload network failures fall back locally. Personal enrollment accepts an existing
   independent account session through `runners add --session-stdin`.
   `overflow show` reports your allowance and usage, and `overflow set` changes
   or removes your saved monthly cap.
 - **store (Breaking):** Advance the rewrite baseline to schema 5 for account
   provenance and overflow controls. [Migration](docs/migrations/_unreleased.md#explicit-cloud-overflow).
+- **charts (Breaking):** Require repository and tag for every enabled image. Add a Cloud launcher Deployment, controller S3 values, and EKS/ExternalSecret examples. Cloud Jobs retain CPU-band tolerations and Karpenter disruption protection. See [migration guide](docs/migrations/_unreleased.md#cloud-helm-images-and-launcher).
 
 - **runners:** Connect installed start, warm, launch and Cloud bootstrap commands to the shared hosts, authenticated state and measured Kubernetes boundary. Plan and eval units retain their own leases. Owners use canonical placement and can report before a work attempt exists.
 - **sdk:** Encode empty service collections as objects or arrays instead of null, so child pipelines without arguments pass host validation.

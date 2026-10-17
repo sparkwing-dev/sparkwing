@@ -3463,6 +3463,12 @@ same name. Intake replay cannot restore lost values. Retry of a run with local
 secrets requires a new requester submission because retained seals have only
 names. The refusal directs the requester to submit a new run.
 
+The supported Cloud chart uses one controller replica and Recreate rollouts.
+That topology sends intake, plan validation and releases to the same in-memory
+registry. Multi-replica deployment needs a verified run-affinity or ephemeral
+relay contract before it can support local secrets. This amendment adds no
+relay, stored value or change to restart behavior.
+
 ## Burst placement and per-user overflow
 
 `Request.Burst` seals ordered `PlacementStep{Target, Hold}` preferences and an optional narrowing `OverflowMinutes` cap. Targets resolve to authenticated here capacity, the requesting account's registered machines, Cloud or granted runner/pool selectors. Existing `ClaimPlacement` controls hold times for the same owner projections, reconciliation and claim paths. Burst nodes can overflow a here-hosted run without transferring its owner.

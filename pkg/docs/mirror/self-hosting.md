@@ -1,8 +1,8 @@
 # Self-hosting Sparkwing
 
-Use the CLI and local controller on one machine, or deploy the controller and
-runner stack to Kubernetes. The controller authenticates private routes from its first start. Provisioning a
-new shared deployment is pending the operator onboarding route described below.
+The launch offering is Local and Cloud. Self-hosted runners register to Cloud.
+Operating your own shared controller is outside the launch offering. The
+controller deployment material below also describes Cloud operator setup.
 
 ## Direct local execution
 
@@ -182,10 +182,14 @@ StorageClass; on clusters without one (some bare-metal kubeadm installs,
 fresh kind clusters with the local-path provisioner not installed, etc.)
 the PVC sits `Pending` indefinitely with no clear error.
 
-Set the class explicitly via the chart value:
+Start from the [Cloud values example](../charts/sparkwing-full/examples/cloud.yaml)
+and prepare `my-values.yaml` with compatible image repositories/tags and existing
+credential Secret references. For a PVC-backed process home, select its class:
+
 
 ```bash
-helm install sparkwing charts/sparkwing-full \
+helm install sparkwing ./charts/sparkwing-full -f my-values.yaml \
+    --set controller.storage.type=pvc \
     --set controller.storage.pvc.storageClassName=gp3
 ```
 
@@ -203,9 +207,9 @@ and configure the chart to read it:
 
 ```bash
 kubectl -n sparkwing create secret generic sparkwing-database \
-    --from-literal=dsn='postgres://sparkwing:<password>@database.example:5432/sparkwing?sslmode=require'
+    --from-file=dsn=/private/path/database-dsn
 
-helm upgrade --install sparkwing charts/sparkwing-full \
+helm upgrade --install sparkwing ./charts/sparkwing-full -f my-values.yaml \
     --set controller.databaseSecret.name=sparkwing-database \
     --set controller.databaseSecret.key=dsn \
     --set controller.storage.type=emptyDir

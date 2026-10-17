@@ -139,3 +139,34 @@ func TestBurstRejectsCommitSelectionBeforeConnecting(t *testing.T) {
 		}
 	}
 }
+
+func TestBurstConnectionFailureFallsBackBeforeIntake(t *testing.T) {
+	cloud, profile := "cloud", "work"
+	for _, tc := range []struct {
+		failure error
+		local   bool
+	}{
+		{&net.OpError{Op: "dial", Net: "tcp", Err: errors.New("controller unreachable")}, true},
+		{&apierr.Error{Code: apierr.Unavailable, Message: "controller unavailable"}, true},
+		{&apierr.Error{Code: apierr.Forbidden, Message: "invalid profile credential"}, false},
+		{context.Canceled, false},
+	} {
+		t.Run(tc.failure.Error(), func(t *testing.T) {
+			local := false
+			var out bytes.Buffer
+			err := runRoutedCommand(t.Context(), "test", runFlags{}, nil, userconfig.RunRouting{Route: &cloud, Profile: &profile}, &out, burstRunDependencies{
+				connect: func(context.Context, string) (client.EngineOptions, func(), error) {
+					return client.EngineOptions{}, nil, tc.failure
+				},
+				probe: func(context.Context, client.EngineOptions) error {
+					t.Fatal("failed connection reached probe")
+					return nil
+				},
+				local: func(context.Context, string, runFlags, []string) error { local = true; return nil },
+			})
+			if local != tc.local || (err == nil) != tc.local || (out.Len() > 0) != tc.local {
+				t.Fatalf("local=%v notice=%q error=%v", local, &out, err)
+			}
+		})
+	}
+}

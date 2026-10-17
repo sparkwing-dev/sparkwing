@@ -71,11 +71,10 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 		return errors.New("run: a cloud-routed run hosts here and must remain attached")
 	}
 	options, closeConnection, err := deps.connect(ctx, *route.Profile)
-	if err != nil {
-		return err
+	if err == nil {
+		defer closeConnection()
+		err = deps.probe(ctx, options)
 	}
-	defer closeConnection()
-	err = deps.probe(ctx, options)
 	if err == nil {
 		err = deps.cloud(ctx, pipeline, flags, args, route, options)
 		var beforeIntake *burstBeforeIntakeError

@@ -8,8 +8,8 @@ The chart has no cache server, git mirror or package proxy. Runners acquire sour
 from the repository and use the controller's signed data paths. Configure a
 standard package mirror through `runner.extraEnv` if your deployment needs one.
 
-Pin the runner image repository and tag to a compatible build. The chart's
-`appVersion` fallback is metadata, not a tested public image set.
+Set both runner image repository and tag to a compatible build. Both are required.
+`appVersion` is metadata and supplies no image fallback.
 
 ```sh
 helm template sparkwing ./charts/sparkwing-runner-bundle \
@@ -40,8 +40,21 @@ API access. The chart creates no runner Role or RoleBinding. The launcher owns
 Kubernetes Jobs under its separate permissions. Set `runner.alsoClaimTriggers`
 to `false` for a pool that should claim only jobs.
 
-For a separately configured Cloud launcher, set `launcher.serviceAccountName`
-to provision its Kubernetes identity, permissions, and admission exemption guard.
+Set `launcher.enabled=true` to run a Cloud launcher Deployment. Supply its
+`image.repository` and `image.tag`, `tokenSecret`, `jobImage` and `dockerImage`
+(each with repository, tag and digest), plus `cpuCeiling` and `memoryCeiling`.
+`controller.url` selects its controller. The launcher token mounts as `agent-token`
+in its credentials directory and needs the deployment `claims.launch` grant.
+`launcher.serviceAccountName` selects its separate Kubernetes identity. An empty
+name generates one from the release. Setting a name with the launcher disabled
+provisions only RBAC and the admission guard for an externally managed launcher.
+Set `runner.enabled=false` when all work goes through Cloud Jobs.
+
+`launcher.networkPolicy.egress` supplies allowed Job destinations alongside the
+selecting default-deny policy. The [Cloud example](../sparkwing-full/examples/cloud.yaml)
+and [Cloud prerequisites](../sparkwing-full/README.md#cloud-node-and-network-prerequisites)
+describe team-node labels, CPU-band taints, disruption protection, native
+sidecars, PodLevelResources and node-level network enforcement.
 The cluster must serve the GA `admissionregistration.k8s.io/v1` validating
 admission policy and binding APIs, and mutating admission policy binding API.
 The launcher reads its namespace labels, mutating webhook configurations,
@@ -71,5 +84,4 @@ exclusion. Cluster administrators must preserve the validating guard while Jobs
 are live. The launcher refuses publication if the required policy API is
 unavailable or the installed guard differs from its expected policy.
 
-`values.yaml` lists the supported chart values. Cache-service values, credentials,
-Deployments, Services, PVCs and NetworkPolicies have been removed.
+`values.yaml` lists the supported chart values.

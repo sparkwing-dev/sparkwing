@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -75,6 +76,15 @@ func TestBurstSDKExecutesHerePersonalAndCloudAwards(t *testing.T) {
 }
 
 func executeBurstSDK(t *testing.T, options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller) {
+	executeBurstSDKProcess(t, options, award, owner, nil)
+}
+
+type burstSDKNativeExecution struct {
+	entry      *source.Entry
+	serviceURL func(http.Handler) string
+}
+
+func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller, native *burstSDKNativeExecution) {
 	t.Helper()
 	ctx := t.Context()
 	private, err := client.NewNodeHostClient(options, award.RunID, award.JobID)
@@ -113,6 +123,9 @@ func executeBurstSDK(t *testing.T, options client.EngineOptions, award controlle
 		t.Fatal(err)
 	}
 	input.Entry = &source.Entry{Engine: selected}
+	if native != nil {
+		input.Entry = native.entry
+	}
 	masker := secrets.NewMasker()
 	masks := nodehost.NewMaskRegistry(masker)
 	authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: private, Bindings: private})
@@ -125,8 +138,23 @@ func executeBurstSDK(t *testing.T, options client.EngineOptions, award controlle
 		t.Fatal(err)
 	}
 	processes := nodehost.NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://127.0.0.1:1"}
-	var logs strings.Builder
+	var logs burstSDKLogs
+	if native != nil {
+		processes.URL = native.serviceURL(router)
+		processes.Session.Environments = nodehost.SDKEnvironment{Store: state, Masks: masks}
+	}
+	processes.Log = func(_ context.Context, _, _ string, frame nodeproto.FrameLog) error {
+		logs.WriteString(frame.Message)
+		logs.Write(frame.Attrs)
+		return nil
+	}
 	closed := false
+	start := func(_ context.Context, input nodehost.NodeInput, _ nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
+		return &burstSDKProcess{runner: input.GrantedRunner, identity: selected.Identity, services: &burstSDKServices{handler: router, bearer: input.RouteBinding.Routes.Bearer, masker: masker, logs: &logs}, closed: &closed}, nil
+	}
+	if native != nil {
+		start = processes.Start
+	}
 	executor, err := nodehost.NewNodeExecutor(nodehost.ExecutorDependencies{
 		Store: state, Mask: masker.Mask, Masks: masks,
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementRunnerHosted, Secrets: masks},
@@ -153,19 +181,17 @@ func executeBurstSDK(t *testing.T, options client.EngineOptions, award controlle
 				return services.Secret(ctx, name)
 			}})
 		},
-		Start: func(_ context.Context, input nodehost.NodeInput, _ nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
-			return &burstSDKProcess{runner: input.GrantedRunner, identity: selected.Identity, services: &burstSDKServices{handler: router, bearer: input.RouteBinding.Routes.Bearer, masker: masker, logs: &logs}, closed: &closed}, nil
-		},
+		Start: start,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := executor.Execute(ctx, input); err != nil {
-		t.Fatal(err)
+		t.Fatalf("SDK execution: %v; logs: %s", err, logs.String())
 	}
 	_, err = state.ReadNode(ctx, row.Ref)
 	var refused *apierr.Error
-	if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated || !closed {
+	if !errors.As(err, &refused) || refused.Code != apierr.Unauthenticated || native == nil && !closed || processes.Computing(award.RunID) {
 		t.Fatalf("completed SDK retained claim authority: closed=%v error=%v", closed, err)
 	}
 	if !strings.Contains(logs.String(), "secret=*** encoded=***") || strings.Contains(logs.String(), "requesting-machine-only-secret") {
@@ -179,7 +205,28 @@ type burstSDKServices struct {
 	handler http.Handler
 	bearer  string
 	masker  *secrets.Masker
-	logs    *strings.Builder
+	logs    *burstSDKLogs
+}
+
+type burstSDKLogs struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *burstSDKLogs) WriteString(value string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.b.WriteString(value)
+}
+
+func (l *burstSDKLogs) Write(value []byte) {
+	l.WriteString(string(value))
+}
+
+func (l *burstSDKLogs) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }
 
 func (s *burstSDKServices) Secret(ctx context.Context, name string) (string, bool, error) {

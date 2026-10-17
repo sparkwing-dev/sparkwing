@@ -1,3 +1,4 @@
+{{- if .Values.runner.enabled }}
 {{- if and .Values.runner.goCache.persistence.enabled (not .Values.runner.goCache.persistence.existingClaim) -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -19,4 +20,6 @@ spec:
   {{- if .Values.runner.goCache.persistence.storageClassName }}
   storageClassName: {{ .Values.runner.goCache.persistence.storageClassName | quote }}
   {{- end }}
+{{- end }}
+
 {{- end }}

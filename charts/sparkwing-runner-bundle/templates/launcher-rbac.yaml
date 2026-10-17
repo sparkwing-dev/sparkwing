@@ -1,8 +1,8 @@
-{{- if .Values.launcher.serviceAccountName }}
+{{- if or .Values.launcher.enabled .Values.launcher.serviceAccountName }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ .Values.launcher.serviceAccountName | quote }}
+  name: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . | quote }}
   namespace: {{ .Release.Namespace }}
 ---
 apiVersion: v1
@@ -41,7 +41,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 subjects:
   - kind: ServiceAccount
-    name: {{ .Values.launcher.serviceAccountName | quote }}
+    name: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . | quote }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -77,7 +77,7 @@ metadata:
   name: {{ .Release.Namespace }}-{{ include "sparkwing-runner-bundle.runner.fullname" . }}-boundary
 subjects:
   - kind: ServiceAccount
-    name: {{ .Values.launcher.serviceAccountName | quote }}
+    name: {{ include "sparkwing-runner-bundle.launcher.serviceAccountName" . | quote }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io

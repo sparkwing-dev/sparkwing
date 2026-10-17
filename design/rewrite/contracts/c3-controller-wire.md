@@ -1028,6 +1028,17 @@ run claim. `GET /overflow` and `PUT /overflow` use OverflowControl and
 OverflowControlWrite under the authenticated account. Null means uncapped.
 Request caps only narrow the saved cap; team tier/ladder admission still applies.
 
+### Burst SDK subprocess verification
+
+Burst verification now also runs the shared SDK server in a subprocess over
+native request/frame pipes for here, personal-machine and exchanged Cloud
+awards. The subprocess resolves declared secrets through the real process
+service router and committing controller reader. A test-only FIFO transports
+HTTP messages where listeners are refused. The `rewrite_integration` variant
+uses a real loopback HTTP listener. Neither changes the runtime wire. Source
+acquisition and selected engine resolution remain separate from that SDK
+subprocess fixture.
+
 ### Overflow management client
 
 `controllerwire.OverflowManager` exposes `ReadOverflowControl` and

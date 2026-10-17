@@ -107,14 +107,10 @@ name so it doesn't collide with the sub-chart's SA.
 {{- end }}
 {{- end }}
 
-{{/*
-Resolved image tag for a component: per-component image.tag wins,
-otherwise fall back to .Chart.AppVersion.
-Usage: {{ include "sparkwing-full.image" (dict "img" .Values.controller.image "root" .) }}
-*/}}
 {{- define "sparkwing-full.image" -}}
-{{- $tag := default .root.Chart.AppVersion .img.tag -}}
-{{- printf "%s:%s" .img.repository $tag -}}
+{{- $repository := required "image.repository is required; pin repository and tag together" .img.repository -}}
+{{- $tag := required "image.tag is required; pin repository and tag together" .img.tag -}}
+{{- printf "%s:%s" $repository $tag -}}
 {{- end }}
 
 {{/*

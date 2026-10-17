@@ -433,7 +433,7 @@ continues to support `--sw-detached`.
 Cloud overflow captures the working tree. Use `pipeline trigger` for explicit
 committed revisions instead of `--sw-ref` or `--sw-pipeline-ref`.
 
-An unreachable controller before intake, including during source upload,
+An unreachable controller before intake, including connection setup and source upload,
 produces a message and a local run.
 Authorization failures remain errors. After intake, a lost response or connection
 cannot start a second local run because the admitted run keeps its Cloud owner.
@@ -458,6 +458,10 @@ use the team's normal secret provider. Values travel outside the sealed request
 and bundle, stay in controller memory, and are released only to the live
 claiming process with masking enabled. A controller restart loses those values.
 A run that needs them then fails explicitly and must be submitted again.
+The Cloud chart supports one controller replica and uses a Recreate rollout.
+Run intake, plan validation and secret release reach that same process.
+Multiple controller replicas require an ephemeral secret relay or verified
+run affinity before they can support requester-resolved secrets.
 Retry also requires a fresh submission so values can be resolved again.
 
 There is no per-user overflow cap by default. `overflow_minutes` narrows the

@@ -948,3 +948,42 @@ preserves `--sw-run-handle-file` after retaining accepted here authority.
 Foreground local routing retains its existing lifecycle. Burst source metadata
 reads the invoking and default branches from the original checkout, because an
 inspection clone's detached HEAD and origin HEAD are not those source facts.
+
+Pre-intake connection setup failures use the same local fallback as the identity
+probe and source upload. Unavailable and network failures announce local
+execution. Authorization failures and cancellation remain failures. A failed
+connection owns no transport, so fallback does not call its close function.
+
+Generated command references retain level-three description headings. The run
+reference exposes a real `burst-and-overflow` section anchor. Level-one and
+level-two description headings stay escaped so command sections retain their
+ownership of those levels.
+
+## Cloud chart integration amendment
+
+The full chart exposes controller-owned S3 bytes as `controller.dataStore.s3URL`,
+passed through the existing `--cache-blob-store` flag. Multi-team accounting uses
+`controller.bucketCeiling.store` for the same bucket. CloudFront uses the existing
+domain/key-pair values and file credential. RDS uses `databaseSecret` projected
+as `pg-url`. Bootstrap and encryption keys retain their fixed file projections.
+`credentialsSecret` preserves each file-named key and has an SSM ExternalSecret
+example. No secret value enters Helm values, argv or environment.
+
+The runner bundle owns an optional launcher Deployment (`launcher.enabled`),
+with separate `launcher.tokenSecret` and Kubernetes ServiceAccount/RBAC.
+`runner.enabled=false` removes the pool and its Go-cache PVC. Every enabled
+image requires repository and tag together. Job runner and Docker coordinates
+also require a SHA-256 digest. AppVersion never selects a runtime image.
+The launcher targets the release namespace, alongside its customer ServiceAccount,
+admission exemption guard and default-deny Job egress policy. Allowed egress is
+operator-supplied through `launcher.networkPolicy.egress`.
+
+BuildJob retains the exact TeamNodeValue label and adds a NoSchedule CPU-band
+Exists toleration, so the existing small-band nodes remain usable. Every Job Pod
+and production boundary probe carries `karpenter.sh/do-not-disrupt=true`.
+Admission validation preserves the Job template annotations as well as placement.
+NodePool provisioning stays an infrastructure prerequisite: each Ready node must
+carry its exact team's hashed label, and one reservation occupies the whole node.
+The launcher does not induce Karpenter scale-up. Native sidecars,
+PodLevelResources, admission APIs and escaped-node network enforcement must be
+verified on the target cluster. A Helm render establishes no native proof.
