@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+- **billing:** Apply early refund callbacks when the worker binds the provider
+  refund ID, so completion and retry outcomes are retained once.
+
+- **store (Breaking):** Require verified payment settlement or an authorized console
+  refund for reversals. `Tenant.RecordCreditGrant` accepts free grants only.
+  Remove the unused `Tenant.AppendEventOnce`, `Operator.DropCardAttempt`,
+  `ValidCreditGrantKind` and `ErrReversalExceedsPayment` APIs.
+
 - **store (Breaking):** Report committed output digests in jobs and receipts
   Replace `Node.OutputRef` with `Node.OutputDigest` and remove `OutputRef`,
   `OutputKeyPrefix` and `NodeLogSealGrace`. `CreditRateTable.ClassForResource`

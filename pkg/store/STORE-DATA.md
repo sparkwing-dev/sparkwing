@@ -72,8 +72,9 @@ financial storage usage counters survive deletion and remain separate.
 Final upload expiry uses quota admission and leased blob maintenance. Empty
 uploads reserve object capacity too, and expired tickets cannot commit.
 
-The raw paid-credit grant path is removed. `Tenant.GrantCredits` and
-`Tenant.RecordCreditGrant` accept no `paid` kind.
+The raw paid-credit grant path is removed. `Tenant.GrantCredits` is removed.
+`Tenant.RecordCreditGrant` accepts free grants only. Payment reversals use verified
+provider settlement or the authorized console refund transaction.
 Paid checkout credit uses `Store.SettlePayment`, which derives the team and
 amount from the committed checkout. Actionable fraud warnings refuse that
 transaction before a grant or event receipt commits. C2's verified-event

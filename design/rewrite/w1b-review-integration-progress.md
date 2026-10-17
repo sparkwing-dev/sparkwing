@@ -397,3 +397,109 @@ socket proof. No Git writes were made. Task scratch is removed at handoff and
 /tmp/sw-gocache is retained.
 
 STATUS: CONTINUE
+
+
+## Continuation after native session 3, 2026-10-17
+
+### Implemented and deleted
+
+The four blockers and all rulings from the original review remain committed at
+7e645ac54315c6e9ed1d3af8b74d3322f93bd733. The latest lead report passes both store
+lanes and the focused controller/native packages. Its remaining failures are
+W2's run-existence privacy properties. Their code and assertions are unchanged.
+
+Invariant: the free-grant writer cannot create paid credit or reverse a payment.
+The generated property reproduced a real -714,757 microcredit reversal through
+RecordCreditGrant before the cut. The writer now accepts only free grants.
+Removed the duplicate raw reversal path, its validator branches, unused
+ValidCreditGrantKind helper and ErrReversalExceedsPayment sentinel. The existing
+operator free grant remains. ConsoleRefund and verified provider settlement own
+payment movements. The console test now checks grant history, ledger state and
+deployment totals after the real refund and provider replay.
+
+Invariant: a refund binding consumes only its exact tenant, configured provider
+mode, payment and refund receipt, once. Porting the early-outcome test off the
+obsolete callback helper reproduced lost failed, canceled and successful outcomes
+through the real provider settlement transaction. MarkCardRefundMade now takes
+the existing ledger lock, reads matching committed receipts using the existing
+mode/object index and commits one resolved queue update. Success wins over a
+stale failed worker response. Generated cases cover foreign tenant, mode, payment
+and refund identities. A refused outcome update rolls back the binding; retry
+retains the recorded outcome.
+
+Deleted reportCardRefundTx and TestOnlyReportCardRefund completely. The failed
+refund, early outcome and partial operator-refund tests now use real provider
+settlement and worker binding, with a committed collection correlation. Callback
+authority follows the provider object instead of a caller's attempt key. The
+transaction rollback test calls the existing production refund mutation owner.
+
+Removed unused Tenant.AppendEventOnce and Operator.DropCardAttempt. Tenant event
+isolation uses the charged event writer. The quota test prepares a real internal
+state event. The obsolete once-only event test is deleted. No compatibility
+wrapper, new table, service, runtime setting, limit or environment variable was
+added.
+
+### Verification
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4, -p 4 and scratch under
+/tmp/sw-astra-W1b. Tests use real SQLite. PostgreSQL is not configured here.
+
+The initial full SQLite store run passed in 289.177s before the refund binding
+join. A second full store run also passed (324.239s) with the initial receipt join.
+The final single-update receipt selection is covered by the financial and race
+selections below. The lead must run its final native matrix on the committed tree.
+
+After the final receipt-selection change, the broad financial/store selection
+passes in 35.291s and the focused refund/association/rollback selection passes
+in 1.790s. The final race selection passes in 42.028s. It includes recorded
+refund association, early outcomes, backoff, partial refunds, free-grant
+refusals, console refund history and verified provider refund properties.
+
+The socket-free controller/acceptance selection passes in 3.806s and 1.677s.
+The earlier financial controller/acceptance selection passes in 2.318s and
+0.302s. Native listener-dependent tests cannot execute here: the broader attempt
+fails on api.sock setsockopt and httptest TCP listener permissions. The lead's
+native report still contains FAIL and remains the completion authority.
+
+Whole-repository build, scoped vet, apiref/apispec/apidiff, documentation mirror,
+whitespace, sleep and comment checks pass. Commentcheck is clean across 2,799 Go files.
+No acceptance cell was newly enabled. Existing SQLite billing-start and ledger
+retention cells pass in the store suite. No PostgreSQL pass is inferred.
+
+### Contracts, shared files and remaining work
+
+C1 records free-only grants, the retired APIs and the atomic provider receipt
+join. The port inventory records each retired test's replacement. The migration
+guide, changelog and generated store API snapshot are updated. Lead-owned
+amendments and handoffs are unchanged. No foreign contract change is requested.
+
+Shared caller migrations stay within pkg/store: the external card-refund test
+moves to operator_card_billing_test.go and uses the real console/provider flow;
+payment rollback calls applyCardRefundTx directly. The only W1 guard edit removes
+the two exemptions for deleted DropCardAttempt and reportCardRefundTx. Production
+changes are credits.go, operator_card_billing.go, payment_mutations.go and
+payment_provider_settlement.go. Other shared files are C1, the port inventory,
+STORE-DATA.md, .apidiff/pkg_store.txt, CHANGELOG.md, the migration guide and its
+embedded copies. No controller production file changed.
+
+Remaining real integration points are unchanged: native child cross-repository
+and ref resolution, audited credentials before private followed-branch lookup,
+persisted HTTP box identity and accepted HTTP memo namespace metadata. The native
+memo/result byte-copy integration remains implemented. Missing authority still
+refuses. The lead owns native PostgreSQL/socket proof, W2 privacy integration,
+independent review, commit and landing.
+
+### Volume and friction
+
+Production Go: +49/-135, net -86 using the lead's exclusions. Combined W1/W1b
+store versus main is -869, 3,381 over the -4,250 budget. No budget waiver or
+engineering completion is claimed. The only new production code joins retained
+provider receipts to the existing refund transaction. A test-only callback had
+hidden that missing production join; keeping it would not preserve real early
+callbacks. The join needs no extra ledger or callback authority.
+
+No Git writes were made. All writes stay inside the worktree or task scratch.
+Scratch is removed at handoff; /tmp/sw-gocache is retained.
+
+STATUS: CONTINUE

@@ -41,40 +41,6 @@ func TestCreditsGrantRejectsUnknownKindAndZero(t *testing.T) {
 	}
 }
 
-func TestAppendEventOnceCollapsesRepeats(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedClaimedNode(t, s, "run-once", "build")
-
-	wrote, err := tenant(t, s, store.DefaultTeam).AppendEventOnce(ctx, "run-once", "build", store.EventKindCreditsBlocked, []byte(`{"balance_micro":0}`))
-	if err != nil {
-		t.Fatalf("append once: %v", err)
-	}
-	if !wrote {
-		t.Fatal("the first append must write")
-	}
-	wrote, err = tenant(t, s, store.DefaultTeam).AppendEventOnce(ctx, "run-once", "build", store.EventKindCreditsBlocked, []byte(`{"balance_micro":0}`))
-	if err != nil {
-		t.Fatalf("append once again: %v", err)
-	}
-	if wrote {
-		t.Fatal("the second append must collapse into the first")
-	}
-	events, err := teststore.ForTeam(t, s, store.DefaultTeam).ListEventsAfter(ctx, "run-once", 0, 10)
-	if err != nil {
-		t.Fatalf("list events: %v", err)
-	}
-	seen := 0
-	for _, e := range events {
-		if e.Kind == store.EventKindCreditsBlocked {
-			seen++
-		}
-	}
-	if seen != 1 {
-		t.Fatalf("credits_blocked events = %d, want 1", seen)
-	}
-}
-
 func TestFormatCreditsRendersTwoPlaces(t *testing.T) {
 	cases := []struct {
 		micro int64

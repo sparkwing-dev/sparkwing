@@ -17,10 +17,13 @@ func TestStoreRetiresTokenMeteredBilling(t *testing.T) {
 			t.Errorf("retired tenant API %s remains", name)
 		}
 	}
-	for _, name := range []string{"OpenCreditCheckout", "AttachCreditCheckout", "DropCreditCheckout", "SetSpendBudget", "StartRecoveryAttempt"} {
+	for _, name := range []string{"OpenCreditCheckout", "AttachCreditCheckout", "DropCreditCheckout", "SetSpendBudget", "StartRecoveryAttempt", "AppendEventOnce"} {
 		if _, exists := reflect.TypeOf(&Tenant{}).MethodByName(name); exists {
 			t.Errorf("raw billing mutation %s remains", name)
 		}
+	}
+	if _, exists := reflect.TypeOf(&Operator{}).MethodByName("DropCardAttempt"); exists {
+		t.Error("unused collection mutation DropCardAttempt remains")
 	}
 	for _, table := range []string{"nodes", "triggers"} {
 		rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)

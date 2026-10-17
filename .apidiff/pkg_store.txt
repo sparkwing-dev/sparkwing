@@ -857,7 +857,6 @@ var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progr
 	"wait for the checkout to expire or complete, then delete the team")
 var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
-var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tokens as a team may")
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
@@ -1452,7 +1451,6 @@ func (o *Operator) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, 
 func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (o *Operator) CreditSettings(ctx context.Context) (_ CreditSettings, err error)
 func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error)
-func (o *Operator) DropCardAttempt(ctx context.Context, attemptID string, now time.Time) error
 func (o *Operator) DueCardCharges(ctx context.Context, now time.Time) (_ []CardChargeWork, _ []BudgetAlert, err error)
 func (o *Operator) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error)
 func (o *Operator) DueGitHubChecks(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
@@ -2529,7 +2527,6 @@ func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding Capa
 func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]string, err error)
 func (t *Tenant) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID, kind string, payload []byte) (int64, error)
-func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (t *Tenant) ApplyProfileFold(ctx context.Context, delivery EffectDelivery, observations map[string]ProfileObservation) (bool, error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
@@ -2864,7 +2861,6 @@ type UsageDelta struct {
 	Amount    int64
 }
 func ValidComputeLimit(name string) bool
-func ValidCreditGrantKind(kind string) bool
 func ValidRunnerName(name string) bool
 func ValidateEventKind(kind string) error
 func ValidateGitHubTagPatterns(patterns []string) error

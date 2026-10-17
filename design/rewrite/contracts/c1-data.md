@@ -2201,8 +2201,8 @@ settlement writes the checkout's paid timestamp and grant association.
 
 `Operator` owns deployment card collection and refund workers: `DueCardCharges`,
 `RecordAttemptIntent`, `SettleCardPayment`,
-`DueCardRefunds`, `MarkCardRefundMade`, `FailCardAttempt`
-and `DropCardAttempt`. Their raw Store methods are removed. Provider workers
+`DueCardRefunds`, `MarkCardRefundMade` and `FailCardAttempt`.
+Their raw Store methods are removed. Provider workers
 select Operator before operating on persisted attempt and payment identities.
 Tenant spend policy and recovery checkout keep their tenant handles.
 Raw card setup, warning and provider refund callback APIs are removed. Their
@@ -2231,9 +2231,9 @@ bound to its first team and payment after release. Replay cannot restore a hold.
 Console HTTP and break-glass callers retain their authenticated tenant selection.
 
 The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
-`Tenant.GrantCredits` is removed. `Tenant.RecordCreditGrant` owns grant requests
-and refuses caller-selected paid credit before opening a ledger transaction.
-The existing free grant and payment-linked reversal paths remain. Checkout
+`Tenant.GrantCredits` is removed. `Tenant.RecordCreditGrant` owns free grant requests
+and refuses paid credit and reversals before writing the ledger. Payment reversals
+use verified provider settlement or the authorized console refund transaction. Checkout
 settlement checks actionable fraud warnings in the same transaction as the
 grant and event receipt. A refusal leaves the checkout and ledger unchanged.
 The verified-event implementation and HTTP adapter remain W2 integrations.
@@ -2408,8 +2408,9 @@ the default ladder from the scalar rate. Validation, ledger locking, settings
 serialization and rollback stay in their existing transaction owners.
 The raw Store methods are removed with every caller.
 `Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
-also removed. Callers select a Tenant explicitly before grants, charge history
-or idempotent events. The tenant methods keep their existing behavior.
+also removed. Callers select a Tenant explicitly before grants and charge history.
+The unused `Tenant.AppendEventOnce` writer is removed. State events commit with
+their owning transition. External event ingestion uses `Tenant.AppendEventCharged`.
 
 `Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
 Store twins are removed. Burn windows use the store clock. A credit-state read
@@ -3981,3 +3982,32 @@ Billing still prices the resources sealed for the awarded unit. Later profile
 pins cannot reprice it. Storage inventory's unused lockTeamStorageTx and the
 unused legacy NodeLogSealGrace constant are also removed. The current blob,
 retained-storage and log transactions remain their respective writers.
+
+
+## W1b free grants and unused writer retirement, 2026-10-17
+
+The free-grant transaction cannot create paid credit or a payment-linked reversal.
+The duplicate raw reversal validator and writer, unused grant-kind helper and
+reversal overflow sentinel are removed. Provider settlement and ConsoleRefund
+retain payment identity, payer selection, replay and conservation.
+
+The unused Tenant.AppendEventOnce and Operator.DropCardAttempt writers are
+removed. The obsolete reportCardRefundTx callback adapter and its fixture API are deleted.
+Production refund callbacks use the verified-event transaction.
+Its exact refund mutation owner, applyCardRefundTx, remains shared with the
+collection worker. No persistence schema, protocol or runtime setting changes.
+
+MarkCardRefundMade binds the provider response and consumes any matching
+committed refund receipt in the same ledger transaction. The receipt is selected
+by configured provider mode, refund object, tenant and payment identity through
+the existing payment_events object index. A successful receipt completes the
+queue and wins over a stale failed worker response; failed or canceled receipts
+schedule one retry. Repeated binds cannot
+repeat that transition. The verified callback owns the financial reversal.
+No second callback authority or refund ledger is introduced.
+
+TestARefundOutcomeBeforeItsBindIsKept now uses provider settlement with a real
+committed collection correlation. TestRecordedRefundCannotBindAnotherAssociationProperty
+generates foreign tenant, mode, payment and refund associations.
+TestRecordedRefundBindingRollsBackWithItsOutcome proves atomicity when applying
+the stored outcome fails. The native harness retains PostgreSQL execution.

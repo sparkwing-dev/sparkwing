@@ -365,27 +365,6 @@ func failCardAttemptTx(ctx context.Context, tx *storeTx, attemptID, paymentInten
 	return Team(name), failures == 0, nil
 }
 
-func reportCardRefundTx(ctx context.Context, tx *storeTx, key, refundID, status string, now time.Time) (bool, error) {
-	paymentIntent, attempt, ok := parseRefundKey(key)
-	if !ok {
-		return false, nil
-	}
-	switch status {
-	case CardRefundSucceeded, "failed", "canceled":
-	default:
-		return false, nil
-	}
-	var team Team
-	err := tx.QueryRowContext(ctx, `SELECT team FROM card_refunds WHERE payment_intent = ?`, paymentIntent).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return applyCardRefundTx(ctx, tx, team, paymentIntent, refundID, status, `attempts = ?`, []any{attempt}, now)
-}
-
 func applyCardRefundTx(ctx context.Context, tx *storeTx, team Team, paymentIntent, refundID, status, when string, whenArgs []any, now time.Time) (bool, error) {
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return false, err

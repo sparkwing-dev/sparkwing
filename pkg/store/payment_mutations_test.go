@@ -66,7 +66,7 @@ func TestPaymentMutationsRollBackWithReceipt(t *testing.T) {
 					_, _, err := failCardAttemptTx(ctx, tx, work.AttemptID, payment.PaymentIntent, "declined", now)
 					return err
 				case "queued_refund":
-					changed, err := reportCardRefundTx(ctx, tx, payment.PaymentIntent+"-0", "provider-refund", "failed", now)
+					changed, err := applyCardRefundTx(ctx, tx, tenant.team, payment.PaymentIntent, "provider-refund", "failed", `attempts = ? AND status = 'due'`, []any{0}, now)
 					if err == nil && !changed {
 						return errors.New("refund queue did not change")
 					}
