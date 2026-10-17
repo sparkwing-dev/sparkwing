@@ -48,9 +48,15 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			retry := newStoreOwnerIntakeFixture(t, original.Store, store.IntakeRequest{
-				RetryMode: mode, Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: source.ID}},
-			})
+			intake := store.IntakeRequest{
+				Authority: original.Control.Authority, IdempotencyKey: "retry", RetryMode: mode,
+				Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: source.ID}},
+			}
+			retry := newStoreOwnerIntakeFixture(t, original.Store, intake)
+			committed, err := retry.Tenant.ReadRun(ctx, retry.Input.RunID)
+			if err != nil || committed.Retry == nil || committed.Retry.Mode != mode {
+				t.Fatalf("missing committed selection: %+v %v", committed.Retry, err)
+			}
 			if scenario.lateSuccess {
 				original.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
 					return original.report(ctx, input, store.NodeSuccess)
@@ -58,6 +64,14 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 				if result, err := original.Host.Run(ctx, original.Input); err != nil || result.Outcome != "success" {
 					t.Fatalf("late source completion=%+v error=%v", result, err)
 				}
+			}
+			replay, err := retry.Tenant.AdmitRun(ctx, intake)
+			if err != nil || !replay.Replayed || replay.RunID != retry.Input.RunID {
+				t.Fatalf("retry replay=%+v error=%v", replay, err)
+			}
+			replayed, err := retry.Tenant.ReadRun(ctx, replay.RunID)
+			if err != nil || !reflect.DeepEqual(replayed.Retry, committed.Retry) {
+				t.Fatalf("replay changed committed selection: %+v %v", replayed.Retry, err)
 			}
 			retry.Host.Acquire = original.Host.Acquire
 			executed := make(chan string, 2)
