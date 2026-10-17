@@ -196,6 +196,8 @@ or ref evidence is accepted in a request.
 | POST `/api/v1/data/has-many` | `digests`, optional `deadline` | `present` |
 | GET `/api/v1/data/records` | flattened `kind`, `name`, `ref`, `pipeline`, `job`, `key`, `deadline`, `verified_default_only` query selectors | `found`, optional flat `record`, `members` |
 | POST `/api/v1/data/records` | flat logical record selectors, digest, optional manifest/expiry, members | flat canonical record |
+| POST `/api/v1/data/memo/lookup` | `pipeline`, `job`, `hash`, optional `deadline` | `found`, optional `output`, `manifest`, `reader`, and `members` |
+| POST `/api/v1/data/memo/copy` | same lookup selectors; destination comes from authenticated attempt | same memo result |
 
 Record handlers and the client use the shared DataRecordWriteRequest,
 DataRecordLookupResult, DataRecord and DataMember DTOs. A verified-default lookup
@@ -211,10 +213,20 @@ carry object headers only. Output upload, record commit, verified download and
 shared log publication are exercised through the real controller HTTP handlers
 with an in-process transport.
 
-Record, memo and depcache HTTP responses do not carry C1's canonical read-set
-proof or complete source metadata. Cache adapters fail with `policy_missing`
-until that foreign schema contract is completed; they do not reconstruct proof
-from caller selectors. Output reads use persisted record keys and verified bytes.
+Memo lookup and copy use shared DataMemoLookupRequest/DataMemoLookupResult.
+On a hit, the server checks C1's reader against its live authority and returns
+only that caller-owned attempt fence. The client requires the same reader,
+valid result digests and file metadata. It leaves ReadSet.Edges empty. Source
+identities, private ancestry, uploader authority and ref evidence stay on the
+controller. Each subsequent byte read is independently authorized there.
+Misses omit references and the reader. Copy requests never carry a destination,
+authority or read set; the server derives them. Explicit request budgets apply
+to lookup and copy through the shared transport.
+
+Record and depcache responses omit complete source facts and read-set proof.
+Cross-profile remote-cache construction still needs a verified-default response
+projection that preserves this privacy boundary. Output reads use persisted
+record keys and verified bytes.
 Upload and commit retries retain their original key/body. Explicit request
 budgets remain context deadlines and exhaust as `blob.ErrBudget`.
 

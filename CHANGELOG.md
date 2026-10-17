@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Read and copy memo results through the controller client. Match each
+  returned result to the authenticated attempt without exposing private ancestry.
+
 - **run:** Stream attached local logs through the controller, including offline
   Cloud fallback. Save and restore local dependency caches without requiring a
   remote repository or a Git branch. Accept the execution award returned by a

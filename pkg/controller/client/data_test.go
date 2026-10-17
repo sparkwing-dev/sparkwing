@@ -125,7 +125,7 @@ func TestDataClientStructuredErrorsAndRetry(t *testing.T) {
 }
 
 func TestDataClientBudgetsBoundTransport(t *testing.T) {
-	for _, operation := range []string{"has-many", "record", "depcache"} {
+	for _, operation := range []string{"has-many", "record", "depcache", "memo", "copy-memo"} {
 		t.Run(operation, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				deadline := time.Now().Add(time.Second)
@@ -154,12 +154,14 @@ func TestDataClientBudgetsBoundTransport(t *testing.T) {
 				case "record":
 					_, err = records.LookupRecord(t.Context(), blob.RecordLookup{Budget: budget})
 				case "memo":
-					_, err = records.LookupMemo(t.Context(), blob.MemoLookup{Budget: budget})
+					authority := depcacheAuthority()
+					_, err = records.LookupMemo(t.Context(), blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "ci", Job: "build", Hash: "hash"}, Budget: budget})
 				case "depcache":
 					authority := depcacheAuthority()
 					_, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: authority, Key: blob.DepcacheKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Name: "modules", Key: "dep-key"}, Budget: budget})
 				case "copy-memo":
-					_, err = records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: blob.MemoLookup{Budget: budget}})
+					authority := depcacheAuthority()
+					_, err = records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: authority, Key: blob.MemoKey{Repo: authority.Repo, Ref: authority.Ref.Scope, Pipeline: "ci", Job: "build", Hash: "hash"}, Budget: budget}, Destination: authority.Attempt.Value})
 				}
 				if !errors.Is(err, blob.ErrBudget) {
 					t.Fatalf("budget exhaustion = %v", err)

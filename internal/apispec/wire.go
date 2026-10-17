@@ -132,6 +132,8 @@ func wireOperations() map[string]wireOperation {
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
 	result["POST /api/v1/data/records"] = operation("Commit a record", wire.DataRecordWriteRequest{}, wire.DataRecord{})
 	result["POST /api/v1/data/depcache/lookup"] = operation("Look up an authorized dependency cache", wire.DataDepcacheLookupRequest{}, wire.DataDepcacheLookupResult{})
+	result["POST /api/v1/data/memo/lookup"] = operation("Look up authorized memo references", wire.DataMemoLookupRequest{}, wire.DataMemoLookupResult{})
+	result["POST /api/v1/data/memo/copy"] = operation("Copy memo references to the authenticated attempt", wire.DataMemoLookupRequest{}, wire.DataMemoLookupResult{})
 	addReadParameters(result)
 	return result
 }

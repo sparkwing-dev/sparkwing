@@ -1,6 +1,12 @@
 # W9 continuation: local integration and runner transport
 
-Latest continuation: [W9-BURST-NATIVE-FAILURES.md](W9-BURST-NATIVE-FAILURES.md).
+Latest continuation: [W9-MEMO-CONTINUATION.md](W9-MEMO-CONTINUATION.md).
+It implements native memo lookup/copy through the existing controller routes,
+with the authenticated reader fence and no private ancestry projection. Real
+router/SQLite and signed-byte materialization pass. The prior burst fixes and
+the remaining native rerun commands are retained below and in that report.
+
+Prior native failure fixes: [W9-BURST-NATIVE-FAILURES.md](W9-BURST-NATIVE-FAILURES.md).
 Commit `3c97acfb1` addresses the lead's native burst failures: session enrollment
 fixture configuration, execution-award validation, pipeline argument separation,
 attached local logs and local cache namespaces. The continuation rechecks that

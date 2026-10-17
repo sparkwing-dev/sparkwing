@@ -745,6 +745,54 @@ components:
         - mode
       type: object
       x-sparkwing-go-type: controllerwire.DataMember
+    internal.controllerwire.DataMemoLookupRequest:
+      additionalProperties: true
+      properties:
+        deadline:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        hash:
+          type: string
+        job:
+          type: string
+        pipeline:
+          type: string
+      required:
+        - pipeline
+        - job
+        - hash
+      type: object
+      x-sparkwing-go-type: controllerwire.DataMemoLookupRequest
+    internal.controllerwire.DataMemoLookupResult:
+      additionalProperties: true
+      properties:
+        found:
+          type: boolean
+        manifest:
+          anyOf:
+            - type: string
+            - type: "null"
+        members:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.DataMember'
+              type: array
+            - type: "null"
+        output:
+          anyOf:
+            - type: string
+            - type: "null"
+        reader:
+          anyOf:
+            - $ref: '#/components/schemas/internal.runspec.AttemptIdentity'
+            - type: "null"
+      required:
+        - found
+        - members
+      type: object
+      x-sparkwing-go-type: controllerwire.DataMemoLookupResult
     internal.controllerwire.DataPresence:
       additionalProperties: true
       properties:
@@ -6391,15 +6439,26 @@ paths:
         retry: safe
   /api/v1/data/memo/copy:
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.DataMemoLookupRequest'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DataMemoLookupResult'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/data/memo/copy
+      summary: Copy memo references to the authenticated attempt
       x-sparkwing-policy:
         method: POST
         path: /api/v1/data/memo/copy
@@ -6414,18 +6473,28 @@ paths:
             binding: data
             liveness: sensitive
         retry: exact_body
-      x-sparkwing-wire: undocumented
   /api/v1/data/memo/lookup:
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.DataMemoLookupRequest'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DataMemoLookupResult'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/data/memo/lookup
+      summary: Look up authorized memo references
       x-sparkwing-policy:
         method: POST
         path: /api/v1/data/memo/lookup
@@ -6449,7 +6518,6 @@ paths:
             binding: data
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/data/objects/{key}:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

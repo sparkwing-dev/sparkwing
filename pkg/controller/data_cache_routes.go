@@ -15,13 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-type dataMemoResponse struct {
-	Found    bool                        `json:"found"`
-	Output   *blob.Digest                `json:"output,omitempty"`
-	Manifest *blob.Digest                `json:"manifest,omitempty"`
-	Members  []controllerwire.DataMember `json:"members"`
-}
-
 func decodeCacheRequest(r *http.Request, required ...string) (map[string]string, blob.Budget, error) {
 	raw, err := readEngineBody(r)
 	if err != nil {
@@ -89,8 +82,12 @@ func (s *Server) handleDataMemo(w http.ResponseWriter, r *http.Request, a capabi
 	if err != nil {
 		return dataRouteError(err)
 	}
-	response := dataMemoResponse{Found: hit.Found, Members: []controllerwire.DataMember{}}
+	response := controllerwire.DataMemoLookupResult{Found: hit.Found, Members: []controllerwire.DataMember{}}
 	if hit.Found {
+		if hit.ReadSet.Reader != binding.Authority.Attempt.Value {
+			return dataProjectionError()
+		}
+		response.Reader = &hit.ReadSet.Reader
 		if hit.Output.Set {
 			response.Output = &hit.Output.Value
 		}

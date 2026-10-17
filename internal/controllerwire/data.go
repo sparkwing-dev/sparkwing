@@ -90,6 +90,23 @@ type DataRecordLookupResult struct {
 	Members []DataMember `json:"members"`
 }
 
+// DataMemoLookupRequest selects a memo within the authenticated repository.
+type DataMemoLookupRequest struct {
+	Pipeline string       `json:"pipeline"`
+	Job      string       `json:"job"`
+	Hash     runspec.Hash `json:"hash"`
+	Deadline *time.Time   `json:"deadline,omitempty"`
+}
+
+// DataMemoLookupResult carries result references and the caller's reader fence.
+type DataMemoLookupResult struct {
+	Found    bool                     `json:"found"`
+	Output   *blob.Digest             `json:"output,omitempty"`
+	Manifest *blob.Digest             `json:"manifest,omitempty"`
+	Members  []DataMember             `json:"members"`
+	Reader   *runspec.AttemptIdentity `json:"reader,omitempty"`
+}
+
 // DataDepcacheLookupRequest selects a declared cache within authenticated execution storage.
 type DataDepcacheLookupRequest struct {
 	Name     string     `json:"name"`

@@ -103,7 +103,7 @@ func TestDataCacheHTTPUsesBoundScopeAndCopyDestination(t *testing.T) {
 	for _, operation := range []string{"memo/lookup", "depcache/lookup", "memo/copy"} {
 		t.Run(operation, func(t *testing.T) {
 			f, tx := newCacheHTTPFixture(t)
-			tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}}
+			tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}, ReadSet: blob.ReadSet{Reader: dataAuthority(dataAuthorized()).Attempt.Value}}
 			tx.depHit = blob.DepcacheHit{Found: true, Record: blob.Record{Digest: dataDigest()}, Source: blob.RestoreDefaultBranch}
 			w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation+"?team=foreign&ref=main", cacheBody(operation))
 			var result struct{ Found bool }
@@ -146,13 +146,17 @@ func TestDataCacheHTTPPrivateFactsNeverLeaveResponse(t *testing.T) {
 	property := func(value string, operationIndex uint8) bool {
 		f, tx := newCacheHTTPFixture(t)
 		secret := "private:" + value
-		tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}, ReadSet: blob.ReadSet{Reader: runspec.AttemptIdentity{Team: secret, RunID: secret, NodeID: secret}}}
+		tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}, ReadSet: blob.ReadSet{Reader: dataAuthority(dataAuthorized()).Attempt.Value, Edges: []blob.ReadEdge{{Source: runspec.AttemptIdentity{Team: secret, RunID: secret, NodeID: secret}}}}}
 		tx.depHit = blob.DepcacheHit{Found: true, Source: blob.RestoreDefaultBranch, Record: blob.Record{Digest: dataDigest(), Uploader: blob.Principal(secret), Source: blob.UploadIdentity{CapabilityRef: secret, Principal: blob.Principal(secret), Team: secret, RunID: secret}, RefFacts: blob.RefFacts{SHA: secret, AppDeliveryKey: secret}}, ReadSet: tx.memoHit.ReadSet}
 		operations := []string{"memo/lookup", "memo/copy", "depcache/lookup"}
 		operation := operations[int(operationIndex)%len(operations)]
 		w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation, cacheBody(operation))
 		var result map[string]json.RawMessage
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || len(result) != 3 {
+		wantFields := 4
+		if operation == "depcache/lookup" {
+			wantFields = 3
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || len(result) != wantFields || strings.Contains(w.Body.String(), "private:") {
 			return false
 		}
 		if operation == "depcache/lookup" {
@@ -327,5 +331,34 @@ func TestDataCacheHTTPMemoCopyCannotBorrowReadGrant(t *testing.T) {
 	assertEngineError(t, w, 403, apierr.Forbidden)
 	if len(*f.events) != 0 {
 		t.Fatalf("events=%v", *f.events)
+	}
+}
+
+func TestDataMemoHTTPRefusesForeignReader(t *testing.T) {
+	property := func(value string, field uint8, copyHit bool) bool {
+		f, tx := newCacheHTTPFixture(t)
+		reader := dataAuthority(dataAuthorized()).Attempt.Value
+		switch field % 5 {
+		case 0:
+			reader.Team += "private:" + value
+		case 1:
+			reader.RunID += "private:" + value
+		case 2:
+			reader.NodeID += "private:" + value
+		case 3:
+			reader.Generation++
+		case 4:
+			reader.Attempt++
+		}
+		tx.memoHit = blob.MemoHit{Found: true, Output: runspec.Optional[blob.Digest]{Set: true, Value: dataDigest()}, ReadSet: blob.ReadSet{Reader: reader}}
+		operation := "memo/lookup"
+		if copyHit {
+			operation = "memo/copy"
+		}
+		w := authorityHTTP(f.handler(), f.boundary, "POST", "/api/v1/data/"+operation, cacheBody(operation))
+		return w.Code == 500 && !strings.Contains(w.Body.String(), "private:") && !strings.Contains(w.Body.String(), `"found":true`)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
 	}
 }

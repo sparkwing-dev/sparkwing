@@ -57,6 +57,10 @@ to the claim's current attempt. The caller cannot choose the destination.
 
 These requests accept only unique, known string fields. Memo responses carry
 `found`, optional `output` and `manifest` digests, and public `members`.
+Memo hits also carry `reader`, the authenticated caller's attempt fence. The
+server checks that fence against its current binding, and the shared client
+rejects a different reader or invalid result metadata. Misses omit the reader
+and result references. Copy destination always comes from the authenticated claim.
 Depcache hits carry public `record` metadata and the winning restore `source`.
 Read-set snapshots and uploader identities stay private.
 
