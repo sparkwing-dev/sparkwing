@@ -62,7 +62,7 @@ func TestBurstUploadedSDKBuildsAndExecutesEveryAward(t *testing.T) {
 func burstSDKSourceFixture(t *testing.T) (string, string, *engine.Resolver, engine.Resolved) {
 	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
+	root := burstSDKModule(t, filepath.Clean(filepath.Join(filepath.Dir(file), "../..")))
 	repo, _ := sourcetest.Repository(t)
 	directory := filepath.Join(repo, ".sparkwing")
 	for _, name := range []string{"go.mod", "go.sum"} {
@@ -97,6 +97,40 @@ func burstSDKSourceFixture(t *testing.T) (string, string, *engine.Resolver, engi
 		t.Fatal(err)
 	}
 	return repo, sha, engines, selected
+}
+
+func burstSDKModule(t *testing.T, root string) string {
+	t.Helper()
+	destination := t.TempDir()
+	files := sourcetest.Git(t, root, "ls-files", "-z")
+	for _, name := range strings.Split(strings.TrimSuffix(files, "\x00"), "\x00") {
+		from, to := filepath.Join(root, name), filepath.Join(destination, name)
+		info, err := os.Lstat(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(to), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(from)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, to); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		body, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(to, body, info.Mode().Perm()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return destination
 }
 
 func executeBurstUploadedSDK(t *testing.T, engines *engine.Resolver, selected engine.Resolved, options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller) {

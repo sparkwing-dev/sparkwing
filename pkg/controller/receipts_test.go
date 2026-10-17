@@ -29,6 +29,7 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 		Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
 		Request: runspec.Request{
 			Version: 1, Team: string(store.DefaultTeam), Pipeline: "deploy", Mode: runspec.IntakeExecute,
+			Source:   runspec.Source{Ref: strings.Repeat("a", 40)},
 			Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40)},
 			RequestedArgs: map[string]string{"env": "prod"}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{}},
 		},

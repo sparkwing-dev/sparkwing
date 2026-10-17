@@ -6,6 +6,11 @@ The baseline is HEAD `7d9792315`. Before edits, I searched production Go for
 CI definitions and snapshot creation. Test fixtures and result/blob
 materialization are separate from pipeline source acquisition.
 
+Refreshed at `b4662bde5` before the native-admission continuation. The same
+production search found 160 matches, including comments and result materialization.
+The Git ownership guard passes. The table below still covers every production
+source acquisition and directory-based SDK/engine selection path found.
+
 | Baseline path | Source operation | Result in this worktree |
 | --- | --- | --- |
 | `internal/source/checkout.go` | Remote init/fetch/checkout, local clone/checkout, prepared checkout and separate pipeline-code checkout | Owns acquisition. Local and remote committed trees share submodule/LFS materialization. |
@@ -44,6 +49,7 @@ materialization are separate from pipeline source acquisition.
 | `internal/engine/pin.go`, `install.go`, `sdkinstall/install.go` | Reads the supplied directory's SDK pin and installs through the selected engine | Retained engine installation responsibility. |
 | `internal/engine/upgrade.go` | Stages source/config and reads pins before/after an explicit SDK upgrade | Retained explicit upgrade responsibility. |
 | `internal/sparks/overlay.go` | Materializes dependency overlays and sums | Retained dependency-management responsibility. |
+| `pkg/controller/burst_sdk_source_test.go` | Test fixture copies tracked working bytes into an owned SDK dependency directory | Test-only source capture. It excludes transient untracked files created by concurrent TypeScript tests. Execution still uses shared acquisition. |
 | `.github/workflows/*`, `.sparkwing/*` | CI checks out/builds the repository through GitHub actions and pipeline tooling | Build infrastructure, outside production application packages. |
 
 `TestGitAcquisitionHasOneOwner` parses production Go packages and refuses Git
