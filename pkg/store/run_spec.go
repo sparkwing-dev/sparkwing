@@ -19,6 +19,7 @@ import (
 // by C2 in the intake transaction. CapabilityPrefix is only a claim fence and
 // cannot replace a session parent. Verified App facts come from the delivery ID.
 type IntakeRequest struct {
+	scheduleID         string
 	Authority          capability.AuthorityRef
 	Request            runspec.Request
 	IdempotencyKey     string

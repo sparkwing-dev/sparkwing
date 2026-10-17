@@ -129,7 +129,7 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 	case capability.BindDeclaredSecret:
 		return bindingSecretTx(ctx, tx, c, target)
 	case capability.BindSlotOfBoundNode:
-		return authorityError(apierr.Unavailable, "binding requires additional resolved selectors")
+		return bindingSlotTx(ctx, tx, c, target)
 	}
 	if !allowed {
 		return bindingRefusal()

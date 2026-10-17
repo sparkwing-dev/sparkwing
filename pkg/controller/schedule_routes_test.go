@@ -368,7 +368,7 @@ func TestScheduleHTTPInvalidInputAndBackend(t *testing.T) {
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("failed transaction leaked schedules: %+v %v", rows, err)
 	}
-	f.s.WithScheduleWriter(nil)
+	f.s.WithScheduleWriter(func(context.Context, store.Team) (ScheduleWriter, error) { return nil, nil })
 	w := f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 500, nil)
 	if !strings.Contains(w.Body.String(), "policy_missing") {
 		t.Fatal(w.Body.String())

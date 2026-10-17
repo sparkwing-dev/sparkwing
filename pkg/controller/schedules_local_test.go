@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -95,6 +96,7 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	home, checkout := t.TempDir(), t.TempDir()
+	initializeScheduleCheckout(t, checkout)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	service := &crons.Service{Store: st, Schedules: tenant, Side: store.CronWhereLocal, PinRoot: filepath.Join(home, "crons"), LockPath: filepath.Join(home, "crons.lock"), Now: func() time.Time { return now }, ArmedBy: "local:0", Host: "fixture", Version: "fixture"}
 	compiled := filepath.Join(t.TempDir(), "pipeline")
@@ -211,5 +213,150 @@ func TestLocalScheduleTransportRegistersPinsTicksAndDeletes(t *testing.T) {
 	}
 	if _, err := controls.DeleteSchedule(t.Context(), id); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func initializeScheduleCheckout(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "README"), []byte("schedule source\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "source"}} {
+		command := exec.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
+		if out, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("prepare scheduled checkout: %v: %s", err, out)
+		}
+	}
+}
+
+func TestLocalControllerScheduleFiresOneSealedRunAtDueInstant(t *testing.T) {
+	checkLocalControllerScheduledIntake(t, false)
+}
+
+func checkLocalControllerScheduledIntake(t *testing.T, native bool) {
+	st := newStoreForAuth(t)
+	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.MkdirTemp("", "schedule-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(home); err != nil {
+			t.Error(err)
+		}
+	})
+	checkout := t.TempDir()
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := []byte("pipelines:\n  - name: ci\n    entrypoint: CI\n    source: pipeline-source\n    on:\n      schedule:\n        - cron: '* * * * *'\n          where: local\n")
+	if err := os.MkdirAll(filepath.Join(checkout, ".sparkwing"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ".sparkwing", projectconfig.Filename), config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	initializeScheduleCheckout(t, checkout)
+	project, err := projectconfig.Parse(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	st.SetTestClock(t, func() time.Time { return now })
+	service := &crons.Service{Store: st, Schedules: tenant, Side: store.CronWhereLocal, PinRoot: filepath.Join(home, "crons"), LockPath: filepath.Join(home, "crons.lock"), Now: func() time.Time { return now }, Host: "native", Version: "test"}
+	snapshots := &localScheduleSnapshots{values: map[runspec.Hash][]string{}}
+	server := New(st, nil).WithLocalSchedules(service, func(context.Context, string, string, []string) (crons.Proof, error) {
+		t.Fatal("follow registration unexpectedly compiled")
+		return crons.Proof{}, nil
+	}, snapshots)
+	service.Launcher = server.ScheduleLauncher()
+	socket := filepath.Join(home, "api.sock")
+	var listener net.Listener
+	var transport *http.Transport
+	if native {
+		listener, err = wingd.ListenSocket(socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return wingd.DialSocket(ctx, socket, time.Second)
+		}}
+	} else {
+		pipe := &localScheduleListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
+		listener = pipe
+		transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			client, host := net.Pipe()
+			uid := uint32(123)
+			select {
+			case pipe.connections <- localScheduleConnection{Conn: host, peer: wingd.LocalPeerIdentity{GOOS: "linux", UID: &uid}}:
+				return client, nil
+			case <-ctx.Done():
+				client.Close()
+				host.Close()
+				return nil, ctx.Err()
+			}
+		}}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- server.HTTP().ServeAPI(ctx, listener) }()
+	t.Cleanup(func() {
+		transport.CloseIdleConnections()
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("local controller failed to join")
+		}
+	})
+	options := client.EngineOptions{URL: "http://local", HTTP: &http.Client{Transport: transport, Timeout: 5 * time.Second}}
+	manager, err := client.NewLocalScheduleManager(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := manager.RegisterLocalSchedules(t.Context(), controllerwire.LocalScheduleRegistration{Mode: controllerwire.ScheduleReplace, RepoPath: checkout, Project: project, Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "ci", Cron: "* * * * *"}}, Environment: []string{"BUILD_CONTEXT=captured"}, Follow: true})
+	if err != nil || len(written.Schedules) != 1 {
+		t.Fatalf("arm through real api.sock: %+v %v", written, err)
+	}
+	row, err := tenant.GetCronSchedule(t.Context(), written.Schedules[0].ID)
+	if err != nil || row.NextDueAt == nil {
+		t.Fatalf("armed schedule: %+v %v", row, err)
+	}
+	due := *row.NextDueAt
+	now = due.Add(-time.Nanosecond)
+	if _, err := manager.TickLocalSchedules(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := tenant.ListRuns(t.Context(), store.RunFilter{})
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("schedule fired before due: %d %v", len(runs), err)
+	}
+	now = due
+	for range 2 {
+		if _, err := manager.TickLocalSchedules(t.Context(), false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs, err = tenant.ListRuns(t.Context(), store.RunFilter{})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("due instant created %d runs: %v", len(runs), err)
+	}
+	sealed, err := tenant.ReadRun(t.Context(), runs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := sealed.Request.Request
+	if sealed.Request.Hash == "" || !sealed.Request.AdmittedAt.Equal(due) || request.Origin != runspec.OriginSchedule || request.Source.Entrypoint != "CI" || request.Source.Ref != "pipeline-source" || request.Source.Location.LocalCheckout != checkout || request.Env.Digest == "" || request.Actor.ID == "" || request.Git.App.Set || !strings.HasPrefix(request.Actor.ID, "local:") {
+		t.Fatalf("schedule lost sealed source or authority: %+v", sealed.Request)
+	}
+	fires, err := tenant.ListCronFires(t.Context(), row.ID, 10)
+	if err != nil || len(fires) != 1 || fires[0].RunID != sealed.ID || !fires[0].DueAt.Equal(due) {
+		t.Fatalf("fire history: %+v %v", fires, err)
 	}
 }

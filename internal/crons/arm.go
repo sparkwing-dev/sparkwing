@@ -98,10 +98,10 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, opts ArmOptions) (Ar
 	if err != nil {
 		return ArmReport{}, err
 	}
-	return s.armDeclared(ctx, root, declared, opts, true, nil)
+	return s.armDeclared(ctx, root, declared, opts, true, nil, nil)
 }
 
-func (s *Service) armDeclared(ctx context.Context, root string, declared []Declared, opts ArmOptions, replace bool, beforeArm func(Declared) error) (_ ArmReport, err error) {
+func (s *Service) armDeclared(ctx context.Context, root string, declared []Declared, opts ArmOptions, replace bool, beforeArm func(Declared) error, commit func([]store.CronSchedule) (ArmReport, error)) (_ ArmReport, err error) {
 	selected, err := selectDeclared(declared, opts.Only, root)
 	if err != nil {
 		return ArmReport{}, err
@@ -128,6 +128,7 @@ func (s *Service) armDeclared(ctx context.Context, root string, declared []Decla
 	}
 
 	now := s.now()
+	var prepared []store.CronSchedule
 	for _, d := range locals {
 		lock := store.CronLock{}
 		if proof, pinned := proofs[d.Pipeline]; pinned && !opts.Follow {
@@ -144,6 +145,10 @@ func (s *Service) armDeclared(ctx context.Context, root string, declared []Decla
 			if err := beforeArm(d); err != nil {
 				return report, err
 			}
+		}
+		if commit != nil {
+			prepared = append(prepared, row)
+			continue
 		}
 		hadPin := s.pinnedBefore(ctx, d.ID())
 		stored, created, aerr := s.Schedules.ArmCronSchedule(ctx, row, now)
@@ -171,6 +176,9 @@ func (s *Service) armDeclared(ctx context.Context, root string, declared []Decla
 		report.Schedules = append(report.Schedules, stored)
 	}
 
+	if commit != nil {
+		return commit(prepared)
+	}
 	if replace {
 		if err := s.withdrawUndeclared(ctx, root, declared, now, &report); err != nil {
 			return report, err

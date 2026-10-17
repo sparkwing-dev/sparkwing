@@ -271,6 +271,22 @@ func scrubInheritedHolder(holder *ConcurrencyHolder) {
 }
 
 func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest, fence *capacityFence) (AcquireSlotResponse, error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	defer rollbackOrLog(tx)
+	result, err := t.acquireConcurrencySlotTx(ctx, tx, req, fence, time.Time{})
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, req.Key}); err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	return result, nil
+}
+
+func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req AcquireSlotRequest, fence *capacityFence, deadline time.Time) (AcquireSlotResponse, error) {
 	if req.Key == "" {
 		return AcquireSlotResponse{}, errors.New("concurrency: empty key")
 	}
@@ -303,11 +319,7 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 		return AcquireSlotResponse{Kind: AcquireFailed}, nil
 	}
 
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return AcquireSlotResponse{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
+	var err error
 
 	if fence != nil {
 		if err := prepareCapacityAcquisitionTx(ctx, tx, t.team, req.Key, *fence); err != nil {
@@ -327,6 +339,12 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 	// pre-BEGIN timestamp goes stale while waiting and revives expired
 	// holders whose budget was already reassigned.
 	now := tx.now()
+	if !deadline.IsZero() {
+		req.Lease = slotLease(now, deadline, req.Lease)
+	}
+	if req.Lease <= 0 {
+		return AcquireSlotResponse{}, holderRefusal()
+	}
 	nowNS := now.UnixNano()
 
 	if reaped, err := txReapTerminalConcurrencyHolders(ctx, tx, t.team, req.Key); err != nil {
@@ -342,9 +360,6 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 		return AcquireSlotResponse{}, err
 	}
 	if hit != nil {
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
-			return AcquireSlotResponse{}, err
-		}
 		return AcquireSlotResponse{
 			Kind:         AcquireCached,
 			OutputRef:    hit.OutputRef,
@@ -423,9 +438,6 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 		}, nowNS, expires.UnixNano()); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
-			return AcquireSlotResponse{}, err
-		}
 		return AcquireSlotResponse{
 			Kind:             AcquireGranted,
 			HolderID:         req.HolderID,
@@ -450,9 +462,6 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 			`UPDATE concurrency_holders SET lease_expires_at = ? WHERE team = ? AND key = ? AND holder_id = ?`,
 			newExpires, string(t.team), req.Key, req.HolderID,
 		); err != nil {
-			return AcquireSlotResponse{}, err
-		}
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -495,9 +504,6 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 		}, nowNS, expiresNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
-			return AcquireSlotResponse{}, err
-		}
 		return AcquireSlotResponse{
 			Kind:             AcquireGranted,
 			HolderID:         req.HolderID,
@@ -509,15 +515,9 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 
 	switch policy {
 	case OnLimitSkip:
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
-			return AcquireSlotResponse{}, err
-		}
 		return AcquireSlotResponse{Kind: AcquireSkipped, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
 
 	case OnLimitFail:
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
-			return AcquireSlotResponse{}, err
-		}
 		return AcquireSlotResponse{Kind: AcquireFailed, PreviousCapacity: prevCap, DriftNote: driftNote}, nil
 
 	case OnLimitCoalesce:
@@ -538,9 +538,6 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 			LeaderRunID: leaderRun, LeaderNodeID: leaderNode,
 			Cost: req.Cost, DeclaredCapacity: req.Capacity,
 		}, nowNS, now.Add(req.Lease).UnixNano()); err != nil {
-			return AcquireSlotResponse{}, err
-		}
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -584,9 +581,6 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 		}, nowNS, expiresNS); err != nil {
 			return AcquireSlotResponse{}, err
 		}
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
-			return AcquireSlotResponse{}, err
-		}
 		return AcquireSlotResponse{
 			Kind:             AcquireCancellingOthers,
 			HolderID:         req.HolderID,
@@ -627,9 +621,6 @@ func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 			`SELECT COUNT(*) FROM concurrency_waiters WHERE team = ? AND key = ? AND policy = ?`,
 			string(t.team), req.Key, OnLimitQueue,
 		).Scan(&queueLen); err != nil {
-			return AcquireSlotResponse{}, err
-		}
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, req.Key}); err != nil {
 			return AcquireSlotResponse{}, err
 		}
 		return AcquireSlotResponse{
@@ -1219,8 +1210,32 @@ type holderRow struct {
 	queueArrivedNS   int64
 }
 
+func capacityLeaseCeilingTx(ctx context.Context, tx *storeTx, team Team, run, job string, expires int64) (int64, error) {
+	if isInheritedHolderNodeID(job) {
+		return expires, nil
+	}
+	var lease sql.NullInt64
+	var err error
+	if job != "" {
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(n.lease_expires_at,CASE WHEN r.dispatch='controller' AND r.plan_accepted_generation>0 THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END) FROM nodes n JOIN runs r ON r.team=n.team AND r.id=n.run_id WHERE n.team=? AND n.run_id=? AND n.node_id=?`, team, run, job).Scan(&lease)
+	} else {
+		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN dispatch='controller' AND plan_accepted_generation>0 THEN (SELECT until FROM leases WHERE name='controller.owner') ELSE (SELECT lease_expires_at FROM triggers WHERE team=r.team AND id=r.id) END FROM runs r WHERE team=? AND id=?`, team, run).Scan(&lease)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if lease.Valid && lease.Int64 < expires {
+		return lease.Int64, nil
+	}
+	return expires, nil
+}
+
 func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expiresNS int64) error {
 	generation, err := capacityGenerationTx(ctx, tx, h.team, h.runID, h.nodeID)
+	if err != nil {
+		return err
+	}
+	expiresNS, err = capacityLeaseCeilingTx(ctx, tx, h.team, h.runID, h.nodeID, expiresNS)
 	if err != nil {
 		return err
 	}
@@ -1648,7 +1663,19 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	if err != nil {
 		return WaiterResolution{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
+	result, err := t.resolveWaiterTx(ctx, tx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead, DefaultConcurrencyLease, fence)
+	if err != nil {
+		return WaiterResolution{}, err
+	}
+	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
+		return WaiterResolution{}, err
+	}
+	return result, nil
+}
+
+func (t *Tenant) resolveWaiterTx(ctx context.Context, tx *storeTx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool, lease time.Duration, fence *capacityFence) (WaiterResolution, error) {
+	var err error
 
 	if fence != nil {
 		if err := checkCapacityFenceTx(ctx, tx, t.team, *fence); err != nil {
@@ -1682,9 +1709,6 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	).Scan(&holderID, &leaseNS, &superInt)
 	switch {
 	case err == nil && superInt == 0 && leaseNS > nowNS:
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-			return WaiterResolution{}, err
-		}
 		return WaiterResolution{
 			Status:             WaiterPromoted,
 			HolderID:           holderID,
@@ -1699,9 +1723,6 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		return WaiterResolution{}, err
 	}
 	if hit != nil {
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-			return WaiterResolution{}, err
-		}
 		return WaiterResolution{
 			Status:       WaiterCached,
 			OutputRef:    hit.OutputRef,
@@ -1724,9 +1745,6 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
 				return WaiterResolution{}, err
 			}
-			if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-				return WaiterResolution{}, err
-			}
 			return WaiterResolution{Status: WaiterExpired}, nil
 		}
 		if waiter.Policy == OnLimitCoalesce {
@@ -1737,9 +1755,6 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 				return WaiterResolution{}, err
 			}
 			if coalesceFollowersCanInherit(leaderOutcome) {
-				if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-					return WaiterResolution{}, err
-				}
 				return WaiterResolution{
 					Status:              WaiterLeaderFinished,
 					LeaderRunID:         leaderRun,
@@ -1760,18 +1775,15 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 			}
 			if liveLeaderHolders == 0 {
 				now := tx.now()
-				promoted, err := txPromoteCoalesceWaiter(ctx, tx, t.team, key, runID, nodeID, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
+				promoted, err := txPromoteCoalesceWaiter(ctx, tx, t.team, key, runID, nodeID, now.UnixNano(), now.Add(lease).UnixNano())
 				if err != nil {
 					return WaiterResolution{}, err
 				}
 				if promoted != nil {
-					if err := txCommitChecked(ctx, tx, now.UnixNano(), concurrencyKey{t.team, key}); err != nil {
-						return WaiterResolution{}, err
-					}
 					return WaiterResolution{
 						Status:             WaiterPromoted,
 						HolderID:           promoted.HolderID,
-						HolderLeaseExpires: now.Add(DefaultConcurrencyLease),
+						HolderLeaseExpires: now.Add(lease),
 					}, nil
 				}
 			}
@@ -1791,19 +1803,16 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		}
 		if shouldPromote {
 			now := tx.now()
-			promoted, err := txPromotePollingWaiter(ctx, tx, t.team, key, runID, nodeID, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano())
+			promoted, err := txPromotePollingWaiter(ctx, tx, t.team, key, runID, nodeID, now.UnixNano(), now.Add(lease).UnixNano())
 			if err != nil {
 				return WaiterResolution{}, err
 			}
 			for _, waiter := range promoted {
 				if waiter.RunID == runID && waiter.NodeID == nodeID {
-					if err := txCommitChecked(ctx, tx, now.UnixNano(), concurrencyKey{t.team, key}); err != nil {
-						return WaiterResolution{}, err
-					}
 					return WaiterResolution{
 						Status:             WaiterPromoted,
 						HolderID:           waiter.HolderID,
-						HolderLeaseExpires: now.Add(DefaultConcurrencyLease),
+						HolderLeaseExpires: now.Add(lease),
 					}, nil
 				}
 			}
@@ -1828,9 +1837,6 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		if e != nil {
 			return WaiterResolution{}, e
 		}
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-			return WaiterResolution{}, err
-		}
 		return WaiterResolution{Status: WaiterStillWaiting, Position: position, QueueLength: queueLength, Holders: holders}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -1843,13 +1849,7 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 			return WaiterResolution{}, err
 		}
 		if !found || !coalesceFollowersCanInherit(leaderOutcome) {
-			if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-				return WaiterResolution{}, err
-			}
 			return WaiterResolution{Status: WaiterCancelled}, nil
-		}
-		if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-			return WaiterResolution{}, err
 		}
 		return WaiterResolution{
 			Status:              WaiterLeaderFinished,
@@ -1860,9 +1860,6 @@ func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		}, nil
 	}
 
-	if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-		return WaiterResolution{}, err
-	}
 	return WaiterResolution{Status: WaiterCancelled}, nil
 }
 
@@ -1872,10 +1869,17 @@ func (t *Tenant) GetConcurrencyState(ctx context.Context, key string) (*Concurre
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
+	state, err := t.concurrencyStateTx(ctx, tx, key)
+	if err != nil {
+		return nil, err
+	}
+	return state, tx.Commit()
+}
 
+func (t *Tenant) concurrencyStateTx(ctx context.Context, tx *storeTx, key string) (*ConcurrencyState, error) {
 	var capacity int
-	err = tx.QueryRowContext(
+	err := tx.QueryRowContext(
 		ctx,
 		`SELECT capacity FROM concurrency_entries WHERE team = ? AND key = ?`, string(t.team), key,
 	).Scan(&capacity)
@@ -1947,9 +1951,6 @@ func (t *Tenant) GetConcurrencyState(ctx context.Context, key string) (*Concurre
 	}
 	if floor > 0 {
 		state.EffectiveCapacity = floor
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	return state, nil
 }

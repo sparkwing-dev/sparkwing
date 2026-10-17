@@ -206,9 +206,16 @@ func prepareCapacityAcquisitionTx(ctx context.Context, tx *storeTx, team Team, k
 	if err := checkCapacityOwnerTx(ctx, tx, team, fence); err != nil {
 		return err
 	}
+	if err := lockCapacityWorkTx(ctx, tx, team, key, NodeRef{fence.binding.RunID, fence.binding.NodeID}); err != nil {
+		return err
+	}
+	return checkCapacityFenceTx(ctx, tx, team, fence)
+}
+
+func lockCapacityWorkTx(ctx context.Context, tx *storeTx, team Team, key string, ref NodeRef) error {
 	rows, err := tx.QueryContext(ctx, `SELECT run_id,node_id FROM concurrency_holders WHERE team=? AND key=?
 UNION SELECT run_id,node_id FROM concurrency_waiters WHERE team=? AND key=?
-UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, fence.binding.RunID, fence.binding.NodeID)
+UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, ref.RunID, ref.NodeID)
 	if err != nil {
 		return err
 	}
@@ -242,7 +249,7 @@ UNION SELECT ?,? ORDER BY run_id,node_id`, team, key, team, key, fence.binding.R
 			return err
 		}
 	}
-	return checkCapacityFenceTx(ctx, tx, team, fence)
+	return nil
 }
 
 func checkCapacityOwnerTx(ctx context.Context, tx *storeTx, team Team, fence capacityFence) error {

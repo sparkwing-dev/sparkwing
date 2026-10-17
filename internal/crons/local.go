@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // LocalRegistration binds a checkout's selected project to captured private inputs.
@@ -53,7 +54,7 @@ func ReadLocalRegistration(ctx context.Context, home, id string) (_ LocalRegistr
 }
 
 // RegisterLocal uses the supplied declaration set without withdrawing unselected schedules.
-func (s *Service) RegisterLocal(ctx context.Context, input controllerwire.LocalScheduleRegistration, prove Prover, capture func(context.Context, []string) (runspec.EnvSnapshot, error)) (ArmReport, error) {
+func (s *Service) RegisterLocal(ctx context.Context, input controllerwire.LocalScheduleRegistration, prove Prover, capture func(context.Context, []string) (runspec.EnvSnapshot, error), commit func(context.Context, []store.CronSchedule, LocalRegistration, bool) (ArmReport, error)) (ArmReport, error) {
 	if s.Side != "local" || !filepath.IsAbs(input.RepoPath) || input.Project == nil || capture == nil || (input.Mode != controllerwire.ScheduleReplace && input.Mode != controllerwire.ScheduleUpsert) || (!input.Prove && !input.Follow) {
 		return ArmReport{}, errors.New("invalid local schedule registration")
 	}
@@ -110,10 +111,16 @@ func (s *Service) RegisterLocal(ctx context.Context, input controllerwire.LocalS
 		return ArmReport{}, err
 	}
 	registration := LocalRegistration{RepoPath: root, Project: input.Project, Environment: seal}
+	var batch func([]store.CronSchedule) (ArmReport, error)
+	if commit != nil {
+		batch = func(rows []store.CronSchedule) (ArmReport, error) {
+			return commit(ctx, rows, registration, input.Mode == controllerwire.ScheduleReplace)
+		}
+	}
 	return s.armDeclared(ctx, root, selected, ArmOptions{Follow: input.Follow, Prove: prove}, input.Mode == controllerwire.ScheduleReplace, func(d Declared) error {
 		registration.Pipeline, registration.ScheduleName = d.Pipeline, d.Name
 		return writeLocalRegistration(ctx, filepath.Dir(s.PinRoot), d.ID(), registration)
-	})
+	}, batch)
 }
 
 func writeLocalRegistration(ctx context.Context, home, id string, registration LocalRegistration) (err error) {

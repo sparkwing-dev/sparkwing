@@ -1355,8 +1355,8 @@ checks share the matching-input reader without taking write locks. The awarding
 transaction evaluates observed labels and available resources through the matcher.
 Data selectors call the transaction's `DataAccessChecker`, supplied by the blob
 owner. Receipt and read-edge changes in that transaction govern its verdict.
-Concurrency binding returns unavailable until C2's resolved target can name the
-declared key. Node-host process cleanup remains the host's binding check.
+Concurrency binding resolves the accepted group and exact holder generation
+from C2's target selectors. Node-host process cleanup remains the host's binding check.
 
 Snapshot transactions omit row locks because PostgreSQL refuses them in a
 read-only transaction. Authorization and owner snapshots use the same repeatable
@@ -3505,18 +3505,54 @@ and ref inputs retain their own source facts. This does not implement the
 client's still-missing cross-repository source resolution.
 
 
-## W1b scheduled-intake consumer contract
+## W1b scheduled intake and concurrency transactions
 
-C2's `ScheduledRunWriter` now calls
-`Tenant.AdmitScheduledRun(ctx, scheduleID, due)` for a leased controller tick or
-local schedule launcher. This method is still required from the committing store
-adapter. See C2's W1b scheduled-intake boundary for the exact signature, stored
-consent checks and transactional replay identity. The controller's old
-`admitTrigger`, `triggerIntake` and `triggerRows` are deleted. The remaining App
-invocation projection helper still serves its existing webhook caller.
+Tenant implements C2's six `ScheduleWriter` mutations and
+`AdmitScheduledRun(ctx, scheduleID, due)`. `cron_schedules.consent_json` holds a
+version-one envelope containing the arming authority and request template.
+Replacement locks the tenant and commits declarations, consent, withdrawals and
+caps together. It preserves existing IDs, pauses, cursors, history and overrides.
+`CronOverride.TZSet` distinguishes an explicit empty zone from inheritance.
 
-C2 ScheduleWriter's six manual schedule mutations also remain unimplemented by
-Tenant. Test doubles cover transport and use real sealed intake after fake
-consent. They do not prove atomic arming, revocation of stored arming consent or
-automatic GitHub App source authority. No store implementation or schema changes
-are made by this reconciliation.
+`ScheduleSourcePolicy.ResolveScheduleSource` resolves the persisted source intent.
+The controller implements it. Source I/O runs between consent checks. The final
+transaction compares the stored declaration and consent with the prepared
+snapshot, resolves full ancestry and membership again, and calls the existing
+sealed intake. The due instant must match the effective cadence and store clock.
+The run's idempotency scope derives from the schedule ID within its tenant.
+A due instant or manual request key returns the first committed seal even if a
+followed branch has moved. Replay still requires current consent. Run, number,
+queue unit, fire history and cursor commit together.
+
+Local registration prepares pins and private environment snapshots before one
+`ReplaceAuthorizedLocalSchedules` transaction. Its seal carries the captured
+snapshot, checkout and configured entrypoint. Local pause, override and deletion
+use the same authorized writers under the controller's local schedule lock.
+GitHub repository IDs are resolved through the controller source identity reader.
+A schedule origin grants no App provenance or pool access.
+
+Tenant also implements all eight `ConcurrencyStore` transactions. They consume
+C2's resolved selectors, current authority and accepted declarations. Acquisition
+cannot replace declared capacity, cost or policy. Holder and waiter access checks
+the exact run, job and generation. Renewal and promotion respect authority and
+work deadlines. Release and force release notify and promote in their transaction.
+Claim group reads preserve contention accounting while removing memo keys and
+leader references outside the declared read set. Native host acquisition and the
+HTTP writer share the existing accounting helpers and lock order.
+
+Proofs use real SQLite, controller routing, source resolution and sealed intake.
+They cover concurrent due replay, consent revocation, membership loss, source
+resolution races, atomic cap refusal, empty override values and both local and
+Cloud scheduling. The real api.sock test is
+`TestNativeLocalControllerScheduleFiresOneSealedRunAtDueInstant`. Its in-memory
+transport counterpart runs the same assertions. Native evidence belongs to the
+lead harness.
+
+Open integration points: automatic App schedule discovery still uses the legacy
+arming path and supplies no persisted consent. Following a private remote branch
+needs audited controller source credentials during revision resolution. Pinned
+remote schedules use the existing post-admission source release. HTTP box groups
+need a persisted host identity, and memo requests need accepted namespace
+metadata. The concrete writer refuses those missing authorities. Native box
+admission remains available. The legacy scheduling and memo surfaces are not
+retired by this cut.

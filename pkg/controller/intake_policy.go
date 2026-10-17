@@ -87,7 +87,7 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	}
 	if strings.HasPrefix(string(request.Request.Git.Repository.Key), "gh:") {
 		verified, ok := ctx.Value(verifiedIntakeSourceKey{}).(verifiedIntakeSource)
-		if !ok || verified.location != location || verified.repository != request.Request.Git.Repository {
+		if (!ok || verified.location != location || verified.repository != request.Request.Git.Repository) && !store.ScheduledSourceVerified(ctx, resolver, request) {
 			return facts, &apierr.Error{Code: apierr.Forbidden, Message: "GitHub source requires verified intake repository identity"}
 		}
 	} else {

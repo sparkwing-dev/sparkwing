@@ -3,8 +3,9 @@ package controller
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -135,31 +136,16 @@ func (s *Server) handleDeleteCronRepo(w http.ResponseWriter, r *http.Request, a 
 }
 
 func (s *Server) handlePauseSchedule(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if s.localSchedules != nil {
-		service, err := s.localScheduleService(r, a)
-		if err != nil {
-			return err
-		}
-		row, err := service.Resolve(r.Context(), r.PathValue("schedule"))
-		if err != nil {
-			return engineLookupError(err)
-		}
-		if r.Pattern == "POST /api/v1/schedules/{schedule}/pause" {
-			err = service.Pause(r.Context(), row.ID)
-		} else {
-			err = service.Resume(r.Context(), row.ID)
-		}
-		if err != nil {
-			return engineLookupError(err)
-		}
-		return s.writeScheduleView(w, r, a, row.ID)
-	}
-
 	writer, err := s.scheduleWriter(r, a)
 	if err != nil {
 		return err
 	}
-	id, err := writer.PauseAuthorizedSchedule(r.Context(), a, r.PathValue("schedule"), r.Pattern == "POST /api/v1/schedules/{schedule}/pause")
+	var id string
+	err = s.withScheduleLock(r, a, func() error {
+		var err error
+		id, err = writer.PauseAuthorizedSchedule(r.Context(), a, r.PathValue("schedule"), r.Pattern == "POST /api/v1/schedules/{schedule}/pause")
+		return err
+	})
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -177,41 +163,17 @@ func (s *Server) handleScheduleOverride(w http.ResponseWriter, r *http.Request, 
 			return invalidEngineBody(err.Error())
 		}
 	}
-	if s.localSchedules != nil {
-		service, err := s.localScheduleService(r, a)
-		if err != nil {
-			return err
-		}
-		row, err := service.Resolve(r.Context(), r.PathValue("schedule"))
-		if err != nil {
-			return engineLookupError(err)
-		}
-		if body == nil {
-			_, err = service.ClearOverride(r.Context(), row.ID)
-		} else {
-			override := crons.Override{Cron: body.Cron, TZ: body.TZ, Overlap: body.Overlap}
-			if body.Args != nil {
-				override.Args = *body.Args
-			}
-			if body.CatchUp != nil {
-				duration, parseErr := time.ParseDuration(*body.CatchUp)
-				if parseErr != nil {
-					return invalidEngineBody("invalid catch-up duration")
-				}
-				override.CatchUp = &duration
-			}
-			_, err = service.SetOverride(r.Context(), row.ID, override)
-		}
-		if err != nil {
-			return engineLookupError(err)
-		}
-		return s.writeScheduleView(w, r, a, row.ID)
-	}
+
 	writer, err := s.scheduleWriter(r, a)
 	if err != nil {
 		return err
 	}
-	id, err := writer.OverrideAuthorizedSchedule(r.Context(), a, r.PathValue("schedule"), body)
+	var id string
+	err = s.withScheduleLock(r, a, func() error {
+		var err error
+		id, err = writer.OverrideAuthorizedSchedule(r.Context(), a, r.PathValue("schedule"), body)
+		return err
+	})
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -240,32 +202,20 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request, a capa
 }
 
 func (s *Server) handleDisarmCron(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if s.localSchedules != nil {
-		service, err := s.localScheduleService(r, a)
-		if err != nil {
-			return err
-		}
-		var id string
-		err = service.WithLocalLock(r.Context(), func() error {
-			row, err := service.Resolve(r.Context(), r.PathValue("schedule"))
-			if err != nil {
-				return err
-			}
-			id = row.ID
-			return service.Disarm(r.Context(), id)
-		})
-		if err != nil {
-			return engineLookupError(err)
-		}
-		writeJSON(w, http.StatusOK, controllerwire.ScheduleDeletion{ScheduleID: id, Deleted: true})
-		return nil
-	}
-
 	writer, err := s.scheduleWriter(r, a)
 	if err != nil {
 		return err
 	}
-	id, deleted, err := writer.DeleteAuthorizedSchedule(r.Context(), a, r.PathValue("schedule"))
+	var id string
+	var deleted bool
+	err = s.withScheduleLock(r, a, func() error {
+		var err error
+		id, deleted, err = writer.DeleteAuthorizedSchedule(r.Context(), a, r.PathValue("schedule"))
+		if err == nil && deleted && s.localSchedules != nil {
+			err = os.RemoveAll(filepath.Join(s.localSchedules.PinRoot, id))
+		}
+		return err
+	})
 	if err != nil {
 		return engineLookupError(err)
 	}
@@ -304,4 +254,15 @@ func scheduleCount(r *http.Request, name string, fallback int) (int, error) {
 		return 0, invalidEngineBody(name + " count must be nonnegative")
 	}
 	return value, nil
+}
+
+func (s *Server) withScheduleLock(r *http.Request, a capability.Authorized, edit func() error) error {
+	if s.localSchedules == nil {
+		return edit()
+	}
+	service, err := s.localScheduleService(r, a)
+	if err != nil {
+		return err
+	}
+	return service.WithLocalLock(r.Context(), edit)
 }

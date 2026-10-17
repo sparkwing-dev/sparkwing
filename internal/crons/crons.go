@@ -762,7 +762,7 @@ func overrideFields(s store.CronSchedule) []string {
 	if s.Override.Cron != "" {
 		out = append(out, "cron")
 	}
-	if s.Override.TZ != "" {
+	if s.Override.TZSet || s.Override.TZ != "" {
 		out = append(out, "tz")
 	}
 	if s.Override.Overlap != "" {

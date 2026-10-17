@@ -33,7 +33,7 @@ func newStoreRecoveryFixture(t *testing.T, started bool) *storeRecoveryFixture {
 	return newStoreRecoveryFixtureAt(t, started, storetest.NewSQLite(t))
 }
 
-func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Target) *storeRecoveryFixture {
+func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Target, edits ...func(*nodeproto.PlanDoc)) *storeRecoveryFixture {
 	t.Helper()
 	ctx := t.Context()
 	f := &storeRecoveryFixture{target: target}
@@ -50,6 +50,9 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 	var plan store.PlanAcceptance
 	f.tenant, plan, err = storePlanSealRequestWith(ctx, f.s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) {
 		doc.Jobs = []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}, Retry: &nodeproto.RetrySpec{Attempts: 2}}}
+		for _, edit := range edits {
+			edit(doc)
+		}
 	})
 	if err != nil {
 		t.Fatal(err)

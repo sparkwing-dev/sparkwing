@@ -53,6 +53,12 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if err != nil {
 		return AdmissionResult{}, err
 	}
+	if request.scheduleID != "" {
+		scope, err = scheduleIntakeScope(request.scheduleID)
+		if err != nil {
+			return AdmissionResult{}, err
+		}
+	}
 	// safety: serializing intake per team reserves the number without taking the team row before owner authority.
 	if err = advisoryLockTx(ctx, tx, "intake:"+string(team)); err != nil {
 		return AdmissionResult{}, err

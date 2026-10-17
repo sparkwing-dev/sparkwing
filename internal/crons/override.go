@@ -54,6 +54,7 @@ func (s *Service) SetOverride(ctx context.Context, id string, fields Override) (
 	}
 	if fields.TZ != nil {
 		override.TZ = *fields.TZ
+		override.TZSet = true
 	}
 	if fields.Overlap != nil {
 		override.Overlap = *fields.Overlap

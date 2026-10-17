@@ -2562,7 +2562,9 @@ The default uses Tenant only if it implements this interface. There is no call
 to the old unfenced methods when it does not.
 
 C1's current BindSlotOfBoundNode checker still refuses missing resolved selectors.
-W1 must consume SlotKey/SlotHolderID and implement the transaction interface.
+Tenant consumes SlotKey/SlotHolderID through the concrete transaction interface.
+See C1's scheduled intake and concurrency section for coverage and remaining
+HTTP box and memo declaration gaps.
 The HTTP properties use committed-fact and transaction fakes. They prove target
 transport, policy selection, cancellation classes and safe failure. They do not
 close native group/memo declaration, cross-team leader, lease-continuity or
@@ -3422,8 +3424,8 @@ that transaction, rechecking authority even on replay. Use the single sealed
 intake and its admission/billing guards. A typed schedule source grants no App
 trust or pool access. Return the first committed result for a repeated instant.
 
-This adds the tick boundary alongside the existing manual `ScheduleWriter`
-contract. It does not implement C1's committing schedule origin or arming
-consent. Controller tests fake consent and source-policy lookup, then use real
-Tenant.AdmitRun, immutable seals, queueing, replay and rate guards. Native local
-and controller schedules still require the C1 implementation of both interfaces.
+Tenant implements both interfaces with persisted arming consent and sealed
+intake. The concrete controller proofs cover local registration, Cloud firing,
+replay and current authority. The real api.sock proof remains assigned to the
+lead harness. C1 records the remaining automatic App, private follow, HTTP box
+and memo integration points.

@@ -50,7 +50,7 @@ func localCapture(_ context.Context, environment []string) (runspec.EnvSnapshot,
 func TestLocalRegistrationPersistsSelectedInputsAndPins(t *testing.T) {
 	h, input := localRegistrationFixture(t)
 	compiler := newFakeCompiler(t)
-	report, err := h.svc.RegisterLocal(t.Context(), input, compiler.prove, localCapture)
+	report, err := h.svc.RegisterLocal(t.Context(), input, compiler.prove, localCapture, nil)
 	if err != nil || len(report.Schedules) != 2 {
 		t.Fatalf("register: %+v: %v", report, err)
 	}
@@ -77,7 +77,7 @@ func TestLocalRegistrationPersistsSelectedInputsAndPins(t *testing.T) {
 	input.Schedules = input.Schedules[:1]
 	input.Environment = []string{"CAPTURE=changed"}
 	input.Follow, input.Prove = true, false
-	report, err = h.svc.RegisterLocal(t.Context(), input, nil, localCapture)
+	report, err = h.svc.RegisterLocal(t.Context(), input, nil, localCapture, nil)
 	if err != nil || len(report.Withdrawals) != 0 {
 		t.Fatalf("selective registration: %+v: %v", report, err)
 	}
@@ -105,7 +105,7 @@ func TestLocalRegistrationPersistsSelectedInputsAndPins(t *testing.T) {
 func TestLocalRegistrationFailedProofKeepsPriorInputs(t *testing.T) {
 	h, input := localRegistrationFixture(t)
 	compiler := newFakeCompiler(t)
-	report, err := h.svc.RegisterLocal(t.Context(), input, compiler.prove, localCapture)
+	report, err := h.svc.RegisterLocal(t.Context(), input, compiler.prove, localCapture, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestLocalRegistrationFailedProofKeepsPriorInputs(t *testing.T) {
 	}
 	input.Environment = []string{"CAPTURE=changed"}
 	compiler.failFor = input.Schedules[1].Pipeline
-	if _, err := h.svc.RegisterLocal(t.Context(), input, compiler.prove, localCapture); err == nil {
+	if _, err := h.svc.RegisterLocal(t.Context(), input, compiler.prove, localCapture, nil); err == nil {
 		t.Fatal("failed proof accepted")
 	}
 	after, err := ReadLocalRegistration(t.Context(), h.home, report.Schedules[0].ID)
@@ -140,7 +140,7 @@ func FuzzLocalRegistrationRejectsForgedSelection(f *testing.F) {
 		_, err := h.svc.RegisterLocal(t.Context(), input, nil, func(context.Context, []string) (runspec.EnvSnapshot, error) {
 			captured = true
 			return runspec.EnvSnapshot{}, nil
-		})
+		}, nil)
 		if err == nil || captured {
 			t.Fatal("forged selection reached host capture")
 		}
@@ -178,7 +178,7 @@ func TestLocalRegistrationAndPinRetainProofUntilCopyAndReleaseOnFailure(t *testi
 		proof.Release = func() error { released++; return os.Remove(proof.Binary) }
 		return proof, nil
 	}
-	report, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture)
+	report, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture, nil)
 	if err != nil || len(report.Schedules) != 2 || released != 2 {
 		t.Fatalf("registration did not copy and release proofs: %+v %v releases=%d", report, err, released)
 	}
@@ -196,7 +196,7 @@ func TestLocalRegistrationAndPinRetainProofUntilCopyAndReleaseOnFailure(t *testi
 		t.Fatalf("pin proof lifecycle: %v releases=%d", err, released)
 	}
 	compiler.failFor = input.Schedules[1].Pipeline
-	if _, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture); err == nil || released != 4 {
+	if _, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture, nil); err == nil || released != 4 {
 		t.Fatalf("earlier proof survived later failure: %v releases=%d", err, released)
 	}
 }
@@ -212,7 +212,7 @@ func TestLocalProofCleanupFailuresReachArmingAndPinning(t *testing.T) {
 		}
 		return proof, err
 	}
-	report, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture)
+	report, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture, nil)
 	if !errors.Is(err, want) || len(report.Schedules) != 2 {
 		t.Fatalf("arm lost cleanup failure: %+v %v", report, err)
 	}
@@ -220,7 +220,7 @@ func TestLocalProofCleanupFailuresReachArmingAndPinning(t *testing.T) {
 		t.Fatalf("pin lost cleanup failure: %v", err)
 	}
 	compiler.failFor = input.Schedules[1].Pipeline
-	if _, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture); !errors.Is(err, want) {
+	if _, err := h.svc.RegisterLocal(t.Context(), input, prove, localCapture, nil); !errors.Is(err, want) {
 		t.Fatalf("failed proof lost prior cleanup failure: %v", err)
 	}
 }
