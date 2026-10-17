@@ -53,7 +53,7 @@ func burstNativeSDKAcceptance(t *testing.T, serve func(*testing.T, http.Handler)
 	identity := engine.Identity{Version: "v1.2.3", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}}
 	for _, placement := range []string{"here", "personal", "cloud"} {
 		t.Run(placement, func(t *testing.T) {
-			controller.BurstExecutionAcceptance(t, placement, controller.BurstExecutionProof{
+			proof := controller.BurstExecutionProof{
 				Pipeline: burstSDKPipelineName, Plan: plan, Engine: identity,
 				Execute: func(options client.EngineOptions, award controllerwire.ClaimedUnit, owner controllerwire.Controller) {
 					entry := &source.Entry{Engine: engine.Resolved{Identity: identity}, Command: []string{executable, "-test.run=^TestBurstSDKNativeChild$", "--"}, Directory: t.TempDir()}
@@ -66,7 +66,11 @@ func burstNativeSDKAcceptance(t *testing.T, serve func(*testing.T, http.Handler)
 						},
 					})
 				},
-			})
+			}
+			if placement == "cloud" {
+				configureBurstCloudJob(t, &proof)
+			}
+			controller.BurstExecutionAcceptance(t, placement, proof)
 		})
 	}
 }

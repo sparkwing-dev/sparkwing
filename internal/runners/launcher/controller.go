@@ -61,11 +61,10 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 	if !slices.Contains(c.demand.Kinds, unit.Unit) || unit.Capability == "" {
 		return nil, errors.New("controller returned an unexpected launcher award")
 	}
-	if unit.Execution == nil || !unit.Execution.Resources.Set || !unit.Execution.Resources.Value.Cores.Set || !unit.Execution.Resources.Value.MemoryBytes.Set {
-		return nil, errors.New("Cloud award is missing resolved execution resources")
+	if unit.CloudResources == nil {
+		return nil, errors.New("Cloud award is missing its committed allocation")
 	}
-	resources := unit.Execution.Resources.Value
-	award := &CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores.Value, Memory: resources.MemoryBytes.Value}
+	award := &CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: unit.CloudResources.Cores, Memory: unit.CloudResources.MemoryBytes}
 	if err := validateAward(*award); err != nil {
 		return nil, err
 	}

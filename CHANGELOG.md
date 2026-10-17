@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **overflow:** Publish and consume declared artifacts through shared native
+  hosts. Cloud Jobs use the CPU and memory class committed at award, including
+  when the pipeline leaves resource settings unset.
+
 - **overflow:** Add explicit Cloud routing, tracked working-tree source bundles,
   requester-resolved ephemeral secrets, personal runner capacity and per-user
   overflow controls. Local execution remains the default. Pre-intake source

@@ -38,8 +38,8 @@ import (
 
 func localAwardPlan() nodeproto.PlanDoc {
 	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "first", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}},
-		{ID: "second", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}},
+		{ID: "first", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}, Artifacts: []string{"result.txt"}},
+		{ID: "second", Inline: true, ResultStep: "run", Steps: []nodeproto.StepSpec{{ID: "run"}}, Needs: []string{"first"}, Consumes: []nodeproto.ArtifactInput{{Producer: "first", Into: "received"}}},
 	}}
 }
 
@@ -68,6 +68,16 @@ func TestLocalAwardProcess(t *testing.T) {
 		case nodeproto.OpRunStep:
 			if binding == nil || request.Job != binding.JobID {
 				t.Fatal("process executed another job")
+			}
+			if request.Job == "first" {
+				if err := os.WriteFile("result.txt", []byte("artifact from first process\n"), 0o640); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				body, err := os.ReadFile(filepath.Join("received", "result.txt"))
+				if err != nil || string(body) != "artifact from first process\n" {
+					t.Fatalf("consumer lost producer artifact: %q %v", body, err)
+				}
 			}
 			fmt.Println("ran " + request.Job)
 			result = map[string]any{"outcome": "success", "output": map[string]string{"job": request.Job}}
@@ -337,6 +347,9 @@ func TestLocalControllerTwoJobProcessesUseIndependentAwards(t *testing.T) {
 		t.Fatalf("persisted pipeline: %+v: %v", stored, err)
 	}
 	for _, row := range stored.Nodes {
+		if row.Ref.NodeID == "first" && row.ManifestRecord == nil {
+			t.Fatalf("producer artifact manifest was not committed: %+v", row)
+		}
 		if row.OutputRecord == nil {
 			t.Fatalf("job output was not committed: %+v", row)
 		}

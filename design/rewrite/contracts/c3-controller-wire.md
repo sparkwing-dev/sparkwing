@@ -1084,3 +1084,20 @@ presentation from stdin; it adds no login, bearer conversion or persisted
 session field. Only the issued runner credential is written to the private
 credential file. Failed installation revokes that credential through the same
 session transport and rolls back the local configuration.
+
+## Committed Cloud allocations and launch proof
+
+`ClaimedUnit.cloud_resources` carries the physical CPU and memory allocation
+from C1's committed billing reservation on Cloud awards, including sync and
+exchange. `Execution` continues to carry the sealed author settings. An absent
+CPU or memory request remains absent in those settings. The launcher requires
+the allocation, builds its Job from it, and refuses an exchange that changes it.
+Non-Cloud awards omit the field. The previous use of author settings as physical
+Cloud allocation is removed.
+
+The burst SDK acceptance drives real intake, claims and launcher publication
+through source init, one-use bootstrap exchange, native SDK pipes, secret
+masking, artifact upload/restoration and final Job/bootstrap cleanup. The
+Kubernetes client and measured isolation boundary are infrastructure fakes.
+The public CLI probes also declare and consume artifacts across separate jobs.
+These tests do not prove cluster enforcement or release-image execution.

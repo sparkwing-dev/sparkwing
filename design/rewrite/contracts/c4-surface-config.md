@@ -1006,3 +1006,15 @@ carry its exact team's hashed label, and one reservation occupies the whole node
 The launcher does not induce Karpenter scale-up. Native sidecars,
 PodLevelResources, admission APIs and escaped-node network enforcement must be
 verified on the target cluster. A Helm render establishes no native proof.
+
+## Burst artifact execution and physical Cloud resources
+
+Burst execution uses the shared native artifact adapter for declaration capture
+and consumer staging. Public here and personal-runner probes now publish a file
+from the uploaded edited source and read it in a dependent job. Native listener
+refusal leaves those probes unverified.
+
+Cloud resource requests keep their sealed presence and origins. The physical
+allocation comes from the billing class committed at award, independently of
+those settings, and remains fixed across bootstrap exchange and price changes.
+No default route, per-user cap, configuration key or execution limit changes.

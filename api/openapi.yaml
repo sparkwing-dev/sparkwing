@@ -545,6 +545,10 @@ components:
           $ref: '#/components/schemas/internal.capability.Binding'
         capability:
           type: string
+        cloud_resources:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.match.Resources'
+            - type: "null"
         delivery:
           type: string
         engine:

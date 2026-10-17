@@ -151,6 +151,10 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	case capability.UnitTrigger:
 		unit.Execution = nil
 	}
+	unit.CloudResources, err = s.Store.CloudAwardResources(ctx, principal.Authority)
+	if err != nil {
+		return controllerwire.ClaimedUnit{}, err
+	}
 	if parent := principal.Capability.Parent; parent != nil {
 		p, err := s.Store.ResolveAuthority(ctx, *parent)
 		if err != nil {

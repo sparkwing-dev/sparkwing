@@ -51,10 +51,13 @@ func burstAcceptanceFlow(t *testing.T, saturated bool, placement string) {
 
 // BurstExecutionProof binds real SDK execution to the composed burst intake and claim fixture.
 type BurstExecutionProof struct {
-	Pipeline string
-	Plan     nodeproto.PlanDoc
-	Engine   engine.Identity
-	Execute  func(client.EngineOptions, controllerwire.ClaimedUnit, controllerwire.Controller)
+	Pipeline      string
+	Plan          nodeproto.PlanDoc
+	Engine        engine.Identity
+	Execute       func(client.EngineOptions, controllerwire.ClaimedUnit, controllerwire.Controller)
+	ClaimCloud    func(client.EngineOptions) controllerwire.ClaimedUnit
+	ExchangeCloud func(client.EngineOptions, controllerwire.ClaimedUnit) controllerwire.ClaimedUnit
+	FinishCloud   func()
 }
 
 // BurstExecutionAcceptance runs the shared burst path through the supplied executor.
@@ -93,7 +96,8 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 	}
 	personal := burstAcceptancePersonalMachine(t, s)
 	worker := newClient(personal, false)
-	cloud := newClient(engineHTTPRoot(t, e, "", "burst-launcher", []capability.Grant{capability.ClaimsLaunch}), true)
+	cloudBearer := engineHTTPRoot(t, e, "", "burst-launcher", []capability.Grant{capability.ClaimsLaunch})
+	cloud := newClient(cloudBearer, true)
 	poll := controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{capability.UnitNode}, AvailableCores: 64}
 	if observed, err := worker.Claim(t.Context(), poll); err != nil || observed.Claim != nil {
 		t.Fatalf("personal machine observation: %+v %v", observed, err)
@@ -190,7 +194,15 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		if placement == "cloud-retry" {
 			engineSQL(t, s.store, `UPDATE nodes SET attempt=2 WHERE team='a' AND run_id=? AND node_id='job'`, created.RunID)
 		}
-		awarded, err = selected.Claim(t.Context(), poll)
+		if cloudWorker && proof != nil && proof.ClaimCloud != nil {
+			launcherOptions := options
+			launcherOptions.Launcher = true
+			launcherOptions.Bearer = func(ctx context.Context) (string, error) { return cloudBearer, nil }
+			unit := proof.ClaimCloud(launcherOptions)
+			awarded.Claim = &unit
+		} else {
+			awarded, err = selected.Claim(t.Context(), poll)
+		}
 		if err != nil || awarded.Claim == nil || awarded.Claim.Runner.Name != wantRunner {
 			t.Fatalf("worker after placement hold: %+v %v", awarded, err)
 		}
@@ -205,11 +217,16 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		bootstrapOptions.Bearer = func(context.Context) (string, error) { return awarded.Claim.Capability, nil }
 		burstAcceptanceCheckout(t, bootstrapOptions, created.RunID, spec)
 		bootstrap := newClient(awarded.Claim.Capability, false)
-		exchanged, err := bootstrap.Exchange(t.Context())
-		if err != nil {
-			t.Fatal(err)
+		if proof != nil && proof.ExchangeCloud != nil {
+			unit := proof.ExchangeCloud(bootstrapOptions, *awarded.Claim)
+			awarded.Claim = &unit
+		} else {
+			exchanged, err := bootstrap.Exchange(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			awarded.Claim = &exchanged.Claim
 		}
-		awarded.Claim = &exchanged.Claim
 		engineClaimHTTP(t, s.Handler(), rawBootstrap, "POST", "/api/v1/data/download", `{"digest":"`+digest+`"}`, http.StatusUnauthorized)
 		if _, err := bootstrap.Exchange(t.Context()); err == nil {
 			t.Fatal("bootstrap exchanged more than once")
@@ -298,6 +315,9 @@ func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, pr
 		if beat, err := c.Renew(t.Context(), unit.UnitID, controllerwire.RenewalRequest{}); err != nil || !beat.CancelRequested {
 			t.Fatalf("cancellation delivery to owner/worker: %+v %v", beat, err)
 		}
+	}
+	if proof != nil && proof.FinishCloud != nil {
+		proof.FinishCloud()
 	}
 }
 

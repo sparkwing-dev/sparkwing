@@ -447,6 +447,17 @@ Each executor prepares its private source workspace on first use and builds
 the pipeline from the uploaded snapshot with its selected
 engine. Go installation downloads the dependencies used by the pipeline.
 
+Jobs publish declared artifacts through the same storage path on this machine,
+on a personal runner and in Cloud. A dependent job's `Consumes` declaration
+restores the producer's files into its workspace, including across machines.
+A missing or corrupt artifact fails the consumer.
+
+Cloud allocates the CPU class selected by the team's price table and the
+memory that comes with that class. This also covers jobs without explicit
+resource settings. The allocation stays fixed for the award if prices change
+or bootstrap authority is exchanged. Team standing and your overflow allowance
+still control new Cloud admissions.
+
 ```yaml
 pipelines:
   - name: test

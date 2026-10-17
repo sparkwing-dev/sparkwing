@@ -1086,3 +1086,18 @@ directory before installing with the selected engine. It preserves that checkout
 when closing. Eval never needs a new source-fetch grant after bootstrap exchange.
 For unaccepted remote sources, acquisition detects the SDK from the acquired directory.
 Accepted sources retain the SDK in their sealed engine identity.
+
+## Native artifact composition for burst execution
+
+Production native services bind `ArtifactRecords.Prepare` to the executor.
+Publication derives the manifest record from the current attempt's authenticated
+output binding. Consumption resolves the producer's persisted terminal manifest
+through the shared host store and stages it under the consumer's live authority.
+Here, registered machines and Cloud use this construction. Artifact publication
+failures prevent successful terminal reporting. A missing cache adapter still
+refuses declared caches. Artifact wiring cannot silently skip them.
+
+The composition regression reaches byte upload and record lookup through these
+returned services. Its property refuses generated run, job, attempt, generation,
+pipeline and repository mismatches before upload. Composed SDK tests verify
+actual artifact bytes through signed controller storage on all three placements.

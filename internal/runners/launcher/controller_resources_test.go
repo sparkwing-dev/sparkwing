@@ -93,8 +93,8 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if award == nil || award.CPUCores != wantCPU || award.Memory != wantMemory {
-				t.Fatalf("award=%+v; want %g CPU and %d bytes", award, wantCPU, wantMemory)
+			if award == nil || award.CPUCores != 2 || award.Memory != store.CPUClassMemoryBytes(2) {
+				t.Fatalf("award=%+v; want the committed two-core allocation", award)
 			}
 			bootstrap, err := client.NewEngineClient(client.EngineOptions{URL: "https://controller.example", HTTP: transport, Bearer: func(context.Context) (string, error) { return string(award.Bootstrap), nil }})
 			if err != nil {
@@ -103,6 +103,9 @@ func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
 			exchanged, err := bootstrap.Exchange(t.Context())
 			if err != nil {
 				t.Fatal(err)
+			}
+			if exchanged.Claim.CloudResources == nil || exchanged.Claim.CloudResources.Cores != 2 || exchanged.Claim.CloudResources.MemoryBytes != store.CPUClassMemoryBytes(2) {
+				t.Fatalf("exchange changed the committed allocation: %+v", exchanged.Claim.CloudResources)
 			}
 			if exchanged.Claim.Execution == nil || exchanged.Claim.Execution.Resources.Value.Cores.Value != wantCPU || exchanged.Claim.Execution.Resources.Value.MemoryBytes.Value != wantMemory {
 				t.Fatalf("exchange changed execution resources: %+v", exchanged.Claim.Execution)

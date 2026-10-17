@@ -125,9 +125,9 @@ func TestBootstrapRejectsChangedOrUnusableExchange(t *testing.T) {
 			value.Version = "v9.9.9"
 			u.Engine, u.Accepted.Spec.Resolved.Engine = &value, value
 		}},
-		{"resources", capability.UnitNode, func(u *controllerwire.ClaimedUnit) { u.Execution = nil }},
-		{"cpu", capability.UnitNode, func(u *controllerwire.ClaimedUnit) { u.Execution.Resources.Value.Cores.Value++ }},
-		{"memory", capability.UnitNode, func(u *controllerwire.ClaimedUnit) { u.Execution.Resources.Value.MemoryBytes.Value++ }},
+		{"resources", capability.UnitNode, func(u *controllerwire.ClaimedUnit) { u.CloudResources = nil }},
+		{"cpu", capability.UnitNode, func(u *controllerwire.ClaimedUnit) { u.CloudResources.Cores++ }},
+		{"memory", capability.UnitNode, func(u *controllerwire.ClaimedUnit) { u.CloudResources.MemoryBytes++ }},
 		{"eval_lease", capability.UnitEval, func(u *controllerwire.ClaimedUnit) { u.Binding.Expansion.Generation++ }},
 		{"eval_source", capability.UnitEval, func(u *controllerwire.ClaimedUnit) { u.SourceGeneration++ }},
 	} {
@@ -292,6 +292,33 @@ func FuzzBootstrapSourceIsImmutable(f *testing.F) {
 		valid := projectionErr == nil && reflect.DeepEqual(projected, expected)
 		if called != valid || (err == nil) != valid {
 			t.Fatalf("exchange changed its private source: field=%d kind=%s called=%t error=%v", field%9, unit.Unit, called, err)
+		}
+	})
+}
+
+func FuzzBootstrapKeepsCommittedAllocation(f *testing.F) {
+	for kind := uint8(0); kind < 3; kind++ {
+		f.Add(kind, uint16(1), false)
+		f.Add(kind, uint16(0), true)
+	}
+	f.Fuzz(func(t *testing.T, kind uint8, delta uint16, unchanged bool) {
+		award, unit := bootstrapAward(t, []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kind%3])
+		if !unchanged {
+			if delta%2 == 0 {
+				unit.CloudResources.Cores += float64(delta) + 0.25
+			} else {
+				unit.CloudResources.MemoryBytes += int64(delta) + 1
+			}
+		}
+		called := false
+		host := BootstrapHost{ControllerURL: "https://controller.example", NewController: func(client.EngineOptions) (controllerwire.Controller, error) {
+			return bootstrapController{exchange: func(context.Context) (controllerwire.ExchangeResponse, error) {
+				return controllerwire.ExchangeResponse{Claim: unit}, nil
+			}}, nil
+		}, Host: bootstrapUnitHost(func(context.Context, controllerwire.ClaimedUnit) error { called = true; return nil })}
+		err := host.Run(t.Context(), award)
+		if called != unchanged || (err == nil) != unchanged {
+			t.Fatalf("allocation changed across exchange: unchanged=%v host=%v error=%v", unchanged, called, err)
 		}
 	})
 }

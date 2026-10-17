@@ -188,8 +188,16 @@ func burstPublicRun(t *testing.T, personal, interrupt bool) {
 	if interrupt {
 		wantStatus = "cancelled"
 	}
-	if err != nil || detail.Status != wantStatus || len(detail.Jobs) != 1 || detail.Jobs[0].Outcome != wantStatus {
+	if err != nil || detail.Status != wantStatus || len(detail.Jobs) != 2 {
 		t.Fatalf("Cloud owner did not retain native execution outcome %s: %+v %v", wantStatus, detail, err)
+	}
+	for _, job := range detail.Jobs {
+		if job.Outcome != wantStatus && !(interrupt && job.ID == "consume" && job.Outcome == "skipped") {
+			t.Fatalf("Cloud job did not finish after native execution: %+v", job)
+		}
+	}
+	if !interrupt && !strings.Contains(string(output), "burst-artifact-restored") {
+		t.Fatalf("native burst did not restore its published artifacts: %s", output)
 	}
 	if personal && !personalAwarded.Load() {
 		t.Fatal("public burst did not award the job to its registered personal machine")

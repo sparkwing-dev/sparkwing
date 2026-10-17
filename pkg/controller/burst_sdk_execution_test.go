@@ -9,12 +9,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -48,8 +51,8 @@ func (burstSDKPipeline) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, _ 
 			return errors.New("SDK lost requester secrets or granted runner")
 		}
 		sw.Info(ctx, "secret=%s encoded=%s", value, base64.StdEncoding.EncodeToString([]byte(value)))
-		return nil
-	})
+		return os.WriteFile("burst-result.txt", []byte("artifact from burst SDK\n"), 0o640)
+	}).Artifacts("burst-result.txt")
 	return nil
 }
 
@@ -122,9 +125,11 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if err != nil {
 		t.Fatal(err)
 	}
-	input.Entry = &source.Entry{Engine: selected}
+	input.Entry = &source.Entry{Engine: selected, Directory: t.TempDir()}
 	if native != nil {
 		input.Entry = native.entry
+	} else {
+		t.Chdir(input.Entry.Directory)
 	}
 	masker := secrets.NewMasker()
 	masks := nodehost.NewMaskRegistry(masker)
@@ -155,7 +160,47 @@ func executeBurstSDKProcess(t *testing.T, options client.EngineOptions, award co
 	if native != nil {
 		start = processes.Start
 	}
+	artifacts := nodehost.ArtifactRecords{Bind: func(_ context.Context, input nodehost.NodeInput) (nodehost.JobUpload, error) {
+		authority := input.Storage.Authority
+		return nodehost.JobUpload{Identity: authority.Upload.Value, Authority: authority, Key: blob.ResultRecordKey(authority.Attempt.Value, authority.Repo, authority.Ref.Scope, burstSDKPipelineName, blob.KindManifest)}, nil
+	}}
+	destination := t.TempDir()
 	executor, err := nodehost.NewNodeExecutor(nodehost.ExecutorDependencies{
+		BindStorage: func(ctx context.Context, _ nodehost.NodeInput) (nodehost.StorageBinding, error) {
+			principal, err := private.Principal(ctx)
+			if err != nil {
+				return nodehost.StorageBinding{}, err
+			}
+			storage, err := private.BindStorage(ctx, principal)
+			return nodehost.StorageBinding{Bytes: storage.Bytes, Records: storage.Records, Authority: storage.Authority}, err
+		},
+		PrepareLayer: func(ctx context.Context, layer nodehost.LayerSpec, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
+			finish, err := artifacts.Prepare(ctx, layer, input, job)
+			if err != nil || finish == nil {
+				return finish, err
+			}
+			return func(ctx context.Context, current nodehost.NodeInput, result *store.NodeResult) error {
+				if err := finish(ctx, current, result); err != nil {
+					return err
+				}
+				if result.ManifestRecord == nil {
+					return errors.New("successful burst SDK did not publish declared artifacts")
+				}
+				reader := nodehost.ArtifactRecords{Blobs: current.Storage.Bytes, Records: current.Storage.Records}
+				count, err := reader.Stage(ctx, blob.RecordLookup{Key: *result.ManifestRecord, Authority: current.Storage.Authority}, destination, "received")
+				if err != nil {
+					return fmt.Errorf("restore burst artifact: %w", err)
+				}
+				if count != 1 {
+					return fmt.Errorf("restored %d burst artifacts, want one", count)
+				}
+				body, err := os.ReadFile(filepath.Join(destination, "received", "burst-result.txt"))
+				if err != nil || string(body) != "artifact from burst SDK\n" {
+					return errors.New("restored burst artifact differs from the SDK output")
+				}
+				return nil
+			}, nil
+		},
 		Store: state, Mask: masker.Mask, Masks: masks,
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementRunnerHosted, Secrets: masks},
 		Log: func(_ context.Context, _ nodehost.NodeInput, frame nodeproto.FrameLog) error {

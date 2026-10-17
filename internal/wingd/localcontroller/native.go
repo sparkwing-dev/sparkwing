@@ -165,6 +165,20 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		}
 		return nodehost.JobUpload{Identity: authority.Upload.Value, Authority: authority, Key: blob.ResultRecordKey(authority.Attempt.Value, authority.Repo, authority.Ref.Scope, run.Run.Pipeline, blob.KindOutput)}, nil
 	}}
+	artifacts := nodehost.ArtifactRecords{Bind: func(ctx context.Context, input nodehost.NodeInput) (nodehost.JobUpload, error) {
+		upload, err := outputs.Bind(ctx, input)
+		upload.Key.Kind = blob.KindManifest
+		return upload, err
+	}, Producer: func(ctx context.Context, input nodehost.NodeInput, producer string) (blob.RecordKey, error) {
+		row, err := cfg.Store.ReadNode(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: producer})
+		if err != nil {
+			return blob.RecordKey{}, err
+		}
+		if row.Status != store.StatusDone || row.ManifestRecord == nil {
+			return blob.RecordKey{}, blob.ErrNotFound
+		}
+		return *row.ManifestRecord, nil
+	}}
 	follower := nodehost.StateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	config := nodehost.NativeHostConfig{
 		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
@@ -175,7 +189,12 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},
-		Executor: nodehost.ExecutorDependencies{PublishOutput: outputs.PublishOutput, BindStorage: func(ctx context.Context, input nodehost.NodeInput) (nodehost.StorageBinding, error) {
+		Executor: nodehost.ExecutorDependencies{PublishOutput: outputs.PublishOutput, PrepareLayer: func(ctx context.Context, layer nodehost.LayerSpec, input nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
+			if layer.Name == "caches" && len(job.Caches) > 0 {
+				return nil, errors.New("executor layer caches has no storage adapter")
+			}
+			return artifacts.Prepare(ctx, layer, input, job)
+		}, BindStorage: func(ctx context.Context, input nodehost.NodeInput) (nodehost.StorageBinding, error) {
 			principal, err := claims.principal(ctx, input.NodeID, input.Generation, input.Attempt)
 			if err != nil {
 				return nodehost.StorageBinding{}, err

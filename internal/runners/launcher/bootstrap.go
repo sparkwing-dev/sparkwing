@@ -89,8 +89,8 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) (result err
 	if !reflect.DeepEqual(projected, award.Source) {
 		return errors.New("Cloud exchange changed the awarded source")
 	}
-	if unit.Execution == nil || !unit.Execution.Resources.Set || !unit.Execution.Resources.Value.Cores.Set || !unit.Execution.Resources.Value.MemoryBytes.Set || unit.Execution.Resources.Value.Cores.Value != award.CPUCores || unit.Execution.Resources.Value.MemoryBytes.Value != award.Memory {
-		return errors.New("Cloud exchange changed awarded execution resources")
+	if unit.CloudResources == nil || unit.CloudResources.Cores != award.CPUCores || unit.CloudResources.MemoryBytes != award.Memory {
+		return errors.New("Cloud exchange changed the committed allocation")
 	}
 	return h.Host.Host(ctx, unit)
 }

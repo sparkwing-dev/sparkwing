@@ -252,7 +252,7 @@ type credentials struct { Token string ` + "`sw:\"TOKEN,required\"`" + ` }
 func (pipeline) ShortHelp() string { return "edited SDK" }
 func (pipeline) Secrets() any { return &credentials{} }
 func (pipeline) Plan(_ context.Context, p *sw.Plan, in inputs, _ sw.RunContext) error {
-    sw.Job(p, "verify", func(ctx context.Context) error {
+    verify := sw.Job(p, "verify", func(ctx context.Context) error {
         value := sw.PipelineSecrets[credentials](ctx).Token
         if value == "" { return errors.New("missing requester secret") }
         for name, want := range map[string]string{"tracked.txt":"edited\n", "declared.txt":"included\n"} {
@@ -266,8 +266,14 @@ func (pipeline) Plan(_ context.Context, p *sw.Plan, in inputs, _ sw.RunContext) 
             <-ctx.Done()
             return ctx.Err()
         }
+        return os.WriteFile("burst-result.txt", []byte("artifact from edited source\n"), 0o640)
+    }).Artifacts("burst-result.txt")
+    sw.Job(p, "consume", func(ctx context.Context) error {
+        body, err := os.ReadFile("received/burst-result.txt")
+        if err != nil || string(body) != "artifact from edited source\n" { return errors.New("missing burst artifact") }
+        sw.Info(ctx, "burst-artifact-restored")
         return nil
-    })
+    }).Consumes(verify, sw.Into("received"))
     return nil
 }
 func main() {

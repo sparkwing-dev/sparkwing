@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func bindRunnerIdentityW8(unit *controllerwire.ClaimedUnit) {
@@ -33,6 +34,7 @@ func TestCloudWorkUsesRunnerExecutionIdentityW8(t *testing.T) {
 	binding := award.Binding
 	unit.UnitID, unit.RunID, unit.JobID = binding.UnitID, binding.RunID, binding.NodeID
 	unit.Binding = capability.Binding{Kind: capability.BindingNode, RunID: binding.RunID, NodeID: binding.NodeID, Holder: binding.Holder, Generation: binding.Generation, Attempt: binding.Attempt}
+	unit.CloudResources = &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}
 	unit.Engine = award.Engine
 	unit.Accepted.Spec.Resolved.Engine = *award.Engine
 	unit.OwnerDeadline, unit.AttemptDeadline, unit.ParentCapabilityExpiry = &binding.OwnerDeadline, &binding.AttemptDeadline, &binding.ParentCapabilityExpiry

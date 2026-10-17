@@ -3474,3 +3474,17 @@ relay, stored value or change to restart behavior.
 `Request.Burst` seals ordered `PlacementStep{Target, Hold}` preferences and an optional narrowing `OverflowMinutes` cap. Targets resolve to authenticated here capacity, the requesting account's registered machines, Cloud or granted runner/pool selectors. Existing `ClaimPlacement` controls hold times for the same owner projections, reconciliation and claim paths. Burst nodes can overflow a here-hosted run without transferring its owner.
 
 The baseline is version 5. `runs.created_subject_kind` accompanies the authenticated creator ID so personal-machine ownership cannot confuse account and machine IDs. `overflow_controls(team, account_id, monthly_minutes)` stores optional monthly allowances. No row means no per-user cap. Account authority changes its own allowance through `SetOverflowLimit` and reads usage through `ReadOverflowControl`. Cloud admission observes the narrower stored/request cap as well as team billing admission. Existing work finishes and unmetered capacity remains eligible. Full field and verification details are in `design/rewrite/W9-BURST-PLACEMENT.md`.
+
+## Cloud allocation projection for burst execution
+
+`Store.CloudAwardResources(ctx, authority)` reads live ancestry and the award's
+committed billing reservation in one snapshot. It returns no allocation for
+customer machines or here ownership. A Cloud award returns the CPU class
+recorded in its reservation charge and `CPUClassMemoryBytes` for that class.
+The current price table and authored resource settings cannot resize that award.
+Bootstrap exchange retains the reservation and its allocation. A consumed
+bootstrap cannot read it again. No new price, tier, limit or schema field is added.
+
+The allocation property starts with an implicit resource request, replaces the
+price table, and exchanges the bootstrap. Generated table changes retain the
+original class and memory. Customer machine awards retain no Cloud allocation.
