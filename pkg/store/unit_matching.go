@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -37,7 +38,7 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	}
 	profile = authenticatedClaimProfile(p.Capability, profile, here)
 	profile.Labels, profile.OS, profile.Arch = slices.Clone(request.Labels), request.OS, request.Arch
-	if tx.store.claimProfiles == nil {
+	if tx.store.claimProfiles == nil || here {
 		profile.Capacity = request.Capacity
 	}
 	var team, repo, display string
@@ -63,8 +64,16 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if err := checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); err != nil {
 		return profile, match.Demand{}, err
 	}
+	if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
+		return profile, match.Demand{}, err
+	}
+	if requestSeal.Request.Burst != nil {
+		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {
+			return profile, match.Demand{}, err
+		}
+	}
 	options := requestSeal.Request.Options
-	if options.Runner.Value.Kind == runspec.RunnerHere && !here {
+	if options.Runner.Value.Kind == runspec.RunnerHere && !here && (requestSeal.Request.Burst == nil || unit.Kind != capability.UnitNode) {
 		return profile, match.Demand{}, authorityError(apierr.Forbidden, "work is reserved for its here claimant")
 	}
 	if len(specBody) > 0 {
@@ -94,6 +103,9 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 			return profile, demand, err
 		}
 		demand.Selector, demand.Prefers, demand.Request = slices.Clone(execution.Requires.Value), slices.Clone(execution.Prefers.Value), matchingResources(execution.Resources.Value)
+		if demand.Request == (match.Resources{}) {
+			demand.Request.Cores = admission.DefaultChargeCores
+		}
 	}
 	switch selected := requestSeal.Request.Options.Runner.Value; selected.Kind {
 	case runspec.RunnerName:
@@ -163,7 +175,7 @@ func launcherClaimant(c capability.Capability) bool {
 	return c.Subject.Kind == capability.SubjectService && c.Binding.Kind == capability.BindingNone && slices.Contains(c.Grants, capability.ClaimsLaunch)
 }
 
-func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref NodeRef) (UnitClaim, error) {
+func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, ref NodeRef, reserved *match.Resources) (UnitClaim, error) {
 	if err := checkOwnerTx(ctx, tx, team, actor, ref.RunID, tx.now()); err != nil {
 		return UnitClaim{}, err
 	}
@@ -171,7 +183,7 @@ func selfClaimNodeTx(ctx context.Context, tx *storeTx, team Team, actor Actor, r
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	demand, err := ownerClaimDemandTx(ctx, tx, p)
+	demand, err := reservedOwnerDemandTx(ctx, tx, p, reserved)
 	if err != nil {
 		return UnitClaim{}, err
 	}

@@ -1,8 +1,53 @@
-# W9 continuation: local integration and runner transport
+# W9 continuation: burst review rulings
 
-Latest continuation: [W9-INTEGRATION-RECHECK.md](W9-INTEGRATION-RECHECK.md)
-reproduces the owner metadata, committed retry selection and production launch
-blockers against the unchanged contracts. Build and focused checks pass.
+Latest continuation: [W9-BURST-REVIEW-RULINGS.md](W9-BURST-REVIEW-RULINGS.md).
+B1 and S1-S5 are implemented with failing-before-fix regressions. Real routed CLI,
+HTTP and SQLite proofs cover hostile repository settings and excluded claimants.
+Here owner renewal restores volatile requester secrets after controller restart.
+Publication pins, scan false positives, bounded/interruptible publication and two
+missing nits are fixed. Build, vet, focused tests, fixed-count fuzzing, race checks
+and source/doc guards pass. The lead's native report is green for the prior
+committed state. Commit these edits and rerun the native families before completion.
+
+Previous continuation: [W9-BURST-CLAIM-CACHE-AND-ENV-PRIVACY.md](W9-BURST-CLAIM-CACHE-AND-ENV-PRIVACY.md).
+Its cache-claim and shell-metadata corrections are committed, and the merge is
+finished. There are no unresolved merge entries or pending Git actions from that
+session. Its later native report passes attached/detached cache and publication.
+
+Earlier continuation: [W9-BURST-DETACHED-DIAGNOSTICS.md](W9-BURST-DETACHED-DIAGNOSTICS.md).
+The lead's latest native run passes attached profile-cache execution and both
+publication modes. Detached profile-cache execution still hangs in log following.
+Its cause is unproven. Background host errors now reach the controller log, and
+native failures include controller status, run status and that log. The harness
+must rerun the native family before completion can be claimed.
+
+Earlier continuation: [W9-BURST-CANCELLATION-PROFILE-CONTINUATION.md](W9-BURST-CANCELLATION-PROFILE-CONTINUATION.md).
+It fixes owner cancellation proof ordinals, avoids repeating persisted remote
+cancellation, and corrects the profile-cache native fixture's Git metadata.
+Profile credentials and attached/detached publication are implemented. The lead's
+latest native file still contains failures, so native completion remains open.
+
+Earlier memo continuation: [W9-MEMO-CONTINUATION.md](W9-MEMO-CONTINUATION.md).
+It implements native memo lookup/copy through the existing controller routes,
+with the authenticated reader fence and no private ancestry projection. Real
+router/SQLite and signed-byte materialization pass. The prior burst fixes and
+the remaining native rerun commands are retained below and in that report.
+
+Prior native failure fixes: [W9-BURST-NATIVE-FAILURES.md](W9-BURST-NATIVE-FAILURES.md).
+Commit `3c97acfb1` addresses the lead's native burst failures: session enrollment
+fixture configuration, execution-award validation, pipeline argument separation,
+attached local logs and local cache namespaces. The continuation rechecks that
+commit and gives the exact native rerun commands. Native execution remains
+unverified because the worker cannot open sockets. Retry selection is explicitly
+handed back to the lead with a failing regression and a recommendation.
+
+Earlier reports below describe their own bases. Their superseded missing-owner,
+here, source, local-cache and SDK replacement statements are not new blockers.
+Cross-profile remote cache credentials and one-way publication under A1-50 are
+implemented and covered through real router, store and signed-byte component
+tests. Attached and detached publication and attached profile-cache execution
+passed the lead's native run. Detached profile-cache completion remains open.
+Full native and deployed acceptance remains lead work under A1-53.
 
 The next continuation fixes background queue service binding and log finalization.
 See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.

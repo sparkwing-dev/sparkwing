@@ -21,6 +21,9 @@ func (c *localController) Ready() error {
 }
 
 func (c *localController) IsRunTerminal(runID wingwire.RunID) (bool, error) {
+	if runID.Remote() {
+		return false, nil
+	}
 	row, err := c.tenant.ReadRun(context.Background(), string(runID))
 	return terminal(row.State), err
 }
@@ -43,6 +46,9 @@ func (c *localController) FinalizeCancelledRuns(runIDs []string, reason string) 
 	}}
 	var result error
 	for _, runID := range runIDs {
+		if wingwire.HolderRef(runID).RunID().Remote() {
+			continue
+		}
 		if err := c.cancelRun(runID, reason, actor); err != nil {
 			result = errors.Join(result, fmt.Errorf("wingd: cancel run %s: %w", runID, err))
 		}

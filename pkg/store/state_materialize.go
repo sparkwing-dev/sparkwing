@@ -153,9 +153,14 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 			return NodeResult{}, authorityError(apierr.IllegalTransition, "source attempt and job outcome disagree")
 		}
 	}
+	return readStoredNodeResultTx(ctx, tx, team, node)
+}
+
+func readStoredNodeResultTx(ctx context.Context, tx *storeTx, team Team, node NodeRow) (NodeResult, error) {
+	ref := node.Ref
 	result := NodeResult{Outcome: node.Outcome}
 	var failure []byte
-	err = tx.QueryRowContext(ctx, `SELECT failure_reason,error,exit_code,failure_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&result.Reason, &result.MaskedError, &result.ExitCode, &failure)
+	err := tx.QueryRowContext(ctx, `SELECT failure_reason,error,exit_code,failure_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&result.Reason, &result.MaskedError, &result.ExitCode, &failure)
 	if err == nil && len(failure) > 0 && node.Outcome == NodeFailed {
 		err = json.Unmarshal(failure, &result.Failure)
 		if err == nil && result.Failure == nil {

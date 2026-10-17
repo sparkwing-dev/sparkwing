@@ -67,7 +67,9 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 		{http.MethodDelete, "/node/v1/cleanups/{cleanup}"},
 	} {
 		path := route.path
-		endpoint := controller.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: serviceEvidence, ResolveTarget: processServiceTarget}
+		endpoint := controller.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: func(request *http.Request) (capability.RequestEvidence, error) {
+			return serviceEvidence(request, path)
+		}, ResolveTarget: processServiceTarget}
 		endpoint.Handle = func(w http.ResponseWriter, request *http.Request, auth capability.Authorized) error {
 			service, err := resolve(request.Context(), auth)
 			if err != nil {
@@ -148,8 +150,14 @@ func processServiceTarget(_ context.Context, principal capability.Principal, tar
 	return target, nil
 }
 
-func serviceEvidence(request *http.Request) (capability.RequestEvidence, error) {
-	evidence := capability.RequestEvidence{Target: capability.Target{SecretName: request.PathValue("name"), NodeID: request.PathValue("job"), Pipeline: request.PathValue("name"), ChildRunID: request.PathValue("run"), CleanupID: request.PathValue("cleanup")}}
+func serviceEvidence(request *http.Request, pattern string) (capability.RequestEvidence, error) {
+	evidence := capability.RequestEvidence{Target: capability.Target{NodeID: request.PathValue("job"), ChildRunID: request.PathValue("run"), CleanupID: request.PathValue("cleanup")}}
+	switch pattern {
+	case "/node/v1/secrets/{name}":
+		evidence.Target.SecretName = request.PathValue("name")
+	case "/node/v1/pipelines/{name}/latest":
+		evidence.Target.Pipeline = request.PathValue("name")
+	}
 	if evidence.Target.NodeID == "" {
 		evidence.Target.NodeID = request.URL.Query().Get("job")
 	}

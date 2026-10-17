@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 type launcherWireFake struct {
@@ -39,7 +40,8 @@ func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 	deadline := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	identity := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}
 	unit := controllerwire.ClaimedUnit{
-		Unit: kind, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
+		CloudResources: &match.Resources{Cores: 1.5, MemoryBytes: 2 << 30},
+		Unit:           kind, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
 		UnitID: "awarded-unit", RunID: "run", JobID: "job", Capability: "one-time-bootstrap",
 		Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "server-holder", Generation: 3},
 		Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Team: "awarded-team"}},
@@ -279,8 +281,8 @@ func TestControllerClaimRejectsIncompleteOrConflictingAwards(t *testing.T) {
 		{"different_run", func(u *controllerwire.ClaimedUnit) { u.Binding.RunID = "other-run" }},
 		{"different_job", func(u *controllerwire.ClaimedUnit) { u.Binding.NodeID = "other-job" }},
 		{"negative_attempt", func(u *controllerwire.ClaimedUnit) { u.Binding.Attempt = -1 }},
-		{"missing_resources", func(u *controllerwire.ClaimedUnit) { u.Execution = nil }},
-		{"unset_cores", func(u *controllerwire.ClaimedUnit) { u.Execution.Resources.Value.Cores.Set = false }},
+		{"missing_resources", func(u *controllerwire.ClaimedUnit) { u.CloudResources = nil }},
+		{"zero_cores", func(u *controllerwire.ClaimedUnit) { u.CloudResources.Cores = 0 }},
 		{"missing_accepted_spec", func(u *controllerwire.ClaimedUnit) { u.Accepted = nil }},
 		{"missing_engine", func(u *controllerwire.ClaimedUnit) { u.Engine = nil }},
 		{"different_engine", func(u *controllerwire.ClaimedUnit) { u.Engine.Version = "v2.0.0" }},

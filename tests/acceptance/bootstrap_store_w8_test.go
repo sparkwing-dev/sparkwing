@@ -81,7 +81,7 @@ func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.Cl
 		t.Fatalf("Cloud acquisition: present=%v error=%v", response.Claim != nil, err)
 	}
 	unit := response.Claim
-	if unit.Delivery != capability.DeliveryBootstrap || unit.ParentCapabilityExpiry == nil || unit.Engine == nil || unit.Execution == nil || unit.Execution.Resources.Value.Cores.Value != 1 || unit.Execution.Resources.Value.MemoryBytes.Value != 1<<29 {
+	if unit.CloudResources == nil || unit.CloudResources.Cores != 2 || unit.CloudResources.MemoryBytes != store.CPUClassMemoryBytes(2) || unit.Delivery != capability.DeliveryBootstrap || unit.ParentCapabilityExpiry == nil || unit.Engine == nil || unit.Execution == nil || unit.Execution.Resources.Value.Cores.Value != 1 || unit.Execution.Resources.Value.MemoryBytes.Value != 1<<29 {
 		t.Fatal("Cloud claim lost bootstrap delivery, parent expiry, engine or execution resources")
 	}
 	binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation, Attempt: unit.Binding.Attempt, ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}
@@ -95,7 +95,7 @@ func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.Cl
 	if err != nil {
 		t.Fatal(err)
 	}
-	return server, launcher.CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: 1, Memory: 1 << 29, Source: projection}
+	return server, launcher.CloudJobAward{Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: unit.CloudResources.Cores, Memory: unit.CloudResources.MemoryBytes, Source: projection}
 }
 
 func cloudStoreClientW8(t *testing.T, server *controller.EngineController) func(client.EngineOptions) (controllerwire.Controller, error) {

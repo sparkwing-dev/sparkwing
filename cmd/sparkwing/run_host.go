@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 type localRunOptions struct {
@@ -35,11 +36,15 @@ type localRunRuntime struct {
 	bind             func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error)
 	close            func() error
 	remoteCache      blob.RemoteCache
+	openCache        func(context.Context, string, *runspec.Request) (blob.RemoteCache, func() error, error)
+	publish          func(context.Context, string, string) error
+	follow           func(context.Context, string, string, io.Writer) error
 }
 
 type localRunDependencies struct {
-	resolve func(context.Context, localRunOptions) (localRunRuntime, error)
-	version string
+	interrupts <-chan os.Signal
+	resolve    func(context.Context, localRunOptions) (localRunRuntime, error)
+	version    string
 }
 
 func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args []string, out io.Writer, deps localRunDependencies) (resultErr error) {
@@ -68,12 +73,15 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if runtime.close != nil {
 		defer func() { resultErr = errors.Join(resultErr, runtime.close()) }()
 	}
-	if runtime.controller == nil || runtime.prepare == nil || runtime.close == nil || (!flags.detached && runtime.bind == nil) {
+	if runtime.controller == nil || runtime.prepare == nil || runtime.close == nil || (!flags.detached && (runtime.bind == nil || runtime.follow == nil)) {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "local run integration has incomplete intake or host bindings"}
 	}
 	prepared, err := runtime.prepare(ctx, pipeline, flags)
 	if err != nil {
 		return err
+	}
+	for _, value := range prepared.localSecrets {
+		masker.Register(value)
 	}
 	request, err := prepareLocalRunRequest(ctx, prepared, flags, args)
 	if err != nil {
@@ -106,10 +114,15 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 		defer release()
 	}
 	if request.Request.Options.CacheFrom.Value != "" && runtime.remoteCache == nil {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "run: remote cache requires an authorized read-only storage binding before intake"}
-	}
-	if request.Request.Options.Publish.Value != "" {
-		return &apierr.Error{Code: apierr.Unavailable, Message: "run: publication requires the controller's authorized result and log publisher before intake"}
+		if runtime.openCache == nil {
+			return &apierr.Error{Code: apierr.Unavailable, Message: "run: remote cache requires an authorized read-only storage binding before intake"}
+		}
+		var closeCache func() error
+		runtime.remoteCache, closeCache, err = runtime.openCache(ctx, request.Request.Options.CacheFrom.Value, &request.Request)
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, closeCache()) }()
 	}
 	if runtime.ensureController != nil {
 		if err := runtime.ensureController(ctx); err != nil {
@@ -139,15 +152,60 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := emitLocalRunEvent(out, format, "run_start", response.RunID, pipeline, ""); err != nil {
 		return fmt.Errorf("run %s is admitted but its start record could not be written: %w", response.RunID, err)
 	}
-	completion, err := hostLocalRun(ctx, runtime, response.RunID, response.Request.Hash, deps.version)
+	host := func(ctx context.Context) (nodehost.RunCompletion, error) {
+		return hostLocalRun(ctx, runtime, response.RunID, response.Request.Hash, deps.version)
+	}
+	completion, err := observeHereRun(ctx, response.RunID, hereObservation{host: host, follow: func(ctx context.Context) error {
+		return runtime.follow(ctx, response.RunID, request.Request.Options.Output.Value, out)
+	}}, nil)
 	if err != nil {
 		return fmt.Errorf("run %s is admitted: %w", response.RunID, err)
+	}
+	if profile := request.Request.Options.Publish.Value; profile != "" {
+		if runtime.publish == nil {
+			_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication is unavailable")
+		} else if err := publishLocalCompletion(ctx, deps.interrupts, runtime.publish, profile, response.RunID); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				_, _ = fmt.Fprintln(os.Stderr, "warning: publication abandoned; run stayed local-only")
+			} else {
+				_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication failed:", masker.Mask(err.Error()))
+			}
+		}
 	}
 	outputErr := emitLocalRunEvent(out, format, "run_finish", response.RunID, pipeline, completion.Outcome)
 	if outputErr != nil {
 		outputErr = fmt.Errorf("run %s is %s but its completion record could not be written: %w", response.RunID, completion.Outcome, outputErr)
 	}
 	return errors.Join(statusExitCode(completion.Outcome), outputErr)
+}
+
+func publishLocalCompletion(parent context.Context, interrupts <-chan os.Signal, publish func(context.Context, string, string) error, profile, run string) error {
+	interrupted := parent.Err() != nil
+	if interrupts == nil {
+		signals := make(chan os.Signal, 2)
+		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(signals)
+		interrupts = signals
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), wingdclient.RequestTimeout)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if !interrupted {
+			select {
+			case <-interrupts:
+			case <-ctx.Done():
+				return
+			}
+		}
+		select {
+		case <-interrupts:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	defer func() { cancel(); <-done }()
+	return publish(ctx, profile, run)
 }
 
 func validateLocalRunFlags(flags runFlags) error {

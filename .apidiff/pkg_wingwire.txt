@@ -373,6 +373,7 @@ type Release struct {
 	LeaseToken string
 }
 func ReleasedProtocolFloors() ProtocolFloors
+func RemoteRunID(controller, run string) RunID
 func ResolveRelativePriority(waiters []Waiter, mode string) int
 type ResourceState struct {
 	Key      string
@@ -388,6 +389,7 @@ type ResourceState struct {
 	Available float64
 }
 type RunID string
+func (run RunID) Remote() bool
 type RunnerHeadroom struct {
 	Name        string
 	Cores       float64

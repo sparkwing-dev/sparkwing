@@ -75,7 +75,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 			if err != nil {
 				return err
 			}
-			eligible, err := ownerExecutionEligibleTx(ctx, tx, owner, request.Ref)
+			eligible, err := ownerExecutionEligibleTx(ctx, tx, owner, request.Ref, request.Reserved)
 			if err != nil {
 				return err
 			}
@@ -84,7 +84,7 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 				result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
 				return err
 			}
-			claim, err := selfClaimNodeTx(ctx, tx, t.team, request.Actor, request.Ref)
+			claim, err := selfClaimNodeTx(ctx, tx, t.team, request.Actor, request.Ref, request.Reserved)
 			if err != nil {
 				return err
 			}

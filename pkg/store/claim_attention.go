@@ -41,7 +41,11 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 		if err != nil {
 			return err
 		}
-		if !registeredClaimant(principal.Capability) {
+		here, err := hereObserverTx(ctx, tx, principal)
+		if err != nil {
+			return err
+		}
+		if !registeredClaimant(principal.Capability) && !here {
 			return authorityError(apierr.Forbidden, "runner observations require an unbound machine claimant")
 		}
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})

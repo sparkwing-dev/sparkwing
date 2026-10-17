@@ -15,19 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-type dataMemoResponse struct {
-	Found    bool                        `json:"found"`
-	Output   *blob.Digest                `json:"output,omitempty"`
-	Manifest *blob.Digest                `json:"manifest,omitempty"`
-	Members  []controllerwire.DataMember `json:"members"`
-}
-
-type dataDepcacheResponse struct {
-	Found  bool                       `json:"found"`
-	Record *controllerwire.DataRecord `json:"record,omitempty"`
-	Source blob.RestoreSource         `json:"source,omitempty"`
-}
-
 func decodeCacheRequest(r *http.Request, required ...string) (map[string]string, blob.Budget, error) {
 	raw, err := readEngineBody(r)
 	if err != nil {
@@ -95,8 +82,12 @@ func (s *Server) handleDataMemo(w http.ResponseWriter, r *http.Request, a capabi
 	if err != nil {
 		return dataRouteError(err)
 	}
-	response := dataMemoResponse{Found: hit.Found, Members: []controllerwire.DataMember{}}
+	response := controllerwire.DataMemoLookupResult{Found: hit.Found, Members: []controllerwire.DataMember{}}
 	if hit.Found {
+		if hit.ReadSet.Reader != binding.Authority.Attempt.Value {
+			return dataProjectionError()
+		}
+		response.Reader = &hit.ReadSet.Reader
 		if hit.Output.Set {
 			response.Output = &hit.Output.Value
 		}
@@ -126,7 +117,7 @@ func (s *Server) handleDataDepcache(w http.ResponseWriter, r *http.Request, a ca
 	if err != nil {
 		return dataRouteError(err)
 	}
-	response := dataDepcacheResponse{Found: hit.Found}
+	response := controllerwire.DataDepcacheLookupResult{Found: hit.Found}
 	if hit.Found {
 		record := dataRecordResponse(hit.Record)
 		response.Record, response.Source = &record, hit.Source

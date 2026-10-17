@@ -75,6 +75,9 @@ func ValidateConfig(cfg Config) error {
 		}
 	}
 	if cfg.Run != nil {
+		if err := ValidateRunRouting("run.routing", cfg.Run.Routing); err != nil {
+			return err
+		}
 		if err := procenv.ValidateSubmitEnvAllow(cfg.Run.SubmitEnvAllow); err != nil {
 			return Invalid("run.submit_env_allow", "use literal environment names or terminal _* prefixes")
 		}

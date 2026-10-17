@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"net/url"
 	"reflect"
@@ -148,7 +149,7 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 		return blob.RecordLookupResult{}, err
 	}
 	if !result.Found {
-		if result.Record != nil {
+		if result.Record != nil || result.VerifiedDefault || len(result.Members) != 0 {
 			return blob.RecordLookupResult{}, dataProtocolError("missing record includes a payload")
 		}
 		return blob.RecordLookupResult{}, nil
@@ -159,7 +160,7 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 	record := decodeDataRecord(*result.Record, input.Key.Team)
 	expected := input.Key
 	if input.VerifiedDefaultOnly {
-		if !record.Key.Scope.Ref.Verified || record.Key.Scope.Ref.Ref == "" {
+		if !result.VerifiedDefault || !record.Key.Scope.Ref.Verified || record.Key.Scope.Ref.Ref == "" {
 			return blob.RecordLookupResult{}, dataProtocolError("record lookup did not select a verified default ref")
 		}
 		expected.Scope.Ref = record.Key.Scope.Ref
@@ -175,7 +176,7 @@ func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) 
 	for _, member := range result.Members {
 		members = append(members, blob.Member{Team: key.Team, ManifestDigest: manifest, Digest: member.Digest, Path: member.Path, Size: member.Size, Mode: member.Mode})
 	}
-	return blob.RecordLookupResult{Found: true, Record: record, Members: members}, nil
+	return blob.RecordLookupResult{Found: true, VerifiedDefault: result.VerifiedDefault, Record: record, Members: members}, nil
 }
 
 func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRequest) (blob.Record, error) {
@@ -219,25 +220,127 @@ func decodeDataRecord(r wire.DataRecord, team string) blob.Record {
 	return record
 }
 
-func (c *dataClient) LookupMemo(context.Context, blob.MemoLookup) (blob.MemoHit, error) {
-	return blob.MemoHit{}, missingDataProof()
+func (c *dataClient) LookupMemo(ctx context.Context, input blob.MemoLookup) (blob.MemoHit, error) {
+	return c.memo(ctx, input, "lookup")
 }
 
-func (c *dataClient) LookupDepcache(context.Context, blob.DepcacheLookup) (blob.DepcacheHit, error) {
-	return blob.DepcacheHit{}, missingDataProof()
+func (c *dataClient) LookupDepcache(ctx context.Context, input blob.DepcacheLookup) (blob.DepcacheHit, error) {
+	if err := c.checkAuthority(input.Authority); err != nil {
+		return blob.DepcacheHit{}, err
+	}
+	authority, key := input.Authority, input.Key
+	team := authority.Attempt.Value.Team
+	if team == "" && authority.Upload.Set {
+		team = authority.Upload.Value.Team
+	}
+	if team == "" || key.Repo != authority.Repo || key.Ref != authority.Ref.Scope {
+		return blob.DepcacheHit{}, localHostClientRefusal()
+	}
+	body := wire.DataDepcacheLookupRequest{Name: key.Name, Key: key.Key, Deadline: dataDeadline(input.Budget)}
+	var result wire.DataDepcacheLookupResult
+	err := c.withBudget(ctx, input.Budget, func(ctx context.Context) error {
+		return c.post(ctx, "depcache/lookup", "", body, &result)
+	})
+	if err != nil {
+		return blob.DepcacheHit{}, err
+	}
+	if !result.Found {
+		if result.Record != nil || result.Source != "" {
+			return blob.DepcacheHit{}, dataProtocolError("missing cache includes a payload")
+		}
+		return blob.DepcacheHit{}, nil
+	}
+	if result.Record == nil {
+		return blob.DepcacheHit{}, dataProtocolError("cache lookup has no payload")
+	}
+	record := decodeDataRecord(*result.Record, team)
+	ref := key.Ref
+	switch result.Source {
+	case blob.RestoreOwnRef:
+	case blob.RestorePRBase:
+		if !authority.Ref.PullRequestBase.Set {
+			return blob.DepcacheHit{}, dataProtocolError("cache lookup selected an unknown PR base")
+		}
+		ref = blob.RefScope{Ref: authority.Ref.PullRequestBase.Value, Verified: true}
+	case blob.RestoreDefaultBranch:
+		ref = blob.RefScope{Ref: authority.Ref.DefaultBranch, Verified: true}
+	default:
+		return blob.DepcacheHit{}, dataProtocolError("cache lookup selected an unknown source")
+	}
+	expected := blob.RecordKey{Team: team, Kind: blob.KindDepcache, Name: key.Name, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Key: key.Key}}
+	if ref.Ref == "" && ref.Verified || record.Key != expected || !dataDigestValid(record.Digest) {
+		return blob.DepcacheHit{}, dataProtocolError("cache lookup changed selected key or digest")
+	}
+	return blob.DepcacheHit{Found: true, Record: record, Source: result.Source}, nil
 }
 
-func (c *dataClient) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error) {
-	return blob.MemoHit{}, missingDataProof()
+func (c *dataClient) CopyMemo(ctx context.Context, input blob.CopyMemoRequest) (blob.MemoHit, error) {
+	if !input.Lookup.Authority.Attempt.Set || input.Destination != input.Lookup.Authority.Attempt.Value {
+		return blob.MemoHit{}, localHostClientRefusal()
+	}
+	return c.memo(ctx, input.Lookup, "copy")
 }
 
-func missingDataProof() error {
-	return &apierr.Error{Code: apierr.PolicyMissing, Message: "controller cache lookup does not transport canonical read-set proof"}
+func (c *dataClient) memo(ctx context.Context, input blob.MemoLookup, operation string) (blob.MemoHit, error) {
+	if err := c.checkAuthority(input.Authority); err != nil {
+		return blob.MemoHit{}, err
+	}
+	a, key := input.Authority, input.Key
+	team := a.Attempt.Value.Team
+	if team == "" && a.Upload.Set {
+		team = a.Upload.Value.Team
+	}
+	if team == "" || key.Repo != a.Repo || key.Ref != a.Ref.Scope || key.Pipeline == "" || key.Job == "" || key.Hash == "" {
+		return blob.MemoHit{}, localHostClientRefusal()
+	}
+	var result wire.DataMemoLookupResult
+	body := wire.DataMemoLookupRequest{Pipeline: key.Pipeline, Job: key.Job, Hash: key.Hash, Deadline: dataDeadline(input.Budget)}
+	if err := c.withBudget(ctx, input.Budget, func(ctx context.Context) error { return c.post(ctx, "memo/"+operation, "", body, &result) }); err != nil {
+		return blob.MemoHit{}, err
+	}
+	if !result.Found {
+		if result.Output != nil || result.Manifest != nil || len(result.Members) != 0 || result.Reader != nil {
+			return blob.MemoHit{}, dataProtocolError("missing memo includes a payload")
+		}
+		return blob.MemoHit{}, nil
+	}
+	if result.Reader == nil || *result.Reader != a.Attempt.Value || result.Output == nil && result.Manifest == nil || result.Manifest == nil && len(result.Members) != 0 {
+		return blob.MemoHit{}, dataProtocolError("memo differs from its authenticated reader or declared references")
+	}
+	for _, digest := range []*blob.Digest{result.Output, result.Manifest} {
+		if digest != nil && !dataDigestValid(*digest) {
+			return blob.MemoHit{}, dataProtocolError("memo result has an invalid digest")
+		}
+	}
+	hit := blob.MemoHit{Found: true, ReadSet: blob.ReadSet{Reader: *result.Reader}, Members: make([]blob.Member, 0, len(result.Members))}
+	if result.Output != nil {
+		hit.Output = runspec.Optional[blob.Digest]{Set: true, Value: *result.Output}
+	}
+	if result.Manifest != nil {
+		hit.Manifest = runspec.Optional[blob.Digest]{Set: true, Value: *result.Manifest}
+	}
+	for _, m := range result.Members {
+		if !dataDigestValid(m.Digest) || m.Path == "" || m.Size < 0 {
+			return blob.MemoHit{}, dataProtocolError("memo member has invalid file metadata")
+		}
+		hit.Members = append(hit.Members, blob.Member{Team: team, ManifestDigest: hit.Manifest.Value, Digest: m.Digest, Path: m.Path, Size: m.Size, Mode: m.Mode})
+	}
+	return hit, nil
+}
+
+func dataDigestValid(digest blob.Digest) bool {
+	decoded, err := hex.DecodeString(string(digest))
+	return err == nil && len(decoded) == 32 && string(digest) == strings.ToLower(string(digest))
 }
 
 func (c *dataClient) post(ctx context.Context, operation, key string, input, output any) error {
 	path := "/api/v1/data/" + operation
-	return c.transport.request(ctx, "POST", path, path, key, input, output)
+	target := path
+	if c.authority != nil && c.authority.Upload.Value.Kind == blob.UploadPublication && c.authority.Attempt.Set {
+		a := c.authority.Attempt.Value
+		target += "?" + url.Values{"job": {a.NodeID}, "attempt": {strconv.FormatInt(a.Attempt, 10)}, "generation": {strconv.FormatInt(a.Generation, 10)}}.Encode()
+	}
+	return c.transport.request(ctx, "POST", path, target, key, input, output)
 }
 
 func (c *dataClient) withBudget(ctx context.Context, budget blob.Budget, call func(context.Context) error) error {

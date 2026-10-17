@@ -30,8 +30,7 @@ type StateFollower struct {
 	Subscribe func(context.Context, string) (StateSubscription, error)
 }
 
-// Wait returns after persisted acceptance, run, job or expansion changes. StoreNow and
-// expired leases never constitute progress; the store must commit each change.
+// Wait returns after persisted state or the owner's current execution eligibility changes.
 func (f StateFollower) Wait(ctx context.Context, before store.RunSnapshot) error {
 	previous, err := snapshotVersion(before)
 	if err != nil {
@@ -124,8 +123,9 @@ type stateVersion struct {
 }
 
 type nodeVersion struct {
-	sequence  int64
-	expansion store.ExpansionState
+	sequence   int64
+	expansion  store.ExpansionState
+	executable bool
 }
 
 func snapshotVersion(snapshot store.RunSnapshot) (stateVersion, error) {
@@ -140,7 +140,7 @@ func snapshotVersion(snapshot store.RunSnapshot) (stateVersion, error) {
 		if _, duplicate := v.nodes[row.Ref]; duplicate || row.Ref.RunID != v.run || row.Ref.NodeID == "" || row.StateSeq < 0 {
 			return v, errors.New("state follower received an invalid job sequence")
 		}
-		v.nodes[row.Ref] = nodeVersion{row.StateSeq, row.Expansion}
+		v.nodes[row.Ref] = nodeVersion{row.StateSeq, row.Expansion, row.OwnerExecution != nil && row.OwnerExecution.Allowed}
 	}
 	for _, row := range snapshot.Expansions {
 		key := expansionVersion{row.Source, row.SourceGeneration}

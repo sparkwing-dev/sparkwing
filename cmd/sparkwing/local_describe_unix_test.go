@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
@@ -35,11 +34,7 @@ func TestNativeLocalPreparationResolvesRepositoryAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	captured := os.Environ()
-	seal, err := snapshots.Capture(t.Context(), captured)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", seal, captured, snapshots, compileOptions{})
+	prepared, err := prepareNativeLocalRun(t.Context(), home, filepath.Join(root, ".sparkwing"), "example", captured, snapshots, compileOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +55,11 @@ func TestNativeLocalPreparationResolvesTrackingSparksBeforeInstallation(t *testi
 	t.Setenv("GOPRIVATE", "")
 	dir := newSparksFixture(t, "libraries:\n  - name: dependency\n    source: example.com/dependency\n    version: latest\n")
 	writeFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: ci\n    entrypoint: CI\nsparks:\n  - name: dependency\n    source: example.com/dependency\n    version: latest\n")
-	_, err := prepareNativeLocalRun(t.Context(), home, dir, "ci", runspec.EnvSnapshot{}, os.Environ(), nil, compileOptions{})
+	snapshots, err := nodehost.NewFileEnvironmentSnapshots(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = prepareNativeLocalRun(t.Context(), home, dir, "ci", os.Environ(), snapshots, compileOptions{})
 	if err == nil || !strings.Contains(err.Error(), "--sw-no-update") || !strings.Contains(err.Error(), "example.com/dependency@latest") {
 		t.Fatalf("tracking resolution did not precede source installation: %v", err)
 	}

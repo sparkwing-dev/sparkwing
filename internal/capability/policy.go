@@ -38,6 +38,7 @@ const (
 	BindReadSet            BindingRule = "readSet"
 	BindDeclaredSecret     BindingRule = "declaredSecret"
 	BindSource             BindingRule = "source"
+	BindSourceBundle       BindingRule = "sourceBundle"
 	BindData               BindingRule = "data"
 	BindExpansion          BindingRule = "expansion"
 	BindClaimSelection     BindingRule = "claimSelection"
@@ -110,6 +111,7 @@ const (
 	CredentialPublisher    CredentialRule = "local_run_publisher"
 	CredentialRepoReader   CredentialRule = "repo_cache_reader"
 	CredentialDiscovery    CredentialRule = "discovery"
+	CredentialLocalPeer    CredentialRule = "verified_local_peer"
 )
 
 // AccessRule is one complete alternative. Every grant in it is required.
@@ -397,6 +399,8 @@ func isMember(p Principal) bool {
 func matchesCredential(p Principal, rule CredentialRule) bool {
 	c := p.Capability
 	switch rule {
+	case CredentialLocalPeer:
+		return p.Class == CredentialPeer && c.Subject.Kind == SubjectLocal && c.Unit == "" && c.Binding.Kind == BindingNone
 	case CredentialBootstrap:
 		return isClaim(p) && c.Delivery == DeliveryBootstrap
 	case CredentialAny:
@@ -508,6 +512,9 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 		return b.Kind == BindingNode && b.RunID != "" && b.NodeID != "" && (t.RunID == "" || run)
 	case BindDeclaredSecret, BindSource:
 		return isClaim(p) && (t.RunID == "" || run)
+	case BindSourceBundle:
+		return matchesCredential(p, CredentialBootstrap) && t.Data != nil && t.Data.Operation == DataDownload &&
+			t.Data.RunID == b.RunID && b.RunID != ""
 	case BindReadSet, BindData, BindClaimSelection:
 		return true
 	}
@@ -570,11 +577,11 @@ func validateRoutePolicy(route RoutePolicy) error {
 	for _, access := range route.Access {
 		if !slices.Contains([]CredentialRule{
 			CredentialBootstrap, CredentialAny, CredentialMember, CredentialAccount, CredentialClaim, CredentialEval, CredentialHere, CredentialLauncher,
-			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialOwnerProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery,
+			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialOwnerProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery, CredentialLocalPeer,
 		}, access.Credential) ||
 			!slices.Contains([]BindingRule{
 				BindNone, BindOperatorSettings, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
-				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindData, BindExpansion, BindClaimSelection, BindOwnToken, BindMachineOwner,
+				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindSourceBundle, BindData, BindExpansion, BindClaimSelection, BindOwnToken, BindMachineOwner,
 				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval, BindSourceReport,
 			}, access.Binding) ||
 			!slices.ContainsFunc(LivenessPolicies, func(policy LivenessPolicy) bool { return policy.Class == access.Liveness }) {

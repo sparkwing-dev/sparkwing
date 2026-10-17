@@ -48,6 +48,9 @@ func namespace(parts ...string) (string, error) {
 }
 
 func refComponent(ref RefScope) (string, error) {
+	if ref.Ref == "" && !ref.Verified {
+		return "manual:", nil
+	}
 	encoded, err := component(ref.Ref)
 	if err != nil {
 		return "", err

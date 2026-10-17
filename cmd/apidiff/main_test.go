@@ -55,3 +55,20 @@ func TestDiscoverPackagePathsIncludesEveryPublicPackage(t *testing.T) {
 		seen[path] = true
 	}
 }
+
+func TestDiscoverPackagePathsExcludesExecutionFixtures(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"pkg/public", "pkg/public/testdata/native-sdk"} {
+		path := filepath.Join(root, dir)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "main.go"), []byte("package fixture\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths, err := discoverPackagePaths(root)
+	if err != nil || !slices.Equal(paths, []string{"pkg/public", "sparkwing"}) {
+		t.Fatalf("execution fixture became a public API: %v %v", paths, err)
+	}
+}

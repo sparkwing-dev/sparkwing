@@ -64,7 +64,7 @@ func checkoutSubmodules(ctx context.Context, client *gitClient, checkout, remote
 		if err := makeSubmodulePath(checkout, relative); err != nil {
 			return err
 		}
-		if err := cloneCommit(ctx, client, Spec{SHA: fields[2]}, submoduleURL, destination, nil); err != nil {
+		if err := cloneCommit(ctx, client, Spec{SHA: fields[2]}, submoduleURL, destination, "", nil); err != nil {
 			return err
 		}
 		if err := checkoutSubmodules(ctx, client, destination, submoduleURL); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -63,6 +64,26 @@ func decodeDataTarget(r *http.Request) (capability.RequestEvidence, error) {
 	default:
 		err = invalidEngineBody("unknown data operation")
 	}
+	if err == nil && r.Method == "POST" {
+		query, e := url.ParseQuery(r.URL.RawQuery)
+		if e != nil {
+			return capability.RequestEvidence{}, invalidEngineBody("invalid data query")
+		}
+		if len(query) != 0 {
+			if len(query) != 3 || len(query["job"]) != 1 || len(query["attempt"]) != 1 || len(query["generation"]) != 1 || query.Get("job") == "" {
+				return capability.RequestEvidence{}, invalidEngineBody("publication requires job, attempt and generation")
+			}
+			target.NodeID = query.Get("job")
+			target.Attempt, e = strconv.ParseInt(query.Get("attempt"), 10, 64)
+			if e != nil || target.Attempt <= 0 {
+				return capability.RequestEvidence{}, invalidEngineBody("invalid publication attempt")
+			}
+			target.Generation, e = strconv.ParseInt(query.Get("generation"), 10, 64)
+			if e != nil || target.Generation <= 0 {
+				return capability.RequestEvidence{}, invalidEngineBody("invalid publication generation")
+			}
+		}
+	}
 	return capability.RequestEvidence{Target: capability.Target{Data: &target}}, err
 }
 
@@ -71,6 +92,13 @@ func resolveDataTarget(_ context.Context, p capability.Principal, target capabil
 		return target, dataForbidden()
 	}
 	scope := p.Capability.Data
+	if target.Data.NodeID != "" {
+		if scope.Use != capability.DataPublish {
+			return target, dataForbidden()
+		}
+		target.Data.RunID = scope.RunID
+		return target, nil
+	}
 	target.Data.RunID, target.Data.NodeID, target.Data.Attempt, target.Data.Generation = scope.RunID, scope.NodeID, scope.Attempt, scope.Generation
 	return target, nil
 }

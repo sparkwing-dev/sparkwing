@@ -9,8 +9,9 @@ import (
 )
 
 // ResolveBlobAuthority derives live scope and uploader identity from persisted authority.
+// SourceRead resolves only an unexchanged bootstrap's sealed source input, without uploader identity.
 func (t *Tenant) ResolveBlobAuthority(ctx context.Context, selector blob.Authority, grant capability.Grant) (blob.Authority, error) {
-	if grant != capability.DataRead && grant != capability.DataWrite {
+	if grant != capability.DataRead && grant != capability.DataWrite && grant != capability.SourceRead {
 		return blob.Authority{}, authorityError(apierr.Forbidden, "data grant is required")
 	}
 	tx, err := t.s.beginTx(ctx)

@@ -278,6 +278,19 @@ Enrollment uses a named controller connection and a runner identity:
 sparkwing runners add --profile prod --runner dev-laptop
 ```
 
+To offer your own machine only to your runs, enroll it as personal capacity:
+
+```bash
+sparkwing runners add --profile prod --runner my-desktop --personal
+```
+
+Personal enrollment requires an independent account session. A member-token
+profile alone cannot authorize it. The controller binds personal capacity to your signed-in account and checks that
+ownership when matching runs. Cloud-routed runs can prefer your registered
+machines before using Cloud pools. Omitting `--personal` enrolls a team runner.
+Repository filters, capacity settings and service installation work the same way
+for both. JSON enrollment output includes `personal` alongside the runner name.
+
 The CLI checks local prerequisites before minting a runner credential. It writes
 that credential to a private file under `runner.credentials_dir`, then updates
 the `runner` section of the complete machine file. Labels, repository patterns

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -227,8 +228,11 @@ func TestLoopPreservesFractionalCapacityAndHereBinding(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	loop := &Loop{
-		Config:          LoopConfig{Version: "v1.2.3", MaxConcurrent: 1, RunID: "here-run"},
-		RequestCapacity: func() (float64, int64) { return .5, 100 },
+		Config: LoopConfig{Version: "v1.2.3", MaxConcurrent: 1, RunID: "here-run"},
+		RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
+			resources := match.Resources{Cores: .5, MemoryBytes: 100}
+			return resources, resources, nil
+		},
 		Controller: claimFunc(func(_ context.Context, req controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 			if req.AvailableCores != .5 || req.AvailableMemoryBytes != 100 || req.RunID != "here-run" {
 				t.Errorf("request: %#v", req)

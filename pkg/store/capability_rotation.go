@@ -104,7 +104,7 @@ func rotationRequestTx(ctx context.Context, tx *storeTx, p capability.Principal,
 		return capability.IssueRequest{}, authorityError(apierr.IntegrityFailure, "credential provisioning origin is unavailable")
 	}
 	origin := record.Origin
-	spec := capability.ProvisionSpec{Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
+	spec := capability.ProvisionSpec{Personal: origin.Personal, Kind: origin.Kind, RegistrationID: origin.RegistrationID, Authority: &p.Authority, Team: c.Team, Subject: c.Subject, Grants: slices.Clone(c.Grants), Binding: c.Binding, ReservedPools: slices.Clone(c.ReservedPools), Repositories: slices.Clone(c.Repositories), Data: c.Data, Metered: c.RootMetered, ExpiresAt: expires}
 	return capability.IssueRequest{Kind: capability.Delegate, Provision: &spec}, nil
 }
 
@@ -129,6 +129,9 @@ func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 }
 
 func validCapabilityOrigin(c capability.Capability, origin CapabilityOrigin) bool {
+	if origin.Personal && origin.Kind != capability.ProvisionMachine {
+		return false
+	}
 	if c.Parent != nil || c.Unit != "" || c.Issuance != capability.Delegate {
 		return false
 	}

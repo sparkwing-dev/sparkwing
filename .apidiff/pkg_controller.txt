@@ -13,24 +13,6 @@ type AccountWriter interface {
 	AcceptAccountInvitation(context.Context, capability.Authorized, string) (store.InvitationAcceptance, error)
 	UnlinkAccountIdentity(context.Context, capability.Authorized, string) (int64, error)
 }
-type Agent struct {
-	Name          string
-	Type          string
-	Location      string
-	Labels        map[string]string
-	Capabilities  []string
-	LastSeen      string
-	Status        string
-	ActiveJobs    []string
-	MaxConcurrent int
-	Headroom      *AgentHeadroom
-}
-type AgentHeadroom struct {
-	Cores       float64
-	MemoryBytes int64
-	QueueDepth  int
-	ObservedAt  string
-}
 type AuthorityRevoker interface {
 	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
 }
@@ -85,6 +67,7 @@ type ConcurrencyStore interface {
 	ForceReleaseAuthorizedSlots(context.Context, capability.Authorized, string) ([]store.ConcurrencyHolder, error)
 }
 type ConsoleWriter interface {
+	ConsoleRefund(context.Context, capability.Authorized, controllerwire.OperatorRefund, string) (store.CreditReversal, error)
 	ConsoleGrantCredit(context.Context, capability.Authorized, store.CreditGrantRequest) (store.CreditGrantResult, error)
 	ConsoleSetBillingTrust(context.Context, capability.Authorized, store.BillingTrustChange) (store.BillingStanding, error)
 	ConsoleFreeze(context.Context, capability.Authorized, string) (store.TeamCreditFreeze, error)
@@ -550,6 +533,7 @@ func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamWriter(resolve func(context.Context, store.Team) (TeamWriter, error)) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyAddr(addr string) *Server
+func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
 	DataDownloadURL string
 

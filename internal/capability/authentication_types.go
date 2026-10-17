@@ -7,10 +7,11 @@ import (
 
 // RequestEvidence carries decoded selectors and the digest of the exact result body.
 type RequestEvidence struct {
-	Method       string
-	Pattern      string
-	Target       Target
-	ResultDigest string
+	Method        string
+	Pattern       string
+	Target        Target
+	ResultDigest  string
+	ResultAttempt *int64
 }
 
 // CredentialLookup contains no reusable secret. Digest hashes the complete presentation.

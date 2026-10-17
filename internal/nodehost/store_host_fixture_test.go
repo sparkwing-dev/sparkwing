@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type hostIntakePolicy struct{}
@@ -170,6 +171,13 @@ func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake stor
 		}
 	}
 	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}
+	if intake.Request.Burst != nil {
+		_, requester, err := teststore.ProvisionCredential(ctx, database, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-requester"}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: requester.Prefix}
+	}
 	intake.Authority = authority
 	admitted, err := tenant.AdmitRun(ctx, intake)
 	if err != nil {

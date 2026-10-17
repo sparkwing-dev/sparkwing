@@ -30,7 +30,7 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	if err != nil {
 		return controllerwire.ReconcileResponse{}, err
 	}
-	request := store.ReconcileRequest{Ref: store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, Policy: store.SourcePolicy(body.Policy), MaterializeOnly: body.MaterializeOnly}
+	request := store.ReconcileRequest{Ref: store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, Policy: store.SourcePolicy(body.Policy), MaterializeOnly: body.MaterializeOnly, Reserved: body.Reserved}
 	if body.Source != nil {
 		source := reconcileSourceForStore(*body.Source)
 		request.Source = &source

@@ -69,13 +69,20 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		if options.Access == nil {
 			return entry, errors.New("remote source requires live source access")
 		}
-		credential, err := options.Access.GitCredential(ctx, spec)
-		if err != nil {
-			return entry, fmt.Errorf("authorize source: %w", err)
+		remote, bundleURL := spec.RemoteURL, ""
+		if spec.BundleDigest != "" {
+			bundleURL, err = options.Access.BundleURL(ctx, spec.BundleDigest)
+			if err != nil {
+				return entry, fmt.Errorf("authorize source bundle: %w", err)
+			}
+		} else {
+			remote, err = client.authorizeRemote(ctx, spec, options.Access)
+			if err != nil {
+				return entry, err
+			}
 		}
-		remote, err := credentialRemote(spec.RemoteURL, credential)
-		if err != nil {
-			return entry, err
+		if err := fssecure.EnsureDir(options.Workspace); err != nil {
+			return entry, fmt.Errorf("prepare host workspace: %w", err)
 		}
 		root, err := fssecure.MkdirPrivateTemp(options.Workspace, "source-")
 		if err != nil {
@@ -83,8 +90,8 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		}
 		entry.ownedDirectory = root
 		checkout = filepath.Join(root, "checkout")
-		client.credential, client.workspace = credential, root
-		if err := cloneCommit(ctx, &client, spec, remote, checkout, options.Access); err != nil {
+		client.workspace = root
+		if err := cloneCommit(ctx, &client, spec, remote, checkout, bundleURL, options.Access); err != nil {
 			return entry, err
 		}
 		if entry.DefaultBranch == "" && spec.BundleDigest == "" {
@@ -155,7 +162,20 @@ func validateSpec(spec Spec) error {
 	return nil
 }
 
-func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, checkout string, access Access) error {
+func (g *gitClient) authorizeRemote(ctx context.Context, spec Spec, access Access) (string, error) {
+	credential, err := access.GitCredential(ctx, spec)
+	if err != nil {
+		return "", fmt.Errorf("authorize source: %w", err)
+	}
+	remote, err := credentialRemote(spec.RemoteURL, credential)
+	if err != nil {
+		return "", err
+	}
+	g.credential = credential
+	return remote, nil
+}
+
+func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, checkout, bundleURL string, access Access) error {
 	if _, err := client.run(ctx, "", "", "init", "--quiet", checkout); err != nil {
 		return err
 	}
@@ -163,7 +183,7 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 		return err
 	}
 	if spec.BundleDigest != "" {
-		if err := seedBundle(ctx, client, checkout, spec.BundleDigest, access); err != nil {
+		if err := seedBundle(ctx, client, checkout, spec.BundleDigest, bundleURL); err != nil {
 			return err
 		}
 	}
@@ -181,10 +201,17 @@ func cloneCommit(ctx context.Context, client *gitClient, spec Spec, remote, chec
 	} else if policy.FullHistory == nil || !*policy.FullHistory {
 		args = append(args, "--depth=1")
 	}
-	args = append(args, "--", remote, spec.SHA)
 	_, presentErr := client.run(ctx, checkout, "", "cat-file", "-e", spec.SHA+"^{commit}")
 	needsFetch := spec.BundleDigest == "" || presentErr != nil
 	needsTags := policy.Tags != nil && *policy.Tags
+	if spec.BundleDigest != "" && (needsFetch || needsTags || policy.Submodules != nil && *policy.Submodules || policy.LFS != nil && *policy.LFS) {
+		var err error
+		remote, err = client.authorizeRemote(ctx, spec, access)
+		if err != nil {
+			return err
+		}
+	}
+	args = append(args, "--", remote, spec.SHA)
 	if needsFetch {
 		if _, err := client.run(ctx, checkout, remote, args...); err != nil {
 			return err

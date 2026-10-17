@@ -59,6 +59,7 @@ CREATE TABLE runs (
     intake_mode TEXT NOT NULL CHECK(intake_mode IN ('execute','publish')),
     admission TEXT NOT NULL DEFAULT '',
     allowed_pools BLOB NOT NULL,
+    created_subject_kind TEXT NOT NULL DEFAULT '',
     created_principal TEXT NOT NULL,
     created_at BIGINT NOT NULL,
     started_at BIGINT,
@@ -550,6 +551,13 @@ CREATE TABLE identities (
     created_at BIGINT NOT NULL,
     linked BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (provider, subject)
+);
+
+CREATE TABLE overflow_controls (
+    team TEXT NOT NULL REFERENCES teams(name),
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    monthly_minutes BIGINT NOT NULL CHECK (monthly_minutes >= 0),
+    PRIMARY KEY (team,account_id)
 );
 
 CREATE TABLE memberships (
@@ -1292,6 +1300,7 @@ CREATE TABLE billing_awards (
     reservation_id TEXT NOT NULL,
     capability_prefix TEXT NOT NULL,
     run_id TEXT NOT NULL,
+    requester_account TEXT NOT NULL DEFAULT '',
     node_id TEXT NOT NULL DEFAULT '',
     generation BIGINT NOT NULL,
     payer_team TEXT NOT NULL REFERENCES teams(name),
@@ -1308,6 +1317,7 @@ CREATE TABLE billing_awards (
 );
 
 CREATE UNIQUE INDEX idx_billing_awards_capability ON billing_awards(team,capability_prefix);
+CREATE INDEX idx_billing_awards_requester ON billing_awards(team,requester_account);
 
 CREATE UNIQUE INDEX idx_billing_awards_unit_generation ON billing_awards(team,run_id,node_id,unit_kind,generation);
 

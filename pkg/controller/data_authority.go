@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -20,15 +19,7 @@ func (s *DataController) persistedDataAuthority(ctx context.Context, a capabilit
 	if err != nil {
 		return blob.Authority{}, err
 	}
-	selector := blob.Authority{CapabilityRef: c.Prefix}
-	if target := a.Target.Data; c.Data != nil && c.Data.Use == capability.DataPublish && target != nil && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {
-		selector.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: c.Team, RunID: target.RunID, NodeID: target.NodeID, Attempt: target.Attempt, Generation: target.Generation}}
-	}
-	grant := capability.DataRead
-	if slices.Contains(a.Access.Grants, capability.DataWrite) {
-		grant = capability.DataWrite
-	}
-	return tenant.ResolveBlobAuthority(ctx, selector, grant)
+	return tenant.ResolveDataAuthority(ctx, a)
 }
 
 func dataForbidden() *apierr.Error {
@@ -40,7 +31,10 @@ func validateDataAuthority(a capability.Authorized, authority blob.Authority) er
 	scope := c.Data
 	if scope == nil || scope.RepositoryKey == "" || c.Audience != capability.Controller || c.Team == "" || a.Target.Team != c.Team ||
 		a.Principal.Authority.ID == "" || authority.CapabilityRef == "" || authority.Principal == "" ||
-		string(authority.Repo) != scope.RepositoryKey || a.Access.Binding != capability.BindData || a.ResultReplay || a.LogTailAttempt != 0 {
+		string(authority.Repo) != scope.RepositoryKey || a.Access.Binding != capability.BindData && a.Access.Binding != capability.BindSourceBundle || a.ResultReplay || a.LogTailAttempt != 0 {
+		return dataForbidden()
+	}
+	if a.Access.Binding == capability.BindSourceBundle && (c.Delivery != capability.DeliveryBootstrap || scope.Use != capability.DataClaim && !(scope.Use == capability.DataExpansion && c.Unit == capability.UnitEval) || authority.Attempt.Set || authority.Upload.Set || a.Target.Data == nil || a.Target.Data.Operation != capability.DataDownload) {
 		return dataForbidden()
 	}
 	if authority.Attempt.Set && !dataAttemptMatches(authority.Attempt.Value, c.Team, scope) {

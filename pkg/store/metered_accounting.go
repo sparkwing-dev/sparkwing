@@ -121,7 +121,11 @@ func recordBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		}
 	}
 	now := tx.now().UnixNano()
-	_, err = tx.ExecContext(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Team, b.ReservationID, c.Prefix, c.Binding.RunID, c.Binding.NodeID, generation, b.PayerTeam, boolInt(b.Metered), b.ExecutorClass, b.Start, c.Unit, b.Unit, now, amount)
+	var requester string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT CASE WHEN created_subject_kind='account' THEN created_principal ELSE '' END FROM runs WHERE team=? AND id=?),'')`, c.Team, c.Binding.RunID).Scan(&requester); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro,requester_account) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.Team, b.ReservationID, c.Prefix, c.Binding.RunID, c.Binding.NodeID, generation, b.PayerTeam, boolInt(b.Metered), b.ExecutorClass, b.Start, c.Unit, b.Unit, now, amount, requester)
 	if err != nil {
 		return err
 	}

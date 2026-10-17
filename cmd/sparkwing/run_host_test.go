@@ -65,6 +65,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 	return localRunDependencies{version: "v1.2.3", resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
 		*observed = append(*observed, "resolve")
 		return localRunRuntime{
+			follow: func(context.Context, string, string, io.Writer) error { return nil },
 			prepare: func(_ context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
 				*observed = append(*observed, "prepare")
 				if pipeline != "ci" {
@@ -656,6 +657,52 @@ func FuzzDetachedIntakeDiagnosticsNeverExposeArguments(f *testing.F) {
 	})
 }
 
+func FuzzLocalIntakeDiagnosticsNeverExposeRequesterSecrets(f *testing.F) {
+	f.Add([]byte("requester credential"), false)
+	f.Add([]byte{0, 255, 34}, true)
+	f.Fuzz(func(t *testing.T, data []byte, canonical bool) {
+		if len(data) > 256 {
+			return
+		}
+		secret := "requester-secret-" + hex.EncodeToString(data)
+		var calls []string
+		deps := localRuntimeFor(t, localTestAward(t), true, &calls)
+		resolve := deps.resolve
+		deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+			runtime, err := resolve(ctx, options)
+			prepare := runtime.prepare
+			runtime.prepare = func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
+				input, err := prepare(ctx, pipeline, flags)
+				input.localSecrets = map[string]string{"TOKEN": secret}
+				return input, err
+			}
+			runtime.controller = localTestController{create: func(_ context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+				if request.LocalSecrets["TOKEN"] != secret || len(request.Request.LocalSecretNames) != 1 {
+					t.Fatal("intake lost its private requester secret")
+				}
+				var failure error = errors.New("intake failed: " + secret)
+				if canonical {
+					failure = &apierr.Error{Code: apierr.InvalidArgs, Message: "intake failed: " + secret}
+				}
+				return controllerwire.CreateRunResponse{}, failure
+			}}
+			return runtime, err
+		}
+		var output bytes.Buffer
+		err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, nil, &output, deps)
+		if err == nil || strings.Contains(err.Error(), secret) || strings.Contains(output.String(), secret) {
+			t.Fatal("requester secret escaped through intake diagnostics")
+		}
+		var structured *apierr.Error
+		if errors.As(err, &structured) {
+			body, err := json.Marshal(structured)
+			if err != nil || bytes.Contains(body, []byte(secret)) {
+				t.Fatal("structured intake diagnostic exposed requester secret")
+			}
+		}
+	})
+}
+
 func TestLocalOwnerResumePreservesAcceptedPlan(t *testing.T) {
 	award := localTestAward(t)
 	plan := json.RawMessage(`{"jobs":[]}`)
@@ -709,7 +756,7 @@ func TestLocalRemoteCacheRequiresTheSealedOptIn(t *testing.T) {
 			}
 		})
 	}
-	for _, flags := range []runFlags{{cacheFrom: "cache"}, {publish: "history"}} {
+	for _, flags := range []runFlags{{cacheFrom: "cache"}} {
 		var calls []string
 		deps := localRuntimeFor(t, localTestAward(t), false, &calls)
 		err := runLocalCommand(t.Context(), "ci", flags, []string{"--password", "private-value"}, io.Discard, deps)
@@ -717,5 +764,96 @@ func TestLocalRemoteCacheRequiresTheSealedOptIn(t *testing.T) {
 		if !errors.As(err, &unavailable) || unavailable.Code != apierr.Unavailable || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "close"}) {
 			t.Fatalf("unbound storage reached intake: calls=%v error=%v", calls, err)
 		}
+	}
+}
+
+func TestLocalPublicationFailurePreservesExecutionVerdict(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		var calls []string
+		deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+		resolve := deps.resolve
+		published := false
+		deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
+			runtime, err := resolve(ctx, opts)
+			runtime.publish = func(_ context.Context, profile, run string) error {
+				published = true
+				if profile != "history" || run != "local-run" {
+					t.Fatal("publication lost its profile or local run")
+				}
+				if fail {
+					return errors.New("profile unavailable")
+				}
+				return nil
+			}
+			return runtime, err
+		}
+		if err := runLocalCommand(t.Context(), "ci", runFlags{publish: "history"}, []string{"--password", "private-value"}, io.Discard, deps); err != nil || !published {
+			t.Fatalf("publication changed local verdict: published=%v err=%v", published, err)
+		}
+	}
+}
+
+func TestLocalPublicationHasDeadlineAndSecondInterruptAbandonsIt(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	resolve := deps.resolve
+	signals := make(chan os.Signal, 2)
+	deps.interrupts = signals
+	stderr, err := os.CreateTemp(t.TempDir(), "publication-stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderr.Close()
+	previous := os.Stderr
+	os.Stderr = stderr
+	defer func() { os.Stderr = previous }()
+	deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, opts)
+		runtime.publish = func(ctx context.Context, _, _ string) error {
+			_, bounded := ctx.Deadline()
+			if !bounded {
+				t.Error("publication has no bounded request deadline")
+				return errors.New("unbounded publication")
+			}
+			signals <- os.Interrupt
+			signals <- os.Interrupt
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return runtime, err
+	}
+	if err := runLocalCommand(t.Context(), "ci", runFlags{publish: "history"}, []string{"--password", "private-value"}, io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(stderr.Name())
+	if err != nil || !strings.Contains(string(body), "stayed local-only") {
+		t.Fatalf("abandoned publication notice: %q %v", body, err)
+	}
+}
+
+func TestLocalAttachedRunStreamsCommittedLogs(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	resolve := deps.resolve
+	followed := false
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		runtime.follow = func(_ context.Context, run, format string, out io.Writer) error {
+			followed = true
+			if run != "local-run" || format != "json" {
+				return errors.New("log attachment lost run or output selection")
+			}
+			_, err := fmt.Fprintln(out, `{"message":"masked output ***"}`)
+			return err
+		}
+		return runtime, err
+	}
+	var out bytes.Buffer
+	flags, args := parseRunFlags([]string{"-o=json", "--", "--password", "private-value"})
+	if err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps); err != nil {
+		t.Fatal(err)
+	}
+	if !followed || !strings.Contains(out.String(), "masked output ***") {
+		t.Fatalf("attached run lost logs: %s", &out)
 	}
 }

@@ -142,6 +142,9 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		edge.Kind = blob.EdgeSealedSource
 		return edge, seal.Request.Source.BundleDigest.Set && seal.Request.Source.BundleDigest.Value == string(c.digest), nil
 	}
+	if a.capability.Delivery == capability.DeliveryBootstrap || a.capability.Unit == capability.UnitNode && !a.authority.Attempt.Set {
+		return edge, false, nil
+	}
 	if c.kind == blob.KindBinary || c.kind == blob.KindSourceBundle {
 		edge.Kind = blob.EdgeOwnUpload
 		return edge, c.source == a.source, nil
@@ -292,7 +295,15 @@ func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest)
 
 func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.HasManyRequest) (blob.Presence, error) {
 	result := blob.Presence{}
-	a, err := resolveBlobAuthorityTx(ctx, tx, team, request.Authority, capability.DataRead)
+	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: request.Authority.CapabilityRef})
+	if err != nil {
+		return result, err
+	}
+	grant := capability.DataRead
+	if p.Capability.Delivery == capability.DeliveryBootstrap {
+		grant = capability.SourceRead
+	}
+	a, err := resolveBlobAuthorityTx(ctx, tx, team, request.Authority, grant)
 	if err != nil {
 		return result, err
 	}

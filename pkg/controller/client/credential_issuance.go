@@ -8,12 +8,14 @@ import (
 
 // CreateTokenRequest narrows a member credential's grants and optional expiry.
 type CreateTokenRequest struct {
-	Grants    []string   `json:"grants"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Grants    []string              `json:"grants"`
+	ExpiresAt *time.Time            `json:"expires_at,omitempty"`
+	Data      *capability.DataScope `json:"data,omitempty"`
 }
 
 // CreatedToken contains the one-time bearer and its public issuance metadata.
 type CreatedToken struct {
+	Principal  string     `json:"principal,omitempty"`
 	Capability string     `json:"capability"`
 	Prefix     string     `json:"prefix"`
 	Team       string     `json:"team"`
@@ -23,6 +25,7 @@ type CreatedToken struct {
 
 // EnrollRunnerRequest selects a machine name, repository patterns and authorized pools.
 type EnrollRunnerRequest struct {
+	Personal      bool       `json:"personal,omitempty"`
 	Name          string     `json:"name"`
 	Repos         []string   `json:"repos"`
 	ReservedPools []string   `json:"reserved_pools,omitempty"`

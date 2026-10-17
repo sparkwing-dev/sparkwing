@@ -27,11 +27,11 @@ func (c *remoteCache) lookup(ctx context.Context, key RecordKey, budget Budget) 
 	if key.Scope.Repo != c.options.Repo {
 		return RecordLookupResult{}, ErrDigestNotReadable
 	}
-	if budget.Deadline.IsZero() {
-		return RecordLookupResult{}, ErrBudget
+	if !budget.Deadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, budget.Deadline)
+		defer cancel()
 	}
-	ctx, cancel := context.WithDeadline(ctx, budget.Deadline)
-	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return RecordLookupResult{}, budgetError(err)
 	}
@@ -41,8 +41,7 @@ func (c *remoteCache) lookup(ctx context.Context, key RecordKey, budget Budget) 
 		return RecordLookupResult{}, err
 	}
 	r := result.Record
-	f := r.RefFacts
-	if r.Key.Team != key.Team || r.Key.Kind != key.Kind || r.Key.Scope.Repo != c.options.Repo || !f.Scope.Verified || !f.DefaultBranchVerified || f.AppDeliveryKey == "" || f.SHA == "" || f.DefaultBranch == "" || f.Scope.Ref != f.DefaultBranch || r.Key.Scope.Ref != f.Scope {
+	if !result.VerifiedDefault || r.Key.Team != key.Team || r.Key.Kind != key.Kind || r.Key.Scope.Repo != c.options.Repo || !r.Key.Scope.Ref.Verified || r.Key.Scope.Ref.Ref == "" {
 		return RecordLookupResult{}, ErrDigestNotReadable
 	}
 	if r.Key.Scope.Pipeline != key.Scope.Pipeline || r.Key.Scope.Job != key.Scope.Job || r.Key.Scope.Key != key.Scope.Key || r.Key.Name != key.Name {

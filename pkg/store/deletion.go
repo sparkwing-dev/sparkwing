@@ -208,6 +208,12 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	if err := t.cancelActiveRunsTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
+	t.s.localSecrets.Range(func(key, _ any) bool {
+		if k := key.(localSecretKey); k.team == t.team {
+			tx.finishedLocalSecrets = append(tx.finishedLocalSecrets, k)
+		}
+		return true
+	})
 	return revoked, nil
 }
 

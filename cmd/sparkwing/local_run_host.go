@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -10,8 +11,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -53,17 +57,50 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		return hereHostSession{}, err
 	}
 	state.Finish = private.FinishRunAndUnit
-	source, err := localSourceOptions(home, nil, secrets.NewMasker())
+	if award.Request.Request.Burst != nil {
+		if len(award.Request.Request.LocalSecretNames) > 0 {
+			state.LocalSecrets = map[string]string{}
+			for _, name := range award.Request.Request.LocalSecretNames {
+				value, present := os.LookupEnv(name)
+				if !present {
+					return hereHostSession{}, errors.New("requester local secret is unavailable on resume")
+				}
+				state.LocalSecrets[name] = value
+			}
+			if _, err := state.RenewOwner(ctx, store.Actor{}, false); err != nil {
+				return hereHostSession{}, err
+			}
+		}
+
+		state.Available = func(ctx context.Context) (*match.Resources, error) {
+			_, available, err := observeBurstCapacity(ctx, home)
+			return &available, err
+		}
+	}
+	sourceOptions, err := hostSourceOptions(home, nil, secrets.NewMasker(), award.Request.Request.Source.Location.LocalCheckout != "")
 	if err != nil {
 		return hereHostSession{}, err
 	}
-	engines, ok := source.Engines.(*engine.Resolver)
+	if award.Request.Request.Source.Location.LocalCheckout == "" {
+		spec, err := source.ForRequest(award.Request)
+		if err != nil {
+			return hereHostSession{}, err
+		}
+		sourceOptions.Access, err = client.NewSourceAccess(options, award.RunID, spec)
+		if err != nil {
+			return hereHostSession{}, err
+		}
+		if options.HTTP != nil {
+			sourceOptions.BundleTransport = options.HTTP.Transport
+		}
+	}
+	engines, ok := sourceOptions.Engines.(*engine.Resolver)
 	if !ok {
 		return hereHostSession{}, errors.New("local source has no native engine resolver")
 	}
 	services, err := localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
 		Home: home, Version: installedVersion(), Store: state, Parent: private, Bindings: private,
-		Principal: principal, Refresh: refresh, Source: source, Local: store.OwnerCanExecute(principal),
+		Principal: principal, Refresh: refresh, Source: sourceOptions, Local: store.OwnerCanExecute(principal),
 		Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 			return state.RenewOwner(ctx, store.Actor{}, computing)
 		},
@@ -72,6 +109,9 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		return hereHostSession{}, err
 	}
 	closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
+	if options.URL != wingdclient.APIBaseURL {
+		services.Config.Admission.Controller = options.URL
+	}
 	adopt := services.Config.Owner.AdoptClaim
 	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
 		if err := private.AdoptClaim(ctx, claim); err != nil {

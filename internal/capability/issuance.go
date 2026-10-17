@@ -183,6 +183,7 @@ const (
 
 // ProvisionSpec is trusted root-issuance input whose origin Store.Issue rechecks in its transaction.
 type ProvisionSpec struct {
+	Personal       bool
 	Seed           string `json:"-"`
 	Kind           ProvisionKind
 	ConsoleProof   *ConsoleProof
@@ -222,11 +223,12 @@ func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) err
 	if child.Audience != Controller && child.Audience != NodeHost || p.Audience != Controller && p.Audience != child.Audience {
 		return forbidden(apierr.ReasonAudience)
 	}
-	if !subset(child.Grants, Grants) || !subset(child.Grants, p.Grants) {
+	accountData := accountDataDelegation(parent, child)
+	if !subset(child.Grants, Grants) || !subset(child.Grants, p.Grants) && !accountData {
 		return forbidden(apierr.ReasonMissingGrant)
 	}
 	ownerExpansion := narrowOwnerExpansion(parent, child)
-	dataNarrowed := narrowData(p.Data, child.Data)
+	dataNarrowed := narrowData(p.Data, child.Data) || accountData
 	if ownerExpansion && child.Data != nil {
 		dataNarrowed = narrowOwnerExpansionData(p, child)
 	}
@@ -238,6 +240,33 @@ func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) err
 		return forbidden(apierr.ReasonBinding)
 	}
 	return nil
+}
+
+func accountDataDelegation(parent Principal, child DelegateSpec) bool {
+	p, d := parent.Capability, child.Data
+	if p.Subject.Kind != SubjectAccount || p.Audience != Controller || p.Unit != "" || p.Data != nil ||
+		p.Binding != (Binding{Kind: BindingNone}) || d == nil || d.RepositoryKey == "" || child.Audience != Controller ||
+		!slices.Equal(child.Repositories, []string{d.RepositoryKey}) || !RepositoryScopeNarrows(p.Repositories, child.Repositories) || d.NodeID != "" || d.Attempt != 0 || d.Generation != 0 {
+		return false
+	}
+	switch d.Use {
+	case DataRemoteCache:
+		return slices.Contains(p.Grants, RunsRead) && slices.Equal(child.Grants, []Grant{DataRead}) &&
+			child.Binding == (Binding{Kind: BindingNone}) && d.VerifiedDefaultOnly && d.WriteRef == "" && d.RunID == "" && len(d.ReadRefs) > 0
+	case DataPublish:
+		return slices.Contains(p.Grants, RunsWrite) && slices.Equal(child.Grants, []Grant{DataWrite}) &&
+			d.RunID != "" && child.Binding == (Binding{Kind: BindingRun, RunID: d.RunID}) && !d.VerifiedDefaultOnly &&
+			d.WriteRef != "" && slices.Equal(d.ReadRefs, []string{d.WriteRef})
+	}
+	return false
+}
+
+// InheritedGrants intersects ordinary delegation and rechecks scoped account data opt-ins.
+func InheritedGrants(parent Principal, child Capability) []Grant {
+	if accountDataDelegation(parent, DelegateSpec{Audience: child.Audience, Grants: child.Grants, Binding: child.Binding, Repositories: child.Repositories, Data: child.Data}) {
+		return slices.Clone(child.Grants)
+	}
+	return slices.DeleteFunc(slices.Clone(child.Grants), func(g Grant) bool { return !slices.Contains(parent.Capability.Grants, g) })
 }
 
 func boundedExpiry(child, parent *time.Time, now time.Time) bool {

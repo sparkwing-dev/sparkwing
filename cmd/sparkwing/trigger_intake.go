@@ -31,6 +31,9 @@ type triggerReceipt struct {
 
 func submitTriggeredRun(ctx context.Context, input controllerwire.CreateRunRequest, detached bool, format string, out io.Writer, connection triggerSubmission) (resultErr error) {
 	masker := secrets.NewMasker()
+	for _, value := range input.LocalSecrets {
+		masker.Register(value)
+	}
 	for _, value := range input.Request.RequestedArgs {
 		masker.Register(value)
 	}

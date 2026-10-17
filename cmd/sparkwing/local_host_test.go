@@ -1,21 +1,27 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -24,6 +30,63 @@ import (
 type queueHostTransport func(*http.Request) (*http.Response, error)
 
 func (f queueHostTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type failedQueueHost struct{ err error }
+
+func (h failedQueueHost) Host(context.Context, controllerwire.ClaimedUnit) error { return h.err }
+
+type queueClaim struct{ unit controllerwire.ClaimedUnit }
+
+func (q queueClaim) Claim(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+	return controllerwire.ClaimResponse{Claim: &q.unit}, nil
+}
+
+func TestLocalQueueReportsHostFailureWhileDraining(t *testing.T) {
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
+	home := t.TempDir()
+	owned, err := teststore.Open(filepath.Join(home, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := owned.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	tenant, err := owned.ForTeam(t.Context(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &controller.EngineController{Store: owned}
+	services, err := bindLocalController(t.Context(), localcontroller.Binding{Home: home, Store: owned, Tenant: tenant, Controller: engine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := services.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	services.Runner.Loop.MaxClaims = 1
+	loop, err := runners.NewStoreRunner(engine, services.Runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("profile cache construction failed")
+	loop.Controller, loop.Host = queueClaim{localTestAward(t)}, failedQueueHost{failure}
+	loop.CheckVersion = func(context.Context, string) error { return nil }
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	if err := loop.Run(t.Context()); !errors.Is(err, failure) {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "local run host failed") || !strings.Contains(output.String(), failure.Error()) {
+		t.Fatalf("host failure stayed silent: %s", &output)
+	}
+}
 
 func TestLocalQueueBindsAuthenticatedStorageBeforeOpeningProcessTransport(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))

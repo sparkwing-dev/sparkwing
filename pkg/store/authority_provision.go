@@ -82,6 +82,9 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 	}
 	c := p.Capability
+	if spec.Personal && (spec.Kind != capability.ProvisionMachine || !p.DirectAccountSession() || c.Subject.Kind != capability.SubjectAccount || !slices.Contains(c.Grants, capability.RunsWrite)) {
+		return bindingRefusal()
+	}
 	deployment := spec.Authority != nil && (capability.DeploymentAuthority(p) && slices.Contains(c.Grants, capability.OperatorTokens) || p.Class == capability.CredentialConsole && slices.Contains(c.Grants, capability.OperatorConsole))
 	if spec.Authority != nil && !deployment && c.Team != spec.Team {
 		return bindingRefusal()
@@ -128,6 +131,9 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 	case capability.ProvisionMachine:
 		account := spec.Authority != nil && p.DirectAccountSession() && c.Team == spec.Team && c.Audience == capability.Controller
+		if account && !spec.Personal && !slices.Contains(c.Grants, capability.TeamAdmin) {
+			return bindingRefusal()
+		}
 		if spec.Team == "" || spec.Subject.Kind != capability.SubjectMachine || spec.Binding.Kind != capability.BindingNone || (!account && !deployment) {
 			return bindingRefusal()
 		}

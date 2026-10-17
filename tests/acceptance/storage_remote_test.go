@@ -27,7 +27,10 @@ type storageCacheRecords struct {
 
 func (s storageCacheRecords) LookupRecord(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
 	s.lookup(q)
-	return s.result, nil
+	result := s.result
+	result.VerifiedDefault = result.Found && result.Record.VerifiedDefault()
+	result.Record.RefFacts = blob.RefFacts{}
+	return result, nil
 }
 
 type storageCacheSigner struct {

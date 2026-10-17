@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -21,10 +22,12 @@ type PrivateHostState interface {
 type RemoteHostStore struct {
 	PrivateHostState
 	*RemoteOwnerStore
-	controller controllerwire.Controller
-	unit       string
-	executing  func() bool
-	Finish     func(context.Context, store.FinishRunRequest) (store.Applied, error)
+	controller   controllerwire.Controller
+	unit         string
+	executing    func() bool
+	LocalSecrets map[string]string
+	Available    func(context.Context) (*match.Resources, error)
+	Finish       func(context.Context, store.FinishRunRequest) (store.Applied, error)
 }
 
 // NewRemoteHostStore constructs an award-bound state adapter.
@@ -36,6 +39,26 @@ func NewRemoteHostStore(controller controllerwire.Controller, private PrivateHos
 		PrivateHostState: private, RemoteOwnerStore: &RemoteOwnerStore{Controller: controller},
 		controller: controller, unit: unit, executing: executing,
 	}, nil
+}
+
+// ReadSnapshot refreshes burst availability before reading canonical placement.
+func (s *RemoteHostStore) ReadSnapshot(ctx context.Context, run string) (store.RunSnapshot, error) {
+	if s.Available != nil {
+		if _, err := s.renew(ctx, s.executing()); err != nil {
+			return store.RunSnapshot{}, err
+		}
+	}
+	return s.PrivateHostState.ReadSnapshot(ctx, run)
+}
+
+// ReconcileNode refreshes burst availability before a self-claim.
+func (s *RemoteHostStore) ReconcileNode(ctx context.Context, request store.ReconcileRequest) (store.ReconciledNode, error) {
+	if s.Available != nil {
+		if _, err := s.renew(ctx, s.executing()); err != nil {
+			return store.ReconciledNode{}, err
+		}
+	}
+	return s.RemoteOwnerStore.ReconcileNode(ctx, request)
 }
 
 func (s *RemoteHostStore) AcceptPlan(ctx context.Context, request store.PlanAcceptance) (store.AcceptedPlan, error) {
@@ -108,7 +131,15 @@ func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref store.NodeRef,
 }
 
 func (s *RemoteHostStore) renew(ctx context.Context, executing bool) (store.LeaseBeat, error) {
-	response, err := s.controller.Renew(ctx, s.unit, controllerwire.RenewalRequest{Executing: executing})
+	request := controllerwire.RenewalRequest{Executing: executing, LocalSecrets: s.LocalSecrets}
+	if s.Available != nil {
+		var err error
+		request.Available, err = s.Available(ctx)
+		if err != nil {
+			return store.LeaseBeat{}, err
+		}
+	}
+	response, err := s.controller.Renew(ctx, s.unit, request)
 	if err != nil {
 		return store.LeaseBeat{}, err
 	}

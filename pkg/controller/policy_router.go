@@ -186,10 +186,16 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 	}
 	authorized, err := capability.Authorize(r.Context(), router.authorization.Bindings, route, authenticated, presentation.Evidence.Target)
 	if err != nil {
+		if presentation.Evidence.Target.Data != nil {
+			return dataRouteError(err)
+		}
 		return err
 	}
 	if evidence := presentation.Evidence; evidence.ResultDigest != "" {
 		b := authorized.Binding
+		if evidence.ResultAttempt != nil {
+			b.Attempt = *evidence.ResultAttempt
+		}
 		authorized.Result = &capability.RecordedResult{Actor: authorized.Principal.Authority, Method: r.Method, Pattern: route.Path, RunID: evidence.Target.RunID, NodeID: evidence.Target.NodeID, ClaimID: evidence.Target.ClaimID, Generation: b.Generation, Attempt: b.Attempt, Digest: evidence.ResultDigest}
 	}
 	return endpoint.Handle(w, r, authorized)

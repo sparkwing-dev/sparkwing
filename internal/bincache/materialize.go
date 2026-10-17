@@ -7,12 +7,20 @@ import (
 
 // MaterializePipeline prepares effective module checksums and returns a leased executable.
 func MaterializePipeline(ctx context.Context, dir string, options CompileOptions) (*Lease, bool, error) {
-	args := []string{"mod", "download"}
-	if overlay := EffectiveOverlay(dir, options.Environment); overlay != "" {
-		args = append(args, "-modfile="+overlay)
+	args := []string{"list", "-deps", "-f", "{{if .Error}}{{.Error}}{{end}}"}
+	preparation := options
+	work, present := goWorkInScope(dir, options.Environment)
+	if !present || !goWorkCovers(work, dir) {
+		args = append(args, "-mod=mod")
+		if present {
+			preparation.Environment = withGoworkOff(options.Environment)
+		}
+		if overlay := EffectiveOverlay(dir, options.Environment); overlay != "" {
+			args = append(args, "-modfile="+overlay)
+		}
 	}
-	args = append(args, "all")
-	if err := RunGo(ctx, dir, args, options); err != nil {
+	args = append(args, ".")
+	if err := RunGo(ctx, dir, args, preparation); err != nil {
 		return nil, false, fmt.Errorf("prepare pipeline dependencies: %w", err)
 	}
 	key, parts, err := ExplainCacheKey(dir, options.Environment)

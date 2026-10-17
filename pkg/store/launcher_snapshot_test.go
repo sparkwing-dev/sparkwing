@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitDemand, UnitClaim, *time.Time) {
+func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind, previousAttempts ...int64) (*Store, UnitDemand, UnitClaim, *time.Time) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
 	fundUnitClaim(t, s)
@@ -35,6 +35,12 @@ func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind) (*Store, Un
 		rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1,generation=7,expansion='expected'`)
 		rewriteSchemaExec(t, s.db, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, now.Add(time.Hour).UnixNano())
 		rewriteSchemaExec(t, s.db, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+	}
+	if len(previousAttempts) > 0 {
+		rewriteSchemaExec(t, s.db, `UPDATE nodes SET attempt=?`, previousAttempts[0])
+		if kind == capability.UnitEval && previousAttempts[0] > 0 {
+			rewriteSchemaExec(t, s.db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES ('a','run','job',?,7,'source-runner','source-capability','runner','source-runner','remote',1,2,'success')`, previousAttempts[0])
+		}
 	}
 	claim, err := s.ClaimUnit(t.Context(), demand)
 	if err != nil {

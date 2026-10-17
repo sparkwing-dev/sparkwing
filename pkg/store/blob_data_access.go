@@ -40,6 +40,9 @@ func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Au
 		return bindingRefusal()
 	}
 	c = p.Capability
+	if c.Delivery == capability.DeliveryBootstrap && (target.Operation != capability.DataDownload || target.RunID != "" && target.RunID != c.Binding.RunID || target.NodeID != "" && target.NodeID != c.Binding.NodeID || target.Generation != 0 && target.Generation != c.Binding.Generation) {
+		return bindingRefusal()
+	}
 	team := Team(c.Team)
 	input := blob.Authority{CapabilityRef: c.Prefix}
 	if target.RunID != "" && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {

@@ -26,7 +26,7 @@ func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLooku
 	if err != nil {
 		return blob.RecordLookupResult{}, err
 	}
-	hit, err := r.lookupRecordTx(ctx, tx, a, request, capability.DataRead)
+	hit, err := r.selectRecordTx(ctx, tx, a, request)
 	if err != nil {
 		return hit, err
 	}
@@ -34,6 +34,23 @@ func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLooku
 		return blob.RecordLookupResult{}, blob.ErrBudget
 	}
 	return hit, tx.Commit()
+}
+
+func (r *blobRecords) selectRecordTx(ctx context.Context, tx *storeTx, a blobActor, request blob.RecordLookup) (blob.RecordLookupResult, error) {
+	if a.capability.Data.Use == capability.DataRemoteCache {
+		request.VerifiedDefaultOnly = true
+	}
+	if request.VerifiedDefaultOnly && request.Key.Scope.Ref == (blob.RefScope{}) {
+		for _, ref := range a.capability.Data.ReadRefs {
+			request.Key.Scope.Ref = blob.RefScope{Ref: ref, Verified: true}
+			hit, err := r.lookupRecordTx(ctx, tx, a, request, capability.DataRead)
+			if err != nil || hit.Found {
+				return hit, err
+			}
+		}
+		return blob.RecordLookupResult{}, nil
+	}
+	return r.lookupRecordTx(ctx, tx, a, request, capability.DataRead)
 }
 
 func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobActor, request blob.RecordLookup, grant capability.Grant) (blob.RecordLookupResult, error) {
@@ -55,7 +72,7 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	}
 	if request.VerifiedDefaultOnly {
 		facts := record.RefFacts
-		if !facts.DefaultBranchVerified || !facts.Scope.Verified || facts.Scope.Ref == "" || facts.Scope.Ref != facts.DefaultBranch || facts.AppDeliveryKey == "" || facts.SHA == "" || (a.authority.Ref.DefaultBranch != "" && facts.Scope.Ref != a.authority.Ref.DefaultBranch) {
+		if !record.VerifiedDefault() || (a.authority.Ref.DefaultBranch != "" && facts.Scope.Ref != a.authority.Ref.DefaultBranch) {
 			return result, nil
 		}
 	}
@@ -120,6 +137,7 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 		result.ReadSet.Edges = append(result.ReadSet.Edges, set.Edges...)
 	}
 	result.Found, result.Record, result.Members = true, record, members
+	result.VerifiedDefault = request.VerifiedDefaultOnly
 	return result, nil
 }
 
@@ -272,7 +290,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 	if err != nil {
 		return result, err
 	}
-	if request.Key.Repo != a.authority.Repo || blobLocalRepo(request.Key.Repo) || (a.capability.Data.Use != capability.DataRemoteCache && request.Key.Ref != a.authority.Ref.Scope) {
+	if request.Key.Repo != a.authority.Repo || !blobCacheRepositoryAllowed(a, blob.KindDepcache) || (a.capability.Data.Use != capability.DataRemoteCache && request.Key.Ref != a.authority.Ref.Scope) {
 		return result, blob.ErrDigestNotReadable
 	}
 	type fallback struct {

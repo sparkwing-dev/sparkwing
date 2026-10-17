@@ -43,7 +43,7 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 		return filepath.Clean(dir), nil
 	}
 	lookPath := func(name string) (string, error) {
-		return cacheToolPath(name, lookup("PATH"), lookup("PATHEXT"), input.Entry.Directory)
+		return cacheToolPath(name, lookup("PATH"), lookup("PATHEXT"), sdkWorkingDirectory(input.Entry))
 	}
 	var command *exec.Cmd
 	if cache.Resolver == depcache.ResolverNpm {
@@ -56,7 +56,7 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 		}
 	}
 	if err == nil {
-		command.Env, command.Dir = env, input.Entry.Directory
+		command.Env, command.Dir = env, sdkWorkingDirectory(input.Entry)
 		var output bytes.Buffer
 		command.Stdout = &output
 		if err := gotoolchain.Run(ctx, command); err == nil {

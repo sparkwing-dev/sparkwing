@@ -55,11 +55,12 @@ type OwnerLayerResult struct {
 // Source supplies the shared acquisition path. Acquire may replace it with a
 // trusted adapter that uses RunInput's sealed request and persisted acceptance.
 type OwnerHost struct {
-	bindAdmission func(*OwnerHost, store.Actor)
-	retainRemote  bool
-	Snapshots     CapturedEnvironmentLoader
-	Store         OwnerStore
-	Lease         lease.Keeper
+	bindAdmission  func(*OwnerHost, store.Actor)
+	claimAdmission *LocalAdmission
+	retainRemote   bool
+	Snapshots      CapturedEnvironmentLoader
+	Store          OwnerStore
+	Lease          lease.Keeper
 	// Renew reports current compute through the authenticated unit renewal transaction.
 	Renew     func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
 	Computing func(string) bool
@@ -97,9 +98,9 @@ var (
 // Run requires an initial successful renewal before acquiring source or resuming work.
 // It joins every executor and renewal before returning, including error paths.
 func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunCompletion, err error) {
+	bound := *h
+	h = &bound
 	if h.bindAdmission != nil {
-		copy := *h
-		h = &copy
 		h.bindAdmission(h, input.Owner)
 	}
 	if h.Store == nil || h.Wait == nil || h.Mask == nil || h.Renew == nil {
@@ -129,7 +130,16 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 	}
 	var preparing atomic.Bool
+	var scheduling atomic.Bool
 	preparing.Store(true)
+	renew := h.Renew
+	h.Renew = func(ctx context.Context, actor store.Actor, computing bool) (store.LeaseBeat, error) {
+		beat, err := renew(ctx, actor, computing)
+		if scheduling.Load() {
+			beat.CancelRequested = false
+		}
+		return beat, err
+	}
 	ctx, stop := h.keepOwner(parent, input.Owner, func() bool {
 		return preparing.Load() || h.Computing != nil && h.Computing(input.RunID)
 	})
@@ -189,10 +199,12 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 	}
 	preparing.Store(false)
+	schedule := func(ctx context.Context) (RunCompletion, error) {
+		scheduling.Store(true)
+		return h.schedule(ctx, input, accepted, entry)
+	}
 	if h.Around != nil {
-		completion, err := h.Around(ctx, accepted, func(ctx context.Context) (RunCompletion, error) {
-			return h.schedule(ctx, input, accepted, entry)
-		})
+		completion, err := h.Around(ctx, accepted, schedule)
 		var refused *AdmissionFailure
 		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
 			policy := admissionPolicy(refused, input.Owner.Owner.Generation)
@@ -211,7 +223,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 		return completion, err
 	}
-	return h.schedule(ctx, input, accepted, entry)
+	return schedule(ctx)
 }
 
 func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRow) (*source.Entry, error) {

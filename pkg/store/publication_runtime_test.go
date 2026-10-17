@@ -200,7 +200,7 @@ func TestPublicationCommitsResultsAndCompletionOnce(t *testing.T) {
 	rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
 	rewriteSchemaCount(t, tenant.s.db, "node_attempts", 0)
 	rewriteSchemaCount(t, tenant.s.db, "run_effects", 4)
-	rewriteSchemaCount(t, tenant.s.db, "pipeline_success_pins", 1)
+	rewriteSchemaCount(t, tenant.s.db, "pipeline_success_pins", 0)
 }
 
 func TestPublicationCompletionChecksPersistedVerdict(t *testing.T) {

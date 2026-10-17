@@ -162,6 +162,15 @@ func (s *EngineController) runResultTarget(r *http.Request) (capability.RequestE
 	}
 	digest := sha256.Sum256(data)
 	evidence.ResultDigest = hex.EncodeToString(digest[:])
+	if evidence.Target.NodeID != "" {
+		var transition struct {
+			SourceAttempt *int64 `json:"source_attempt"`
+		}
+		if err := json.Unmarshal(data, &transition); err != nil {
+			return evidence, invalidEngineBody("invalid transition body")
+		}
+		evidence.ResultAttempt = transition.SourceAttempt
+	}
 	return evidence, nil
 }
 

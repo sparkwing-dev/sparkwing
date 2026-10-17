@@ -133,8 +133,14 @@ func dispatchRunWithEngine(args []string, selectEngine func(string, func()) erro
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
-	if err := orchestrator.RefusePinnedLocalRun(entry); err != nil {
-		return fmt.Errorf("run: %w", err)
+	route, err := loadRunRouting(dir, pipelineName)
+	if err != nil {
+		return err
+	}
+	if route.Route == nil || *route.Route == "local" {
+		if err := orchestrator.RefusePinnedLocalRun(entry); err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
 	}
 
 	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
@@ -142,7 +148,7 @@ func dispatchRunWithEngine(args []string, selectEngine func(string, func()) erro
 		return err
 	}
 
-	return runLocalInvocation(pipelineName, flags, passthrough)
+	return runConfiguredInvocation(pipelineName, flags, passthrough)
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {
@@ -290,6 +296,8 @@ func dispatchCommand(args []string) error {
 		return runTokens(args[1:])
 	case "pools":
 		return runPools(context.Background(), args[1:])
+	case "overflow":
+		return runOverflow(context.Background(), args[1:])
 	case "profiles":
 		return runProfiles(args[1:])
 	case "operator":

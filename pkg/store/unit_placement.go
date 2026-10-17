@@ -31,6 +31,19 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 	}
 	policy, _ := ClaimPlacementFromContext(ctx)
 	preferences := policy.preferencesFor(demand.Prefers)
+	burst, err := burstPlacementTx(ctx, tx, team, unit.RunID)
+	if err != nil {
+		return decision, err
+	}
+	if burst != nil {
+		preferences, err = burstPreferencesTx(ctx, tx, team, unit.RunID, *burst)
+		if err != nil {
+			return decision, err
+		}
+		if policy.Liveness <= 0 {
+			policy.Liveness = time.Minute
+		}
+	}
 	if len(preferences) == 0 || len(preferences[0].Prefers) == 0 {
 		return decision, nil
 	}
@@ -89,7 +102,7 @@ func placementRunnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef
 		return match.Profile{}, match.Demand{}, err
 	}
 	c := chain[0].principal.Capability
-	if c.Team != string(team) || !registeredClaimant(c) {
+	if c.Team != string(team) || (!registeredClaimant(c) && c.Binding.RunID != unit.RunID) {
 		return match.Profile{}, match.Demand{}, bindingRefusal()
 	}
 	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil {

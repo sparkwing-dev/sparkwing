@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // ClaimController claims through the shared queue and must honor context cancellation.
@@ -42,7 +44,7 @@ type Loop struct {
 	Controller      ClaimController
 	Host            UnitHost
 	CheckVersion    func(context.Context, string) error
-	RequestCapacity func() (cores float64, memoryBytes int64)
+	RequestCapacity func(context.Context) (capacity, available match.Resources, err error)
 	OnError         func(error)
 	mu              sync.Mutex
 	drain           chan struct{}
@@ -210,9 +212,12 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 			done := make(chan claimOutcome, 1)
 			pending = done
-			request := l.request()
 			go func() {
-				response, err := l.Controller.Claim(claims, request)
+				request, err := l.request(claims)
+				var response controllerwire.ClaimResponse
+				if err == nil {
+					response, err = l.Controller.Claim(claims, request)
+				}
 				done <- claimOutcome{response: response, err: err}
 			}()
 		}
@@ -296,16 +301,21 @@ func policyInterrupted(ctx context.Context, err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-func (l *Loop) request() controllerwire.ClaimRequest {
+func (l *Loop) request(ctx context.Context) (controllerwire.ClaimRequest, error) {
 	req := controllerwire.ClaimRequest{
-		RunnerVersion: l.Config.Version,
-		Kinds:         slices.Clone(l.Config.Kinds),
-		Labels:        slices.Clone(l.Config.Labels), RunID: l.Config.RunID,
+		RunnerVersion: l.Config.Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
+		Kinds:  slices.Clone(l.Config.Kinds),
+		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID,
 	}
 	if l.RequestCapacity != nil {
-		req.AvailableCores, req.AvailableMemoryBytes = l.RequestCapacity()
+		capacity, available, err := l.RequestCapacity(ctx)
+		if err != nil {
+			return req, err
+		}
+		req.Capacity = &capacity
+		req.AvailableCores, req.AvailableMemoryBytes = available.Cores, available.MemoryBytes
 	}
-	return req
+	return req, nil
 }
 
 func validateUnit(unit controllerwire.ClaimedUnit) error {

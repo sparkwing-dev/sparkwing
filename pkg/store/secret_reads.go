@@ -40,7 +40,22 @@ func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secr
 			}
 			pipeline = selected
 		}
-		out, _, err = selectedSecretTx(ctx, tx, t.team, a.Target.SecretName, pipeline, claim)
+		if claim {
+			var selected RunRow
+			selected, err = readRunTx(ctx, tx, t.team, run)
+			if err != nil {
+				return err
+			}
+			if slices.Contains(selected.Request.Request.LocalSecretNames, a.Target.SecretName) {
+				var value string
+				value, err = tx.store.localSecret(t.team, run, a.Target.SecretName)
+				out = &Secret{Name: a.Target.SecretName, Value: value, Masked: true, Ephemeral: true, Pipeline: pipeline, Principal: selected.Request.Request.Actor.ID}
+			} else {
+				out, _, err = selectedSecretTx(ctx, tx, t.team, a.Target.SecretName, pipeline, claim)
+			}
+		} else {
+			out, _, err = selectedSecretTx(ctx, tx, t.team, a.Target.SecretName, pipeline, claim)
+		}
 		if err != nil {
 			return err
 		}
@@ -87,6 +102,9 @@ func (t *Tenant) authorizeSecretReadTx(ctx context.Context, tx *storeTx, a capab
 			continue
 		}
 		if rule.Binding == capability.BindDeclaredSecret {
+			if err := checkBurstClaimantTx(ctx, tx, t.team, chain, UnitRef{Kind: p.Capability.Unit, RunID: p.Capability.Binding.RunID, NodeID: p.Capability.Binding.NodeID}); err != nil {
+				return capability.Principal{}, err
+			}
 			if err := t.secretClaimFenceTx(ctx, tx, p.Capability); err != nil {
 				return capability.Principal{}, err
 			}

@@ -167,7 +167,7 @@ func TestDirectSource(t *testing.T) {
 				}
 				want := []string{"authorize", "ensure", "install"}
 				if bundled {
-					want = []string{"authorize", "sign-bundle", "download-bundle", "ensure", "install"}
+					want = []string{"sign-bundle", "download-bundle", "authorize", "ensure", "install"}
 				}
 				if !reflect.DeepEqual(adapters.trace, want) {
 					t.Fatalf("source trace = %v, want %v", adapters.trace, want)

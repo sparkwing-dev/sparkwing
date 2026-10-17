@@ -49,7 +49,7 @@ func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.Aut
 		if c.Unit != capability.UnitTrigger {
 			continue
 		}
-		allowed, err := ownerExecutionEligibleTx(ctx, tx, p, node.Ref)
+		allowed, err := ownerExecutionEligibleTx(ctx, tx, p, node.Ref, nil)
 		if err != nil {
 			return RunSnapshot{}, err
 		}
