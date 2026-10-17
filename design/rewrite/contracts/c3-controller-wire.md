@@ -1131,3 +1131,19 @@ ReadSet, uploader or verified App facts. Signed downloads independently
 recompute the live data entitlement in the controller transaction. This
 implements ordinary execution dependency-cache reads. The separate cross-profile
 memo/provenance contract and its refusal stubs are unchanged.
+
+## Native burst handoff and local fallback
+
+The one-time `PurposeHere` credential reserves the named run and authorizes
+its first claim. The claim response is a `PurposeTrigger` execution award,
+with its own positive generation, holder and lease. Here hosting validates that
+award and the sealed RunnerHere selection. It never executes the reservation.
+The native fixture grants its observing member `logs.read` and enables account
+sessions with a signed multi-team license. Plain-HTTP fixtures select insecure
+cookies. Production enrollment still presents an independent account session
+and its CSRF proof. Pipeline arguments in the native interrupt probe follow `--`.
+
+Attached local execution starts the shared log follower beside the host and
+joins both. This also applies after a pre-intake Cloud connection failure.
+Detached submission keeps its existing receipt path. No wire field or route
+changes.

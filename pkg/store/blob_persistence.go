@@ -317,3 +317,7 @@ func commitBlobBytesTx(ctx context.Context, tx *storeTx, team Team, object blob.
 	}
 	return objects, nil
 }
+
+func blobCacheRepositoryAllowed(a blobActor, kind blob.Kind) bool {
+	return !blobLocalRepo(a.authority.Repo) || kind == blob.KindDepcache && a.capability.Subject.Kind == capability.SubjectLocal && a.capability.Data.Use == capability.DataClaim
+}

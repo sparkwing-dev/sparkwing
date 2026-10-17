@@ -80,7 +80,7 @@ func TestBurstPublicRunFallsBackLocallyWithRequesterSecrets(t *testing.T) {
 	command := exec.CommandContext(ctx, cli, "run", "burst", "--sw-run-handle-file", handlePath, "-o=json")
 	command.Dir = repo
 	output, err := command.CombinedOutput()
-	if err != nil || !strings.Contains(string(output), "Cloud controller is unreachable; running locally.") || !strings.Contains(string(output), "burst-edited-ok secret=*** encoded=***") || !strings.Contains(string(output), "burst-cache-restored") || !strings.Contains(string(output), "burst-artifact-restored") || bytes.Contains(output, []byte(burstIntakeSecret)) {
+	if err != nil || !strings.Contains(string(output), "Cloud controller is unreachable; running locally.") || !strings.Contains(string(output), "burst-edited-ok secret=*** encoded=***") || !strings.Contains(string(output), "burst-cache-restored") || !strings.Contains(string(output), "burst-artifact-restored") || bytes.Contains(output, []byte(burstIntakeSecret)) || bytes.Contains(output, []byte("cache restore failed")) || bytes.Contains(output, []byte("cache save failed")) {
 		t.Fatalf("native local fallback: %v\n%s", err, output)
 	}
 	var handle orchestrator.RunHandle
@@ -197,7 +197,7 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	args := []string{"run", "burst", "--sw-run-handle-file", handleFile, "-o=json"}
 	var output []byte
 	if interrupt {
-		args = append(args, "--block")
+		args = append(args, "--", "--block")
 		command := exec.CommandContext(ctx, cli, args...)
 		command.Dir = repo
 		ready := make(chan struct{})
@@ -345,10 +345,12 @@ func burstPublicPersonalRunner(t *testing.T, ctx context.Context, cli, repo stri
 	finished := make(chan error, 1)
 	go func() { finished <- runner.Wait() }()
 	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		_ = runner.Process.Signal(os.Interrupt)
 		select {
 		case <-finished:
-		case <-time.After(10 * time.Second):
+		case <-cleanup.Done():
 			_ = runner.Process.Kill()
 			<-finished
 			t.Error("registered runner did not drain after interrupt")

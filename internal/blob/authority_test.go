@@ -220,3 +220,27 @@ func TestLogSubjectIdentity(t *testing.T) {
 		}
 	}
 }
+
+func FuzzDepcacheNamespaceKeepsAbsentRefDistinct(f *testing.F) {
+	f.Add("main")
+	f.Add("manual:")
+	f.Add("../manual:%2F")
+	f.Fuzz(func(t *testing.T, name string) {
+		key := blob.DepcacheKey{Repo: "local:checkout", Name: "modules", Key: "key"}
+		absent, err := blob.DepcacheNamespace(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		key.Ref.Verified = true
+		if _, err := blob.DepcacheNamespace(key); err == nil {
+			t.Fatal("empty verified ref accepted")
+		}
+		for _, verified := range []bool{true, false} {
+			key.Ref = blob.RefScope{Ref: name, Verified: verified}
+			named, err := blob.DepcacheNamespace(key)
+			if err == nil && (name != "" || verified) && named == absent {
+				t.Fatal("named ref collided with absent ref")
+			}
+		}
+	})
+}

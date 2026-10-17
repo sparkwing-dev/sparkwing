@@ -91,3 +91,16 @@ func FuzzDataClientDepcacheRejectsChangedScope(f *testing.F) {
 		}
 	})
 }
+
+func TestDataClientReadsLocalDepcacheWithoutGitRef(t *testing.T) {
+	authority := depcacheAuthority()
+	authority.Ref = blob.RefFacts{}
+	authority.Repo = "local:checkout"
+	_, records := testDataClient(t, func(*http.Request) (*http.Response, error) {
+		return dataResponse(t, map[string]any{"found": true, "source": blob.RestoreOwnRef, "record": map[string]any{"pipeline": "", "job": "", "provenance": "", "created_at": time.Time{}, "kind": "depcache", "repo": "local:checkout", "ref": "manual:", "name": "modules", "key": "dep-key", "digest": strings.Repeat("a", 64)}}), nil
+	})
+	hit, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: authority, Key: blob.DepcacheKey{Repo: authority.Repo, Name: "modules", Key: "dep-key"}})
+	if err != nil || !hit.Found || hit.Record.Key.Scope.Ref != (blob.RefScope{}) {
+		t.Fatalf("cache without Git ref: %+v %v", hit, err)
+	}
+}

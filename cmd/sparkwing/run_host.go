@@ -35,6 +35,7 @@ type localRunRuntime struct {
 	bind             func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error)
 	close            func() error
 	remoteCache      blob.RemoteCache
+	follow           func(context.Context, string, string, io.Writer) error
 }
 
 type localRunDependencies struct {
@@ -68,7 +69,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if runtime.close != nil {
 		defer func() { resultErr = errors.Join(resultErr, runtime.close()) }()
 	}
-	if runtime.controller == nil || runtime.prepare == nil || runtime.close == nil || (!flags.detached && runtime.bind == nil) {
+	if runtime.controller == nil || runtime.prepare == nil || runtime.close == nil || (!flags.detached && (runtime.bind == nil || runtime.follow == nil)) {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "local run integration has incomplete intake or host bindings"}
 	}
 	prepared, err := runtime.prepare(ctx, pipeline, flags)
@@ -138,7 +139,12 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if flags.detached {
 		return errors.Join(emitLocalRunReceipt(out, response, request.Request.Options.Output.Value), ctx.Err())
 	}
-	completion, err := hostLocalRun(ctx, runtime, response.RunID, response.Request.Hash, deps.version)
+	host := func(ctx context.Context) (nodehost.RunCompletion, error) {
+		return hostLocalRun(ctx, runtime, response.RunID, response.Request.Hash, deps.version)
+	}
+	completion, err := observeHereRun(ctx, response.RunID, hereObservation{host: host, follow: func(ctx context.Context) error {
+		return runtime.follow(ctx, response.RunID, request.Request.Options.Output.Value, out)
+	}}, nil)
 	if err != nil {
 		return fmt.Errorf("run %s is admitted: %w", response.RunID, err)
 	}

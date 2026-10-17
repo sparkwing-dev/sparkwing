@@ -269,7 +269,7 @@ func (c *dataClient) LookupDepcache(ctx context.Context, input blob.DepcacheLook
 	}
 	expected := blob.RecordKey{Team: team, Kind: blob.KindDepcache, Name: key.Name, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Key: key.Key}}
 	digest, digestErr := hex.DecodeString(string(record.Digest))
-	if ref.Ref == "" || record.Key != expected || digestErr != nil || len(digest) != 32 || string(record.Digest) != strings.ToLower(string(record.Digest)) {
+	if ref.Ref == "" && ref.Verified || record.Key != expected || digestErr != nil || len(digest) != 32 || string(record.Digest) != strings.ToLower(string(record.Digest)) {
 		return blob.DepcacheHit{}, dataProtocolError("cache lookup changed selected key or digest")
 	}
 	return blob.DepcacheHit{Found: true, Record: record, Source: result.Source}, nil

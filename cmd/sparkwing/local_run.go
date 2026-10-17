@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -64,6 +65,9 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 	}
 	return localRunRuntime{
 		controller: controller,
+		follow: func(ctx context.Context, run, format string, out io.Writer) error {
+			return followControllerRunLogs(ctx, transport, run, format, out)
+		},
 		ensureController: func(ctx context.Context) error {
 			_, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
 				return resolveLocalServicesAt(ctx, home)

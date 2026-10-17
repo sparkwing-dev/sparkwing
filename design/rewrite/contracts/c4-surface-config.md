@@ -1068,3 +1068,11 @@ variable, public flag or new limit is introduced.
 The public personal-runner probe now uses a separate HOME, runtime home, cache
 and local controller from its requester. It still uses one development binary
 and a local SDK replacement, so it does not verify signed release distribution.
+
+## Attached local output
+
+The local run binding requires a log follower whenever hosting is attached.
+It uses the public controller log reader and selected output mode while the
+CLI hosts execution. Host and follower are joined before return. This preserves
+masked terminal output during offline Cloud fallback. No new flag or output
+format is added.

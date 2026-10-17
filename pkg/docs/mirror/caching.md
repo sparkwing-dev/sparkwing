@@ -77,8 +77,9 @@ path, missing input or read failure returns an error.
 
 ### Storage
 
-Local runs keep archives under `$SPARKWING_HOME/depcache/`. Hosts with a signed
-data binding restore through it and refresh the binding after execution, so
+Local runs keep dependency-cache records and archives in the local controller,
+scoped to the checkout. A remote repository and Git branch are optional. Hosts
+restore through their signed data binding and refresh it after execution, so
 retries save under the final attempt. A refused binding runs cold or skips saving.
 Downloads verify length and SHA-256 and close before extraction publishes files.
 

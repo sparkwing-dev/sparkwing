@@ -3528,3 +3528,17 @@ owner, claim fences, repository, selectors and placement. Private snapshot
 eligibility and ordinary claims see only free resources. The reservation never
 updates the stored observation, so concurrent heartbeats cannot erase it or
 advertise it to another job. Existing callers omit the field.
+
+## Local dependency-cache scope
+
+A live `SubjectLocal` execution with `DataClaim` authority may save and restore
+dependency caches under its sealed `local:` repository key in the local
+controller. Foreign repositories, account/machine subjects, publication and
+cross-profile cache authority cannot use that local namespace. Shared memo
+restrictions remain. Existing attempt, receipt, ref and read-edge checks apply.
+
+An absent unverified Git ref has the distinct namespace component `manual:`.
+Named refs escape their colons, so a literal `manual:` ref cannot alias it.
+An empty verified ref is invalid. The dependency-cache client preserves the
+absent unverified ref on lookup instead of rejecting a valid local hit.
+No table, credential grant or public API changes.

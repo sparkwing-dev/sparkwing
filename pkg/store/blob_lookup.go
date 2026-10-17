@@ -272,7 +272,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 	if err != nil {
 		return result, err
 	}
-	if request.Key.Repo != a.authority.Repo || blobLocalRepo(request.Key.Repo) || (a.capability.Data.Use != capability.DataRemoteCache && request.Key.Ref != a.authority.Ref.Scope) {
+	if request.Key.Repo != a.authority.Repo || !blobCacheRepositoryAllowed(a, blob.KindDepcache) || (a.capability.Data.Use != capability.DataRemoteCache && request.Key.Ref != a.authority.Ref.Scope) {
 		return result, blob.ErrDigestNotReadable
 	}
 	type fallback struct {

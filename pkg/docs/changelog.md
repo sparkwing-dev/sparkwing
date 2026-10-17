@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **run:** Stream attached local logs through the controller, including offline
+  Cloud fallback. Save and restore local dependency caches without requiring a
+  remote repository or a Git branch. Accept the execution award returned by a
+  here claim.
+
 - **run:** Keep burst jobs available to other ranked claimants while the
   requesting machine waits for compute capacity. Reserve local compute before
   claiming, and join the wait when another claimant advances the job.

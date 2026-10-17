@@ -197,7 +197,7 @@ func hereRunInput(run string, award controllerwire.ClaimedUnit) (nodehost.RunInp
 	if !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
 		return nodehost.RunInput{}, localRunProtocolError("controller returned a different here runner selection")
 	}
-	return ownerRunInput(run, award, capability.PurposeHere)
+	return ownerRunInput(run, award, capability.PurposeTrigger)
 }
 
 func runHereResumeCommand(ctx context.Context, flags triggerFlags, out io.Writer,

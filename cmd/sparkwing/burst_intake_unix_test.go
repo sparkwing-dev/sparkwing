@@ -22,6 +22,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -223,6 +225,9 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 	if err != nil || claimed.Claim == nil {
 		t.Fatalf("here owner claim: %+v %v", claimed, err)
 	}
+	if _, err := hereRunInput(created.RunID, *claimed.Claim); err != nil {
+		t.Fatalf("public here award cannot be hosted: purpose=%s delivery=%s binding=%+v error=%v", claimed.Claim.Purpose, claimed.Claim.Delivery, claimed.Claim.Binding, err)
+	}
 	options.Bearer = func(context.Context) (string, error) { return claimed.Claim.Capability, nil }
 	spec, err := source.ForRequest(created.Request)
 	if err != nil {
@@ -296,7 +301,10 @@ func burstIntakeController(t *testing.T, endpoint string) (*store.Store, *contro
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := controller.New(state, nil).WithSecretsCipher(cipher)
+	pub, priv := licensetest.NewKey(t)
+	now := time.Now()
+	terms := licensetest.Terms{Features: []string{license.FeatureMultiTeam}, IssuedTo: "burst test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
+	server := controller.New(state, nil).WithSecretsCipher(cipher).WithDashboard(controller.Dashboard{InsecureCookies: strings.HasPrefix(endpoint, "http://")}).WithLicense(license.Resolve(licensetest.Sign(t, priv, terms), pub, now, nil))
 	for _, query := range []string{
 		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('burst-user','burst@example.test',1,1)`,
 		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','burst-user','editor',1)`,
@@ -311,7 +319,7 @@ func burstIntakeController(t *testing.T, endpoint string) (*store.Store, *contro
 	}
 	digest := sha256.Sum256([]byte(session))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-user"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	issued, err := state.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "default", Authority: &authority, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-user"}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.LogsRead}, Binding: capability.Binding{Kind: capability.BindingNone}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,3 +391,23 @@ func main() {
     sw.Main()
 }
 `
+
+func TestBurstFixtureSupportsPublicSessionEnrollment(t *testing.T) {
+	state, server, _ := burstIntakeController(t, "http://controller.test")
+	session, _, _, err := state.CreateAccountSession(t.Context(), store.Account{ID: "burst-user"}, "default", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := server.Handler()
+	manager, err := client.NewSessionRunnerTokenManager(t.Context(), client.EngineOptions{URL: "http://controller.test", HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w.Result(), nil
+	})}}, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.EnrollRunner(t.Context(), client.EnrollRunnerRequest{Name: "desktop", Repos: []string{"example.test/acme/*"}, Personal: true}); err != nil {
+		t.Fatal(err)
+	}
+}

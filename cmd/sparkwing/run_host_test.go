@@ -65,6 +65,7 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 	return localRunDependencies{version: "v1.2.3", resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
 		*observed = append(*observed, "resolve")
 		return localRunRuntime{
+			follow: func(context.Context, string, string, io.Writer) error { return nil },
 			prepare: func(_ context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
 				*observed = append(*observed, "prepare")
 				if pipeline != "ci" {
@@ -664,5 +665,32 @@ func TestLocalRemoteCacheRequiresTheSealedOptIn(t *testing.T) {
 		if !errors.As(err, &unavailable) || unavailable.Code != apierr.Unavailable || !reflect.DeepEqual(calls, []string{"resolve", "prepare", "close"}) {
 			t.Fatalf("unbound storage reached intake: calls=%v error=%v", calls, err)
 		}
+	}
+}
+
+func TestLocalAttachedRunStreamsCommittedLogs(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	resolve := deps.resolve
+	followed := false
+	deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, options)
+		runtime.follow = func(_ context.Context, run, format string, out io.Writer) error {
+			followed = true
+			if run != "local-run" || format != "json" {
+				return errors.New("log attachment lost run or output selection")
+			}
+			_, err := fmt.Fprintln(out, `{"message":"masked output ***"}`)
+			return err
+		}
+		return runtime, err
+	}
+	var out bytes.Buffer
+	flags, args := parseRunFlags([]string{"-o=json", "--", "--password", "private-value"})
+	if err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps); err != nil {
+		t.Fatal(err)
+	}
+	if !followed || !strings.Contains(out.String(), "masked output ***") {
+		t.Fatalf("attached run lost logs: %s", &out)
 	}
 }
