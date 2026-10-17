@@ -28,10 +28,14 @@ type boundaryFake struct {
 	releases     int
 	retirements  int
 	err          error
+	reserveErr   error
 }
 
 func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string) (CloudNodeReservation, CloudNetworkEvidence, error) {
 	b.reservations++
+	if b.reserveErr != nil {
+		return CloudNodeReservation{}, CloudNetworkEvidence{}, b.reserveErr
+	}
 	return CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation", Award: a.LeaseRef()}, CloudNetworkEvidence{Namespace: "cloud", NodeUID: "uid", PolicyRevision: "revision", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
 }
 

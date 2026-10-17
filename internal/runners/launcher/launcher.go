@@ -142,6 +142,9 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 		}
 	}()
 	r, err := BuildJob(ctx, time.Now(), l.Config, *award, l.Boundary)
+	if errors.Is(err, ErrNoDedicatedNode) {
+		return true, errors.Join(err, l.requestCapacity(ctx, *award))
+	}
 	if err != nil {
 		return true, err
 	}

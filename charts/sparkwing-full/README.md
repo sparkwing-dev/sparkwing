@@ -161,9 +161,13 @@ The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the followin
   Reservation checks the node's owning NodeClaim, its node name/provider identity,
   and its NodePool UID and template label. A protected first-use label permanently
   binds the node to one team. Clearing a reservation retains that label.
-  A rejected Pod cordons the node and deletes its exact NodeClaim. The launcher reserves existing Ready nodes
-  and does not create NodePools or request nodes from Karpenter. An empty pool
-  that scales only in response to pending Pods must be provisioned externally.
+  A rejected Pod cordons the node and deletes its exact NodeClaim. With no vacant
+  Ready team node, the launcher creates an unbound `sw-capacity-*` Pod sized to
+  the award, with the team node selector and the job tolerations and no
+  credentials, so Karpenter adds a node from the team's pool. Sync deletes it
+  once that node is Ready and the job's next award reserves the node, about one
+  award lease (3 minutes) later. Keep `consolidateAfter` for empty nodes above
+  that window, and cap cost with the NodePool `limits`.
 - Nodes need the awarded CPU/memory plus system overhead and at least 20 GiB of
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.
 - The cluster must support native sidecars and `PodLevelResources`.

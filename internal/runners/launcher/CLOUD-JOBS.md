@@ -340,6 +340,19 @@ accounting commits and the original bootstrap lease ends, permitting cleanup and
 refusing exchange. Finished, cancelled or expired own awards do not prevent
 reconciliation of other live Jobs.
 
+## Capacity requests
+
+Job pods are pre-bound to a reserved node and never pend, so they cannot make
+Karpenter add one. When reservation finds no vacant Ready team node, LaunchOne
+creates `sw-capacity-<unit hash>`: an unbound Pod with the team node selector,
+the job tolerations, the award's CPU, memory and scratch requests, the runner
+image running `sparkwing-runner version`, and no volumes, environment or
+service account token. Its name omits generation and holder, so re-awards and
+other launcher replicas reuse it. Sync deletes it, UID-fenced, once its node is
+Ready or the award deadline passes. Until then it keeps that node non-vacant.
+[W8-SCALE-FROM-ZERO.md](../../../design/rewrite/W8-SCALE-FROM-ZERO.md) records
+the rationale and the open consolidation and latency decisions.
+
 ## Team identity and credential rotation
 
 `node-restriction.kubernetes.io/sparkwing-team-node` is the placement label and

@@ -99,7 +99,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			}
 		}
 	}
-	return errors.Join(append(errs, l.syncReservations(ctx))...)
+	return errors.Join(append(errs, l.syncReservations(ctx), l.syncCapacity(ctx))...)
 }
 
 func (l *Launcher) syncReservations(ctx context.Context) error {
