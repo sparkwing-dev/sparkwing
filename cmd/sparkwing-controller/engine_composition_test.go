@@ -41,8 +41,8 @@ func TestControllerCompositionAdmitsLauncherAndRunnerClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	launcherToken, err := operator.CreateToken(t.Context(), controllerwire.TokenCreate{Kind: "service", Principal: "launcher", Scopes: []capability.Grant{capability.ClaimsLaunch}})
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || launcherToken.Metadata.Principal != "launcher" {
+		t.Fatalf("service token %+v: %v", launcherToken.Metadata, err)
 	}
 	teams, err := client.NewOperatorManager(bearer(admin))
 	if err != nil {
