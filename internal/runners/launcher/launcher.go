@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -37,6 +38,7 @@ type CloudJobObservation struct {
 	NodeUID       string
 	ReservationID string
 	Rejected      bool
+	Unheld        bool
 }
 
 // CloudJobState carries the controller's teardown decision for one immutable award.
@@ -53,6 +55,9 @@ type Launcher struct {
 	Boundary CloudBoundary
 	Poll     time.Duration
 	Logger   *slog.Logger
+
+	mu      sync.Mutex
+	waiting map[string]*CloudJobAward
 }
 
 func (l *Launcher) validate() error {
@@ -78,16 +83,20 @@ func (l *Launcher) Run(ctx context.Context) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	var cooldown time.Time
 	for ctx.Err() == nil {
-		wait := poll
-		if err := l.Sync(ctx); err != nil {
+		if time.Now().Before(cooldown) {
+			if err := l.verifyLocal(ctx); err != nil {
+				logger.Warn("launcher verification failed", failureAttrs(err)...)
+			}
+		} else if err := l.Sync(ctx); err != nil {
 			logger.Warn("launcher reconciliation failed", failureAttrs(err)...)
-			wait = retryWait(err, poll)
+			cooldown = time.Now().Add(retryWait(err, 0))
 		} else if _, err := l.LaunchOne(ctx); err != nil {
 			logger.Warn("launcher claim failed", failureAttrs(err)...)
-			wait = retryWait(err, poll)
+			cooldown = time.Now().Add(retryWait(err, 0))
 		}
-		timer := time.NewTimer(wait)
+		timer := time.NewTimer(poll)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -125,10 +134,32 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.validate(); err != nil {
 		return false, err
 	}
+	if err := l.placeWaiting(ctx); err != nil {
+		return false, err
+	}
 	award, err := l.Control.Claim(ctx)
 	if err != nil || award == nil {
 		return false, err
 	}
+	return l.launch(ctx, award)
+}
+
+func (l *Launcher) placeWaiting(ctx context.Context) error {
+	var errs []error
+	for _, award := range l.waitingAwards() {
+		_, err := l.launch(ctx, award)
+		var failure *apierr.Error
+		if errors.Is(err, limits.ErrNoTime) || errors.As(err, &failure) && failure.Code == apierr.LockHeld {
+			errs = append(errs, l.releaseCapacity(ctx, award.Binding))
+		}
+		if err != nil && !errors.Is(err, ErrNoDedicatedNode) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched bool, err error) {
 	prepared, stop, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
 	if err != nil {
 		return true, err
@@ -143,10 +174,14 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	}()
 	r, err := BuildJob(ctx, time.Now(), l.Config, *award, l.Boundary)
 	if errors.Is(err, ErrNoDedicatedNode) {
+		l.wait(award)
 		return true, errors.Join(err, l.requestCapacity(ctx, *award))
 	}
 	if err != nil {
 		return true, err
+	}
+	if err := l.releaseCapacity(ctx, award.Binding); err != nil {
+		return true, errors.Join(err, l.Boundary.Release(ctx, r.Reservation))
 	}
 	// safety: a suspended Job persists teardown ownership before any Secret exists or code can execute.
 	r.Job.Spec.Suspend = ptr(true)

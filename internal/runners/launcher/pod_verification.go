@@ -106,32 +106,36 @@ func validateJobPod(job *batchv1.Job, pod *corev1.Pod) error {
 	if pod.Namespace != job.Namespace || owner == nil || owner.APIVersion != "batch/v1" || owner.Kind != "Job" || owner.Name != job.Name || owner.UID != job.UID {
 		return errors.New("Pod is not owned by the created Job")
 	}
+	return verifyAdmittedPod(job.Spec.Template, pod, func(key, value string) bool {
+		switch key {
+		case "batch.kubernetes.io/controller-uid", "controller-uid":
+			return value == string(job.UID)
+		case "batch.kubernetes.io/job-name", "job-name":
+			return value == job.Name
+		}
+		return false
+	})
+}
+
+// safety: every launcher-created Pod kind passes this one comparison, so the
+// admitted object differs from the request only by API defaults, the named EKS
+// injections, owner labels and a scheduler-chosen node.
+func verifyAdmittedPod(requested corev1.PodTemplateSpec, pod *corev1.Pod, ownerLabel func(key, value string) bool) error {
 	labels := pod.Labels
-	for key, value := range job.Spec.Template.Labels {
+	for key, value := range requested.Labels {
 		if labels[key] != value {
-			return errors.New("Pod lost its Job labels")
+			return errors.New("Pod lost its requested labels")
 		}
 	}
 	for key, value := range labels {
-		if job.Spec.Template.Labels[key] == value {
-			continue
+		if requested.Labels[key] != value && (ownerLabel == nil || !ownerLabel(key, value)) {
+			return errors.New("Pod has unexpected labels")
 		}
-		switch key {
-		case "batch.kubernetes.io/controller-uid", "controller-uid":
-			if value == string(job.UID) {
-				continue
-			}
-		case "batch.kubernetes.io/job-name", "job-name":
-			if value == job.Name {
-				continue
-			}
-		}
-		return errors.New("Pod has unexpected labels")
 	}
 	annotations := pod.Annotations
-	for key, value := range job.Spec.Template.Annotations {
+	for key, value := range requested.Annotations {
 		if annotations[key] != value {
-			return errors.New("Pod lost its Job annotations")
+			return errors.New("Pod lost its requested annotations")
 		}
 	}
 	for key, value := range annotations {
@@ -140,11 +144,14 @@ func validateJobPod(job *batchv1.Job, pod *corev1.Pod) error {
 				return err
 			}
 		}
-		if job.Spec.Template.Annotations[key] != value && key != "vpc.amazonaws.com/pod-eni" {
+		if requested.Annotations[key] != value && key != "vpc.amazonaws.com/pod-eni" {
 			return errors.New("Pod has unexpected annotations")
 		}
 	}
-	p, q := job.Spec.Template.Spec.DeepCopy(), pod.Spec.DeepCopy()
+	p, q := requested.Spec.DeepCopy(), pod.Spec.DeepCopy()
+	if p.NodeName == "" {
+		q.NodeName = ""
+	}
 	if err := removeEKSMutations(p, q); err != nil {
 		return err
 	}
