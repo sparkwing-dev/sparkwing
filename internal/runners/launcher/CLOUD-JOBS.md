@@ -66,7 +66,7 @@ still requires current award retirement and container vacancy before cleanup.
 RBAC grants Pod/Job creation only to the launcher. Operators must keep other
 bindings from granting those rights. Customer ServiceAccounts receive no API
 credential or role. Team nodes carry a team-specific NoSchedule taint, which
-only launcher Job Pods tolerate. Kubernetes administrators remain trusted.
+only launcher-created Pods tolerate: Job Pods and that team's capacity requests. Kubernetes administrators remain trusted.
 The launcher requires no Kubernetes admission policy API or webhook exclusions.
 
 `Launcher.LaunchOne` persists a suspended Job and checks the admitted response
@@ -343,15 +343,29 @@ reconciliation of other live Jobs.
 ## Capacity requests
 
 Job pods are pre-bound to a reserved node and never pend, so they cannot make
-Karpenter add one. When reservation finds no vacant Ready team node, LaunchOne
-creates `sw-capacity-<unit hash>`: an unbound Pod with the team node selector,
-the job tolerations, the award's CPU, memory and scratch requests, the runner
-image running `sparkwing-runner version`, and no volumes, environment or
-service account token. Its name omits generation and holder, so re-awards and
-other launcher replicas reuse it. Sync deletes it, UID-fenced, once its node is
-Ready or the award deadline passes. Until then it keeps that node non-vacant.
+Karpenter add one. When reservation finds no vacant Ready team node, the
+launcher keeps the award and creates `sw-capacity-<unit hash>`: an unbound Pod
+with the team node selector, the job tolerations, the award's CPU, memory and
+scratch requests, the runner image running `sparkwing-runner version`, and no
+volumes, environment or service account token. The Pod records its unit fence
+and size in `sparkwing.dev/capacity-demand`, never the bootstrap credential.
+
+- Every admitted request, on create, on adoption by a re-award and on every
+  pass, is recomputed from that record and held to the same comparison as Job
+  Pods. A mismatch deletes it, UID-fenced, and the held award requests again.
+- Each launcher pass retries held awards. Reservation may consume the team's
+  own requests on a node: it persists the reservation first, then deletes them
+  and waits for their removal before the Job is created, so the node is never
+  empty in between.
+- Sync observes each request through its recorded award. Awards this launcher
+  holds are renewed by that observation; others are only checked. A request
+  is deleted when the controller ends its award or the award deadline passes.
+
+Team NodePools need `disruption: {consolidationPolicy: WhenEmpty,
+consolidateAfter: 10m}` or longer, above the award lease, so a node emptied by
+a launcher restart survives until its unit is re-awarded.
 [W8-SCALE-FROM-ZERO.md](../../../design/rewrite/W8-SCALE-FROM-ZERO.md) records
-the rationale and the open consolidation and latency decisions.
+the rationale.
 
 ## Team identity and credential rotation
 

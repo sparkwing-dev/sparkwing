@@ -45,9 +45,10 @@ Jobs exchange a one-use bootstrap Secret for an in-memory awarded capability.
 
 The [Cloud chart](../charts/sparkwing-full/README.md) documents its values and
 node/network prerequisites. Team-node labels use the hash of the team slug.
-When a team has no vacant Ready node, the launcher creates an unbound,
-award-sized capacity-request Pod that only the team's NodePool can satisfy, so
-Karpenter adds a node; the next award for that job reserves it. Self-hosted runner pools use `runner.repos`,
+When a team has no vacant Ready node, the launcher holds the award and creates
+an unbound, award-sized capacity-request Pod that only the team's NodePool can
+satisfy, so Karpenter adds a node that the held award then reserves. Team
+NodePools need `consolidateAfter` above the 3-minute award lease. Self-hosted runner pools use `runner.repos`,
 `runner.alsoClaimTriggers` and pool scheduling values. They claim through HTTP
 and need no Kubernetes API token.
 
