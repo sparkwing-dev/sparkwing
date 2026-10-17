@@ -115,6 +115,47 @@ func TestReviewConsoleCredentialCommits(t *testing.T) {
 	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/operator/tokens", `{"name":"other","grants":["operator.tokens"]}`, 403)
 }
 
+func TestConsoleInventoryRevalidatesSessionProperty(t *testing.T) {
+	s, raw, csrf := reviewAccount(t, "reader")
+	s.WithOperatorAccounts([]string{"member"})
+	w := reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/operator/tokens", `{"name":"inventory","grants":["operator.tokens"]}`, 201)
+	var issued credentialResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &issued); err != nil {
+		t.Fatal(err)
+	}
+	route, ok := capability.LookupRoute("GET", "/api/v1/operator/tokens/{token}")
+	if !ok {
+		t.Fatal("missing inventory policy")
+	}
+	auth, err := s.authorization.Authenticator.Authenticate(t.Context(), capability.Presentation{Class: capability.CredentialSession, Raw: raw}, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, err := capability.Authorize(t.Context(), s.authorization.Bindings, route, auth, capability.Target{TokenPrefix: issued.Prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	property := func(configured, derived, foreign bool) bool {
+		s.WithOperatorAccounts(nil)
+		if configured {
+			s.WithOperatorAccounts([]string{"member"})
+		}
+		engineSQL(t, s.store, `UPDATE sessions SET capability_prefix='' WHERE hash=?`, auth.Principal.Authority.ID)
+		if derived {
+			engineSQL(t, s.store, `UPDATE sessions SET capability_prefix=? WHERE hash=?`, issued.Prefix, auth.Principal.Authority.ID)
+		}
+		a := authorized
+		if foreign {
+			a.Principal.Authority.ID = "foreign"
+		}
+		metadata, err := s.store.AsOperator().ReadCapability(t.Context(), a)
+		return (err == nil && metadata.Prefix == issued.Prefix) == (configured && !derived && !foreign)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReviewMembersRevokeOwnTokens(t *testing.T) {
 	for _, role := range []string{"reader", "editor"} {
 		t.Run(role, func(t *testing.T) {

@@ -44,18 +44,25 @@ func (s *EngineController) handleJobs(w http.ResponseWriter, r *http.Request, a 
 }
 
 func (s *EngineController) handleJob(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	if s.Store == nil {
-		return missingEndpointPolicy()
+	read := s.ReadRunStatus
+	if read == nil {
+		if s.Store == nil {
+			return missingEndpointPolicy()
+		}
+		read = func(ctx context.Context, team store.Team, run string) (RunStatusFacts, error) {
+			tenant, err := s.Store.ForTeam(ctx, team)
+			if err != nil {
+				return RunStatusFacts{}, err
+			}
+			view, err := tenant.ReadRunView(ctx, run)
+			return RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts}, err
+		}
 	}
-	tenant, err := s.Store.ForTeam(r.Context(), store.Team(a.Target.Team))
-	if err != nil {
-		return err
-	}
-	view, err := tenant.ReadRunView(r.Context(), a.Target.RunID)
+	facts, err := read(r.Context(), store.Team(a.Target.Team), a.Target.RunID)
 	if err != nil {
 		return engineLookupError(err)
 	}
-	result, err := debugJobResponse(a.Target, view)
+	result, err := debugJobResponse(a.Target, store.RunView{Snapshot: facts.Snapshot, Attempts: facts.Attempts})
 	if err != nil {
 		return err
 	}
@@ -71,7 +78,7 @@ func debugJobResponse(target capability.Target, view store.RunView) (controllerw
 	var selected *store.NodeRow
 	for i := range view.Snapshot.Nodes {
 		row := &view.Snapshot.Nodes[i]
-		if row.Ref.RunID != run.ID {
+		if row.Ref.RunID != run.ID || row.Ref.NodeID == "" {
 			return controllerwire.DebugJob{}, errors.New("invalid persisted debug job")
 		}
 		if row.Ref.NodeID == target.NodeID {

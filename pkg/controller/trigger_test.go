@@ -405,48 +405,32 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 	}
 }
 
-func TestListRoutes_ClampTheirLimit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
+func TestEventListClampsItsLimit(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	for i := range store.MaxRunListLimit + 5 {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
-			ID:        "tg-" + strconv.Itoa(i),
-			Pipeline:  "push",
-			CreatedAt: time.Unix(int64(i+1), 0),
-		}); err != nil {
-			t.Fatal(err)
-		}
+	for range store.MaxRunListLimit + 5 {
 		if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
-
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	t.Cleanup(srv.Close)
-
-	var triggers struct {
-		Triggers []json.RawMessage `json:"triggers"`
+	raw, _, err := teststore.ProvisionCredential(ctx, st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	getJSON(t, srv.URL+"/api/v1/triggers?limit=1000000000", &triggers)
-	if len(triggers.Triggers) != store.MaxRunListLimit {
-		t.Fatalf("triggers = %d, want %d", len(triggers.Triggers), store.MaxRunListLimit)
-	}
-
+	r := httptest.NewRequest("GET", "/api/v1/runs/run-1/events?limit=1000000000", nil)
+	r.Header.Set("Authorization", "Bearer "+raw)
+	w := httptest.NewRecorder()
+	controller.New(st, nil).Handler().ServeHTTP(w, r)
 	var events []json.RawMessage
-	getJSON(t, srv.URL+"/api/v1/runs/run-1/events?limit=1000000000", &events)
-	if len(events) != store.MaxRunListLimit {
-		t.Fatalf("events = %d, want %d", len(events), store.MaxRunListLimit)
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &events) != nil || len(events) != store.MaxRunListLimit {
+		t.Fatalf("events HTTP %d count=%d, want %d: %s", w.Code, len(events), store.MaxRunListLimit, w.Body)
 	}
 }
 

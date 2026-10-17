@@ -49,7 +49,7 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 	writerB := teamToken(t, f.store, tenantB, "runs.read", "runs.control")
 
 	var pushed map[string]any
-	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, &pushed)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, cronPushBody(), http.StatusOK, &pushed)
 
 	ctx := context.Background()
 	stored, err := tenantB.ListCronSchedules(ctx)
@@ -69,30 +69,30 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 	}
 
 	var overview controllerwire.ScheduleOverview
-	f.call(http.MethodGet, "/api/v1/crons", f.writer, nil, http.StatusOK, &overview)
+	f.call(http.MethodGet, "/api/v1/schedules", f.writer, nil, http.StatusOK, &overview)
 	if len(overview.Schedules) != 0 {
 		t.Errorf("the default team lists %d of team B's schedules", len(overview.Schedules))
 	}
-	f.call(http.MethodGet, "/api/v1/crons", writerB, nil, http.StatusOK, &overview)
+	f.call(http.MethodGet, "/api/v1/schedules", writerB, nil, http.StatusOK, &overview)
 	if len(overview.Schedules) != 2 {
 		t.Errorf("team B lists %d schedules, want 2", len(overview.Schedules))
 	}
 
 	id := stored[0].ID
 	for _, route := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v1/crons/" + id},
-		{http.MethodGet, "/api/v1/crons/acme%2Fwidgets%2Fnightly"},
-		{http.MethodPost, "/api/v1/crons/" + id + "/pause"},
-		{http.MethodPost, "/api/v1/crons/" + id + "/resume"},
-		{http.MethodPost, "/api/v1/crons/" + id + "/run"},
-		{http.MethodPost, "/api/v1/crons/" + id + "/disarm"},
-		{http.MethodDelete, "/api/v1/crons/" + id + "/override"},
+		{http.MethodGet, "/api/v1/schedules/" + id},
+		{http.MethodGet, "/api/v1/schedules/acme%2Fwidgets%2Fnightly"},
+		{http.MethodPost, "/api/v1/schedules/" + id + "/pause"},
+		{http.MethodPost, "/api/v1/schedules/" + id + "/resume"},
+		{http.MethodPost, "/api/v1/schedules/" + id + "/run"},
+		{http.MethodDelete, "/api/v1/schedules/" + id},
+		{http.MethodDelete, "/api/v1/schedules/" + id + "/override"},
 	} {
 		if got := f.status(route.method, route.path, f.writer, nil); got != http.StatusNotFound {
 			t.Errorf("default team %s %s = %d, want 404", route.method, route.path, got)
 		}
 	}
-	if got := f.status(http.MethodPut, "/api/v1/crons/"+id+"/override", f.writer,
+	if got := f.status(http.MethodPut, "/api/v1/schedules/"+id+"/override", f.writer,
 		map[string]any{"cron": "0 4 * * *"}); got != http.StatusNotFound {
 		t.Errorf("default team override of team B's schedule = %d, want 404", got)
 	}
@@ -100,12 +100,12 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 	var removed struct {
 		Removed int `json:"removed"`
 	}
-	f.call(http.MethodDelete, "/api/v1/crons/repos?repo_url="+cronTestRepoURL, f.writer, nil, http.StatusOK, &removed)
+	f.call(http.MethodDelete, "/api/v1/schedules/repos?repo_url="+cronTestRepoURL, f.writer, nil, http.StatusOK, &removed)
 	if removed.Removed != 0 {
 		t.Errorf("the default team's repository delete removed %d of team B's schedules", removed.Removed)
 	}
 
-	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, cronPushBody(), http.StatusOK, nil)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, cronPushBody(), http.StatusOK, nil)
 	own, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil || len(own) != 2 {
 		t.Fatalf("the default team holds %d schedules (err %v) after arming the same repository, want 2", len(own), err)
@@ -125,7 +125,7 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 		t.Errorf("team B's schedule changed under the default team: %+v", after)
 	}
 
-	f.call(http.MethodPost, "/api/v1/crons/"+id+"/pause", writerB, nil, http.StatusOK, nil)
+	f.call(http.MethodPost, "/api/v1/schedules/"+id+"/pause", writerB, nil, http.StatusOK, nil)
 	if got, err := tenantB.GetCronSchedule(ctx, id); err != nil || !got.Paused {
 		t.Errorf("team B could not pause its own schedule: paused=%v err=%v", got.Paused, err)
 	}
@@ -137,10 +137,10 @@ func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
 	writerB := teamToken(t, f.store, tenantB, "runs.read", "runs.control")
-	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, nil)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, cronPushBody(), http.StatusOK, nil)
 
 	var launched controllerwire.ScheduleRun
-	f.call(http.MethodPost, "/api/v1/crons/acme%2Fwidgets%2Fnightly/run", writerB, nil, http.StatusOK, &launched)
+	f.call(http.MethodPost, "/api/v1/schedules/acme%2Fwidgets%2Fnightly/run", writerB, nil, http.StatusOK, &launched)
 
 	ctx := context.Background()
 	if _, err := tenantB.GetRun(ctx, launched.RunID); err != nil {
@@ -165,21 +165,21 @@ func TestControllerCrons_ATeamsSchedulesAreCapped(t *testing.T) {
 		entries = append(entries, map[string]any{"pipeline": fmt.Sprintf("p%d", i), "cron": "0 3 * * *"})
 	}
 	many["schedules"] = entries
-	if got := f.status(http.MethodPut, "/api/v1/crons/repos", writerB, many); got != http.StatusBadRequest {
+	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, many); got != http.StatusBadRequest {
 		t.Errorf("a push of 21 schedules = %d want 400", got)
 	}
 
 	for i := range 10 {
 		body := cronPushBody()
 		body["repo_url"] = fmt.Sprintf("https://github.com/acme/repo-%d.git", i)
-		f.call(http.MethodPut, "/api/v1/crons/repos", writerB, body, http.StatusOK, nil)
+		f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, body, http.StatusOK, nil)
 	}
 	eleventh := cronPushBody()
 	eleventh["repo_url"] = "https://github.com/acme/repo-10.git"
-	if got := f.status(http.MethodPut, "/api/v1/crons/repos", writerB, eleventh); got != http.StatusConflict {
+	if got := f.status(http.MethodPut, "/api/v1/schedules/repos", writerB, eleventh); got != http.StatusConflict {
 		t.Errorf("an eleventh repository = %d want 409", got)
 	}
 	again := cronPushBody()
 	again["repo_url"] = "https://github.com/acme/repo-3.git"
-	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, again, http.StatusOK, nil)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", writerB, again, http.StatusOK, nil)
 }

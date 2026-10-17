@@ -115,6 +115,7 @@ func TestOperatorHTTPRefusesNonConsoleAuthority(t *testing.T) {
 					b.snapshot.Authorities[0].MembershipValid = false
 					want = apierr.Unauthenticated
 				case "wrong audience":
+					want = apierr.Unauthenticated
 					p.Capability.Audience = capability.NodeHost
 					p.Capability.Binding = capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "process", Generation: 1, Attempt: 1}
 					b.snapshot.Binding = capability.BindingState{Current: p.Capability.Binding, ProcessAlive: true}

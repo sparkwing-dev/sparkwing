@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc/githuboidctest"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
@@ -265,5 +267,20 @@ func TestGitHubRunnerWorkflowDocMatchesTheRenderedTemplate(t *testing.T) {
 	}
 	if !strings.Contains(doc, controller.GitHubActionsLabel) {
 		t.Fatal("doc does not name the runner label")
+	}
+}
+
+func TestGitHubRunnerWorkflowUsesCurrentGrammar(t *testing.T) {
+	workflow := controller.GitHubRunnerWorkflow("https://sparkwing.example.com", "acme")
+	_, command, found := strings.Cut(workflow, `"$RUNNER_TEMP/sparkwing-runner" `)
+	if !found {
+		t.Fatal("workflow contains no runner invocation")
+	}
+	words := strings.Fields(strings.ReplaceAll(command, "\\\n", " "))
+	if len(words) == 0 {
+		t.Fatal("workflow contains no runner command")
+	}
+	if _, err := runnerflags.Parse(words[0], words[1:], io.Discard); err != nil {
+		t.Fatal(err)
 	}
 }

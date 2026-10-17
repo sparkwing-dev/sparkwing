@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -271,6 +272,21 @@ func TestTrendsRejectsStoreQueryFailures(t *testing.T) {
 			if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "example", Status: "success", StartedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
+			raw, _, err := teststore.ProvisionCredential(t.Context(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := controller.New(st, nil).Handler()
+			read := func() *httptest.ResponseRecorder {
+				request := httptest.NewRequest(http.MethodGet, "/api/v1/trends", nil)
+				request.Header.Set("Authorization", "Bearer "+raw)
+				output := httptest.NewRecorder()
+				handler.ServeHTTP(output, request)
+				return output
+			}
+			if output := read(); output.Code != http.StatusOK {
+				t.Fatalf("healthy trends: %d %s", output.Code, output.Body)
+			}
 			var queries []string
 			switch failure {
 			case "query":
@@ -279,13 +295,13 @@ func TestTrendsRejectsStoreQueryFailures(t *testing.T) {
 				queries = []string{
 					`ALTER TABLE runs RENAME TO original_runs`,
 					`CREATE VIEW runs AS
-SELECT id, pipeline, status, created_at, started_at, 'not-an-integer' AS finished_at
+SELECT team, id, pipeline, status, created_at, started_at, 'not-an-integer' AS finished_at
   FROM original_runs`,
 				}
 			case "iteration":
 				queries = []string{
 					`ALTER TABLE nodes RENAME TO original_nodes`,
-					`CREATE VIEW nodes AS SELECT 'run' AS run_id, 'cached' AS outcome UNION ALL SELECT 'run', abs(-9223372036854775808)`,
+					`CREATE VIEW nodes AS SELECT 'default' AS team, 'run' AS run_id, 'memoized' AS outcome UNION ALL SELECT 'default', 'run', abs(-9223372036854775808)`,
 				}
 			}
 			for _, query := range queries {
@@ -293,9 +309,7 @@ SELECT id, pipeline, status, created_at, started_at, 'not-an-integer' AS finishe
 					t.Fatal(err)
 				}
 			}
-			output := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodGet, "/api/v1/trends", nil)
-			controller.New(st, nil).Handler().ServeHTTP(output, request)
+			output := read()
 			if output.Code != http.StatusInternalServerError {
 				t.Fatalf("%s failure returned status=%d body=%s", failure, output.Code, output.Body.String())
 			}

@@ -30,82 +30,78 @@ W1b integration scope. Categories: A deletes a retired surface, B fixes behavior
 - C tests/acceptance: FuzzStoreQueueClaimAuthorityW8 keeps the parent's binding and repository scope when minting its deliberately reduced-grant child. The test continues to refuse mixed claims lacking a grant, invalid kinds and revoked credentials.
 - B verification: remove the untagged inline pinnedClock comment in pkg/store/store.go. The required commentcheck then passes. No store behavior changed.
 
+- B pkg/controller and pkg/store: TestReviewConsoleCredentialCommits now passes. managementAuthorityTx uses the existing console-proof resolver, rechecking the direct session and current operator configuration in its transaction. TestConsoleInventoryRevalidatesSessionProperty generates configuration, ancestry and foreign-session changes. Invariant: cached console authorization never substitutes for a current direct configured operator session.
+- C tests/acceptance: TestLoginHTTPRefusesInvalidCredentialAndForm supplies the required repository allowlist when provisioning its machine fixture. Machine and operator login remain forbidden, with no session or credential leakage.
+- C tests/acceptance: TestOperatorHTTPRefusesNonConsoleAuthority expects Unauthenticated when a NodeHost-audience fake has no live lease. Every operator action remains refused.
+- C tests/acceptance: replace the obsolete roleless-refusal case in TestOAuthHTTPProviderAndStoreRefusals with TestOAuthHTTPWaitlistedSessionHasNoTeamAuthority. The recorded roleless-session contract permits sign-in. The new HTTP test proves empty team/scopes and refusal of runs, tokens and console routes while retaining provider/session privacy assertions.
+- B/C tests/acceptance and pkg/controller: TestEngineJobsHTTP, TestEngineJobsHTTPRefusals and TestEngineJobsMemberReadsFinishedJobs use DebugJob and the existing committed RunStatusFacts callback. Job detail now honors that callback for embedded controllers and tests, retains the concrete store default and rejects an empty persisted job identity. All claim, tenant, cancellation, masking and read-count assertions remain. Foreign tenant selectors expect NotFound.
+- C pkg/controller: newCronsFixture gives its no-read token the valid runs.write grant instead of removed triggers.read and serves the real handler through an in-memory recorder. TestControllerPipelines_ListIsTheCallersTeamOnly passes with its tenant and missing-grant refusals. Cron fixtures use /schedules and DELETE /schedules/{id}; their missing concrete ScheduleWriter remains visible.
+- C pkg/controller: TestTrendsRejectsStoreQueryFailures authenticates with current runs.read authority and first verifies a healthy response. Corrupt views retain team columns and memoized spelling so scan and iteration cases reach their intended failures.
+- A/C pkg/controller: TestEventListClampsItsLimit replaces TestListRoutes_ClampTheirLimit. Remove the retired trigger-list assertion and writer, retain the current event-page ceiling and authenticate through the real issuer/router using an in-memory HTTP recorder. No event assertion was dropped.
+- B pkg/controller and docs: GitHubRunnerWorkflow emits warm rather than the removed runner command. TestGitHubRunnerWorkflowUsesCurrentGrammar fails on the old template and parses the final invocation through the actual runner parser. TestGitHubRunnerWorkflowDocMatchesTheRenderedTemplate passes with the workflow restored to source docs and embedded mirror.
+
+- C tests/acceptance: TestDeploymentHTTPAuthorization permits an unbound service bearing the exact deployment grant, as C2 requires. Use a real SQLite read store and a recording OperatorSettingsWriter fake for the missing committing adapter. Assert successful handler delivery, exact forwarded authority and zero writer calls for every refused credential. All account/run-bound/session/CSRF refusals remain. Production settings-write composition remains open.
+
+- C pkg/controller: TestSourceSnapshotRealClientStorageAndIntake configures a bound cipher, machine ownership/consent and a confirmed git credential with username. Its prior policy_missing was a fixture omission. Actual upload, immutable intake/replay, source release, signed bundle transfer, checkout, release audit and storage accounting now run together. TestSourceSnapshotAuthorityAndRevisionProperty still rejects forged revisions/repositories and revoked-member uploads. No production authorization changed.
+
 ## Verification
 
 - GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache, go test -p 4: full internal/apiroutes, internal/fssecure, internal/profile, internal/userconfig, internal/crons, internal/repos, internal/pipelineentry and sparkwing suites pass. The initial full internal/nodehost suite also passed.
 - Fourteen focused controller/acceptance groups pass across the final two batches. These cover native bootstrap exchange/metering, Actions expiry and enrollment/revocation, identity-link privacy, console provisioning proof, queue metrics, retry lifecycle, inventory destinations, dashboard requests, tenant-concealed run detail, session lifetime and runner claim authority.
 - TestNodeHostAdmissionReadsItsRealRun, FuzzRetiredProfileFieldsKeepValuesPrivate seeds and TestInstallToGreenTidiesSoACandidateDependencyResolves pass. TypeScript SDK build completed before repository-description verification.
 - Whole-repository go build -p 4 ./... passes. go vet -p 4 passes for all changed Go packages and their tested direct dependents. go run ./internal/commentcheck -base main . passes across 2660 files. git diff --check passes.
-- The controller sweep attempted all 745 top-level tests in batches that resume after a panic. At that snapshot, 475 completed without failure, 247 required sockets (244 panics and three ordinary failures), and 23 had other failures. Five of those 23 are now fixed or deleted. Eighteen remain below. This was a failure census, not a green full-suite result.
-- The acceptance sweep attempted all 405 top-level tests. At that snapshot 390 completed without failure and 15 failed. Eight failing groups were subsequently fixed and verified. Seven remain below. Contract skeletons still skip their cells and do not establish product acceptance.
+- The controller sweep attempted all 745 top-level tests in batches that resume after a panic. At that snapshot, 475 completed without failure, 247 required sockets (244 panics and three ordinary failures), and 23 had other failures. That snapshot predates the continuation below. Twelve controller groups remain unresolved; the listed socket failures still need native verification. This was a failure census, not a green full-suite result.
+- The acceptance sweep attempted all 405 top-level tests. At that snapshot 390 completed without failure and 15 failed. All fifteen failing groups have now been reconciled across the two sessions. The final full acceptance rerun passes, as recorded below. Contract skeletons still skip their cells and do not establish product acceptance.
 - Full cmd/sparkwing, cmd/sparkwing-controller, internal/web and bin runs stop at socket failures. The attempted socket cases are named in [test-reconciliation-sockets.md](test-reconciliation-sockets.md). No socket-dependent test was skipped or deleted to pass this sandbox. PostgreSQL was not attempted because both TCP and Unix socket operations were refused. Lead verification must run the controller/acceptance paths with PostgreSQL and complete the native transport cases.
+
+### Continuation verification
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and TMPDIR/GOTMPDIR=/tmp/sw-astra-W1b.
+
+- `go test -json -p 4 ./tests/acceptance -count=1 -timeout=5m` passes in 187.844s: 406 top-level tests pass; all levels contain 5,386 passing and 2,991 skipped tests/cells. The skips pre-exist this continuation. A green Go suite does not prove skipped native/S3/PostgreSQL cells. No skip was added or widened.
+- Focused controller checks pass for console issuance/inventory/revocation and generated proof revalidation, current debug projection and tenant-selector fuzz seeds, source snapshot acquisition/audit/accounting and authority/revision properties, pipeline tenant filtering, event pagination, trends query failures, and generated workflow grammar/docs. `go test -p 4 ./pkg/controller -run '^TestSourceSnapshot' -count=1 -timeout=2m` passes after the final audit assertion.
+- `go test -p 4 ./pkg/store -run '^(Test.*(Inventory|CapabilityManagement|CapabilityRotation|Console|Credential).*|TestReview.*)$' -count=1 -timeout=2m` passes. This exercises the shared authority change beyond the controller regression.
+- `go test -json -p 4 ./pkg/controller -run '^(TestCronTick_.*|TestComputeLimits_Cron.*|TestControllerCrons_.*|TestFinishRunFoldsPartialSamplesRaiseOnly)$' -count=1 -timeout=2m` confirms exactly the twelve enabled top-level failures below. They are real integration obligations, not socket refusals.
+- Whole-repository `go build -p 4 ./...`, vet for controller/store/docs/acceptance, commentcheck against main, embedded-doc drift/privacy tests, CLI-doc grammar tests and `git diff --check` pass.
+- The socket inventory from the prior continuation remains [test-reconciliation-sockets.md](test-reconciliation-sockets.md). This continuation reproduced TCP listen refusal before replacing the cron/pipeline fixture listener with a recorder. PostgreSQL was not attempted because socket creation is forbidden. Native controller transport and PostgreSQL lanes still need lead verification.
+- Source diagnosis used a temporary Go overlay to expose the policy_missing boundary; no instrumentation remains in the repository. Git has no local user identity or core.worktree override. No Git writes, Sparkwing execution, services or releases were performed. Scratch is deleted after the final checks; the shared Go cache remains.
 
 ## Remaining reconciliation
 
 Each entry stays enabled. B means behavior still owed or uncertain, so its assertion must survive. C identifies a fixture or expectation change still to make.
 
 - B OPEN pkg/controller: TestCronTick_TwoControllersSharingAStoreFireOneTrigger, TestCronTick_ARepeatedInstantReachesTheFirstRun and TestCronTick_AScheduleFiresInTheTeamThatArmedIt need native scheduled admission in cronLauncher. Actual failure: triggers has no column named pipeline. Keep exclusive leased ticks, idempotency and tenant isolation. Existing legacy admitTrigger/CreateTriggerWithRun callers need migration, not a compatibility schema.
-- B OPEN pkg/controller: TestReviewConsoleCredentialCommits. Creating a deployment token through a direct console session succeeds, but reading it returns Forbidden. managementAuthorityTx reloads a session without restoring/rechecking its console proof. Reuse the existing transaction-local console predicate, with generated current-configuration/ancestry tests before changing authority behavior.
-- B OPEN pkg/controller: TestSourceSnapshotRealClientStorageAndIntake. The real source-upload client fails authorization. Preserve upload binding, byte proof and intake immutability.
-- C OPEN pkg/controller: TestComputeLimits_CronBelowTheMinimumIntervalIsRefused, TestComputeLimits_CronLaunchesCarryTheArmingPrincipal and TestComputeLimits_CronRunNowAtTheCapAnswers429 stop in newFixture's stranger token provisioning because its requested grants exceed its account role. Seed current scoped authority before checking the limits. Do not relax provisioning or limits.
-- C OPEN pkg/controller: TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt, TestControllerCrons_RunNowLaunchesInTheSchedulesTeam, TestControllerCrons_ATeamsSchedulesAreCapped, TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant and TestControllerCrons_ASecondLaunchOfOneDueInstantReachesTheFirstRun have the same stranger-provisioning fixture failure. Their tenant, quota, principal and replay assertions remain required. Native scheduled admission is also needed.
-- B OPEN pkg/controller: TestGitHubRunnerWorkflowDocMatchesTheRenderedTemplate. Docs no longer include the emitted workflow. The production template still invokes the retired runner subcommand/flags, so synchronize the runnable workflow and docs against the current runner contract before changing this test.
-- C OPEN pkg/controller: TestControllerPipelines_ListIsTheCallersTeamOnly has the same stranger-provisioning fixture failure. Preserve tenant filtering.
-- C OPEN pkg/controller: TestFinishRunFoldsPartialSamplesRaiseOnly uses a stale finish/session fixture and gets session unavailable. Keep raise-only sizing evidence while moving the fixture to current authority and result reporting.
-- C OPEN pkg/controller: TestTrendsRejectsStoreQueryFailures gets session unavailable before its query/scan/iteration failures. Restore current authenticated fixture evidence and retain loud query failure.
-- B OPEN pkg/controller: TestListRoutes_ClampTheirLimit seeds retired triggers. The triggers half is retired, but event pagination still needs a current authenticated test. Split/port that obligation before deleting the legacy group.
-- C OPEN tests/acceptance: TestDeploymentHTTPAuthorization assumes an unbound service with the exact deployment grant is forbidden. Current deployment authority permits it and the nil-store fixture panics after authorization. Add a current service-backed fixture with explicit allowed-route expectations, retaining all forbidden account/run-bound/session cases.
-- C OPEN tests/acceptance: TestEngineJobsHTTP, TestEngineJobsHTTPRefusals and TestEngineJobsMemberReadsFinishedJobs expect the former bare JobDetail reader. GET job now returns DebugJob and reads a committed RunView. Supply current contract fakes/reader evidence and keep all masking, tenancy, claim fencing and finished-job read assertions. One foreign-tenant refusal also needs the selector's NotFound expectation.
-- C OPEN tests/acceptance: TestLoginHTTPRefusesInvalidCredentialAndForm cannot provision its machine fixture under the presenting role. Seed a currently authorized machine origin while keeping login refusal for machine/operator roots.
-- B OPEN tests/acceptance: TestOAuthHTTPProviderAndStoreRefusals receives a 200 page where the roleless/waitlisted fixture expects refusal. Check the recorded waitlist sign-in decision before changing the expectation. Keep absence of application authority and credential/privacy assertions.
-- B OPEN tests/acceptance: TestOperatorHTTPRefusesNonConsoleAuthority sometimes returns Unauthenticated where its fake expects Forbidden. Reconcile credential presentation/class/liveness evidence without permitting any console action.
+- B OPEN pkg/controller: TestComputeLimits_CronBelowTheMinimumIntervalIsRefused now reaches the missing concrete OperatorSettingsWriter and returns policy_missing. TestComputeLimits_CronLaunchesCarryTheArmingPrincipal and TestComputeLimits_CronRunNowAtTheCapAnswers429 reach the missing concrete ScheduleWriter on /schedules/repos. Fixture authority and transport are reconciled. Provisioning, principal and limit assertions remain unchanged.
+- B OPEN pkg/controller: TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt, TestControllerCrons_RunNowLaunchesInTheSchedulesTeam, TestControllerCrons_ATeamsSchedulesAreCapped, TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant and TestControllerCrons_ASecondLaunchOfOneDueInstantReachesTheFirstRun reach the missing concrete ScheduleWriter on /schedules/repos. Retain tenant, quota, principal and replay assertions. Native scheduled admission is also needed. Existing schedule_routes_test.go exercises that declared interface with fakes; this suite retains the missing production-composition signal.
+- B OPEN pkg/controller: TestFinishRunFoldsPartialSamplesRaiseOnly still uses an unauthenticated legacy finish request. The deeper obligation is the missing profile_fold completion-outbox delivery worker. Frozen v4 §3.9 requires terminal, idempotent folding through the elected reconciler; do not restore direct finish-handler side effects. Direct fold tests already pass. Port the HTTP fixture alongside the real outbox delivery and preserve raise-only partial-sample assertions.
 
 ## Contracts, shared files and budget
 
-No runtime contract shape changed. Only the port-inventory paths and the retired-route disposition were corrected in contract documents. Lead-owned amendments and handoffs are unchanged. No new production mechanism, configuration variable or compatibility API was added.
+No signature or wire shape changed. C2 now records transaction-local console-proof revalidation for credential management and job detail's use of the existing committed ReadRunStatus callback. The default remains Tenant.ReadRunView. Earlier port-inventory corrections remain. Lead-owned amendments and handoffs are unchanged. No production interface, configuration variable or compatibility API was added. ScheduleWriter, OperatorSettingsWriter and completion-outbox composition remain real integration points.
 
-Session production Go delta: +21/-20, net +1 line across the integration slice. Combined pkg/store delta against main remains -4,170 lines, with the inherited 80-line budget justification in pkg/store/W1b-HANDOFF.md. This area remains incomplete because the open tests, legacy scheduled admission and socket/PostgreSQL verification remain.
+Previous session production Go delta: +21/-20, net +1. This continuation: +18/-11, net +7, all in three production files. pkg/store has no net line growth, so the inherited combined store delta (-4,170) and its 80-line exception in pkg/store/W1b-HANDOFF.md are unchanged. The seven added production lines let the existing committed status callback serve job detail while preserving its concrete default. All other production changes replace existing lines.
 
-The old upsert test deletes 41 lines. The old 42-line catch-up clamping test was replaced with strict refusal plus zero-persistence assertions. No security, masking, tenancy or billing assertion was deleted.
+The 44-line TestListRoutes_ClampTheirLimit becomes the 28-line TestEventListClampsItsLimit: remove the retired trigger-pagination writer/assertions and preserve authenticated event pagination (net -16 test lines). The old node-only ReadNode fake is replaced with committed RunStatusFacts. No security, tenant-boundary, masking or billing assertion is removed. No native acceptance skeleton is unskipped or claimed complete. W1b's earlier billing/retention amendments and handoffs are already completed in pkg/store/W1b-HANDOFF.md and were not reimplemented.
 
-Shared paths touched by this session:
+Shared paths touched by this continuation:
 
-- `bin/install_to_green_test.go`.
-- `design/rewrite/contracts/t1-credential-routes.md`.
-- `design/rewrite/contracts/t1-port-inventory.md`.
-- `docs/sdk-reference.md`.
-- `internal/apiroutes/apiroutes.go`.
-- `internal/apiroutes/apiroutes_test.go`.
-- `internal/crons/arm_test.go`.
-- `internal/crons/crons_test.go`.
-- `internal/crons/pushed_test.go`.
-- `internal/fssecure/owned_dirs_test.go`.
-- `internal/pipelineentry/environment_test.go`.
-- `internal/profile/profile_test.go`.
-- `internal/repos/describe_test.go`.
-- `internal/repos/sandbox_test.go`.
-- `internal/userconfig/contract_test.go`.
-- `internal/userconfig/userconfig.go`.
-- `internal/userconfig/validate.go`.
-- `internal/wingd/admission_run_identity_test.go`.
-- `pkg/controller/crons_tick_test.go`.
-- `pkg/controller/engine_amendment_test.go`.
-- `pkg/controller/github_actions_exchange.go`.
-- `pkg/controller/github_runners.go`.
-- `pkg/controller/identity_link_routes.go`.
-- `pkg/controller/operator_queue_internal_test.go`.
-- `pkg/controller/review_actions_native_test.go`.
-- `pkg/controller/review_authority_native_test.go`.
-- `pkg/controller/trigger_test.go`.
-- `pkg/docs/mirror/sdk-reference.md`.
-- `pkg/store/store.go`.
-- `sparkwing/combinator.go`.
-- `sparkwing/plan.go`.
-- `sparkwing/plan_runner_docs_test.go`.
-- `tests/acceptance/dashboard_requests_test.go`.
-- `tests/acceptance/engine_lifecycle_http_test.go`.
-- `tests/acceptance/engine_run_detail_http_test.go`.
-- `tests/acceptance/session_policy_http_test.go`.
-- `tests/acceptance/store_queue_w8_test.go`.
+- `design/rewrite/contracts/c2-credentials.md`.
 - `design/rewrite/test-reconciliation.md`.
-- `design/rewrite/test-reconciliation-sockets.md`.
+- `docs/github-actions-runners.md`.
+- `pkg/controller/compute_limits_test.go`.
+- `pkg/controller/crons_team_test.go`.
+- `pkg/controller/crons_test.go`.
+- `pkg/controller/engine_jobs.go`.
+- `pkg/controller/github_runners.go`.
+- `pkg/controller/github_runners_test.go`.
+- `pkg/controller/review_authority_native_test.go`.
+- `pkg/controller/source_upload_test.go`.
+- `pkg/controller/trends_test.go`.
+- `pkg/controller/trigger_test.go`.
+- `pkg/docs/mirror/github-actions-runners.md`.
+- `pkg/store/capability_inventory.go`.
+- `tests/acceptance/deployment_authorization_test.go`.
+- `tests/acceptance/engine_jobs_http_test.go`.
+- `tests/acceptance/login_http_test.go`.
+- `tests/acceptance/oauth_http_test.go`.
+- `tests/acceptance/operator_authorization_test.go`.

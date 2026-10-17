@@ -3290,3 +3290,17 @@ A private package context proof carries the resolved location and repository
 through the intake transaction; policy refuses missing or changed proofs and
 does not open a second SQLite connection inside the transaction. The proof is
 absent from the wire and seal. CLI environment tokens stay at the GitHub API.
+
+## Credential inventory and debug-view reconciliation
+
+Credential inventory, rotation and revocation revalidate a presented console
+proof with the same transaction-local direct-session and configured-operator
+predicate as issuance. A cached console projection never grants authority after
+configuration, ancestry or session liveness changes.
+
+Job detail returns `controllerwire.DebugJob`. Embedded controllers and tests
+supply its committed snapshot and attempts through the existing
+`EngineController.ReadRunStatus` callback. The default still reads
+`Tenant.ReadRunView`. The projection validates the selected run/team, nonempty
+job identities and current attempt fences before returning public fields.
+No route grants, credential classes or wire fields change.

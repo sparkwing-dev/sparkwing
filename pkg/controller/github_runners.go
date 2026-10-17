@@ -127,7 +127,7 @@ jobs:
           install -m 0755 sparkwing-runner-linux-amd64 "$RUNNER_TEMP/sparkwing-runner"
       - name: Run this repository's Sparkwing work
         run: |
-          "$RUNNER_TEMP/sparkwing-runner" runner --github-actions \
+          "$RUNNER_TEMP/sparkwing-runner" warm --github-actions \
             --team ` + team + ` \
             --controller ` + controllerURL + ` \
             --idle-exit 2m

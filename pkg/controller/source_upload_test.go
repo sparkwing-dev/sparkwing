@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -29,6 +30,11 @@ import (
 func sourceUploadFixture(t *testing.T) (*Server, client.EngineOptions, runspec.Request, string) {
 	t.Helper()
 	s, session := credentialSessionServer(t)
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.WithSecretsCipher(cipher)
 	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://controller", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
@@ -91,6 +97,13 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 		t.Fatalf("run storage: bytes=%d objects=%d %v", used, objects, err)
 	}
 	runner := engineHTTPRoot(t, &EngineController{Store: s.store}, "a", "snapshot-runner", []capability.Grant{capability.TriggersClaim})
+	engineSQL(t, s.store, `UPDATE capabilities SET created_by='member' WHERE prefix='snapshot-runner'`)
+	engineSQL(t, s.store, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) VALUES ('a','snapshot-runner','member',1)`)
+	envelope, err := sealSecret(s.secretsCipher, gitCredentialBinding("a", "example.test"), "private-source-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, s.store, `INSERT INTO git_credentials(id,team,host,kind,username,secret,confirmed_at,created_at,updated_at) VALUES ('source-credential','a','example.test','https','git',?,1,1,1)`, envelope)
 	s.store.SetClaimProfileResolver(engineProfileFake{})
 	claim, err := s.store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "snapshot-runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: created.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
 	if err != nil || len(claim.Bearer) == 0 {
@@ -112,6 +125,9 @@ func TestSourceSnapshotRealClientStorageAndIntake(t *testing.T) {
 	}
 	if err := entry.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM git_credential_releases WHERE team='a' AND run_id=? AND credential_id='source-credential' AND capability_prefix=?`, created.RunID, claim.Award.CapabilityPrefix).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("source release audits=%d: %v", count, err)
 	}
 	engineClaimHTTP(t, s.Handler(), runner, "POST", "/api/v1/data/download", `{"digest":"`+digest+`"}`, 403)
 	request.IdempotencyKey = "reuse"
