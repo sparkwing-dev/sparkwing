@@ -14,7 +14,6 @@ import (
 // reason, because a new reader has to be argued for in a diff.
 var declaredRepoReaders = map[string]string{
 	"pkg/controller/github_app_webhook.go": "reporting displays the stored repository metadata without authorizing work",
-	"pkg/controller/handlers.go":           "reporting displays the stored repository metadata without authorizing work",
 	"pkg/store/latest_run.go":              "the tenant reporting query filters the sealed repository projection",
 	"pkg/store/runfilter_http.go":          "the HTTP filter parser selects repository display metadata",
 	"pkg/store/store.go":                   "the sealed run reporting projection exposes repository metadata without granting authority",

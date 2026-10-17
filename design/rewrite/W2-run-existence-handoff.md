@@ -62,22 +62,67 @@ and handoffs remain untouched. Earlier W2 serving, bootstrap and operator-team
 work remains committed. C1's QueuePriorityWriter transaction remains the prior
 separate integration point, with its existing fake-backed HTTP contract.
 
-The supplied native receipt
-/home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/review/areas/W2-existence-native-latest.md
-was absent at session start. Completion requires the lead harness to commit the
-patch, run its native tests and produce that file with no FAIL. There is no new
-design question or contract request.
+The lead's native receipt now reports two failures: a GitHub App fixture panic
+and a stale declared-repository guard entry. Completion requires the lead
+harness to commit the fixes and replace that receipt with a run containing no
+FAIL. There is no new design question or contract request.
 
-All changed production files belong to W2: authority_routes.go,
+The committed implementation's production files belong to W2: authority_routes.go,
 child_routes.go, engine_claim_routes.go, engine_job_control.go, engine_routes.go,
 log_submission_routes.go, metrics.go, missing_operation_routes.go,
 policy_router.go, private_host.go, run_selector.go and source_controller.go,
 all under pkg/controller. No caller outside W2 required migration. The only
 contract edit is design/rewrite/contracts/c2-credentials.md.
 
-Friction: the native receipt is missing and this sandbox refuses sockets. No
-Git write, candidate binary, service or pipeline ran. Scratch is removed before
-handoff and the shared build cache is retained.
+## Native-failure continuation
+
+The native panic address 0x1828a68 resolves to ConsoleFixtureRequest in the
+controller test binary. newAppFixture left identityFixture.srv nil while a
+shadowing appFixture.srv held the server. Removed the shadow field and populated
+the embedded fixture. newGHFixture had the same missing initialization and now
+populates it too. Existing security assertions remain unchanged.
+
+Removed pkg/controller/handlers.go from declaredRepoReaders because that file
+no longer reads the declared repository. The guard failed before this edit and
+passes afterward. The shared file touched is
+pkg/store/declared_repo_guard_test.go. The other edits are
+pkg/controller/github_app_test.go and pkg/controller/github_runners_test.go.
+No production code, API, contract or historical test port changed. This session
+deletes five test lines and adds three, net -2. Production delta is zero, and
+W2 remains net -892 production lines against main.
+
+Both required privacy tests pass unchanged. Additional passing evidence:
+
+- Whole-repository go build -p 4 ./....
+- go vet -p 4 ./pkg/controller ./pkg/store ./internal/capability ./internal/apierr.
+- Full internal/capability and internal/apierr tests.
+- TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField in pkg/store, both required
+  controller privacy tests and TestGitHubBrowserConnection* (controller 1.260s,
+  store 0.291s).
+- Controller TestFinalCredential*, TestGitHubBrowserConnection*, TestReviewSetup*,
+  TestOperatorCreateTeam*, TestBootstrapSeed*, TestEnsureBootstrap* and
+  TestControllerRefusesAnonymous* (1.069s). Serving registrations pass in both
+  metrics configurations.
+- tests/acceptance TestCredential*, TestAuthority*, TestDeployment*,
+  TestEngineAuthority* and TestLocalNode* (1.933s).
+- go run ./internal/commentcheck -base main . and git diff --check.
+
+Commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOTMPDIR/TMPDIR under /tmp/sw-astra-W2 and at most four package workers.
+Run the test selections with go test -p 4 -run '<selection>' -count=1.
+
+TestGitHubAppExistingPickerRefusesForeignIdentityAndBoundInstallation still
+needs native verification: here its fixture fails first at googletest.New
+because httptest cannot open a TCP socket. The native receipt's panic was
+diagnosed from its address, not reproduced past that socket restriction.
+No whole-controller, whole-store or PostgreSQL pass is claimed. No acceptance
+topology cell was unskipped. The earlier QueuePriorityWriter persistence
+integration remains with C1, as recorded above.
+
+The lead-owned handoffs and amendments remain unchanged. No Git write,
+candidate binary, service or pipeline ran. Scratch is deleted before handoff
+and the shared cache is retained. The native receipt still contains FAIL, so
+the lead must rerun it before completion.
 
 <!-- design:end -->
 
