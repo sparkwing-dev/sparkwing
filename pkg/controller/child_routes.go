@@ -12,10 +12,10 @@ import (
 
 func (s *Server) childEndpoints(e *EngineController) []Endpoint {
 	return []Endpoint{
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/children", Authentication: capability.AuthCapability, Decode: e.childIntakeTarget, Handle: s.handleIntake(e)},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}", Authentication: capability.AuthCapability, Decode: e.childTarget, Handle: e.handleChild},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: e.runTarget, Handle: s.handleJobOutput},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: e.childTarget, Handle: s.handleChildOutput},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/children", Authentication: capability.AuthCapability, Decode: e.childIntakeTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleIntake(e)},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}", Authentication: capability.AuthCapability, Decode: e.childTarget, ResolveTarget: e.resolveRunSelector, Handle: e.handleChild},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobOutput},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", Authentication: capability.AuthCapability, Decode: e.childTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleChildOutput},
 	}
 }
 
@@ -58,10 +58,7 @@ func (s *Server) handleOutput(w http.ResponseWriter, r *http.Request, a capabili
 }
 
 func (s *EngineController) childIntakeTarget(r *http.Request) (capability.RequestEvidence, error) {
-	evidence, err := s.runTarget(r)
-	if err != nil {
-		return evidence, err
-	}
+	evidence, _ := runSelectorTarget(r)
 	var body controllerwire.CreateRunRequest
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return evidence, err
@@ -76,7 +73,7 @@ func (s *EngineController) childIntakeTarget(r *http.Request) (capability.Reques
 }
 
 func (s *EngineController) childTarget(r *http.Request) (capability.RequestEvidence, error) {
-	evidence, err := s.runTarget(r)
+	evidence, err := runSelectorTarget(r)
 	evidence.Target.ChildRunID = r.PathValue("child")
 	return evidence, err
 }

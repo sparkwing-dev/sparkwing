@@ -69,6 +69,7 @@ type ActorKind string
 const (
 	ActorRunHost    ActorKind = "run_host"
 	ActorHolder     ActorKind = "holder"
+	ActorClaimant   ActorKind = "claimant"
 	ActorController ActorKind = "controller"
 	ActorReaper     ActorKind = "reaper"
 	ActorOperator   ActorKind = "operator"
@@ -174,6 +175,7 @@ const (
 	CauseRelease         TransitionCause = "release"
 	CauseDependency      TransitionCause = "dependency"
 	CauseOwnerPolicy     TransitionCause = "owner_policy"
+	CauseUnpriced        TransitionCause = "unpriced"
 	CauseApprovalOpen    TransitionCause = "approval_open"
 	CauseApprovalResolve TransitionCause = "approval_resolve"
 	CauseApprovalTimeout TransitionCause = "approval_timeout"
@@ -199,6 +201,7 @@ const (
 	GuardLauncherAward   EdgeGuard = "exact_live_launcher_award"
 	GuardOwner           EdgeGuard = "live_owner"
 	GuardOwnerPolicy     EdgeGuard = "typed_owner_policy"
+	GuardUnpriced        EdgeGuard = "authorized_unpriced_claim"
 	GuardUnclaimed       EdgeGuard = "unclaimed"
 	GuardHolder          EdgeGuard = "live_exact_holder"
 	GuardAward           EdgeGuard = "atomic_award"
@@ -233,6 +236,7 @@ func NodeTransitions() []NodeEdge {
 	cancellers := []ActorKind{ActorOperator, ActorController, ActorReaper}
 	return []NodeEdge{
 		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeFailed}, []ActorKind{ActorLauncher}, CauseLaunchRejected, []EdgeGuard{GuardLauncherAward}, false},
+		{[]NodeState{NodePending, NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorClaimant}, CauseUnpriced, []EdgeGuard{GuardUnclaimed, GuardUnpriced}, false},
 		{[]NodeState{NodePending}, terminal, []ActorKind{ActorOperator}, CausePublish, []EdgeGuard{GuardPublication}, false},
 		{[]NodeState{NodePending}, []NodeState{NodePending}, []ActorKind{ActorOperator}, CausePublishAttempt, []EdgeGuard{GuardPublication}, false},
 		{[]NodeState{NodePending}, []NodeState{NodeReady}, owners, CauseRelease, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
@@ -652,6 +656,10 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 		case GuardUnclaimed:
 			if row.ClaimedBy != "" {
 				return holderRefusal()
+			}
+		case GuardUnpriced:
+			if err := checkUnpricedClaimTx(ctx, tx, row, change); err != nil {
+				return err
 			}
 		case GuardOwnerPolicy:
 			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)

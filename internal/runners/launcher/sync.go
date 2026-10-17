@@ -39,7 +39,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	for i, job := range jobs.Items {
 		binding, reservation, err := jobOwnership(job)
 		if err != nil {
-			errs = append(errs, err)
+			errs = append(errs, l.discardMalformedJob(ctx, &job, err))
 			continue
 		}
 		if job.Annotations[rejectedAnnotation] != "" {
@@ -50,7 +50,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		}
 		if jobFinished(job) && (job.Spec.Suspend == nil || !*job.Spec.Suspend) {
 			if verifyErr := l.verifyJobPods(ctx, &job); verifyErr != nil {
-				errs = append(errs, verifyErr, l.rejectJob(ctx, &job, binding, reservation))
+				errs = append(errs, l.verificationFailure(ctx, &job, binding, reservation, verifyErr))
 				continue
 			}
 		}
@@ -58,7 +58,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		remove := job.DeletionTimestamp != nil || jobFinished(job)
 		deadline, deadlineErr := time.Parse(time.RFC3339Nano, job.Annotations[deadlineAnnotation])
 		if deadlineErr != nil {
-			errs = append(errs, fmt.Errorf("Job %s has invalid deadline: %w", job.Name, deadlineErr))
+			errs = append(errs, l.discardMalformedJob(ctx, &job, deadlineErr))
 			continue
 		}
 		if !deadline.After(time.Now()) {
@@ -87,7 +87,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 					continue
 				}
 				if verifyErr := l.verifyJobPods(ctx, job); verifyErr != nil {
-					errs = append(errs, verifyErr, l.rejectJob(ctx, job, observation.Binding, reservation))
+					errs = append(errs, l.verificationFailure(ctx, job, observation.Binding, reservation, verifyErr))
 				}
 				continue
 			}
@@ -206,6 +206,12 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 	if err := json.Unmarshal([]byte(job.Annotations[reservationAnnotation]), &reservation); err != nil {
 		return binding, reservation, fmt.Errorf("Job %s has invalid reservation: %w", job.Name, err)
 	}
+	if raw := job.Annotations[bootstrapAnnotation]; raw != "" {
+		var ref bootstrapReference
+		if err := json.Unmarshal([]byte(raw), &ref); err != nil || ref.Name == "" || ref.UID == "" || ref.JobUID != job.UID {
+			return binding, reservation, errors.New("Cloud Job has invalid bootstrap ownership")
+		}
+	}
 	var requested corev1.PodTemplateSpec
 	if err := json.Unmarshal([]byte(job.Annotations[templateAnnotation]), &requested); err != nil {
 		return binding, reservation, fmt.Errorf("Job %s has invalid requested template: %w", job.Name, err)
@@ -222,7 +228,7 @@ func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation C
 	if reference := job.Annotations[bootstrapAnnotation]; reference != "" {
 		bootstrap = bootstrapReference{}
 		if err := json.Unmarshal([]byte(reference), &bootstrap); err != nil || bootstrap.Name == "" || bootstrap.UID == "" || bootstrap.JobUID == "" || bootstrap.JobUID != job.UID {
-			return fmt.Errorf("Job %s has invalid bootstrap cleanup ownership", job.Name)
+			return l.discardMalformedJob(ctx, job, fmt.Errorf("Job %s has invalid bootstrap cleanup ownership", job.Name))
 		}
 	}
 	foreground := metav1.DeletePropagationForeground

@@ -108,7 +108,7 @@ func (c *NativeProcessClient) Latest(ctx context.Context, pipeline, job string, 
 func (c *NativeProcessClient) StartChild(ctx context.Context, pipeline string, args map[string]string, repo, branch string) (string, error) {
 	request := c.request
 	request.Pipeline, request.RequestedArgs, request.Origin = pipeline, args, runspec.OriginChild
-	request.Lineage = runspec.Lineage{ParentRunID: c.run, ParentJobID: c.job}
+	request.Lineage = runspec.Lineage{ParentRunID: c.run, ParentJobID: c.job, RepoInherited: repo == ""}
 	if repo != "" && repo != string(request.Git.Repository.Key) {
 		return "", localHostClientRefusal()
 	}

@@ -33,16 +33,35 @@ memory across the host and Docker sidecar.
 
 The Job retains its requested template before API defaulting. The launcher
 verifies Pods against that template after activation
-and on each reconciliation. An empty Pod list keeps the Job pending verification
-until the Job controller creates its Pod. The next reconciliation checks it.
-Kubernetes defaults and an explicit list of EKS mutations are allowed: pod
-identity environment values and projected token mounts/volumes, the VPC
-controller's Pod ENI resource and annotation, and load-balancer readiness gates.
+and on each reconciliation. Activation polls for up to two seconds for exactly
+one owned Pod. An active, unsuspended Job with zero or multiple Pods is rejected.
+Pod-list and PriorityClass API failures retry on reconciliation without failing
+the award. Only a typed spec mismatch starts rejection.
+
+Allowed EKS changes are region environment values, the VPC controller's unit
+Pod ENI resource and validated ENI annotation, and load-balancer readiness gates.
+Customer Pods cannot receive IRSA or Pod Identity credentials, projected tokens
+or token mounts. Their ServiceAccount must have no role annotation or Pod Identity
+association. Infrastructure probes use the same account and restriction.
+
+The explicit defaults are DNSClusterFirst, default-scheduler, a 30-second
+termination grace, the serviceAccount alias, PreemptLowerPriority, priority zero,
+container termination-message path/policy, startup-probe timeout/success threshold,
+and the standard 300-second not-ready/unreachable NoExecute tolerations.
+The cluster's globalDefault PriorityClass supplies its name, value and preemption
+policy instead of priority zero. Multiple defaults select the lowest value, as
+Kubernetes does. Other spec differences remain mismatches. Clusters changing the
+standard toleration/grace defaults need matching configuration and native QA.
 All other changes, including missing authored security fields, reject the Pod.
 The launcher logs rejection, UID-fences Job deletion and tells the controller to
 fail that exact plan, eval or work award. A rejection annotation and cleanup
 finalizer retain ownership until the controller acknowledges failure and every
-container stops. Restart reconciliation repeats pending rejection reports.
+container stops. Rejection first cordons the reserved node and UID-fences deletion
+of its Karpenter NodeClaim. A failed retirement retains cleanup ownership and
+cannot release capacity. Restart reconciliation repeats pending rejection reports.
+Malformed ownership, deadline or bootstrap annotations trigger UID-fenced Job
+deletion. Garbage collection owns its Secrets. The node's persisted reservation
+still requires current award retirement and container vacancy before cleanup.
 
 RBAC grants Pod/Job creation only to the launcher. Operators must keep other
 bindings from granting those rights. Customer ServiceAccounts receive no API
@@ -320,3 +339,19 @@ marking the unit running. Existing credit grace still applies. At grace expiry,
 accounting commits and the original bootstrap lease ends, permitting cleanup and
 refusing exchange. Finished, cancelled or expired own awards do not prevent
 reconciliation of other live Jobs.
+
+## Team identity and credential rotation
+
+`node-restriction.kubernetes.io/sparkwing-team-node` is the placement label and
+team NoSchedule taint key. Enable Node authorizer and NodeRestriction. Reservation
+checks the node's owning NodeClaim UID, status node name and provider ID, plus
+that claim's owning NodePool UID and protected template label. Both must match
+the award's team value. A second protected label,
+`node-restriction.kubernetes.io/sparkwing-used-team`, records first use and is
+never cleared. Neither reservation cleanup nor a NodePool template change can
+move a used node to another team. No LimitRange read permission is needed.
+
+The launcher rereads its private agent-token file for every controller request.
+A missing, unreadable or empty rotated file fails the request. The launcher does
+not reuse the previous token or need a restart. The file reader remains in the
+transport and is never passed to Jobs.

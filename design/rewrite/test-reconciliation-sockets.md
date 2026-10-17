@@ -273,3 +273,7 @@ claim and controller-election transaction over recorders, including exact-limit
 acceptance and unchanged snapshots after live/retired-claim refusals. The two
 retired source-token/git-credential aliases are covered by the unregistered-route
 table. Their obsolete native listener fixture is deleted.
+
+## W1b continuation 10
+
+Six historical entries now run through recorders with current persisted authority: TestTeamGitCredentialSSHIsUnusableUntilConfirmed, TestTeamGitCredentialStaysWithTheTeamClaimAndHost, TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn, TestTeamGitCredentialRotationAndRevocation, TestTeamGitCredentialIsOwnerManagedAndWriteOnly and TestTeamGitCredentialNeedsASecretsKey. Their native SSH/OAuth transport and PostgreSQL coverage remain separate. TestTeamGitCredentialLosesToTheAppWhenTheAppCovers remains open and enabled.

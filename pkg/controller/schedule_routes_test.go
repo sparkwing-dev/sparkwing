@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -15,16 +16,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type scheduleWriterFake struct {
 	*store.Tenant
-	s         *Server
-	runs      map[string]string
-	seen      capability.Authorized
-	failure   error
-	lastError error
+	s            *Server
+	runs         map[string]string
+	seen         capability.Authorized
+	failure      error
+	lastError    error
+	authority    map[string]capability.AuthorityRef
+	repositories map[string]int64
 }
 
 func (f *scheduleWriterFake) service(a capability.Authorized) *crons.Service {
@@ -45,7 +50,30 @@ func (f *scheduleWriterFake) ReplaceAuthorizedSchedules(ctx context.Context, a c
 		return nil, nil, err
 	}
 	svc := f.service(a)
-	report, err := svc.ArmPushed(ctx, crons.ArmPush{RepoURL: body.RepoURL, Branch: body.Branch, SHA: body.SHA, Entries: declared, GitHubInstallationID: 17, GitHubRepositoryID: 23})
+	if f.repositories == nil {
+		f.repositories = map[string]int64{}
+	}
+	if f.repositories[body.RepoURL] == 0 {
+		f.repositories[body.RepoURL] = int64(len(f.repositories) + 1)
+	}
+	repositoryID := f.repositories[body.RepoURL]
+	if status, err := f.s.cronRepoCapRefusal(ctx, svc, body.RepoURL, repositoryID, len(declared)); err != nil {
+		code := apierr.BadRequest
+		if status == 409 {
+			code = apierr.Conflict
+		}
+		return nil, nil, &apierr.Error{Code: code, Message: err.Error()}
+	}
+	limits, err := f.s.store.AsOperator().ComputeLimits(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, entry := range declared {
+		if err := crons.RefuseBelowMinInterval(entry.Trigger.Cron, limits.CronSeconds); err != nil {
+			return nil, nil, errors.Join(err, &apierr.Error{Code: apierr.RateLimited, Message: "schedule cadence exceeds the configured limit", Details: map[string]any{"limit": store.ComputeLimitCronSeconds}})
+		}
+	}
+	report, err := svc.ArmPushed(ctx, crons.ArmPush{RepoURL: body.RepoURL, Branch: body.Branch, SHA: body.SHA, Entries: declared, GitHubInstallationID: 17, GitHubRepositoryID: repositoryID})
 	f.lastError = err
 	ids := make([]string, 0, len(report.Schedules))
 	for _, row := range report.Schedules {
@@ -103,12 +131,47 @@ func (f *scheduleWriterFake) RunAuthorizedSchedule(ctx context.Context, a capabi
 		return "", "", false, err
 	}
 	replayKey := string(f.Team()) + "/" + sched.ID + "/" + key
-	if run, ok := f.runs[replayKey]; ok {
-		return sched.ID, run, true, nil
+	admitted, err := f.admit(ctx, sched, replayKey)
+	return sched.ID, admitted.RunID, admitted.Replayed, err
+}
+
+func (f *scheduleWriterFake) AdmitScheduledRun(ctx context.Context, sched store.CronSchedule, due time.Time) (store.AdmissionResult, error) {
+	return f.admit(ctx, sched, sched.ID+"@"+due.UTC().Format(time.RFC3339Nano))
+}
+
+func (f *scheduleWriterFake) admit(ctx context.Context, sched store.CronSchedule, key string) (store.AdmissionResult, error) {
+	if f.authority == nil {
+		f.authority = map[string]capability.AuthorityRef{}
 	}
-	run := "run-" + key
-	f.runs[replayKey] = run
-	return sched.ID, run, false, nil
+	if _, exists := f.authority[sched.ID]; !exists {
+		_, root, err := teststore.ProvisionCredential(ctx, f.s.store, capability.ProvisionSpec{
+			Kind: capability.ProvisionMember, Team: string(f.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: sched.ArmedBy},
+			Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsWrite},
+		})
+		if err != nil {
+			return store.AdmissionResult{}, err
+		}
+		f.authority[sched.ID] = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
+	}
+	admitted, err := f.Tenant.AdmitRun(ctx, store.IntakeRequest{Authority: f.authority[sched.ID], IdempotencyKey: key, Request: runspec.Request{
+		Version: 1, Team: string(f.Team()), Pipeline: sched.Pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost,
+		Origin: runspec.OriginSchedule, RequestedArgs: sched.Effective().Args,
+		Git:    runspec.Git{Repository: runspec.Repository{Key: runspec.RepoKey("gh:" + strconv.FormatInt(sched.GitHubRepositoryID, 10))}, Ref: sched.GitBranch, SHA: sched.LockedRef},
+		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: sched.RepoPath}},
+	}})
+	if err == nil {
+		if f.runs == nil {
+			f.runs = map[string]string{}
+		}
+		f.runs[key] = admitted.RunID
+	}
+	return admitted, err
+}
+
+type scheduleIntakePolicy struct{}
+
+func (scheduleIntakePolicy) ResolveIntake(_ context.Context, _ capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
+	return store.IntakePolicyFacts{Options: &request.Request.Options, SourceLocation: &request.Request.Source.Location, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 }
 
 func (f *scheduleWriterFake) DeleteAuthorizedSchedule(ctx context.Context, a capability.Authorized, name string) (string, bool, error) {
@@ -131,6 +194,7 @@ type scheduleHTTPFixture struct {
 func newScheduleHTTPFixture(t *testing.T) scheduleHTTPFixture {
 	t.Helper()
 	s := New(newStoreForAuth(t), nil)
+	s.store.SetIntakePolicy(scheduleIntakePolicy{})
 	tenant, err := s.store.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
@@ -279,7 +343,7 @@ func TestScheduleHTTPInvalidInputAndBackend(t *testing.T) {
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("failed transaction leaked schedules: %+v %v", rows, err)
 	}
-	f.s.WithScheduleWriter(nil)
+	f.s.WithScheduleWriter(func(context.Context, store.Team) (ScheduleWriter, error) { return nil, nil })
 	w := f.call(t, "PUT", "/api/v1/schedules/repos", schedulePushJSON, "", 500, nil)
 	if !strings.Contains(w.Body.String(), "policy_missing") {
 		t.Fatal(w.Body.String())

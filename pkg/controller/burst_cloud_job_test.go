@@ -38,6 +38,24 @@ func configureBurstCloudJob(t *testing.T, proof *controller.BurstExecutionProof)
 		}
 		return false, nil, nil
 	})
+	kube.PrependReactor("list", "pods", func(action ktesting.Action) (bool, k8sruntime.Object, error) {
+		objects, err := kube.Tracker().List(batchv1.SchemeGroupVersion.WithResource("jobs"), batchv1.SchemeGroupVersion.WithKind("Job"), action.GetNamespace())
+		if err != nil {
+			return true, nil, err
+		}
+		list := &corev1.PodList{}
+		for _, job := range objects.(*batchv1.JobList).Items {
+			if job.DeletionTimestamp != nil || (job.Spec.Suspend != nil && *job.Spec.Suspend) {
+				continue
+			}
+			pod := corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+			pod.Name, pod.Namespace = job.Name+"-pod", job.Namespace
+			controller := true
+			pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &controller}}
+			list.Items = append(list.Items, pod)
+		}
+		return true, list, nil
+	})
 	boundary := &burstCloudBoundary{}
 	var runtime *launcher.Launcher
 	var published launcher.CloudJobAward
@@ -155,3 +173,5 @@ type burstCloudHost func(context.Context, controllerwire.ClaimedUnit) error
 func (h burstCloudHost) Host(ctx context.Context, unit controllerwire.ClaimedUnit) error {
 	return h(ctx, unit)
 }
+
+func (*burstCloudBoundary) Retire(context.Context, launcher.CloudNodeReservation) error { return nil }

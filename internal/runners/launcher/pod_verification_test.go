@@ -1,13 +1,15 @@
 package launcher
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -81,6 +83,9 @@ func TestPodMutationDeletesJobAndFailsAward(t *testing.T) {
 			if !rejected {
 				t.Fatal("award was not failed")
 			}
+			if l.Boundary.(*boundaryFake).retirements != 1 {
+				t.Fatal("rejected node returned to the pool")
+			}
 			if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 				t.Fatalf("Job survived: %v", err)
 			}
@@ -89,6 +94,24 @@ func TestPodMutationDeletesJobAndFailsAward(t *testing.T) {
 }
 
 func eksMutations() map[string]func(*corev1.Pod) {
+	return map[string]func(*corev1.Pod){
+		"region": func(p *corev1.Pod) {
+			p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "AWS_REGION", Value: "us-west-2"}, corev1.EnvVar{Name: "AWS_DEFAULT_REGION", Value: "us-west-2"}, corev1.EnvVar{Name: "AWS_STS_REGIONAL_ENDPOINTS", Value: "regional"})
+		},
+		"vpc_resource_requests": func(p *corev1.Pod) {
+			p.Spec.Containers[0].Resources.Requests["vpc.amazonaws.com/pod-eni"] = resource.MustParse("1")
+			p.Spec.Containers[0].Resources.Limits["vpc.amazonaws.com/pod-eni"] = resource.MustParse("1")
+		},
+		"vpc_annotations": func(p *corev1.Pod) {
+			p.Annotations["vpc.amazonaws.com/pod-eni"] = `[{"eniId":"eni-12345678901234567","ifAddress":"02:00:00:00:00:01","privateIp":"10.0.1.2","vlanId":1,"subnetCidr":"10.0.0.0/16"}]`
+		},
+		"load_balancer": func(p *corev1.Pod) {
+			p.Spec.ReadinessGates = append(p.Spec.ReadinessGates, corev1.PodReadinessGate{ConditionType: "target-health.elbv2.k8s.aws/k8s-ci-job-123"})
+		},
+	}
+}
+
+func credentialMutations() map[string]func(*corev1.Pod) {
 	return map[string]func(*corev1.Pod){
 		"pod_identity": func(p *corev1.Pod) {
 			p.Spec.Volumes = append(p.Spec.Volumes, corev1.Volume{Name: "eks-pod-identity-token", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{DefaultMode: ptr(int32(420)), Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Audience: "pods.eks.amazonaws.com", ExpirationSeconds: ptr(int64(86400)), Path: "eks-pod-identity-token"}}}}}})
@@ -108,19 +131,23 @@ func eksMutations() map[string]func(*corev1.Pod) {
 				}
 			}
 		},
-		"region": func(p *corev1.Pod) {
-			p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "AWS_REGION", Value: "us-west-2"}, corev1.EnvVar{Name: "AWS_DEFAULT_REGION", Value: "us-west-2"}, corev1.EnvVar{Name: "AWS_STS_REGIONAL_ENDPOINTS", Value: "regional"})
-		},
-		"vpc_resource_requests": func(p *corev1.Pod) {
-			p.Spec.Containers[0].Resources.Requests["vpc.amazonaws.com/pod-eni"] = resource.MustParse("1")
-			p.Spec.Containers[0].Resources.Limits["vpc.amazonaws.com/pod-eni"] = resource.MustParse("1")
-		},
-		"vpc_annotations": func(p *corev1.Pod) {
-			p.Annotations["vpc.amazonaws.com/pod-eni"] = `[{"eniId":"eni-123","ifAddress":"02:00:00:00:00:01","privateIp":"10.0.1.2","vlanId":1,"subnetCidr":"10.0.0.0/16"}]`
-		},
-		"load_balancer": func(p *corev1.Pod) {
-			p.Spec.ReadinessGates = append(p.Spec.ReadinessGates, corev1.PodReadinessGate{ConditionType: "target-health.elbv2.k8s.aws/k8s-ci-job-123"})
-		},
+	}
+}
+
+func TestPodRejectsAWSCredentials(t *testing.T) {
+	for name, mutate := range credentialMutations() {
+		t.Run(name, func(t *testing.T) {
+			l, p := requestedPod(t)
+			r, err := BuildJob(t.Context(), time.Now(), l.Config, *l.Control.(*controlFake).award, l.Boundary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Job.UID = "job-uid"
+			mutate(p)
+			if validateJobPod(r.Job, p) == nil {
+				t.Fatal("customer Pod accepted AWS credentials")
+			}
+		})
 	}
 }
 
@@ -180,7 +207,7 @@ func TestLaunchVerifiesPodAfterJobActivation(t *testing.T) {
 			l, p := requestedPod(t)
 			kube := l.Kube.(*fake.Clientset)
 			mutate(p)
-			podOnActivation(t, kube, p)
+			podOnRead(t, kube, p)
 			rejected := false
 			original := l.Control
 			l.Control = publicationControl{CloudControl: original, sync: func(obs []CloudJobObservation) ([]CloudJobState, error) {
@@ -223,7 +250,7 @@ func TestEKSAllowListRejectsAlteredInjectionShapes(t *testing.T) {
 				t.Fatal(err)
 			}
 			r.Job.UID = "job-uid"
-			eksMutations()["pod_identity"](p)
+			credentialMutations()["pod_identity"](p)
 			mutate(p)
 			if validateJobPod(r.Job, p) == nil {
 				t.Fatal("malformed EKS injection accepted")
@@ -258,15 +285,10 @@ func TestRestartComparesOriginalRequestedTemplate(t *testing.T) {
 	}
 }
 
-func podOnActivation(t *testing.T, kube *fake.Clientset, pod *corev1.Pod) {
+func podOnRead(t *testing.T, kube *fake.Clientset, pod *corev1.Pod) {
 	t.Helper()
-	kube.PrependReactor("patch", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-		if bytes.Contains(action.(ktesting.PatchAction).GetPatch(), []byte(`"suspend":false`)) {
-			if err := kube.Tracker().Create(corev1.SchemeGroupVersion.WithResource("pods"), pod, pod.Namespace); err != nil {
-				t.Fatal(err)
-			}
-		}
-		return false, nil, nil
+	kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, &corev1.PodList{Items: []corev1.Pod{*pod}}, nil
 	})
 }
 
@@ -277,23 +299,11 @@ func TestLaunchAllowsEKSMutationsAfterJobActivation(t *testing.T) {
 			mutate(p)
 		}
 	}
-	mutations["pod_identity_ipv6"] = func(p *corev1.Pod) {
-		eksMutations()["pod_identity"](p)
-		for _, cs := range [][]corev1.Container{p.Spec.Containers, p.Spec.InitContainers} {
-			for i := range cs {
-				for j := range cs[i].Env {
-					if cs[i].Env[j].Name == "AWS_CONTAINER_CREDENTIALS_FULL_URI" {
-						cs[i].Env[j].Value = "http://[fd00:ec2::23]/v1/credentials"
-					}
-				}
-			}
-		}
-	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
 			l, p := requestedPod(t)
 			mutate(p)
-			podOnActivation(t, l.Kube.(*fake.Clientset), p)
+			podOnRead(t, l.Kube.(*fake.Clientset), p)
 			if claimed, err := l.LaunchOne(t.Context()); !claimed || err != nil {
 				t.Fatalf("EKS Pod refused: claimed=%v err=%v", claimed, err)
 			}
@@ -305,5 +315,233 @@ func TestLaunchAllowsEKSMutationsAfterJobActivation(t *testing.T) {
 				t.Fatalf("EKS Job did not survive verification: %+v %v", job, err)
 			}
 		})
+	}
+}
+
+func TestPodListFailureDoesNotRejectAward(t *testing.T) {
+	l, kube, _, control := fixture()
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("temporary API failure")
+	kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, failure })
+	rejected := false
+	l.Control = publicationControl{CloudControl: control, sync: func(obs []CloudJobObservation) ([]CloudJobState, error) {
+		for _, o := range obs {
+			rejected = rejected || o.Rejected
+		}
+		return control.Sync(t.Context(), obs)
+	}}
+	if err := l.Sync(t.Context()); !errors.Is(err, failure) {
+		t.Fatalf("lost API error: %v", err)
+	}
+	if rejected {
+		t.Fatal("API error rejected the award")
+	}
+	if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{}); err != nil {
+		t.Fatalf("API error deleted Job: %v", err)
+	}
+}
+
+func TestActivationWaitsForOwnedPod(t *testing.T) {
+	l, p := requestedPod(t)
+	kube := l.Kube.(*fake.Clientset)
+	lists := 0
+	kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		lists++
+		pods := &corev1.PodList{}
+		if lists > 1 {
+			pods.Items = []corev1.Pod{*p}
+		}
+		return true, pods, nil
+	})
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if lists < 2 {
+		t.Fatalf("empty activation check succeeded after %d lists", lists)
+	}
+}
+
+func TestMalformedJobIsDeletedWithoutBlockingNextLaunch(t *testing.T) {
+	for _, annotation := range []string{bindingAnnotation, reservationAnnotation, templateAnnotation, deadlineAnnotation, bootstrapAnnotation} {
+		t.Run(annotation, func(t *testing.T) {
+			l, kube, _, control := fixture()
+			if _, err := l.LaunchOne(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			job.Annotations[annotation] = "invalid"
+			if _, err = kube.BatchV1().Jobs("cloud").Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			control.remove = true
+			if err = l.Sync(t.Context()); err != nil {
+				t.Fatalf("malformed Job blocks claims: %v", err)
+			}
+			if _, err = kube.BatchV1().Jobs("cloud").Get(t.Context(), job.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+				t.Fatalf("malformed Job survived: %v", err)
+			}
+		})
+	}
+}
+
+func TestPodUsesAPIDefaultedPriority(t *testing.T) {
+	for _, priority := range []int32{1000, -1000} {
+		for _, mutate := range []bool{false, true} {
+			l, p := requestedPod(t)
+			class := &schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: "default-priority"}, Value: priority, GlobalDefault: true, PreemptionPolicy: ptr(corev1.PreemptNever)}
+			if _, err := l.Kube.SchedulingV1().PriorityClasses().Create(t.Context(), class, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			p.Spec.PriorityClassName, p.Spec.Priority, p.Spec.PreemptionPolicy = class.Name, ptr(priority), class.PreemptionPolicy
+			apiDefaultedPod(p)
+			if mutate {
+				p.Spec.Priority = ptr(priority + 1)
+			}
+			podOnRead(t, l.Kube.(*fake.Clientset), p)
+			_, err := l.LaunchOne(t.Context())
+			if (err != nil) != mutate {
+				t.Fatalf("priority=%d mutate=%v err=%v", priority, mutate, err)
+			}
+		}
+	}
+}
+
+func TestPodRejectsMalformedENIAnnotation(t *testing.T) {
+	for _, value := range []string{"", "true", "[]", "[{}]", `[{"eniId":"eni-12345678901234567","ifAddress":"bad","privateIp":"10.0.1.2","vlanId":1,"subnetCidr":"10.0.0.0/16"}]`, `[{"eniId":"eni-12345678901234567","ifAddress":"02:00:00:00:00:01","privateIp":"127.0.0.1","vlanId":1,"subnetCidr":"10.0.0.0/16"}]`} {
+		l, p := requestedPod(t)
+		r, err := BuildJob(t.Context(), time.Now(), l.Config, *l.Control.(*controlFake).award, l.Boundary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Job.UID = "job-uid"
+		p.Annotations["vpc.amazonaws.com/pod-eni"] = value
+		if validateJobPod(r.Job, p) == nil {
+			t.Fatalf("malformed ENI annotation accepted: %q", value)
+		}
+	}
+}
+
+func FuzzPodNeverAcceptsAWSCredentialInjection(f *testing.F) {
+	for i := uint8(0); i < 6; i++ {
+		f.Add(i, "credential")
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, value string) {
+		l, p := requestedPod(t)
+		r, err := BuildJob(t.Context(), time.Now(), l.Config, *l.Control.(*controlFake).award, l.Boundary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Job.UID = "job-uid"
+		switch mode % 6 {
+		case 0:
+			p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "AWS_ROLE_ARN", Value: "arn:aws:iam::123456789012:role/" + value})
+		case 1:
+			p.Spec.InitContainers[0].Env = append(p.Spec.InitContainers[0].Env, corev1.EnvVar{Name: "AWS_WEB_IDENTITY_TOKEN_FILE", Value: value})
+		case 2:
+			p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "AWS_CONTAINER_CREDENTIALS_FULL_URI", Value: value})
+		case 3:
+			p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", Value: value})
+		case 4:
+			credentialMutations()["irsa"](p)
+		case 5:
+			credentialMutations()["pod_identity"](p)
+		}
+		if validateJobPod(r.Job, p) == nil {
+			t.Fatal("AWS credentials accepted")
+		}
+	})
+}
+
+func TestRejectionCannotReleaseBeforeNodeRetirement(t *testing.T) {
+	l, p := requestedPod(t)
+	boundary := l.Boundary.(*boundaryFake)
+	failure := errors.New("retirement unavailable")
+	boundary.err = failure
+	podMutations()["changed_image"](p)
+	podOnRead(t, l.Kube.(*fake.Clientset), p)
+	if _, err := l.LaunchOne(t.Context()); !errors.Is(err, failure) {
+		t.Fatalf("retirement failure lost: %v", err)
+	}
+	if boundary.retirements != 1 || boundary.releases != 0 {
+		t.Fatalf("retirement failure released node: retirements=%d releases=%d", boundary.retirements, boundary.releases)
+	}
+}
+
+func TestActivationRequiresExactlyOneOwnedPod(t *testing.T) {
+	for _, count := range []int{0, 2} {
+		synctest.Test(t, func(t *testing.T) {
+			l, p := requestedPod(t)
+			kube := l.Kube.(*fake.Clientset)
+			kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+				pods := &corev1.PodList{}
+				for i := 0; i < count; i++ {
+					copy := p.DeepCopy()
+					copy.Name += string(rune('a' + i))
+					pods.Items = append(pods.Items, *copy)
+				}
+				return true, pods, nil
+			})
+			if _, err := l.LaunchOne(t.Context()); err == nil {
+				t.Fatalf("activation accepted %d owned Pods", count)
+			}
+			if l.Boundary.(*boundaryFake).retirements != 1 {
+				t.Fatal("rejected Pod count did not retire node")
+			}
+			if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), p.OwnerReferences[0].Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+				t.Fatalf("rejected Job survived: %v", err)
+			}
+		})
+	}
+}
+
+func TestActivationRetriesAPIErrorWithoutRejecting(t *testing.T) {
+	l, _, boundary, control := fixture()
+	kube := l.Kube.(*fake.Clientset)
+	failure := errors.New("temporary Pod list failure")
+	failed := true
+	kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		if failed {
+			return true, nil, failure
+		}
+		return false, nil, nil
+	})
+	if _, err := l.LaunchOne(t.Context()); !errors.Is(err, failure) {
+		t.Fatalf("API error lost: %v", err)
+	}
+	if boundary.retirements != 0 {
+		t.Fatal("API error retired the node")
+	}
+	if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	failed = false
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatalf("reconciliation could not recover: %v", err)
+	}
+}
+
+func apiDefaultedPod(p *corev1.Pod) {
+	p.Spec.DNSPolicy = corev1.DNSClusterFirst
+	p.Spec.SchedulerName = "default-scheduler"
+	p.Spec.TerminationGracePeriodSeconds = ptr(int64(30))
+	p.Spec.DeprecatedServiceAccount = p.Spec.ServiceAccountName
+	p.Spec.Tolerations = append(p.Spec.Tolerations,
+		corev1.Toleration{Key: "node.kubernetes.io/not-ready", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))},
+		corev1.Toleration{Key: "node.kubernetes.io/unreachable", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr(int64(300))})
+	for _, containers := range [][]corev1.Container{p.Spec.Containers, p.Spec.InitContainers} {
+		for i := range containers {
+			c := &containers[i]
+			c.TerminationMessagePath = "/dev/termination-log"
+			c.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+			if c.StartupProbe != nil {
+				c.StartupProbe.TimeoutSeconds = 1
+				c.StartupProbe.SuccessThreshold = 1
+			}
+		}
 	}
 }

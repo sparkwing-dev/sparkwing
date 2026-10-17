@@ -163,6 +163,7 @@ func (c *engineClient) ReadFailure(ctx context.Context, run, job string, generat
 func (c *engineClient) ReadLogs(ctx context.Context, run string, q controllerwire.LogQuery) (controllerwire.LogPage, error)
 func (c *engineClient) ReadObjectStoreBreaker(ctx context.Context) (controllerwire.ObjectStoreBreaker, error)
 func (c *engineClient) ReadOperatorLimits(ctx context.Context) (controllerwire.OperatorLimits, error)
+func (c *engineClient) ReadOperatorTeam(ctx context.Context, team string) (controllerwire.OperatorTeam, error)
 func (c *engineClient) ReadOverflowControl(ctx context.Context) (controllerwire.OverflowControl, error)
 func (c *engineClient) ReadQueue(ctx context.Context) (wingwire.QueueState, error)
 func (c *engineClient) ReadQueueGroup(ctx context.Context, group string) (controllerwire.QueueGroup, error)

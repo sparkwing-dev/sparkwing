@@ -338,6 +338,7 @@ CREATE TABLE cron_schedules (
     declared BIGINT NOT NULL DEFAULT 1,
     armed_at BIGINT NOT NULL,
     armed_by TEXT NOT NULL DEFAULT '',
+    consent_json TEXT NOT NULL DEFAULT '',
     updated_at BIGINT NOT NULL,
     cursor_at BIGINT NOT NULL,
     last_fired_at BIGINT,

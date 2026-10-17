@@ -65,6 +65,7 @@ type Server struct {
 	resolveSourceAuditReader   func(context.Context, store.Team) (SourceAuditReader, error)
 	resolveSecretReader        func(context.Context, store.Team) (SecretReader, error)
 	resolveScheduleWriter      func(context.Context, store.Team) (ScheduleWriter, error)
+	resolveScheduledRunWriter  func(context.Context, store.Team) (ScheduledRunWriter, error)
 	resolveBillingWriter       func(context.Context, store.Team) (BillingWriter, error)
 	resolveTeamWriter          func(context.Context, store.Team) (TeamWriter, error)
 	resolveGitHubConnectWriter func(context.Context, store.Team) (GitHubConnectWriter, error)

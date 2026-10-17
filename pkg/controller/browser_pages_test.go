@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -154,33 +155,48 @@ func TestBrowserLocalModeServesPagesWithoutSignIn(t *testing.T) {
 }
 
 func TestDashboardReadsStayInsideTheTeamBoundary(t *testing.T) {
-	f := newIdentityFixture(t)
-	a := f.user("g-a", "a@example.com")
-	b := f.user("g-b", "b@example.com")
-	ctx := context.Background()
-	team, err := f.store.ForTeam(ctx, store.Team(a.team))
+	f := newBrowserFixture(t, nil)
+	ctx := t.Context()
+	if err := f.st.AsOperator().CreateTeam(ctx, "other"); err != nil {
+		t.Fatal(err)
+	}
+	own, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.SeedRun(f.store, ctx, team.Team(), store.Run{ID: "run-a", Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {
+	other, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "other", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "other"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/api/v1/runs/run-a/logs", "/api/v1/runs/run-a/logs/n1/completeness", "/api/v1/runs/run-a/events/stream"} {
-		if code := f.call("GET", path, b.auth, nil, nil); code != http.StatusNotFound {
-			t.Errorf("another team's %s = %d, want 404", path, code)
+	if err := teststore.SeedRun(f.st, ctx, store.DefaultTeam, store.Run{ID: "run-a", Pipeline: "private-team-pipeline", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := teststore.SeedNode(f.st, ctx, store.Node{RunID: "run-a", NodeID: "n1", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	get := func(path, token string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		return f.serve(req)
+	}
+	for _, path := range []string{"/api/v1/runs/run-a/logs", "/api/v1/runs/run-a/jobs/n1/logs/completeness", "/api/v1/runs/run-a/events/stream"} {
+		if rec := get(path, own); rec.Code != http.StatusOK {
+			t.Fatalf("own team %s = %d %s", path, rec.Code, rec.Body)
+		}
+		if rec := get(path, other); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "private-team-pipeline") {
+			t.Fatalf("foreign team %s = %d %s", path, rec.Code, rec.Body)
 		}
 	}
-	if code := f.call("GET", "/api/v1/runs/run-a/logs", a.auth, nil, nil); code != http.StatusOK {
-		t.Errorf("the owning team's logs = %d, want 200", code)
-	}
+	rec := get("/api/v1/runs/grep?q=x", other)
 	var grep struct {
 		RunsMatching int `json:"runs_matching"`
 	}
-	if code := f.call("GET", "/api/v1/runs/grep?q=x", b.auth, nil, &grep); code != http.StatusOK || grep.RunsMatching != 0 {
-		t.Errorf("another team's grep = %d over %d runs, want none of team a's", code, grep.RunsMatching)
+	if err := json.Unmarshal(rec.Body.Bytes(), &grep); err != nil || rec.Code != http.StatusOK || grep.RunsMatching != 0 {
+		t.Fatalf("foreign grep = %d %s: %v", rec.Code, rec.Body, err)
 	}
-	if code := f.call("GET", "/api/v1/capacity/profiles", a.auth, nil, nil); code != http.StatusNotImplemented {
-		t.Errorf("hosted capacity profiles = %d, want 501", code)
+	if rec := get("/api/v1/capacity/profiles", own); rec.Code != http.StatusNotFound {
+		t.Fatalf("retired capacity profiles = %d", rec.Code)
 	}
 }
 
@@ -188,33 +204,36 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
+	f := newBrowserFixture(t, &controller.Dashboard{Paths: paths.PathsAt(t.TempDir())})
+	ctx := t.Context()
+	if err := teststore.SeedRun(f.st, ctx, store.DefaultTeam, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx := context.Background()
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{Paths: paths.PathsAt(t.TempDir())})
-	ts := httptest.NewUnstartedServer(srv.Handler())
+	ts := httptest.NewUnstartedServer(f.h)
 	// safety: the stream polls every quarter second, so a millisecond write timeout has long expired by the time
 	// the event below is sent unless the stream extends its own deadline.
 	ts.Config.WriteTimeout = time.Millisecond
 	ts.Start()
 	t.Cleanup(ts.Close)
 
-	resp, err := ts.Client().Get(ts.URL + "/api/v1/runs/r1/events/stream")
+	req, err := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/v1/runs/r1/events/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	resp, err := ts.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream = %d", resp.StatusCode)
+	}
 	scanner := bufio.NewScanner(resp.Body)
 	appended := false
 	for scanner.Scan() {
 		if !appended && strings.HasPrefix(scanner.Text(), ": open") {
-			if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, "r1", "", "late_event", []byte(`{}`)); err != nil {
+			if err := teststore.ForTeam(t, f.st, store.DefaultTeam).AppendEvent(ctx, "r1", "", "late_event", []byte(`{}`)); err != nil {
 				t.Fatal(err)
 			}
 			appended = true

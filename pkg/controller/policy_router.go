@@ -162,10 +162,6 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 		return err
 	}
 	notePolicyPrincipal(r.Context(), authenticated.Principal)
-	// safety: unknown or dead credentials cannot use decoder failures as an existence oracle.
-	if decodeErr != nil {
-		return decodeErr
-	}
 	// safety: team-local routes without a selector use only the committed credential's active team.
 	if route.Owner == capability.OwnerTeam && presentation.Evidence.Target.Team == "" {
 		presentation.Evidence.Target.Team = authenticated.Principal.Capability.Team
@@ -175,6 +171,9 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return err
 		}
+	}
+	if decodeErr != nil {
+		return decodeErr
 	}
 	if requiresCSRF(r.Method, authenticated.Principal.Class) {
 		if router.authorization.CheckCSRF == nil {

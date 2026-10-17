@@ -30,9 +30,6 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "delete"]
-  - apiGroups: [""]
-    resources: ["limitranges"]
-    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -53,6 +50,15 @@ kind: ClusterRole
 metadata:
   name: {{ .Release.Namespace }}-{{ include "sparkwing-runner-bundle.runner.fullname" . }}-boundary
 rules:
+  - apiGroups: ["karpenter.sh"]
+    resources: ["nodeclaims"]
+    verbs: ["get", "delete"]
+  - apiGroups: ["karpenter.sh"]
+    resources: ["nodepools"]
+    verbs: ["get"]
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    verbs: ["list"]
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "update"]

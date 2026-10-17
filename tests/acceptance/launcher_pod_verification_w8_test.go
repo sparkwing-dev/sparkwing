@@ -7,7 +7,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestLauncherPodRejectionCommitsFailedAwardW8(t *testing.T) {
@@ -41,6 +43,14 @@ func TestLauncherPodRejectionCommitsFailedAwardW8(t *testing.T) {
 			}
 			if _, err = kube.BatchV1().Jobs("cloud").Get(t.Context(), job.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 				t.Fatalf("Job survived: %v", err)
+			}
+			physical, err := kube.CoreV1().Nodes().Get(t.Context(), "dedicated", metav1.GetOptions{})
+			if err != nil || !physical.Spec.Unschedulable {
+				t.Fatalf("rejected node not cordoned: %v", err)
+			}
+			boundary := runtime.Boundary.(*launcher.KubernetesBoundary)
+			if _, err = boundary.Karpenter.Resource(schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}).Get(t.Context(), "claim", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+				t.Fatalf("rejected NodeClaim survived: %v", err)
 			}
 			tenant, err := server.Store.ForTeam(t.Context(), "default")
 			if err != nil {

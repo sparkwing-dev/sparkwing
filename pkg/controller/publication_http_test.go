@@ -92,7 +92,7 @@ func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := runspec.Request{Version: 1, Team: "local", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, Ref: "main", SHA: "local-sha"}, RequestedArgs: map[string]string{}}
+	request := runspec.Request{Version: 1, Team: "local", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, Ref: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}, RequestedArgs: map[string]string{}}
 	state := store.LocalPublication{RunSnapshot: store.RunSnapshot{Run: store.RunRow{ID: "local-run", Team: "local", Pipeline: "ci", State: store.RunSuccess, Request: runspec.SealedRequest{Request: request}, Spec: &runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: 1}, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"LOCAL_TOKEN"}, Guards: runspec.Guards{Passed: true}}}, Plan: raw, FinishedAt: &now}, Nodes: []store.NodeRow{{Ref: store.NodeRef{RunID: "local-run", NodeID: "job"}, Spec: rawJob(t, plan.Jobs[0]), Status: store.StatusDone, Outcome: store.NodeSuccess, Attempt: 1, Generation: 1, StartedAt: &now, FinishedAt: &now}}}}
 	values := map[string]string{}
 	for _, name := range shellNames {

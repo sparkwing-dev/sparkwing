@@ -1173,3 +1173,39 @@ to the launcher. NodePool templates set the exact team-node label and matching
 NoSchedule taint. The Cloud example mounts a separate launcher controller
 credential, enables controller data-volume ownership with fsGroup and the
 ownership initializer, and shows trusted proxy CIDRs.
+## Child lineage reporting, 2026-10-17
+
+`Lineage.RepoInherited` uses optional JSON `repo_inherited`. True records that the
+child caller omitted a repository override. C1 checks the parent repository and
+seals this intent before reporting it. False is omitted, preserving canonical
+encodings for requests without inherited repository intent. Source authorization
+continues through the current intake policy.
+
+
+## Launcher review reconciliation (2026-10-17, W8 integration)
+
+This supersedes the Pod Identity allowance and empty-Pod behavior in the earlier
+EKS amendment, following the lead's launcher review rulings. Customer Pods refuse
+all AWS credential injections. The account must have neither an IRSA role nor a
+Pod Identity association. Region, validated ENI data and load-balancer gates are
+the remaining EKS allowances. Active unsuspended Jobs require exactly one owned
+Pod. Activation polls briefly for creation. A typed mismatch alone rejects work.
+Transport errors retry during reconciliation. The explicit default list is in
+CLOUD-JOBS.md and is tested with API-defaulted fixtures, including globalDefault
+PriorityClass selection from the cluster.
+
+The placement/taint key is node-restriction.kubernetes.io/sparkwing-team-node.
+Reservation checks the node's NodeClaim UID, node name and provider identity,
+then the claim's NodePool UID and template label. A protected sparkwing-used-team
+label retains first use forever. Clear never assigns a new team. CloudBoundary
+adds Retire(ctx, reservation). It cordons the exact node and UID-fences deletion
+of its NodeClaim before reservation release. Retirement failures retain cleanup
+ownership. Malformed Job annotations trigger UID-fenced deletion, leaving orphan
+reservation cleanup subject to its current award and container vacancy.
+
+NewProductionBoundary requires the Karpenter dynamic client. LauncherFactory
+receives a bearer reader instead of a captured string. The installed launcher
+rereads its private credential file on every controller request. Charts grant
+NodeClaim get/delete, NodePool get and PriorityClass list. LimitRange list is
+removed. operator teams show --team reports node_label_key and node_label_value
+in JSON and the label assignment in plain/pretty output.

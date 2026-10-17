@@ -19,7 +19,10 @@ func TestStoreDataEventsCapsCountKindAndUnchargedEvents(t *testing.T) {
 	if err := s.SetEventLimits(t.Context(), EventLimits{MaxBytesPerEvent: 5, MaxBytesPerRun: 10, MaxEventsPerRun: 3}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.AppendEventOnce(t.Context(), "run", "", "k", []byte("1234567")); err != nil {
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		_, err := appendEventTx(t.Context(), tx, tenant.team, "run", "", "k", []byte("1234567"), tx.now())
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tenant.AppendEventCharged(t.Context(), "replica", "run", "", "kkk", nil); !errors.Is(err, ErrStorageQuota) {

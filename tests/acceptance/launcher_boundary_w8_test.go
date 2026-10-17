@@ -71,6 +71,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 			_, cfg, award := cloudFixture(kind)
 			control := &cloudControlW8{award: &award}
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "dedicated", UID: "node-uid", Labels: map[string]string{launcher.TeamNodeLabel: launcher.TeamNodeValue("team")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
+			karpenter := cloudProvisionerW8(node, "team")
 			kube := cloudKubeW8(node)
 			// safety: retain deleting Jobs so the fake API exercises reconstruction while DinD drains.
 			kube.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
@@ -91,7 +92,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 			})
 			clears := 0
 			boundary := &launcher.KubernetesBoundary{
-				Kube: kube, Namespace: cfg.Namespace,
+				Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace,
 				Probe: func(_ context.Context, r launcher.CloudNodeReservation) (launcher.CloudNetworkEvidence, error) {
 					return launcher.CloudNetworkEvidence{Namespace: cfg.Namespace, NodeUID: r.NodeUID, PolicyRevision: "tested-policy", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
 				},

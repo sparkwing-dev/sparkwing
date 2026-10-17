@@ -4,18 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
-	"github.com/sparkwing-dev/sparkwing/internal/runflags"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -31,254 +30,6 @@ func TestTrigger_Validation(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("body %s: status=%d want 400: %s", body, response.Code, response.Body)
 		}
-	}
-}
-
-func TestTrigger_RecordsARunForRunnersToClaim(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	defer srv.Close()
-
-	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "demo",
-		"trigger":  map[string]string{"source": "github"},
-	})
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
-	}
-	var body struct {
-		RunID  string `json:"run_id"`
-		Status string `json:"status"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.RunID == "" {
-		t.Error("run_id empty")
-	}
-	if body.Status != "dispatched" {
-		t.Errorf("status=%q want dispatched", body.Status)
-	}
-}
-
-func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	defer srv.Close()
-
-	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "demo",
-		"trigger": map[string]any{
-			"source": "manual",
-			"env": map[string]string{
-				"SPARKWING_LEASE_TOKEN":       "stale-local-token",
-				"SPARKWING_CHILD_LEASE_TOKEN": "stale-child-token",
-				"GITHUB_REPOSITORY":           "sparkwing-dev/sparkwing",
-			},
-		},
-	})
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
-	}
-	var body struct {
-		RunID string `json:"run_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), body.RunID)
-	if err != nil {
-		t.Fatalf("GetTrigger: %v", err)
-	}
-	if trigger.TriggerEnv["SPARKWING_LEASE_TOKEN"] != "" {
-		t.Fatalf("local lease token persisted from public env: %+v", trigger.TriggerEnv)
-	}
-	if trigger.TriggerEnv["SPARKWING_CHILD_LEASE_TOKEN"] != "" {
-		t.Fatalf("child lease token persisted from public env: %+v", trigger.TriggerEnv)
-	}
-	if trigger.TriggerEnv["GITHUB_REPOSITORY"] != "sparkwing-dev/sparkwing" {
-		t.Fatalf("allow-listed env = %q, want sparkwing-dev/sparkwing", trigger.TriggerEnv["GITHUB_REPOSITORY"])
-	}
-}
-
-func TestTrigger_CreatesPendingRunRow(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-
-	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "demo",
-		"trigger":  map[string]string{"source": "github"},
-		"git":      map[string]string{"branch": "main", "sha": "deadbeef00000000000000000000000000000000"},
-	})
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
-	}
-	var body struct {
-		RunID string `json:"run_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.RunID == "" {
-		t.Fatal("empty run_id")
-	}
-
-	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), body.RunID)
-	if err != nil {
-		t.Fatalf("GetRun(%s): %v", body.RunID, err)
-	}
-	if run.Status != "pending" {
-		t.Errorf("Status=%q want pending", run.Status)
-	}
-	if run.Pipeline != "demo" {
-		t.Errorf("Pipeline=%q want demo", run.Pipeline)
-	}
-	if run.GitSHA != "deadbeef00000000000000000000000000000000" {
-		t.Errorf("GitSHA=%q want the posted object id", run.GitSHA)
-	}
-	if run.CreatedAt.IsZero() {
-		t.Error("CreatedAt is zero")
-	}
-	runs, err := st.AsOperator().ListRuns(context.Background(), store.RunFilter{Limit: 10})
-	if err != nil {
-		t.Fatalf("ListRuns: %v", err)
-	}
-	found := false
-	for _, r := range runs {
-		if r.ID == body.RunID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("ListRuns did not include the pending run %s", body.RunID)
-	}
-}
-
-func postJSON(t *testing.T, url string, body any) *http.Response {
-	t.Helper()
-	buf, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(buf))
-	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
-	}
-	t.Cleanup(func() { resp.Body.Close() })
-	return resp
-}
-
-func TestTrigger_RequiresJSONContentType(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	defer srv.Close()
-
-	cases := []struct {
-		name        string
-		contentType string
-		wantStatus  int
-	}{
-		{name: "simple cross-site post", contentType: "text/plain;charset=UTF-8", wantStatus: http.StatusBadRequest},
-		{name: "form post", contentType: "application/x-www-form-urlencoded", wantStatus: http.StatusBadRequest},
-		{name: "absent", contentType: "", wantStatus: http.StatusBadRequest},
-		{name: "json", contentType: "application/json", wantStatus: http.StatusAccepted},
-		{name: "json with charset", contentType: "application/json; charset=utf-8", wantStatus: http.StatusAccepted},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			body := `{"pipeline":"demo","trigger":{"source":"test"}}`
-			req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/triggers", bytes.NewReader([]byte(body)))
-			if err != nil {
-				t.Fatalf("create request: %v", err)
-			}
-			if tc.contentType != "" {
-				req.Header.Set("Content-Type", tc.contentType)
-			}
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatalf("post: %v", err)
-			}
-			defer resp.Body.Close()
-			raw, _ := io.ReadAll(resp.Body)
-			if resp.StatusCode != tc.wantStatus {
-				t.Fatalf("status = %d body = %q, want %d", resp.StatusCode, raw, tc.wantStatus)
-			}
-		})
-	}
-}
-
-func TestTrigger_ValidatesRepoURL(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	defer srv.Close()
-
-	for _, tc := range []struct {
-		name    string
-		repoURL string
-		want    int
-	}{
-		{name: "https", repoURL: "https://github.com/sparkwing-dev/sparkwing.git", want: http.StatusAccepted},
-		{name: "scp-like ssh", repoURL: "git@github.com:sparkwing-dev/sparkwing.git", want: http.StatusAccepted},
-		{name: "empty", repoURL: "", want: http.StatusAccepted},
-		{name: "local path", repoURL: "/tmp/repo", want: http.StatusBadRequest},
-		{name: "file scheme", repoURL: "file:///tmp/repo", want: http.StatusBadRequest},
-		{name: "loopback host", repoURL: "https://127.0.0.1/repo.git", want: http.StatusBadRequest},
-		{name: "embedded credentials", repoURL: "https://user:secret@example.com/repo.git", want: http.StatusBadRequest},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-				"pipeline": "demo",
-				"trigger":  map[string]any{"source": "manual"},
-				"git":      map[string]any{"repo_url": tc.repoURL},
-			})
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != tc.want {
-				body, _ := io.ReadAll(resp.Body)
-				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tc.want, body)
-			}
-		})
 	}
 }
 
@@ -311,167 +62,222 @@ func TestEventListClampsItsLimit(t *testing.T) {
 	}
 }
 
-func getJSON(t *testing.T, url string, out any) {
-	t.Helper()
-	resp, err := http.Get(url)
+func TestTrigger_RecordsARunForRunnersToClaim(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	created := floodRun(t, f.submit(f.token, "demo", fortyHex(1)), 201)
+	var units int
+	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM triggers WHERE team='default' AND id=? AND unit_kind='trigger' AND claimed_by IS NULL`, created.RunID).Scan(&units); err != nil || units != 1 {
+		t.Fatalf("claimable units=%d: %v", units, err)
+	}
+}
+
+func TestTrigger_CreatesPendingRunRow(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	created := floodRun(t, f.submit(f.token, "demo", fortyHex(1)), 201)
+	tenant := teststore.ForTeam(t, f.st, store.DefaultTeam)
+	run, err := tenant.ReadRun(t.Context(), created.RunID)
+	if err != nil || run.State != store.RunPending || run.Pipeline != "demo" || run.Request.Request.Git.SHA != fortyHex(1) || run.CreatedAt.IsZero() {
+		t.Fatalf("run: %+v: %v", run, err)
+	}
+	rows, err := tenant.ListRuns(t.Context(), store.RunFilter{Limit: 10})
+	if err != nil || len(rows) != 1 || rows[0].ID != created.RunID {
+		t.Fatalf("list: %+v: %v", rows, err)
+	}
+}
+
+func TestRunIntakeRefusesClientSuppliedTriggerEnvironment(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	for _, key := range []string{"SPARKWING_LEASE_TOKEN", "SPARKWING_CHILD_LEASE_TOKEN"} {
+		raw, err := json.Marshal(computeIntake("demo"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		request := body["request"].(map[string]any)
+		request["trigger_env"] = map[string]string{key: "stale-private-token", "GITHUB_REPOSITORY": "acme/app"}
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest("POST", "/api/v1/runs", bytes.NewReader(encoded))
+		r.Header.Set("Authorization", "Bearer "+f.token)
+		r.Header.Set("Content-Type", "application/json")
+		w := f.serve(r)
+		if w.Code != 400 || strings.Contains(w.Body.String(), "stale-private-token") {
+			t.Fatalf("public env: %d %s", w.Code, w.Body)
+		}
+	}
+	var n int
+	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("refused env persisted %d runs: %v", n, err)
+	}
+}
+
+func TestTrigger_RequiresJSONContentType(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	body, err := json.Marshal(computeIntake("demo"))
 	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
+		t.Fatal(err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET %s status = %d (body: %s)", url, resp.StatusCode, body)
+	for _, tc := range []struct {
+		typ    string
+		status int
+	}{{"text/plain;charset=UTF-8", 400}, {"application/x-www-form-urlencoded", 400}, {"", 400}, {"application/json", 201}, {"application/json; charset=utf-8", 201}} {
+		r := httptest.NewRequest("POST", "/api/v1/runs", bytes.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+f.token)
+		r.Header.Set("Content-Type", tc.typ)
+		w := f.serve(r)
+		if w.Code != tc.status {
+			t.Fatalf("Content-Type %q: %d %s", tc.typ, w.Code, w.Body)
+		}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		t.Fatalf("decode %s: %v", url, err)
+}
+
+type triggerSourcePolicy struct{ receiptPolicy }
+
+func (p triggerSourcePolicy) ResolveIntake(ctx context.Context, authority capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
+	facts, err := p.receiptPolicy.ResolveIntake(ctx, authority, request)
+	facts.SourceLocation = &request.Request.Source.Location
+	return facts, err
+}
+
+func TestTrigger_ValidatesRepoURL(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	f.st.SetIntakePolicy(triggerSourcePolicy{})
+	for _, tc := range []struct {
+		remote string
+		want   int
+	}{
+		{"https://example.com/acme/app.git", 201},
+		{"git@example.com:acme/app.git", 201},
+		{"", 201},
+		{"/tmp/repo", 400},
+		{"file:///tmp/repo", 400},
+		{"https://127.0.0.1/repo.git", 400},
+		{"https://user:secret@example.com/repo.git", 400},
+	} {
+		body := computeIntake("demo")
+		body.Request.Source.Location.RemoteURL = tc.remote
+		if tc.remote != "" {
+			body.Request.Git.Repository = runspec.Repository{}
+		}
+		w := f.intake(f.token, body)
+		if w.Code != tc.want {
+			t.Fatalf("remote %q: %d %s", tc.remote, w.Code, w.Body)
+		}
+	}
+}
+
+func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	property := func(noise string) bool {
+		body := computeIntake("demo")
+		body.Request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{DeliveryKey: "forged-" + noise, RepositoryID: 701, InstallationID: 7, DefaultBranchPush: true, VerifiedAt: time.Now()}}
+		created := floodRun(t, f.intake(f.token, body), 201)
+		tenant := teststore.ForTeam(t, f.st, store.DefaultTeam)
+		run, err := tenant.ReadRun(t.Context(), created.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return !run.Request.Request.Git.App.Set && !created.Request.Request.Git.App.Set
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+	body := computeIntake("demo")
+	body.Request.Origin = runspec.OriginApp
+	if w := f.intake(f.token, body); w.Code != 403 {
+		t.Fatalf("forged App origin: %d %s", w.Code, w.Body)
 	}
 }
 
 func TestTriggerAndCreateRunRejectAGitSHAThatIsNotAnObjectID(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	defer srv.Close()
-
-	for i, sha := range []string{"--upload-pack=evil", "main", "abc1234", "HEAD"} {
-		resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-			"pipeline": "demo",
-			"trigger":  map[string]string{"source": "manual"},
-			"git":      map[string]string{"sha": sha},
-		})
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Errorf("trigger sha %q: status=%d want 400: %s", sha, resp.StatusCode, body)
-		}
-
-		runResp := postJSON(t, srv.URL+"/api/v1/runs", store.Run{
-			ID: "run-sha-" + strconv.Itoa(i), Pipeline: "demo", Status: "running",
-			GitSHA: sha, StartedAt: time.Now(),
-		})
-		runBody, _ := io.ReadAll(runResp.Body)
-		_ = runResp.Body.Close()
-		if runResp.StatusCode != http.StatusBadRequest {
-			t.Errorf("run sha %q: status=%d want 400: %s", sha, runResp.StatusCode, runBody)
+	f := newFloodServer(t, controller.FloodPolicy{})
+	for _, sha := range []string{"--upload-pack=evil", "main", "abc1234", "HEAD"} {
+		if w := f.submit(f.token, "demo", sha); w.Code != 400 {
+			t.Fatalf("sha %q: %d %s", sha, w.Code, w.Body)
 		}
 	}
-
-	head := "0123456789abcdef0123456789abcdef01234567"
-	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "demo",
-		"trigger":  map[string]string{"source": "manual"},
-		"git":      map[string]string{"sha": head},
-	})
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("object id trigger: status=%d want 202: %s", resp.StatusCode, body)
-	}
-	runResp := postJSON(t, srv.URL+"/api/v1/runs", store.Run{
-		ID: "run-sha-ok", Pipeline: "demo", Status: "running", GitSHA: head, StartedAt: time.Now(),
-	})
-	runBody, _ := io.ReadAll(runResp.Body)
-	_ = runResp.Body.Close()
-	if runResp.StatusCode != http.StatusCreated {
-		t.Errorf("object id run: status=%d want 201: %s", runResp.StatusCode, runBody)
-	}
+	floodRun(t, f.submit(f.token, "demo", fortyHex(1)), 201)
 }
 
-// A run page reads GITHUB_REPOSITORY and a direct runner fetches
-// git.repo_url, so a trigger whose names disagree would show one repository
-// and run another.
 func TestTrigger_RefusesATriggerThatNamesTwoRepositories(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	f := newFloodServer(t, controller.FloodPolicy{})
+	f.st.SetIntakePolicy(triggerSourcePolicy{})
+	property := func(value uint32) bool {
+		body := computeIntake("demo")
+		body.Request.Source.Location.RemoteURL = "https://example.com/acme/app.git"
+		body.Request.Git.Repository.Key = runspec.RepoKey(fmt.Sprintf("git:example.com/evil/repo%d", value))
+		w := f.intake(f.token, body)
+		return w.Code == 403 && !strings.Contains(w.Body.String(), "private")
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+	body := computeIntake("demo")
+	body.Request.Source.Location.RemoteURL = "git@example.com:acme/app.git"
+	body.Request.Git.Repository = runspec.Repository{Key: "git:example.com/acme/app"}
+	floodRun(t, f.intake(f.token, body), 201)
+}
+
+func TestTriggerRecordsTheRunFlagsOnTheRunRow(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	body := computeIntake("demo")
+	body.Request.Options.Only = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "ship"}}
+	body.Request.Options.DryRun = runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}
+	body.Request.Options.NoMemo = runspec.Setting[bool]{Optional: runspec.Optional[bool]{Set: true, Value: true}}
+	created := floodRun(t, f.intake(f.token, body), 201)
+	row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).ReadRun(t.Context(), created.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	t.Cleanup(srv.Close)
-
-	for _, tc := range []struct {
-		name string
-		env  map[string]string
-		git  map[string]any
-		want int
-	}{
-		{
-			name: "repo_url against GITHUB_REPOSITORY",
-			env:  map[string]string{"GITHUB_REPOSITORY": "acme/app"},
-			git:  map[string]any{"repo_url": "https://github.com/evil/payload.git"},
-			want: http.StatusBadRequest,
-		},
-		{
-			name: "repo_url against github_owner/github_repo",
-			git:  map[string]any{"repo_url": "https://github.com/acme/app.git", "github_owner": "evil", "github_repo": "payload"},
-			want: http.StatusBadRequest,
-		},
-		{
-			name: "GITHUB_REPOSITORY against github_owner/github_repo",
-			env:  map[string]string{"GITHUB_REPOSITORY": "acme/app"},
-			git:  map[string]any{"github_owner": "evil", "github_repo": "payload"},
-			want: http.StatusBadRequest,
-		},
-		{
-			name: "every name agrees",
-			env:  map[string]string{"GITHUB_REPOSITORY": "Acme/App"},
-			git:  map[string]any{"repo_url": "git@github.com:acme/app.git", "github_owner": "acme", "github_repo": "app"},
-			want: http.StatusAccepted,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-				"pipeline": "demo",
-				"trigger":  map[string]any{"source": "manual", "env": tc.env},
-				"git":      tc.git,
-			})
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != tc.want {
-				body, _ := io.ReadAll(resp.Body)
-				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tc.want, body)
-			}
-		})
+	got := row.Request.Request.Options
+	if !got.Only.Set || got.Only.Value != "ship" || !got.DryRun.Set || !got.DryRun.Value || !got.NoMemo.Set || !got.NoMemo.Value {
+		t.Fatalf("flags: %+v", got)
 	}
 }
 
-// safety: the run row is where every host of a triggered run reads its run flags, the planning claim's included.
-func TestTriggerRecordsTheRunFlagsOnTheRunRow(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
+func TestRunIntakeRejectsUntrustedRevisionSelectorsProperty(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	property := func(noise string, variant uint8) bool {
+		sha := "--upload-pack=" + noise
+		switch variant % 3 {
+		case 1:
+			sha = strings.Repeat("a", 41+int(variant%23))
+		case 2:
+			sha = strings.Repeat("0", 39) + "g"
+		}
+		w := f.submit(f.token, "demo", sha)
+		return w.Code == 400
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "demo",
-		"trigger": map[string]any{"source": "manual", "env": map[string]string{
-			"SPARKWING_ONLY": "ship", "SPARKWING_DRY_RUN": "1", "SPARKWING_NO_CACHE": "1",
-		}},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	floodRun(t, f.submit(f.token, "demo", strings.Repeat("a", 40)), 201)
+	floodRun(t, f.submit(f.token, "demo", strings.Repeat("b", 64)), 201)
+	var count int
+	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("invalid revision persisted runs: %d: %v", count, err)
 	}
-	var body struct {
-		RunID string `json:"run_id"`
+}
+
+func TestRunIntakeSourceBoundaryProperty(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	f.st.SetIntakePolicy(triggerSourcePolicy{})
+	property := func(a, b, c uint8) bool {
+		body := computeIntake("demo")
+		body.Request.Git.Repository = runspec.Repository{}
+		body.Request.Source.Location.RemoteURL = fmt.Sprintf("https://10.%d.%d.%d/repo.git", a, b, c)
+		return f.intake(f.token, body).Code == 400
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), body.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := runflags.FromInvocation(run.Invocation), (runflags.Flags{Only: "ship", DryRun: true, NoCache: true}); got != want {
-		t.Fatalf("run row's flags = %+v, want %+v", got, want)
+	var count int
+	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("private source persisted runs: %d: %v", count, err)
 	}
 }

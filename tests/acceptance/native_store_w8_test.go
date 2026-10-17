@@ -5,12 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"net/http"
 	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"

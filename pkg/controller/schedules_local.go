@@ -55,7 +55,9 @@ func (s *Server) handleRegisterLocalSchedules(w http.ResponseWriter, r *http.Req
 	}
 	report, err := service.RegisterLocal(r.Context(), input, func(ctx context.Context, root, pipeline string) (crons.Proof, error) {
 		return s.localScheduleProver(ctx, root, pipeline, input.Environment)
-	}, s.localScheduleEnvironments.Capture)
+	}, s.localScheduleEnvironments.Capture, func(ctx context.Context, rows []store.CronSchedule, registration crons.LocalRegistration, replace bool) (crons.ArmReport, error) {
+		return s.commitLocalSchedules(ctx, a, input.RepoPath, rows, registration, replace)
+	})
 	if err != nil {
 		return engineLookupError(err)
 	}

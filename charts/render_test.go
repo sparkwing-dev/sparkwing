@@ -2259,7 +2259,9 @@ func TestCloudLauncherCanReadBoundaryNamespace(t *testing.T) {
 				verbs                 []string
 			}{
 				{"ClusterRole", "", "namespaces", []string{"get"}},
-				{"Role", "", "limitranges", []string{"list"}},
+				{"ClusterRole", "karpenter.sh", "nodeclaims", []string{"get", "delete"}},
+				{"ClusterRole", "karpenter.sh", "nodepools", []string{"get"}},
+				{"ClusterRole", "scheduling.k8s.io", "priorityclasses", []string{"list"}},
 			} {
 				found := false
 				for _, resource := range resources {

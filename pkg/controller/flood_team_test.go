@@ -1,125 +1,100 @@
 package controller_test
 
 import (
-	"context"
-	"net/http"
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-// A signed-up team's tokens share one run-creation bucket, so minting another
-// token does not buy another cap, and a retry spends from the same bucket as
-// a trigger.
-func TestFloodPolicy_ATeamsTokensShareOneCap(t *testing.T) {
-	ctx := context.Background()
-	now := time.Now().UTC()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+func floodMember(t *testing.T, f *floodFixture, team store.Team, name string) string {
+	t.Helper()
+	raw, _, err := teststore.ProvisionCredential(t.Context(), f.st, capability.ProvisionSpec{
+		Kind: capability.ProvisionMember, Team: string(team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: name},
+		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	if _, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)}); err != nil {
+	return raw
+}
+
+func TestFloodPolicy_APISubmissionsAndRetriesUsePerTokenCaps(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	tokens := []string{f.token, floodMember(t, f, "default", "alice"), floodMember(t, f, "default", "alice")}
+	first := floodRun(t, f.submit(tokens[0], "build", fortyHex(1)), 201)
+	if err := teststore.SeedRunFinish(f.st, t.Context(), store.DefaultTeam, first.RunID, "failed", "boom"); err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.New(st, nil).WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 2})
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	if err := st.AsOperator().CreateTeam(ctx, "acme"); err != nil {
-		t.Fatal(err)
-	}
-	acme, err := st.ForTeam(ctx, "acme")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var tokens []string
-	for _, name := range []string{"one", "two", "three"} {
-		raw, _, err := teststore.ProvisionCredential(ctx, st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(acme.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: name}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.control", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
+	retry := func(token, key string) *httptest.ResponseRecorder {
+		body, err := json.Marshal(controllerwire.RetryRequest{Mode: "all", IdempotencyKey: key})
 		if err != nil {
 			t.Fatal(err)
 		}
-		tokens = append(tokens, "Bearer "+raw)
+		req := httptest.NewRequest("POST", "/api/v1/runs/"+first.RunID+"/retry", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		return f.serve(req)
 	}
-	f := &tenancyFixture{t: t, url: ts.URL, st: st}
-	trigger := func(auth string, seed int) int {
-		code, _ := f.do("POST", "/api/v1/triggers", auth, map[string]any{
-			"pipeline": "build", "trigger": map[string]any{"source": "api"},
-			"git": map[string]any{"branch": "main", "sha": fortyHex(seed)},
-		})
-		return code
+	floodRun(t, retry(tokens[1], "inside-cap"), 200)
+	floodRun(t, f.submit(tokens[2], "build", fortyHex(3)), 201)
+	if r := f.submit(tokens[0], "build", fortyHex(4)); r.Code != 429 {
+		t.Fatalf("first token escaped its cap: %d %s", r.Code, r.Body)
 	}
-	if code := trigger(tokens[0], 1); code != http.StatusAccepted {
-		t.Fatalf("first trigger = %d", code)
+	if r := retry(tokens[2], "over-cap"); r.Code != 429 {
+		t.Fatalf("retry = %d %s", r.Code, r.Body)
 	}
-	seedRun(t, st, acme, "run-acme", "build")
-	if code, body := f.do("POST", "/api/v1/runs/run-acme/retry", tokens[1], nil); code/100 != 2 {
-		t.Fatalf("retry inside the cap = %d: %s", code, body)
-	}
-	if code := trigger(tokens[2], 3); code != http.StatusTooManyRequests {
-		t.Errorf("a third token's trigger past the team's cap = %d want 429", code)
-	}
-	if code, _ := f.do("POST", "/api/v1/runs/run-acme/retry", tokens[2], nil); code != http.StatusTooManyRequests {
-		t.Errorf("a retry past the team's cap = %d want 429", code)
+	runs, err := f.st.AsOperator().ListRuns(t.Context(), store.RunFilter{Limit: 10})
+	if err != nil || len(runs) != 3 {
+		t.Fatalf("runs = %d: %v", len(runs), err)
 	}
 }
 
-// The shed threshold measures the submitting team's own queue, so one team's
-// backlog never refuses another team's submissions.
 func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
-	ctx := context.Background()
-	now := time.Now().UTC()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	for i := range 2 {
+		floodRun(t, f.submit(f.token, "build", fortyHex(i)), 201)
+	}
+	if err := f.st.AsOperator().CreateTeam(t.Context(), "other"); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	if _, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)}); err != nil {
-		t.Fatal(err)
+	other := floodMember(t, f, "other", "ci-other")
+	f.srv.WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
+	floodRun(t, f.submit(other, "build", fortyHex(1)), 201)
+	if r := f.submit(f.token, "build", fortyHex(2)); r.Code != 503 {
+		t.Fatalf("backlogged team = %d %s", r.Code, r.Body)
 	}
-	srv := controller.New(st, nil).WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	auth := map[store.Team]string{}
-	for _, team := range []store.Team{"acme", "globex"} {
-		if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
-			t.Fatal(err)
-		}
-		tenant, err := st.ForTeam(ctx, team)
-		if err != nil {
-			t.Fatal(err)
-		}
-		raw, _, err := teststore.ProvisionCredential(ctx, st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(tenant.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "ci"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		auth[team] = "Bearer " + raw
-		if team == "acme" {
-			for _, id := range []string{"run-backlog-1", "run-backlog-2"} {
-				if err := teststore.SeedTrigger(st, ctx, tenant.Team(), store.Trigger{ID: id, Pipeline: "build", CreatedAt: now}); err != nil {
+}
+
+func TestFloodPolicyTeamBucketsRemainIndependentProperty(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{RunsPerPrincipalHour: 1, DedupeWindow: time.Minute})
+	i := 0
+	property := func(seed uint32) bool {
+		i++
+		teams := []store.Team{store.Team(fmt.Sprintf("a-%d-%d", i, seed)), store.Team(fmt.Sprintf("b-%d-%d", i, seed))}
+		f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1, DedupeWindow: time.Minute})
+		for _, team := range teams {
+			if _, err := f.st.ForTeam(t.Context(), team); err != nil {
+				if err := f.st.AsOperator().CreateTeam(t.Context(), team); err != nil {
 					t.Fatal(err)
 				}
 			}
 		}
+		a, b := floodMember(t, f, teams[0], fmt.Sprintf("a-%d-%d", i, seed)), floodMember(t, f, teams[1], fmt.Sprintf("b-%d-%d", i, seed))
+		first := floodRun(t, f.submit(a, "build", fortyHex(1)), 201)
+		second := floodRun(t, f.submit(b, "build", fortyHex(1)), 201)
+		return first.RunID != second.RunID && f.submit(a, "build", fortyHex(2)).Code == 429 && f.submit(b, "build", fortyHex(2)).Code == 429
 	}
-	f := &tenancyFixture{t: t, url: ts.URL, st: st}
-	trigger := func(team store.Team, seed int) int {
-		code, _ := f.do("POST", "/api/v1/triggers", auth[team], map[string]any{
-			"pipeline": "build", "trigger": map[string]any{"source": "api"},
-			"git": map[string]any{"branch": "main", "sha": fortyHex(seed)},
-		})
-		return code
-	}
-	if code := trigger("globex", 1); code != http.StatusAccepted {
-		t.Errorf("globex trigger beside acme's backlog = %d want 202", code)
-	}
-	if code := trigger("acme", 2); code != http.StatusServiceUnavailable {
-		t.Errorf("acme trigger past its own backlog = %d want 503", code)
+	if err := quick.Check(property, &quick.Config{MaxCount: 12}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -56,9 +56,12 @@ and [Cloud prerequisites](../sparkwing-full/README.md#cloud-node-and-network-pre
 describe team-node labels, CPU-band taints, disruption protection, native
 sidecars, PodLevelResources and node-level network enforcement.
 The launcher reads each created Job's Pods and compares them with the requested
-spec. Kubernetes defaults and the named EKS pod-identity, VPC resource controller
-and load-balancer readiness injections are allowed. Any other change deletes
-the Job and fails its exact award. Reconciliation repeats the check, including
+spec. Kubernetes defaults, EKS region settings, validated VPC resource controller
+ENI data and load-balancer readiness gates are allowed. Customer Pods must not
+carry AWS credentials. Do not annotate their ServiceAccount with an IRSA role
+or create a Pod Identity association for it. Any other change deletes
+the Job, fails its exact award, cordons the node and deletes its Karpenter
+NodeClaim. Nodes keep their first team assignment through reservation cleanup. Reconciliation repeats the check, including
 after launcher restart. Kubernetes admission policy APIs are not required.
 
 Use a dedicated Job namespace. Grant Pod and Job creation only to the launcher

@@ -28,7 +28,7 @@ const (
 	JobLabel              = "sparkwing.dev/job"
 	JobBinary             = "sparkwing-runner"
 	TeamLabel             = "sparkwing.dev/team"
-	TeamNodeLabel         = "sparkwing.dev/team-node"
+	TeamNodeLabel         = "node-restriction.kubernetes.io/sparkwing-team-node"
 	managedByLauncher     = "sparkwing-launcher"
 	bindingAnnotation     = "sparkwing.dev/award-binding"
 	deadlineAnnotation    = "sparkwing.dev/job-deadline"

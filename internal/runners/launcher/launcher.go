@@ -179,8 +179,8 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := validateAdmittedJob(expected, activated); err != nil {
 		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation))
 	}
-	if err := l.verifyJobPods(ctx, created); err != nil {
-		return true, errors.Join(err, l.rejectJob(ctx, created, award.Binding, r.Reservation))
+	if err := l.waitForJobPod(ctx, activated); err != nil {
+		return true, l.verificationFailure(ctx, activated, award.Binding, r.Reservation, err)
 	}
 	return true, nil
 }

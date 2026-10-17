@@ -282,9 +282,9 @@ func TestSourceCredential_NeedsTheRunsOwnClaimToken(t *testing.T) {
 		}
 	}
 	bobs, _ := f.nodeClaim(bob, "run-bob", "https://github.com/bob/tools.git", 801)
-	if got, code := f.sourceCredential(bobs, "run-widgets"); (code != http.StatusForbidden && code != http.StatusNotFound) ||
-		got.Token != "" || got.Error == "not_found" {
-		t.Fatalf("another team's claim token = %d %+v, want a refusal that reveals nothing", code, got)
+	// safety: another team's run answers exactly as a missing run does.
+	if got, code := f.sourceCredential(bobs, "run-widgets"); code != http.StatusNotFound || got.Token != "" || got.Error != "not_found" {
+		t.Fatalf("another team's claim token = %d %+v, want the missing-run 404", code, got)
 	}
 }
 

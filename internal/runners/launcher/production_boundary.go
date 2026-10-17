@@ -23,13 +23,14 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
 
 const boundaryControlLabel = "sparkwing.dev/boundary-control"
 
 // NewProductionBoundary measures networking from root and escaped node contexts before authorizing Cloud execution.
-func NewProductionBoundary(kube kubernetes.Interface, cfg CloudJobConfig, apiServer string) (*KubernetesBoundary, error) {
+func NewProductionBoundary(kube kubernetes.Interface, karpenter dynamic.Interface, cfg CloudJobConfig, apiServer string) (*KubernetesBoundary, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -45,7 +46,7 @@ func NewProductionBoundary(kube kubernetes.Interface, cfg CloudJobConfig, apiSer
 		return nil, errors.New("Cloud boundary requires Kubernetes")
 	}
 	p := &productionBoundary{kube: kube, cfg: cfg, required: required, api: api}
-	return &KubernetesBoundary{Kube: kube, Namespace: cfg.Namespace, Probe: p.probe, Clear: p.stopProbes, StopProbes: p.stopProbes}, nil
+	return &KubernetesBoundary{Kube: kube, Karpenter: karpenter, Namespace: cfg.Namespace, Probe: p.probe, Clear: p.stopProbes, StopProbes: p.stopProbes}, nil
 }
 
 type productionBoundary struct {
@@ -206,7 +207,7 @@ func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) 
 		return evidence, err
 	}
 	pods = append(pods, admitted)
-	if err = validateCanary(control, admitted); err != nil {
+	if err = p.validateCanary(ctx, control, admitted); err != nil {
 		return evidence, err
 	}
 	policy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: control.Name, Namespace: p.cfg.Namespace, Annotations: control.Annotations}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{boundaryControlLabel: nonce}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}, Ingress: []networkingv1.NetworkPolicyIngressRule{{}}}}
@@ -236,7 +237,7 @@ func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) 
 		return evidence, err
 	}
 	pods = append(pods, admitted)
-	if err = validateCanary(witness, admitted); err != nil {
+	if err = p.validateCanary(ctx, witness, admitted); err != nil {
 		return evidence, err
 	}
 	if _, err = p.waitPod(ctx, admitted, false); err != nil {
@@ -248,7 +249,7 @@ func (p *productionBoundary) probe(ctx context.Context, r CloudNodeReservation) 
 		return evidence, err
 	}
 	pods = append(pods, admitted)
-	if err = validateCanary(measure, admitted); err != nil {
+	if err = p.validateCanary(ctx, measure, admitted); err != nil {
 		return evidence, err
 	}
 	if _, err = p.waitPod(ctx, admitted, false); err != nil {
@@ -301,11 +302,14 @@ done`
 	return pod
 }
 
-func validateCanary(expected, admitted *corev1.Pod) error {
+func (boundary *productionBoundary) validateCanary(ctx context.Context, expected, admitted *corev1.Pod) error {
 	if admitted == nil || admitted.UID == "" || admitted.Name != expected.Name || admitted.Namespace != expected.Namespace || admitted.DeletionTimestamp != nil || !equality.Semantic.DeepEqual(expected.Labels, admitted.Labels) || !equality.Semantic.DeepDerivative(expected.Annotations, admitted.Annotations) {
 		return errors.New("Kubernetes changed Cloud canary identity")
 	}
 	p, q := expected.Spec.DeepCopy(), admitted.Spec.DeepCopy()
+	if err := defaultPriority(ctx, boundary.kube, p); err != nil {
+		return err
+	}
 	if err := removeEKSMutations(p, q); err != nil {
 		return err
 	}

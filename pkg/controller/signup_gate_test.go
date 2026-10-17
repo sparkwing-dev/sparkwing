@@ -124,7 +124,7 @@ func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 	owner := f.signIn(person("g-o", "owner@example.com", "Owner"))
 	operator := f.operatorAuth()
 	st := f.setSignUp(map[string]any{"mode": "waitlist", "reason": "launch"})
-	if st.State != "waitlist" || st.Source != store.WaitlistReasonOperator || !strings.Contains(st.SetBy, "root") {
+	if st.State != "waitlist" || st.Source != store.WaitlistReasonOperator || st.SetBy != "bootstrap:admin" {
 		t.Fatalf("status after closing = %+v", st)
 	}
 
@@ -163,10 +163,10 @@ func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 	ownerAuth := sessionAuth(owner.SessionID)
 	joiner := signedIn{auth: auth, id: newcomer.User.ID}
 	f.join(signedIn{auth: ownerAuth, team: owner.ActiveTeam.Slug}, joiner, "new@example.com", "reader")
-	if me := f.me(auth); me.ActiveTeam == nil || me.ActiveTeam.Slug != owner.ActiveTeam.Slug || !me.Waitlisted {
+	if me := f.me(auth); me.ActiveTeam == nil || me.ActiveTeam.Slug != owner.ActiveTeam.Slug || me.ActiveTeam.Role != "reader" || !me.Waitlisted {
 		t.Fatalf("/me after accepting an invitation = %+v", me)
 	}
-	if w := f.whoami(auth); w.Team != owner.ActiveTeam.Slug || w.Role != "reader" {
+	if w := f.whoami(auth); w.Team != owner.ActiveTeam.Slug || w.Principal != newcomer.User.ID || len(w.Scopes) != 2 || !slices.Contains(w.Scopes, "runs.read") || !slices.Contains(w.Scopes, "logs.read") {
 		t.Fatalf("whoami after accepting = %+v", w)
 	}
 
@@ -184,12 +184,19 @@ func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 	if len(approved.Approved) != 1 || approved.Approved[0].ActiveTeam != "later" {
 		t.Fatalf("approved = %+v", approved)
 	}
-	me := f.me(sessionAuth(later.SessionID))
-	if me.Waitlisted || me.ActiveTeam == nil || me.ActiveTeam.Slug != "later" || me.ActiveTeam.Role != "owner" {
+	laterAuth := sessionAuth(later.SessionID)
+	me := f.me(laterAuth)
+	if me.Waitlisted || me.ActiveTeam != nil || len(me.Memberships) != 1 || me.Memberships[0].Slug != "later" || me.Memberships[0].Role != "owner" {
 		t.Fatalf("/me on the waitlisted session after approval = %+v", me)
 	}
-	if w := f.whoami(sessionAuth(later.SessionID)); w.Team != "later" || w.Role != "owner" {
-		t.Fatalf("whoami after approval = %+v", w)
+	if code := f.call("POST", "/api/v1/me/active-team", laterAuth, map[string]string{"slug": "later"}, nil); code != http.StatusNoContent {
+		t.Fatalf("select approved team on the existing session = %d, want 204", code)
+	}
+	if me := f.me(laterAuth); me.ActiveTeam == nil || me.ActiveTeam.Slug != "later" || me.ActiveTeam.Role != "owner" {
+		t.Fatalf("/me after selecting the approved team = %+v", me)
+	}
+	if w := f.whoami(laterAuth); w.Team != "later" || w.Principal != later.User.ID || !slices.Contains(w.Scopes, "team.admin") {
+		t.Fatalf("whoami after approval and selection = %+v", w)
 	}
 }
 

@@ -36,6 +36,13 @@ not the bearer. The operation refuses an existing or retired team slug with
 `conflict` and makes no changes. It never retries automatically because a lost
 response cannot recover the one-time credential.
 
+
+Use `sparkwing operator teams show --team support-test --profile deployment -o json`
+to read the team identity and its protected node label key and value. Apply that
+value to the team's NodePool template label and taint. The underlying
+`GET /api/v1/operator/teams/{team}` returns team ID and display name to deployment
+credentials. Financial and console details remain restricted to console sessions.
+
 This is the Cloud operations, support and test-environment path. Local mode
 uses its default team and OS-verified socket. Self-hosted controller onboarding
 is outside the launch offering.

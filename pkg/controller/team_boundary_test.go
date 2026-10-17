@@ -94,20 +94,15 @@ type tenancyFixture struct {
 
 	ownerA, ownerB   string
 	readerA, editorA string
-	// safety: carries every scope, so a refusal it gets is the team boundary's and not a missing scope.
-	everyScopeB string
-	runnerB     string
+	everyScopeB      string
+	runnerB          string
 
-	runA   string
-	victim string
+	runA     string
+	victim   string
+	requests int
 }
 
-var everyScope = []string{
-	"runs.read", "runs.write", "runs.control",
-	"nodes.claim", "logs.read",
-	"triggers.read", "triggers.claim", "runs.state",
-	"secrets.read", "approvals.write", "team.admin",
-}
+var everyMemberGrant = store.ScopesForRole(store.RoleOwner)
 
 func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	t.Helper()
@@ -119,9 +114,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	raw, pub := multiTeamLicense(t)
 	srv := controller.New(st, nil).WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	f := &tenancyFixture{t: t, srv: srv, url: ts.URL, st: st}
+	f := &tenancyFixture{t: t, srv: srv, url: "https://controller.test", st: st}
 
 	alice, teamA := signUp(t, st, "alice")
 	bob, teamB := signUp(t, st, "bob")
@@ -132,7 +125,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	f.readerA = f.member(alice, "carol", store.RoleReader)
 	f.editorA = f.member(alice, "dave", store.RoleEditor)
 
-	raw, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "b-everything"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants(everyScope), ExpiresAt: teststore.CredentialExpiry(now, 0)})
+	raw, _, err := teststore.ProvisionCredential(ctx, f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(f.teamB.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "b-everything"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants(everyMemberGrant), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,11 +137,11 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	f.runnerB = "Bearer " + raw
 
 	f.runA = "run-team-a"
-	seedRun(t, f.st, f.teamA, f.runA, "build-a")
-	if err := teststore.SeedNode(st, ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "running"}); err != nil {
+	seedRun(t, st, f.teamA, f.runA, "build-a")
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES (?,?,?,?,?,?)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,on_timeout) VALUES ($1,$2,$3,$4,$5,$6)`, f.teamA.Team(), f.runA, "n1", now.UnixNano(), "", "fail"); err != nil {
 		t.Fatal(err)
 	}
 	seedControllerCapacityHolder(t, st, f.teamA.Team(), "deploy", "holder-a", f.runA, "n1", 0)
@@ -207,10 +200,7 @@ func (f *tenancyFixture) member(owner store.Account, name string, role store.Rol
 func seedRun(t *testing.T, st *store.Store, tn *store.Tenant, id, pipeline string) {
 	t.Helper()
 	now := time.Now()
-	if err := teststore.SeedTriggerWithRun(st, context.Background(), tn.Team(),
-		store.Trigger{ID: id, Pipeline: pipeline, TriggerSource: "api", CreatedAt: now},
-		store.Run{ID: id, Pipeline: pipeline, Status: "running", CreatedAt: now, StartedAt: now},
-	); err != nil {
+	if err := teststore.SeedRun(st, t.Context(), tn.Team(), store.Run{ID: id, Pipeline: pipeline, Status: "running", CreatedAt: now, StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -235,13 +225,17 @@ func (f *tenancyFixture) do(method, path, auth string, body any) (int, string) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Authorization", auth)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		f.t.Fatalf("%s %s: %v", method, path, err)
+	f.requests++
+	req.Header.Set("Idempotency-Key", "tenant-"+strconv.Itoa(f.requests))
+	if strings.HasPrefix(auth, "Session ") {
+		if err := controller.ConsoleFixtureRequest(f.srv, req, strings.TrimPrefix(auth, "Session ")); err != nil {
+			f.t.Fatal(err)
+		}
 	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(raw)
+	req.Header.Set("Origin", "https://controller.test")
+	w := httptest.NewRecorder()
+	f.srv.Handler().ServeHTTP(w, req)
+	return w.Code, w.Body.String()
 }
 
 func tenancyDialects(t *testing.T, run func(t *testing.T, f *tenancyFixture)) {
@@ -260,20 +254,24 @@ func tenancyDialects(t *testing.T, run func(t *testing.T, f *tenancyFixture)) {
 
 func TestTeamBoundary_ConcurrencyHolderCannotCrossTeams(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		path := "/api/v1/concurrency/deploy"
+		path := "/api/v1/queue/groups/deploy"
 		for _, route := range []string{"/heartbeat", "/release", "/holder?holder_id=holder-a"} {
 			method := http.MethodPost
-			if strings.HasPrefix(route, "/holder") {
-				method = http.MethodGet
+			payload := map[string]any{"holder_id": "holder-a"}
+			if route == "/release" {
+				payload["outcome"] = "success"
 			}
-			code, _ := f.do(method, path+route, f.everyScopeB, map[string]any{"holder_id": "holder-a", "outcome": "success"})
-			if code == http.StatusOK || code == http.StatusNoContent {
+			if strings.HasPrefix(route, "/holder") {
+				method, payload = http.MethodGet, nil
+			}
+			code, body := f.do(method, path+route, f.everyScopeB, payload)
+			if code != http.StatusForbidden || strings.Contains(body, "route not found") {
 				t.Errorf("team B reached team A's concurrency holder through %s: %d", route, code)
 			}
 		}
-		holder, err := f.teamA.ConcurrencyHolder(context.Background(), "deploy", "holder-a", time.Now())
-		if err != nil || holder == nil || holder.RunID != f.runA {
-			t.Fatalf("team A holder changed: %+v, %v", holder, err)
+		state, err := f.teamA.GetConcurrencyState(t.Context(), "deploy")
+		if err != nil || len(state.Holders) != 1 || state.Holders[0].HolderID != "holder-a" || state.Holders[0].RunID != f.runA || !state.Holders[0].LeaseExpiresAt.After(time.Now()) {
+			t.Fatalf("team A holder changed: %+v, %v", state, err)
 		}
 	})
 }
@@ -300,11 +298,9 @@ func TestTeamBoundary_AFreshAccountCannotReachAnotherTeamsRun(t *testing.T) {
 			t.Errorf("team B's cancels reached %d triggers of other teams", n)
 		}
 
-		code, body := f.do("POST", "/api/v1/triggers", f.ownerB, map[string]any{
-			"pipeline": "build-b", "trigger": map[string]any{"source": "api"},
-		})
-		if code != http.StatusAccepted {
-			t.Fatalf("POST /triggers as team B = %d: %s", code, body)
+		code, body := f.do("POST", "/api/v1/runs", f.ownerB, computeIntake("build-b"))
+		if code != http.StatusCreated {
+			t.Fatalf("POST /runs as team B = %d: %s", code, body)
 		}
 		var resp struct {
 			RunID string `json:"run_id"`
@@ -333,54 +329,10 @@ func cancelRequests(t *testing.T, st *store.Store) int {
 	t.Helper()
 	var n int
 	if err := st.DB().QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM triggers WHERE cancel_requested_at IS NOT NULL`).Scan(&n); err != nil {
+		`SELECT COUNT(*) FROM runs WHERE cancel_requested_at IS NOT NULL`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
-}
-
-// The orchestrator of a webhook trigger creates the run under its trigger
-// claim, and the run lands in the team the claim was made in.
-func TestTeamBoundary_ARunnerCreatesItsRunInItsOwnTeam(t *testing.T) {
-	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		ctx := context.Background()
-		if err := teststore.SeedTrigger(f.st, ctx, f.teamB.Team(), store.Trigger{
-			ID: "run-by-b", Pipeline: "build-b", TriggerSource: "api", CreatedAt: time.Now(),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		code, body := f.do("POST", "/api/v1/triggers/claim", f.runnerB, map[string]any{})
-		if code != http.StatusOK {
-			t.Fatalf("claim as team B's runner = %d: %s", code, body)
-		}
-		var claimed store.Trigger
-		if err := json.Unmarshal([]byte(body), &claimed); err != nil {
-			t.Fatal(err)
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.url+"/api/v1/runs", strings.NewReader(
-			`{"id":"run-by-b","pipeline":"build-b","status":"running"}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", f.runnerB)
-		req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		raw, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusCreated {
-			t.Fatalf("POST /runs under team B's trigger claim = %d: %s", resp.StatusCode, raw)
-		}
-		if _, err := f.teamB.GetRun(ctx, "run-by-b"); err != nil {
-			t.Errorf("the run team B created is not in team B: %v", err)
-		}
-		if _, err := forTeam(t, f.st, store.DefaultTeam).GetRun(ctx, "run-by-b"); err == nil {
-			t.Error("the run team B created landed in default")
-		}
-	})
 }
 
 func runRoutePath(pattern, runID string) (method, path string) {
@@ -394,7 +346,7 @@ func runScoped(pattern string) bool {
 	return strings.HasPrefix(path, "/api/v1/runs/{run}")
 }
 
-func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
+func TestTeamBoundary_EveryRunRouteHidesOtherTeamsResources(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		routes := controller.New(nil, nil).Registrations()
 		mustCover := []string{
@@ -420,11 +372,16 @@ func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 			method, path := runRoutePath(pattern, f.runA)
 			for _, caller := range []struct{ name, auth string }{
 				{"team B owner session", f.ownerB},
-				{"team B token with every scope", f.everyScopeB},
+				{"team B token with every member grant", f.everyScopeB},
 			} {
 				code, body := f.do(method, path, caller.auth, map[string]any{})
-				if code != http.StatusNotFound || strings.Contains(body, `"message":"route not found"`) {
-					t.Errorf("%s as %s = %d want the boundary's 404: %s", pattern, caller.name, code, body)
+				missingMethod, missingPath := runRoutePath(pattern, "missing-run")
+				missingCode, missingBody := f.do(missingMethod, missingPath, caller.auth, map[string]any{})
+				if code != missingCode || body != missingBody || (code != http.StatusForbidden && code != http.StatusNotFound) || strings.Contains(body, `"message":"route not found"`) {
+					t.Errorf("%s as %s reveals resource existence: foreign=%d %s missing=%d %s", pattern, caller.name, code, body, missingCode, missingBody)
+				}
+				if slices.Contains(mustCover, pattern) && !strings.HasSuffix(pattern, "/claim") && code != http.StatusNotFound {
+					t.Errorf("member route %s returned %d, want 404: %s", pattern, code, body)
 				}
 			}
 		}
@@ -460,22 +417,30 @@ func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 // list that shows nothing to anyone cannot pass for a filtered one.
 func TestTeamBoundary_ListsNeverIncludeAnotherTeam(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
+		readers := map[store.Team]*queueGroupReaderFake{}
+		f.srv.WithConcurrencyStore(func(ctx context.Context, team store.Team) (controller.ConcurrencyStore, error) {
+			tenant, err := f.st.ForTeam(ctx, team)
+			if err != nil {
+				return nil, err
+			}
+			reader := &queueGroupReaderFake{tenant: tenant}
+			readers[team] = reader
+			return reader, nil
+		})
 		lists := []struct {
 			path    string
 			ownerAs bool
 		}{
 			{"/api/v1/runs", true},
-			{"/api/v1/triggers", true},
-			{"/api/v1/approvals/pending", true},
+			{"/api/v1/approvals", true},
 			{"/api/v1/pipelines/build-a/latest?status=running", true},
-			{"/api/v1/agents", false},
+			{"/api/v1/runners", false},
 			{"/api/v1/credits/history", false},
-			{"/api/v1/triggers/spawned-child?parent_run_id=" + f.runA + "&parent_node_id=n1&pipeline=child", false},
 		}
 		for _, l := range lists {
 			for _, caller := range []struct{ name, auth string }{
 				{"team B owner session", f.ownerB},
-				{"team B token with every scope", f.everyScopeB},
+				{"team B token with every member grant", f.everyScopeB},
 			} {
 				code, body := f.do("GET", l.path, caller.auth, nil)
 				if strings.Contains(body, f.runA) {
@@ -489,11 +454,17 @@ func TestTeamBoundary_ListsNeverIncludeAnotherTeam(t *testing.T) {
 				t.Errorf("GET %s as team A = %d does not show its own run: %s", l.path, code, body)
 			}
 		}
-		if code, _ := f.do("GET", "/api/v1/concurrency/deploy/state", f.ownerB, nil); code != http.StatusNotFound {
+		if code, _ := f.do("GET", "/api/v1/queue/groups/deploy", f.ownerB, nil); code != http.StatusNotFound {
 			t.Errorf("team B reads team A's concurrency key: %d", code)
 		}
-		if code, body := f.do("GET", "/api/v1/concurrency/deploy/state", f.ownerA, nil); code != http.StatusOK || !strings.Contains(body, f.runA) {
+		if code, body := f.do("GET", "/api/v1/queue/groups/deploy", f.ownerA, nil); code != http.StatusOK || !strings.Contains(body, f.runA) {
 			t.Errorf("team A cannot read its own concurrency key: %d %s", code, body)
+		}
+		for _, team := range []store.Team{f.teamA.Team(), f.teamB.Team()} {
+			reader := readers[team]
+			if reader == nil || reader.calls != 1 || reader.seen.Target.Team != string(team) || reader.seen.Target.SlotKey != "deploy" || reader.seen.Principal.Capability.Team != string(team) {
+				t.Fatalf("queue read did not preserve authority: %+v", reader)
+			}
 		}
 		if total := trendTotal(t, f, f.ownerB); total != 0 {
 			t.Errorf("team B's trends count %d runs; it has none", total)
@@ -529,9 +500,7 @@ func trendTotal(t *testing.T, f *tenancyFixture, auth string) int {
 
 func TestTeamBoundary_RolesStayInsideTheirGrant(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		if code, body := f.do("POST", "/api/v1/triggers", f.readerA, map[string]any{
-			"pipeline": "build-a", "trigger": map[string]any{"source": "api"},
-		}); code != http.StatusForbidden {
+		if code, body := f.do("POST", "/api/v1/runs", f.readerA, computeIntake("build-a")); code != http.StatusForbidden {
 			t.Errorf("a reader triggered a run: %d %s", code, body)
 		}
 		if code, _ := f.do("GET", "/api/v1/runs/"+f.runA, f.readerA, nil); code != http.StatusOK {
@@ -545,15 +514,33 @@ func TestTeamBoundary_RolesStayInsideTheirGrant(t *testing.T) {
 			{"GET", "/api/v1/secrets/deploy-key"},
 			{"DELETE", "/api/v1/secrets/deploy-key"},
 			{"POST", "/api/v1/secrets/rotate"},
-			{"POST", "/api/v1/tokens"},
-			{"GET", "/api/v1/tokens"},
-			{"GET", "/api/v1/tokens/swu_x"},
-			{"DELETE", "/api/v1/tokens/swu_x"},
-			{"POST", "/api/v1/tokens/swu_x/rotate"},
 		} {
 			if code, body := f.do(r.method, r.path, f.editorA, map[string]any{}); code != http.StatusForbidden {
 				t.Errorf("an editor reached %s %s: %d %s", r.method, r.path, code, body)
 			}
+		}
+		for _, grant := range []string{"team.admin", "secrets.read", "nodes.claim", "triggers.claim", "operator.tokens"} {
+			if code, body := f.do("POST", "/api/v1/tokens", f.editorA, map[string]any{"grants": []string{grant}}); code != http.StatusForbidden {
+				t.Fatalf("editor issued %s = %d: %s", grant, code, body)
+			}
+		}
+		code, body := f.do("POST", "/api/v1/tokens", f.editorA, map[string]any{"grants": []string{"runs.read"}})
+		var issued struct{ Capability, Prefix, Team string }
+		if code != http.StatusCreated || json.Unmarshal([]byte(body), &issued) != nil || issued.Capability == "" || issued.Prefix == "" || issued.Team != string(f.teamA.Team()) {
+			t.Fatalf("editor read token = %d: %s", code, body)
+		}
+		if code, body := f.do("GET", "/api/v1/tokens", f.editorA, nil); code != 200 || !strings.Contains(body, issued.Prefix) || strings.Contains(body, issued.Capability) {
+			t.Fatalf("editor own inventory = %d: %s", code, body)
+		}
+		for _, auth := range []string{f.readerA, f.ownerB} {
+			for _, route := range []struct{ method, suffix string }{{"GET", ""}, {"DELETE", ""}, {"POST", "/rotate"}} {
+				if code, body := f.do(route.method, "/api/v1/tokens/"+issued.Prefix+route.suffix, auth, nil); code != http.StatusForbidden || strings.Contains(body, issued.Capability) {
+					t.Fatalf("foreign token operation = %d: %s", code, body)
+				}
+			}
+		}
+		if code, body := f.do("POST", "/api/v1/runs/"+f.runA+"/cancel", "Bearer "+issued.Capability, nil); code != http.StatusForbidden {
+			t.Fatalf("read token cancellation = %d: %s", code, body)
 		}
 	})
 }
@@ -608,90 +595,6 @@ func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 		}
 		if checked < 30 {
 			t.Errorf("checked %d admin route calls; the enumeration is broken", checked)
-		}
-	})
-}
-
-func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
-	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		res, err := f.st.DB().ExecContext(context.Background(),
-			`UPDATE tokens SET team = '' WHERE principal = 'b-runner'`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n, _ := res.RowsAffected(); n != 1 {
-			t.Fatalf("cleared the team of %d tokens want 1", n)
-		}
-		for path, body := range map[string]map[string]any{
-			"/api/v1/triggers/claim": {},
-			"/api/v1/nodes/claim":    {"holder_id": "runner-b"},
-		} {
-			code, body := f.do("POST", path, f.runnerB, body)
-			if code != http.StatusForbidden || !strings.Contains(body, "claim_no_team") {
-				t.Errorf("POST %s with a teamless credential = %d want 403 claim_no_team: %s", path, code, body)
-			}
-		}
-	})
-}
-
-// A runner of a team other than default claims its team's trigger and carries
-// the run to the end under that claim: the plan, the heartbeat and the finish
-// are each fenced by the trigger claim, checked in the run's own team.
-func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) {
-	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		ctx := context.Background()
-		now := time.Now()
-		const runB = "run-team-b"
-		if err := teststore.SeedTriggerWithRun(f.st, ctx, f.teamB.Team(),
-			store.Trigger{ID: runB, Pipeline: "build-b", TriggerSource: "api", CreatedAt: now},
-			store.Run{ID: runB, Pipeline: "build-b", Status: "pending", CreatedAt: now, StartedAt: now},
-		); err != nil {
-			t.Fatal(err)
-		}
-		code, body := f.do("POST", "/api/v1/triggers/claim", f.runnerB, map[string]any{})
-		if code != http.StatusOK {
-			t.Fatalf("claim as team B's runner = %d: %s", code, body)
-		}
-		var claimed store.Trigger
-		if err := json.Unmarshal([]byte(body), &claimed); err != nil || claimed.ID != runB {
-			t.Fatalf("claimed %s, want %s: %v", body, runB, err)
-		}
-		fenced := func(method, path string, payload any) (int, string) {
-			t.Helper()
-			b, _ := json.Marshal(payload)
-			req, err := http.NewRequestWithContext(ctx, method, f.url+path, bytes.NewReader(b))
-			if err != nil {
-				t.Fatal(err)
-			}
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", f.runnerB)
-			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-			raw, _ := io.ReadAll(resp.Body)
-			return resp.StatusCode, string(raw)
-		}
-		for _, step := range []struct {
-			path    string
-			payload any
-		}{
-			{"/api/v1/runs/" + runB + "/plan", map[string]any{"nodes": []any{}}},
-			{"/api/v1/runs/" + runB + "/heartbeat", map[string]any{}},
-			{"/api/v1/runs/" + runB + "/finish", map[string]any{"status": "success"}},
-		} {
-			if code, body := fenced("POST", step.path, step.payload); code/100 != 2 {
-				t.Errorf("POST %s under team B's trigger claim = %d: %s", step.path, code, body)
-			}
-		}
-		run, err := f.teamB.GetRun(ctx, runB)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if run.Status != "success" {
-			t.Errorf("team B's run finished as %q, want success", run.Status)
 		}
 	})
 }

@@ -68,7 +68,7 @@ func latestRunPresentation(row RunRow) *Run {
 	run := &Run{ID: row.ID, Pipeline: row.Pipeline, Status: string(row.State), CreatedAt: row.CreatedAt,
 		StartedAt: row.CreatedAt, FinishedAt: row.FinishedAt, TriggerSource: string(row.Request.Request.Origin),
 		GitBranch: display.Git.Ref, GitSHA: display.Git.SHA, DeclaredRepo: display.Git.Repository.Display,
-		Args: args, PlanSnapshot: row.Plan, ParentRunID: row.Lineage.ParentRunID, RetryOf: row.Lineage.RetryOf,
+		Args: args, PlanSnapshot: row.Plan, ParentRunID: row.Lineage.ParentRunID, RetryOf: row.Lineage.RetryOf, RepoInherited: row.Request.Request.Lineage.RepoInherited,
 		Invocation: map[string]any{"args": args, InvocationSecretArgsKey: display.SecretArgs, "reproducer": display.Reproducer},
 	}
 	if row.StartedAt != nil {

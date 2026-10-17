@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -301,5 +302,74 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCardBilling_OwnerSetsABudget(t *testing.T) {
+	s, session, csrf := billingNativeServer(t)
+	h := s.Handler()
+	call := func(method, body string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, "https://controller.test/api/v1/team/billing/budget", strings.NewReader(body))
+		if method == "GET" {
+			r.URL.Path = "/api/v1/team/billing"
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", "https://controller.test")
+		r.Header.Set(csrfHeaderName, csrf)
+		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: session})
+		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s budget: %d %s, want %d", method, w.Code, w.Body, want)
+		}
+		return w
+	}
+	engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`)
+	for _, role := range []string{"editor", "reader"} {
+		engineSQL(t, s.store, `UPDATE memberships SET role=? WHERE team='a' AND account_id='owner'`, role)
+		call("PUT", `{"budget_cents":1000}`, 403)
+	}
+	engineSQL(t, s.store, `UPDATE memberships SET role='owner' WHERE team='a' AND account_id='owner'`)
+	call("PUT", `{"budget_cents":1000}`, 204)
+	var answer struct {
+		Limits struct {
+			BudgetCents int64 `json:"budget_cents"`
+		} `json:"limits"`
+	}
+	if err := json.Unmarshal(call("GET", "", 200).Body.Bytes(), &answer); err != nil || answer.Limits.BudgetCents != 1000 {
+		t.Fatalf("budget=%+v: %v", answer, err)
+	}
+	for _, cents := range []int64{-1, store.MaxCreditGrantMicro/store.MicroCreditsPerCent + 1} {
+		call("PUT", fmt.Sprintf(`{"budget_cents":%d}`, cents), 400)
+	}
+	var unchanged int64
+	if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&unchanged); err != nil || unchanged != 1000 {
+		t.Fatalf("refused budget changed balance: %d: %v", unchanged, err)
+	}
+	property := func(roleIndex uint8, cents uint16) bool {
+		role := []string{"owner", "editor", "reader"}[roleIndex%3]
+		engineSQL(t, s.store, `UPDATE memberships SET role=? WHERE team='a' AND account_id='owner'`, role)
+		var before int64
+		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		wantStatus, wantBudget := 403, before
+		if role == "owner" {
+			wantStatus, wantBudget = 204, int64(cents)
+		}
+		call("PUT", fmt.Sprintf(`{"budget_cents":%d}`, cents), wantStatus)
+		var actual, foreign int64
+		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='a'`).Scan(&actual); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.store.DB().QueryRow(`SELECT billing_budget_cents FROM teams WHERE name='foreign'`).Scan(&foreign); err != nil {
+			t.Fatal(err)
+		}
+		return actual == wantBudget && foreign == 0
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 48}); err != nil {
+		t.Fatal(err)
 	}
 }

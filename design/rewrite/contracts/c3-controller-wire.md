@@ -1219,3 +1219,20 @@ identity, holder and generation in the write transaction. Only that launcher's
 current plan/eval/work award can fail. Replays acknowledge cleanup without
 changing a replacement claim. A rejected observation returns its Job in Remove.
 No additional credential or endpoint is introduced.
+## Child repository omission, 2026-10-17
+
+The native child client carries `lineage.repo_inherited=true` when its repository
+argument is omitted. An explicit argument equal to the parent repository keeps
+it false. Both carry the captured parent source. C1 seals the bit and checks the
+parent repository before commit. It grants no repository or credential access.
+Changed omission intent under one idempotency key conflicts. Cross-repository
+resolution in the native client remains a refusal until its source resolver is
+provided.
+
+
+## W8 operator placement read (2026-10-17, integration)
+
+OperatorManager adds ReadOperatorTeam(ctx, team) returning OperatorTeam with
+team and display_name. It uses the existing GET /api/v1/operator/teams/{team}
+route. C2 defines the deployment authorization and identity-only projection.
+The CLI derives node placement through the launcher's shared hash owner.

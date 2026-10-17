@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -35,15 +36,42 @@ type cronLauncher struct {
 	server *Server
 }
 
+// ScheduledRunWriter admits a stored schedule through the sealed intake transaction.
+type ScheduledRunWriter interface {
+	Team() store.Team
+	AdmitScheduledRun(context.Context, store.CronSchedule, time.Time) (store.AdmissionResult, error)
+}
+
+// WithScheduledRunWriter supplies tenant scheduled-intake transactions before serving.
+func (s *Server) WithScheduledRunWriter(resolve func(context.Context, store.Team) (ScheduledRunWriter, error)) *Server {
+	s.resolveScheduledRunWriter = resolve
+	return s
+}
+
 // Launch records one run for a due schedule instant.
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error) {
-	tenant, err := l.server.tenantForTeam(ctx, s.Team)
+	if s.Team == "" || s.ID == "" || due.IsZero() {
+		return "", invalidEngineBody("schedule team, id and due instant are required")
+	}
+	var writer ScheduledRunWriter
+	var err error
+	if l.server.resolveScheduledRunWriter != nil {
+		writer, err = l.server.resolveScheduledRunWriter(ctx, s.Team)
+	} else {
+		writer, err = l.server.tenantForTeam(ctx, s.Team)
+	}
 	if err != nil {
 		return "", err
 	}
-	admitted, err := tenant.AdmitScheduledRun(ctx, s, due)
+	if writer == nil || writer.Team() != s.Team {
+		return "", missingEndpointPolicy()
+	}
+	admitted, err := writer.AdmitScheduledRun(ctx, s, due)
 	if err != nil {
 		return "", err
+	}
+	if admitted.RunID == "" {
+		return "", missingEndpointPolicy()
 	}
 	if !admitted.Replayed {
 		l.server.recordQueueActivity(admitted.Request.AdmittedAt)
@@ -354,8 +382,8 @@ func cronRunStatus(ctx context.Context, tenant *store.Tenant, runID string) stri
 // team's repositories are bounded in count. Re-pushing a repository the team
 // already arms replaces its schedules and does not count as another.
 const (
-	maxCronSchedulesPerRepo = 20
-	maxCronReposPerTeam     = 10
+	maxCronSchedulesPerRepo = limits.MaxSchedulesPerRepo
+	maxCronReposPerTeam     = limits.MaxScheduledReposPerTeam
 )
 
 func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, repoURL string, githubRepoID int64, entries int) (int, error) {

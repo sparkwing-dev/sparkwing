@@ -139,21 +139,28 @@ The example references an existing `sparkwing-tls` certificate Secret.
 
 The launcher runs on infrastructure nodes with its own Kubernetes identity. Job
 code runs as root with a privileged DinD sidecar under `sparkwing-customer-job`,
-which has no API token or cloud annotations. Each Job and its boundary probes
+which has no API token or cloud annotations. Do not attach an IRSA role or create
+a Pod Identity association for this account. Customer Pods with AWS credential
+injections are rejected. Each Job and its boundary probes
 carry `karpenter.sh/do-not-disrupt: "true"`. Jobs tolerate
 `sparkwing.dev/cpu-band:NoSchedule`, including the existing `small` band, and keep
 the fixed aggregate 20 GiB scratch budget including DinD.
 
 The existing Karpenter NodePool `sparkwing-jobs-small` needs all of the following:
 
-- Each team's nodes have `sparkwing.dev/team-node` equal to `launcher.TeamNodeValue(team)`:
+- Each team's nodes have `node-restriction.kubernetes.io/sparkwing-team-node` equal to the `node_label_value` from
+  `sparkwing operator teams show --team <team> -o json`:
   `sha256-` plus the first 40 lowercase hex characters of SHA-256 of the team ID.
   A presence-only label or a shared `small` value cannot establish team ownership.
 - Set that exact value in the team's NodePool template metadata labels and in a
-  `sparkwing.dev/team-node=<hash>:NoSchedule` taint. Retain the existing
+  `node-restriction.kubernetes.io/sparkwing-team-node=<hash>:NoSchedule` taint. Retain the existing
   `sparkwing.dev/cpu-band=small:NoSchedule` taint. Start from
   [the team NodePool example](examples/team-nodepool.yaml). Provision one
-  isolated node per concurrent Job. The launcher reserves existing Ready nodes
+  isolated node per concurrent Job. Enable Node authorizer and NodeRestriction.
+  Reservation checks the node's owning NodeClaim, its node name/provider identity,
+  and its NodePool UID and template label. A protected first-use label permanently
+  binds the node to one team. Clearing a reservation retains that label.
+  A rejected Pod cordons the node and deletes its exact NodeClaim. The launcher reserves existing Ready nodes
   and does not create NodePools or request nodes from Karpenter. An empty pool
   that scales only in response to pending Pods must be provisioned externally.
 - Nodes need the awarded CPU/memory plus system overhead and at least 20 GiB of

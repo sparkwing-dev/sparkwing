@@ -187,6 +187,18 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 			}
 			return UnitRef{}, err
 		}
+		var price CreditRate
+		if metered {
+			var err error
+			price, err = unitBillingPriceTx(ctx, tx, requirements.Request)
+			if err != nil {
+				var unpriced *UnpricedCPUClassError
+				if errors.As(err, &unpriced) {
+					unpriced.RunID, unpriced.NodeID = candidate.unit.RunID, candidate.unit.NodeID
+				}
+				return UnitRef{}, err
+			}
+		}
 		verdict := match.Evaluate(profile, requirements)
 		if !verdict.OK() || !match.Fits(profile.Capacity, demand.Available, requirements.Request).OK() {
 			continue
@@ -199,7 +211,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 			continue
 		}
 		if metered {
-			ok, err := eligibleUnitBillingTx(ctx, tx, candidate.team, candidate.unit, requirements.Request, launcherClaimant(c))
+			ok, err := eligibleUnitBillingTx(ctx, tx, candidate.team, candidate.unit, price, launcherClaimant(c))
 			if err != nil {
 				return UnitRef{}, err
 			}

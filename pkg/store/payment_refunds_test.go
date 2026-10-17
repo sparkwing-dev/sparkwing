@@ -129,8 +129,7 @@ func TestPaymentRefundAuditFailureRollsBackAndPriorReversalsCount(t *testing.T) 
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
 	}
-	tenant := &Tenant{s: s, team: "a"}
-	if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantReversal, AmountMicro: -300000, Reference: "console-partial", Reverses: "payment:test:checkout", CreatedBy: "console"}); err != nil {
+	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "console-partial", "console", 300000); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_refund_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)

@@ -2875,3 +2875,74 @@ on manual admission. Claimed App origin is refused. The real controller policy,
 issuer, request sealer and SQLite intake run. Existing verified-webhook suites
 retain the trusted positive cases. Test names remain discoverable. No acceptance
 registry, skip or native matrix claim is added.
+
+
+## W1b inherited-holder and coalesce retirement
+
+The five inherited-holder tests in concurrency_cost_test.go retire with the
+removed API: TestConcurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost,
+TestConcurrency_TerminalReaperTransfersInheritedHolderCost,
+TestConcurrency_ReleaseTransfersCostToSiblingInheritedHolder,
+TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders and
+TestConcurrency_CancelOthersSupersedesInheritedHolder. Both production writers
+already refused that selector. TestConcurrencyHTTPRejectsRetiredInheritedHolderSelector
+now requires HTTP 400 and no capacity row. Weighted cost, restrictive capacity,
+FIFO/backfill, cancellation and lease continuity tests remain. Blob memo and
+materialization tests cover the replacement result-sharing path.
+
+TestChildIntakeRetainsRepositoryInheritanceWithoutGrantingSourceAuthority and
+TestNativeChildPreservesOmittedRepositoryIntent restore the omitted-versus-explicit
+reporting assertion. Generated cases retain current source-scope refusal, reject
+false inheritance from an authorized foreign repository, and conflict on changed
+intent under one replay key.
+
+The claim-pricing property now accepts the optional capacity observation defined
+by C3 and verifies that every generated launcher report reserves the sealed
+sixteen-core class and its exact rate. Publication fixtures carry valid hex SHAs.
+TestSourceSnapshotRealClientStorageAndIntake now needs no stored Git credential
+for a complete bundle and requires zero release audits. It still proves source
+sealing, exact checkout SHA, unique-byte charging and fenced bundle reads.
+
+
+## W1b output and pricing reader retirement, 2026-10-17
+
+The unused OutputRef validity helper and its FuzzOutputReferenceUsesSharedLimit
+are removed. FuzzOutputRecordUsesSharedLimit exercises Tenant.CommitRecord over
+real store records at generated sizes and proves oversized outputs leave no
+record. Empty blobs follow the current blob contract's nonnegative size rule.
+Existing real-store memo limit, oversized-memo miss and manifest tests remain.
+TestOutputReportingUsesCommittedResult covers both reporting readers.
+TestOutputReportingNeverRevealsAnotherResultProperty generates foreign selectors.
+TestMaterializedResultCopiesBytesThroughControllerAndHost now also checks the
+receipt's exact output hash after deletion of the source run and memo.
+
+The three nodeChargeFromSnapshot tests are retired with that unused old-plan
+reader. TestMeteredAwardPricesPinnedResourcesProperty still drives real claim,
+renewal and release transactions, verifies immutable class/rate/reservation and
+survival of financial rows after run deletion, and now sets a conflicting
+96-core profile pin before each claim. Old profile fallback arithmetic no longer
+participates in billing. Current profile-learning tests remain.
+
+
+## W1b remaining raw billing and event retirement, 2026-10-17
+
+| Retired test or helper | Retained evidence |
+| --- | --- |
+| TestCreditReversalNetsOutOfTheBalanceAndTheHistory | TestConsoleRefundCurrentAuthorityPayerAndRetry now checks ledger state, deployment totals and payment-linked grant history after the real authorized refund and provider replay. |
+| TestCreditReversalRefusesUnfundedOrExcessiveMovements | TestFreeGrantCannotCreatePaymentMovementsProperty refuses generated paid, reversal and disguised free adjustments without changing financial state. TestPaymentRefundRequiresProviderPaymentAndValidGrantAssociation and TestProviderRefundIdentityAndConservationProperty retain association and conservation checks. |
+| TestAppendEventOnceCollapsesRepeats | Retired with the unused once-only event API. State-transition replay and event-intake quota tests remain. |
+| TestTenantEventsStayInTheRunsTeam | Uses the real charged event writer and tenant readers. Foreign writes refuse and foreign reads stay empty. |
+| reportCardRefundTx and TestOnlyReportCardRefund | Deleted. TestAFailedQueuedRefundIsRetried, TestARefundOutcomeBeforeItsBindIsKept and TestOnlyTheQueuesOwnRefundMovesIt now use provider settlement and the real worker binding transaction. The rollback test calls the production applyCardRefundTx owner. |
+
+TestPaymentRefundAuditFailureRollsBackAndPriorReversalsCount prepares its partial
+refund through the payment transaction instead of the removed raw negative grant.
+The uncharged-event cap test prepares a real internal state event. The retirement
+reflection test also refuses Tenant.AppendEventOnce and Operator.DropCardAttempt.
+No acceptance cell is newly enabled by this cut.
+
+The queued-refund tests retain failed/canceled retry backoff, exact provider
+object binding, duplicate and stale callbacks, early outcomes, operator partial
+refunds and conservation. Caller-supplied attempt keys no longer authorize
+callbacks. The generated association property covers foreign tenant, provider
+mode, payment and refund selectors. The new rollback proof refuses a partial
+provider binding if its stored terminal outcome cannot apply.

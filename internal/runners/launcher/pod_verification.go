@@ -7,37 +7,95 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 )
+
+type podMismatch struct {
+	message string
+	missing bool
+}
+
+func (e *podMismatch) Error() string { return e.message }
+
+func (l *Launcher) waitForJobPod(ctx context.Context, job *batchv1.Job) error {
+	err := wait.PollUntilContextTimeout(ctx, 50*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := l.verifyJobPods(ctx, job)
+		var mismatch *podMismatch
+		if errors.As(err, &mismatch) && mismatch.missing {
+			return false, nil
+		}
+		return err == nil, err
+	})
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		return &podMismatch{message: "active Cloud Job has no owned Pod"}
+	}
+	return err
+}
+
+func (l *Launcher) verificationFailure(ctx context.Context, job *batchv1.Job, binding CloudJobBinding, r CloudNodeReservation, err error) error {
+	var mismatch *podMismatch
+	if !errors.As(err, &mismatch) {
+		return err
+	}
+	return errors.Join(err, l.rejectJob(ctx, job, binding, r))
+}
 
 func (l *Launcher) verifyJobPods(ctx context.Context, job *batchv1.Job) error {
 	expected := job.DeepCopy()
 	if err := json.Unmarshal([]byte(job.Annotations[templateAnnotation]), &expected.Spec.Template); err != nil {
-		return fmt.Errorf("invalid requested Cloud template: %w", err)
+		return &podMismatch{message: fmt.Sprintf("invalid requested Cloud template: %v", err)}
 	}
 	p, q := expected.Spec.Template.Spec.DeepCopy(), job.Spec.Template.Spec.DeepCopy()
 	defaultPodSpec(p)
 	defaultPodSpec(q)
 	if !equality.Semantic.DeepEqual(p, q) || !equality.Semantic.DeepEqual(expected.Spec.Template.Annotations, job.Spec.Template.Annotations) {
-		return errors.New("Cloud Job template changed after creation")
+		return &podMismatch{message: "Cloud Job template changed after creation"}
 	}
 	pods, err := l.Kube.CoreV1().Pods(l.Config.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
+	count := 0
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		owner := metav1.GetControllerOf(pod)
 		if pod.Labels[JobLabel] != job.Name && !(owner != nil && owner.UID == job.UID) && pod.GenerateName != job.Name+"-" {
 			continue
 		}
-		if err := validateJobPod(expected, pod); err != nil {
-			return fmt.Errorf("Cloud Pod %s failed verification: %w", pods.Items[i].Name, err)
+		count++
+		requested := expected.DeepCopy()
+		if err := defaultPriority(ctx, l.Kube, &requested.Spec.Template.Spec); err != nil {
+			return err
+		}
+		if err := validateJobPod(requested, pod); err != nil {
+			return &podMismatch{message: fmt.Sprintf("Cloud Pod %s failed verification: %v", pod.Name, err)}
+		}
+	}
+	if (job.Spec.Suspend == nil || !*job.Spec.Suspend) && !jobFinished(*job) && count != 1 {
+		return &podMismatch{message: fmt.Sprintf("active Cloud Job requires one owned Pod, found %d", count), missing: count == 0}
+	}
+	return nil
+}
+
+func defaultPriority(ctx context.Context, kube kubernetes.Interface, spec *corev1.PodSpec) error {
+	if spec.PriorityClassName != "" {
+		return nil
+	}
+	classes, err := kube.SchedulingV1().PriorityClasses().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, class := range classes.Items {
+		if class.GlobalDefault && (spec.Priority == nil || class.Value < *spec.Priority) {
+			spec.PriorityClassName, spec.Priority, spec.PreemptionPolicy = class.Name, ptr(class.Value), class.PreemptionPolicy
 		}
 	}
 	return nil
@@ -77,6 +135,11 @@ func validateJobPod(job *batchv1.Job, pod *corev1.Pod) error {
 		}
 	}
 	for key, value := range annotations {
+		if key == "vpc.amazonaws.com/pod-eni" {
+			if err := validateENI(value); err != nil {
+				return err
+			}
+		}
 		if job.Spec.Template.Annotations[key] != value && key != "vpc.amazonaws.com/pod-eni" {
 			return errors.New("Pod has unexpected annotations")
 		}
@@ -147,10 +210,8 @@ func removeEKSMutations(p, q *corev1.PodSpec) error {
 				seen[env.Name] = true
 			}
 			b.Env = b.Env[:len(a.Env)]
-			for _, mount := range b.VolumeMounts[len(a.VolumeMounts):] {
-				if !eksMount(mount) {
-					return errors.New("Pod has unexpected mount injection")
-				}
+			if len(b.VolumeMounts) != len(a.VolumeMounts) {
+				return errors.New("Pod has unexpected mount injection")
 			}
 			b.VolumeMounts = b.VolumeMounts[:len(a.VolumeMounts)]
 			for _, resources := range []corev1.ResourceList{b.Resources.Requests, b.Resources.Limits} {
@@ -172,10 +233,8 @@ func removeEKSMutations(p, q *corev1.PodSpec) error {
 	if len(q.Volumes) < len(p.Volumes) {
 		return errors.New("Pod lost volumes")
 	}
-	for _, v := range q.Volumes[len(p.Volumes):] {
-		if !eksTokenVolume(v) {
-			return errors.New("Pod has unexpected volume injection")
-		}
+	if len(q.Volumes) != len(p.Volumes) {
+		return errors.New("Pod has unexpected volume injection")
 	}
 	q.Volumes = q.Volumes[:len(p.Volumes)]
 	for _, gate := range q.ReadinessGates {
@@ -193,53 +252,10 @@ func eksEnv(e corev1.EnvVar) bool {
 		return false
 	}
 	switch e.Name {
-	case "AWS_CONTAINER_CREDENTIALS_FULL_URI":
-		return e.Value == "http://169.254.170.23/v1/credentials" || e.Value == "http://[fd00:ec2::23]/v1/credentials"
-	case "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE":
-		return e.Value == "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"
-	case "AWS_WEB_IDENTITY_TOKEN_FILE":
-		return e.Value == "/var/run/secrets/eks.amazonaws.com/serviceaccount/token"
-	case "AWS_ROLE_ARN":
-		return strings.HasPrefix(e.Value, "arn:aws:iam::") && strings.Contains(e.Value, ":role/")
 	case "AWS_REGION", "AWS_DEFAULT_REGION":
 		return e.Value != "" && len(validation.IsDNS1123Label(e.Value)) == 0
 	case "AWS_STS_REGIONAL_ENDPOINTS":
 		return e.Value == "regional"
 	}
 	return false
-}
-
-func eksMount(m corev1.VolumeMount) bool {
-	path := ""
-	switch m.Name {
-	case "aws-iam-token":
-		path = "/var/run/secrets/eks.amazonaws.com/serviceaccount"
-	case "eks-pod-identity-token":
-		path = "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount"
-	default:
-		return false
-	}
-	return equality.Semantic.DeepEqual(m, corev1.VolumeMount{Name: m.Name, MountPath: path, ReadOnly: true})
-}
-
-func eksTokenVolume(v corev1.Volume) bool {
-	audience, path := "", ""
-	switch v.Name {
-	case "aws-iam-token":
-		audience, path = "sts.amazonaws.com", "token"
-	case "eks-pod-identity-token":
-		audience, path = "pods.eks.amazonaws.com", "eks-pod-identity-token"
-	default:
-		return false
-	}
-	projected := v.Projected
-	if projected == nil || len(projected.Sources) != 1 || projected.Sources[0].ServiceAccountToken == nil {
-		return false
-	}
-	token := projected.Sources[0].ServiceAccountToken
-	if token.ExpirationSeconds == nil || *token.ExpirationSeconds < 600 {
-		return false
-	}
-	expected := corev1.Volume{Name: v.Name, VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{DefaultMode: ptr(int32(420)), Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Audience: audience, Path: path, ExpirationSeconds: token.ExpirationSeconds}}}}}}
-	return equality.Semantic.DeepEqual(v, expected)
 }

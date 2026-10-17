@@ -228,3 +228,5 @@ func TestLauncherCloudPlanUsesRunBinding(t *testing.T) {
 		}
 	}
 }
+
+func (b *cloudBoundaryFake) Retire(context.Context, launcher.CloudNodeReservation) error { return nil }

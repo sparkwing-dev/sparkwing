@@ -124,8 +124,8 @@ func FuzzJobAndReservationShareAward(f *testing.F) {
 			if err != nil || boundary.releases != 1 {
 				t.Fatalf("matching Job: releases=%d: %v", boundary.releases, err)
 			}
-		} else if err == nil || boundary.releases != 0 {
-			t.Fatalf("changed award authorized teardown: mode=%d releases=%d: %v", mode, boundary.releases, err)
+		} else if err != nil || boundary.releases != 0 {
+			t.Fatalf("malformed award must discard Job without releasing reservation: mode=%d releases=%d: %v", mode, boundary.releases, err)
 		}
 	})
 }

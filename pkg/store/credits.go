@@ -75,9 +75,6 @@ const (
 // ErrInsufficientCredits is returned when a metered runner's controller has no balance left to pay for the work it asked for.
 var ErrInsufficientCredits = errors.New("insufficient credits")
 
-// ErrReversalExceedsPayment is returned when a reversal would take back more than the payment it names paid, counting the reversals already written.
-var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
-
 // ErrCreditGrantConflict is returned when a grant names a kind and reference another grant already carries but asks for different terms.
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 
@@ -193,12 +190,7 @@ type CreditState struct {
 	ExhaustedAt               *time.Time
 }
 
-// ValidCreditGrantKind reports whether kind is one this ledger stores.
-func ValidCreditGrantKind(kind string) bool {
-	return kind == CreditGrantFree || kind == CreditGrantPaid || kind == CreditGrantReversal
-}
-
-// CreditGrantRequest carries a free grant or a negative, payment-linked reversal with its idempotency reference.
+// CreditGrantRequest carries an operator free grant and its idempotency reference.
 type CreditGrantRequest struct {
 	Kind        string
 	AmountMicro int64
@@ -216,44 +208,19 @@ type CreditGrantResult struct {
 }
 
 func (req CreditGrantRequest) validate() error {
-	if req.Kind == CreditGrantPaid {
-		return fmt.Errorf("%w: paid credit requires verified checkout settlement", ErrInvalidInput)
-	}
-	if !ValidCreditGrantKind(req.Kind) {
-		return fmt.Errorf("credits: unknown grant kind %q", req.Kind)
+	if req.Kind != CreditGrantFree || req.Reverses != "" {
+		return fmt.Errorf("%w: paid credits and reversals require verified payment settlement or an authorized refund", ErrInvalidInput)
 	}
 	if strings.HasPrefix(req.Reference, unappliedPrefix) {
 		return fmt.Errorf("%w: the reference prefix %q is reserved", ErrInvalidInput, unappliedPrefix)
 	}
-	if req.Kind != CreditGrantReversal {
-		if req.AmountMicro <= 0 {
-			return errors.New("credits: grant amount must be positive")
-		}
-		if req.AmountMicro > MaxCreditGrantMicro {
-			return fmt.Errorf("credits: a grant may not exceed %d micro-credits", MaxCreditGrantMicro)
-		}
-		if req.Reverses != "" {
-			return fmt.Errorf("credits: only a %s grant reverses another grant", CreditGrantReversal)
-		}
-		return nil
-	}
-	if req.AmountMicro >= 0 {
-		return errors.New("credits: a reversal amount must be negative")
-	}
-	if req.AmountMicro < -MaxCreditGrantMicro {
-		return fmt.Errorf("credits: a reversal may not exceed %d micro-credits", MaxCreditGrantMicro)
-	}
-	if req.Reference == "" {
-		return errors.New("credits: a reversal needs its own reference, the refund id")
-	}
-	if req.Reverses == "" {
-		return fmt.Errorf("credits: a reversal must name the %s grant's reference it reverses",
-			CreditGrantPaid)
+	if req.AmountMicro <= 0 || req.AmountMicro > MaxCreditGrantMicro {
+		return fmt.Errorf("%w: grant amount must be between 1 and %d micro-credits", ErrInvalidInput, MaxCreditGrantMicro)
 	}
 	return nil
 }
 
-// RecordCreditGrant writes a free grant or payment-linked reversal and reports whether it was created.
+// RecordCreditGrant writes an operator free grant and reports whether it was created.
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error) {
@@ -305,27 +272,6 @@ func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req Credit
 				return CreditGrantResult{}, err
 			}
 			return CreditGrantResult{Grant: existing}, nil
-		}
-	}
-	if req.Kind == CreditGrantReversal {
-		// safety: the reversal has to find the payment inside this team,
-		// because reversing another team's grant would move credits between
-		// balances that never traded.
-		reversed, found, err := creditGrantByReferenceTx(ctx, tx, team, CreditGrantPaid, req.Reverses)
-		if err != nil {
-			return CreditGrantResult{}, err
-		}
-		if !found || reversed.Team != team {
-			return CreditGrantResult{}, fmt.Errorf(
-				"credits: no %s grant carries the reference %q", CreditGrantPaid, req.Reverses)
-		}
-		already, err := reversedMicroTx(ctx, tx, team, req.Reverses)
-		if err != nil {
-			return CreditGrantResult{}, err
-		}
-		if already-req.AmountMicro > reversed.AmountMicro {
-			return CreditGrantResult{}, fmt.Errorf("%w: %q paid %d micro-credits, %d are already reversed, not %d more",
-				ErrReversalExceedsPayment, req.Reverses, reversed.AmountMicro, already, -req.AmountMicro)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -808,52 +754,6 @@ func refuseFrozenTeamTx(
 		out.Limit = SpendLimitChargeFailed
 	}
 	return out
-}
-
-// AppendEventOnce writes a tenant run event unless that run or job already has its kind.
-func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {
-	// safety: the common call finds the event already there, so the read comes
-	// before the transaction rather than inside one opened twice a second.
-	present, err := t.eventKindPresent(ctx, runID, nodeID, kind)
-	if err != nil || present {
-		return false, err
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
-		return false, err
-	}
-	var existing int
-	err = tx.QueryRowContext(ctx,
-		`SELECT 1 FROM events WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
-		string(t.team), runID, nodeID, kind).Scan(&existing)
-	if err == nil {
-		return false, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, kind, payload, time.Now()); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (t *Tenant) eventKindPresent(ctx context.Context, runID, nodeID, kind string) (bool, error) {
-	var existing int
-	err := t.s.queryRow(ctx,
-		`SELECT 1 FROM events WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
-		string(t.team), runID, nodeID, kind).Scan(&existing)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
 }
 
 func newCreditID(prefix string) (string, error) {

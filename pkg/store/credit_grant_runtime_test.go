@@ -2,7 +2,11 @@ package store
 
 import (
 	"errors"
+	"fmt"
+	"math/rand"
+	"reflect"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -61,68 +65,29 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "credit_grants", 2)
 }
 
-func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
+func TestFreeGrantCannotCreatePaymentMovementsProperty(t *testing.T) {
 	s, event := paymentFixture(t, capability.PaymentTest)
 	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
 		t.Fatal(err)
 	}
 	tenant := &Tenant{s: s, team: "a"}
-	request := CreditGrantRequest{Kind: CreditGrantReversal, AmountMicro: -400000, Reference: "refund", Reverses: "payment:test:checkout", CreatedBy: "ops"}
-	first, err := tenant.RecordCreditGrant(t.Context(), request)
-	if err != nil || !first.Created || first.Grant.Reverses != request.Reverses {
-		t.Fatalf("partial reversal: %+v, %v", first, err)
-	}
-	again, err := tenant.RecordCreditGrant(t.Context(), request)
-	if err != nil || again.Created || again.Grant.ID != first.Grant.ID {
-		t.Fatalf("reversal replay: %+v, %v", again, err)
-	}
-	request.AmountMicro--
-	if _, err := tenant.RecordCreditGrant(t.Context(), request); !errors.Is(err, ErrCreditGrantConflict) {
-		t.Fatalf("changed reversal: %v", err)
-	}
-	state, err := tenant.CreditState(t.Context(), 0)
-	if err != nil || state.GrantedMicro != 1000000 || state.ReversedMicro != 400000 || state.BalanceMicro != 600000 {
-		t.Fatalf("reversal state: %+v, %v", state, err)
-	}
-	totals, err := s.AsOperator().CreditLedgerTotals(t.Context())
-	if err != nil || totals.ReversedMicro != 400000 || totals.BalanceMicro != 600000 {
-		t.Fatalf("reversal totals: %+v, %v", totals, err)
-	}
-	grants, err := tenant.ListCreditGrants(t.Context(), 10)
-	if err != nil || len(grants) != 2 {
-		t.Fatalf("reversal history: %+v, %v", grants, err)
-	}
-	for _, grant := range grants {
-		if grant.Kind == CreditGrantReversal && (grant.AmountMicro != -400000 || grant.Reverses != "payment:test:checkout") {
-			t.Fatalf("reversal history lost identity: %+v", grant)
+	before := paymentMutationSnapshot(t, s)
+	property := func(seed uint32, kind uint8) bool {
+		request := CreditGrantRequest{Kind: CreditGrantReversal, AmountMicro: -int64(seed%999999 + 1), Reference: fmt.Sprintf("refund-%x", seed), Reverses: "payment:test:checkout", CreatedBy: "operator"}
+		switch kind % 3 {
+		case 1:
+			request.Kind, request.AmountMicro = CreditGrantPaid, -request.AmountMicro
+		case 2:
+			request.Kind, request.AmountMicro = CreditGrantFree, -request.AmountMicro
 		}
-	}
-}
-
-func TestCreditReversalRefusesUnfundedOrExcessiveMovements(t *testing.T) {
-	s, event := paymentFixture(t, capability.PaymentTest)
-	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
-		t.Fatal(err)
-	}
-	tenant := &Tenant{s: s, team: "a"}
-	for _, req := range []CreditGrantRequest{
-		{Kind: CreditGrantReversal, AmountMicro: -1, Reference: "refund", Reverses: "missing"},
-		{Kind: CreditGrantReversal, AmountMicro: -1000001, Reference: "refund", Reverses: "payment:test:checkout"},
-	} {
-		if _, err := tenant.RecordCreditGrant(t.Context(), req); err == nil {
-			t.Fatalf("unfunded reversal accepted: %+v", req)
+		got, err := tenant.RecordCreditGrant(t.Context(), request)
+		if err == nil || got.Created || got.Grant.ID != "" {
+			t.Logf("grant accepted payment movement: %+v, %+v, %v", request, got, err)
+			return false
 		}
+		return reflect.DeepEqual(before, paymentMutationSnapshot(t, s))
 	}
-	foreign := &Tenant{s: s, team: "b"}
-	request := CreditGrantRequest{Kind: CreditGrantReversal, AmountMicro: -1000000, Reference: "refund", Reverses: "payment:test:checkout"}
-	if _, err := foreign.RecordCreditGrant(t.Context(), request); err == nil {
-		t.Fatal("foreign team reversed a checkout")
-	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('spent','a','retained-run','job','','usage',1,600000,1)`)
-	if _, err := tenant.RecordCreditGrant(t.Context(), request); err != nil {
+	if err := quick.Check(property, &quick.Config{MaxCount: 48, Rand: rand.New(rand.NewSource(41))}); err != nil {
 		t.Fatal(err)
-	}
-	if balance, err := tenant.CreditBalanceMicro(t.Context()); err != nil || balance != -600000 {
-		t.Fatalf("spent credit reversed: %d, %v", balance, err)
 	}
 }

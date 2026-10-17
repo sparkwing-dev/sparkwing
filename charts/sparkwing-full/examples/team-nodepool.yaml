@@ -1,4 +1,4 @@
-# Replace the team hash with launcher.TeamNodeValue(team) in both places.
+# Get the team hash with sparkwing operator teams show --team <team> -o json.
 # This pool requires an existing EC2NodeClass named sparkwing-jobs.
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -8,7 +8,7 @@ spec:
   template:
     metadata:
       labels:
-        sparkwing.dev/team-node: sha256-REPLACE_WITH_TEAM_HASH
+        node-restriction.kubernetes.io/sparkwing-team-node: sha256-REPLACE_WITH_TEAM_HASH
     spec:
       nodeClassRef:
         group: karpenter.k8s.aws
@@ -18,7 +18,7 @@ spec:
         - key: sparkwing.dev/cpu-band
           value: small
           effect: NoSchedule
-        - key: sparkwing.dev/team-node
+        - key: node-restriction.kubernetes.io/sparkwing-team-node
           value: sha256-REPLACE_WITH_TEAM_HASH
           effect: NoSchedule
       requirements:

@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
@@ -23,6 +24,7 @@ import (
 type boundaryFake struct {
 	reservations int
 	releases     int
+	retirements  int
 	err          error
 }
 
@@ -33,6 +35,11 @@ func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string
 
 func (b *boundaryFake) Release(context.Context, CloudNodeReservation) error {
 	b.releases++
+	return b.err
+}
+
+func (b *boundaryFake) Retire(context.Context, CloudNodeReservation) error {
+	b.retirements++
 	return b.err
 }
 
@@ -62,11 +69,15 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 	control := &controlFake{award: &CloudJobAward{Binding: CloudJobBinding{UnitID: "unit", Kind: CloudWork, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now, ParentCapabilityExpiry: now.Add(2 * time.Hour)}, Bootstrap: []byte("bootstrap-secret"), CPUCores: 1.5, Memory: 2 << 30, Engine: &engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}}}
 	boundary := &boundaryFake{}
 	kube := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}})
+	firstJobName := jobName(control.award.Binding)
 	kube.PrependReactor("create", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
 		switch obj := action.(ktesting.CreateAction).GetObject().(type) {
 		case *batchv1.Job:
 			if obj.UID == "" {
 				obj.UID = "job-uid"
+				if obj.Name != firstJobName {
+					obj.UID = types.UID(obj.Name + "-uid")
+				}
 			}
 		case *corev1.Secret:
 			if obj.UID == "" {
@@ -74,6 +85,36 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 			}
 		}
 		return false, nil, nil
+	})
+	kube.PrependReactor("list", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+		namespace := action.GetNamespace()
+		pods, err := kube.Tracker().List(corev1.SchemeGroupVersion.WithResource("pods"), corev1.SchemeGroupVersion.WithKind("Pod"), namespace)
+		if err != nil {
+			return true, nil, err
+		}
+		jobs, err := kube.Tracker().List(batchv1.SchemeGroupVersion.WithResource("jobs"), batchv1.SchemeGroupVersion.WithKind("Job"), namespace)
+		if err != nil {
+			return true, nil, err
+		}
+		list := pods.(*corev1.PodList)
+		for _, job := range jobs.(*batchv1.JobList).Items {
+			if job.DeletionTimestamp != nil || (job.Spec.Suspend != nil && *job.Spec.Suspend) {
+				continue
+			}
+			found := false
+			for _, pod := range list.Items {
+				if pod.Labels[JobLabel] == job.Name || pod.GenerateName == job.Name+"-" {
+					found = true
+				}
+			}
+			if !found {
+				pod := corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+				pod.Name, pod.Namespace, pod.UID = job.Name+"-pod", job.Namespace, "pod-uid"
+				pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr(true)}}
+				list.Items = append(list.Items, pod)
+			}
+		}
+		return true, list, nil
 	})
 	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
 	return l, kube, boundary, control
