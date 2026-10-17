@@ -680,3 +680,16 @@ Bug: `EngineController.Retry` validates Mode and then drops it before CreateRun,
 
 1. Run-resource existence lookup: the redesign is APPROVED. Invariant: an authenticated caller cannot distinguish a foreign run from an absent one by status, error body or decoder diagnostics. The current design breaks this: `EngineController.runTarget` calls the global `Operator.RunTeam` while decoding, and the decode error escapes before authorization, so a foreign run returns 403/team and an absent one 404. The fix is a single tenant-scoped target-resolution boundary after authentication. Decoders collect only selectors and body evidence; reuse `resolveRunSelector` where it applies. Keep result digests, source-generation fencing and child binding. Every run route's foreign and missing responses must be identical. Proofs: `TestTeamBoundaryOutputHidesRunExistenceProperty` and `TestTeamBoundary_EveryRunRouteHidesOtherTeamsResources`, both kept as written. Assigned to W2 (env 1080).
 2. Concrete C1 `ScheduleWriter` / `ScheduledRunWriter` is launch scope. It needs persisted arming consent, current authority checks, atomic declaration replacement and caps, a trusted scheduled source, replay per schedule and due instant, and single sealed intake. Cloud schedules must fire end to end; a fake boundary is not enough. The concrete `ConcurrencyStore` with declared-group and read-edge transactions is also launch scope. Both assigned to W1b (env 1088), with native proof of a scheduled run firing on the local controller.
+
+## 2026-10-17 07:30 lead decision (Korey approved): launcher on EKS without the admission-policy dependency
+
+Korey approved dropping the launcher's dependency on Kubernetes admission policies; he is upgrading kikd to EKS 1.37. Invariant kept: only pods the launcher created, matching the awarded spec, run on team-dedicated nodes, with privileged DinD. How it is enforced:
+- Remove the startup requirement for MutatingAdmissionPolicy (`verifyAdmissionExemption`) and stop rendering the cluster-wide ValidatingAdmissionPolicy.
+- RBAC lets only the launcher service account create pods and Jobs in the job namespace. Team nodes are tainted so that only launcher job pods tolerate them.
+- After creating a Job, the launcher reads the pod back and compares it with the spec it requested. Only an explicit allow-list of known EKS mutations is tolerated: the pod-identity webhook's env vars, projected token volume and mounts; vpc-resource-controller resource requests and annotations; aws-load-balancer readiness gates. Any other difference makes the launcher delete the Job and fail the award, logged.
+- The Karpenter NodePool template sets the team-node label (today it is only a requirement).
+- The launcher gets its own controller credential, provisioned by the chart or bootstrap with the same file-mount rules as other credentials.
+- Chart pods carry the `app` label kikd's baseline NetworkPolicies select on.
+- examples/cloud.yaml starts as written: /data ownership via fsGroup or securityContext.
+- Show the trusted-proxy CIDRs value in the Cloud example.
+Assigned to W8 (env 1086).
