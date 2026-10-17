@@ -37,6 +37,7 @@ type ClaimedNodeHost struct {
 	Executor  NodeHost
 	Mask      func(string) string
 	Masks     *MaskRegistry
+	Admission *LocalAdmission
 }
 
 // Execute accepts only store-derived inputs, without a pre-acquired entry.
@@ -80,6 +81,22 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if err := context.Cause(ctx); err != nil {
 		return h.setupFailure(ctx, input, err)
 	}
+	if h.Admission == nil {
+		return h.execute(ctx, input, spec)
+	}
+	row := store.NodeRow{Ref: ref, Execution: input.Execution}
+	admitted := false
+	err = h.Admission.ClaimedNode(ctx, input.Accepted, row, func(ctx context.Context) error {
+		admitted = true
+		return h.execute(ctx, input, spec)
+	})
+	if err != nil && !admitted {
+		return h.setupFailure(ctx, input, err)
+	}
+	return err
+}
+
+func (h *ClaimedNodeHost) execute(ctx context.Context, input NodeInput, spec source.Spec) (err error) {
 	acquire := h.Acquire
 	if acquire == nil {
 		acquire = source.Acquire
@@ -170,6 +187,10 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, fai
 		code = structured.Code
 	}
 	result := store.NodeResult{Outcome: store.NodeFailed, Reason: string(code), MaskedError: boundedNodeErrText(h.Mask(failure.Error()))}
+	var refused *AdmissionFailure
+	if errors.As(failure, &refused) {
+		result.Outcome, result.Reason = refused.Outcome, string(refused.Reason)
+	}
 	if ctx.Err() != nil {
 		result.Outcome, result.Reason = store.NodeCancelled, string(apierr.ReasonCancelled)
 	}

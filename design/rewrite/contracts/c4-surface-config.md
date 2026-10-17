@@ -1018,3 +1018,38 @@ Cloud resource requests keep their sealed presence and origins. The physical
 allocation comes from the billing class committed at award, independently of
 those settings, and remains fixed across bootstrap exchange and price changes.
 No default route, per-user cap, configuration key or execution limit changes.
+
+## Burst machine admission continuation
+
+Registered runner capacity observes the existing machine sampler, including
+container limits, or the local admission queue when `local_admission` is enabled.
+`contribution` caps advertised headroom and `keep_free` subtracts the reserved
+share. The physical capacity and free resources remain distinct, including an
+explicit zero offer. Observation errors fail before a claim instead of reporting
+unknown capacity. Claim messages include OS and architecture.
+
+When enrollment-enabled local admission has no daemon, the runner resolves its
+own release's signed Sparkwing CLI through the existing engine resolver, then
+calls the existing detached lifecycle and waits for readiness. An unreachable
+existing owner is an error and never causes another owner to be started.
+Development builds have no published matching release. Their native fixture
+starts an independent local controller with the development CLI first.
+
+`NativeHostConfig.ClaimAdmission` composes the existing `LocalAdmission` into
+independently claimed jobs. `LocalAdmission.ClaimedNode` holds one job-specific
+machine lease before source preparation and through process cleanup. It uses
+the sealed job resources and concurrency, without creating another run record.
+Here owners retain their existing parent and child admission lifetimes.
+
+Machine admission for a Cloud-owned run uses `wingwire.RemoteRunID` with the
+controller address and run ID encoded as separate base64url fields. Job and
+semaphore participants preserve that owner namespace. The local controller
+does not query or finalize those identities in its run store. Resource release,
+eviction and local queue cancellation still operate on the machine lease. The
+Cloud host owns its award and run cancellation. Local run lookup failures remain
+errors. No SQL schema, controller chaining, persisted credential, environment
+variable, public flag or new limit is introduced.
+
+The public personal-runner probe now uses a separate HOME, runtime home, cache
+and local controller from its requester. It still uses one development binary
+and a local SDK replacement, so it does not verify signed release distribution.

@@ -229,9 +229,10 @@ func TestProductionLocalQueueAdvertisesUsableCapacity(t *testing.T) {
 	if runner.RequestCapacity == nil {
 		t.Fatal("local queue cannot supply available CPU to matching")
 	}
-	cores, memory := runner.RequestCapacity()
-	available := match.Resources{Cores: cores, MemoryBytes: memory}
-	capacity := match.Resources{Cores: float64(runtime.NumCPU())}
+	capacity, available, err := runner.RequestCapacity(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if verdict := match.Fits(capacity, available, match.Resources{Cores: .25}); !verdict.OK() {
 		t.Fatalf("local queue refuses a fractional CPU job on this machine: %v", verdict)
 	}

@@ -16,7 +16,7 @@ func NewLocalLifecycle(home string, runtime wingd.LocalRuntime, units wingd.Mana
 	if err != nil {
 		return nil, err
 	}
-	return newProcessLifecycle(home, runtime, units, localOwnerClient{home: home}, ensureLocalProcess), nil
+	return newProcessLifecycle(home, runtime, units, localOwnerClient{home: home}, EnsureLocalProcess), nil
 }
 
 type controllerOwner interface {

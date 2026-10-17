@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // RuntimeConfig composes one authenticated claim loop and its award-bound hosts.
@@ -23,7 +24,7 @@ type RuntimeConfig struct {
 	Installation    RunnerInstallation
 	Target          releaseasset.Target
 	Notices         func([]engine.Notice)
-	RequestCapacity func() (float64, int64)
+	RequestCapacity func(context.Context) (capacity, available match.Resources, err error)
 	OnError         func(error)
 }
 

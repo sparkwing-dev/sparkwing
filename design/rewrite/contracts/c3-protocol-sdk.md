@@ -1101,3 +1101,18 @@ The composition regression reaches byte upload and record lookup through these
 returned services. Its property refuses generated run, job, attempt, generation,
 pipeline and repository mismatches before upload. Composed SDK tests verify
 actual artifact bytes through signed controller storage on all three placements.
+
+## Burst claimed-job machine admission
+
+`ClaimedNodeHost.Admission` optionally holds the existing machine admission
+lease around source preparation, SDK execution and joined cleanup. Native
+composition supplies it through `NativeHostConfig.ClaimAdmission` for registered
+machines with local admission enabled. Independently claimed jobs have separate
+job-specific holders, including when they belong to one run. Admission refusal
+before source acquisition reports the claim's terminal setup result without
+starting an attempt. Cloud Job execution keeps its existing physical allocation.
+
+Remote machine admission uses the controller-scoped holder codec in C4. It
+creates no local run record and gives the local controller no authority to read
+or cancel a Cloud run. Existing award renewal, masking and source authorization
+remain in force while a claimed job waits for machine admission.

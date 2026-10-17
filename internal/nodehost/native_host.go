@@ -22,22 +22,23 @@ type NativeHostStore interface {
 
 // NativeHostConfig supplies policy adapters in nested configs; shared fields come from its top level.
 type NativeHostConfig struct {
-	Store         NativeHostStore
-	Lease         lease.Keeper
-	Source        source.Options
-	Snapshots     CapturedEnvironmentLoader
-	Masks         *MaskRegistry
-	Processes     *NativeProcesses
-	Router        ProcessEndpointRegistrar
-	Validation    nodeproto.ValidationContext
-	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
-	CanonicalHash func(any) (runspec.Hash, error)
-	Owner         OwnerHost
-	Executor      ExecutorDependencies
-	Evaluation    EvaluationDependencies
-	Planner       SDKPlanner
-	Admission     *LocalAdmission
-	Capacity      *StoreAdmission
+	Store          NativeHostStore
+	Lease          lease.Keeper
+	Source         source.Options
+	Snapshots      CapturedEnvironmentLoader
+	Masks          *MaskRegistry
+	Processes      *NativeProcesses
+	Router         ProcessEndpointRegistrar
+	Validation     nodeproto.ValidationContext
+	ValidatePlan   func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
+	CanonicalHash  func(any) (runspec.Hash, error)
+	Owner          OwnerHost
+	Executor       ExecutorDependencies
+	Evaluation     EvaluationDependencies
+	Planner        SDKPlanner
+	Admission      *LocalAdmission
+	ClaimAdmission *LocalAdmission
+	Capacity       *StoreAdmission
 }
 
 // NewNativeHost configures its owned transport and returns shared hosts and an evaluator for owner policies.
@@ -151,7 +152,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	}
 	claimed := &ClaimedNodeHost{
 		Store: config.Store, Lease: config.Lease, Source: config.Source, Snapshots: config.Snapshots,
-		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks,
+		Executor: executor, Mask: config.Masks.masker.Mask, Masks: config.Masks, Admission: config.ClaimAdmission,
 	}
 	if err := RegisterProcessServices(config.Router, processes.Authorities.Resolve); err != nil {
 		return nil, nil, nil, err

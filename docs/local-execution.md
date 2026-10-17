@@ -430,6 +430,15 @@ and its CSRF proof stay in memory. The command saves only the new runner
 credential. A profile backed only by a member token cannot enroll a personal machine.
 Cloud routing requires an attached terminal session. The default local route
 continues to support `--sw-detached`.
+
+Registered machines advertise measured CPU and memory headroom. Their
+`contribution` setting caps that offer, and `keep_free` reserves capacity for
+other work. Enrollment enables `local_admission`, which shares the machine's
+admission controller with local runs. If that controller is absent, a released
+runner fetches the verified matching CLI and starts it before claiming work.
+Each claimed job holds its machine lease through source preparation, execution
+and cleanup. A full machine offers zero headroom, so later preferences can win.
+Machine admission keeps Cloud run identities separate from local records.
 Cloud overflow captures the working tree. Use `pipeline trigger` for explicit
 committed revisions instead of `--sw-ref` or `--sw-pipeline-ref`.
 

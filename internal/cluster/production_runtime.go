@@ -38,14 +38,18 @@ func ProductionRuntime(version string) Runtime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			hosting := &productionHost{UnitHost: productionHosting(home, version, client.EngineOptions{URL: *options.Config.Controller})}
+			capacity, err := runnerCapacity(home, version, options.Config, engines)
+			if err != nil {
+				return runners.RuntimeConfig{}, err
+			}
+			hosting := &productionHost{UnitHost: productionHostingAt(home, version, client.EngineOptions{URL: *options.Config.Controller}, "", "", options.Config.LocalAdmission != nil && *options.Config.LocalAdmission)}
 			installation, err := productionInstallation(options.ConfigPath, hosting)
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
 			return runners.RuntimeConfig{
 				Installation: installation, Versions: engines, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-				Hosting: hosting,
+				Hosting: hosting, RequestCapacity: capacity,
 			}, nil
 		}},
 		Bootstrap: BootstrapRuntime{
@@ -60,7 +64,7 @@ func ProductionRuntime(version string) Runtime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache)}, nil, nil
+				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.SourceDir, options.ModuleCache, false)}, nil, nil
 			},
 		},
 	}
@@ -70,11 +74,7 @@ func fixedBearer(raw string) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) { return raw, context.Cause(ctx) }
 }
 
-func productionHosting(home, version string, connection client.EngineOptions) runners.Hosting {
-	return productionHostingAt(home, version, connection, "", "")
-}
-
-func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string) runners.Hosting {
+func productionHostingAt(home, version string, connection client.EngineOptions, checkout, modules string, admission bool) runners.Hosting {
 	return runners.Hosting{ControllerURL: connection.URL, HTTP: connection.HTTP, Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (services runners.NativeServices, principal capability.Principal, err error) {
 		options := connection
 		options.Bearer, options.Launcher = fixedBearer(unit.Capability), false
@@ -138,6 +138,10 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 		}, private))
 		if err != nil {
 			return services, principal, err
+		}
+		if admission {
+			services.Config.Admission.Controller = connection.URL
+			services.Config.ClaimAdmission = services.Config.Admission
 		}
 		processes = services.Config.Processes
 		closeResources = func() error { return errors.Join(services.Close(), private.Close()) }

@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // StoreRunnerConfig binds an embedded claimant and native hosts to the controller's store.
@@ -15,7 +16,7 @@ type StoreRunnerConfig struct {
 	Bearer          func(context.Context) (string, error)
 	Loop            LoopConfig
 	Bind            func(context.Context, StoreBinding) (NativeServices, error)
-	RequestCapacity func() (float64, int64)
+	RequestCapacity func(context.Context) (capacity, available match.Resources, err error)
 	OnError         func(error)
 }
 

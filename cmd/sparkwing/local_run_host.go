@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -93,6 +94,9 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 		return hereHostSession{}, err
 	}
 	closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
+	if options.URL != wingdclient.APIBaseURL {
+		services.Config.Admission.Controller = options.URL
+	}
 	adopt := services.Config.Owner.AdoptClaim
 	services.Config.Owner.AdoptClaim = func(ctx context.Context, claim store.ReconciledNode) error {
 		if err := private.AdoptClaim(ctx, claim); err != nil {

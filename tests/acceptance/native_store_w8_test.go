@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"net/http"
 	"reflect"
 	"sync/atomic"
@@ -231,7 +232,10 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 			Controller: client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return root.Raw, nil }}, NewController: cloudStoreClientW8(t, server),
 			Loop: runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1}, Hosting: remote,
 			Repositories: repositories,
-			Versions:     runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner}, RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
+			Versions:     runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner}, RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
+				resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
+				return resources, resources, nil
+			},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -241,10 +245,13 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		executionErr = (runners.StoreHosting{Store: s, Bind: bind}).Host(ctx, unit)
 	} else if mode == "embedded_queue" {
 		runner, err := runners.NewStoreRunner(server, runners.StoreRunnerConfig{
-			Bearer:          func(context.Context) (string, error) { return root.Raw, nil },
-			Loop:            runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
-			Bind:            bind,
-			RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
+			Bearer: func(context.Context) (string, error) { return root.Raw, nil },
+			Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
+			Bind:   bind,
+			RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
+				resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
+				return resources, resources, nil
+			},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -262,7 +269,10 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				Runner: runners.StoreRunnerConfig{
 					Bearer: func(context.Context) (string, error) { return root.Raw, nil },
 					Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1},
-					Bind:   bind, RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
+					Bind:   bind, RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
+						resources := match.Resources{Cores: 2, MemoryBytes: 1 << 30}
+						return resources, resources, nil
+					},
 				},
 			}, nil
 		}}

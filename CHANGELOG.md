@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **overflow:** Registered machines advertise measured resource headroom and
+  honor contribution and keep-free settings. Enrolled runners start a missing
+  admission controller with the verified matching CLI. Claimed jobs hold machine
+  capacity through cleanup, while Cloud-owned admission cannot change local runs.
+
 - **overflow:** Publish and consume declared artifacts through shared native
   hosts. Cloud Jobs use the CPU and memory class committed at award, including
   when the pipeline leaves resource settings unset.

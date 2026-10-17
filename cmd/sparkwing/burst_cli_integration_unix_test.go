@@ -213,13 +213,24 @@ func burstPublicPersonalRunner(t *testing.T, ctx context.Context, cli, repo stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(os.Getenv("SPARKWING_HOME"), "runner.yaml")
+	runnerHome := t.TempDir()
+	runnerState := filepath.Join(runnerHome, "state")
+	config := filepath.Join(runnerHome, "runner.yaml")
 	enroll := exec.CommandContext(ctx, cli, "runners", "add", "--personal", "--session-stdin", "--no-service", "--profile", "cloud", "--runner", "burst-desktop", "--repos", "example.test/acme/*", "--max-concurrent", "1", "--config", config, "-o=json")
 	enroll.Dir, enroll.Stdin = repo, strings.NewReader(session+"\n")
 	if output, err := enroll.CombinedOutput(); err != nil {
 		t.Fatalf("public personal-machine enrollment: %v\n%s", err, output)
 	}
+	environment := append(os.Environ(), "HOME="+runnerHome, "SPARKWING_HOME="+runnerState,
+		"XDG_CONFIG_HOME="+filepath.Join(runnerHome, "config"), "XDG_CACHE_HOME="+filepath.Join(runnerHome, "cache"), "SPARKWING_CONFIG="+config)
+	offlineStopDaemon(t, runnerState)
+	ready := exec.CommandContext(ctx, cli, "runs", "list", "-o=json")
+	ready.Env, ready.Dir = environment, repo
+	if output, err := ready.CombinedOutput(); err != nil {
+		t.Fatalf("personal machine controller startup: %v\n%s", err, output)
+	}
 	runner := exec.CommandContext(ctx, cli, "__test-runner", "start", "--config", config)
+	runner.Env = environment
 	stream := &burstCLIOutput{}
 	runner.Stdout, runner.Stderr = stream, stream
 	if err := runner.Start(); err != nil {

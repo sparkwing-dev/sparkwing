@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func resolveLocalServices(ctx context.Context) (dashboardServices, error) {
@@ -166,9 +167,12 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 		},
 		Maintain: server.MaintainStorage,
 		Runner: runners.StoreRunnerConfig{
-			Bearer:          claimant.Bearer,
-			Loop:            runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
-			RequestCapacity: func() (float64, int64) { return float64(runtime.NumCPU()), 0 },
+			Bearer: claimant.Bearer,
+			Loop:   runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
+			RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
+				resources := match.Resources{Cores: float64(runtime.NumCPU())}
+				return resources, resources, nil
+			},
 			Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 				return newLocalNativeServices(ctx, b.Home, b.Store, binding, client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport})
 			},

@@ -36,6 +36,7 @@ type LocalAdmission struct {
 	storeGroups bool
 	Daemon      Admitter
 	BoxID       string
+	Controller  string
 	Queued      func(context.Context, store.NodeRef, wingwire.Queued)
 }
 
@@ -58,8 +59,9 @@ func (a *LocalAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 	resources := localResources(options.Resources.Value)
 	parent := localRunLease{runID: accepted.RunID, resources: resources.Cores > 0 || resources.MemoryBytes > 0}
 	request := wingwire.AdmissionRequest{
-		RunID: wingwire.HolderRef(accepted.RunID), Pipeline: spec.Request.Request.Pipeline,
-		Semaphores: claims, SemaphoresOnly: !parent.resources, Resources: resources,
+		RunID: wingwire.HolderRef(a.holderRunID(accepted.RunID)), Pipeline: spec.Request.Request.Pipeline,
+		DisplayRunID: accepted.RunID,
+		Semaphores:   claims, SemaphoresOnly: !parent.resources, Resources: resources,
 		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
 	}
 	err = a.hold(ctx, store.NodeRef{RunID: accepted.RunID}, request, func(ctx context.Context, held Lease) error {
@@ -73,6 +75,29 @@ func (a *LocalAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 // Node admits an unclaimed local job before release and holds its lease through cleanup.
 func (a *LocalAdmission) Node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
 	return a.node(ctx, accepted, row, true, body)
+}
+
+// ClaimedNode holds machine capacity for one independently awarded job.
+func (a *LocalAdmission) ClaimedNode(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+	spec, err := admissionSpec(accepted)
+	if err != nil {
+		return err
+	}
+	if row.Ref.RunID != accepted.RunID || row.Ref.NodeID == "" {
+		return errors.New("claimed job admission requires its accepted run and job")
+	}
+	claims, err := a.claims(row.Execution.Concurrency, accepted.RunID)
+	if err != nil {
+		return err
+	}
+	options := spec.Resolved.Settings.Options
+	request := wingwire.AdmissionRequest{
+		RunID:        wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID),
+		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
+		Semaphores: claims, Resources: localResources(row.Execution.Resources.Value),
+		Priority: options.Priority.Value, Class: options.AdmissionClass.Value,
+	}
+	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error { return body(ctx) })
 }
 
 func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, local bool, body func(context.Context) error) error {
@@ -97,17 +122,17 @@ func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row sto
 	}
 	options := spec.Resolved.Settings.Options
 	request := wingwire.AdmissionRequest{
-		OwnerRunID: accepted.RunID, OwnerLeaseToken: parent.token, SubLease: true,
+		OwnerRunID: a.holderRunID(accepted.RunID), OwnerLeaseToken: parent.token, SubLease: true,
 		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
 		Semaphores: claims, SemaphoresOnly: semaphoresOnly,
 		Resources: localResources(row.Execution.Resources.Value), Priority: options.Priority.Value,
 		Class: options.AdmissionClass.Value,
 	}
 	if semaphoresOnly {
-		request.RunID = wingwire.NodeSemaphoreParticipant(accepted.RunID, row.Ref.NodeID)
+		request.RunID = wingwire.NodeSemaphoreParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID)
 		request.Resources = wingwire.HostResources{}
 	} else {
-		request.RunID = wingwire.NodeHostParticipant(accepted.RunID, row.Ref.NodeID)
+		request.RunID = wingwire.NodeHostParticipant(a.holderRunID(accepted.RunID), row.Ref.NodeID)
 	}
 	return a.hold(ctx, row.Ref, request, func(ctx context.Context, _ Lease) error { return body(ctx) })
 }
@@ -125,6 +150,7 @@ func localResources(resources runspec.Resources) wingwire.HostResources {
 }
 
 func (a *LocalAdmission) claims(groups []runspec.Concurrency, runID string) ([]wingwire.SemaphoreClaim, error) {
+	runID = a.holderRunID(runID)
 	claims := make([]wingwire.SemaphoreClaim, 0, len(groups))
 	for _, group := range groups {
 		if group.Scope != "run" && group.Scope != "box" {
@@ -144,6 +170,13 @@ func (a *LocalAdmission) claims(groups []runspec.Concurrency, runID string) ([]w
 	}
 	slices.SortFunc(claims, func(a, b wingwire.SemaphoreClaim) int { return strings.Compare(a.Name, b.Name) })
 	return claims, nil
+}
+
+func (a *LocalAdmission) holderRunID(run string) string {
+	if a.Controller == "" {
+		return run
+	}
+	return string(wingwire.RemoteRunID(a.Controller, run))
 }
 
 func (a *LocalAdmission) hold(parent context.Context, ref store.NodeRef, request wingwire.AdmissionRequest, body func(context.Context, Lease) error) (err error) {

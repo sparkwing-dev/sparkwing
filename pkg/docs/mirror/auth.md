@@ -605,7 +605,8 @@ The operator route that creates a team and its first team-admin credential is
 pending Korey's decision. A bootstrap seed cannot use the team token route to
 perform that step. The removed unauthenticated `POST /api/v1/tokens` flow is not
 supported. Existing team administrators issue member credentials through the
-team namespace and enroll machines through `sparkwing runners add`.
+team namespace and enroll machines with
+`sparkwing runners add --profile work --runner build-box --repos 'github.com/acme/*'`.
 
 `profiles add` probes `/api/v1/health` and authenticates through
 `/api/v1/auth/whoami`, which every live credential may call. Passing this probe

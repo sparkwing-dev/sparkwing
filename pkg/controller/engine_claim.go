@@ -72,7 +72,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
-	if principal.Capability.Purpose == capability.PurposeHere {
+	if principal.Capability.Purpose == capability.PurposeHere || principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
 		profile.OS, profile.Arch = body.OS, body.Arch
 		profile.Capacity = match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}
 		if body.Capacity != nil {

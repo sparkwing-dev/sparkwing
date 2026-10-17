@@ -1013,14 +1013,22 @@ existing live, declared, masked claim path. Registry loss and retry return
 unavailable, requiring fresh requester resolution. Cross-process secret delivery
 still needs a Cloud affinity or unpersisted relay contract.
 
-`ClaimRequest` adds optional `capacity`, `os` and `arch` for the authenticated
-here capability. Existing available CPU/memory fields retain current free
+`ClaimRequest` adds optional `capacity`, `os` and `arch` for authenticated
+here capabilities and unbound registered machines. Existing available CPU/memory fields retain current free
 resources. `RenewalRequest.available` refreshes the here owner's availability.
 The CLI reads the local admission daemon's actual capacity and free resources,
 including explicit zero availability. `RemoteHostStore.Available` supplies
 renewal observations. Canonical store placement decides owner self-execution.
 Here binding now supplies the real shared native host, private HTTP state,
 source access, data, logs, process services and leases.
+
+Runner `RequestCapacity` callbacks now take context and return physical capacity,
+current availability and an error. The loop makes no controller claim when
+observation fails. Every claim carries the machine's OS and architecture.
+Physical capacity remains nonzero when contribution or keep-free settings leave
+zero availability. Registration identity, pools and repository grants still
+come from authenticated capabilities. Trusted profile ceilings remain enforced
+by the store matcher. All callback consumers use the new signature.
 
 `POST /runners` adds `personal`. It grants no extra pools or billing authority.
 C1 checks personal machine ownership from account subject provenance for every
