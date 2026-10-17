@@ -336,6 +336,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 				t.Fatal(err)
 			}
 			path = "/api/v1/runs/foreign-run/source-credential"
+			status = 404
 		case 1:
 			run, err := tenant.ReadRun(t.Context(), "run")
 			if err != nil {
