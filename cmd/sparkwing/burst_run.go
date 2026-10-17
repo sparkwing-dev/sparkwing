@@ -36,22 +36,27 @@ func burstControllerUnreachable(err error) bool {
 }
 
 func resolveRunRouting(machine userconfig.Config, project *projectconfig.Config, pipeline string) userconfig.RunRouting {
-	var layers []*userconfig.RunRouting
-	if machine.Run != nil {
-		layers = append(layers, machine.Run.Routing)
+	var route userconfig.RunRouting
+	if machine.Run != nil && machine.Run.Routing != nil {
+		route = *machine.Run.Routing
+	}
+	restrict := func(r *projectconfig.RunRestrictions) {
+		if r != nil && r.Route != nil {
+			route.Route = new("local")
+		}
 	}
 	if project != nil {
 		if project.Defaults != nil {
-			layers = append(layers, project.Defaults.Run)
+			restrict(project.Defaults.Run)
 		}
 		for _, p := range project.Pipelines {
 			if p.Name == pipeline {
-				layers = append(layers, p.Run)
+				restrict(p.Run)
 				break
 			}
 		}
 	}
-	return userconfig.MergeRunRouting(layers...)
+	return route
 }
 
 func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args []string, route userconfig.RunRouting, out io.Writer, deps burstRunDependencies) error {
@@ -65,7 +70,7 @@ func runRoutedCommand(ctx context.Context, pipeline string, flags runFlags, args
 		return errors.New("run: Cloud overflow captures the working tree; use pipeline trigger to select committed revisions")
 	}
 	if route.Profile == nil {
-		return errors.New("run: cloud routing requires a profile in run.routing or the repository's run settings")
+		return errors.New("run: cloud routing requires a profile in machine run.routing")
 	}
 	if flags.detached {
 		return errors.New("run: a cloud-routed run hosts here and must remain attached")

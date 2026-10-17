@@ -694,6 +694,44 @@ func TestLocalPublicationFailurePreservesExecutionVerdict(t *testing.T) {
 	}
 }
 
+func TestLocalPublicationHasDeadlineAndSecondInterruptAbandonsIt(t *testing.T) {
+	var calls []string
+	deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+	resolve := deps.resolve
+	signals := make(chan os.Signal, 2)
+	deps.interrupts = signals
+	stderr, err := os.CreateTemp(t.TempDir(), "publication-stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderr.Close()
+	previous := os.Stderr
+	os.Stderr = stderr
+	defer func() { os.Stderr = previous }()
+	deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
+		runtime, err := resolve(ctx, opts)
+		runtime.publish = func(ctx context.Context, _, _ string) error {
+			_, bounded := ctx.Deadline()
+			if !bounded {
+				t.Error("publication has no bounded request deadline")
+				return errors.New("unbounded publication")
+			}
+			signals <- os.Interrupt
+			signals <- os.Interrupt
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return runtime, err
+	}
+	if err := runLocalCommand(t.Context(), "ci", runFlags{publish: "history"}, []string{"--password", "private-value"}, io.Discard, deps); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(stderr.Name())
+	if err != nil || !strings.Contains(string(body), "stayed local-only") {
+		t.Fatalf("abandoned publication notice: %q %v", body, err)
+	}
+}
+
 func TestLocalAttachedRunStreamsCommittedLogs(t *testing.T) {
 	var calls []string
 	deps := localRuntimeFor(t, localTestAward(t), false, &calls)

@@ -3501,8 +3501,8 @@ declaration and claim fences pass. It commits the same `secret_released` audit,
 then rechecks authority. Returned local rows have `Masked=true` and
 `Ephemeral=true`. The ephemeral marker is absent from JSON. Values never enter
 secret rows, run seals, events or source-bundle storage. Terminal run commit
-removes the registry entry. A rolled-back completion retains it. Store close
-clears the registry.
+removes the registry entry. Team deletion and owner lease expiry also purge it.
+A rolled-back completion retains it. Store close clears the registry.
 
 Losing the registry fails with `unavailable`, even if a stored secret has the
 same name. Intake replay cannot restore lost values. Retry of a run with local
@@ -3513,7 +3513,12 @@ The supported Cloud chart uses one controller replica and Recreate rollouts.
 That topology sends intake, plan validation and releases to the same in-memory
 registry. Multi-replica deployment needs a verified run-affinity or ephemeral
 relay contract before it can support local secrets. This amendment adds no
-relay, stored value or change to restart behavior.
+relay or stored value. ResupplyHereSecrets accepts matching sealed names and values
+only from the run's live, fenced here owner. It restores a lost registry on its
+authenticated heartbeat. Existing values cannot be changed. Burst job claims and
+secret reads independently restrict eligibility to the sealed here/personal/Cloud
+set. The here owner keeps planning authority. Publish-mode success never updates
+pipeline_success_pins.
 
 ## Burst placement and per-user overflow
 
@@ -3602,3 +3607,7 @@ os.Root, and signed uploads verify the digest and size again.
 
 Local publication reuses the persisted result reader used by materialization,
 retaining failure reasons, masked errors, exit codes and structured failures.
+
+Publication attempts always store local for executor kind, name and location.
+The caller-supplied executor name cannot alter that provenance. Billing awards
+index (team, requester_account) for account-scoped overflow lookup.

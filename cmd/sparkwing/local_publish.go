@@ -7,11 +7,15 @@ import (
 	"os"
 	"path/filepath"
 
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func publishLocalProfile(ctx context.Context, home string, local client.EngineOptions, profile, run string) (resultErr error) {
+	ctx, cancel := context.WithTimeout(ctx, wingdclient.RequestTimeout)
+	defer cancel()
 	state, err := client.ReadLocalPublication(ctx, local, run)
 	if err != nil {
 		return err

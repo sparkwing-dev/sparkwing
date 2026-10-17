@@ -18,6 +18,9 @@ type burstAvailabilityWire struct {
 
 func (c burstAvailabilityWire) Renew(_ context.Context, _ string, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
 	*c.calls = append(*c.calls, "renew")
+	if body.LocalSecrets["TOKEN"] != "requester-volatile-value" {
+		return controllerwire.RenewalResponse{}, errors.New("owner renewal lost requester secrets")
+	}
 	if body.Available == nil || body.Available.Cores != 0 {
 		return controllerwire.RenewalResponse{}, errors.New("zero availability lost")
 	}
@@ -45,6 +48,7 @@ func TestBurstAvailabilityRefreshesBeforePlacementReadsAndClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	state.LocalSecrets = map[string]string{"TOKEN": "requester-volatile-value"}
 	state.Available = func(context.Context) (*match.Resources, error) {
 		calls = append(calls, "observe")
 		return &match.Resources{}, nil

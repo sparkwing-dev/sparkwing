@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -41,7 +40,10 @@ func FuzzRequesterLocalSecretNeverPersistsOrFallsBackOnAnotherProcess(f *testing
 func requesterLocalSecretRelease(t *testing.T, value string) {
 	t.Helper()
 	s, options, input, _ := sourceUploadFixture(t)
+	s.WithEngineController(&EngineController{Store: s.store, RunnerPolicy: runnerAdmissionFunc(func(context.Context, string) error { return nil })})
+	options.HTTP = &http.Client{Transport: inventoryRoundTrip{s.Handler()}}
 	input.LocalSecretNames = []string{"TOKEN"}
+	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 	input.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "machines"}, {Target: "cloud"}}}
 	c, err := client.NewEngineClient(options)
 	if err != nil {
@@ -51,13 +53,17 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engineHTTPRoot(t, &EngineController{Store: s.store}, "a", "secret-runner", []capability.Grant{capability.TriggersClaim})
-	s.store.SetClaimProfileResolver(engineProfileFake{})
-	award, err := s.store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "secret-runner", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: created.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
-	if err != nil || len(award.Bearer) == 0 {
-		t.Fatalf("claim: %v", err)
+	options.Bearer = func(context.Context) (string, error) { return created.HereBearer, nil }
+	here, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
 	}
-	options.Bearer = func(context.Context) (string, error) { return string(award.Bearer), nil }
+	response, err := here.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1", RunID: created.RunID, Kinds: []capability.UnitKind{capability.UnitTrigger}, AvailableCores: 1})
+	if err != nil || response.Claim == nil {
+		t.Fatalf("here claim: %+v %v", response, err)
+	}
+	award := response.Claim
+	options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
 	owner, err := client.NewEngineClient(options)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +107,7 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	h := s.Handler()
 	path := "/api/v1/secrets/TOKEN?run=" + created.RunID
-	reply := sourceUploadHTTP(h, string(award.Bearer), "GET", path, "")
+	reply := sourceUploadHTTP(h, award.Capability, "GET", path, "")
 	var secret controllerwire.SecretValue
 	if reply.Code != http.StatusOK || json.Unmarshal(reply.Body.Bytes(), &secret) != nil || secret.Value != value || !secret.Masked {
 		t.Fatalf("release HTTP %d %s", reply.Code, reply.Body)
@@ -172,22 +178,50 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	defer other.Close()
-	otherServer := New(other, nil).WithSecretsCipher(s.secretsCipher)
+	otherServer := New(other, nil).WithSecretsCipher(s.secretsCipher).WithEngineController(&EngineController{Store: other})
 	lost := sourceUploadHTTP(otherServer.Handler(), reconciled.Claim.Capability, "GET", "/api/v1/secrets/TOKEN?run="+created.RunID, "")
 	if lost.Code != http.StatusServiceUnavailable || value != "" && strings.Contains(lost.Body.String(), value) {
 		t.Fatalf("another process restored or exposed requester values: HTTP %d", lost.Code)
+	}
+	resupply, err := json.Marshal(map[string]any{"local_secrets": map[string]string{"TOKEN": value}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	heartbeat := "/api/v1/claims/" + award.UnitID + "/heartbeat"
+	rejected := sourceUploadHTTP(otherServer.Handler(), reconciled.Claim.Capability, "POST", "/api/v1/claims/"+reconciled.Claim.UnitID+"/heartbeat", string(resupply))
+	if rejected.Code == http.StatusOK {
+		t.Fatal("worker replaced requester secrets")
+	}
+	renewed := sourceUploadHTTP(otherServer.Handler(), award.Capability, "POST", heartbeat, string(resupply))
+	if renewed.Code != http.StatusOK {
+		t.Fatalf("here resupply after controller restart: HTTP %d %s", renewed.Code, renewed.Body)
+	}
+	restored := sourceUploadHTTP(otherServer.Handler(), reconciled.Claim.Capability, "GET", path, "")
+	var restoredValue controllerwire.SecretValue
+	if restored.Code != http.StatusOK || json.Unmarshal(restored.Body.Bytes(), &restoredValue) != nil || restoredValue.Value != value {
+		t.Fatalf("resumed burst lost requester secret: HTTP %d", restored.Code)
+	}
+	for _, invalid := range []map[string]string{{"TOKEN": "changed-value"}, {"OTHER": "value"}, {"TOKEN": value, "OTHER": "value"}} {
+		body, err := json.Marshal(map[string]any{"local_secrets": invalid})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rejected := sourceUploadHTTP(otherServer.Handler(), award.Capability, "POST", heartbeat, string(body))
+		if rejected.Code == http.StatusOK {
+			t.Fatal("here renewal replaced sealed requester inputs")
+		}
 	}
 	if live := sourceUploadHTTP(h, reconciled.Claim.Capability, "GET", "/api/v1/secrets/TOKEN?run="+created.RunID, ""); live.Code != http.StatusOK {
 		t.Fatalf("another process changed the original process's secret delivery: HTTP %d", live.Code)
 	}
 	for _, name := range []string{"TOKEN?run=foreign", "UNDECLARED?run=" + created.RunID} {
-		refused := sourceUploadHTTP(h, string(award.Bearer), "GET", "/api/v1/secrets/"+name, "")
+		refused := sourceUploadHTTP(h, award.Capability, "GET", "/api/v1/secrets/"+name, "")
 		if refused.Code == http.StatusOK || value != "" && strings.Contains(refused.Body.String(), value) {
 			t.Fatalf("foreign release: %d %s", refused.Code, refused.Body)
 		}
 	}
 	engineSQL(t, s.store, `UPDATE triggers SET generation=generation+1 WHERE team='a' AND id=?`, created.RunID)
-	refused := sourceUploadHTTP(h, string(award.Bearer), "GET", path, "")
+	refused := sourceUploadHTTP(h, award.Capability, "GET", path, "")
 	if refused.Code == http.StatusOK || value != "" && strings.Contains(refused.Body.String(), value) {
 		t.Fatalf("stale release: %d %s", refused.Code, refused.Body)
 	}

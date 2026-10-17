@@ -2830,6 +2830,12 @@ components:
             - type: "null"
         executing:
           type: boolean
+        local_secrets:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
       required:
         - executing
       type: object
@@ -5878,6 +5884,18 @@ components:
         - StoreNow
       type: object
       x-sparkwing-go-type: store.LocalPublication
+    pkg.store.MaterializedResultSource:
+      additionalProperties: true
+      properties:
+        Ref:
+          $ref: '#/components/schemas/pkg.store.NodeRef'
+        StateSeq:
+          type: integer
+      required:
+        - Ref
+        - StateSeq
+      type: object
+      x-sparkwing-go-type: store.MaterializedResultSource
     pkg.store.NodeRef:
       additionalProperties: true
       properties:
@@ -6094,6 +6112,22 @@ components:
         - Generation
       type: object
       x-sparkwing-go-type: store.OwnerLeaseRef
+    pkg.store.RetrySelection:
+      additionalProperties: true
+      properties:
+        mode:
+          type: string
+        results:
+          anyOf:
+            - additionalProperties:
+                $ref: '#/components/schemas/pkg.store.MaterializedResultSource'
+              type: object
+            - type: "null"
+      required:
+        - mode
+        - results
+      type: object
+      x-sparkwing-go-type: store.RetrySelection
     pkg.store.RunRow:
       additionalProperties: true
       properties:
@@ -6137,6 +6171,10 @@ components:
           type: string
         Request:
           $ref: '#/components/schemas/internal.runspec.SealedRequest'
+        Retry:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.store.RetrySelection'
+            - type: "null"
         Spec:
           anyOf:
             - $ref: '#/components/schemas/internal.runspec.Spec'
@@ -6164,6 +6202,7 @@ components:
         - State
         - Request
         - Lineage
+        - Retry
         - Spec
         - Plan
         - PlanHash

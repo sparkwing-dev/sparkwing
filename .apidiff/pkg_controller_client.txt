@@ -9,8 +9,10 @@ type CreateServiceTokenRequest struct {
 type CreateTokenRequest struct {
 	Grants    []string
 	ExpiresAt *time.Time
+	Data      *capability.DataScope
 }
 type CreatedToken struct {
+	Principal  string
 	Capability string
 	Prefix     string
 	Team       string
@@ -89,6 +91,23 @@ func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, se
 func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, error)
 func NewSourceAccess(options EngineOptions, run string, sealed source.Spec) (source.Access, error)
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error)
+func OpenProfileData(ctx context.Context, options EngineOptions, scope capability.DataScope) (ProfileData, error)
+type ProfileData struct {
+	Options   EngineOptions
+	Authority blob.Authority
+	Team      string
+}
+func (p ProfileData) Close(ctx context.Context) error
+func (p ProfileData) PublicationLogs(attempt runspec.AttemptIdentity) (logseg.Uploader, error)
+func (p ProfileData) PublicationStorage(attempt runspec.AttemptIdentity) (blob.Store, blob.RecordStore, blob.Authority, error)
+func (p ProfileData) RemoteCache(profile string) (blob.RemoteCache, error)
+type PublicationInput struct {
+	State    store.LocalPublication
+	OpenBlob func(context.Context, blob.Digest) (io.ReadCloser, int64, error)
+	Logs     controllerwire.LogReader
+}
+func PublishLocalRun(ctx context.Context, options EngineOptions, input PublicationInput) (_ string, resultErr error)
+func ReadLocalPublication(ctx context.Context, options EngineOptions, run string) (store.LocalPublication, error)
 func ResolveLocalSecrets(ctx context.Context, declarations []nodeproto.SecretDeclaration, lookup func(context.Context, string) (string, bool, error)) (map[string]string, error)
 type RotatedToken struct {
 	Capability   string
@@ -106,11 +125,11 @@ func UploadSourceSnapshot(ctx context.Context, options EngineOptions, git runspe
 # methods on un-declared receiver types (likely a bug)
 func (c *dataClient) Commit(ctx context.Context, input blob.CommitUpload) (blob.Receipt, error)
 func (c *dataClient) CommitRecord(ctx context.Context, input blob.CommitRecordRequest) (blob.Record, error)
-func (c *dataClient) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error)
+func (c *dataClient) CopyMemo(ctx context.Context, input blob.CopyMemoRequest) (blob.MemoHit, error)
 func (c *dataClient) Download(ctx context.Context, input blob.GetRequest) (blob.SignedTransfer, error)
 func (c *dataClient) HasMany(ctx context.Context, input blob.HasManyRequest) (blob.Presence, error)
 func (c *dataClient) LookupDepcache(ctx context.Context, input blob.DepcacheLookup) (blob.DepcacheHit, error)
-func (c *dataClient) LookupMemo(context.Context, blob.MemoLookup) (blob.MemoHit, error)
+func (c *dataClient) LookupMemo(ctx context.Context, input blob.MemoLookup) (blob.MemoHit, error)
 func (c *dataClient) LookupRecord(ctx context.Context, input blob.RecordLookup) (blob.RecordLookupResult, error)
 func (c *dataClient) Upload(ctx context.Context, input blob.UploadIntent) (blob.UploadTicket, error)
 func (c *engineClient) AcceptExpansion(ctx context.Context, run, job string, input controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)

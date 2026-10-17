@@ -22,11 +22,12 @@ type PrivateHostState interface {
 type RemoteHostStore struct {
 	PrivateHostState
 	*RemoteOwnerStore
-	controller controllerwire.Controller
-	unit       string
-	executing  func() bool
-	Available  func(context.Context) (*match.Resources, error)
-	Finish     func(context.Context, store.FinishRunRequest) (store.Applied, error)
+	controller   controllerwire.Controller
+	unit         string
+	executing    func() bool
+	LocalSecrets map[string]string
+	Available    func(context.Context) (*match.Resources, error)
+	Finish       func(context.Context, store.FinishRunRequest) (store.Applied, error)
 }
 
 // NewRemoteHostStore constructs an award-bound state adapter.
@@ -130,7 +131,7 @@ func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref store.NodeRef,
 }
 
 func (s *RemoteHostStore) renew(ctx context.Context, executing bool) (store.LeaseBeat, error) {
-	request := controllerwire.RenewalRequest{Executing: executing}
+	request := controllerwire.RenewalRequest{Executing: executing, LocalSecrets: s.LocalSecrets}
 	if s.Available != nil {
 		var err error
 		request.Available, err = s.Available(ctx)

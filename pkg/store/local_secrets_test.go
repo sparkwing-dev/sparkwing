@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -107,6 +108,32 @@ func TestLocalSecretsLossFailsInsteadOfFallingBack(t *testing.T) {
 	}
 }
 
+func FuzzBurstSecretReadRechecksClaimantEligibility(f *testing.F) {
+	f.Add("here")
+	f.Add("machines")
+	f.Add("cloud")
+	f.Fuzz(func(t *testing.T, target string) {
+		if target != "here" && target != "machines" && target != "cloud" {
+			t.Skip()
+		}
+		tenant, a := localSecretFixture(t, "requester-private-value")
+		run, err := tenant.ReadRun(t.Context(), a.Binding.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run.Request.Request.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: target}}}
+		body, err := json.Marshal(run.Request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, tenant.s.db, "UPDATE runs SET request_json=? WHERE team=? AND id=?", body, tenant.team, run.ID)
+		row, err := tenant.ReadSecret(t.Context(), a)
+		if err == nil || row != nil {
+			t.Fatal("team runner released a requester's burst secret")
+		}
+	})
+}
+
 func FuzzLocalSecretsNeverPersistOrEscapeTheirRun(f *testing.F) {
 	f.Add([]byte("seed"), uint8(0))
 	f.Add([]byte("other"), uint8(3))
@@ -169,6 +196,33 @@ func TestLocalSecretsReleasedOnlyAfterCommittedRunCompletion(t *testing.T) {
 	}
 	if _, ok := tenant.s.localSecrets.Load(localSecretKey{tenant.team, a.Binding.RunID}); ok {
 		t.Fatal("completed run retained local secret")
+	}
+}
+
+func TestLocalSecretsPurgedOnTeamDeletionAndOwnerLeaseExpiry(t *testing.T) {
+	for _, boundary := range []string{"team deletion", "expired owner"} {
+		t.Run(boundary, func(t *testing.T) {
+			tenant, a := localSecretFixture(t, "requester-private-value")
+			if boundary == "team deletion" {
+				if _, _, err := tenant.s.AsOperator().RequestTeamDeletion(t.Context(), tenant.team, tenant.s.now()); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				now := tenant.s.now().Add(time.Minute)
+				rewriteSchemaExec(t, tenant.s.db, "UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?", now.UnixNano(), tenant.team, a.Binding.RunID)
+				tenant.s.clock = func() time.Time { return now }
+				lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+					t.Fatalf("expired owner did not requeue: %+v %v", reaped, err)
+				}
+			}
+			if _, err := tenant.s.localSecret(tenant.team, a.Binding.RunID, "KEY"); err == nil {
+				t.Fatal("inactive requester secret retained")
+			}
+		})
 	}
 }
 

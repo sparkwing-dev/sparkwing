@@ -323,6 +323,7 @@ const CauseLeaseLapse TransitionCause = "lease_lapse"
 const CauseMaterialize TransitionCause = "materialize"
 const CauseOwnerPolicy TransitionCause = "owner_policy"
 const CausePublish TransitionCause = "publish"
+const CausePublishAttempt TransitionCause = "publish_attempt"
 const CauseQueueTimeout TransitionCause = "queue_timeout"
 const CauseRelease TransitionCause = "release"
 const CauseReport TransitionCause = "report"
@@ -1113,6 +1114,7 @@ type IntakeRequest struct {
 	CapabilityPrefix   string
 	LocalSecrets       map[string]string
 	VerifiedDeliveryID string
+	RetryMode          string
 }
 func IntakeSettings(ctx context.Context, resolver capability.AuthorityResolver, team Team) (ComputeLimits, bool, error)
 type Invitation struct {
@@ -1156,6 +1158,11 @@ type LeaseBeat struct {
 	WatchedNodes    []string
 }
 func LiveLogAttempt(attempt, generation int64) string
+type LocalPublication struct {
+	RunSnapshot
+	Records []blob.RecordLookupResult
+	Results map[string]NodeResult
+}
 type LogSegments struct {
 	Subject          blob.LogSubject
 	Segments         []Segment
@@ -1760,6 +1767,10 @@ type RetentionResult struct {
 	PinnedRuns    int64
 	PinnedOutputs int64
 }
+type RetrySelection struct {
+	Mode    string
+	Results map[string]MaterializedResultSource
+}
 const RetrySourceManual = "manual"
 type Role string
 func (r Role) AtLeast(other Role) bool
@@ -1881,6 +1892,7 @@ type RunRow struct {
 	State             RunState
 	Request           runspec.SealedRequest
 	Lineage           runspec.Lineage
+	Retry             *RetrySelection
 	Spec              *runspec.Spec
 	Plan              json.RawMessage
 	PlanHash          string
@@ -2426,6 +2438,7 @@ func (s *Store) RenewLauncherPreparation(ctx context.Context, authority capabili
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
+func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.AuthorityRef, values map[string]string) error
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
 func (s *Store) SelectAccountTeam(ctx context.Context, a capability.Authorized, team Team) error
@@ -2619,6 +2632,7 @@ func (t *Tenant) ReadChildOutput(ctx context.Context, supplied capability.Author
 func (t *Tenant) ReadDataBlob(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error)
 func (t *Tenant) ReadFailure(ctx context.Context, source NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error)
 func (t *Tenant) ReadJobOutput(ctx context.Context, supplied capability.Authorized) (blob.Blob, error)
+func (t *Tenant) ReadLocalPublication(ctx context.Context, run string) (LocalPublication, error)
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error)
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
 func (t *Tenant) ReadOIDCFacts(ctx context.Context, supplied capability.Authorized) (capability.OIDCFacts, error)
@@ -2716,6 +2730,7 @@ func (t *Tenant) WriteUsage(ctx context.Context, a capability.Authorized, usage 
 func TierQuota(tier string) (StorageQuota, bool)
 type TransitionCause string
 type TransitionExtra struct {
+	Publication *runspec.PublishedAttempt
 	OwnerPolicy *OwnerPolicyResult
 	Result      *NodeResult
 	Materialize *MaterializeSource

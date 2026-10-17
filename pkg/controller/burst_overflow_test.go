@@ -27,7 +27,7 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 			e, tenant := engineRuntimeStore(t)
 			engineSQL(t, e.Store, `UPDATE teams SET card_customer='customer',card_payment_method='method' WHERE name='a'`)
 			budget := int64(1)
-			seal := runspec.SealedRequest{Request: runspec.Request{Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}, OverflowMinutes: &budget}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}
+			seal := runspec.SealedRequest{Request: runspec.Request{Burst: &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "machines"}, {Target: "cloud"}}, OverflowMinutes: &budget}, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}}}
 			request, err := json.Marshal(seal)
 			if err != nil {
 				t.Fatal(err)
@@ -57,7 +57,15 @@ func TestBurstCloudClaimsRespectUserOverflowAndLeavePersonalCapacityAvailable(t 
 					t.Fatal("queued Cloud bypassed overflow limit")
 				}
 			}
-			local := engineHTTPRoot(t, e, "a", "own-machine", []capability.Grant{capability.NodesClaim})
+			engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','account@example.test',1,1)`)
+			engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','account','editor',1)`)
+			engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('personal-session','account','runs.read,runs.write',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
+			authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "personal-session"}
+			machine, err := e.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:own-machine", Repositories: []string{"github.com/acme/*"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "own-machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			local := machine.Raw
 			engineClaimHTTP(t, h, local, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"run_id":"run","job_id":"two","available_cores":64}`, http.StatusOK)
 			node, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "two"})
 			if err != nil || node.ClaimedBy != "own-machine" {

@@ -12,11 +12,13 @@ import (
 // APIBaseURL addresses HTTP requests carried by the private controller socket.
 const APIBaseURL = "http://sparkwing-api"
 
+// RequestTimeout bounds a private controller request.
+const RequestTimeout = 45 * time.Second
+
 // NewAPIClient carries HTTP over the private socket and refuses redirects.
 func NewAPIClient(socket string) *http.Client {
-	const requestTimeout = 45 * time.Second
 	return &http.Client{
-		Timeout: requestTimeout,
+		Timeout: RequestTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -27,7 +29,7 @@ func NewAPIClient(socket string) *http.Client {
 			MaxIdleConns:          16,
 			MaxIdleConnsPerHost:   16,
 			IdleConnTimeout:       90 * time.Second,
-			ResponseHeaderTimeout: requestTimeout,
+			ResponseHeaderTimeout: RequestTimeout,
 		},
 	}
 }

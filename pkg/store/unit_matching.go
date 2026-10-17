@@ -67,6 +67,11 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if err := checkPersonalMachineTx(ctx, tx, chain, unit.RunID); err != nil {
 		return profile, match.Demand{}, err
 	}
+	if requestSeal.Request.Burst != nil {
+		if err := checkBurstClaimantTx(ctx, tx, Team(team), chain, unit); err != nil {
+			return profile, match.Demand{}, err
+		}
+	}
 	options := requestSeal.Request.Options
 	if options.Runner.Value.Kind == runspec.RunnerHere && !here && (requestSeal.Request.Burst == nil || unit.Kind != capability.UnitNode) {
 		return profile, match.Demand{}, authorityError(apierr.Forbidden, "work is reserved for its here claimant")

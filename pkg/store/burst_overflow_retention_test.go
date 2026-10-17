@@ -2,11 +2,24 @@ package store
 
 import (
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
+
+func TestOverflowUsageLookupIndexesTeamAndRequester(t *testing.T) {
+	s := authorityStore(t)
+	var id, parent, unused int
+	var plan string
+	if err := s.db.QueryRow("EXPLAIN QUERY PLAN SELECT reservation_id FROM billing_awards WHERE team=? AND requester_account=?", "a", "requester").Scan(&id, &parent, &unused, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, "team=? AND requester_account=?") {
+		t.Fatalf("usage lookup scans other requesters: %s", plan)
+	}
+}
 
 func TestOverflowUsageSurvivesRunDeletionAndIdentityReuse(t *testing.T) {
 	overflowRetainedUsage(t, "requester", true)

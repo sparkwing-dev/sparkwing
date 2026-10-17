@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -57,6 +58,20 @@ func bindLocalRunHost(ctx context.Context, home string, options client.EngineOpt
 	}
 	state.Finish = private.FinishRunAndUnit
 	if award.Request.Request.Burst != nil {
+		if len(award.Request.Request.LocalSecretNames) > 0 {
+			state.LocalSecrets = map[string]string{}
+			for _, name := range award.Request.Request.LocalSecretNames {
+				value, present := os.LookupEnv(name)
+				if !present {
+					return hereHostSession{}, errors.New("requester local secret is unavailable on resume")
+				}
+				state.LocalSecrets[name] = value
+			}
+			if _, err := state.RenewOwner(ctx, store.Actor{}, false); err != nil {
+				return hereHostSession{}, err
+			}
+		}
+
 		state.Available = func(ctx context.Context) (*match.Resources, error) {
 			_, available, err := observeBurstCapacity(ctx, home)
 			return &available, err

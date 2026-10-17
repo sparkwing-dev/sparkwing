@@ -331,9 +331,11 @@ the saved limit with `{"monthly_minutes":N}` or removes it with
 narrow that account limit. Team billing admission still applies. Self-hosted and
 local capacity remains eligible when Cloud claims wait for budget.
 
-`CreateRunRequest.local_secrets` carries requester-resolved values only during
-intake. The sealed request retains `local_secret_names`. Responses omit the
+`CreateRunRequest.local_secrets` carries requester-resolved values during intake.
+`RenewalRequest.local_secrets` re-supplies them only through the live here owner,
+including after controller restart. Other claimants cannot supply or replace values. The sealed request retains `local_secret_names`. Responses omit the
 values. Secret release follows the existing live claim and declared-secret
 checks and returns `masked:true`. Values remain in the intake controller's
-memory and are removed after terminal completion. Loss of that memory returns
-`unavailable`; retry requires a fresh requester submission.
+memory and are removed on terminal completion, team deletion and owner lease
+expiry. Reads recheck the sealed burst preference set. Values remain unavailable
+until the here host restores them. Retry requires a fresh requester submission.

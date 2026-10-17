@@ -68,7 +68,7 @@ func TestBurstPublicRunFallsBackLocallyWithRequesterSecrets(t *testing.T) {
 	t.Setenv("TOKEN", burstIntakeSecret)
 	config := filepath.Join(home, "config.yaml")
 	t.Setenv("SPARKWING_CONFIG", config)
-	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: swu_offline_fixture\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n", endpoint)
+	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: swu_offline_fixture\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint)
 	if err := os.WriteFile(config, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	t.Setenv("SPARKWING_CONFIG", config)
 	writeConfig := func(route string) {
 		t.Helper()
-		if err := os.WriteFile(config, []byte(fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: %s\n    profile: cloud\n    local_secrets: [TOKEN]\n", endpoint, bearer, route)), 0o600); err != nil {
+		if err := os.WriteFile(config, []byte(fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: %s\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint, bearer, route)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -366,7 +366,7 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	server.Start()
 	t.Cleanup(server.Close)
 	config := filepath.Join(os.Getenv("SPARKWING_HOME"), "config.yaml")
-	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n", endpoint, bearer)
+	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint, bearer)
 	if contended {
 		contents += "    prefer: [{target: here}, {target: machines}]\n"
 	} else if personal {

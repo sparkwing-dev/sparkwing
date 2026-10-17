@@ -28,6 +28,15 @@ func burstFixture(t *testing.T, policy runspec.BurstPlacement) (*Store, UnitDema
 	return s, demand
 }
 
+func burstPersonalClaimant(t *testing.T, s *Store, authority capability.AuthorityRef, name string) capability.Capability {
+	t.Helper()
+	issued, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:" + name, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: name}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return issued.Capability
+}
+
 func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(816, 192))
 	for i := range 32 {
@@ -67,8 +76,10 @@ func TestBurstPersonalMachineOwnershipProperty(t *testing.T) {
 
 func TestBurstSealedPreferencesOverrideControllerPlacement(t *testing.T) {
 	s, demand := burstFixture(t, runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "name=preferred", Hold: time.Minute}, {Target: "machines"}, {Target: "cloud"}}})
-	root := authorityRoot("preferred", "a")
-	authorityPersist(t, s, root)
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	root := burstPersonalClaimant(t, s, owner.Authority, "preferred")
+	fallback := burstPersonalClaimant(t, s, owner.Authority, "fallback")
+	demand.CapabilityPrefix = fallback.Prefix
 	if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Capacity: demand.Capacity, Available: demand.Available}); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +193,8 @@ func burstHereOwnerFixture(t *testing.T) (*Store, UnitDemand, capability.Princip
 func TestBurstHereOwnerCapacityComesFromItsFencedObservation(t *testing.T) {
 	s, demand, principal := burstHereOwnerFixture(t)
 	fallback := demand
-	fallback.CapabilityPrefix = "runner"
+	owner := authorityMember(t, s, "owner", RoleOwner)
+	fallback.CapabilityPrefix = burstPersonalClaimant(t, s, owner.Authority, "fallback").Prefix
 	fallback.Target = &UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}
 	if _, err := s.ClaimUnit(t.Context(), fallback); err == nil {
 		t.Fatal("live here owner did not hold fallback")

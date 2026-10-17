@@ -386,9 +386,10 @@ those behaviors. See [node protocol](node-protocol.md).
 
 ## Burst and overflow
 
-Configure a Cloud connection in the user file, then opt in to routing through
-that profile. A checkout can reference a profile name but cannot supply its
-connection URL or credential.
+Configure a Cloud connection and opt in through machine `run.routing`.
+The machine file alone selects the route, profile, preferences, local secret
+sources, overflow limit and untracked source files. Repository configuration
+can restrict execution to this machine and declare required secret names.
 
 ```yaml
 run:
@@ -400,26 +401,26 @@ run:
         hold: 5s
       - target: machines
         hold: 10s
-      - target: pool=linux
+      - target: cloud
     local_secrets: [DEPLOY_TOKEN]
+    source_files: [generated/fixture.json]
     overflow_minutes: 120
 ```
 
 The route defaults to `local`. The example gives this machine the first chance,
-then the user's registered machines, then the named Cloud pool. Holds apply
+then the user's registered personal machines, then Cloud. Holds apply
 while an eligible preferred claimant is live. An absent claimant does not delay
 later capacity. Omit `prefer` to use `here` for five seconds, `machines` for five
 seconds, then `cloud`. `name=NAME` selects a registered machine by name.
-Pool selectors preserve the team's existing pool authorization.
+Named and pool selectors can narrow the requester's eligible personal machines.
+Cloud executors require a `cloud` entry. Runners outside the sealed preference
+set cannot claim burst jobs or read requester secrets, even after all holds expire.
+Team runners remain excluded. The attached here owner retains its planning authority.
 
-Repository settings override the user file, and pipeline settings override the
-repository defaults. For example, keep deployment on this machine:
+Repository restrictions apply to machine-authorized routing. For example, keep
+deployment on this machine:
 
 ```yaml
-defaults:
-  run:
-    route: cloud
-    profile: work
 pipelines:
   - name: deploy
     entrypoint: Deploy
@@ -465,10 +466,12 @@ Authorization failures remain errors. After intake, a lost response or connectio
 cannot start a second local run because the admitted run keeps its Cloud owner.
 
 The source bundle contains Git-tracked files with their working-tree edits and
-deletions. It excludes untracked files unless the pipeline lists their exact
-repository-relative paths in `source_files`. The bundle has no parent history.
-Secret files and any snapshot containing a resolved local secret are refused
-before upload. Bundle upload uses authorized content-addressed source storage.
+deletions. Untracked files require their exact repository-relative paths in
+machine `run.routing.source_files`. A repository `source_files` declaration
+requires that machine approval, including for ignored paths. The bundle has
+no parent history. Secret-shaped files are refused before upload. The local
+secret scan checks changed and uncommitted blobs, skips values shorter than
+eight bytes and ignores PEM armor lines. Log masking keeps its full patterns. Bundle upload uses authorized content-addressed source storage.
 Each executor prepares its private source workspace on first use and builds
 the pipeline from the uploaded snapshot with its selected
 engine. Go installation downloads the dependencies used by the pipeline.
@@ -498,13 +501,16 @@ pipelines:
     source_files: [generated/fixture.json]
 ```
 
-Declare secrets in the pipeline, then list the names to resolve locally in
-`local_secrets`. The CLI reads those names from its captured environment at
+Declare secrets in the pipeline, then authorize the names to resolve locally in
+machine `run.routing.local_secrets`. Repository `run.local_secrets` lists names
+only and cannot select requester sources or supply values. Machine secret
+classification also remains in force for local snapshots. The CLI reads those names from its captured environment at
 intake. Required missing values fail before submission. Other declared names
 use the team's normal secret provider. Values travel outside the sealed request
 and bundle, stay in controller memory, and are released only to the live
-claiming process with masking enabled. A controller restart loses those values.
-A run that needs them then fails explicitly and must be submitted again.
+claiming process with masking enabled. The attached here host re-supplies values
+on authenticated owner heartbeats and when it resumes after a controller restart.
+Team deletion, terminal completion and owner lease expiry purge those values.
 The Cloud chart supports one controller replica and uses a Recreate rollout.
 Run intake, plan validation and secret release reach that same process.
 Multiple controller replicas require an ephemeral secret relay or verified
@@ -537,3 +543,8 @@ billing charge ladder still apply. Once the allowance is reached, new Cloud
 claims wait while local and registered-machine capacity remains eligible.
 Running work finishes.
 Deleting run history keeps its usage in the monthly total.
+
+Local publication has a 45-second request deadline. During publication, a second
+Ctrl-C abandons the upload and reports that the run stayed local-only. Publication
+failure preserves the local execution verdict. Published history never replaces
+the team's latest successful execution pin.

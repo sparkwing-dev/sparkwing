@@ -928,14 +928,18 @@ remains immutable. Snapshot scratch closes on success and failure.
 
 ## Launch burst configuration
 
-Machine `run.routing`, checkout `defaults.run` and `pipelines[].run` carry the
-same `userconfig.RunRouting` fields: optional `route` (local/cloud), named
-`profile`, ordered `prefer` entries (`target`, duration-string `hold`), optional
-`overflow_minutes`, and `local_secrets` name lists. Merge is fieldwise from user
-to repository defaults to pipeline. Explicit lists replace lower lists. Route
-absence is local. Cloud requires a user-configured profile. Prefer absence uses
-here/5s, machines/5s, cloud/0s. Empty preference lists, negative holds, invalid
-selectors and negative/overflowing minutes fail configuration validation.
+Machine `run.routing` owns optional route, profile, ordered prefer entries,
+overflow_minutes, local_secrets source selection and source_files approval.
+Repository `defaults.run` and pipeline `run` use RunRestrictions, carrying only
+route:local and local_secrets name declarations. Repository restrictions cannot
+widen machine authorization. Repository secret names remain declarations and
+cannot change machine source selection or secret classification. Untracked
+repository source_files, including ignored
+paths, require exact machine run.routing.source_files approval. Source-file
+validation remains shared by capture. Route absence is local. Cloud requires a
+machine-configured profile. Prefer absence retains here/5s, machines/5s, cloud/0s.
+Empty preference lists, negative holds, invalid selectors and negative/overflowing
+minutes fail validation.
 
 Local preparation, including offline fallback, resolves configured local secret
 names against the selected pipeline's complete declarations and the requesting
@@ -1103,3 +1107,18 @@ Burst intake uses an empty environment snapshot rather than the shell name list.
 
 The background queue reports host errors to the local controller's logger when
 hosting returns. Error reporting does not wait for controller shutdown.
+
+## Burst review integration rulings
+
+Burst claim eligibility and requester-secret release use the same sealed claimant
+set. Eligible executors are the run's here host, its requester's enrolled personal
+machines and Cloud executors when cloud is listed. Name/pool entries only narrow
+that eligible set. The here owner retains planning authority independently of
+job placement. Authenticated origin and ownership decide eligibility. Poll labels
+cannot grant it. Revoked or expired personal registrations do not hold placement.
+
+Burst scanning inspects changed/uncommitted snapshot blobs against HEAD. It skips
+values shorter than eight bytes and PEM armor patterns for this scan only.
+Masking retains all its patterns. Local publication reuses the private controller's
+45-second request deadline. The second interrupt cancels publication and reports
+local-only history without changing the local execution verdict.

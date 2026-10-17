@@ -14,6 +14,7 @@ type RunRouting struct {
 	Profile         *string           `yaml:"profile,omitempty" json:"profile,omitempty"`
 	Prefer          []RoutePreference `yaml:"prefer,omitempty" json:"prefer,omitempty"`
 	OverflowMinutes *int64            `yaml:"overflow_minutes,omitempty" json:"overflow_minutes,omitempty"`
+	SourceFiles     []string          `yaml:"source_files,omitempty" json:"source_files,omitempty"`
 	LocalSecrets    []string          `yaml:"local_secrets,omitempty" json:"local_secrets,omitempty"`
 }
 
@@ -65,30 +66,4 @@ func ValidateRunRouting(key string, r *RunRouting) error {
 		}
 	}
 	return nil
-}
-
-// MergeRunRouting applies explicitly supplied fields from low to high precedence.
-func MergeRunRouting(layers ...*RunRouting) RunRouting {
-	var r RunRouting
-	for _, next := range layers {
-		if next == nil {
-			continue
-		}
-		if next.Route != nil {
-			r.Route = next.Route
-		}
-		if next.Profile != nil {
-			r.Profile = next.Profile
-		}
-		if next.Prefer != nil {
-			r.Prefer = append([]RoutePreference{}, next.Prefer...)
-		}
-		if next.OverflowMinutes != nil {
-			r.OverflowMinutes = next.OverflowMinutes
-		}
-		if next.LocalSecrets != nil {
-			r.LocalSecrets = append([]string{}, next.LocalSecrets...)
-		}
-	}
-	return r
 }

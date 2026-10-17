@@ -1,7 +1,5 @@
 package projectconfig
 
-import "github.com/sparkwing-dev/sparkwing/internal/userconfig"
-
 // Config excludes connection credentials because a checkout cannot choose where
 // a user's secrets are sent. Nil optional fields mean unset; explicit null fails.
 type Config struct {
@@ -12,28 +10,34 @@ type Config struct {
 
 // Defaults applies even when a pipeline has no entry in the project file.
 type Defaults struct {
-	Run      *userconfig.RunRouting `yaml:"run,omitempty" json:"run,omitempty"`
-	Args     map[string]string      `yaml:"args,omitempty" json:"args,omitempty"`
-	Guards   *Guards                `yaml:"guards,omitempty" json:"guards,omitempty"`
-	Requires []string               `yaml:"requires,omitempty" json:"requires,omitempty"`
-	Prefers  []string               `yaml:"prefers,omitempty" json:"prefers,omitempty"`
+	Run      *RunRestrictions  `yaml:"run,omitempty" json:"run,omitempty"`
+	Args     map[string]string `yaml:"args,omitempty" json:"args,omitempty"`
+	Guards   *Guards           `yaml:"guards,omitempty" json:"guards,omitempty"`
+	Requires []string          `yaml:"requires,omitempty" json:"requires,omitempty"`
+	Prefers  []string          `yaml:"prefers,omitempty" json:"prefers,omitempty"`
 }
 
 // Pipeline keeps author declarations separate from the host's sealed run spec.
 type Pipeline struct {
-	Run         *userconfig.RunRouting `yaml:"run,omitempty" json:"run,omitempty"`
-	Name        string                 `yaml:"name" json:"name"`
-	Entrypoint  string                 `yaml:"entrypoint" json:"entrypoint"`
-	Description *string                `yaml:"description,omitempty" json:"description,omitempty"`
-	Hidden      *bool                  `yaml:"hidden,omitempty" json:"hidden,omitempty"`
-	Source      *string                `yaml:"source,omitempty" json:"source,omitempty"`
-	Profile     *string                `yaml:"profile,omitempty" json:"profile,omitempty"`
-	Args        map[string]string      `yaml:"args,omitempty" json:"args,omitempty"`
-	Guards      *Guards                `yaml:"guards,omitempty" json:"guards,omitempty"`
-	Requires    []string               `yaml:"requires,omitempty" json:"requires,omitempty"`
-	Prefers     []string               `yaml:"prefers,omitempty" json:"prefers,omitempty"`
-	SourceFiles []string               `yaml:"source_files,omitempty" json:"source_files,omitempty"`
-	On          *Events                `yaml:"on,omitempty" json:"on,omitempty"`
+	Run         *RunRestrictions  `yaml:"run,omitempty" json:"run,omitempty"`
+	Name        string            `yaml:"name" json:"name"`
+	Entrypoint  string            `yaml:"entrypoint" json:"entrypoint"`
+	Description *string           `yaml:"description,omitempty" json:"description,omitempty"`
+	Hidden      *bool             `yaml:"hidden,omitempty" json:"hidden,omitempty"`
+	Source      *string           `yaml:"source,omitempty" json:"source,omitempty"`
+	Profile     *string           `yaml:"profile,omitempty" json:"profile,omitempty"`
+	Args        map[string]string `yaml:"args,omitempty" json:"args,omitempty"`
+	Guards      *Guards           `yaml:"guards,omitempty" json:"guards,omitempty"`
+	Requires    []string          `yaml:"requires,omitempty" json:"requires,omitempty"`
+	Prefers     []string          `yaml:"prefers,omitempty" json:"prefers,omitempty"`
+	SourceFiles []string          `yaml:"source_files,omitempty" json:"source_files,omitempty"`
+	On          *Events           `yaml:"on,omitempty" json:"on,omitempty"`
+}
+
+// RunRestrictions limits machine-authorized burst routing.
+type RunRestrictions struct {
+	Route        *string  `yaml:"route,omitempty" json:"route,omitempty"`
+	LocalSecrets []string `yaml:"local_secrets,omitempty" json:"local_secrets,omitempty"`
 }
 
 // Guards replaces the complete lower-priority block, including when empty.

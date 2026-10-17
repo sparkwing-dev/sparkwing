@@ -1,19 +1,18 @@
-# W9 continuation: local integration and runner transport
+# W9 continuation: burst review rulings
 
-Latest continuation: [W9-BURST-CLAIM-CACHE-AND-ENV-PRIVACY.md](W9-BURST-CLAIM-CACHE-AND-ENV-PRIVACY.md).
-The background queue can claim a job independently of its owner. Both award
-paths now construct the sealed profile cache before execution. The regression
-fails for the independently claimed job before the fix and passes for both
-paths afterwards. Publication excludes the private shell snapshot from the
-uploaded request and resolved spec. Real Cloud-store tests cover shell names,
-with a fuzz target generating additional names. Burst intake already constructs
-an empty snapshot and now has a persisted-record regression.
+Latest continuation: [W9-BURST-REVIEW-RULINGS.md](W9-BURST-REVIEW-RULINGS.md).
+B1 and S1-S5 are implemented with failing-before-fix regressions. Real routed CLI,
+HTTP and SQLite proofs cover hostile repository settings and excluded claimants.
+Here owner renewal restores volatile requester secrets after controller restart.
+Publication pins, scan false positives, bounded/interruptible publication and two
+missing nits are fixed. Build, vet, focused tests, fixed-count fuzzing, race checks
+and source/doc guards pass. The lead's native report is green for the prior
+committed state. Commit these edits and rerun the native families before completion.
 
-The latest lead-native file contains no FAIL for the prior committed state.
-The lead must rerun it after these edits. File-content merge conflicts are
-resolved. The index remains unmerged because the swarm brief reserves Git
-writes for the lead. Stage the four resolved files and finish the merge before
-committing the W9 changes.
+Previous continuation: [W9-BURST-CLAIM-CACHE-AND-ENV-PRIVACY.md](W9-BURST-CLAIM-CACHE-AND-ENV-PRIVACY.md).
+Its cache-claim and shell-metadata corrections are committed, and the merge is
+finished. There are no unresolved merge entries or pending Git actions from that
+session. Its later native report passes attached/detached cache and publication.
 
 Earlier continuation: [W9-BURST-DETACHED-DIAGNOSTICS.md](W9-BURST-DETACHED-DIAGNOSTICS.md).
 The lead's latest native run passes attached profile-cache execution and both

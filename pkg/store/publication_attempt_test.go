@@ -26,6 +26,13 @@ func TestPublicationImportsTerminalAttemptWithoutExecution(t *testing.T) {
 		t.Fatalf("imported node: %+v %v", row, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "node_attempts", 1)
+	var executor string
+	if err := tenant.s.db.QueryRow("SELECT executor_name FROM node_attempts WHERE team=? AND run_id=?", tenant.team, terminal.Ref.RunID).Scan(&executor); err != nil {
+		t.Fatal(err)
+	}
+	if executor != "local" {
+		t.Fatalf("publication trusted caller executor name: %q", executor)
+	}
 	rewriteSchemaCount(t, tenant.s.db, "triggers", 0)
 }
 

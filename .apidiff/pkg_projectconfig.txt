@@ -7,7 +7,7 @@ type Config struct {
 }
 func (c *Config) Registry() *pipelines.Config
 type Defaults struct {
-	Run      *userconfig.RunRouting
+	Run      *RunRestrictions
 	Args     map[string]string
 	Guards   *Guards
 	Requires []string
@@ -32,7 +32,7 @@ func Load(path string) (*Config, error)
 func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error)
 func Parse(raw []byte) (*Config, error)
 type Pipeline struct {
-	Run         *userconfig.RunRouting
+	Run         *RunRestrictions
 	Name        string
 	Entrypoint  string
 	Description *string
@@ -54,6 +54,10 @@ type PullRequestEvent struct {
 type PushEvent struct {
 	Branches []string
 	Paths    []string
+}
+type RunRestrictions struct {
+	Route        *string
+	LocalSecrets []string
 }
 type Schedule struct {
 	Name    *string

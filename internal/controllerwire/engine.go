@@ -138,8 +138,9 @@ type ExchangeResponse struct {
 
 // RenewalRequest reports activity, never a replacement holder or generation.
 type RenewalRequest struct {
-	Available *match.Resources `json:"available,omitempty"`
-	Executing bool             `json:"executing"`
+	LocalSecrets map[string]string `json:"local_secrets,omitempty"`
+	Available    *match.Resources  `json:"available,omitempty"`
+	Executing    bool              `json:"executing"`
 }
 
 // RenewalResponse carries liveness, cancellation and watch state for every unit keeper.

@@ -20,7 +20,7 @@ var (
 // Validate validates typed checkout declarations for seal-point consumers.
 func Validate(cfg Config) error {
 	if cfg.Defaults != nil {
-		if err := userconfig.ValidateRunRouting("defaults.run", cfg.Defaults.Run); err != nil {
+		if err := validateRunRestrictions("defaults.run", cfg.Defaults.Run); err != nil {
 			return err
 		}
 		if err := validateGuards("defaults.guards", cfg.Defaults.Guards); err != nil {
@@ -30,7 +30,7 @@ func Validate(cfg Config) error {
 	seen := map[string]bool{}
 	for i, p := range cfg.Pipelines {
 		key := fmt.Sprintf("pipelines[%d]", i)
-		if err := userconfig.ValidateRunRouting(key+".run", p.Run); err != nil {
+		if err := validateRunRestrictions(key+".run", p.Run); err != nil {
 			return err
 		}
 		if !pipelineName.MatchString(p.Name) {
@@ -65,6 +65,16 @@ func Validate(cfg Config) error {
 		}
 	}
 	return nil
+}
+
+func validateRunRestrictions(key string, r *RunRestrictions) error {
+	if r == nil {
+		return nil
+	}
+	if r.Route != nil && *r.Route != "local" {
+		return userconfig.Invalid(key+".route", "repository routing may only require local execution")
+	}
+	return userconfig.ValidateRunRouting(key, &userconfig.RunRouting{LocalSecrets: r.LocalSecrets})
 }
 
 // ValidateSourceFiles checks literal repository-relative bundle file paths.

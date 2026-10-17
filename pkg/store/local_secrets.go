@@ -1,10 +1,12 @@
 package store
 
 import (
+	"context"
 	"maps"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
@@ -76,4 +78,51 @@ func localSecretDeclared(specNames, localNames []string) bool {
 		}
 	}
 	return true
+}
+
+// ResupplyHereSecrets restores volatile inputs only from their live requester host.
+func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.AuthorityRef, values map[string]string) error {
+	var installed *localRunSecrets
+	var key localSecretKey
+	err := s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockClaimControllerTx(ctx, tx); err != nil {
+			return err
+		}
+		p, err := tx.ResolveAuthority(ctx, authority)
+		if err != nil {
+			return err
+		}
+		c := p.Capability
+		if c.Unit != capability.UnitTrigger || c.Purpose != capability.PurposeTrigger {
+			return bindingRefusal()
+		}
+		here, err := hereObserverTx(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		if !here {
+			return bindingRefusal()
+		}
+		tenant := &Tenant{s: s, team: Team(c.Team)}
+		if err := tenant.secretClaimFenceTx(ctx, tx, c); err != nil {
+			return err
+		}
+		run, err := readRunTx(ctx, tx, tenant.team, c.Binding.RunID)
+		if err != nil {
+			return err
+		}
+		if run.Request.Request.Burst == nil {
+			return bindingRefusal()
+		}
+		if err := validateLocalSecrets(run.Request.Request.LocalSecretNames, values); err != nil {
+			return err
+		}
+		key = localSecretKey{tenant.team, run.ID}
+		installed, err = s.installLocalSecrets(tenant.team, AdmissionResult{RunID: run.ID, Request: run.Request}, values)
+		return err
+	})
+	if err != nil && installed != nil {
+		s.localSecrets.CompareAndDelete(key, installed)
+	}
+	return err
 }

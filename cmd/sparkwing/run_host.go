@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 type localRunOptions struct {
@@ -41,8 +42,9 @@ type localRunRuntime struct {
 }
 
 type localRunDependencies struct {
-	resolve func(context.Context, localRunOptions) (localRunRuntime, error)
-	version string
+	interrupts <-chan os.Signal
+	resolve    func(context.Context, localRunOptions) (localRunRuntime, error)
+	version    string
 }
 
 func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args []string, out io.Writer, deps localRunDependencies) (resultErr error) {
@@ -158,11 +160,44 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if profile := request.Request.Options.Publish.Value; profile != "" {
 		if runtime.publish == nil {
 			_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication is unavailable")
-		} else if err := runtime.publish(context.WithoutCancel(ctx), profile, response.RunID); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication failed:", masker.Mask(err.Error()))
+		} else if err := publishLocalCompletion(ctx, deps.interrupts, runtime.publish, profile, response.RunID); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				_, _ = fmt.Fprintln(os.Stderr, "warning: publication abandoned; run stayed local-only")
+			} else {
+				_, _ = fmt.Fprintln(os.Stderr, "warning: local run completed but publication failed:", masker.Mask(err.Error()))
+			}
 		}
 	}
 	return statusExitCode(completion.Outcome)
+}
+
+func publishLocalCompletion(parent context.Context, interrupts <-chan os.Signal, publish func(context.Context, string, string) error, profile, run string) error {
+	interrupted := parent.Err() != nil
+	if interrupts == nil {
+		signals := make(chan os.Signal, 2)
+		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(signals)
+		interrupts = signals
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), wingdclient.RequestTimeout)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if !interrupted {
+			select {
+			case <-interrupts:
+			case <-ctx.Done():
+				return
+			}
+		}
+		select {
+		case <-interrupts:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	defer func() { cancel(); <-done }()
+	return publish(ctx, profile, run)
 }
 
 func validateLocalRunFlags(flags runFlags) error {

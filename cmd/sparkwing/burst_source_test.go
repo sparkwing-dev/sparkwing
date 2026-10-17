@@ -230,6 +230,7 @@ func FuzzBurstSnapshotRejectsSecretValues(f *testing.F) {
 		writeSnapshotFile(t, repo, "ordinary.dat", payload, 0o644)
 		runSnapshotGit(t, repo, "add", ".")
 		runSnapshotGit(t, repo, "commit", "-m", "base")
+		writeSnapshotFile(t, repo, "ordinary.dat", payload+"changed", 0o644)
 		snapshot, err := captureBurstSnapshot(t.Context(), repo, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -249,7 +250,7 @@ func FuzzBurstSnapshotRejectsSecretValues(f *testing.F) {
 	})
 }
 
-func TestBurstSnapshotSecretScanChecksNamesAndAllowsCleanSource(t *testing.T) {
+func TestBurstSnapshotSecretScanAllowsUnchangedSourceAndNames(t *testing.T) {
 	repo := initSnapshotRepo(t)
 	writeSnapshotFile(t, repo, "private-token-in-filename.txt", "public", 0o644)
 	runSnapshotGit(t, repo, "add", ".")
@@ -263,11 +264,47 @@ func TestBurstSnapshotSecretScanChecksNamesAndAllowsCleanSource(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if err := snapshot.rejectSecrets(t.Context(), map[string]string{"TOKEN": "private-token"}); err == nil {
-		t.Fatal("secret in filename admitted")
+	if err := snapshot.rejectSecrets(t.Context(), map[string]string{"TOKEN": "private-token"}); err != nil {
+		t.Fatal(err)
 	}
 	if err := snapshot.rejectSecrets(t.Context(), map[string]string{"TOKEN": "absent-private-token"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBurstSecretScanOnlyChecksChangedBlobsAndMeaningfulValues(t *testing.T) {
+	for _, tc := range []struct {
+		name, committed, edited, value string
+		refuse                         bool
+	}{
+		{"unchanged", "committed-private-token", "", "committed-private-token", false},
+		{"removed historical secret", "historical-private-token", "clean", "historical-private-token", false},
+		{"short value", "base", "go build ./...", "go", false},
+		{"PEM armor", "base", "-----BEGIN PRIVATE KEY-----\npublic fixture\n-----END PRIVATE KEY-----\n", "-----BEGIN PRIVATE KEY-----\nopaque-private-key-material\n-----END PRIVATE KEY-----\n", false},
+		{"changed secret", "base", "opaque-private-key-material", "opaque-private-key-material", true},
+		{"changed PEM body", "base", "opaque-private-key-material", "-----BEGIN PRIVATE KEY-----\nopaque-private-key-material\n-----END PRIVATE KEY-----\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := initSnapshotRepo(t)
+			writeSnapshotFile(t, repo, "input.txt", tc.committed, 0o644)
+			runSnapshotGit(t, repo, "add", ".")
+			runSnapshotGit(t, repo, "commit", "-m", "base")
+			if tc.edited != "" {
+				writeSnapshotFile(t, repo, "input.txt", tc.edited, 0o644)
+			}
+			snapshot, err := captureSnapshot(t.Context(), repo, defaultWorktreeSnapshotLimits, []string{"input.txt"}, &burstSourceSelection{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := snapshot.close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err := snapshot.rejectSecrets(t.Context(), map[string]string{"TOKEN": tc.value}); (err != nil) != tc.refuse {
+				t.Fatalf("refuse=%v error=%v", tc.refuse, err)
+			}
+		})
 	}
 }
 

@@ -102,6 +102,9 @@ func (t *Tenant) authorizeSecretReadTx(ctx context.Context, tx *storeTx, a capab
 			continue
 		}
 		if rule.Binding == capability.BindDeclaredSecret {
+			if err := checkBurstClaimantTx(ctx, tx, t.team, chain, UnitRef{Kind: p.Capability.Unit, RunID: p.Capability.Binding.RunID, NodeID: p.Capability.Binding.NodeID}); err != nil {
+				return capability.Principal{}, err
+			}
 			if err := t.secretClaimFenceTx(ctx, tx, p.Capability); err != nil {
 				return capability.Principal{}, err
 			}

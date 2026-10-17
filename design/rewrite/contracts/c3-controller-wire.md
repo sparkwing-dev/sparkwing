@@ -1013,9 +1013,10 @@ numeric ID or caller display name.
 ## Launch burst vertical (decisions 112 and 116)
 
 `runspec.Request.Burst` seals `BurstPlacement`: ordered `PlacementStep` values
-(`target`, nanosecond `hold`) and optional `overflow_minutes`. The CLI merges
-user `run.routing`, repository `defaults.run` and pipeline `run` fields, then
-converts YAML durations once. Targets are `here`, `machines`, `cloud`,
+(`target`, nanosecond `hold`) and optional `overflow_minutes`. Machine
+`run.routing` supplies authorization. Repository `defaults.run` and pipeline
+`run` can only require local execution and declare names. The CLI converts
+machine YAML durations once. Targets are `here`, `machines`, `cloud`,
 `name=NAME` and `pool=POOL`. Default route is local. Explicit Cloud routing sets
 RunnerHere and dispatch host. Cloud remains the sole run record owner, and the
 CLI hosts scheduling and public log attachment. Connection failure before intake
@@ -1028,8 +1029,11 @@ The mark never covers run submission because a lost response can hide acceptance
 C1's volatile registry without serializing them into SQL, seals or responses.
 The requester resolver reads only configured names from the pipeline's complete
 SecretDeclaration list and captured environment. Native secret release uses the
-existing live, declared, masked claim path. Registry loss and retry return
-unavailable, requiring fresh requester resolution. Cross-process secret delivery
+existing live, declared, masked claim path, rechecking sealed burst eligibility.
+The here owner re-supplies values through RenewalRequest.local_secrets on renewal,
+including after restart. Other claimants cannot supply them. Names must match
+the original request and resident values cannot change. Registry loss returns
+unavailable until the owner restores values. Retry requires fresh resolution. Cross-process secret delivery
 still needs a Cloud affinity or unpersisted relay contract.
 
 `ClaimRequest` adds optional `capacity`, `os` and `arch` for authenticated

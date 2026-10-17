@@ -189,7 +189,7 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 		return w.Result(), nil
 	})
 	options := client.EngineOptions{URL: "http://controller.test", Bearer: func(context.Context) (string, error) { return bearer, nil }, HTTP: &http.Client{Transport: transport}}
-	route := userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"TOKEN"}}
+	route := userconfig.RunRouting{Profile: new("cloud"), LocalSecrets: []string{"TOKEN"}, SourceFiles: []string{"declared.txt"}}
 	prepared, err := prepareNativeBurst(t.Context(), "burst", runFlags{}, []string{"--block"}, route, options)
 	if err != nil {
 		t.Fatalf("native burst preparation: %v", err)

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,20 @@ import (
 type burstSourceSelection struct {
 	include []string
 	exclude []string
+}
+
+func authorizeBurstSource(ctx context.Context, root string, declared, allowed []string) error {
+	tracked, err := gitOutput(ctx, root, nil, "ls-files", "--cached", "-z")
+	if err != nil {
+		return fmt.Errorf("inspect burst source approval: %w", snapshotGitError(err))
+	}
+	paths := strings.Split(tracked, "\x00")
+	for _, name := range declared {
+		if !slices.Contains(paths, name) && !slices.Contains(allowed, name) {
+			return errors.New("run: repository source_files requires approval in machine run.routing.source_files")
+		}
+	}
+	return nil
 }
 
 func captureBurstSnapshot(ctx context.Context, start string, includedUntracked, excludedSecretFiles []string) (*worktreeSnapshot, error) {
@@ -108,19 +123,37 @@ func (s *worktreeSnapshot) rejectSecrets(ctx context.Context, values map[string]
 	masker := secrets.NewMasker()
 	longest := 0
 	for _, value := range values {
-		masker.Register(value)
+		lines := slices.DeleteFunc(strings.Split(value, "\n"), func(line string) bool {
+			line = strings.TrimSpace(line)
+			return strings.HasPrefix(line, "-----BEGIN ") || strings.HasPrefix(line, "-----END ")
+		})
+		value = strings.Join(lines, "\n")
+		if len(value) >= 8 {
+			masker.Register(value)
+		}
 	}
-	for _, pattern := range masker.Values() {
+	patterns := slices.DeleteFunc(masker.Values(), func(pattern string) bool { return len(pattern) < 8 })
+	for _, pattern := range patterns {
 		longest = max(longest, len(pattern))
 	}
 	if longest == 0 {
 		return nil
 	}
 	gitDir := filepath.Join(s.tempDir, "repo.git")
-	objects, err := gitDirOutput(ctx, gitDir, "rev-list", "--objects", "--no-object-names", s.SHA)
+	changed, err := gitDirOutput(ctx, gitDir, "diff-tree", "-r", "--no-commit-id", "--no-renames", "--diff-filter=ACMT", "--raw", "-z", s.BaseSHA, s.SHA)
 	if err != nil {
 		return errors.New("inspect source snapshot objects failed")
 	}
+	var ids strings.Builder
+	records := strings.Split(changed, "\x00")
+	for i := 0; i+1 < len(records); i += 2 {
+		fields := strings.Fields(records[i])
+		if len(fields) != 5 {
+			return errors.New("inspect changed snapshot blob failed")
+		}
+		ids.WriteString(fields[3] + "\n")
+	}
+	objects := ids.String()
 	scanCtx, cancel := context.WithCancel(ctx)
 	cmd := snapshotGitCommand(scanCtx, "--git-dir", gitDir, "cat-file", "--batch")
 	cmd.Stdin = strings.NewReader(objects)
@@ -161,7 +194,7 @@ func (s *worktreeSnapshot) rejectSecrets(ctx context.Context, values map[string]
 				return errors.New("read source snapshot contents failed")
 			}
 			text := tail + string(buffer[:n])
-			if masker.ContainsSecret(text) {
+			if slices.ContainsFunc(patterns, func(pattern string) bool { return strings.Contains(text, pattern) }) {
 				return errors.New("source bundle contains a declared local secret")
 			}
 			tail = text[max(0, len(text)-longest+1):]

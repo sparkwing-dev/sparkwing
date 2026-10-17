@@ -1314,6 +1314,7 @@ CREATE TABLE billing_awards (
 );
 
 CREATE UNIQUE INDEX idx_billing_awards_capability ON billing_awards(team,capability_prefix);
+CREATE INDEX idx_billing_awards_requester ON billing_awards(team,requester_account);
 
 CREATE UNIQUE INDEX idx_billing_awards_unit_generation ON billing_awards(team,run_id,node_id,unit_kind,generation);
 

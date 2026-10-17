@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -17,15 +18,27 @@ import (
 func TestRunRoutingPrecedence(t *testing.T) {
 	cloud, local, profile := "cloud", "local", "work"
 	machine := userconfig.Config{Run: &userconfig.RunConfig{Routing: &userconfig.RunRouting{Route: &cloud, Profile: &profile}}}
-	cfg := &projectconfig.Config{Defaults: &projectconfig.Defaults{Run: &userconfig.RunRouting{OverflowMinutes: new(int64)}}, Pipelines: []projectconfig.Pipeline{{Name: "deploy", Run: &userconfig.RunRouting{Route: &local}}}}
+	cfg := &projectconfig.Config{Pipelines: []projectconfig.Pipeline{{Name: "deploy", Run: &projectconfig.RunRestrictions{Route: &local}}}}
 	if r := resolveRunRouting(machine, cfg, "deploy"); *r.Route != local {
 		t.Fatal(r)
 	}
-	if r := resolveRunRouting(machine, cfg, "test"); *r.Route != cloud || r.OverflowMinutes == nil {
+	if r := resolveRunRouting(machine, cfg, "test"); *r.Route != cloud || r.OverflowMinutes != nil {
 		t.Fatal(r)
 	}
 	if r := resolveRunRouting(userconfig.Config{}, nil, "test"); r.Route != nil {
 		t.Fatal(r)
+	}
+}
+
+func TestRepositorySecretNamesCannotChangeMachineSourcesOrClassification(t *testing.T) {
+	machine := userconfig.Config{Run: &userconfig.RunConfig{Routing: &userconfig.RunRouting{LocalSecrets: []string{"TOKEN", "OTHER"}}}}
+	project := &projectconfig.Config{Defaults: &projectconfig.Defaults{Run: &projectconfig.RunRestrictions{LocalSecrets: []string{"TOKEN", "UNAUTHORIZED"}}}}
+	route := resolveRunRouting(machine, project, "test")
+	if !slices.Equal(route.LocalSecrets, []string{"TOKEN", "OTHER"}) {
+		t.Fatal("repository changed machine secret sources or classification")
+	}
+	if !slices.Equal(machine.Run.Routing.LocalSecrets, []string{"TOKEN", "OTHER"}) {
+		t.Fatal("repository modified machine configuration")
 	}
 }
 
