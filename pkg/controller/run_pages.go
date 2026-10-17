@@ -62,9 +62,6 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request, a capabil
 func (s *Server) readRunPage(ctx context.Context, tenant *store.Tenant, a capability.Authorized, query controllerwire.RunQuery, cursor *runPageCursor) (controllerwire.RunPage, error) {
 	page := controllerwire.RunPage{Runs: []controllerwire.RunDetail{}}
 	engine := s.engineController
-	if engine == nil {
-		engine = &EngineController{Store: s.store}
-	}
 	for through := cursor.Through; through > query.AfterNumber; {
 		views, err := tenant.ListRunViews(ctx, query.AfterNumber, through, 100)
 		if err != nil {

@@ -17,7 +17,7 @@ import (
 )
 
 // WithEngineController supplies the engine and authority transaction adapter before
-// Handler is constructed. The default adapter uses the server's store.
+// Handler is constructed. ServeWith refuses an engine without a runner policy.
 func (s *Server) WithEngineController(engine *EngineController) *Server {
 	s.engineController = engine
 	return s
@@ -25,9 +25,6 @@ func (s *Server) WithEngineController(engine *EngineController) *Server {
 
 func (s *Server) engineEndpoints() []Endpoint {
 	engine := s.engineController
-	if engine == nil {
-		engine = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{
 			Method: "POST", Pattern: "/api/v1/runs", Authentication: capability.AuthCapability,

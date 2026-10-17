@@ -49,9 +49,6 @@ func (s *Server) teamWriter(r *http.Request, a capability.Authorized) (TeamWrite
 
 func (s *Server) teamWriteEndpoints() []Endpoint {
 	engine := s.engineController
-	if engine == nil {
-		engine = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{Method: "PUT", Pattern: "/api/v1/team/settings", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleTeamSettings},
 		{Method: "PATCH", Pattern: "/api/v1/team", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRenameTeam},

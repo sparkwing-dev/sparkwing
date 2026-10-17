@@ -169,6 +169,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	}
 	srv := &Server{
 		store:              st,
+		engineController:   &EngineController{Store: st},
 		operatorSettings:   storeOperatorSettings{Store: st, Operator: st.AsOperator()},
 		logger:             logger,
 		masker:             secrets.NewMasker(),
@@ -498,6 +499,9 @@ const controllerShutdownBudget = 5 * time.Second
 // at addr. Split from Serve so the controller pod
 // main can configure the server without passing options through Serve.
 func ServeWith(ctx context.Context, s *Server, addr string) error {
+	if s.engineController.RunnerPolicy == nil {
+		return errors.New("controller has no runner admission policy; compose its engine with WithEngineController before serving")
+	}
 	listener := func(addr string, h http.Handler) *http.Server {
 		return &http.Server{
 			Addr:              addr,

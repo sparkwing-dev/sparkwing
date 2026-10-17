@@ -64,9 +64,6 @@ func (s *Server) capabilityManager(ctx context.Context, team string) (Capability
 
 func (s *Server) capabilityEndpoints() []Endpoint {
 	e := s.engineController
-	if e == nil {
-		e = &EngineController{Store: s.store}
-	}
 	return []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/overflow", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleReadOverflow},
 		{Method: "PUT", Pattern: "/api/v1/overflow", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSetOverflow},

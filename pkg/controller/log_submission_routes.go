@@ -48,9 +48,6 @@ func (s *Server) logSubmission(r *http.Request, a capability.Authorized, propose
 	if r.PathValue("job") != "" {
 		subject.Kind = blob.LogJobAttempt
 		e := s.engineController
-		if e == nil {
-			e = &EngineController{Store: s.store}
-		}
 		tenant, err := e.runTransactions(r.Context(), a.Target.Team)
 		if err != nil {
 			return nil, subject, err

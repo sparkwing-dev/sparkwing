@@ -11,9 +11,6 @@ import (
 
 func (s *Server) missingOperationEndpoints() []Endpoint {
 	e := s.engineController
-	if e == nil {
-		e = &EngineController{Store: s.store}
-	}
 	endpoints := []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/debug-pause", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobDebugPause},
 		{Method: "DELETE", Pattern: "/api/v1/runners/{runner}", Decode: authorityTarget, Handle: s.handleDeleteRunner},
