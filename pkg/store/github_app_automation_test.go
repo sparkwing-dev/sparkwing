@@ -14,7 +14,7 @@ func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
 	ctx := t.Context()
 	now := time.Now()
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), now); err != nil {
 		t.Fatal(err)
 	}
 	a := store.GitHubAppAutomation{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, EnabledBy: "github-admin"}

@@ -330,8 +330,8 @@ func TestGitHubAppLargeInstallationKeepsSchedulesPastTheListingCap(t *testing.T)
 			t.Fatalf("%s withdrew a schedule of a still-installed repository: %+v", action, rows)
 		}
 	}
-	if code := f.subscribe(olga, "acme/widgets", "deploy", nil); code != http.StatusBadGateway {
-		t.Fatalf("subscribe past the listing cap = %d, want 502", code)
+	if code := f.subscribe(olga, "acme/widgets", "deploy", nil); code != http.StatusServiceUnavailable {
+		t.Fatalf("subscribe past the listing cap = %d, want 503", code)
 	}
 	if code := f.subscribe(olga, "acme/r5", "deploy", nil); code != http.StatusOK {
 		t.Fatalf("subscribe within the listing cap = %d, want 200", code)

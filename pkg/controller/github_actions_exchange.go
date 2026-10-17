@@ -112,6 +112,9 @@ func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, 
 		return missingEndpointPolicy()
 	}
 	issued, err := s.credentialIssuer.ProvisionCapability(r.Context(), proof.spec)
+	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {
+		return &apierr.Error{Code: apierr.RateLimited, Message: "the team already holds the maximum live GitHub Actions runner credentials"}
+	}
 	if err != nil {
 		return engineLookupError(err)
 	}

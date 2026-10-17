@@ -22,7 +22,7 @@ func TestGitHubRunnerOnboardingResolvesCoveredIdentity(t *testing.T) {
 		} `json:"bindings"`
 		Workflow string `json:"workflow"`
 	}
-	if code := f.call("POST", "/api/v1/team/github-runners", owner.auth, map[string]string{"repository": "ACME/Widgets"}, &out); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/runners/github", owner.auth, map[string]string{"repository": "ACME/Widgets"}, &out); code != http.StatusCreated {
 		t.Fatalf("bind = %d", code)
 	}
 	if len(out.Bindings) != 1 || out.Bindings[0].Repository != "acme/widgets" || out.Bindings[0].ID != 701 || out.Bindings[0].OwnerID != 70 || !strings.Contains(out.Workflow, owner.team) {
@@ -58,14 +58,14 @@ func TestGitHubRunnerOnboardingRefusesUnverifiedIdentity(t *testing.T) {
 			case "unavailable":
 				f.app.FailInstallationRepositories(1)
 			}
-			code := f.call("POST", "/api/v1/team/github-runners", owner.auth, req, nil)
+			code := f.call("POST", "/api/v1/runners/github", owner.auth, req, nil)
 			if code < 400 {
 				t.Fatalf("bind = %d", code)
 			}
 			var listed struct {
 				Bindings []any `json:"bindings"`
 			}
-			if code := f.call("GET", "/api/v1/team/github-runners", owner.auth, nil, &listed); code != http.StatusOK || len(listed.Bindings) != 0 {
+			if code := f.call("GET", "/api/v1/runners/github", owner.auth, nil, &listed); code != http.StatusOK || len(listed.Bindings) != 0 {
 				t.Fatalf("refused binding persisted: %d %+v", code, listed)
 			}
 		})

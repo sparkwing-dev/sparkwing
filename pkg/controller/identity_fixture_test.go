@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"html"
@@ -125,13 +126,15 @@ func (f *identityFixture) call(method, path, auth string, body, out any) int {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Idempotency-Key", rand.Text())
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
-	if strings.HasPrefix(path, "/api/v1/operator/") && strings.HasPrefix(auth, "Session ") {
+	if strings.HasPrefix(auth, "Session ") {
 		if err := controller.ConsoleFixtureRequest(f.srv, req, strings.TrimPrefix(auth, "Session ")); err != nil {
 			f.t.Fatal(err)
 		}
+		req.Header.Set("Origin", req.URL.Scheme+"://"+req.URL.Host)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

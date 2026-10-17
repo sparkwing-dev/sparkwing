@@ -59,10 +59,10 @@ Runner enrollment uses the same typed team token manager. Its JSON result
 contains the runner name, profile, config path, credential metadata and service
 result. It never prints the bearer. Plain prints the runner name. Removal checks
 the enrolled controller, optional runner name and explicit credential kind
-before stopping its service and revoking the credential. A principal spelled
+before stopping its service and revoking the credential. Its enrollment-owned
+credential file must remain owner-only. A principal spelled
 `agent:NAME` does not establish runner kind.
 
 The local runner file and service installer still need their final machine
 schema and native runtime integration. `--reserved-for` needs the team-admin
 provisioning request contract. It fails as `policy_missing` before enrollment.
-

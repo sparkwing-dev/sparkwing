@@ -49,7 +49,7 @@ func newGHFixture(t *testing.T) *ghFixture {
 		t.Fatal(err)
 	}
 	google, gh := googletest.New(t), githuboidctest.New(t)
-	srv := controller.New(st, nil).
+	srv := controller.New(st, nil).WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 		WithExternalURL(ghAudience).
@@ -58,14 +58,14 @@ func newGHFixture(t *testing.T) *ghFixture {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return &ghFixture{
-		identityFixture: &identityFixture{t: t, url: ts.URL, store: st, google: google, admin: admin},
+		identityFixture: &identityFixture{t: t, url: ts.URL, store: st, google: google, admin: admin, srv: srv},
 		gh:              gh,
 	}
 }
 
 func (f *ghFixture) bind(owner signedIn, job githuboidctest.Job) {
 	f.t.Helper()
-	if code := f.call("POST", "/api/v1/team/github-runners", owner.auth, map[string]any{
+	if code := f.call("POST", "/api/v1/runners/github", owner.auth, map[string]any{
 		"repository": job.Repository, "repository_id": job.RepositoryID, "repository_owner_id": job.RepositoryOwnerID,
 	}, nil); code != http.StatusCreated {
 		f.t.Fatalf("bind %s = %d", job.Repository, code)
@@ -181,7 +181,7 @@ func TestGitHubRunnerCredentialReachesNothingOutsideItsRoutes(t *testing.T) {
 	runner := f.credential(widgetsJob, owner.team)
 	for _, route := range [][2]string{
 		{"GET", "/api/v1/runs"},
-		{"GET", "/api/v1/team/github-runners"},
+		{"GET", "/api/v1/runners/github"},
 		{"POST", "/api/v1/team/tokens"},
 		{"GET", "/api/v1/tokens"},
 	} {
@@ -198,7 +198,7 @@ func TestGitHubRunnerCredentialsPerTeamAreBounded(t *testing.T) {
 	for i := range 20 {
 		job := widgetsJob
 		job.RunID = fmt.Sprint(1000 + i)
-		if _, code := f.exchange(f.gh.Token(job, ghAudience), owner.team); code != http.StatusOK {
+		if _, code := f.exchange(f.gh.Token(job, ghAudience), owner.team); code != http.StatusCreated {
 			t.Fatalf("mint %d: HTTP %d", i, code)
 		}
 	}

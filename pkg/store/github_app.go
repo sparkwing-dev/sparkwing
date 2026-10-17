@@ -95,25 +95,36 @@ func scanGitHubAppInstallation(row interface{ Scan(...any) error }) (GitHubAppIn
 		return GitHubAppInstallation{}, err
 	}
 	in.Team, in.Suspended = Team(team), suspended != 0
-	in.CreatedAt, in.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+	in.CreatedAt, in.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 	return in, nil
 }
 
-// BindGitHubAppInstallation binds in to t, or refreshes the account and
-// connector of a binding t already holds. An installation another team holds
-// is [ErrInstallationBoundElsewhere], and the binding stays where it is.
-func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
-	if in.InstallationID <= 0 || in.AccountID <= 0 || in.AccountLogin == "" || in.AccountType == "" {
+// TestOnlySeedGitHubInstallation inserts an installation for fixtures.
+func (t *Tenant) TestOnlySeedGitHubInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
+	var out GitHubAppInstallation
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		out, err = t.bindGitHubInstallationTx(ctx, tx, in, now)
+		return err
+	})
+	if err != nil {
+		return GitHubAppInstallation{}, err
+	}
+	return out, nil
+}
+
+func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
+	if in.InstallationID <= 0 || in.AccountID <= 0 || in.AccountLogin == "" || (in.AccountType != "User" && in.AccountType != "Organization") {
 		return GitHubAppInstallation{}, fmt.Errorf("%w: a binding needs the installation and its account", ErrInvalidInput)
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	suspended := 0
 	if in.Suspended {
 		suspended = 1
 	}
 	// safety: the conflict guard compares teams, so a second team's connect
 	// updates nothing and cannot take the installation over.
-	res, err := t.s.exec(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO github_app_installations (`+githubAppInstallationCols+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (installation_id) DO UPDATE SET
@@ -133,7 +144,7 @@ func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInst
 		}
 		return GitHubAppInstallation{}, ErrInstallationBoundElsewhere
 	}
-	return t.GitHubAppInstallation(ctx, in.InstallationID)
+	return scanGitHubAppInstallation(tx.QueryRowContext(ctx, `SELECT `+githubAppInstallationCols+` FROM github_app_installations WHERE team=? AND installation_id=?`, t.team, in.InstallationID))
 }
 
 // GitHubAppInstallation reads t's binding of installation, or ErrNotFound.
@@ -212,7 +223,7 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 	}
 	defer rollbackOrLog(tx)
 	if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
-		WHERE team = ? AND installation_id = ?`, flag, now.UTC().Unix(), string(in.Team), installation); err != nil {
+		WHERE team = ? AND installation_id = ?`, flag, now.UTC().UnixNano(), string(in.Team), installation); err != nil {
 		return err
 	}
 	if suspended {
@@ -393,14 +404,6 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 	_, err := t.s.exec(ctx, `UPDATE github_app_triggers SET repository = ?, installation_id = ? WHERE team = ? AND repository_id = ?`,
 		repo.Slug(), installation, string(t.team), repositoryID)
 	return err
-}
-
-// ConsumeGitHubAppConnectState records that the connect flow named by nonce
-// finished, and reports false when one already did. The record lives until
-// the state expires, so every replica and a restarted controller refuse a
-// state that was used once.
-func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
-	return s.consumeFlowNonce(ctx, "github_app_connect", nonce, expires)
 }
 
 // GitHubAppDeliveryRetention is how long a delivery's digest is remembered.

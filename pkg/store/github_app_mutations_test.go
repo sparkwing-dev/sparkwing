@@ -17,7 +17,7 @@ func githubMutationFixture(t *testing.T) (*Store, *Tenant, capability.Authorized
 	tenant := &Tenant{s: s, team: "a"}
 	now := time.Unix(1800000000, 123456789).UTC()
 	s.clock = func() time.Time { return now }
-	if _, err := tenant.BindGitHubAppInstallation(t.Context(), GitHubAppInstallation{InstallationID: 7, AccountID: 1, AccountLogin: "acme", AccountType: "Organization"}, now); err != nil {
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), GitHubAppInstallation{InstallationID: 7, AccountID: 1, AccountLogin: "acme", AccountType: "Organization"}, now); err != nil {
 		t.Fatal(err)
 	}
 	a := teamAuthorization(t, s, actor, "a", "PUT", "/api/v1/team/github-app/triggers")

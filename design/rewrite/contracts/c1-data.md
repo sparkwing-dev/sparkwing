@@ -3125,6 +3125,15 @@ trigger repository columns or issues one read per result.
 
 ## GitHub App administration transactions
 
+Tenant also implements C2 GitHubConnectWriter. Identity reads, nonce consumption
+and installation binding recheck the same live direct owner session, current
+team membership and exact account/team in a store-clock transaction. Binding
+rechecks the linked provider subject, derives the connector and preserves a
+foreign installation's ownership. Nonces commit once before provider redemption.
+Installation creation and update timestamps use nanoseconds. Raw installation
+binding and the unscoped connection nonce API are removed. Test fixtures use
+TestOnlySeedGitHubInstallation, which shares the binding statement.
+
 Tenant implements C2 GitHubAppWriter. All six mutations serialize on the team
 and recheck live authority, ancestry, membership and the selected team.admin
 access before commit. Subscription and automation writes lock and require the

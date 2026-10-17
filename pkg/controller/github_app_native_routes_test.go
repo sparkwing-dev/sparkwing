@@ -20,7 +20,7 @@ func TestGitHubAppRemovalRoutesUseTenantTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.BindGitHubAppInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 1, AccountLogin: "acme", AccountType: "Organization"}, time.Now()); err != nil {
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 1, AccountLogin: "acme", AccountType: "Organization"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(session))

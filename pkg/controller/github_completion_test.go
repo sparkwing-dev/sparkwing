@@ -127,7 +127,7 @@ func newGitHubCompletion(t *testing.T) *githubCompletionFixture {
 	f.changeRequest(func(input *runspec.Request) {
 		input.Git = runspec.Git{Repository: runspec.Repository{Key: "gh:42", Display: "acme/app"}, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{InstallationID: 7, RepositoryID: 42, SHA: strings.Repeat("a", 40), Ref: "refs/heads/main", DeliveryKey: "verified", VerifiedAt: f.now}}}
 	})
-	if _, err := tenant.BindGitHubAppInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization"}, f.now); err != nil {
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), store.GitHubAppInstallation{InstallationID: 7, AccountID: 70, AccountLogin: "acme", AccountType: "Organization"}, f.now); err != nil {
 		t.Fatal(err)
 	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

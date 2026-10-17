@@ -19,7 +19,7 @@ func TestGitHubAppExtraReposAreAPerSourceListOfTheTeams(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
+	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 

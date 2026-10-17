@@ -12,7 +12,7 @@ func TestGitHubAppExtraRepoRefs_CarryTheRecordedIDs(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	acme := teamHandle(t, st, "acme")
-	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
+	if _, err := acme.TestOnlySeedGitHubInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := acme.SetAuthorizedGitHubExtraRepos(ctx, githubAppAuthorization(t, st, acme), "acme/app", []string{"acme/lib", "acme/proto"}, map[string]int64{"acme/lib": 42, "acme/proto": 43}); err != nil {
