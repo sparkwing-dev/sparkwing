@@ -1,5 +1,19 @@
 # C2 credentials contract
 
+## Process secret selector and value transport
+
+Node-host route decoding derives named selectors from the registered route.
+`GET /node/v1/secrets/{name}` supplies only `SecretName`. It supplies no pipeline
+selector. `GET /node/v1/pipelines/{name}/latest` supplies only `Pipeline`.
+Unrelated selectors stay absent. The existing store declaration, run, pipeline,
+claim and parent-authority checks remain authoritative.
+
+Controller value reads encode the shared `controllerwire.SecretValue`, including
+explicit false `shared` and an explicit `value` even when empty. Metadata fields
+retain the same meaning. The native process client can consume requester values
+through its existing live award. A wire omission cannot silently become a
+missing secret or suppress execution. No grant or release fence is widened.
+
 <!-- design:begin -->
 
 ## Amendment 1: selected routes and trusted adapters

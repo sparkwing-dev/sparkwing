@@ -296,6 +296,8 @@ func dispatchCommand(args []string) error {
 		return runTokens(args[1:])
 	case "pools":
 		return runPools(context.Background(), args[1:])
+	case "overflow":
+		return runOverflow(context.Background(), args[1:])
 	case "profiles":
 		return runProfiles(args[1:])
 	case "operator":

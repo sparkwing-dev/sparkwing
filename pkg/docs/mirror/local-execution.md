@@ -462,9 +462,20 @@ Retry also requires a fresh submission so values can be resolved again.
 
 There is no per-user overflow cap by default. `overflow_minutes` narrows the
 user's monthly Cloud allowance for this run. The account's saved limit can only
-be tightened by the request. `GET /api/v1/overflow` reports `monthly_minutes`,
+be tightened by the request. Read and change your saved allowance with:
+
+```bash
+sparkwing overflow show --profile work
+sparkwing overflow set --profile work --minutes 120
+sparkwing overflow set --profile work --minutes 0
+sparkwing overflow set --profile work --uncapped
+```
+
+Zero prevents new Cloud overflow. `--uncapped` removes your saved cap.
+Use `-o json` for the saved `monthly_minutes`, `used_seconds` and UTC
+`period_start`. `GET /api/v1/overflow` reports `monthly_minutes`,
 `used_seconds` and the UTC `period_start`. `PUT /api/v1/overflow` saves
-`{"monthly_minutes":120}`, and `null` removes the saved cap. These operations
+`{"monthly_minutes":120}`, and `{"monthly_minutes":null}` removes the saved cap. These operations
 use the selected account credential. Team standing tiers, owner budgets and the
 billing charge ladder still apply. Once the allowance is reached, new Cloud
 claims wait while local and registered-machine capacity remains eligible.

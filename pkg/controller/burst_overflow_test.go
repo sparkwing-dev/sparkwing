@@ -119,6 +119,32 @@ type overflowResponse struct {
 	MonthlyMinutes *int64 `json:"monthly_minutes"`
 }
 
+func TestBurstOverflowClientControlsAuthenticatedAccount(t *testing.T) {
+	s, options, _, _ := sourceUploadFixture(t)
+	options.HTTP = &http.Client{Transport: inventoryRoundTrip{s.Handler()}}
+	manager, err := client.NewOverflowManager(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := manager.ReadOverflowControl(t.Context())
+	if err != nil || initial.MonthlyMinutes != nil || initial.UsedSeconds != 0 || initial.PeriodStart.Day() != 1 {
+		t.Fatalf("default control: %+v %v", initial, err)
+	}
+	minutes := int64(12)
+	changed, err := manager.SetOverflowLimit(t.Context(), &minutes)
+	if err != nil || changed.MonthlyMinutes == nil || *changed.MonthlyMinutes != minutes {
+		t.Fatalf("set control: %+v %v", changed, err)
+	}
+	persisted, err := manager.ReadOverflowControl(t.Context())
+	if err != nil || persisted.MonthlyMinutes == nil || *persisted.MonthlyMinutes != minutes {
+		t.Fatalf("persisted control: %+v %v", persisted, err)
+	}
+	cleared, err := manager.SetOverflowLimit(t.Context(), nil)
+	if err != nil || cleared.MonthlyMinutes != nil {
+		t.Fatalf("clear control: %+v %v", cleared, err)
+	}
+}
+
 func TestBurstPersonalEnrollmentAndClaimsUseTheAccountOwner(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('account','a@example.test',1,1)`)

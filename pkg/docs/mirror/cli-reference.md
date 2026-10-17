@@ -17,6 +17,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing examples`](cli-examples.md) -- Read complete example pipelines
 - [`sparkwing info`](cli-info.md) -- Describe Sparkwing and the selected project
 - [`sparkwing operator`](cli-operator.md) -- Manage deployment operations
+- [`sparkwing overflow`](cli-overflow.md) -- Manage your Cloud overflow allowance
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines
 - [`sparkwing pools`](cli-pools.md) -- Manage team runner pools
 - [`sparkwing profiles`](cli-profiles.md) -- Manage controller connection profiles

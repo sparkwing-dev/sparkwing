@@ -1,5 +1,19 @@
 # C4: surface and configuration contracts
 
+## Overflow account controls
+
+`sparkwing overflow show --profile NAME` reads the authenticated account's
+allowance and current usage. `overflow set --profile NAME` requires exactly
+one of `--minutes N` or `--uncapped`. Zero prevents new Cloud overflow, and
+uncapped removes the saved cap. The existing team tier and billing ladder remain
+in force. Explicit profiles keep this Cloud account setting separate from local
+execution settings.
+
+JSON preserves `monthly_minutes` (including null), `used_seconds` and UTC
+`period_start`. Plain emits only the allowance in minutes or `uncapped`.
+Pretty labels the allowance, usage and period. Validation and controller errors
+emit no success receipt. The command adds no new routes, grants or settings.
+
 <!-- design:begin -->
 
 ## Amendment 1: environment, presence and managed units

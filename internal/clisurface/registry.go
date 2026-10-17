@@ -269,6 +269,15 @@ func Registry() []Command {
 			{Name: "ref", Argument: "REF"},
 			{Name: "pipeline-ref", Argument: "REF"},
 		}},
+		{Path: "sparkwing overflow", Flags: []Flag{}},
+		{Path: "sparkwing overflow show", Authority: TeamCredential, Rules: []string{"Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+		}},
+		{Path: "sparkwing overflow set", Authority: TeamCredential, Rules: []string{"Set your monthly Cloud allowance with --minutes, or remove your saved cap with --uncapped. Exactly one is required. Zero prevents new Cloud overflow while local and registered-machine work remain eligible. Running work finishes. JSON returns the saved allowance and usage. Plain prints the allowance in minutes or uncapped."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "minutes", Argument: "N", HasMinimum: true, Minimum: 0, Conflicts: []string{"uncapped"}},
+			{Name: "uncapped", Conflicts: []string{"minutes"}},
+		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
 		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},

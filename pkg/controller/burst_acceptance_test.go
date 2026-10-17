@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -45,6 +46,24 @@ func TestBurstAcceptanceLocalOwnerExecutesBeforeOverflow(t *testing.T) {
 }
 
 func burstAcceptanceFlow(t *testing.T, saturated bool, placement string) {
+	burstAcceptanceExecution(t, saturated, placement, nil)
+}
+
+// BurstExecutionProof binds real SDK execution to the composed burst intake and claim fixture.
+type BurstExecutionProof struct {
+	Pipeline string
+	Plan     nodeproto.PlanDoc
+	Engine   engine.Identity
+	Execute  func(client.EngineOptions, controllerwire.ClaimedUnit, controllerwire.Controller)
+}
+
+// BurstExecutionAcceptance runs the shared burst path through the supplied executor.
+func BurstExecutionAcceptance(t *testing.T, placement string, proof BurstExecutionProof) {
+	t.Helper()
+	burstAcceptanceExecution(t, placement != "here", placement, &proof)
+}
+
+func burstAcceptanceExecution(t *testing.T, saturated bool, placement string, proof *BurstExecutionProof) {
 	t.Helper()
 	cloudWorker := strings.HasPrefix(placement, "cloud")
 	s, options, input, memberBearer := sourceUploadFixture(t)
@@ -93,6 +112,9 @@ func burstAcceptanceFlow(t *testing.T, saturated bool, placement string) {
 	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 	input.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here", Hold: 2 * time.Second}, {Target: "machines", Hold: 2 * time.Second}, {Target: "cloud"}}}
 	input.LocalSecretNames = []string{"TOKEN"}
+	if proof != nil {
+		input.Pipeline = proof.Pipeline
+	}
 	const localSecret = "requesting-machine-only-secret"
 	created, err := member.CreateRun(t.Context(), controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "burst-acceptance", LocalSecrets: map[string]string{"TOKEN": localSecret}})
 	if err != nil || created.HereBearer == "" {
@@ -109,6 +131,9 @@ func burstAcceptanceFlow(t *testing.T, saturated bool, placement string) {
 	}
 	owner := newClient(claimed.Claim.Capability, false)
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job", Steps: []nodeproto.StepSpec{{ID: "run"}}}}}
+	if proof != nil {
+		plan = proof.Plan
+	}
 	body, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +143,11 @@ func burstAcceptanceFlow(t *testing.T, saturated bool, placement string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
+	resolution := runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}
+	if proof != nil {
+		resolution.Engine = proof.Engine
+	}
+	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: resolution})
 	if err != nil || accepted.Spec.Hash == "" || accepted.Spec.Request.Request.Source.BundleDigest.Value != digest {
 		t.Fatalf("sealed burst plan: %+v %v", accepted, err)
 	}
@@ -250,10 +279,21 @@ func burstAcceptanceFlow(t *testing.T, saturated bool, placement string) {
 	if err != nil || strings.Contains(string(persisted), localSecret) {
 		t.Fatal("local secret appeared in persisted run or plan")
 	}
+	if proof != nil {
+		proof.Execute(workerOptions, *awarded.Claim, owner)
+		completed, err := owner.ReadSnapshot(t.Context(), created.RunID)
+		if err != nil || len(completed.Jobs) != 1 || completed.Jobs[0].Outcome != string(store.NodeSuccess) {
+			t.Fatalf("owner did not observe successful SDK execution: %+v %v", completed, err)
+		}
+	}
 	if applied, err := member.Cancel(t.Context(), created.RunID, controllerwire.CancelRequest{Reason: "user_cancelled"}); err != nil || !applied.CancelRequested {
 		t.Fatalf("requester cancellation: %+v %v", applied, err)
 	}
-	for _, unit := range []*controllerwire.ClaimedUnit{claimed.Claim, awarded.Claim} {
+	units := []*controllerwire.ClaimedUnit{claimed.Claim}
+	if proof == nil {
+		units = append(units, awarded.Claim)
+	}
+	for _, unit := range units {
 		c := newClient(unit.Capability, false)
 		if beat, err := c.Renew(t.Context(), unit.UnitID, controllerwire.RenewalRequest{}); err != nil || !beat.CancelRequested {
 			t.Fatalf("cancellation delivery to owner/worker: %+v %v", beat, err)

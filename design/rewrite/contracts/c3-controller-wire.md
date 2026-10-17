@@ -1028,6 +1028,16 @@ run claim. `GET /overflow` and `PUT /overflow` use OverflowControl and
 OverflowControlWrite under the authenticated account. Null means uncapped.
 Request caps only narrow the saved cap; team tier/ladder admission still applies.
 
+### Overflow management client
+
+`controllerwire.OverflowManager` exposes `ReadOverflowControl` and
+`SetOverflowLimit` through `client.NewOverflowManager`. It uses the existing
+account-authenticated `GET /overflow` and `PUT /overflow` routes and their retry
+policies. A nil allowance sends an explicit `monthly_minutes:null`. Zero blocks
+new Cloud overflow. Negative or unrepresentable allowances fail before HTTP.
+Responses must include all shared fields and carry a non-negative allowance and
+usage plus a first-of-month UTC period. The client rejects malformed receipts.
+
 `NewSessionRunnerTokenManager(ctx, EngineOptions, session)` authenticates runner
 enrollment and token management with an existing account session. It rejects a
 simultaneous bearer callback, obtains CSRF from `GET /api/v1/auth/session`, and

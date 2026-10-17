@@ -1,6 +1,15 @@
 package controllerwire
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// OverflowManager reads and changes only the authenticated account's allowance.
+type OverflowManager interface {
+	ReadOverflowControl(context.Context) (OverflowControl, error)
+	SetOverflowLimit(context.Context, *int64) (OverflowControl, error)
+}
 
 // OverflowControl reports the authenticated account's monthly Cloud allowance.
 type OverflowControl struct {

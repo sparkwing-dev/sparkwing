@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -90,10 +91,13 @@ func (s *Server) handleReadSecret(w http.ResponseWriter, r *http.Request, a capa
 		}
 	}
 	noteAuditTarget(r.Context(), "secret_name", row.Name)
-	writeJSON(w, http.StatusOK, secretJSON{
-		Name: row.Name, Value: plain, Principal: row.Principal, Pipeline: row.Pipeline,
-		Masked: row.Masked, Shared: row.Shared, Bound: secrets.IsBound(row.Value),
-		CreatedAt: row.CreatedAt.Unix(), UpdatedAt: row.UpdatedAt.Unix(),
+	writeJSON(w, http.StatusOK, controllerwire.SecretValue{
+		SecretMetadata: controllerwire.SecretMetadata{
+			Name: row.Name, Principal: row.Principal, Pipeline: row.Pipeline,
+			Masked: row.Masked, Shared: row.Shared, Bound: secrets.IsBound(row.Value),
+			CreatedAt: row.CreatedAt.Unix(), UpdatedAt: row.UpdatedAt.Unix(),
+		},
+		Value: plain,
 	})
 	return nil
 }

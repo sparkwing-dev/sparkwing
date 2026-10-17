@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -18,8 +19,14 @@ import (
 )
 
 func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
+	for _, value := range []string{"requester-local-secret-value", ""} {
+		t.Run(fmt.Sprintf("empty=%v", value == ""), func(t *testing.T) { requesterLocalSecretRelease(t, value) })
+	}
+}
+
+func requesterLocalSecretRelease(t *testing.T, value string) {
+	t.Helper()
 	s, options, input, _ := sourceUploadFixture(t)
-	const value = "requester-local-secret-value"
 	input.LocalSecretNames = []string{"TOKEN"}
 	input.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "machines"}, {Target: "cloud"}}}
 	c, err := client.NewEngineClient(options)
@@ -51,20 +58,22 @@ func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badPlan := plan
-	badPlan.Jobs = append([]nodeproto.JobSpec{}, plan.Jobs...)
-	badPlan.Jobs[0].ID = value
-	badBody, err := json.Marshal(badPlan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	badResolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: badPlan})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: badBody, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: badResolved, Guards: runspec.Guards{Passed: true}}})
-	if err == nil || strings.Contains(err.Error(), value) {
-		t.Fatal("local secret reached a persisted plan identifier or its refusal")
+	if value != "" {
+		badPlan := plan
+		badPlan.Jobs = append([]nodeproto.JobSpec{}, plan.Jobs...)
+		badPlan.Jobs[0].ID = value
+		badBody, err := json.Marshal(badPlan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		badResolved, err := settings.ResolvePlan(settings.PlanInputs{Request: created.Request, Declarations: declarations, Plan: badPlan})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: badBody, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: badResolved, Guards: runspec.Guards{Passed: true}}})
+		if err == nil || value != "" && strings.Contains(err.Error(), value) {
+			t.Fatal("local secret reached a persisted plan identifier or its refusal")
+		}
 	}
 	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
 	if err != nil {
@@ -95,6 +104,24 @@ func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
 	if nodeReply.Code != http.StatusOK || json.Unmarshal(nodeReply.Body.Bytes(), &nodeSecret) != nil || nodeSecret.Value != value || !nodeSecret.Masked {
 		t.Fatalf("node release HTTP %d %s", nodeReply.Code, nodeReply.Body)
 	}
+	options.Bearer = func(context.Context) (string, error) { return reconciled.Claim.Capability, nil }
+	private, err := client.NewNodeHostClient(options, created.RunID, "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer private.Close()
+	principal, err := private.Principal(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := private.ProcessClient(t.Context(), principal, "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, masked, err := process.Secret(t.Context(), "TOKEN")
+	if err != nil || actual != value || !masked {
+		t.Fatalf("native secret release: masked=%v error=%v", masked, err)
+	}
 
 	tenant, err := s.store.ForTeam(t.Context(), "a")
 	if err != nil {
@@ -109,18 +136,18 @@ func TestRequesterLocalSecretRealIntakeClaimAndRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	persisted, err := json.Marshal([]any{stored, events})
-	if err != nil || strings.Contains(string(persisted), value) {
+	if err != nil || value != "" && strings.Contains(string(persisted), value) {
 		t.Fatal("plaintext persisted")
 	}
 	for _, name := range []string{"TOKEN?run=foreign", "UNDECLARED?run=" + created.RunID} {
 		refused := sourceUploadHTTP(h, string(award.Bearer), "GET", "/api/v1/secrets/"+name, "")
-		if refused.Code == http.StatusOK || strings.Contains(refused.Body.String(), value) {
+		if refused.Code == http.StatusOK || value != "" && strings.Contains(refused.Body.String(), value) {
 			t.Fatalf("foreign release: %d %s", refused.Code, refused.Body)
 		}
 	}
 	engineSQL(t, s.store, `UPDATE triggers SET generation=generation+1 WHERE team='a' AND id=?`, created.RunID)
 	refused := sourceUploadHTTP(h, string(award.Bearer), "GET", path, "")
-	if refused.Code == http.StatusOK || strings.Contains(refused.Body.String(), value) {
+	if refused.Code == http.StatusOK || value != "" && strings.Contains(refused.Body.String(), value) {
 		t.Fatalf("stale release: %d %s", refused.Code, refused.Body)
 	}
 }

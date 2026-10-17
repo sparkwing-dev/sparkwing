@@ -1,5 +1,19 @@
 # C3 protocol and SDK contract
 
+## Declared requester secrets in composed execution
+
+The process secret route resolves its `name` as a secret selector, independently
+of named pipeline routes. Controller value replies use the shared SecretValue
+shape, preserving empty values and false shared visibility. The native process
+client, process service and SDK all consume that value under the same live node
+award. The host registers masking before the SDK receives the secret.
+
+The composed burst proof now runs real Go SDK planning and step operations
+in-process from here, personal-machine and exchanged Cloud node awards. It
+retains real HTTP authorization, store transitions, process delegation and secret
+release. SDK process transport, selected-engine installation and native listeners
+remain separate native verification boundaries.
+
 Owner admission refusals use typed store policy results under the live owner and
 captured work generation. Job skip, failure and queue timeout finish the unreleased
 job. Plan refusal preserves completed work, finishes every remaining unreleased

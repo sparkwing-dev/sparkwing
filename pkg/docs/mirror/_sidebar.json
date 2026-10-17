@@ -101,6 +101,7 @@
         "cli-examples",
         "cli-info",
         "cli-operator",
+        "cli-overflow",
         "cli-pipeline",
         "cli-pools",
         "cli-profiles",
