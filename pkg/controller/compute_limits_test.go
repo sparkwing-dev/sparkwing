@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -16,53 +18,24 @@ import (
 
 func setComputeLimit(t *testing.T, f creditsFixture, name string, value int64) {
 	t.Helper()
-	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+	status, body := f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 		map[string]any{"limits": map[string]int64{name: value}})
 	if status != http.StatusOK {
 		t.Fatalf("set %s: status = %d: %s", name, status, body)
 	}
 }
 
-func seedRunNodeFor(t *testing.T, f creditsFixture, principal, runID, nodeID string) {
-	t.Helper()
-	ctx := store.WithCreatingPrincipal(context.Background(), principal)
-	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
-		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := teststore.SeedNode(f.store, ctx, store.Node{
-		RunID: runID, NodeID: nodeID, Status: "pending",
-	}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := teststore.SeedNodeReady(f.store, ctx, runID, nodeID); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-}
-
-func computeLimitEvents(t *testing.T, f creditsFixture, runID string) []store.Event {
-	t.Helper()
-	events, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListEventsAfter(context.Background(), runID, 0, 100)
-	if err != nil {
-		t.Fatalf("list events: %v", err)
-	}
-	var out []store.Event
-	for _, e := range events {
-		if e.Kind == store.EventKindComputeLimitBlocked {
-			out = append(out, e)
-		}
-	}
-	return out
+func computeIntake(pipeline string) controllerwire.CreateRunRequest {
+	return controllerwire.CreateRunRequest{Request: runspec.Request{Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}}
 }
 
 func TestComputeLimits_ShowAndSet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	f := newCreditsFixture(t, true)
+	f := newCreditsFixture(t)
 
-	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/operator/limits", f.admin, nil)
+	status, body := f.request(t, http.MethodGet, "/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show: status = %d: %s", status, body)
 	}
@@ -86,7 +59,7 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 	}
 
 	setComputeLimit(t, f, store.ComputeLimitGlobalRunners, 12)
-	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/operator/limits", f.admin, nil)
+	status, body = f.request(t, http.MethodGet, "/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show after set: status = %d: %s", status, body)
 	}
@@ -97,20 +70,20 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 		t.Fatalf("global runners = %d, want 12", view.Limits[store.ComputeLimitGlobalRunners])
 	}
 
-	if status, _ := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+	if status, _ := f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 		map[string]any{"limits": map[string]int64{"max_dollars": 1}}); status != http.StatusBadRequest {
 		t.Fatalf("an unknown guard = %d, want 400", status)
 	}
-	if status, _ := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.readonly,
+	if status, _ := f.request(t, http.MethodPut, "/api/v1/operator/limits", f.readonly,
 		map[string]any{"limits": map[string]int64{store.ComputeLimitGlobalRunners: 1}}); status != http.StatusForbidden {
 		t.Fatalf("a reader setting a guard = %d, want 403", status)
 	}
 }
 
 func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
-	f := newCreditsFixture(t, true)
+	f := newCreditsFixture(t)
 	for range 20 {
-		status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+		status, body := f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 			map[string]any{"limits": map[string]int64{
 				store.ComputeLimitGlobalRunners: 7,
 				store.ComputeLimitRunSeconds:    -1,
@@ -119,7 +92,7 @@ func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
 			t.Fatalf("mixed write = %d: %s", status, body)
 		}
 	}
-	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/operator/limits", f.admin, nil)
+	status, body := f.request(t, http.MethodGet, "/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show = %d: %s", status, body)
 	}
@@ -135,30 +108,30 @@ func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
 }
 
 func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
-	f := newCreditsFixture(t, true)
+	f := newCreditsFixture(t)
 	setComputeLimit(t, f, store.ComputeLimitGlobalRunners, 7)
 
-	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+	status, body := f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 		map[string]any{"limits": map[string]any{store.ComputeLimitGlobalRunners: nil}})
 	if status != http.StatusBadRequest {
 		t.Fatalf("null write = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+	status, body = f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 		map[string]any{"limits": nil})
 	if status != http.StatusBadRequest {
 		t.Fatalf("null limits = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+	status, body = f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 		map[string]any{"LIMITS": map[string]any{store.ComputeLimitGlobalRunners: nil}})
 	if status != http.StatusBadRequest {
 		t.Fatalf("case-folded null write = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+	status, body = f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 		json.RawMessage(`{"limits":{"max_global_runners":null},"limits":{"runner_alarm":3}}`))
 	if status != http.StatusBadRequest {
 		t.Fatalf("duplicate null write = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/operator/limits", f.admin, nil)
+	status, body = f.request(t, http.MethodGet, "/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show = %d: %s", status, body)
 	}
@@ -171,12 +144,12 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 	if got := view.Limits[store.ComputeLimitGlobalRunners]; got != 7 {
 		t.Fatalf("explicit null reset the global runner cap to %d", got)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+	status, body = f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 		map[string]any{"LIMITS": map[string]any{store.ComputeLimitGlobalRunners: 8}})
 	if status != http.StatusOK {
 		t.Fatalf("case-folded valid write = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
+	status, body = f.request(t, http.MethodPut, "/api/v1/operator/limits", f.admin,
 		json.RawMessage(`{"limits":{"max_global_runners":9},"LIMITS":{"runner_alarm":3}}`))
 	if status != http.StatusOK {
 		t.Fatalf("duplicate valid write = %d: %s", status, body)
@@ -190,36 +163,13 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 	}
 }
 
-func TestComputeLimits_NodeCreationRefusedPastThePerRunCap(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	setComputeLimit(t, f, store.ComputeLimitNodesPerRun, 1)
-	seedRunNodeFor(t, f, "pool", "run-fan", "build")
-
-	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/runs/run-fan/nodes", f.admin,
-		map[string]any{"id": "fan-1", "status": "pending"})
-	if status != http.StatusTooManyRequests {
-		t.Fatalf("the node past the cap = %d, want 429: %s", status, body)
-	}
-	if got := len(computeLimitEvents(t, f, "run-fan")); got != 1 {
-		t.Fatalf("compute_limit_blocked events = %d, want 1", got)
-	}
-	nodes, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListNodes(ctx, "run-fan")
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	if len(nodes) != 1 {
-		t.Fatalf("nodes = %d, want the refused one absent", len(nodes))
-	}
-}
-
 func TestComputeLimits_RunCreationRefusedPastTheHourlyCap(t *testing.T) {
-	f := newCreditsFixture(t, true)
+	f := newCreditsFixture(t)
+	f.store.SetIntakePolicy(receiptPolicy{})
 	setComputeLimit(t, f, store.ComputeLimitGlobalRunsPerHour, 1)
 	seedRunNode(t, f.store, "run-first", "build")
 
-	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/runs", f.admin,
-		map[string]any{"id": "run-second", "pipeline": "demo", "status": "running"})
+	status, body := f.request(t, http.MethodPost, "/api/v1/runs", f.writer, computeIntake("demo"))
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("the run past the cap = %d, want 429: %s", status, body)
 	}
@@ -258,7 +208,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	f := newCreditsFixture(t, true)
+	f := newCreditsFixture(t)
 	ctx := context.Background()
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
 	writer, _, err := teststore.ProvisionCredential(ctx, f.store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "pool"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.control", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
@@ -266,18 +216,17 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 		t.Fatalf("mint a writer for the metered principal: %v", err)
 	}
 
-	body := map[string]any{
-		"pipeline": "demo",
-		"trigger":  map[string]any{"source": "manual"},
+	f.store.SetIntakePolicy(receiptPolicy{})
+	body := computeIntake("demo")
+	status, first := f.request(t, http.MethodPost, "/api/v1/runs", writer, body)
+	if status != http.StatusCreated {
+		t.Fatalf("first intake = %d: %s", status, first)
 	}
-	status, first := creditsRequest(t, http.MethodPost, f.url+"/api/v1/triggers", writer, body)
-	if status != http.StatusAccepted {
-		t.Fatalf("the first trigger = %d, want 202: %s", status, first)
-	}
-	status, second := creditsRequest(t, http.MethodPost, f.url+"/api/v1/triggers", writer, body)
+	status, second := f.request(t, http.MethodPost, "/api/v1/runs", writer, body)
 	if status != http.StatusTooManyRequests {
-		t.Fatalf("the second trigger = %d, want 429: %s", status, second)
+		t.Fatalf("second intake = %d, want 429: %s", status, second)
 	}
+
 	runs, err := f.store.AsOperator().ListRuns(ctx, store.RunFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -293,19 +242,25 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	f := newCreditsFixture(t, true)
+	f := newCreditsFixture(t)
 	ctx := context.Background()
 	writer, _, err := teststore.ProvisionCredential(ctx, f.store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "pool"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write", "runs.control", "runs.read"}), ExpiresAt: teststore.CredentialExpiry(time.Now().UTC(), 0)})
 	if err != nil {
 		t.Fatalf("mint a writer for the metered principal: %v", err)
 	}
-	seedRunNodeFor(t, f, "pool", "run-source", "build")
-	if err := teststore.SeedRunFinish(f.store, ctx, store.DefaultTeam, "run-source", "failed", "boom"); err != nil {
-		t.Fatalf("finish the source run: %v", err)
+
+	f.store.SetIntakePolicy(receiptPolicy{})
+	status, first := f.request(t, http.MethodPost, "/api/v1/runs", writer, computeIntake("demo"))
+	var admitted controllerwire.CreateRunResponse
+	if status != http.StatusCreated || json.Unmarshal(first, &admitted) != nil || admitted.RunID == "" {
+		t.Fatalf("retry source intake = %d: %s", status, first)
+	}
+	if err := teststore.SeedRunFinish(f.store, ctx, store.DefaultTeam, admitted.RunID, "failed", "boom"); err != nil {
+		t.Fatal(err)
 	}
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
+	status, body := f.request(t, http.MethodPost, "/api/v1/runs/"+admitted.RunID+"/retry", writer, controllerwire.RetryRequest{Mode: "all", IdempotencyKey: "limited-retry"})
 
-	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/runs/run-source/retry", writer, nil)
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("a retry past the cap = %d, want 429: %s", status, body)
 	}

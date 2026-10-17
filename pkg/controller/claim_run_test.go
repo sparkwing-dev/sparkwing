@@ -3,16 +3,11 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const specA = "sha256:" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -104,103 +99,6 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 		t.Fatalf("read the child with the ended plan claim = %d, want 403", code)
 	}
 }
-
-// A plan whose required secrets the run cannot read is refused with 422. The
-// planning claim learns only which declared names the run cannot read, never
-// whether a row exists elsewhere or which pipeline owns it; that detail, with
-// the fix for each, goes to the run's events, which only the team reads.
-func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	plan := "Bearer " + f.launchedRun(olga, "run-missing", "acme", "widgets")
-	tn, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, sec := range []store.Secret{{Name: "TEAM_ONLY", Value: "v"}, {Name: "ELSEWHERE", Value: "v", Pipeline: "release"}} {
-		sec.Masked = true
-		if err := teststore.SeedSecret(f.store, tn.Team(), sealedSecret(t, store.Team(olga.team), sec), time.Now()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	doc := map[string]any{
-		"nodes": []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}},
-		"secrets": []map[string]any{
-			{"name": "DEPLOY_TOKEN", "required": true},
-			{"name": "TEAM_ONLY"},
-			{"name": "ELSEWHERE"},
-			{"name": "SLACK_HOOK", "optional": true},
-		},
-	}
-	var refused map[string]any
-	if code := f.call("POST", "/api/v1/runs/run-missing/plan", plan, doc, &refused); code != http.StatusUnprocessableEntity {
-		t.Fatalf("accept plan = %d %v, want 422", code, refused)
-	}
-	want := `pipeline "build" did not start: this run cannot read 3 required secrets it declares: DEPLOY_TOKEN, TEAM_ONLY, ELSEWHERE. ` +
-		`A team member sees which scope each is missing from, and the command that sets it, with: ` +
-		`sparkwing runs status --run run-missing --profile <profile>`
-	if got := fmt.Sprint(refused["error"]); got != want {
-		t.Fatalf("the planner's refusal =\n%s\nwant\n%s", got, want)
-	}
-	for _, leak := range []string{"team-wide", "shared", "release", "only for", "not set", "admin"} {
-		if strings.Contains(fmt.Sprint(refused), leak) {
-			t.Fatalf("the planner's refusal tells it %q: %v", leak, refused)
-		}
-	}
-	if code := f.call("GET", "/api/v1/runs/run-missing/events", plan, nil, nil); code == http.StatusOK {
-		t.Fatal("the planning claim read the run's events")
-	}
-	var events []store.Event
-	if code := f.call("GET", "/api/v1/runs/run-missing/events", olga.auth, nil, &events); code != http.StatusOK {
-		t.Fatalf("a team member's events read = %d", code)
-	}
-	var detail string
-	for _, ev := range events {
-		if ev.Kind == store.EventKindSecretPreflightRefused {
-			var payload struct{ Message string }
-			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-				t.Fatal(err)
-			}
-			detail = payload.Message
-		}
-	}
-	for _, line := range []string{
-		"- TEAM_ONLY is set team-wide but not shared with runs",
-		`- ELSEWHERE is set only for pipeline "release"`,
-		"sparkwing secrets set --name DEPLOY_TOKEN --file <path> --profile <profile> --pipeline build",
-	} {
-		if !strings.Contains(detail, line) {
-			t.Fatalf("the team's detail lacks %q:\n%s", line, detail)
-		}
-	}
-	if strings.Contains(detail, "SLACK_HOOK") {
-		t.Fatalf("the detail names the optional SLACK_HOOK:\n%s", detail)
-	}
-	if _, err := tn.GetNode(context.Background(), "run-missing", store.PlanNodeID); err != nil {
-		t.Fatalf("the run's own planning node: %v", err)
-	}
-	if _, err := tn.GetNode(context.Background(), "run-missing", "a"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("node of the refused plan: err = %v, want not found", err)
-	}
-}
-
-// A work claim reads a secret its run's plan declares, and each read is
-// recorded on its node; an undeclared name, a planning claim, another run
-// and a cancelled run are all refused.
-// A work claim takes and returns concurrency slots for its own run in its
-// own team, and only as its node's accepted plan declares them: another run,
-// another node, another key or policy, another run's holder ID or holder, a
-// planning claim and a cancelled run's new acquire are refused, neither an
-// acquire nor a heartbeat holds the lease past the claim, and a release after cancel still frees the slot.
-
-// A claim takes a memo slot only under its own repository, pipeline and node,
-// and heartbeats, observes and releases only its own node's holder, never a
-// sibling's in the same run.
-
-// Every concurrency route a claim reaches holds it to one rule: it acts only
-// on its own node's holders and waiters, under a key its node declares. A
-// sibling node's live holder in the same run survives every route aimed at it.
 
 func (f *appFixture) teamOf(u signedIn) *store.Tenant {
 	f.t.Helper()

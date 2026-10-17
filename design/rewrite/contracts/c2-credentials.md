@@ -3339,3 +3339,23 @@ payloads contain aggregate outcomes and the authenticated dashboard link,
 without job identifiers, arguments or private errors. The old queue-only
 Server.Shutdown API and its callers are removed because no reporter goroutine
 remains to drain.
+
+
+## W1b controller test reconciliation: preflight diagnostics and pricing errors
+
+Invariant: a planning claim learns only declared unreadable secret names, never
+the existence, value or pipeline scope of another secret row. SourceRead no
+longer authorizes GET `/api/v1/runs/{run}/events` or its `/stream` route. The
+member RunsRead and awarded TriggerHost alternatives remain. This closes the
+route-policy grant that exposed the team-only secret_preflight_refused payload.
+The hand-written policy expectation and generated API reference follow the same
+cut. Real-store HTTP properties cover original and delegated plan awards, ID
+and numeric aliases, both event routes and caller-supplied scope hints. A real
+member session still receives the scoped diagnostic. No grant table, schema or
+event projection changes.
+
+UnpricedCPUClassError maps through engineLookupError to HTTP 409 conflict with
+details.reason=unpriced_cpu_class. It formerly escaped as HTTP 500. Claim refusal
+keeps the pending job, balance and attempts unchanged and creates no reservation
+or charge. The controller tests use committed checkout reservations and signed
+Stripe events for paid credit setup.

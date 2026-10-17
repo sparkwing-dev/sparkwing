@@ -9620,11 +9620,6 @@ paths:
             liveness: credential
           - credential: awarded_or_delegated_claim
             grants:
-              - source.read
-            binding: run
-            liveness: sensitive
-          - credential: awarded_or_delegated_claim
-            grants:
               - trigger.host
             binding: run
             liveness: sensitive
@@ -9659,11 +9654,6 @@ paths:
               - runs.read
             binding: none
             liveness: credential
-          - credential: awarded_or_delegated_claim
-            grants:
-              - source.read
-            binding: run
-            liveness: sensitive
           - credential: awarded_or_delegated_claim
             grants:
               - trigger.host

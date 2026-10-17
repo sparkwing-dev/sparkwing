@@ -9,8 +9,8 @@ import (
 )
 
 func TestLegacyMultiTeamLicenseAdvertisesBilling(t *testing.T) {
-	f := newCreditsFixtureWithLicense(t, true, license.FeatureMultiTeam)
-	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/capabilities", f.admin, nil)
+	f := newCreditsFixtureWithLicense(t, license.FeatureMultiTeam)
+	status, body := f.request(t, http.MethodGet, "/api/v1/capabilities", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("capabilities = %d", status)
 	}
@@ -25,7 +25,7 @@ func TestLegacyMultiTeamLicenseAdvertisesBilling(t *testing.T) {
 	if !caps.Billing.Enabled {
 		t.Fatal("legacy multi-team license did not advertise billing")
 	}
-	status, _ = creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits", f.admin, nil)
+	status, _ = f.request(t, http.MethodGet, "/api/v1/credits", f.readonly, nil)
 	if status != http.StatusOK {
 		t.Fatalf("licensed credits route = %d, want 200", status)
 	}
