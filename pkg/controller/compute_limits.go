@@ -14,8 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// ComputeLimitRefusedCode is the machine-readable code on a 429 from work a
-// compute guard refused.
+// ComputeLimitRefusedCode is details.reason on the rate_limited refusal of work
+// a compute guard refused.
 const ComputeLimitRefusedCode = "compute_limit"
 
 type computeLimitsJSON struct {

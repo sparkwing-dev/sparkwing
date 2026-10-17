@@ -454,7 +454,7 @@ func run(args []string) error {
 			"the checkout service refuses a controller without its token")
 	}
 
-	srv, err := newControllerServer(st, p.Root, readProvenance().Version)
+	srv, err := newControllerServer(st, p.Root, readProvenance().Version, nil)
 	if err != nil {
 		return err
 	}
