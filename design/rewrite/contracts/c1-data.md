@@ -3150,8 +3150,8 @@ The raw Tenant UnbindGitHubAppInstallation, PutGitHubAppTrigger,
 DeleteGitHubAppTrigger, PutGitHubAppAutomation, DeleteGitHubAppAutomation,
 SetGitHubAppExtraRepos and SetGitHubAppExtraRepoIDs are removed. Trusted provider
 uninstall still uses Operator and its existing transaction helper. Automatic
-schedule/App run admission still needs the committing origin contract described
-in the earlier intake handoff.
+schedule run admission still needs the committing origin contract described
+in the earlier intake handoff. App admission uses the trusted transaction below.
 
 
 ## Run-control transactions and sealed intake rate guards
@@ -3475,3 +3475,55 @@ with each lane receiving its own bounded batch. The in-memory GitHub queue,
 capacity drops, retry sleeps and shutdown drain are removed. Pending, running
 and terminal intents all come from run transitions. Metrics and parent
 notification remain due for their unfinished consumers.
+
+
+## Verified GitHub App admission integration
+
+`Tenant.AdmitGitHubAppRun(ctx, GitHubAppAdmission)` is a trusted webhook adapter,
+not a customer route. C2 calls it only after HMAC verification, event binding,
+repository coverage and event/subscription selection. It supplies the exact
+installation snapshot and either the selected subscription or automation grant.
+
+The transaction attaches that proof privately to `storeTx` and calls the existing
+`admitRun`. Its `github_app` authority reference identifies the installation and
+numeric repository for accountability. It is neither a capability nor a session.
+Only that transaction resolves it. Ordinary intake and authentication cannot
+manufacture it, and no bearer is issued for it. `VerifiedAppIntake` exposes the
+proof to the existing C4 settings policy through its transaction resolver.
+
+Every authority check locks and rechecks the installation's team, suspension and
+connection generation, the bound signed event, and the exact subscription or
+consent generation. Admission retains the shared number allocation, rate guards,
+source location, owner unit, first seal and completion intent. Failed validation
+or effects roll all of them back. A retry of the signed body and pipeline returns
+the existing run without spending another number or admission slot.
+
+`github_app_deliveries.admitted_team` is an empty string until the first successful
+admission of that signed body. The same transaction binds it to the tenant.
+Partial deliveries retain that binding even while another pipeline is shed.
+Moving the installation cannot admit the body into a second tenant. The event
+row expires with the existing replay retention. No schema migration is added.
+
+Replay keys use the signed body digest plus pipeline and are selected inside the
+tenant. The processed-body marker still prevents replays across installations
+that move teams. `GitHubCommitRuns` replaces `GitHubCommitTriggers` and reads
+sealed requests in one query by tenant, numeric repository and exact SHA.
+Re-request selection uses those facts rather than removed trigger environment
+columns. OIDC classification uses the event in the seal, so expiry of the replay
+ledger does not erase the identity of a retained or retried run.
+
+`CronSchedule.RepositoryKey` carries resolved identity separately from App
+installation authority. `ArmCronSchedule` validates and stores that key, and the
+scanner returns it. Manual GitHub schedules require a resolved numeric identity
+without acquiring App authority. Manual/App conflicts compare those keys.
+Unresolved GitHub URLs fail before arming, including former names that cannot be
+resolved. The old alias comparison and its GitHub token mint are removed.
+
+Data authority maps a full GitHub branch ref and the App's short default-branch
+name into the same storage ref namespace. Only the exact verified pushed branch
+can receive default-branch trust. Tags, mismatched SHAs and non-default events
+remain untrusted. Generated tests cover these cases through live data authority.
+
+The raw automation-specific trigger insertion API is removed. The legacy generic
+trigger insertion and controller schedule intake remain open until scheduled
+execution reaches `admitRun`.

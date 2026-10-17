@@ -1,136 +1,91 @@
 # W1 test reconciliation-a progress
 
-Native starting report: 110 top-level failures, 48 in the assigned controller
-prefixes. That file still reflects the last committed state and still has FAIL.
-Local final evidence: 44 of 93 assigned controller groups pass, 49 fail.
-The first complete local sweep after the connection/fixture fixes was 36/93.
-No acceptance matrix or native transport cell is newly claimed complete.
+Local final selection: **85/95 groups pass, ten fail, none skip**. All 72
+GitHub App groups pass. This closes 39 previously open original groups and adds
+two passing controller regressions. The native report still reflects the last
+committed state and still contains FAIL. No native or acceptance-matrix cell is
+newly claimed complete.
 
-Implemented the existing C2 GitHubConnectWriter transactions and compile-time
-controller conformance. The invariant is that only the same live direct owner
-session for the exact team/account can read the linked identity, consume the
-nonce or bind the verified installation. The bind transaction rechecks the
-provider identity, derives the connector and cannot take a foreign installation.
-Generated authority refusals, exact expiry, one-use concurrency and rollback pass.
+Verified App deliveries now call the existing sealed admission transaction.
+The committing checks revalidate the exact installation, team and consent
+generation. Shared settings, ceilings, rate limits, number allocation, source
+identity, fork refusal, owner creation and completion intent remain in that
+transaction. An ordinary capability or intake request cannot manufacture the
+transaction-private origin. Failed effects leave no run, owner, replay-team
+binding or spent number.
 
-Runner removal now opens its enrollment-owned file through OpenPrivateConfig.
-The invariant is that an unsafe credential mode cannot stop the service or revoke
-authority. Generated permission bits and the original regression pass under race.
-The shared mounted-credential reader is unchanged. The Actions credential quota
-now returns the required RateLimited envelope instead of internal error.
+The first successful admission binds the signed body to its tenant in the
+existing delivery record. Partial admission cannot move the body to another
+team after the installation moves. Generated tests reproduce that failure when
+the check is removed. Other generated cases cover subscription/automation
+revocation, suspension, replacement, event tampering, team mismatch and forks.
 
-Deleted both raw GitHub connection APIs. Their fixture callers migrate to the
-explicit test-only seed and private nonce helper. Production delta this session:
-119 added, 19 deleted, net +100 Go lines. The store share is +95. Against main,
-W1+W1b store is -2,590 production lines under the lead's exclusions, still 1,660
-over the -4,250 target. The inherited budget gap remains open. The added concrete
-transactions implement the already-declared connection contract. No new option,
-interface, setting, environment input, compatibility path or schema is added.
+Re-requests read immutable App/event/PR facts from seals. Tag, base-branch and
+label filters and optional merge state survive. Discovery of today's default
+branch cannot overwrite the default reported by the signed event. Full refs
+retain exact default-branch storage trust. Tags, wrong SHAs and absent App facts
+do not acquire that trust. OIDC event identity survives replay-ledger expiry.
 
-Reconciled current runner enrollment routes, real browser session/CSRF evidence,
-fresh invitation replay keys, App schedule list syntax, current log job fields,
-CLI error wording, selected-revision Git arguments, dependency-preparation fakes,
-SDK replacement engine selection and the description fixture environment.
-Every original security, tenant, masking and billing assertion remains enabled.
-The per-group changes and open failures are appended to test-reconciliation.md.
+Manual schedules carry resolved repository keys independently of App authority.
+Manual/App conflicts use numeric identity. Unresolved GitHub URLs fail before
+arming. Existing tenant, refusal and narrow GitHub token assertions remain.
+No test group or security assertion is deleted, skipped or disabled.
+
+Deleted the raw automation trigger insertion API, its generic insertion branch,
+the old commit-trigger reader, the alias repository lookup and the App handler's
+legacy trigger/run writer. Under the lead's production exclusions, this session
+adds 233 lines and deletes 187, net **+46**. Store delta against main is **-2,482**,
+which remains 1,768 over the -4,250 W1+W1b target. The budget is still open. The
+new transaction implements the existing one-intake requirement. Reusing an
+account credential would bind automatic work to a user's session lifetime, and
+keeping the raw writer would preserve a second admission path.
+
+## Contract changes made
+
+C1, C2 and C4 record these integration amendments for lead review:
+
+- GitHubAppAdmission, AdmitGitHubAppRun and VerifiedAppIntake attach trusted proof
+  only to the shared admission transaction. The github_app reference is an
+  accountability tag, not a new authenticatable credential or bearer.
+- github_app_deliveries.admitted_team binds partially admitted signed bodies.
+  This changes the disposable baseline schema. No migration is added.
+- AppFacts.Event/Action and PullRequest.Label/Merged preserve typed event context.
+  Arbitrary environment values remain outside the request snapshot.
+- CronSchedule.RepositoryKey separates resolved identity from App consent.
+- GitHubCommitRuns replaces GitHubCommitTriggers and reads seals in one query.
+
+No package, setting, flag, environment variable, quota, compatibility alias or
+second intake implementation is added. Lead-owned handoffs/amendments are
+unchanged. No further contract change is requested in this session.
 
 ## Verification
 
-All checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
-GOMAXPROCS=4, -p 4 and TMPDIR/GOTMPDIR beneath /tmp/sw-astra-W1.
+Checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOMAXPROCS=4, -p 4 and scratch under /tmp/sw-astra-W1.
 
-- Whole-repository go build ./... passes. Scoped go vet passes for store,
-  controller, both changed commands, web and wingd. Final commentcheck is clean.
-- Store GitHub connection/App/nonce selections pass normally and under race
-  (76.489s). The scoped SQL guard selection also passes.
-- Runner-removal regressions and generated permission property pass normally
-  and under race (1.116s).
-- Full cmd/sparkwing-controller and internal/web suites pass with temporary
-  HTTP transport (1.953s and 2.547s).
-- The final targeted CLI/wingd/controller selections pass (1.797s, 0.121s,
-  5.139s). The separately corrected large-installation group passes (0.495s).
-- Docs source/mirror guard passes. The source credential guide records the
-  existing private-file removal requirement and sync-docs regenerates its mirror.
-- git diff --check passes. No local Git identity/core.worktree override exists.
+- Whole-repository go build ./... passes. Scoped vet passes for store, controller,
+  runspec and githubapp. Commentcheck is clean. git diff --check passes.
+- Final assigned HTTP selection: 85 pass, ten fail, zero skip, 19.895s.
+- All App groups pass. The corrected signed-default regression also passes in
+  isolation. Tag/base/label re-requests reproduce red before their projection fix.
+- Focused store App/data/reporting race checks pass in 92.157s. Focused controller
+  consent/replay/re-request race checks pass in 7.578s.
+- Store App/data/reporting checks pass after the final rollback assertion in
+  4.311s. Complete runspec and githubapp suites pass with memory HTTP transport
+  in 2.575s and 0.958s. Normal HTTP listeners fail on sandbox socket restrictions.
+- The local wingd sweep still reaches TCP/Unix socket restrictions. Native
+  wingd evidence stays open. Unchanged bin/CLI suites were not repeated.
 
-TCP/Unix sockets are forbidden here. A throwaway standard-library Go overlay
-replaces only httptest listeners with net.Pipe and routes the default HTTP
-transport to them. Actual HTTP handlers, provider fakes, authentication and
-transactions still execute. This is component evidence, not native socket proof.
-It is removed with the scratch directory. No test is skipped or disabled.
-
-The outside-package sweep still fails when subprocesses require sockets or the
-module proxy. The test process's memory listener cannot serve a Docker subprocess.
-Keep bin install-to-green/release-manifest, offline run/output-daemon and native
-wingd proofs with the lead. No environment failure is reported as a pass.
+Temporary standard-library overlays replace only httptest listeners with
+net.Pipe and route the default transport to them. Real handlers, provider fakes,
+authorization and SQLite transactions execute. This is component evidence, not
+native socket proof. The overlays and logs are removed with W1 scratch. The
+shared build cache remains. No Sparkwing candidate or pipeline is run.
 
 ## Remaining work
 
-- Trusted App delivery/consent must enter the single sealed admission transaction.
-  The webhook still reaches CreateTriggerWithRun and retired trigger columns.
-  Retain rate, replay, fork, tenant, signed-body and consent-race assertions.
-- Four App/manual schedule conflict tests seed unresolved GitHub identities that
-  the current store refuses. Reconcile the native manual schedule contract and
-  its committing adapter before changing these assertions or seeding rows.
-- Port three GitHub runner claim groups to current unit/run claims and sealed
-  numeric repository/push facts. They still seed legacy trigger rows.
-- Port seven source credential groups to accepted requests/current claims and
-  connect App credential acquisition to the shared source contract. The old
-  source helper still seeds removed columns. No App token assertion is dropped.
-- Re-request/check-suite prerequisites still need native App intake. No failing
-  test is deleted to conceal those missing integrations.
-- Previous sealed schedule intake, legacy intake deletion and the store budget
-  overage remain open. Completed earlier metering/placement/rotation work is
-  not rebuilt. Lead-owned handoffs and amendments remain unchanged.
-
-Contract changes made: C1 records fulfillment of the existing C2 connection
-interface, the raw API cuts and nanosecond installation timestamps. No contract
-signature or schema amendment is needed. No further cross-area contract changes
-are proposed in this session.
-
-## Remaining controller groups
-
 - TestRunSourceCredential_MintsTheApprovedRepositoriesByID
 - TestRunSourceCredential_NeedsTheGitHubApp
-- TestGitHubAppAutomationRevokedDuringDiscoveryStartsNoRun
-- TestGitHubAppAutomationRequiresConsentAndUsesDefaultBranch
-- TestGitHubAppAutomationConfigErrorsAndManualOverride
-- TestGitHubAppCronConflictsWithManualControllerSchedule
-- TestGitHubAppCronRenameConflictStopsOldAppRow
-- TestGitHubAppCronRefusesManualScheduleAtOldRedirectedURL
-- TestGitHubAppCronCannotProveManualGitHubURLDistinct
-- TestGitHubAppCronFailureDoesNotSuppressSubscribedPush
-- TestGitHubAppStaleCronPushStillStartsSubscribedPipeline
-- TestGitHubAppPushRunsOnlyInTheInstallationsTeam
-- TestGitHubAppRunLimitRefusesWithoutConsumingDelivery
-- TestGitHubAppTagPushRequiresTagSubscription
-- TestGitHubAppTagPatternsFilterPushes
-- TestGitHubAppPushBranchSubscription
-- TestGitHubAppPullRequestBaseBranchSubscription
-- TestGitHubAppBranchFilterLeavesTagPatternsAlone
-- TestGitHubAppRedeliveryStartsOneRun
-- TestGitHubAppForkPullRequestIsNotRun
-- TestGitHubAppAdditionalEventsRequireSubscription
-- TestGitHubAppRepositoryIdentitySurvivesRenameAndTransfer
-- TestGitHubAppReleaseReplayAndCoverage
-- TestGitHubAppUndatedEventIsIgnored
-- TestGitHubAppRedeliveryChargesOnlyShedRuns
-- TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit
-- TestGitHubAppFloodCapCountsTheTeamsRuns
-- TestGitHubAppReplayAfterAMoveStartsNothing
-- TestGitHubAppBranchFiltersGateBranchAndPullRequestEvents
-- TestGitHubAppSignedBodyKeepsItsEvent
-- TestGitHubAppBranchDeleteRunsOnGitHubsPayload
-- TestGitHubAppEventOlderThanTheReplayWindowIsRefused
-- TestGitHubAppRunRecordsTheDefaultBranch
-- TestGitHubAppCheckRunRerequestedRerunsItsPipeline
-- TestGitHubAppCheckSuiteRerequestedRerunsEveryPipeline
-- TestGitHubAppCheckSuiteRerequestedNeedsEachPipelinesOwnRun
-- TestGitHubAppRerequestedNeedsPriorEventsSubscription
-- TestGitHubAppRerequestedUsesCurrentBranchFilter
-- TestGitHubAppRerequestedForkOrForeignCommitStartsNothing
-- TestGitHubAppRerequestedNeedsTheBinding
-- TestGitHubAppRerequestedSpendsTheRunBudget
 - TestGitHubRunnerCredentialClaimsOnlyItsRepository
 - TestGitHubRunnerCredentialReachesNothingOutsideItsRoutes
 - TestGitHubRunnerCredentialClaimsOnlyItsOwnPush
@@ -140,53 +95,51 @@ are proposed in this session.
 - TestSourceCredential_NeedsTheRunsOwnClaimToken
 - TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos
 
+Runner fixtures still write removed trigger columns and call retired claim
+routes. Port them to current unit/run/job claims with sealed numeric repo and
+push facts. Preserve named and queued tenant/repository/SHA exclusions.
+
+Source fixtures still write removed repo/trigger columns and use legacy claim
+bearers. Port them to current requests and claims. SourceController still handles
+team git credentials without an App minting adapter. Connect verified App IDs,
+owner-approved extras, live claim authorization, narrow token minting and audit
+commit. Preserve every extra-repo, owner-consent and claim-boundary assertion.
+Use contract fakes for runner/software-policy composition where needed and name
+the real enrollment/runtime integration still left open.
+
+The original scheduled-origin handoff remains open. Generic legacy trigger
+insertion, triggerIntake and triggerRows cannot be deleted until schedules and
+their remaining callers enter the one sealed intake. Completed placement,
+metering, enrollment, rotation and connection work is not repeated.
+
+The lead must run native tests and review the trusted-origin/schema amendments.
+The native report must show no FAIL before completion can be claimed.
+
 ## Shared files touched
 
-- cmd/sparkwing-controller/secrets_key_test.go
-- cmd/sparkwing/compile_toolchain_test.go
-- cmd/sparkwing/docs_auth_test.go
-- cmd/sparkwing/run_offline_unix_test.go
-- cmd/sparkwing/runner_preferences_test.go
-- cmd/sparkwing/runners.go
-- cmd/sparkwing/schedules_repository_environment_test.go
-- cmd/sparkwing/trigger_selection_unix_test.go
-- cmd/sparkwing/update_release_workflow_test.go
-- cmd/sparkwing/update_unified_test.go
-- cmd/sparkwing/xrepo_describe_test.go
-- cmd/sparkwing/xrepo_flags_test.go
 - design/rewrite/contracts/c1-data.md
+- design/rewrite/contracts/c2-credentials.md
+- design/rewrite/contracts/c4-surface-config.md
 - design/rewrite/test-reconciliation.md
-- docs/credentials.md
-- internal/web/logpretty_test.go
-- internal/wingd/idle_exit_parallel_test.go
-- pkg/controller/browser_github_app_routes.go
-- pkg/controller/github_actions_exchange.go
+- internal/githubapp/githubapp.go
+- internal/runspec/contracts.go
+- pkg/controller/github_app_automation_test.go
+- pkg/controller/github_app_check_events.go
 - pkg/controller/github_app_crons_identity_test.go
-- pkg/controller/github_app_crons_test.go
-- pkg/controller/github_app_native_routes_test.go
 - pkg/controller/github_app_test.go
-- pkg/controller/github_completion_test.go
-- pkg/controller/github_onboarding_browser_test.go
-- pkg/controller/github_runner_onboarding_test.go
-- pkg/controller/github_runners_test.go
-- pkg/controller/identity_fixture_test.go
-- pkg/controller/intake_source_test.go
-- pkg/docs/mirror/credentials.md
-- pkg/store/claim_source_test.go
-- pkg/store/flow_nonce_runtime_test.go
-- pkg/store/github_app.go
-- pkg/store/github_app_automation_test.go
-- pkg/store/github_app_extra_repos_test.go
-- pkg/store/github_app_mutations_test.go
-- pkg/store/github_app_test.go
-- pkg/store/github_connect.go
-- pkg/store/github_connect_test.go
+- pkg/controller/github_app_webhook.go
+- pkg/controller/github_checks_test.go
+- pkg/controller/intake_policy.go
 
-Friction: Xwing env context cannot create its read-only sessions-index lock.
-The assigned environment was reused. Sockets, external module downloads and
-subprocess transport remain unavailable. No Sparkwing candidate, pipeline,
-Git write, external message or harness memory write is performed. Native
-acceptance and independent security review remain lead-owned. W1 scratch is
-removed after checks, and the shared Go cache is retained.
+Store files changed: app_intake.go, app_intake_test.go, authority_oidc.go,
+blob_persistence.go, capabilities_contract.go, crons.go, dialect.go, github_app.go,
+github_app_automation.go, github_commit_reporting_test.go, schema.sql and
+tenant_triggers.go. These are the minimal store, projection and caller changes
+for App admission. The generic insertion API remains only for unmigrated callers.
+
+Friction: sockets remain forbidden, and the native harness owns final evidence.
+No Git writes, external messages, candidate runtime or harness-memory writes are
+performed. The shared Git config has no user.name/core.worktree overrides.
+W1 scratch is removed after checks. The shared Go cache is retained.
 
 STATUS: CONTINUE

@@ -64,7 +64,14 @@ func (s *Server) ResolveIntake(ctx context.Context, resolver capability.Authorit
 	}
 	facts := store.IntakePolicyFacts{Options: &options, Ceilings: ceilings, LogRetentionClass: fmt.Sprintf("r%d", days), LogRetentionDays: days}
 	if request.VerifiedDeliveryID != "" {
-		return facts, &apierr.Error{Code: apierr.Unavailable, Message: "verified App delivery facts are unavailable"}
+		delivery, err := store.VerifiedAppIntake(ctx, resolver, request)
+		if err != nil {
+			return facts, err
+		}
+		facts.Delivery, facts.RepositoryAuthorized = &delivery, true
+		location := request.Request.Source.Location
+		facts.SourceLocation = &location
+		return facts, nil
 	}
 	location := request.Request.Source.Location
 	if location == (runspec.SourceLocation{}) {

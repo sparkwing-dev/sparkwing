@@ -151,7 +151,7 @@ func TestGitHubAppCronConflictsWithManualControllerSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "crn_manual", RepoPath: "git@github.com:acme/widgets.git", Pipeline: "nightly", Name: "default",
+		ID: "crn_manual", RepoPath: "git@github.com:acme/widgets.git", RepositoryKey: "gh:701", Pipeline: "nightly", Name: "default",
 		Cron: "0 3 * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour,
 		Where: store.CronWhereController,
 	}, time.Now()); err != nil {
@@ -180,7 +180,7 @@ func TestGitHubAppCronRenameConflictStopsOldAppRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "crn_manual_renamed", RepoPath: "https://github.com/acme/renamed.git",
+		ID: "crn_manual_renamed", RepoPath: "https://github.com/acme/renamed.git", RepositoryKey: "gh:701",
 		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
 	}, time.Now()); err != nil {
@@ -213,7 +213,7 @@ func TestGitHubAppCronRefusesManualScheduleAtOldRedirectedURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "crn_manual_old_url", RepoPath: "git@github.com:acme/widgets.git",
+		ID: "crn_manual_old_url", RepoPath: "git@github.com:acme/widgets.git", RepositoryKey: "gh:701",
 		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
 	}, time.Now()); err != nil {
@@ -230,14 +230,14 @@ func TestGitHubAppCronRefusesManualScheduleAtOldRedirectedURL(t *testing.T) {
 	if len(rows) != 1 || rows[0].GitHubRepositoryID != 0 || !rows[0].Declared {
 		t.Fatalf("old manual URL was duplicated or adopted: %+v", rows)
 	}
+
 	minted := f.app.Minted()
 	if len(minted) == 0 {
-		t.Fatal("manual URL comparison minted no token")
+		t.Fatal("schedule snapshot minted no token")
 	}
 	last := minted[len(minted)-1]
-	if len(last.Repositories) != 1 || last.Repositories[0] != "renamed" ||
-		len(last.Permissions) != 1 || last.Permissions["contents"] != "read" {
-		t.Fatalf("manual URL comparison token = %+v, want renamed with contents:read only", last)
+	if len(last.Repositories) != 1 || last.Repositories[0] != "renamed" || len(last.Permissions) != 1 || last.Permissions["contents"] != "read" {
+		t.Fatalf("schedule snapshot token = %+v, want renamed with contents:read only", last)
 	}
 }
 
@@ -245,25 +245,15 @@ func TestGitHubAppCronCannotProveManualGitHubURLDistinct(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
-	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	tenant, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
-		ID: "crn_manual_unreadable", RepoPath: "git@github.com:acme/old-name.git",
-		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
-		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
-	}, time.Now()); err != nil {
-		t.Fatal(err)
+	if _, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "unresolved", RepoPath: "git@github.com:acme/old-name.git", Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController}, time.Now()); err == nil {
+		t.Fatal("an unresolved GitHub repository was armed")
 	}
-	f.app.SetCommit("acme/widgets", "main", headSHA)
-	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
-	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusConflict {
-		t.Fatalf("unverifiable manual URL = %d, want 409", code)
-	}
-	rows := appCronRows(t, f, olga.team)
-	if len(rows) != 1 || rows[0].GitHubRepositoryID != 0 {
-		t.Fatalf("unverifiable manual URL was duplicated or adopted: %+v", rows)
+	if rows := appCronRows(t, f, olga.team); len(rows) != 0 {
+		t.Fatalf("unresolved schedule committed: %+v", rows)
 	}
 }
 

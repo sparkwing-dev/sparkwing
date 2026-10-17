@@ -419,6 +419,9 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 
 // ResolveAuthority reads live ancestry and locks it in write transactions.
 func (tx *storeTx) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error) {
+	if tx.appAdmission != nil && ref == tx.appAdmission.authority() {
+		return tx.appAdmission.resolve(ctx, tx)
+	}
 	chain, err := authorityChainTx(ctx, tx, ref, true)
 	if err != nil {
 		return capability.Principal{}, err

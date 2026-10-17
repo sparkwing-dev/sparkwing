@@ -24,10 +24,6 @@ func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error {
 // trigger behind for a worker to claim. It maps the same duplicate-key
 // errors [Tenant.CreateTrigger] does.
 func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error {
-	return t.createTriggerWithRun(ctx, trig, r, nil)
-}
-
-func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, automation *GitHubAppAutomation) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -39,11 +35,7 @@ func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, 
 	if err := t.s.createRunTx(ctx, tx, t.team, r); err != nil {
 		return err
 	}
-	if automation != nil {
-		if err := t.checkGitHubAppAutomationTx(ctx, tx, *automation); err != nil {
-			return err
-		}
-	}
+
 	return tx.Commit()
 }
 

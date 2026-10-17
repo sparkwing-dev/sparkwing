@@ -625,6 +625,7 @@ CREATE TABLE github_app_triggers (
 );
 
 CREATE TABLE github_app_deliveries (
+    admitted_team TEXT NOT NULL DEFAULT '',
     digest TEXT NOT NULL PRIMARY KEY,
     delivery_id TEXT NOT NULL,
     received_at BIGINT NOT NULL,

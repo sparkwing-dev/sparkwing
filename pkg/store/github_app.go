@@ -558,25 +558,27 @@ func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ct
 	return tx.Commit()
 }
 
-const maxGitHubCommitTriggers = 100
-
-// GitHubCommitTriggers reads sealed trigger reports by numeric repository identity and exact commit.
-func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) (_ []*Trigger, err error) {
+// GitHubCommitRuns reads sealed App requests by numeric repository identity and exact commit.
+func (t *Tenant) GitHubCommitRuns(ctx context.Context, repo GitHubRepo, sha string) (_ []RunRow, err error) {
 	if repo.ID <= 0 {
 		return nil, nil
 	}
-	rows, err := t.s.query(ctx, triggerSelect+` WHERE runs.team=? AND runs.repo_key=? AND runs.git_sha=? ORDER BY triggers.created_at DESC,triggers.id DESC LIMIT ?`, t.team, githubRepositoryKey(repo.ID), sha, maxGitHubCommitTriggers)
+	rows, err := t.s.query(ctx, `SELECT id,pipeline,request_json FROM runs WHERE team=? AND repo_key=? AND git_sha=? ORDER BY created_at DESC,id DESC LIMIT 100`, t.team, githubRepositoryKey(repo.ID), sha)
 	if err != nil {
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
-	var out []*Trigger
+	var out []RunRow
 	for rows.Next() {
-		tr, err := scanTrigger(rows)
-		if err != nil {
+		var run RunRow
+		var body []byte
+		if err := rows.Scan(&run.ID, &run.Pipeline, &body); err != nil {
 			return nil, err
 		}
-		out = append(out, tr)
+		if err := json.Unmarshal(body, &run.Request); err != nil {
+			return nil, err
+		}
+		out = append(out, run)
 	}
 	return out, rows.Err()
 }

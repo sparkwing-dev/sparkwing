@@ -3339,3 +3339,18 @@ payloads contain aggregate outcomes and the authenticated dashboard link,
 without job identifiers, arguments or private errors. The old queue-only
 Server.Shutdown API and its callers are removed because no reporter goroutine
 remains to drain.
+
+
+## Trusted App origin integration
+
+The verified webhook adapter now calls C1 `AdmitGitHubAppRun` with the selected
+installation and consent generation. C1 supplies `VerifiedAppIntake` only to that
+admission transaction. `Server.ResolveIntake` keeps the normal settings, ceilings
+and retention resolution and uses those trusted delivery/source facts.
+
+The transaction-local `github_app` authority reference is an accountability tag.
+It is not an accepted credential class, token spelling, authentication route or
+new issuance operation. Customer intake cannot supply its proof. Revocation,
+installation moves, consent replacement and partial-delivery replay are checked
+again in the committing transaction. Source credential release remains a separate
+claim-authorized operation.

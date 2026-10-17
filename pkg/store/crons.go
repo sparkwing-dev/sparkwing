@@ -61,11 +61,12 @@ type CronSchedule struct {
 	ID string `json:"id"`
 	// Team owns the schedule and every run it fires. It stays off the wire,
 	// because a caller only ever reads its own team's schedules.
-	Team                 Team   `json:"-"`
-	RepoPath             string `json:"repo_path"`
-	GitHubInstallationID int64  `json:"-"`
-	GitHubRepositoryID   int64  `json:"-"`
-	Pipeline             string `json:"pipeline"`
+	Team                 Team            `json:"-"`
+	RepoPath             string          `json:"repo_path"`
+	RepositoryKey        runspec.RepoKey `json:"-"`
+	GitHubInstallationID int64           `json:"-"`
+	GitHubRepositoryID   int64           `json:"-"`
+	Pipeline             string          `json:"pipeline"`
 	// Name distinguishes several schedules of one pipeline;
 	// [CronScheduleDefaultName] when the pipeline declares one.
 	Name    string `json:"name"`
@@ -266,10 +267,22 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 		sched.GitHubInstallationID < 0 || sched.GitHubRepositoryID < 0 {
 		return CronSchedule{}, false, errors.New("ArmCronSchedule: GitHub installation and repository ids must both be positive or both zero")
 	}
-	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: sched.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: sched.GitHubRepositoryID > 0, Value: sched.GitHubRepositoryID}})
+	repoID := sched.GitHubRepositoryID
+	if strings.HasPrefix(string(sched.RepositoryKey), "gh:") && repoID == 0 {
+		var err error
+		repoID, err = strconv.ParseInt(strings.TrimPrefix(string(sched.RepositoryKey), "gh:"), 10, 64)
+		if err != nil || repoID <= 0 {
+			return CronSchedule{}, false, ErrInvalidInput
+		}
+	}
+	repository, err := runspec.CanonicalRepository(runspec.RepoInput{RemoteURL: sched.RepoPath, GitHubRepositoryID: runspec.Optional[int64]{Set: repoID > 0, Value: repoID}})
 	if err != nil {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: %w", err)
 	}
+	if sched.RepositoryKey != "" && sched.RepositoryKey != repository.Key {
+		return CronSchedule{}, false, ErrInvalidInput
+	}
+	sched.RepositoryKey = repository.Key
 	if sched.Name == "" {
 		sched.Name = CronScheduleDefaultName
 	}
@@ -875,6 +888,7 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 		return CronSchedule{}, err
 	}
 	sched.Team = Team(team)
+	sched.RepositoryKey = runspec.RepoKey(repoKey)
 	sched.CatchUp = time.Duration(catchUpNS)
 	sched.Paused = paused != 0
 	sched.Declared = declared != 0

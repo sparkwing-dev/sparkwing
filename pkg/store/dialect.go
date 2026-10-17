@@ -114,6 +114,7 @@ type storeTx struct {
 	dialect      Dialect
 	store        *Store
 	snapshotRead bool
+	appAdmission *GitHubAppAdmission
 	rotatingRoot *capability.Capability
 	createdTeam  *TeamInfo
 }

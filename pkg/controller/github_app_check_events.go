@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -105,15 +104,15 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 			subscribed[sub.Pipeline] = sub
 		}
 	}
-	runs, err := tenant.GitHubCommitTriggers(r.Context(), repo, sha)
+	runs, err := tenant.GitHubCommitRuns(r.Context(), repo, sha)
 	if err != nil {
 		s.writeInternalError(w, r, "github app commit runs", err)
 		return
 	}
-	installation := strconv.FormatInt(env.Installation.ID, 10)
-	var anchors []*store.Trigger
-	for _, run := range runs {
-		if run.TriggerEnv[envGitHubAppInstallation] == installation && run.GitSHA == sha {
+	var anchors []*store.RunRow
+	for i := range runs {
+		run := &runs[i]
+		if app := run.Request.Request.Git.App; app.Set && app.Value.InstallationID == env.Installation.ID && run.Request.Request.Git.SHA == sha {
 			anchors = append(anchors, run)
 		}
 	}
@@ -122,7 +121,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 		pipeline, named := strings.CutPrefix(p.CheckRun.Name, "sparkwing/")
 		for _, run := range anchors {
 			if sub, ok := subscribed[pipeline]; named && ok && run.ID == p.CheckRun.ExternalID && run.Pipeline == pipeline && githubAppRunEventSubscribed(run, sub) {
-				planned = append(planned, githubAppPlannedRun{pipeline: pipeline, intake: githubAppRerunIntake(run, p.Sender.Login)})
+				planned = append(planned, githubAppPlannedRun{pipeline: pipeline, intake: githubAppRerunIntake(run, p.Sender.Login), subscription: &sub})
 				break
 			}
 		}
@@ -132,7 +131,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 				continue
 			}
 			if run := githubAppRerunAnchor(anchors, sub); run != nil {
-				planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: githubAppRerunIntake(run, p.Sender.Login)})
+				planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: githubAppRerunIntake(run, p.Sender.Login), subscription: &sub})
 			}
 		}
 	}
@@ -143,7 +142,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 	s.startGitHubAppRuns(w, r, in, tenant, env, repo, event, delivery, body, planned)
 }
 
-func githubAppRerunAnchor(anchors []*store.Trigger, sub store.GitHubAppTrigger) *store.Trigger {
+func githubAppRerunAnchor(anchors []*store.RunRow, sub store.GitHubAppTrigger) *store.RunRow {
 	for _, run := range anchors {
 		if run.Pipeline == sub.Pipeline && githubAppRunEventSubscribed(run, sub) {
 			return run
@@ -152,28 +151,31 @@ func githubAppRerunAnchor(anchors []*store.Trigger, sub store.GitHubAppTrigger) 
 	return nil
 }
 
-func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger) bool {
-	event := run.TriggerEnv["GITHUB_EVENT_NAME"]
-	if event == "" {
-		event = "push"
-	}
-	action := run.TriggerEnv["GITHUB_ACTION"]
-	if action == "" && event == "pull_request" {
-		action = run.TriggerEnv["GITHUB_PR_ACTION"]
-	}
-	return githubAppSubscribes(sub, event, action, run.TriggerEnv, run.GitBranch)
+func githubAppRunEventSubscribed(run *store.RunRow, sub store.GitHubAppTrigger) bool {
+	in := githubAppRerunIntake(run, "")
+	return githubAppSubscribes(sub, in.env["GITHUB_EVENT_NAME"], in.env["GITHUB_ACTION"], in.env, in.branch)
 }
 
-func githubAppRerunIntake(anchor *store.Trigger, user string) githubAppIntake {
-	env := make(map[string]string, len(anchor.TriggerEnv))
-	for k, v := range anchor.TriggerEnv {
-		if k != "GITHUB_DELIVERY" {
-			env[k] = v
-		}
+func githubAppRerunIntake(anchor *store.RunRow, user string) githubAppIntake {
+	request := anchor.Request.Request
+	app := request.Git.App.Value
+	env := map[string]string{"GITHUB_EVENT_NAME": app.Event, "GITHUB_ACTION": app.Action, "GITHUB_REF": request.Git.Ref, EnvDefaultBranch: app.DefaultBranch}
+	branch := strings.TrimPrefix(request.Git.Ref, "refs/heads/")
+	if strings.HasPrefix(request.Git.Ref, "refs/tags/") {
+		env["GITHUB_REF_TYPE"], branch = "tag", ""
+		env["GITHUB_TAG"] = strings.TrimPrefix(request.Git.Ref, "refs/tags/")
+	} else {
+		env["GITHUB_REF_TYPE"] = "branch"
 	}
 	var pr *sparkwing.PullRequest
-	if env["GITHUB_EVENT_NAME"] == "pull_request" {
-		pr = PullRequestForTrigger(env)
+	if request.PullRequest.Set {
+		p := request.PullRequest.Value
+		pr = &sparkwing.PullRequest{Number: int(p.Number), Action: p.Action, BaseRef: p.BaseRef, BaseSHA: p.BaseSHA, HeadRef: p.HeadRef, HeadSHA: p.HeadSHA}
+		branch, env["GITHUB_BASE_REF"] = p.HeadRef, p.BaseRef
+		env["GITHUB_LABEL"] = p.Label
+		if p.Merged.Set {
+			env["GITHUB_MERGED"] = fmt.Sprint(p.Merged.Value)
+		}
 	}
-	return githubAppIntake{user: user, branch: anchor.GitBranch, sha: anchor.GitSHA, env: env, at: time.Now(), prInfo: pr}
+	return githubAppIntake{user: user, branch: branch, sha: request.Git.SHA, env: env, at: time.Now(), prInfo: pr}
 }

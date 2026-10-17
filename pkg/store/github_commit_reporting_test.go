@@ -54,7 +54,7 @@ func TestGitHubCommitReportingUsesSealedIdentityProperty(t *testing.T) {
 		if _, err := foreign.RecordGitHubCheckRun(t.Context(), first.RunID, 43); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("foreign check: %v", err)
 		}
-		rows, err := tenant.GitHubCommitTriggers(t.Context(), GitHubRepo{ID: repoID, Owner: name, Name: name}, sha)
+		rows, err := tenant.GitHubCommitRuns(t.Context(), GitHubRepo{ID: repoID, Owner: name, Name: name}, sha)
 		if err != nil || len(rows) != 2 {
 			t.Logf("report count=%d err=%v", len(rows), err)
 			return false
@@ -66,7 +66,7 @@ func TestGitHubCommitReportingUsesSealedIdentityProperty(t *testing.T) {
 			return false
 		}
 		for _, id := range []int64{0, repoID + 2} {
-			rows, err := tenant.GitHubCommitTriggers(t.Context(), GitHubRepo{ID: id, Owner: name, Name: name}, sha)
+			rows, err := tenant.GitHubCommitRuns(t.Context(), GitHubRepo{ID: id, Owner: name, Name: name}, sha)
 			if err != nil || len(rows) != 0 {
 				t.Fatalf("unmatched repository: %+v %v", rows, err)
 			}
