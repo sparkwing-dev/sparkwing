@@ -662,3 +662,7 @@ Test daemons from the run were left running and had to be killed by the lead: te
 
 **W2 (credentials) builds the operator command.** One operator route and CLI command that, under operator authority, creates a team and issues its first team-admin credential, in one transaction, with an audit record naming the operator. Refuse if the team exists. Test through the real router, authenticator and store. Self-hosted controller onboarding beyond this is out of scope.
 **W9 (docs):** launch docs present two modes, Local and Cloud, with self-hosted runners registering to Cloud. Remove or clearly mark self-hosted-controller material (docs/self-hosting.md, the chart README) as not part of the launch offering, without deleting the chart or code.
+
+## Lead note 20:40: lock-order follow-up (for the final review)
+
+PostgreSQL testing found and fixed two lock-order deadlocks (3e7d8aabd): concurrent claims by one claimant (shared lock on the claimant capability row upgraded later under the run lock; fixed by lockClaimantTx taking the claimant row first) and sign-in versus identity unlink (team/account order). The same inversion (FOR SHARE on the claimant, then a later last_used_at update under the run lock) may exist in RenewUnit and observeUnitTx. The final review checks every transaction that touches capability rows and run rows for one global lock order.
