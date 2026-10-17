@@ -67,7 +67,7 @@ func TestFoldRunProfilesPartialSamplesRaiseOnly(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			New(st, nil).foldRunProfiles(ctx, tenant, run)
+			foldProfilesForTest(t, tenant, run)
 			for _, id := range []string{"build", ""} {
 				p, err := tenant.GetPipelineProfile(ctx, "demo", id)
 				if err != nil {
@@ -78,5 +78,18 @@ func TestFoldRunProfilesPartialSamplesRaiseOnly(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func foldProfilesForTest(t *testing.T, tenant *store.Tenant, run *store.Run) {
+	t.Helper()
+	observations, err := runProfileObservations(t.Context(), tenant, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for node, observation := range observations {
+		if err := tenant.RecordProfileObservation(t.Context(), run.Pipeline, node, observation); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

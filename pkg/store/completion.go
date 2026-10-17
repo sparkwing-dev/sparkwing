@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -54,6 +55,15 @@ type EffectDelivery struct {
 
 // DueRunEffects reads revisions under the completion singleton lease; expiry stops further delivery acknowledgements.
 func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error) {
+	return o.dueRunEffects(ctx, lease, "", limit)
+}
+
+// DueProfileFolds selects terminal profile work without starvation by other effect types.
+func (o *Operator) DueProfileFolds(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error) {
+	return o.dueRunEffects(ctx, lease, EffectProfileFold, limit)
+}
+
+func (o *Operator) dueRunEffects(ctx context.Context, lease SingletonLease, effect Effect, limit int) ([]DesiredRunEffect, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("effect limit must be positive")
 	}
@@ -67,7 +77,7 @@ func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limi
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT e.team,e.run_id,e.effect,e.desired_state,e.desired_rev,e.delivered_rev,e.attempts,e.next_at,
 r.pipeline,r.git_sha,r.git_branch,r.error FROM run_effects e JOIN runs r ON r.team = e.team AND r.id = e.run_id
-WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? ORDER BY e.next_at,e.team,e.run_id,e.effect LIMIT ?`, tx.now().UnixNano(), limit)
+WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? AND (?='' OR e.effect=?) ORDER BY e.next_at,e.team,e.run_id,e.effect LIMIT ?`, tx.now().UnixNano(), effect, effect, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +113,7 @@ WHERE e.delivered_rev < e.desired_rev AND e.next_at <= ? ORDER BY e.next_at,e.te
 
 // AcknowledgeRunEffect advances delivered_rev only to the delivered revision, never to a newly observed desired_rev.
 func (t *Tenant) AcknowledgeRunEffect(ctx context.Context, delivery EffectDelivery) error {
-	return t.deliverRunEffect(ctx, delivery, nil)
+	return t.deliverRunEffect(ctx, delivery, nil, nil)
 }
 
 // RetryRunEffect records a failed delivery without overwriting a later desired state or its due work.
@@ -111,10 +121,10 @@ func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, ne
 	if nextAt.IsZero() {
 		return fmt.Errorf("effect retry time is required")
 	}
-	return t.deliverRunEffect(ctx, delivery, &nextAt)
+	return t.deliverRunEffect(ctx, delivery, &nextAt, nil)
 }
 
-func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, retryAt *time.Time) error {
+func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, retryAt *time.Time, apply func(*storeTx) error) error {
 	if delivery.RunID == "" || delivery.Revision < 1 {
 		return fmt.Errorf("invalid effect delivery")
 	}
@@ -143,9 +153,17 @@ func (t *Tenant) deliverRunEffect(ctx context.Context, delivery EffectDelivery, 
 	if retryAt != nil {
 		_, err = tx.ExecContext(ctx, `UPDATE run_effects SET attempts = attempts + 1, next_at = CASE WHEN desired_rev = ? THEN ? ELSE next_at END WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, retryAt.UnixNano(), t.team, delivery.RunID, delivery.Effect)
 	} else {
+		if apply != nil {
+			if err := apply(tx); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE run_effects SET delivered_rev = ?, delivered_at = ? WHERE team = ? AND run_id = ? AND effect = ?`, delivery.Revision, tx.now().UnixNano(), t.team, delivery.RunID, delivery.Effect)
 	}
 	if err != nil {
+		return err
+	}
+	if err := assertSingletonLeaseTx(ctx, tx, delivery.Lease, "completion", tx.now()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -185,4 +203,34 @@ func writeRunEffectsTx(ctx context.Context, tx *storeTx, team Team, runID string
 		}
 	}
 	return nil
+}
+
+// ApplyProfileFold commits terminal profile observations with their exact delivered revision.
+func (t *Tenant) ApplyProfileFold(ctx context.Context, delivery EffectDelivery, observations map[string]ProfileObservation) (bool, error) {
+	if delivery.Effect != EffectProfileFold {
+		return false, fmt.Errorf("profile fold requires its own effect")
+	}
+	applied := false
+	err := t.deliverRunEffect(ctx, delivery, nil, func(tx *storeTx) error {
+		run, err := readRunTx(ctx, tx, t.team, delivery.RunID)
+		if err != nil {
+			return err
+		}
+		if effectPhase(run.State) != EffectTerminal {
+			return fmt.Errorf("profile fold requires a terminal run")
+		}
+		ids := make([]string, 0, len(observations))
+		for id := range observations {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		for _, id := range ids {
+			if err := t.recordProfileObservationTx(ctx, tx, run.Pipeline, id, observations[id]); err != nil {
+				return err
+			}
+		}
+		applied = true
+		return nil
+	})
+	return applied && err == nil, err
 }

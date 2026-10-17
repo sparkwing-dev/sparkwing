@@ -640,6 +640,9 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ticker.C:
 			s.reapLeased(ctx)
 			s.reconcileOwnedRuns(ctx)
+			if err := s.ReconcileProfileFolds(ctx); err != nil && ctx.Err() == nil {
+				s.logger.Error("profile completion failed", "err", err)
+			}
 			s.sampleOperationalSeries(ctx)
 		}
 	}

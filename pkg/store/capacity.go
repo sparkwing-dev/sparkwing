@@ -205,8 +205,7 @@ type profileMutState struct {
 	cpuMeasured         bool
 }
 
-// RecordProfileObservation folds clean observations and resource floors into this tenant's windowed profile.
-func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
+func validateProfileObservation(obs ProfileObservation) error {
 	if obs.Duration < 0 || obs.PeakMemoryBytes < 0 || obs.FloorMemoryBytes < 0 {
 		return errors.New("profile duration and memory must be nonnegative")
 	}
@@ -215,22 +214,27 @@ func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID 
 			return errors.New("profile CPU values must be finite and nonnegative")
 		}
 	}
+	return nil
+}
+
+// RecordProfileObservation folds clean observations and resource floors into this tenant's windowed profile.
+func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
+	return retryOnBusy(func() error {
+		return t.s.inTx(ctx, func(tx *storeTx) error { return t.recordProfileObservationTx(ctx, tx, pipeline, nodeID, obs) })
+	})
+}
+
+func (t *Tenant) recordProfileObservationTx(ctx context.Context, tx *storeTx, pipeline, nodeID string, obs ProfileObservation) error {
+	if err := validateProfileObservation(obs); err != nil {
+		return err
+	}
 	if !obs.CPUMeasured {
 		return nil
 	}
-	return retryOnBusy(func() error { return t.recordProfileObservation(ctx, pipeline, nodeID, obs) })
-}
-
-func (t *Tenant) recordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) (err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO pipeline_profiles
  (team,pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,updated_at)
  VALUES (?,?,?,0,0,0,0,0,?) ON CONFLICT (team,pipeline,node_id) DO NOTHING`,
-		string(t.team), pipeline, nodeID, time.Now().UnixNano()); err != nil {
+		string(t.team), pipeline, nodeID, tx.now().UnixNano()); err != nil {
 		return err
 	}
 	st, err := loadProfileMutState(ctx, tx, t.team, pipeline, nodeID)
@@ -239,7 +243,7 @@ func (t *Tenant) recordProfileObservation(ctx context.Context, pipeline, nodeID 
 	}
 	if obs.Partial && !obs.Contended {
 		if obs.PeakCores <= st.peakCores && sustainedOrPeak(obs) <= st.sustainedCores && obs.PeakMemoryBytes <= st.peakMemoryBytes {
-			return tx.Commit()
+			return nil
 		}
 		obs.SustainedCores = math.Max(sustainedOrPeak(obs), st.sustainedCores)
 		obs.PeakCores = math.Max(obs.PeakCores, st.peakCores)
@@ -312,13 +316,13 @@ ON CONFLICT (team, pipeline, node_id) DO UPDATE SET
 		string(t.team), pipeline, nodeID,
 		prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
 		prof.PeakCores, prof.PeakMemoryBytes, prof.SampleCount,
-		boolToInt(cpuMeasured), time.Now().UnixNano(), raw,
+		boolToInt(cpuMeasured), tx.now().UnixNano(), raw,
 		planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes,
 		prof.SustainedCores, prevSustainedCores)
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // safety: resolve missing sustained cores before storing; a literal zero can

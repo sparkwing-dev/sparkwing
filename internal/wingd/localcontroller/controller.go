@@ -39,6 +39,7 @@ type Services struct {
 	Runner   runners.StoreRunnerConfig
 	Close    func() error
 	Maintain func(context.Context)
+	Complete func(context.Context) error
 }
 
 // Config supplies shared service constructors without opening another store.
@@ -190,6 +191,11 @@ func (c *localController) maintain(ctx context.Context, lease store.SingletonLea
 			}
 			if err := c.sweep(ctx, lease); err != nil {
 				return err
+			}
+			if c.services.Complete != nil {
+				if err := c.services.Complete(ctx); err != nil {
+					return err
+				}
 			}
 			if c.services.Maintain != nil && !time.Now().Before(nextMaintenance) {
 				c.services.Maintain(ctx)

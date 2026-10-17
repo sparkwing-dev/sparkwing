@@ -77,7 +77,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			New(st, nil).foldRunProfiles(ctx, tenant, &run)
+			foldProfilesForTest(t, tenant, &run)
 			for _, id := range []string{"a", "b"} {
 				if id == "b" && (mode == "single" || mode == "memoized") {
 					continue

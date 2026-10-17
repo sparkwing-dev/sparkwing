@@ -2708,7 +2708,7 @@ schema version is added.
 | Create | `internal/runspec/contracts.go` |
 | Create | `pkg/storage/state_contract.go` |
 | Create | `pkg/store/claim_contract.go` |
-| Create | `pkg/store/completion_contract.go` |
+| Create | `pkg/store/completion.go` |
 | Create | `pkg/store/concurrency_contract.go` |
 | Create | `pkg/store/maintenance_contract.go` |
 | Create | `pkg/store/node_state.go` |
@@ -2910,7 +2910,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `ControllerRun` | Carries the team and global run ID of a visited controller-owned run. |
 | `Operator.ReconcileControllerRuns` | Resumes settlement and live capacity renewal in bounded pages under the elected controller fence. |
 
-### pkg/store/completion_contract.go
+### pkg/store/completion.go
 
 | Export | Purpose |
 |---|---|
@@ -3410,3 +3410,31 @@ The source-upload schema advances the hard-cut rewrite baseline to version 4.
 Version 3 stores are refused by the existing baseline check; no migration or
 compatibility path is added. Native QA must use a fresh version-4 development
 store. This is a schema change within the assigned integration slice.
+
+
+## Profile completion delivery
+
+`Operator.DueProfileFolds(ctx, completionLease, limit)` selects the profile lane
+through the same leased completion reader as `DueRunEffects`. Other due effect
+types cannot starve this lane. It leaves their revisions unchanged.
+
+`Tenant.ApplyProfileFold(ctx, EffectDelivery, map[string]ProfileObservation)`
+returns whether it committed a new fold. It loads the pipeline from the same
+team's terminal run, locks the exact outbox row, applies the complete observation
+batch in stable job order and acknowledges that revision in one transaction.
+Invalid observations, write failures and lease expiry roll everything back.
+Already delivered revisions apply no observations. The lease is rechecked after
+the writes before commit. The profile observation transaction helper is shared
+with `RecordProfileObservation`; no second folding algorithm exists.
+
+The completion implementation lives in `pkg/store/completion.go`. Its former
+contract scaffold is removed. `Server.ReconcileProfileFolds(ctx)` consumes the
+profile lane with current tenant handles, retrying failed reads or commits
+through the existing outbox. Corrupt metric reads fail the entire observation
+batch. The HTTP controller calls the reconciler from its existing maintenance loop.
+The elected local runtime calls the same reconciler through
+`localcontroller.Services.Complete func(context.Context) error` on its existing
+maintenance cadence, after readiness and while owning the store. The CLI binds
+that callback to the concrete server. Local completion failures join the
+existing worker shutdown path. GitHub, metrics and parent notification delivery
+remain separate unfinished lanes of the same completion outbox.
