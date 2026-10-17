@@ -14,7 +14,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -45,11 +47,18 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	input.LocalSecretNames = []string{"TOKEN"}
 	input.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}
 	input.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "here"}, {Target: "machines"}, {Target: "cloud"}}}
+	submittedValue := "submitted-environment-" + value
+	environment, err := runspec.EnvironmentDigest(map[string]string{"BUILD_REGION": submittedValue, "BUILD_EMPTY": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Env = environment
+	input.Options.SubmitEnvAllow = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"BUILD_*"}}}
 	c, err := client.NewEngineClient(options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "local-secret", LocalSecrets: map[string]string{"TOKEN": value}})
+	created, err := c.CreateRun(t.Context(), controllerwire.CreateRunRequest{Request: input, IdempotencyKey: "local-secret", LocalSecrets: map[string]string{"TOKEN": value}, SubmittedEnv: map[string][]byte{"BUILD_REGION": []byte(submittedValue), "BUILD_EMPTY": {}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +72,23 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		t.Fatalf("here claim: %+v %v", response, err)
 	}
 	award := response.Claim
+	if len(award.SubmittedEnv) != 2 || string(award.SubmittedEnv["BUILD_REGION"]) != submittedValue {
+		t.Fatal("private direct award lost submitted environment")
+	}
+	masker := secrets.NewMasker()
+	base, err := procenv.WithSubmitted(procenv.Base{Ambient: []string{"BUILD_REGION=runner-value", "UNLISTED=runner-private"}, Masker: masker}, award.SubmittedEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []procenv.Kind{procenv.Install, procenv.Plan, procenv.Attempt, procenv.Eval} {
+		environment, err := procenv.Build(kind, base, procenv.Runtime{})
+		if err != nil || !strings.Contains(strings.Join(environment, "\n"), "BUILD_REGION="+submittedValue) || strings.Contains(strings.Join(environment, "\n"), "UNLISTED=") {
+			t.Fatal("remote process lost submitted values or inherited unlisted input", err)
+		}
+	}
+	if masker.ContainsSecret(submittedValue) == false {
+		t.Fatal("submitted values are not masked")
+	}
 	options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
 	owner, err := client.NewEngineClient(options)
 	if err != nil {
@@ -90,12 +116,12 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: badBody, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: badResolved, Guards: runspec.Guards{Passed: true}}})
+		_, err = owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: badBody, Resolved: runspec.Resolved{Env: created.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: badResolved, Guards: runspec.Guards{Passed: true}}})
 		if err == nil || value != "" && strings.Contains(err.Error(), value) {
 			t.Fatal("local secret reached a persisted plan identifier or its refusal")
 		}
 	}
-	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
+	accepted, err := owner.AcceptPlan(t.Context(), created.RunID, controllerwire.PlanSubmission{Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Env: created.Request.Request.Env, Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"TOKEN"}, Settings: resolved, Guards: runspec.Guards{Passed: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +144,9 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	reconciled, err := owner.ReconcileJob(t.Context(), created.RunID, "job", controllerwire.ReconcileRequest{Policy: "none"})
 	if err != nil || reconciled.Claim == nil {
 		t.Fatalf("claiming node: %#v %v", reconciled, err)
+	}
+	if string(reconciled.Claim.SubmittedEnv["BUILD_REGION"]) != submittedValue {
+		t.Fatal("node award lost submitted environment")
 	}
 	nodeReply := sourceUploadHTTP(h, reconciled.Claim.Capability, "GET", path, "")
 	var nodeSecret controllerwire.SecretValue
@@ -179,6 +208,14 @@ func requesterLocalSecretRelease(t *testing.T, value string) {
 	}
 	defer other.Close()
 	otherServer := New(other, nil).WithSecretsCipher(s.secretsCipher).WithEngineController(&EngineController{Store: other})
+	otherTenant, err := other.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained, err := otherTenant.ReadSubmittedEnvironment(t.Context(), principal.Authority)
+	if err != nil || string(retained["BUILD_REGION"]) != submittedValue {
+		t.Fatal("submitted environment did not survive another controller process", err)
+	}
 	lost := sourceUploadHTTP(otherServer.Handler(), reconciled.Claim.Capability, "GET", "/api/v1/secrets/TOKEN?run="+created.RunID, "")
 	if lost.Code != http.StatusServiceUnavailable || value != "" && strings.Contains(lost.Body.String(), value) {
 		t.Fatalf("another process restored or exposed requester values: HTTP %d", lost.Code)

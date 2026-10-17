@@ -850,6 +850,15 @@ components:
           $ref: '#/components/schemas/internal.nodeproto.RunnerIdentity'
         source_generation:
           type: integer
+        submitted_env:
+          anyOf:
+            - additionalProperties:
+                anyOf:
+                  - contentEncoding: base64
+                    type: string
+                  - type: "null"
+              type: object
+            - type: "null"
         unit:
           type: string
         unit_id:
@@ -900,6 +909,15 @@ components:
             - type: "null"
         request:
           $ref: '#/components/schemas/internal.runspec.Request'
+        submitted_env:
+          anyOf:
+            - additionalProperties:
+                anyOf:
+                  - contentEncoding: base64
+                    type: string
+                  - type: "null"
+              type: object
+            - type: "null"
       required:
         - request
         - idempotency_key
@@ -5629,8 +5647,12 @@ components:
           $ref: '#/components/schemas/internal.runspec.Optional.string.'
         entrypoint:
           type: string
+        hash_all_files:
+          type: boolean
         location:
           $ref: '#/components/schemas/internal.runspec.SourceLocation'
+        no_bincache:
+          type: boolean
         ref:
           type: string
       required:

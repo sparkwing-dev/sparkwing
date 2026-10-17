@@ -335,7 +335,7 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 		source:         preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
 		described:      []nodeproto.PipelineDescription{{Name: "deploy-prod"}},
 		settings:       settings.Inputs{Flags: settings.Values{Options: runspec.Options{Priority: runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: priority}}, Output: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: output}}, Runner: runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runner}}}}, Context: settings.Context{NumCPU: 4}},
-		env:            map[string]string{"DEPLOY_REGION": "private-region"},
+		submittedEnv:   map[string][]byte{"DEPLOY_REGION": []byte("private-region")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func TestPrepareTriggerRequestRetainsSharedSettings(t *testing.T) {
 	if !reflect.DeepEqual(request.Request.Env.Names, []string{"DEPLOY_REGION"}) || request.Request.Env.Digest == "" {
 		t.Fatalf("environment identity lost: %+v", request.Request.Env)
 	}
-	raw, err := json.Marshal(request)
+	raw, err := json.Marshal(request.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 		request, err := prepareTriggerRequest(triggerRequestInput{
 			source:    preparedTriggerSource{pipeline: "deploy-prod", source: runspec.Source{Entrypoint: "Deploy"}},
 			described: []nodeproto.PipelineDescription{{Name: "deploy-prod"}},
-			settings:  settings.Inputs{Context: settings.Context{NumCPU: 4}}, env: map[string]string{"DEPLOY_REGION": value},
+			settings:  settings.Inputs{Context: settings.Context{NumCPU: 4}}, submittedEnv: map[string][]byte{"DEPLOY_REGION": []byte(value)},
 		})
 		if strings.ContainsRune(value, 0) {
 			if err == nil || strings.Contains(err.Error(), value) {
@@ -392,7 +392,7 @@ func FuzzTriggerEnvironmentValuesStayPrivate(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, err := json.Marshal(request)
+		raw, err := json.Marshal(request.Request)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -1,5 +1,21 @@
 # C1 data contract
 
+## Submitted environment retention
+
+Integration amendment: IntakeRequest.SubmittedEnv carries private values outside
+the request seal. AdmitRun validates the sealed environment names/digest and
+allow-list and encrypts values atomically into runs.submitted_env. The existing
+row-bound cipher binds ciphertext to team, execution ID and run-environment
+purpose. Values never enter RunRow, receipts, events or public snapshots. Missing
+or corrupt values fail before release; no ambient fallback occurs.
+
+Retries and child intake retain the source values and seal identity, encrypting
+them under the new execution ID. Replay cannot replace values. Retention follows
+the run row, including deletion. SetRunEnvironmentCipher is configured with the
+controller's existing credential cipher. ReadSubmittedEnvironment releases only
+to the run's live direct execution award with source.read and repository binding.
+Plan acceptance includes these registered masks in identifier refusal.
+
 ## Verified-default record observations
 
 `RecordLookupResult.VerifiedDefault` records a successful verified-default

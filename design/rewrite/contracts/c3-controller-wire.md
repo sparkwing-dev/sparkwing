@@ -1,5 +1,20 @@
 # Controller API contract
 
+## Submitted environment transport
+
+CreateRunRequest.SubmittedEnv carries only filtered, present variables privately
+as map[string][]byte, preserving empty and non-UTF-8 values through JSON. The
+immutable request retains only EnvSnapshot names/digest and SubmitEnvAllow's
+setting and provenance. Intake validates both before admitting.
+
+ClaimedUnit.SubmittedEnv is populated only on live direct execution awards,
+including successful bootstrap exchange and fresh node reconciliation. Source
+bootstrap awards, launcher sync and reconciled awards without a fresh bearer
+carry no values. The controller rechecks the claim, tenant, repository binding,
+cancellation and lease before release. NativeServices verifies the values against
+the sealed identity before merging them with the remote base or starting code.
+No new route or grant is introduced.
+
 <!-- design:begin -->
 
 ## Operator team creation (decision 114)

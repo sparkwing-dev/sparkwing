@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -81,6 +82,22 @@ func runNativeBurst(ctx context.Context, pipeline string, flags runFlags, args [
 func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, args []string, route userconfig.RunRouting, connection client.EngineOptions) (_ controllerwire.CreateRunRequest, resultErr error) {
 	captured := os.Environ()
 	masker := secrets.NewMasker()
+	configPath, err := userconfig.Path()
+	if err != nil {
+		return controllerwire.CreateRunRequest{}, err
+	}
+	machine, err := userconfig.ReadConfig(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		return controllerwire.CreateRunRequest{}, err
+	}
+	var allow []string
+	if machine.Run != nil {
+		allow = machine.Run.SubmitEnvAllow
+	}
+	submitted, err := procenv.Submit(captured, allow, masker)
+	if err != nil {
+		return controllerwire.CreateRunRequest{}, err
+	}
 	for _, item := range captured {
 		key, value, ok := strings.Cut(item, "=")
 		if ok && slices.Contains(route.LocalSecrets, key) {
@@ -163,7 +180,10 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	values := localRunSettingFlags(flags)
 	values.Profile.Set, values.Profile.Value = true, *route.Profile
 	values.Runner.Set, values.Runner.Value = true, runspec.RunnerSelection{Kind: runspec.RunnerHere}
-	request, err := prepareTriggerRequest(triggerRequestInput{source: selected, settings: settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: values}, described: described, args: args, env: map[string]string{}, idempotencyKey: flags.idempotencyKey})
+	inputs := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: values}
+	inputs.Machine.SubmitEnvAllow.Set, inputs.Machine.SubmitEnvAllow.Value = allow != nil, allow
+	inputs.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: configPath, Key: "run.submit_env_allow"}
+	request, err := prepareTriggerRequest(triggerRequestInput{source: selected, settings: inputs, described: described, args: args, submittedEnv: submitted, idempotencyKey: flags.idempotencyKey})
 	if err != nil {
 		return request, err
 	}

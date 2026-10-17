@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -104,6 +105,54 @@ func TestNativeServicesUsesSharedInterfacesAndCapturedEnvironment(t *testing.T) 
 	owner, claimed, evaluator, err := nodehost.NewNativeHost(services.Config)
 	if err != nil || owner == nil || claimed == nil || evaluator == nil {
 		t.Fatalf("shared native hosts cannot use the supplied interfaces: %v", err)
+	}
+}
+
+func TestNativeServicesBindsSubmittedValuesBeforeProcessStartup(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(map[bool]string{false: "retained", true: "corrupt"}[corrupt], func(t *testing.T) {
+			cfg, state := nativeConfigFixture(t)
+			const value = "requester-submitted-value"
+			cfg.Source.Base = procenv.Base{Ambient: []string{"BUILD_NOTE=ambient-value", "UNLISTED=ambient-private"}}
+			cfg.SubmittedEnv = map[string][]byte{"BUILD_NOTE": []byte(value), "BUILD_EMPTY": {}}
+			var err error
+			state.snapshot.Run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": value, "BUILD_EMPTY": ""})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if corrupt {
+				cfg.SubmittedEnv["BUILD_NOTE"] = []byte("changed")
+			}
+			services, err := nativeServices(t.Context(), cfg, func(string, string) (net.Listener, error) {
+				if corrupt {
+					t.Fatal("changed environment reached process transport startup")
+				}
+				return &processListener{closed: make(chan struct{})}, nil
+			})
+			if corrupt {
+				if err == nil {
+					t.Fatal("changed environment was accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := services.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			for _, kind := range []procenv.Kind{procenv.Plan, procenv.Install, procenv.Attempt, procenv.Eval} {
+				env, err := procenv.Build(kind, services.Config.Source.Base, procenv.Runtime{})
+				if err != nil || !slices.Contains(env, "BUILD_NOTE="+value) || !slices.Contains(env, "BUILD_EMPTY=") || slices.Contains(env, "UNLISTED=ambient-private") {
+					t.Fatal("native environment lost private input or used unlisted ambient values", err)
+				}
+			}
+			if !services.Config.Source.Base.Masker.ContainsSecret(value) {
+				t.Fatal("native source masks omit submitted value")
+			}
+		})
 	}
 }
 

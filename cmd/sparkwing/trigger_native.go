@@ -37,10 +37,21 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	if err != nil && !os.IsNotExist(err) {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	if machine.Run != nil && len(machine.Run.SubmitEnvAllow) != 0 {
-		return unavailable("trigger environment submission requires private captured-value retention at the controller")
-	}
 	captured := os.Environ()
+	masker := secrets.NewMasker()
+	var allow []string
+	if machine.Run != nil {
+		allow = machine.Run.SubmitEnvAllow
+	}
+	submitted, err := procenv.Submit(captured, allow, masker)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		if resultErr != nil {
+			resultErr = &maskedCLIError{err: resultErr, masker: masker}
+		}
+	}()
 	checkout, err := os.Getwd()
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
@@ -109,12 +120,14 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 			return result, err
 		}
 	}
-	options := source.Options{SDK: sdk, Engines: engines, PreparedCheckout: checkout, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
+	options := source.Options{SDK: sdk, Engines: engines, PreparedCheckout: checkout, Base: procenv.Base{Masker: masker}, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}
 	described, err := inspectTriggerSource(ctx, selected, captured, options)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
 	input := settings.Inputs{Context: settings.Context{Origin: runspec.OriginTrigger, Submitter: true, NumCPU: runtime.NumCPU()}, Flags: settings.Values{Options: runspec.Options{Profile: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: flags.profile}}}}}
+	input.Machine.SubmitEnvAllow.Set, input.Machine.SubmitEnvAllow.Value = allow != nil, allow
+	input.Machine.SubmitEnvAllow.Origin = runspec.SettingOrigin{Layer: runspec.LayerMachine, File: path, Key: "run.submit_env_allow"}
 	if flags.runner != "" {
 		selection := runspec.RunnerSelection{Kind: runspec.RunnerName, Value: flags.runner}
 		if flags.runner == hereRunnerFlag {
@@ -125,7 +138,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 		}
 		input.Flags.Runner.Set, input.Flags.Runner.Value = true, selection
 	}
-	result, err = prepareTriggerRequest(triggerRequestInput{source: selected, settings: input, described: described, reason: flags.reason, args: flags.passthrough, env: map[string]string{}})
+	result, err = prepareTriggerRequest(triggerRequestInput{source: selected, settings: input, described: described, reason: flags.reason, args: flags.passthrough, submittedEnv: submitted})
 	if err != nil || snapshot == nil {
 		return result, err
 	}

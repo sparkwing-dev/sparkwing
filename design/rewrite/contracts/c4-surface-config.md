@@ -1,5 +1,26 @@
 # C4: surface and configuration contracts
 
+## Submitted environment and standalone CI
+
+`procenv.Submit` captures only present user names matching the machine's
+`run.submit_env_allow`; credentials and engine-owned names are dropped. Values
+of at least 12 bytes and embedded proxy credentials are registered before
+inspection or subprocess startup. Empty values and native bytes are retained.
+`runspec.VerifyEnvironment` binds byte-preserving private values to EnvSnapshot's
+sorted names and digest. `procenv.WithSubmitted` supplies the verified values to
+the remote base for installation, planning, attempts and evaluation. Step tools
+and cleanup inherit the attempt environment. Submitted values override ambient
+runner values of the same name.
+
+`--sw-allow-unadmitted` selects decision 91's exclusive in-process local
+controller, rather than the shared machine admission service. The same runtime
+owns the home, store, queue, admission, concurrency and workers. It keeps the
+election lock and startup reconciliation and joins shutdown on command return.
+It refuses detached execution and Cloud routing. A home already owned by a
+controller is refused without opening its store or stopping that owner. CI
+should provide a private SPARKWING_HOME. No resource or concurrency policy is
+silently bypassed.
+
 ## Retained run build policy
 
 Trigger and Cloud overflow inspection use the acquired SDK entry through the

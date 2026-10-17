@@ -278,17 +278,20 @@ func triggerRepository(ctx context.Context, remote string, githubID func(context
 }
 
 type triggerRequestInput struct {
+	submittedEnv   map[string][]byte
 	idempotencyKey string
 	reason         string
 	source         preparedTriggerSource
 	settings       settings.Inputs
 	described      []nodeproto.PipelineDescription
 	args           []string
-	env            map[string]string
 }
 
 func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.CreateRunRequest, resultErr error) {
 	masker := secrets.NewMasker()
+	for _, value := range input.submittedEnv {
+		masker.Register(string(value))
+	}
 	for _, token := range input.args {
 		values := []string{token}
 		if _, value, present := strings.Cut(token, "="); present {
@@ -319,7 +322,11 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	env, err := runspec.EnvironmentDigest(input.env)
+	values := make(map[string]string, len(input.submittedEnv))
+	for name, value := range input.submittedEnv {
+		values[name] = string(value)
+	}
+	env, err := runspec.EnvironmentDigest(values)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
@@ -333,7 +340,7 @@ func prepareTriggerRequest(input triggerRequestInput) (request controllerwire.Cr
 	if key == "" {
 		key = rand.Text()
 	}
-	return controllerwire.CreateRunRequest{IdempotencyKey: key, Request: runspec.Request{
+	return controllerwire.CreateRunRequest{IdempotencyKey: key, SubmittedEnv: input.submittedEnv, Request: runspec.Request{
 		Version: 1, Pipeline: pipeline, Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Reason: input.reason,
 		Git: input.source.git, Source: input.source.source, Options: options, Env: env,
 		RequestedArgs: args, SecretArgs: runspec.Optional[[]string]{Set: true, Value: secretArgs},

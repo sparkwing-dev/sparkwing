@@ -143,7 +143,11 @@ service, then waits for the successor to acquire the same home and become ready.
 
 ### Running with no daemon available
 
-Standalone CI runs the same controller runtime in process with its own home.
+`sparkwing run <pipeline> --sw-allow-unadmitted` runs the same controller runtime
+in process for standalone CI. Give it a private `SPARKWING_HOME`. Its admission
+queue belongs to that process; it does not join another controller's machine
+admission queue. It retains run and job concurrency rules. It cannot detach or
+use Cloud routing. The CLI drains and joins its controller before returning.
 It must not open a home another controller owns. An unavailable or incompatible
 shared controller is an error, rather than permission to open its database in a
 second process. Startup reconciliation and shutdown draining belong to the

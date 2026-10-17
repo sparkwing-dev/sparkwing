@@ -38,6 +38,7 @@ func CompatibilityFor(release engine.VersionInfo) Compatibility {
 
 // CreateRunRequest carries user input; authenticated authority and App facts are server-derived.
 type CreateRunRequest struct {
+	SubmittedEnv   map[string][]byte `json:"submitted_env,omitempty"`
 	Request        runspec.Request   `json:"request"`
 	IdempotencyKey string            `json:"idempotency_key"`
 	LocalSecrets   map[string]string `json:"local_secrets,omitempty"`
@@ -84,6 +85,7 @@ type ClaimRequest struct {
 
 // ClaimedUnit carries the one-time private execution award over authenticated transport.
 type ClaimedUnit struct {
+	SubmittedEnv           map[string][]byte             `json:"submitted_env,omitempty"`
 	CloudResources         *match.Resources              `json:"cloud_resources,omitempty"`
 	Unit                   capability.UnitKind           `json:"unit"`
 	Purpose                capability.AwardPurpose       `json:"purpose"`

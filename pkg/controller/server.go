@@ -304,6 +304,7 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server {
 		s.store.SetPlanSecretOpener(opener)
 		bound, _ := c.(store.SessionKeyCipher)
 		s.store.SetSessionKeyCipher(bound)
+		s.store.SetRunEnvironmentCipher(bound)
 	}
 	return s
 }

@@ -65,6 +65,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 		cleanup()
 		return localRunRuntime{}, err
 	}
+	var standalone wingd.LocalLifecycle
 	return localRunRuntime{
 		controller: controller,
 		openCache:  openLocalProfileCache,
@@ -75,12 +76,31 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 			return followControllerRunLogs(ctx, transport, run, format, out)
 		},
 		ensureController: func(ctx context.Context) error {
+			if options.standalone {
+				services, err := resolveLocalServicesAt(ctx, home)
+				if err != nil {
+					return err
+				}
+				start := services.options
+				start.Standalone = true
+				if _, err := services.lifecycle.EnsureStarted(ctx, start); err != nil {
+					return err
+				}
+				standalone = services.lifecycle
+				return nil
+			}
 			_, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
 				return resolveLocalServicesAt(ctx, home)
 			})
 			return err
 		},
-		close: func() error { cleanup(); return nil },
+		close: func() error {
+			defer cleanup()
+			if standalone != nil {
+				return standalone.Stop(context.WithoutCancel(ctx))
+			}
+			return nil
+		},
 		prepare: func(ctx context.Context, pipeline string, flags runFlags) (localRunPreparation, error) {
 			return prepareNativeLocalRun(ctx, home, directory, pipeline, captured, snapshots, flags)
 		},

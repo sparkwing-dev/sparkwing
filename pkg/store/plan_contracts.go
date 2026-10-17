@@ -8,7 +8,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
 
@@ -59,6 +61,17 @@ func (values planSecretValues) ContainsSecret(identifier string) bool {
 
 func planSecretsTx(ctx context.Context, tx *storeTx, team Team, spec runspec.Spec) (planSecretValues, error) {
 	values := planSecretValues{}
+	if spec.Request.Request.Origin != runspec.OriginLocal && len(spec.Request.Request.Env.Names) > 0 {
+		submitted, err := (&Tenant{s: tx.store, team: team}).readSubmittedEnvironmentTx(ctx, tx, spec.Request.RunID)
+		if err != nil {
+			return nil, err
+		}
+		masker := secrets.NewMasker()
+		if _, err := procenv.WithSubmitted(procenv.Base{Masker: masker}, submitted); err != nil {
+			return nil, err
+		}
+		values = append(values, masker.Values()...)
+	}
 	for _, name := range spec.Request.Request.LocalSecretNames {
 		value, err := tx.store.localSecret(team, spec.Request.RunID, name)
 		if err != nil {

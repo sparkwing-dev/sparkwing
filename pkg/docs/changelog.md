@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **cli:** Submit present, allow-listed environment values with triggers and Cloud overflow. Encrypt private values at the controller, retain them through retry, and mask them on hosts.
+- **cli:** `run --sw-allow-unadmitted` uses an exclusive in-process local controller for standalone CI, with joined shutdown and its own admission queue.
+
 - **cli:** Cloud overflow retains uncached builds, full source hashing and relative priority. Inspection uses the installed SDK entry through the shared planner.
 - **cli:** Local `run --sw-index` retains a private, self-contained Git index for detached hosting and retries. Startup rejects changed snapshot bytes.
 

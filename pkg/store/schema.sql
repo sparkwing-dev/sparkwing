@@ -34,6 +34,7 @@ CREATE TABLE runs (
     error TEXT NOT NULL DEFAULT '',
     request_json BLOB NOT NULL,
     request_hash TEXT NOT NULL,
+    submitted_env TEXT NOT NULL DEFAULT '',
     idempotency_scope TEXT NOT NULL DEFAULT '',
     idempotency_key TEXT NOT NULL DEFAULT '',
     idempotency_digest TEXT NOT NULL DEFAULT '',

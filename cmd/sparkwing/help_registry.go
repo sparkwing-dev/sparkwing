@@ -133,7 +133,7 @@ var flagDescriptions = map[string]string{
 	"sw-no-update":        "Skip automatic updates for this invocation.",
 	"sw-no-bincache":      "Build without reusing the local pipeline binary cache.",
 	"sw-hash-all-files":   "Include all files when computing the local binary cache key.",
-	"sw-allow-unadmitted": "Permit execution without local resource admission.",
+	"sw-allow-unadmitted": "Use an exclusive in-process local controller for CI admission.",
 	"sw-dry-run":          "Preview the run without executing its jobs.",
 	"sw-index":            "Capture a Git index for local staged-content checks.",
 	"sw-run-handle-file":  "Write the submitted run handle to this file.",

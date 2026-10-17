@@ -22,6 +22,8 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 
 --sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names fail before work starts. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry.
 
+--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.
+
 ### Arguments
 
 - `<pipeline>` (required) -- Pipeline name
@@ -55,7 +57,7 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--sw-no-update` | Skip automatic updates for this invocation. |
 | `--sw-no-bincache` | Build without reusing the local pipeline binary cache. |
 | `--sw-hash-all-files` | Include all files when computing the local binary cache key. |
-| `--sw-allow-unadmitted` | Permit execution without local resource admission. |
+| `--sw-allow-unadmitted` | Use an exclusive in-process local controller for CI admission. |
 | `--sw-dry-run` | Preview the run without executing its jobs. |
 | `--sw-allow-risk LABEL[,LABEL...]` | Authorize the listed pipeline risks. Repeatable; comma-separated values are accepted. |
 | `--sw-index PATH` | Capture a Git index for local staged-content checks. |

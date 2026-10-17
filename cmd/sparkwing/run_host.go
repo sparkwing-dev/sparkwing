@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -28,6 +29,7 @@ import (
 
 type localRunOptions struct {
 	standaloneReason, stateDB, environmentFile string
+	standalone                                 bool
 }
 
 type localRunRuntime struct {
@@ -67,7 +69,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	runtime, err := deps.resolve(ctx, localRunOptions{})
+	runtime, err := deps.resolve(ctx, localRunOptions{standalone: flags.allowUnadmitted})
 	if err != nil {
 		return err
 	}
@@ -229,8 +231,8 @@ func validateLocalRunFlags(flags runFlags) error {
 			return err
 		}
 	}
-	if flags.allowUnadmitted {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --sw-allow-unadmitted requires a standalone local admission binding before intake"}
+	if flags.allowUnadmitted && flags.detached {
+		return &clisurface.UsageError{Path: "sparkwing run", Message: "--sw-allow-unadmitted uses an in-process controller and cannot detach"}
 	}
 	if !flags.detached {
 		return refuseDetachedOnlyFlags(flags)

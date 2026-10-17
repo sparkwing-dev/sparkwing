@@ -277,17 +277,35 @@ func (w *localFailingEventWriter) Write(body []byte) (int, error) {
 	return w.Buffer.Write(body)
 }
 
-func TestLocalRunRejectsUnsupportedSelectionsBeforeAnyEffect(t *testing.T) {
-	for _, flags := range []runFlags{{allowUnadmitted: true}} {
+func TestLocalRunRejectsDetachedStandaloneBeforeAnyEffect(t *testing.T) {
+	for _, flags := range []runFlags{{allowUnadmitted: true, detached: true}} {
 		deps := localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
 			t.Fatal("unsupported input reached native composition")
 			return localRunRuntime{}, nil
 		}}
 		err := runLocalCommand(t.Context(), "ci", flags, nil, io.Discard, deps)
-		var refusal *apierr.Error
-		if !errors.As(err, &refusal) || refusal.Code != apierr.CapabilityUnsupported {
+		var refusal *clisurface.UsageError
+		if !errors.As(err, &refusal) {
 			t.Fatalf("unrepresented selection: %v", err)
 		}
+	}
+}
+
+func TestLocalRunSelectsStandaloneFromRealParser(t *testing.T) {
+	inv, err := clisurface.Parse("sparkwing", []string{"run", "ci", "--sw-allow-unadmitted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags, _ := runFlagsFromInvocation(inv)
+	stop := errors.New("composition reached")
+	err = runLocalCommand(t.Context(), "ci", flags, nil, io.Discard, localRunDependencies{resolve: func(_ context.Context, options localRunOptions) (localRunRuntime, error) {
+		if !options.standalone {
+			t.Fatal("parser selection lost before runtime construction")
+		}
+		return localRunRuntime{}, stop
+	}})
+	if !errors.Is(err, stop) {
+		t.Fatal(err)
 	}
 }
 

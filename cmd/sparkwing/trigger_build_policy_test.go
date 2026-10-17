@@ -31,7 +31,7 @@ func TestTriggerInspectionUsesRetainedBuildPolicy(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	repo := initSnapshotRepo(t)
 	dir := filepath.Join(repo, ".sparkwing")
-	if err := os.Mkdir(dir, 0700); err != nil {
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	writeSDKFixture(t, dir, `package main
@@ -57,9 +57,9 @@ func (pipeline) Plan(_ context.Context,p *sw.Plan,_ inputs,_ sw.RunContext)error
 }
 func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Main()}
 `)
-	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: ci\n    entrypoint: ci\n", 0600)
-	writeSnapshotFile(t, repo, ".sparkwing/payload", "first", 0600)
-	writeSnapshotFile(t, repo, ".gitignore", ".sparkwing/payload\n", 0600)
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: ci\n    entrypoint: ci\n", 0o600)
+	writeSnapshotFile(t, repo, ".sparkwing/payload", "first", 0o600)
+	writeSnapshotFile(t, repo, ".gitignore", ".sparkwing/payload\n", 0o600)
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-qm", "fixture")
 	sha := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
@@ -70,7 +70,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Ma
 	selected := preparedTriggerSource{pipeline: "ci", git: runspec.Git{Repository: repository, SHA: sha}, source: runspec.Source{Ref: sha, Entrypoint: "ci", Location: runspec.SourceLocation{LocalCheckout: repo, PipelineDir: ".sparkwing"}}}
 	for _, tc := range []struct{ flag, want string }{{"", "first"}, {"--sw-hash-all-files", "second"}, {"--sw-no-bincache", "third"}} {
 		t.Run(tc.flag, func(t *testing.T) {
-			writeSnapshotFile(t, repo, ".sparkwing/payload", tc.want, 0600)
+			writeSnapshotFile(t, repo, ".sparkwing/payload", tc.want, 0o600)
 			args := []string{"run", "ci"}
 			if tc.flag != "" {
 				args = append(args, tc.flag)
@@ -89,7 +89,7 @@ func main(){sw.Register("ci",func()sw.Pipeline[inputs]{return pipeline{}});sw.Ma
 			if err != nil || len(described) != 1 || described[0].Name != "ci" || described[0].Help != tc.want {
 				t.Fatalf("selected policy inspection: %+v: %v", described, err)
 			}
-			req, err := prepareTriggerRequest(triggerRequestInput{source: selected, described: described, args: []string{"--region=west", "--password=private-value"}, env: map[string]string{}, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}})
+			req, err := prepareTriggerRequest(triggerRequestInput{source: selected, described: described, args: []string{"--region=west", "--password=private-value"}, settings: settings.Inputs{Context: settings.Context{NumCPU: 4}}})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -147,7 +147,6 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		"--sw-ref",
 		"--sw-start-at", "--sw-stop-at",
 		"--sw-dry-run",
-		"--target",
 		"--sw-verbose",
 		"--sw-allow-risk",
 	}
@@ -156,6 +155,9 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 			var buf bytes.Buffer
 			PrintHelp(tc.cmd, &buf)
 			out := buf.String()
+			if containsFlagRow(out, "--target") {
+				t.Fatal("run help advertises retired --target")
+			}
 			for _, f := range allFlags {
 				if !containsFlagRow(out, f) {
 					t.Errorf("expected %s --help to list %s; got:\n%s", tc.name, f, out)

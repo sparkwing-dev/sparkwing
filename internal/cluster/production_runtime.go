@@ -130,7 +130,8 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 			return services, principal, err
 		}
 		services, err = localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
-			Home: home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
+			SubmittedEnv: unit.SubmittedEnv,
+			Home:         home, Version: version, Store: state, Parent: private, Bindings: private, Principal: principal, Refresh: refresh, Local: store.OwnerCanExecute(principal),
 			Source: source.Options{PreparedCheckout: checkout, Engines: engines, Access: access, SDK: engine.GoSDK, Workspace: filepath.Join(home, "workspaces"), Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, Base: procenv.Base{Ambient: runnerToolEnvironment(modules), SubmitEnvAllow: []string{"GOMODCACHE"}, Masker: secrets.NewMasker()}},
 			Renew: func(ctx context.Context, _ string, computing bool) (store.LeaseBeat, error) {
 				return state.RenewOwner(ctx, store.Actor{}, computing)

@@ -20,6 +20,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -168,6 +170,32 @@ func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 
 func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	e, tenant := engineRuntimeStore(t)
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string][]byte{"BUILD_NOTE": []byte("private-cloud-environment")}
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"BUILD_NOTE": string(values["BUILD_NOTE"])})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(run.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := cipher.SealBound("a", "run", "run-environment", false, true, string(encoded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,submitted_env=? WHERE id='run'`, request, envelope)
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "launcher-test", CreatedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +204,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
 	e.Store.SetClaimProfileResolver(engineProfileFake{})
 	e.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
-	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
+	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithEngineController(e).Handler()
 	w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/claim", `{"runner_version":"v1","kinds":["plan"],"available_cores":1}`, 200)
 	var response controllerwire.ClaimResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
@@ -186,6 +214,9 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 		t.Fatalf("launcher award: %+v", response.Claim)
 	}
 	bootstrap := response.Claim.Capability
+	if len(response.Claim.SubmittedEnv) != 0 {
+		t.Fatal("source bootstrap received private environment")
+	}
 	engineClaimHTTP(t, h, bootstrap, "POST", "/api/v1/claims/exchange", `{"run_id":"foreign"}`, 400)
 	w = engineClaimHTTP(t, h, bootstrap, "POST", "/api/v1/claims/exchange", `{}`, 200)
 	var exchange controllerwire.ExchangeResponse
@@ -193,6 +224,9 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	claim := exchange.Claim
+	if string(claim.SubmittedEnv["BUILD_NOTE"]) != string(values["BUILD_NOTE"]) {
+		t.Fatal("exchanged execution award lost private environment")
+	}
 	if claim.Capability == "" || claim.Capability == bootstrap || claim.Delivery != capability.DeliveryDirect || !reflect.DeepEqual(claim.Binding, response.Claim.Binding) || !claim.LeaseExpiresAt.Equal(response.Claim.LeaseExpiresAt) {
 		t.Fatal("exchange changed the immutable award or did not replace its bootstrap")
 	}

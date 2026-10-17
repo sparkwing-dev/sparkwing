@@ -18,7 +18,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -29,6 +31,7 @@ import (
 
 // NativeConfig binds one authenticated award to shared state and authority services.
 type NativeConfig struct {
+	SubmittedEnv   map[string][]byte
 	Local          func(store.NodeRow) bool
 	Home           string
 	Version        string
@@ -109,6 +112,17 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		masker = secrets.NewMasker()
 	}
 	sourceOptions.Base.Captured, sourceOptions.Base.Masker = captured, masker
+	if !sourceOptions.Base.Local {
+		if len(run.Run.Request.Request.Env.Names) > 0 || len(cfg.SubmittedEnv) > 0 {
+			if err := runspec.VerifyEnvironment(run.Run.Request.Request.Env, cfg.SubmittedEnv); err != nil {
+				return runners.NativeServices{}, err
+			}
+		}
+		sourceOptions.Base, err = procenv.WithSubmitted(sourceOptions.Base, cfg.SubmittedEnv)
+		if err != nil {
+			return runners.NativeServices{}, err
+		}
+	}
 	if run.Run.Spec != nil {
 		sourceOptions.SDK = run.Run.Spec.Resolved.Engine.Pin.SDK
 	} else if run.Run.Request.Request.Source.Location.LocalCheckout != "" {

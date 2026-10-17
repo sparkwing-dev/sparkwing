@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -16,6 +17,12 @@ import (
 func TestNativeHereTriggerSubmitsAndReplaysRecordedReason(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	if err := os.WriteFile(os.Getenv("SPARKWING_CONFIG"), []byte("run:\n  submit_env_allow: [W9_APP_*, W9_MISSING, W9_TOKEN]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("W9_APP_REGION", "submitted-region-value")
+	t.Setenv("W9_APP_EMPTY", "")
+	t.Setenv("W9_TOKEN", "must-never-be-submitted")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	repo := initSnapshotRepo(t)
 	dir := filepath.Join(repo, ".sparkwing")
@@ -47,6 +54,12 @@ func main() { sw.Register("deploy-prod", func() sw.Pipeline[sw.NoInputs] { retur
 	}
 	if request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
 		t.Fatalf("selection = %+v", request.Request.Options.Runner)
+	}
+	if len(request.SubmittedEnv) != 2 || string(request.SubmittedEnv["W9_APP_REGION"]) != "submitted-region-value" {
+		t.Fatal("native trigger did not filter submitted environment")
+	}
+	if err := runspec.VerifyEnvironment(request.Request.Env, request.SubmittedEnv); err != nil {
+		t.Fatal(err)
 	}
 	if got := request.Request.Reason; got != flags.reason {
 		t.Fatalf("reason=%q, want %q", got, flags.reason)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -56,6 +57,16 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 		return controllerwire.ReconcileResponse{}, err
 	}
 	response.Claim = engineReconciledClaim(principal.Capability, result, run)
+	if len(result.Bearer) > 0 && principal.Capability.Delivery == capability.DeliveryDirect && run.Request.Request.Origin != runspec.OriginLocal && len(run.Request.Request.Env.Names) > 0 {
+		owner, err := s.Store.ForTeam(ctx, store.Team(principal.Capability.Team))
+		if err != nil {
+			return controllerwire.ReconcileResponse{}, err
+		}
+		response.Claim.SubmittedEnv, err = owner.ReadSubmittedEnvironment(ctx, principal.Authority)
+		if err != nil {
+			return controllerwire.ReconcileResponse{}, err
+		}
+	}
 	return response, nil
 }
 
