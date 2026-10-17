@@ -351,9 +351,9 @@ func runsPerHourRefusal(
 ) error {
 	since := now.Add(-time.Hour).UnixNano()
 	if limits.RunsPerHour > 0 && principal.ID != "" {
-		kind := `COALESCE(json_extract(request_json, '$.request.actor.kind'), '')`
+		kind := `COALESCE(CASE WHEN retry_of<>'' THEN json_extract(lineage_json, '$.retrier.value.kind') ELSE json_extract(request_json, '$.request.actor.kind') END, '')`
 		if q.dialect == DialectPostgres {
-			kind = `COALESCE(convert_from(request_json,'UTF8')::jsonb->'request'->'actor'->>'kind','')`
+			kind = `COALESCE(CASE WHEN retry_of<>'' THEN convert_from(lineage_json,'UTF8')::jsonb->'retrier'->'value'->>'kind' ELSE convert_from(request_json,'UTF8')::jsonb->'request'->'actor'->>'kind' END,'')`
 		}
 		var runs int64
 		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE team = ? AND created_principal = ? AND created_at >= ? AND `+kind+`=?`, team, principal.ID, since, principal.Kind).Scan(&runs); err != nil {

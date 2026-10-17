@@ -120,6 +120,7 @@ func TestBurstPublicRunReadsProfileCacheBeforeNativeExecution(t *testing.T) {
 
 func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	t.Helper()
+	t.Setenv("STRAY_REQUESTER_SHELL_NAME", "private")
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		t.Skipf("native publication requires sockets: %v", err)
@@ -236,6 +237,10 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	snapshot, err := tenant.ReadSnapshot(ctx, page.Runs[0].ID)
 	if err != nil || snapshot.Run.Owner != nil || snapshot.Run.Request.Request.Mode != "publish" || len(snapshot.Nodes) != 2 || snapshot.Nodes[0].ManifestRecord == nil {
 		t.Fatalf("publication lost local result graph: %+v %v", snapshot, err)
+	}
+	persisted, err := json.Marshal(snapshot)
+	if err != nil || bytes.Contains(persisted, []byte("STRAY_REQUESTER_SHELL_NAME")) || len(snapshot.Run.Request.Request.Env.Names) != 0 || len(snapshot.Run.Spec.Resolved.Env.Names) != 0 {
+		t.Fatalf("publication uploaded private shell metadata: %s %v", persisted, err)
 	}
 }
 

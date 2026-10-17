@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain(t *testing.T) {
@@ -50,6 +51,54 @@ func TestSealedIntakeChecksRunRateAndReplaysWithoutSpendingAgain(t *testing.T) {
 	if _, err := tenant.AdmitRun(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func FuzzRetryRunRateUsesRetrierIdentity(f *testing.F) {
+	for _, sourceAccount := range []bool{false, true} {
+		for _, retryAccount := range []bool{false, true} {
+			f.Add(sourceAccount, retryAccount, uint64(1))
+		}
+	}
+	f.Fuzz(func(t *testing.T, sourceAccount, retryAccount bool, seed uint64) {
+		tenant, request, _ := intakeFixture(t)
+		if sourceAccount {
+			request.Authority = authorityMember(t, tenant.s, "member", RoleEditor).Authority
+		}
+		source, err := tenant.AdmitRun(t.Context(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := fmt.Sprintf("retrier-%016x", seed)
+		root := authorityRoot("retry-root", "a")
+		root.Subject.ID = id
+		root.Grants = []capability.Grant{capability.RunsControl}
+		authorityPersist(t, tenant.s, root)
+		request.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}
+		if retryAccount {
+			request.Authority = authorityMember(t, tenant.s, id, RoleEditor).Authority
+		}
+		if _, err := tenant.s.AsOperator().SetComputeLimits(t.Context(), map[string]int64{ComputeLimitRunsPerHour: 1}); err != nil {
+			t.Fatal(err)
+		}
+		request.Request.Lineage = runspec.Lineage{RetryOf: source.RunID}
+		request.IdempotencyKey = "first"
+		first, err := tenant.AdmitRun(t.Context(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replay, err := tenant.AdmitRun(t.Context(), request)
+		if err != nil || !replay.Replayed || replay.RunID != first.RunID {
+			t.Fatalf("retry replay spent another slot: %+v %v", replay, err)
+		}
+		request.IdempotencyKey = "second"
+		_, err = tenant.AdmitRun(t.Context(), request)
+		var refusal *ComputeLimitError
+		if !errors.As(err, &refusal) || refusal.Principal != id || refusal.Observed != 1 {
+			t.Fatalf("sourceAccount=%t retryAccount=%t: retry escaped its principal's cap: %v", sourceAccount, retryAccount, err)
+		}
+		rewriteSchemaCount(t, tenant.s.db, "runs", 2)
+		rewriteSchemaCount(t, tenant.s.db, "triggers", 2)
+	})
 }
 
 func TestSealedIntakeRateCountsOnlyTheAuthenticatedTeam(t *testing.T) {

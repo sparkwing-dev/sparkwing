@@ -66,10 +66,15 @@ func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, b
 	if err := body.Validate(); err != nil {
 		return controllerwire.CreateRunResponse{}, err
 	}
-	return s.CreateRun(ctx, a, controllerwire.CreateRunRequest{
+	request, err := IntakeForStore(a, controllerwire.CreateRunRequest{
 		IdempotencyKey: body.IdempotencyKey,
 		Request:        runspec.Request{Version: 1, Team: a.Target.Team, Lineage: runspec.Lineage{RetryOf: a.Target.RunID}},
 	})
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, err
+	}
+	request.RetryMode = string(body.Mode)
+	return s.admitRun(ctx, a.Target.Team, request)
 }
 
 // UnitRenewer preserves the store's atomic unit liveness and execution-start boundary.

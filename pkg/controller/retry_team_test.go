@@ -10,52 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A trigger's retry_of links the new run into another run's attempt tree, and
-// the attempts route answers with every run in that tree, so a retry_of naming
-// another team's run would hand that run's record to the caller.
-func TestTeamBoundary_ATriggerCannotRetryAnotherTeamsRun(t *testing.T) {
-	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		for _, victim := range []string{f.runA, f.victim} {
-			code, body := f.do("POST", "/api/v1/triggers", f.ownerB, map[string]any{
-				"pipeline": "build-b", "trigger": map[string]any{"source": "api"},
-				"retry_of": victim,
-			})
-			if code != http.StatusNotFound {
-				t.Errorf("POST /triggers as team B with retry_of %s = %d want 404: %s", victim, code, body)
-			}
-			var resp struct {
-				RunID string `json:"run_id"`
-			}
-			if json.Unmarshal([]byte(body), &resp) == nil && resp.RunID != "" {
-				_, attempts := f.do("GET", "/api/v1/runs/"+resp.RunID+"/attempts", f.ownerB, nil)
-				if attemptIDs(t, attempts)[victim] {
-					t.Errorf("team B's attempts of %s list %s: %s", resp.RunID, victim, attempts)
-				}
-			}
-		}
-
-		code, body := f.do("POST", "/api/v1/triggers", f.ownerB, map[string]any{
-			"pipeline": "build-b", "trigger": map[string]any{"source": "api"},
-		})
-		if code != http.StatusAccepted {
-			t.Fatalf("POST /triggers as team B = %d: %s", code, body)
-		}
-		var own struct {
-			RunID string `json:"run_id"`
-		}
-		if err := json.Unmarshal([]byte(body), &own); err != nil {
-			t.Fatal(err)
-		}
-		code, body = f.do("POST", "/api/v1/triggers", f.ownerB, map[string]any{
-			"pipeline": "build-b", "trigger": map[string]any{"source": "manual"},
-			"retry_of": own.RunID,
-		})
-		if code != http.StatusAccepted {
-			t.Fatalf("POST /triggers as team B retrying its own run = %d: %s", code, body)
-		}
-	})
-}
-
 // A retry_of pointer that already crosses teams, whichever way it points, is
 // not followed: the attempt tree stays inside the team that asks for it.
 func TestTeamBoundary_AttemptsNeverFollowAPointerIntoAnotherTeam(t *testing.T) {

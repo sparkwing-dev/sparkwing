@@ -1087,7 +1087,9 @@ default-branch hint from the authorized local checkout, because intake clears
 requester-supplied default-branch metadata. The profile server still requires verified
 default-branch records. Both paths ignore inherited Git repository overrides.
 Refreshing a job's attempt storage preserves the read-only cache only for the
-sealed local opt-in.
+sealed local opt-in. Background owner and independently claimed job awards
+construct the same profile cache before execution; queue claim order does not
+select cache availability.
 
 --publish runs after local completion. The profile admits publish-mode history,
 imports terminal local attempts, copies selected output/artifact bytes through
@@ -1095,7 +1097,9 @@ signed storage and streams retained logs through the shared log uploader. Local
 history is exported through verified peer authentication. Publication failure
 warns without changing the local verdict. The background local host publishes
 on cleanup. Historical generated topology is flattened to explicit dependencies;
-closure generation does not run during import.
+closure generation does not run during import. The uploaded request and resolved
+spec exclude the private local environment snapshot, including names and digest.
+Burst intake uses an empty environment snapshot rather than the shell name list.
 
 The background queue reports host errors to the local controller's logger when
 hosting returns. Error reporting does not wait for controller shutdown.

@@ -38,6 +38,7 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 	request.Team, request.Actor, request.Mode = "", runspec.Actor{}, runspec.IntakePublish
 	request.Source.Location = runspec.SourceLocation{}
 	request.LocalSecretNames = nil
+	request.Env = runspec.EnvSnapshot{}
 	request.Lineage, request.Burst = runspec.Lineage{}, nil
 	request.Options.Publish.Value, request.Options.CacheFrom.Value = "", ""
 	response, err := controller.CreateRun(ctx, controllerwire.CreateRunRequest{Request: request, IdempotencyKey: "publication/" + local.ID})
@@ -63,6 +64,7 @@ func PublishLocalRun(ctx context.Context, options EngineOptions, input Publicati
 		return response.RunID, err
 	}
 	resolved := local.Spec.Resolved
+	resolved.Env = response.Request.Request.Env
 	resolved.Settings, err = settings.ResolvePlan(settings.PlanInputs{Request: response.Request, Declarations: local.Spec.Declarations, Plan: plan, Context: settings.Context{Local: true}})
 	if err != nil {
 		return response.RunID, err

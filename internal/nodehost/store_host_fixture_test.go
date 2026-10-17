@@ -143,6 +143,11 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 
 func newStoreOwnerFixture(t *testing.T, database *store.Store, request runspec.Request) *storeHostFixture {
 	t.Helper()
+	return newStoreOwnerIntakeFixture(t, database, store.IntakeRequest{Request: request})
+}
+
+func newStoreOwnerIntakeFixture(t *testing.T, database *store.Store, intake store.IntakeRequest) *storeHostFixture {
+	t.Helper()
 	ctx := t.Context()
 	database.SetIntakePolicy(hostIntakePolicy{})
 	database.SetClaimProfileResolver(hostEnrollment{})
@@ -166,14 +171,15 @@ func newStoreOwnerFixture(t *testing.T, database *store.Store, request runspec.R
 		}
 	}
 	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}
-	if request.Burst != nil {
+	if intake.Request.Burst != nil {
 		_, requester, err := teststore.ProvisionCredential(ctx, database, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "burst-requester"}, Grants: []capability.Grant{capability.RunsWrite}, Binding: capability.Binding{Kind: capability.BindingNone}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: requester.Prefix}
 	}
-	admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: authority, Request: request})
+	intake.Authority = authority
+	admitted, err := tenant.AdmitRun(ctx, intake)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -23,7 +24,11 @@ func (s localOwnerState) ReadSnapshot(ctx context.Context, run string) (store.Ru
 	return s.Tenant.ReadOwnerSnapshot(ctx, s.owner, run)
 }
 
-func newLocalNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions) (_ runners.NativeServices, err error) {
+func newLocalNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions) (runners.NativeServices, error) {
+	return localNativeServices(ctx, home, owned, binding, options, localcontroller.NativeServices)
+}
+
+func localNativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, options client.EngineOptions, build func(context.Context, localcontroller.NativeConfig) (runners.NativeServices, error)) (_ runners.NativeServices, err error) {
 	options.Bearer = binding.Bearer
 	var private *client.LocalHostClient
 	fence := binding.Principal.Capability.Binding
@@ -48,7 +53,7 @@ func newLocalNativeServices(ctx context.Context, home string, owned *store.Store
 	if binding.Principal.Capability.Unit == capability.UnitTrigger {
 		state = localOwnerState{Tenant: binding.Tenant, owner: binding.Principal.Authority}
 	}
-	services, err := localcontroller.NativeServices(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
+	services, err := build(ctx, localcontroller.WithClient(localcontroller.NativeConfig{
 		Home: home, Version: installedVersion(), Store: state, Parent: owned, Bindings: owned,
 		Principal: binding.Principal, Refresh: binding.Refresh, Renew: owned.RenewUnit, Source: source, Local: store.OwnerCanExecute(binding.Principal),
 	}, private))
@@ -58,20 +63,20 @@ func newLocalNativeServices(ctx context.Context, home string, owned *store.Store
 	services.Config.Owner.Delegator = owned
 	closeServices := services.Close
 	services.Close = func() error { return errors.Join(closeServices(), private.Close()) }
-	if binding.Principal.Capability.Unit == capability.UnitTrigger {
-		run, err := binding.Tenant.ReadRun(ctx, fence.RunID)
+	run, err := binding.Tenant.ReadRun(ctx, fence.RunID)
+	if err != nil {
+		return runners.NativeServices{}, errors.Join(err, services.Close())
+	}
+	if profile := run.Request.Request.Options.CacheFrom.Value; profile != "" && run.Request.Request.Origin == runspec.OriginLocal {
+		cache, closeCache, err := openProfileCache(ctx, profile, run.Request.Request.Git, run.Request.Request.Source.Location.LocalCheckout)
 		if err != nil {
 			return runners.NativeServices{}, errors.Join(err, services.Close())
 		}
-		if profile := run.Request.Request.Options.CacheFrom.Value; profile != "" {
-			cache, closeCache, err := openProfileCache(ctx, profile, run.Request.Request.Git, run.Request.Request.Source.Location.LocalCheckout)
-			if err != nil {
-				return runners.NativeServices{}, errors.Join(err, services.Close())
-			}
-			services.Storage.RemoteCache = cache
-			closeHost := services.Close
-			services.Close = func() error { return errors.Join(closeHost(), closeCache()) }
-		}
+		services.Storage.RemoteCache = cache
+		closeHost := services.Close
+		services.Close = func() error { return errors.Join(closeHost(), closeCache()) }
+	}
+	if binding.Principal.Capability.Unit == capability.UnitTrigger {
 		closeHost := services.Close
 		services.Close = func() error {
 			err := closeHost()

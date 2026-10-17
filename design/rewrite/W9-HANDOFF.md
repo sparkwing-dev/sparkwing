@@ -1,12 +1,19 @@
 # W9 continuation: local integration and runner transport
 
-Latest continuation: [W9-BURST-DETACHED-CACHE-CONSTRUCTION.md](W9-BURST-DETACHED-CACHE-CONSTRUCTION.md).
-The queued cache constructor no longer requires default-branch metadata that
-intake clears. It reads the hint from the authorized checkout while retaining
-the sealed repository and server-side verified-default fence. The real-intake
-regression and generated Git-override property pass, including with -race.
-The authoritative native file still contains the detached-cache failure. The
-lead must rerun the native family before completion can be claimed.
+Latest continuation: [W9-BURST-CLAIM-CACHE-AND-ENV-PRIVACY.md](W9-BURST-CLAIM-CACHE-AND-ENV-PRIVACY.md).
+The background queue can claim a job independently of its owner. Both award
+paths now construct the sealed profile cache before execution. The regression
+fails for the independently claimed job before the fix and passes for both
+paths afterwards. Publication excludes the private shell snapshot from the
+uploaded request and resolved spec. Real Cloud-store tests cover shell names,
+with a fuzz target generating additional names. Burst intake already constructs
+an empty snapshot and now has a persisted-record regression.
+
+The latest lead-native file contains no FAIL for the prior committed state.
+The lead must rerun it after these edits. File-content merge conflicts are
+resolved. The index remains unmerged because the swarm brief reserves Git
+writes for the lead. Stage the four resolved files and finish the merge before
+committing the W9 changes.
 
 Earlier continuation: [W9-BURST-DETACHED-DIAGNOSTICS.md](W9-BURST-DETACHED-DIAGNOSTICS.md).
 The lead's latest native run passes attached profile-cache execution and both

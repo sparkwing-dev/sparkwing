@@ -170,6 +170,7 @@ func FuzzBurstHostSourceEnvironmentExcludesRequesterValues(f *testing.F) {
 }
 
 func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
+	t.Setenv("STRAY_REQUESTER_SHELL_NAME", "private")
 	home := t.TempDir()
 	t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
 	t.Setenv("HOME", t.TempDir())
@@ -215,9 +216,12 @@ func TestBurstNativePreparationBuildsUploadedEditedSDK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(snapshot.Run.Request.Request.Env.Names) != 0 {
+		t.Fatalf("burst uploaded shell names: %v", snapshot.Run.Request.Request.Env.Names)
+	}
 	persisted, err := json.Marshal(snapshot)
-	if err != nil || strings.Contains(string(persisted), burstIntakeSecret) {
-		t.Fatal("requester secret entered persisted run data")
+	if err != nil || bytes.Contains(persisted, []byte(burstIntakeSecret)) || bytes.Contains(persisted, []byte("STRAY_REQUESTER_SHELL_NAME")) {
+		t.Fatal("requester shell data entered the Cloud run record")
 	}
 	options.Bearer = func(context.Context) (string, error) { return created.HereBearer, nil }
 	here, err := client.NewEngineClient(options)

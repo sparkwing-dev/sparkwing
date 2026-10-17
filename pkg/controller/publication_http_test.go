@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,11 +33,24 @@ func (publicationLogReader) ReadLogs(_ context.Context, run string, _ controller
 
 func TestProfilePublicationImportsRecordsAndLogsWithoutClaims(t *testing.T) {
 	for _, outcome := range []string{"success", "failed"} {
-		t.Run(outcome, func(t *testing.T) { profilePublication(t, outcome) })
+		t.Run(outcome, func(t *testing.T) {
+			profilePublication(t, outcome, "CLAUDE_CODE_MESSAGING_TOKEN", "AWS_PAGER", "KUBECONFIG", "WSL_DISTRO_NAME")
+		})
 	}
 }
 
-func profilePublication(t *testing.T, outcome string) {
+func FuzzProfilePublicationExcludesShellEnvironment(f *testing.F) {
+	f.Add([]byte("developer-tool"))
+	f.Add([]byte{0, 255, 10, 34})
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		if len(raw) > 128 {
+			t.Skip()
+		}
+		profilePublication(t, "failed", "PRIVATE_SHELL_"+hex.EncodeToString(raw))
+	})
+}
+
+func profilePublication(t *testing.T, outcome string, shellNames ...string) {
 	t.Helper()
 	s, session := credentialSessionServer(t)
 	engineSQL(t, s.store, `UPDATE teams SET next_run_number=2 WHERE name='a'`)
@@ -80,6 +94,15 @@ func profilePublication(t *testing.T, outcome string) {
 	}
 	request := runspec.Request{Version: 1, Team: "local", Pipeline: "ci", Origin: runspec.OriginLocal, Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "git:example.test/acme/repo"}, Ref: "main", SHA: "local-sha"}, RequestedArgs: map[string]string{}}
 	state := store.LocalPublication{RunSnapshot: store.RunSnapshot{Run: store.RunRow{ID: "local-run", Team: "local", Pipeline: "ci", State: store.RunSuccess, Request: runspec.SealedRequest{Request: request}, Spec: &runspec.Spec{Declarations: runspec.CheckoutDeclarations{Version: 1}, Resolved: runspec.Resolved{Args: map[string]string{}, SecretArgs: []string{}, SecretNames: []string{"LOCAL_TOKEN"}, Guards: runspec.Guards{Passed: true}}}, Plan: raw, FinishedAt: &now}, Nodes: []store.NodeRow{{Ref: store.NodeRef{RunID: "local-run", NodeID: "job"}, Spec: rawJob(t, plan.Jobs[0]), Status: store.StatusDone, Outcome: store.NodeSuccess, Attempt: 1, Generation: 1, StartedAt: &now, FinishedAt: &now}}}}
+	values := map[string]string{}
+	for _, name := range shellNames {
+		values[name] = "private shell value"
+	}
+	localEnv, err := runspec.EnvironmentDigest(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Run.Request.Request.Env, state.Run.Spec.Resolved.Env = localEnv, localEnv
 	state.Run.State = store.RunState(outcome)
 	state.Nodes[0].Outcome = store.NodeState(outcome)
 	masked, exit := "", 0
@@ -129,6 +152,21 @@ func profilePublication(t *testing.T, outcome string) {
 	snapshot, err := tenant.ReadSnapshot(t.Context(), run)
 	if err != nil || snapshot.Run.State != store.RunState(outcome) || snapshot.Run.Owner != nil || len(snapshot.Nodes) != 1 || snapshot.Nodes[0].OutputRecord == nil || snapshot.Nodes[0].ManifestRecord == nil {
 		t.Fatalf("published history: %+v %v", snapshot, err)
+	}
+	persisted, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range shellNames {
+		if bytes.Contains(persisted, []byte(name)) {
+			t.Fatalf("private shell name reached Cloud history: %s", name)
+		}
+	}
+	if len(snapshot.Run.Request.Request.Env.Names) != 0 || len(snapshot.Run.Spec.Resolved.Env.Names) != 0 || snapshot.Run.Request.Request.Env.Digest == localEnv.Digest || snapshot.Run.Spec.Resolved.Env.Digest == localEnv.Digest {
+		t.Fatal("Cloud history retained the private local environment identity")
+	}
+	if len(state.Run.Request.Request.Env.Names) != len(shellNames) || state.Run.Spec.Resolved.Env.Digest != localEnv.Digest {
+		t.Fatal("publication modified the local environment snapshot")
 	}
 	exported, err := tenant.ReadLocalPublication(t.Context(), run)
 	if err != nil || exported.Results["job"].MaskedError != masked || exported.Results["job"].ExitCode == nil || *exported.Results["job"].ExitCode != exit {

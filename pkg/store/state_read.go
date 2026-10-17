@@ -17,6 +17,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	var request, spec, lineage, pools, actor, plan []byte
 	var cancel, start, finish sql.NullInt64
 	var created, accepted int64
+	var execution executionLineage
 	err := tx.QueryRowContext(ctx, `SELECT number,pipeline,status,request_json,spec_json,lineage_json,plan_json,plan_hash,dispatch,allowed_pools,cancel_requested_at,cancel_reason,started_at,finished_at,state_seq,state_digest,state_actor,created_at,plan_accepted_generation FROM runs WHERE team=? AND id=?`, team, id).Scan(&v.Number, &v.Pipeline, &v.State, &request, &spec, &lineage, &plan, &v.PlanHash, &v.Dispatch, &pools, &cancel, &v.CancelReason, &start, &finish, &v.StateSeq, &v.StateDigest, &actor, &created, &accepted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, notFound("run", id)
@@ -27,13 +28,14 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	for _, item := range []struct {
 		raw []byte
 		dst any
-	}{{request, &v.Request}, {spec, &v.Spec}, {lineage, &v.Lineage}, {pools, &v.AllowedPools}, {actor, &v.StateActor}} {
+	}{{request, &v.Request}, {spec, &v.Spec}, {lineage, &execution}, {pools, &v.AllowedPools}, {actor, &v.StateActor}} {
 		if len(item.raw) > 0 {
 			if err := json.Unmarshal(item.raw, item.dst); err != nil {
 				return v, fmt.Errorf("decode run %s: %w", id, err)
 			}
 		}
 	}
+	v.Lineage, v.Retry = execution.Lineage, execution.Retry
 	v.Plan = plan
 	v.CreatedAt = time.Unix(0, created).UTC()
 	v.CancelRequestedAt, v.StartedAt, v.FinishedAt = stateTime(cancel), stateTime(start), stateTime(finish)

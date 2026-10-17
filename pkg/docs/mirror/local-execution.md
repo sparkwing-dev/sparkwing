@@ -58,7 +58,8 @@ membership and revocation and is revoked when the host closes.
 `--publish P` uploads completed local job results, artifacts and retained logs
 to profile P. Publication creates history with local provenance and no execution
 claim. A publication error prints a warning and preserves the local verdict.
-Background local runs publish when their host closes.
+Background local runs publish when their host closes. Published history excludes
+the private shell environment snapshot, including its variable names and digest.
 
 Local schedule registration, pins, timer installation and `__tick` use the
 controller and lifecycle services. Timers carry their absolute state home into
