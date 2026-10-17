@@ -2,6 +2,15 @@
 
 <!-- design:begin -->
 
+## Committed retry mode
+
+`EngineController.Retry` passes the validated `RetryRequest.Mode` through
+`IntakeRequest.RetryMode` to the sole admission transaction. Canonical run
+resolution precedes admission, so a numeric selector and its run ID replay the
+same execution. Changing mode under the same key returns `conflict`. Mode and
+selected results never enter the original request or spec seals. Current
+authority remains required for both admission and replay.
+
 ## Amendment 1: selected routes and trusted adapters
 
 ### Credential files and proxy attribution

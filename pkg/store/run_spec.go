@@ -24,6 +24,7 @@ type IntakeRequest struct {
 	IdempotencyKey     string
 	CapabilityPrefix   string
 	VerifiedDeliveryID string
+	RetryMode          string
 }
 
 // AdmissionResult includes the atomically allocated team number and the first sealed request.
@@ -322,7 +323,7 @@ func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result Admis
 	if err != nil {
 		return err
 	}
-	lineage, err := json.Marshal(snapshot.lineage)
+	lineage, err := json.Marshal(executionLineage{Lineage: snapshot.lineage, Retry: snapshot.retry})
 	if err != nil {
 		return err
 	}

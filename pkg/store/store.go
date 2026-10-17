@@ -104,7 +104,7 @@ type Store struct {
 	consolePolicy    consolePolicy
 	sourcePolicy     sourceReleaseContracts
 	clock            func() time.Time
-	pinnedClock      func() time.Time // set only by test fixtures; Postgres otherwise reads its own clock
+	pinnedClock      func() time.Time // safety: only fixtures may replace the database clock used by PostgreSQL leases.
 	db               *sql.DB
 	dialect          Dialect
 	cleanup          func() error

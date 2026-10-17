@@ -708,6 +708,12 @@ environment construction cannot require the envelope's embedded source run ID
 to equal the execution run ID. The environment acceptance cell and native SDK
 startup tests cover both identities with fake persistence and process policy.
 
+Before releasing a retry job, `OwnerHost` reads `RunRow.Retry` from its persisted
+snapshot and probes only the committed `MaterializedResultSource` for that job.
+A hit ends the release without admission or an execution attempt. A record miss
+continues through the existing owner layers. Restart never rescans the source
+run for newly successful jobs. C1 rechecks the committed selection before copying.
+
 `ExecutorDependencies.Bind` and `EvaluationDependencies.Bind` delegate a new
 nodehost route bearer before each process startup. The factory uses authenticated
 owner or claim authority. The returned binding must keep the input's run and job

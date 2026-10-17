@@ -272,6 +272,24 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		return err
 	}
 	request := store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone}
+	snapshot, err := h.Store.ReadSnapshot(ctx, input.RunID)
+	if err != nil {
+		return err
+	}
+	if selection := snapshot.Run.Retry; selection != nil {
+		if selected, ok := selection.Results[row.Ref.NodeID]; ok {
+			probe := request
+			probe.Policy, probe.MaterializeOnly = store.SourceManualRetry, true
+			probe.Source = &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &selected}
+			reused, err := FollowReconciliation(ctx, h.Store, probe, h.WaitNode)
+			if err != nil {
+				return err
+			}
+			if reused.Kind != store.Dispatch {
+				return nil
+			}
+		}
+	}
 	for _, layer := range LayerTable() {
 		if layer.Side != OwnerSide {
 			continue

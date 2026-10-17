@@ -23,9 +23,10 @@ func materializationFixture(t *testing.T, policy SourcePolicy) (*Tenant, Reconci
 	rewriteSchemaExec(t, tenant.s.db, `DELETE FROM node_attempts`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,started_at=NULL,generation=0,attempt=0,spec_hash='same'`)
 	maintenanceRun(t, tenant.s, "source", 2, RunSuccess)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET lineage_json=? WHERE id='run'`, []byte(`{"retry_of":"source"}`))
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET lineage_json=? WHERE id='run'`, []byte(`{"retry_of":"source","retry":{"mode":"failed","results":{"job":{"Ref":{"run_id":"source","job_id":"job"},"StateSeq":1}}}}`))
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,outcome,generation,attempt,finished_at,spec_json,spec_hash,execution_json) VALUES ('a','source','job','done','success',2,1,1,?,'same',?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES ('a','source','job',1,2,'past','past','runner','past','remote',1,2,'success')`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE nodes SET state_seq=1 WHERE run_id='source'`)
 	source := MaterializeSource{Kind: policy, Source: runspec.AttemptIdentity{Team: "a", RunID: "source", NodeID: "job", Attempt: 1, Generation: 2}}
 	if policy == SourceMemo {
 		source.Record = blob.RecordKey{Team: "a", Kind: blob.KindMemo, Scope: blob.Scope{Repo: "gh:1", Pipeline: "p", Job: "job"}, Name: "key"}
@@ -183,7 +184,7 @@ func TestReconcileRetryCanReuseMaterializedResult(t *testing.T) {
 				t.Fatal(err)
 			}
 			maintenanceRun(t, tenant.s, "next", 3, RunRunning)
-			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET lineage_json=? WHERE id='next'`, []byte(`{"retry_of":"run"}`))
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET lineage_json=? WHERE id='next'`, []byte(`{"retry_of":"run","retry":{"mode":"failed","results":{"job":{"Ref":{"run_id":"run","job_id":"job"},"StateSeq":1}}}}`))
 			rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json) VALUES ('a','next','job','pending',?,'same',?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 			expiry := tenant.s.now().Add(time.Hour)
 			owner := authorityRoot("next-owner", "a")

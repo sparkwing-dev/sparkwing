@@ -107,6 +107,35 @@ func TestRetryActionPreservesSealsAndCreatesPendingExecution(t *testing.T) {
 	}
 }
 
+func TestRetryAliasesReplayCommittedMode(t *testing.T) {
+	for _, mode := range []controllerwire.RetryMode{controllerwire.RetryFailed, controllerwire.RetryAll} {
+		t.Run(string(mode), func(t *testing.T) {
+			s, options, _, source := retryActionFixture(t, "private-value", true)
+			control, err := client.NewEngineClient(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := controllerwire.RetryRequest{Mode: mode, IdempotencyKey: "retry"}
+			first, err := control.Retry(t.Context(), "1", request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replay, err := control.Retry(t.Context(), "run", request)
+			if err != nil || !replay.Replayed || replay.RunID != first.RunID || replay.Number != first.Number || replay.HereBearer != "" || !reflect.DeepEqual(replay.Request, source.Request) {
+				t.Fatalf("alias changed committed execution: %+v %v", replay, err)
+			}
+			tenant, err := s.store.ForTeam(t.Context(), "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, err := tenant.ReadRun(t.Context(), first.RunID)
+			if err != nil || row.Retry == nil || row.Retry.Mode != string(mode) || !reflect.DeepEqual(row.Request, source.Request) || !reflect.DeepEqual(row.Spec, source.Spec) {
+				t.Fatalf("selection was not committed outside seals: %+v %v", row, err)
+			}
+		})
+	}
+}
+
 func FuzzRetryActionCannotCrossAuthorityOrChangeSource(f *testing.F) {
 	for _, selector := range []string{"run", "1", "2", "foreign", "01", "../foreign", "' OR 1=1 --"} {
 		for state := range byte(3) {
