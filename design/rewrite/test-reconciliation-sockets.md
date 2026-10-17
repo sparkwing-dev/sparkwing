@@ -38,11 +38,8 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestController_Health`.
 - `pkg/controller`: `TestController_HealthDoesNotExposeRunFailures`.
 - `pkg/controller`: `TestController_HealthHidesDatabaseErrors`.
-- `pkg/controller`: `TestController_ListPausesAlias`.
 - `pkg/controller`: `TestController_RunLifecycle`.
 - `pkg/controller`: `TestController_ValidationErrors`.
-- `pkg/controller`: `TestCreateNode_LiveRunStillAcceptsNodes`.
-- `pkg/controller`: `TestCreateNode_StrangerTokenLearnsNothingAboutTheRun`.
 - `pkg/controller`: `TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin`.
 - `pkg/controller`: `TestCreditSettings_ReadsTheDefaultRateLadder`.
 - `pkg/controller`: `TestCreditSettings_RefusesARateTableTheLedgerCannotPrice`.
@@ -81,10 +78,7 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestGitHubAppBranchDeleteRunsOnGitHubsPayload`.
 - `pkg/controller`: `TestGitHubAppBranchFilterLeavesTagPatternsAlone`.
 - `pkg/controller`: `TestGitHubAppBranchFiltersGateBranchAndPullRequestEvents`.
-- `pkg/controller`: `TestGitHubAppCheckRunConclusions`.
 - `pkg/controller`: `TestGitHubAppCheckRunRerequestedRerunsItsPipeline`.
-- `pkg/controller`: `TestGitHubAppCheckRunSummaryIsBounded`.
-- `pkg/controller`: `TestGitHubAppCheckRunSummaryKeepsPrivateRunDataInConsole`.
 - `pkg/controller`: `TestGitHubAppCheckSuiteRerequestedNeedsEachPipelinesOwnRun`.
 - `pkg/controller`: `TestGitHubAppCheckSuiteRerequestedRerunsEveryPipeline`.
 - `pkg/controller`: `TestGitHubAppConnectBindsAnInstallationItsOrgAdminProves`.
@@ -130,7 +124,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestGitHubAppRunLimitRefusesWithoutConsumingDelivery`.
 - `pkg/controller`: `TestGitHubAppRunNeedsTheRepositoryStillCovered`.
 - `pkg/controller`: `TestGitHubAppRunRecordsTheDefaultBranch`.
-- `pkg/controller`: `TestGitHubAppRunReportsOneCheckRun`.
 - `pkg/controller`: `TestGitHubAppSignedBodyKeepsItsEvent`.
 - `pkg/controller`: `TestGitHubAppStaleCronPushStillStartsSubscribedPipeline`.
 - `pkg/controller`: `TestGitHubAppSubscriptionRejectsInvalidBranchPatterns`.
@@ -142,7 +135,6 @@ These tests were attempted and hit forbidden TCP, UDP/DNS or Unix socket operati
 - `pkg/controller`: `TestGitHubAppUninstallUnbinds`.
 - `pkg/controller`: `TestGitHubAppWebhookSignature`.
 - `pkg/controller`: `TestGitHubAppWithdrawnRepoReleasesCapacity`.
-- `pkg/controller`: `TestGitHubAppWithoutChecksPermissionPostsStatuses`.
 - `pkg/controller`: `TestGitHubOnboardingCookieSessionUsesTeamRole`.
 - `pkg/controller`: `TestGitHubOnboardingCookieWritesRejectInvalidCSRF`.
 - `pkg/controller`: `TestGitHubRunnerCredentialClaimsOnlyItsOwnPush`.
@@ -268,3 +260,15 @@ lanes also remain unverified here. TCP and Unix bind probes both return EPERM.
 The new store GitHubCommitStatusMode tests and the existing ReportGitHubCheck
 lock tests must also run on the lead's PostgreSQL store. The new controller
 recorder fixtures use the existing SQLite engine fixture.
+
+Continuation 6 ports the run-report lifecycle, conclusion table, permission fallback
+and bounded/private summaries to recorder transport in github_reporting_test.go
+and github_completion_test.go. Those groups no longer need sockets. Their
+verified App request and initial queued intent are fixture seeds. Actual running
+and terminal transitions, the outbox, report lock and GitHub adapter execute.
+They do not establish signed-webhook intake or native listener behavior.
+
+The paused alias and arbitrary node-creation success tests are deleted because
+their surfaces are retired. TestPlanTopologyStrangerLearnsNothingProperty
+replaces the latter route's stranger-token security assertion at the current
+plan acceptance boundary. Those obligations no longer require a listener.

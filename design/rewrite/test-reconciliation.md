@@ -357,3 +357,73 @@ schedule authority and verified-App intake owners are real integration work,
 not retired assertions. No Git writes are performed. Local Git has no identity
 or core.worktree override. W1b scratch is removed after all checks, and the
 shared build cache is retained.
+
+
+## Continuation 6: reporting fixture reconciliation
+
+- C pkg/controller: port TestGitHubAppRunReportsOneCheckRun to the current owner transition and elected completion path with recorder transport. Retain queued/running/terminal phases, exact provider create/update identity, persisted check ID, commit, pipeline, aggregate counts, authenticated link, checks-only numeric repository token and zero commit statuses. Require all three exact revisions to be acknowledged.
+- C pkg/controller: merge TestGitHubAppCheckRunConclusions into TestGitHubCompletionFromRealTerminalTransition. Pin success/failure/cancelled with an independent literal expectation table instead of calling the production conclusion mapper in the assertion. Real finish and repeated delivery remain.
+- C pkg/controller: port TestGitHubAppWithoutChecksPermissionPostsStatuses. Retain pending/success on the first commit, pending on the second, one warning per installation, numeric repository restriction and only the required write permission. A new run after permission acceptance produces a queued check without changing prior statuses. The existing replacement test retains durable per-run fallback.
+- C pkg/controller: port TestGitHubAppCheckRunSummaryIsBounded. Four hundred long private job names/errors and a 100,000-character run error reach the current reporting adapter. The fixture declares every added job in its accepted topology. UTF-8, GitHub's character bound, all 401 failed jobs and the authenticated link remain asserted.
+- C pkg/controller: port TestGitHubAppCheckRunSummaryKeepsPrivateRunDataInConsole. Retain exclusion of private job names, job errors and run errors with exact aggregate count and link checks. TestGitHubCompletionSummaryPrivacyProperty generates adversarial private text and checks the whole outgoing check, including a run error verified present after finish. Previously finish cleared that error before the property exercised it. Invariant: GitHub receives aggregate state and the authenticated link, never arbitrary private job/run text.
+- A pkg/controller: delete claimedRun, startRun, runnerCall, finishRun, addNode and onlyCheckTokens from github_checks_test.go. They called retired trigger-claim/run-creation surfaces or have no callers after these ports. The file loses 258 lines. No owed test group is dropped.
+- B OPEN pkg/controller: the focused cron census still reproduces all eleven enabled failures. Three use retired trigger SQL and eight lack the concrete ScheduleWriter. No expectation or security assertion changes. Internal/crons passes in full.
+
+The reporting fixture seeds the verified App request, initial pending row and
+queued revision. The running and terminal edges are real store transitions;
+terminal finish traverses the real private HTTP host adapter. The other two
+permission-check runs are pending store fixtures. The missing signed webhook
+intake composition is still open. No socket-dependent test is marked skipped,
+and no native acceptance cell is newly claimed complete.
+
+- A pkg/controller: delete TestController_ListPausesAlias (26 lines). Frozen v4 principle 3 and decisions 94/97 remove pre-launch aliases. TestBusinessRetiredRoutesAndExactMethods now requires /runs/{run}/paused to be unregistered and return 404 for every tested method. Canonical debug-pause tests remain.
+- A pkg/controller: delete TestCreateNode_LiveRunStillAcceptsNodes and its unused postNode helper/reapReason. Arbitrary insertion through /runs/{run}/nodes is retired. The existing plan/expansion transaction suites own topology insertion. TestBusinessRetiredRoutesAndExactMethods asserts that the removed collection stays unregistered.
+- C pkg/controller: replace TestCreateNode_StrangerTokenLearnsNothingAboutTheRun with TestPlanTopologyStrangerLearnsNothingProperty at /runs/{run}/plan. Generated private errors, running/failed/missing runs and machine grants including node.result all retain refusal, zero private-field/bearer disclosure, an unchanged full run snapshot and zero inserted jobs/events/effects. Invariant: a claimant without the current plan award cannot insert topology or learn private run state. reaped_run_conflict_test.go is deleted (124 lines), replaced by the smaller property file.
+
+
+### Continuation 6 verification and remaining work
+
+All successful Go checks use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and TMPDIR/GOTMPDIR under
+/tmp/sw-astra-W1b. Normal tests use -p 4 and race tests use -p 2.
+
+- Whole-repository build passes. Final vet passes for controller and acceptance. Final commentcheck against main is clean across 2,673 files. git diff --check passes.
+- The reporting/completion selection passes in 10.423s. Its race selection passes in 52.496s. The topology-authority property and retired-route checks pass normally and with the race detector. The original full internal/crons package passes in 3.777s.
+- The broader controller selection passes in 55.173s: 482 top-level tests and 895 passing tests/subtests. The command selects tests outside the named socket inventory and reproduced cron failures. It runs before the final topology-property/retired-route edits, which pass separately afterward. This is not a full controller-suite claim. No source skip is added or widened.
+- Full acceptance passes in 202.401s: 406 top-level tests, 5,386 passing tests/cells and 2,991 pre-existing skips. No native matrix cell is newly claimed complete.
+- A temporary Go source overlay makes githubCheckSummary append the private run error. The generated privacy property fails on its first input. The normal source passes. The overlay never modifies production files and is deleted with scratch.
+- Fresh TCP and Unix bind probes both return Operation not permitted. PostgreSQL is not attempted. The remaining named native transport checks and PostgreSQL controller/acceptance lanes need the lead's environment. The new tests use the existing SQLite controller fixture. They do not establish a PostgreSQL result.
+
+Production delta against session HEAD fef4c812f is zero. No production file,
+contract, schema, credential, setting or provider interface changes. No new
+production mechanism is added. The stale test/helper deletions total 408
+lines; replacement tests and fixture changes give net -110 Go lines.
+The W1+W1b store area stays at -2,685 production Go lines against main under
+the lead's budget exclusions, 1,565 over its -4,250 budget. The inherited
+overage remains open. No area-complete claim is made.
+
+Contract changes made: none. Contract changes still needed are the previously
+recorded schedule arming-origin/consent join and verified App intake composition.
+Eleven cron failures remain enabled. Metrics and parent-notification consumers
+remain unfinished. Signed-webhook intake, re-request, repository subscription,
+fork, binding, replay and run-budget fixtures still need native reconciliation.
+The source and security assertions in those tests are retained.
+
+Shared files touched in this continuation:
+- design/rewrite/test-reconciliation.md
+- design/rewrite/test-reconciliation-sockets.md
+- pkg/controller/github_checks_test.go
+- pkg/controller/github_completion_test.go
+- pkg/controller/github_reporting_test.go
+- pkg/controller/reaped_run_conflict_test.go (deleted)
+- pkg/controller/run_control_routes_test.go
+- pkg/controller/server_test.go
+- pkg/controller/topology_authority_test.go
+
+Friction: forbidden sockets prevent native transport and PostgreSQL proofs.
+The missing committing schedule origin and verified App intake are real
+implementation obligations. This continuation uses fixture seeds only at those
+external seams and does not count them as production acceptance. No lead-owned
+amendment or handoff file is edited. No Git writes or Sparkwing candidate
+execution is performed. Local Git has no identity or core.worktree override.
+W1b scratch is removed after checks and the shared cache is retained.

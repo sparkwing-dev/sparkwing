@@ -150,7 +150,7 @@ func TestResumeDebugPauseWriterScopeAndErrors(t *testing.T) {
 func TestBusinessRetiredRoutesAndExactMethods(t *testing.T) {
 	s := New(nil, nil)
 	h := s.Handler()
-	for _, path := range []string{"/api/v1/crons", "/api/v1/crons/repos", "/api/v1/crons/entry", "/api/v1/crons/entry/pause", "/api/v1/crons/entry/resume", "/api/v1/crons/entry/run", "/api/v1/crons/entry/disarm", "/api/v1/crons/entry/override", "/api/v1/runs/run/approvals/job/request"} {
+	for _, path := range []string{"/api/v1/runs/run/paused", "/api/v1/runs/run/nodes", "/api/v1/crons", "/api/v1/crons/repos", "/api/v1/crons/entry", "/api/v1/crons/entry/pause", "/api/v1/crons/entry/resume", "/api/v1/crons/entry/run", "/api/v1/crons/entry/disarm", "/api/v1/crons/entry/override", "/api/v1/runs/run/approvals/job/request"} {
 		for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
 			r := httptest.NewRequest(method, path, nil)
 			r.Header.Set("Authorization", "Bearer swct_retired")

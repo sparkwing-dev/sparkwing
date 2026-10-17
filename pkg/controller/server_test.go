@@ -391,32 +391,6 @@ func TestController_GetRun_IncludeNodes_NoSnapshot(t *testing.T) {
 	}
 }
 
-func TestController_ListPausesAlias(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	mustPostJSON(t, base+"/api/v1/runs", store.Run{
-		ID: "run-pause", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	}, http.StatusCreated)
-
-	resp := mustGet(t, base+"/api/v1/runs/run-pause/paused")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("paused alias status=%d", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	resp = mustGet(t, base+"/api/v1/runs/run-pause/debug-pauses")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("debug-pauses status=%d", resp.StatusCode)
-	}
-	canonicalBody, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if !bytes.Equal(body, canonicalBody) {
-		t.Errorf("alias body diverges from canonical:\n  alias:    %s\n  canonical: %s",
-			body, canonicalBody)
-	}
-}
-
 func TestController_ValidationErrors(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()

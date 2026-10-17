@@ -25,10 +25,12 @@ import (
 )
 
 type completionGitHub struct {
-	mu       sync.Mutex
-	checks   []githubapp.CheckRun
-	statuses []githubCommitStatusRequest
-	tokens   []struct {
+	mu          sync.Mutex
+	checks      []githubapp.CheckRun
+	checkWrites []string
+	statuses    []githubCommitStatusRequest
+	statusSHAs  []string
+	tokens      []struct {
 		IDs         []int64           `json:"repository_ids"`
 		Names       []string          `json:"repositories"`
 		Permissions map[string]string `json:"permissions"`
@@ -84,6 +86,7 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 		g.checks = append(g.checks, check)
+		g.checkWrites = append(g.checkWrites, r.Method+" "+r.URL.Path)
 		if g.existing == 0 {
 			g.existing = 101
 		}
@@ -99,6 +102,7 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 		g.statuses = append(g.statuses, commit)
+		g.statusSHAs = append(g.statusSHAs, strings.TrimPrefix(r.URL.Path, "/repos/"+g.name+"/statuses/"))
 	default:
 		return nil, fmt.Errorf("unexpected request %s %s", r.Method, r.URL)
 	}
@@ -161,11 +165,11 @@ func (f *githubCompletionFixture) revision() (desired, delivered, attempts, next
 	if err := f.server.store.DB().QueryRow(`SELECT desired_rev,delivered_rev,attempts,next_at FROM run_effects WHERE team='a' AND run_id='run' AND effect='github_check'`).Scan(&desired, &delivered, &attempts, &next); err != nil {
 		f.t.Fatal(err)
 	}
-	return
+	return desired, delivered, attempts, next
 }
 
 func TestGitHubCompletionFromRealTerminalTransition(t *testing.T) {
-	for _, outcome := range []store.RunState{store.RunSuccess, store.RunFailed, store.RunCancelled} {
+	for outcome, conclusion := range map[store.RunState]string{store.RunSuccess: "success", store.RunFailed: "failure", store.RunCancelled: "cancelled"} {
 		t.Run(string(outcome), func(t *testing.T) {
 			f := newGitHubCompletion(t)
 			f.finish(outcome)
@@ -173,7 +177,7 @@ func TestGitHubCompletionFromRealTerminalTransition(t *testing.T) {
 				f.reconcile()
 			}
 			checks := f.api.checks
-			if len(checks) != 1 || checks[0].Status != "completed" || checks[0].Conclusion != githubCheckConclusion(string(outcome)) || checks[0].ExternalID != "run" || checks[0].DetailsURL != "https://dash.example.test/runs?run=run" {
+			if len(checks) != 1 || checks[0].Status != "completed" || checks[0].Conclusion != conclusion || checks[0].ExternalID != "run" || checks[0].DetailsURL != "https://dash.example.test/runs?run=run" {
 				t.Fatalf("terminal GitHub checks=%+v", checks)
 			}
 			if checks[0].HeadSHA != strings.Repeat("a", 40) || len(f.api.statuses) != 0 {
@@ -360,7 +364,7 @@ func TestGitHubCompletionAuthorityProperty(t *testing.T) {
 }
 
 func TestGitHubCompletionStalePhasesNeverRegressProperty(t *testing.T) {
-	property := func(outcome uint8, phase bool, statuses bool) bool {
+	property := func(outcome uint8, phase, statuses bool) bool {
 		f := newGitHubCompletion(t)
 		f.api.checksGranted = !statuses
 		state := []store.RunState{store.RunSuccess, store.RunFailed, store.RunCancelled}[outcome%3]
@@ -395,7 +399,6 @@ func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		engineSQL(t, f.server.store, `UPDATE runs SET plan_json=? WHERE team='a' AND id='run'`, plan)
-		engineSQL(t, f.server.store, `UPDATE runs SET error=? WHERE team='a' AND id='run'`, private)
 		if err := teststore.SeedNode(f.server.store, t.Context(), store.Node{RunID: "run", NodeID: private, Status: "pending", Error: private}); err != nil {
 			t.Fatal(err)
 		}
@@ -403,6 +406,11 @@ func TestGitHubCompletionSummaryPrivacyProperty(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.finish(store.RunFailed)
+		engineSQL(t, f.server.store, `UPDATE runs SET error=? WHERE team='a' AND id='run'`, private)
+		run, err := f.tenant.GetRun(t.Context(), "run")
+		if err != nil || run.Error != private {
+			t.Fatalf("private run error was lost: %+v: %v", run, err)
+		}
 		f.reconcile()
 		if len(f.api.checks) != 1 {
 			t.Fatalf("checks=%+v", f.api.checks)
@@ -505,7 +513,6 @@ func TestGitHubCompletionReaperPreservesTimeoutConclusion(t *testing.T) {
 			if len(f.api.checks) != 1 {
 				t.Fatalf("stale pending report overwrote timeout: %+v", f.api.checks)
 			}
-
 		})
 	}
 }

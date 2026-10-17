@@ -1,21 +1,14 @@
 package controller_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func (f *appFixture) reconcileChecks() {
@@ -50,80 +43,6 @@ func (f *appFixture) pushRun(sha string) string {
 	return ids[0]
 }
 
-type claimedRun struct {
-	auth       string
-	generation int64
-}
-
-func (f *appFixture) startRun(owner signedIn, runID string) claimedRun {
-	f.t.Helper()
-	var m mintedRunner
-	if code := f.call("POST", "/api/v1/team/tokens", owner.auth,
-		map[string]any{"scopes": machineScopes, "name": "s-" + runID, "repos": []string{"github.com/*/*"}}, &m); code != http.StatusCreated {
-		f.t.Fatalf("mint runner = %d", code)
-	}
-	var claimed store.Trigger
-	c := claimedRun{auth: "Bearer " + m.Token}
-	if code := f.call("POST", "/api/v1/triggers/"+runID+"/claim", c.auth, nil, &claimed); code != http.StatusOK {
-		f.t.Fatalf("claim trigger %s = %d", runID, code)
-	}
-	c.generation = claimed.ClaimSeq
-	if code := f.runnerCall(c, "POST", "/api/v1/runs", map[string]any{
-		"id": runID, "pipeline": claimed.Pipeline, "status": "running", "started_at": time.Now().UTC(),
-	}); code != http.StatusCreated {
-		f.t.Fatalf("start run %s = %d", runID, code)
-	}
-	return c
-}
-
-func (f *appFixture) runnerCall(c claimedRun, method, path string, body any) int {
-	f.t.Helper()
-	raw, err := json.Marshal(body)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	req, err := http.NewRequest(method, f.url+path, bytes.NewReader(raw))
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", c.auth)
-	req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(c.generation, 10))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(resp.Body)
-		f.t.Logf("%s %s = %d: %s", method, path, resp.StatusCode, msg)
-	}
-	return resp.StatusCode
-}
-
-func (f *appFixture) finishRun(c claimedRun, runID, status, errMsg string) {
-	f.t.Helper()
-	if code := f.runnerCall(c, "POST", "/api/v1/runs/"+runID+"/finish",
-		map[string]any{"status": status, "error": errMsg}); code != http.StatusNoContent {
-		f.t.Fatalf("finish run %s = %d", runID, code)
-	}
-}
-
-func (f *appFixture) addNode(runID, nodeID, outcome, errMsg string) {
-	f.t.Helper()
-	ctx := context.Background()
-	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
-		f.t.Fatal(err)
-	}
-	team, err := f.store.AsOperator().RunTeam(ctx, runID)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	if err := teststore.SeedNodeFinish(f.store, ctx, team, store.NodeRef{RunID: runID, NodeID: nodeID}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: errMsg}); err != nil {
-		f.t.Fatal(err)
-	}
-}
-
 func checkRunPayload(installation int64, action string, call githubapptest.CheckRunCall) map[string]any {
 	return map[string]any{
 		"action": action,
@@ -149,183 +68,6 @@ func checkSuitePayload(installation int64, action, sha string, pullRequests []an
 		"installation": map[string]any{"id": installation},
 		"repository":   map[string]any{"id": 701, "full_name": "acme/widgets"},
 		"sender":       map[string]any{"login": "olga"},
-	}
-}
-
-func onlyCheckTokens(t *testing.T, app *githubapptest.GitHub) {
-	t.Helper()
-	for _, m := range app.Minted() {
-		if _, checks := m.Permissions["checks"]; checks &&
-			(len(m.Repositories) != 0 || len(m.RepositoryIDs) != 1 || m.RepositoryIDs[0] != 701 || len(m.Permissions) != 1 || m.Permissions["checks"] != "write") {
-			t.Fatalf("check run token request = %+v, want repository 701 with checks:write only", m)
-		}
-	}
-}
-
-// A run the App started is one check run on its commit that moves from
-// queued through in_progress to completed, and posts no commit status.
-func TestGitHubAppRunReportsOneCheckRun(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	runID := f.pushRun(headSHA)
-	f.reconcileChecks()
-
-	calls := f.app.CheckRunCalls()
-	if len(calls) != 1 {
-		t.Fatalf("check run writes after the push = %+v, want one create", calls)
-	}
-	created := calls[0]
-	if created.Method != "create" || created.Name != "sparkwing/build" || created.HeadSHA != headSHA ||
-		created.Status != "queued" || created.ExternalID != runID ||
-		created.DetailsURL != "https://dash.example.com/runs?run="+runID {
-		t.Fatalf("create = %+v", created)
-	}
-
-	runner := f.startRun(olga, runID)
-	f.reconcileChecks()
-	f.addNode(runID, "compile", "success", "")
-	f.addNode(runID, "unit-tests", "failed", "3 tests failed")
-	f.finishRun(runner, runID, "failed", "node unit-tests failed")
-	f.reconcileChecks()
-
-	calls = f.app.CheckRunCalls()
-	if len(calls) != 3 {
-		t.Fatalf("check run writes = %+v, want create, in_progress and completed", calls)
-	}
-	started, done := calls[1], calls[2]
-	if started.Method != "update" || started.ID != created.ID || started.Status != "in_progress" {
-		t.Fatalf("second write = %+v, want in_progress on check run %d", started, created.ID)
-	}
-	if done.Method != "update" || done.ID != created.ID || done.Status != "completed" || done.Conclusion != "failure" {
-		t.Fatalf("third write = %+v, want completed failure on check run %d", done, created.ID)
-	}
-	for _, want := range []string{"Failed", "1 success", "1 failed", "https://dash.example.com/runs?run=" + runID} {
-		if !strings.Contains(done.Summary, want) {
-			t.Fatalf("summary lacks %q:\n%s", want, done.Summary)
-		}
-	}
-	if got := f.app.Statuses(); len(got) != 0 {
-		t.Fatalf("the App posted commit statuses %+v; its runs report as check runs", got)
-	}
-	onlyCheckTokens(t, f.app)
-}
-
-// Each of Sparkwing's run outcomes lands as the conclusion that names it.
-func TestGitHubAppCheckRunConclusions(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	for i, c := range []struct{ status, conclusion string }{
-		{"success", "success"}, {"failed", "failure"}, {"cancelled", "cancelled"},
-	} {
-		runID := f.pushRun(strings.Repeat(string(rune('a'+i)), 40))
-		f.finishRun(f.startRun(olga, runID), runID, c.status, "")
-		f.reconcileChecks()
-		calls := f.app.CheckRunCalls()
-		last := calls[len(calls)-1]
-		if last.ExternalID != runID || last.Status != "completed" || last.Conclusion != c.conclusion {
-			t.Fatalf("run finished %s: last write %+v, want conclusion %s", c.status, last, c.conclusion)
-		}
-	}
-}
-
-// An installation whose owner has not accepted the checks permission keeps
-// getting commit statuses until it does, and says so in the log once.
-func TestGitHubAppWithoutChecksPermissionPostsStatuses(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	f.app.SetChecksGranted(7, false)
-
-	first := f.pushRun(headSHA)
-	f.reconcileChecks()
-	f.finishRun(f.startRun(olga, first), first, "success", "")
-	f.pushRun(strings.Repeat("6", 40))
-	f.reconcileChecks()
-
-	if calls := f.app.CheckRunCalls(); len(calls) != 0 {
-		t.Fatalf("check runs %+v on an installation without the permission", calls)
-	}
-	var states []string
-	for _, st := range f.app.Statuses() {
-		if st.Context != "sparkwing/build" {
-			t.Fatalf("status %+v, want context sparkwing/build", st)
-		}
-		states = append(states, st.SHA[:1]+":"+st.State)
-	}
-	if strings.Join(states, ",") != "8:pending,8:success,6:pending" {
-		t.Fatalf("statuses = %v, want pending and success on the first commit, pending on the second", states)
-	}
-	if n := strings.Count(f.logs.String(), "has not accepted the checks permission"); n != 1 {
-		t.Fatalf("the missing permission was logged %d times, want once:\n%s", n, f.logs.String())
-	}
-
-	f.app.SetChecksGranted(7, true)
-	f.pushRun(strings.Repeat("7", 40))
-	f.reconcileChecks()
-	if calls := f.app.CheckRunCalls(); len(calls) != 1 || calls[0].Status != "queued" {
-		t.Fatalf("after the owner accepted, writes = %+v, want a check run", calls)
-	}
-	if n := len(f.app.Statuses()); n != 3 {
-		t.Fatalf("after the owner accepted, %d statuses, want the 3 from before", n)
-	}
-}
-
-// The summary stays within GitHub's limit however many nodes a run has and
-// however long its error is.
-func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	runID := f.pushRun(headSHA)
-	runner := f.startRun(olga, runID)
-	for i := 0; i < 400; i++ {
-		f.addNode(runID, "node-"+strings.Repeat("x", 40)+"-"+strconv.Itoa(i), "failed", strings.Repeat("é", 500))
-	}
-	f.finishRun(runner, runID, "failed", strings.Repeat("ü", 100_000))
-	f.reconcileChecks()
-	calls := f.app.CheckRunCalls()
-	done := calls[len(calls)-1]
-	if done.Status != "completed" {
-		t.Fatalf("writes = %d, last %+v; the fake refuses a summary over the limit", len(calls), done.Status)
-	}
-	if n := utf8.RuneCountInString(done.Summary); n > 65535 {
-		t.Fatalf("summary is %d characters", n)
-	}
-	if !utf8.ValidString(done.Summary) {
-		t.Fatal("summary was cut inside a character")
-	}
-	if !strings.Contains(done.Summary, "400 failed") || !strings.Contains(done.Summary, "https://dash.example.com/runs?run="+runID) {
-		t.Fatalf("summary lost its counts or link: %s", done.Summary)
-	}
-}
-
-func TestGitHubAppCheckRunSummaryKeepsPrivateRunDataInConsole(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	runID := f.pushRun(headSHA)
-	runner := f.startRun(olga, runID)
-	f.addNode(runID, "secret-node-name", "failed", "ghp_secret-looking-node-error")
-	f.finishRun(runner, runID, "failed", "ghp_secret-looking-run-error")
-	f.reconcileChecks()
-	calls := f.app.CheckRunCalls()
-	summary := calls[len(calls)-1].Summary
-	for _, secret := range []string{"secret-node-name", "ghp_secret-looking-node-error", "ghp_secret-looking-run-error"} {
-		if strings.Contains(summary, secret) {
-			t.Fatalf("public check summary exposes %q: %s", secret, summary)
-		}
-	}
-	for _, want := range []string{"Failed", "1 failed", "https://dash.example.com/runs?run=" + runID} {
-		if !strings.Contains(summary, want) {
-			t.Fatalf("check summary lacks %q: %s", want, summary)
-		}
 	}
 }
 
