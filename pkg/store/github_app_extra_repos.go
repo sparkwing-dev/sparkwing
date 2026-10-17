@@ -53,8 +53,11 @@ func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, reposit
 		}
 		canonical[key] = id
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_extra_repos WHERE team = ? AND repository = ?`,
-		string(t.team), source); err != nil {
+	if canonical[source] <= 0 {
+		return nil, ErrInvalidInput
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_extra_repos WHERE team = ? AND repository_id = ?`,
+		string(t.team), canonical[source]); err != nil {
 		return nil, err
 	}
 	for _, x := range list {
@@ -62,20 +65,19 @@ func (t *Tenant) setGitHubExtraReposTx(ctx context.Context, tx *storeTx, reposit
 			return nil, ErrInvalidInput
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO github_app_extra_repos (team, repository, extra_repo, extra_repo_id, created_by, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)`, string(t.team), source, x, canonical[x], by, tx.now().UnixNano()); err != nil {
+			INSERT INTO github_app_extra_repos (team, repository, repository_id, extra_repo, extra_repo_id, created_by, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`, string(t.team), source, canonical[source], x, canonical[x], by, tx.now().UnixNano()); err != nil {
 			return nil, err
 		}
 	}
 	return list, nil
 }
 
-// GitHubAppExtraRepos is the extra repositories an owner listed for
-// repository, sorted; empty when none.
-func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repository string) (_ []string, err error) {
+// GitHubAppExtraRepos returns approved extras for a numeric source repository ID.
+func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repositoryID int64) (_ []string, err error) {
 	rows, err := t.s.query(ctx, `
-		SELECT extra_repo FROM github_app_extra_repos WHERE team = ? AND repository = ? ORDER BY extra_repo`,
-		string(t.team), strings.ToLower(repository))
+		SELECT extra_repo FROM github_app_extra_repos WHERE team = ? AND repository_id = ? ORDER BY extra_repo`,
+		string(t.team), repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,30 +110,6 @@ func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]str
 			return nil, err
 		}
 		out[repo] = append(out[repo], x)
-	}
-	return out, rows.Err()
-}
-
-// GitHubAppExtraRepoRefs is repository's extra repositories with the GitHub
-// ID recorded for each, 0 when none was.
-func (t *Tenant) GitHubAppExtraRepoRefs(ctx context.Context, repository string) (_ []GitHubRepo, err error) {
-	rows, err := t.s.query(ctx, `SELECT extra_repo, extra_repo_id FROM github_app_extra_repos
- WHERE team = ? AND repository = ? ORDER BY extra_repo`, string(t.team), strings.ToLower(repository))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsOrLog(rows)
-	var out []GitHubRepo
-	for rows.Next() {
-		var slug string
-		var id int64
-		if err := rows.Scan(&slug, &id); err != nil {
-			return nil, err
-		}
-		if x, ok := ParseGitHubRepo(slug); ok {
-			x.ID = id
-			out = append(out, x)
-		}
 	}
 	return out, rows.Err()
 }

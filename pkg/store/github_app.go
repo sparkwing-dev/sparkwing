@@ -95,25 +95,36 @@ func scanGitHubAppInstallation(row interface{ Scan(...any) error }) (GitHubAppIn
 		return GitHubAppInstallation{}, err
 	}
 	in.Team, in.Suspended = Team(team), suspended != 0
-	in.CreatedAt, in.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+	in.CreatedAt, in.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 	return in, nil
 }
 
-// BindGitHubAppInstallation binds in to t, or refreshes the account and
-// connector of a binding t already holds. An installation another team holds
-// is [ErrInstallationBoundElsewhere], and the binding stays where it is.
-func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
-	if in.InstallationID <= 0 || in.AccountID <= 0 || in.AccountLogin == "" || in.AccountType == "" {
+// TestOnlySeedGitHubInstallation inserts an installation for fixtures.
+func (t *Tenant) TestOnlySeedGitHubInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
+	var out GitHubAppInstallation
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		out, err = t.bindGitHubInstallationTx(ctx, tx, in, now)
+		return err
+	})
+	if err != nil {
+		return GitHubAppInstallation{}, err
+	}
+	return out, nil
+}
+
+func (t *Tenant) bindGitHubInstallationTx(ctx context.Context, tx *storeTx, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error) {
+	if in.InstallationID <= 0 || in.AccountID <= 0 || in.AccountLogin == "" || (in.AccountType != "User" && in.AccountType != "Organization") {
 		return GitHubAppInstallation{}, fmt.Errorf("%w: a binding needs the installation and its account", ErrInvalidInput)
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	suspended := 0
 	if in.Suspended {
 		suspended = 1
 	}
 	// safety: the conflict guard compares teams, so a second team's connect
 	// updates nothing and cannot take the installation over.
-	res, err := t.s.exec(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO github_app_installations (`+githubAppInstallationCols+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (installation_id) DO UPDATE SET
@@ -133,7 +144,7 @@ func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInst
 		}
 		return GitHubAppInstallation{}, ErrInstallationBoundElsewhere
 	}
-	return t.GitHubAppInstallation(ctx, in.InstallationID)
+	return scanGitHubAppInstallation(tx.QueryRowContext(ctx, `SELECT `+githubAppInstallationCols+` FROM github_app_installations WHERE team=? AND installation_id=?`, t.team, in.InstallationID))
 }
 
 // GitHubAppInstallation reads t's binding of installation, or ErrNotFound.
@@ -212,7 +223,7 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 	}
 	defer rollbackOrLog(tx)
 	if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
-		WHERE team = ? AND installation_id = ?`, flag, now.UTC().Unix(), string(in.Team), installation); err != nil {
+		WHERE team = ? AND installation_id = ?`, flag, now.UTC().UnixNano(), string(in.Team), installation); err != nil {
 		return err
 	}
 	if suspended {
@@ -395,14 +406,6 @@ func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installat
 	return err
 }
 
-// ConsumeGitHubAppConnectState records that the connect flow named by nonce
-// finished, and reports false when one already did. The record lives until
-// the state expires, so every replica and a restarted controller refuse a
-// state that was used once.
-func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
-	return s.consumeFlowNonce(ctx, "github_app_connect", nonce, expires)
-}
-
 // GitHubAppDeliveryRetention is how long a delivery's digest is remembered.
 // The App webhook refuses an event older than this, so a forgotten digest
 // does not readmit a replayed delivery.
@@ -463,6 +466,29 @@ func (t *Tenant) GitHubCheckRun(ctx context.Context, runID string) (int64, error
 		return 0, notFound("trigger", runID)
 	}
 	return id, err
+}
+
+// GitHubCommitStatuses reports the committed fallback mode for this run.
+func (t *Tenant) GitHubCommitStatuses(ctx context.Context, runID string) (bool, error) {
+	var fallback int
+	err := t.s.queryRow(ctx, `SELECT github_status_fallback FROM triggers WHERE team=? AND id=?`, t.team, runID).Scan(&fallback)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, notFound("run", runID)
+	}
+	return fallback == 1, err
+}
+
+// UseGitHubCommitStatuses persists the mode before a fallback status can reach GitHub.
+func (t *Tenant) UseGitHubCommitStatuses(ctx context.Context, runID string) error {
+	result, err := t.s.exec(ctx, `UPDATE triggers SET github_status_fallback=1 WHERE team=? AND id=?`, t.team, runID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err == nil && changed != 1 {
+		return notFound("run", runID)
+	}
+	return err
 }
 
 // RecordGitHubCheckRun records checkRun as the GitHub check run reporting
@@ -532,25 +558,27 @@ func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ct
 	return tx.Commit()
 }
 
-const maxGitHubCommitTriggers = 100
-
-// GitHubCommitTriggers reads sealed trigger reports by numeric repository identity and exact commit.
-func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) (_ []*Trigger, err error) {
+// GitHubCommitRuns reads sealed App requests by numeric repository identity and exact commit.
+func (t *Tenant) GitHubCommitRuns(ctx context.Context, repo GitHubRepo, sha string) (_ []RunRow, err error) {
 	if repo.ID <= 0 {
 		return nil, nil
 	}
-	rows, err := t.s.query(ctx, triggerSelect+` WHERE runs.team=? AND runs.repo_key=? AND runs.git_sha=? ORDER BY triggers.created_at DESC,triggers.id DESC LIMIT ?`, t.team, githubRepositoryKey(repo.ID), sha, maxGitHubCommitTriggers)
+	rows, err := t.s.query(ctx, `SELECT id,pipeline,request_json FROM runs WHERE team=? AND repo_key=? AND git_sha=? ORDER BY created_at DESC,id DESC LIMIT 100`, t.team, githubRepositoryKey(repo.ID), sha)
 	if err != nil {
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
-	var out []*Trigger
+	var out []RunRow
 	for rows.Next() {
-		tr, err := scanTrigger(rows)
-		if err != nil {
+		var run RunRow
+		var body []byte
+		if err := rows.Scan(&run.ID, &run.Pipeline, &body); err != nil {
 			return nil, err
 		}
-		out = append(out, tr)
+		if err := json.Unmarshal(body, &run.Request); err != nil {
+			return nil, err
+		}
+		out = append(out, run)
 	}
 	return out, rows.Err()
 }

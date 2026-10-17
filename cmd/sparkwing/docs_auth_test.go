@@ -40,7 +40,19 @@ func TestAuthGuideCLIExamplesUseFinalGrammar(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, unit := range codeUnits(strings.ReplaceAll(body, "\\\n", "")) {
+		inFence := false
+		var examples strings.Builder
+		for _, line := range strings.Split(strings.ReplaceAll(body, "\\\n", ""), "\n") {
+			if strings.HasPrefix(line, "```") {
+				inFence = !inFence
+				examples.WriteString(line + "\n")
+				continue
+			}
+			if inFence {
+				examples.WriteString(line + "\n")
+			}
+		}
+		for _, unit := range codeUnits(examples.String()) {
 			if !strings.HasPrefix(unit, "sparkwing ") {
 				continue
 			}

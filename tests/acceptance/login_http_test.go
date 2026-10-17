@@ -247,7 +247,7 @@ func TestLoginHTTPRefusesInvalidCredentialAndForm(t *testing.T) {
 				if state == "machine" {
 					digest := sha256.Sum256([]byte(f.raw))
 					origin := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-					spec = capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}, RegistrationID: "runner:team:runner"}
+					spec = capability.ProvisionSpec{Kind: capability.ProvisionMachine, Authority: &origin, Team: "team", Repositories: []string{"github.com/acme/*"}, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "runner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.NodesClaim}, RegistrationID: "runner:team:runner"}
 				}
 				issued, err := f.store.ProvisionCapability(t.Context(), spec)
 				if err != nil {

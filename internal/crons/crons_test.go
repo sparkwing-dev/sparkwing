@@ -14,12 +14,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
-	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type fakeLauncher struct {
+	store      *store.Store
 	mu         sync.Mutex
 	launched   []string
 	runIDs     []string
@@ -36,7 +36,7 @@ func newFakeLauncher(runIDs ...string) *fakeLauncher {
 	return &fakeLauncher{runIDs: runIDs, active: map[string]bool{}, pending: map[string]time.Time{}, now: time.Now}
 }
 
-func (f *fakeLauncher) Launch(_ context.Context, s store.CronSchedule, due time.Time) (string, error) {
+func (f *fakeLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.launchErr != nil {
@@ -45,6 +45,11 @@ func (f *fakeLauncher) Launch(_ context.Context, s store.CronSchedule, due time.
 	id := fmt.Sprintf("run-%d", f.nextRun+1)
 	if f.nextRun < len(f.runIDs) {
 		id = f.runIDs[f.nextRun]
+	}
+	if f.store != nil {
+		if err := teststore.SeedRun(f.store, ctx, s.Team, store.Run{ID: id, Pipeline: s.Pipeline, Status: "pending", CreatedAt: f.now()}); err != nil {
+			return "", err
+		}
 	}
 	f.nextRun++
 	f.launched = append(f.launched, fmt.Sprintf("%s@%s", s.Pipeline, due.UTC().Format(time.RFC3339)))
@@ -121,6 +126,7 @@ func newHarness(t *testing.T, now time.Time) *harness {
 	c := &clock{at: now}
 	launcher := newFakeLauncher()
 	launcher.now = c.now
+	launcher.store = st
 	return &harness{
 		svc: &Service{
 			Store:     st,
@@ -155,8 +161,8 @@ const everyMinute = `  - name: every-minute
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "* * * * *"
-        where: local
+        - cron: "* * * * *"
+          where: local
 `
 
 func TestScheduleIDIsStableAndScopedToTheCheckoutPipelineAndEntry(t *testing.T) {
@@ -320,10 +326,10 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "*/5 * * * *"
-        where: local
-        tz: America/Denver
-        overlap: queue
+        - cron: "*/5 * * * *"
+          where: local
+          tz: America/Denver
+          overlap: queue
 `), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
@@ -356,8 +362,8 @@ func TestArmWithdrawsASchedulTheRepoStoppedDeclaring(t *testing.T) {
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
 `)
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
@@ -409,8 +415,8 @@ func TestDisarmRemovesEverySchedulOfTheRepo(t *testing.T) {
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
 `)
 	other := writeRepo(t, "other", everyMinute)
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
@@ -443,8 +449,8 @@ func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
 `)
 	gone := writeRepo(t, "gone", everyMinute)
 	for _, root := range []string{edited, dropped, gone} {
@@ -458,8 +464,8 @@ func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "0 4 * * *"
-        where: local
+        - cron: "0 4 * * *"
+          where: local
 `), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
@@ -527,8 +533,8 @@ func TestRefreshWritesNothingWhenTheDeclarationIsUnchanged(t *testing.T) {
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "0 4 * * *"
-        where: local
+        - cron: "0 4 * * *"
+          where: local
 `), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
@@ -564,8 +570,8 @@ func TestTickWithNothingDue(t *testing.T) {
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
 `))
 	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
 	report, err := h.svc.Tick(ctx, false)
@@ -668,9 +674,9 @@ func TestTickAsksActiveWithTheSchedulesCatchUpWindow(t *testing.T) {
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "* * * * *"
-        where: local
-        catch_up: 15m
+        - cron: "* * * * *"
+          where: local
+          catch_up: 15m
 `))
 	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
 	if _, err := h.svc.Tick(ctx, false); err != nil {
@@ -687,46 +693,15 @@ func TestTickAsksActiveWithTheSchedulesCatchUpWindow(t *testing.T) {
 	}
 }
 
-func TestTickFiresAgainWhenACatchUpAboveTheCeilingWouldWedgeASkip(t *testing.T) {
-	ctx := context.Background()
+func TestArmRefusesCatchUpAboveCeiling(t *testing.T) {
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
-	sched := armOne(t, h, writeRepo(t, "svc", `  - name: every-minute
-    entrypoint: Hourly
-    on:
-      schedule:
-        cron: "0 * * * *"
-        where: local
-        catch_up: 720h
-`))
-
-	h.clock.set(at(t, "2026-01-01T01:00:05Z"))
-	if _, err := h.svc.Tick(ctx, false); err != nil {
-		t.Fatalf("first tick: %v", err)
+	root := writeRepo(t, "svc", strings.Replace(everyMinute, "where: local", "where: local\n          catch_up: 720h", 1))
+	if _, err := h.svc.Arm(t.Context(), root, ArmOptions{}); err == nil || !strings.Contains(err.Error(), "catch_up") {
+		t.Fatalf("Arm = %v, want catch_up refusal", err)
 	}
-	h.launcher.mu.Lock()
-	h.launcher.pending["run-1"] = h.clock.now()
-	h.launcher.mu.Unlock()
-
-	h.clock.set(at(t, "2026-01-02T07:00:05Z"))
-	report, err := h.svc.Tick(ctx, false)
-	if err != nil {
-		t.Fatalf("second tick: %v", err)
-	}
-	if report.Fired != 1 || report.Skipped != 0 {
-		t.Fatalf("a run unclaimed for 30h still suppressed the schedule: %+v", report)
-	}
-	h.launcher.mu.Lock()
-	staleAfter := append([]time.Duration(nil), h.launcher.staleAfter...)
-	h.launcher.mu.Unlock()
-	if len(staleAfter) != 1 || staleAfter[0] != cronspec.MaxCatchUp {
-		t.Fatalf("Active was given %v, want the ceiling %v", staleAfter, cronspec.MaxCatchUp)
-	}
-	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
-	if err != nil {
-		t.Fatalf("GetCronSchedule: %v", err)
-	}
-	if stored.LastOutcome != store.CronOutcomeFired {
-		t.Fatalf("the schedule never fired again: %+v", stored)
+	rows, err := h.svc.List(t.Context())
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("invalid arm persisted schedules: %+v, %v", rows, err)
 	}
 }
 
@@ -737,9 +712,9 @@ func TestTickQueuesOverAnActiveRunWhenThePolicySaysSo(t *testing.T) {
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "* * * * *"
-        where: local
-        overlap: queue
+        - cron: "* * * * *"
+          where: local
+          overlap: queue
 `))
 	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
 	if _, err := h.svc.Tick(ctx, false); err != nil {
@@ -769,9 +744,9 @@ func TestTickRecordsACatchUpBacklogAsOneMissAndAdvancesTheCursor(t *testing.T) {
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "* * * * *"
-        where: local
-        catch_up: 2m
+        - cron: "* * * * *"
+          where: local
+          catch_up: 2m
 `))
 	h.clock.set(at(t, "2026-01-01T01:00:20Z"))
 	report, err := h.svc.Tick(ctx, false)
@@ -1015,8 +990,8 @@ func TestResolveByIDDisplayNameAndBarePipeline(t *testing.T) {
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
 `)
 	sched := armOne(t, h, root)
 
@@ -1099,9 +1074,9 @@ func TestUpcomingReadsTheScheduleInItsOwnZone(t *testing.T) {
     entrypoint: EveryMinute
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
-        tz: America/Denver
+        - cron: "0 3 * * *"
+          where: local
+          tz: America/Denver
 `))
 	got, err := h.svc.Upcoming(ctx, sched.ID, 2)
 	if err != nil {

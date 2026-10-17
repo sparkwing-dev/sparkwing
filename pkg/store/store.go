@@ -24,7 +24,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -615,101 +614,6 @@ type RunPullRequest struct {
 	BaseSHA string `json:"base_sha,omitempty"`
 	HeadRef string `json:"head_ref,omitempty"`
 	HeadSHA string `json:"head_sha,omitempty"`
-}
-
-func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) error {
-	if err := ValidateRunInvocation(r); err != nil {
-		return err
-	}
-	if r.FinishedAt != nil && !isTerminalRunStatus(r.Status) {
-		return fmt.Errorf("%w: a non-terminal run cannot have finished_at", ErrInvalidInput)
-	}
-	argsJSON, _ := json.Marshal(r.Args)
-	var invocationJSON []byte
-	if len(r.Invocation) > 0 {
-		invocationJSON, _ = json.Marshal(r.Invocation)
-	}
-	var parent sql.NullString
-	if r.ParentRunID != "" {
-		parent = sql.NullString{String: r.ParentRunID, Valid: true}
-	}
-	if r.StartedAt.IsZero() {
-		r.StartedAt = time.Now()
-	}
-	created := r.CreatedAt
-	if created.IsZero() {
-		created = r.StartedAt
-	}
-	// safety: a terminal run with no finish time is indistinguishable from an
-	// earlier attempt's leftover row, and every caller that reads one to decide
-	// whether work ended reads it wrongly.
-	finished := nullableTimeNS(r.FinishedAt)
-	if finished == nil && isTerminalRunStatus(r.Status) {
-		finished = time.Now().UnixNano()
-	}
-	// safety: lock order across this store is executor eligibility first, then
-	// a guard or ledger advisory lock; taking them the other way around here
-	// deadlocks against a claim that holds the executor lock.
-	if err := enforceRunsPerHourTx(ctx, tx, team, r.ID, capability.Subject{ID: creatingPrincipal(ctx)}, time.Now()); err != nil {
-		return err
-	}
-	// safety: the team is in the conflict guard, not the conflict target,
-	// because the target must name a unique index and runs has only the
-	// primary key on id; a (team, id) target would race that key's own
-	// violation on a same-team re-create.
-	res, err := tx.ExecContext(ctx, `
-INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, created_principal)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET
-    pipeline        = excluded.pipeline,
-    status          = excluded.status,
-    trigger_source  = excluded.trigger_source,
-    git_branch      = excluded.git_branch,
-    git_sha         = excluded.git_sha,
-    args_json       = excluded.args_json,
-    plan_json       = excluded.plan_json,
-    started_at      = excluded.started_at,
-    finished_at     = excluded.finished_at,
-    parent_run_id   = excluded.parent_run_id,
-    declared_repo   = CASE WHEN runs.declared_repo = '' THEN excluded.declared_repo ELSE runs.declared_repo END,
-    repo_url        = CASE WHEN runs.repo_url = '' THEN excluded.repo_url ELSE runs.repo_url END,
-    github_owner    = CASE WHEN runs.github_owner = '' THEN excluded.github_owner ELSE runs.github_owner END,
-    github_repo     = CASE WHEN runs.github_repo = '' THEN excluded.github_repo ELSE runs.github_repo END,
-    retry_of        = excluded.retry_of,
-    retried_as      = excluded.retried_as,
-    retry_source    = excluded.retry_source,
-    replay_of_run_id  = excluded.replay_of_run_id,
-    replay_of_node_id = excluded.replay_of_node_id,
-    invocation_json   = excluded.invocation_json,
-    created_principal = CASE WHEN runs.created_principal = '' THEN excluded.created_principal ELSE runs.created_principal END
-WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`' AND runs.finished_at IS NULL`,
-		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
-		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
-		r.DeclaredRepo, r.RepoURL, r.GithubOwner, r.GithubRepo,
-		r.RetryOf, r.RetriedAs, r.RetrySource,
-		r.ReplayOfRunID, r.ReplayOfNodeID,
-		invocationJSON, creatingPrincipal(ctx),
-	)
-	if err != nil {
-		return err
-	}
-	// safety: a refused conflict guard is not an error, so without this a
-	// team told its create succeeded could not read the row it "created"
-	// and the other team would run the writer's plan under its own repo.
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		owner, found, err := runOwnerTx(ctx, tx, r.ID)
-		if err != nil {
-			return err
-		}
-		if found && owner != team {
-			return fmt.Errorf("%w: run %s", ErrIDOwnedByAnotherTeam, r.ID)
-		}
-	}
-	return nil
 }
 
 // ErrIDOwnedByAnotherTeam reports a write whose key already names a row of
@@ -1515,58 +1419,6 @@ type Trigger struct {
 // DefaultLeaseDuration is the configured runner claim lease TTL.
 const DefaultLeaseDuration = 3 * time.Minute
 
-func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
-	argsJSON, _ := json.Marshal(t.Args)
-	envJSON, _ := json.Marshal(t.TriggerEnv)
-	status := t.Status
-	if status == "" {
-		status = triggerStatusPending
-	}
-	var parent sql.NullString
-	if t.ParentRunID != "" {
-		parent = sql.NullString{String: t.ParentRunID, Valid: true}
-	}
-	fullInt := 0
-	if t.Full {
-		fullInt = 1
-	}
-	repoInheritedInt := 0
-	if t.RepoInherited {
-		repoInheritedInt = 1
-	}
-	_, err := tx.ExecContext(
-		ctx, `
-INSERT INTO triggers (team, id, pipeline, args_json, trigger_source, trigger_user,
-                      trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-		              repo, repo_url, github_owner, github_repo, github_repo_id, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-		              idempotency_key, webhook_delivery, webhook_replay_key, runner_pin)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		string(team), t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
-		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
-		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, t.GithubRepoID, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
-		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey, t.RunnerPin,
-	)
-	if err != nil && isUniqueViolation(err) {
-		if t.WebhookReplayKey != "" && strings.Contains(err.Error(), triggerWebhookReplayKeyColumn) {
-			return fmt.Errorf("%w: replay key %q", ErrDuplicateWebhookDelivery, t.WebhookReplayKey)
-		}
-		if t.IdempotencyKey != "" && strings.Contains(err.Error(), "idempotency_key") {
-			return fmt.Errorf("%w: idempotency key %q", ErrDuplicateIdempotencyKey, t.IdempotencyKey)
-		}
-	}
-	return err
-}
-
-// ErrDuplicateIdempotencyKey reports that a trigger insert lost the race
-// to another submission carrying the same idempotency key. It is not a
-// failure for the caller to report: the winning trigger is the answer,
-// and the caller resolves it with [Tenant.FindTriggerByIdempotencyKey].
-var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
-
-// ErrDuplicateWebhookDelivery reports a signed replay key already accepted
-// by a trigger in the same team. The caller returns that original run.
-var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
-
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
@@ -1782,8 +1634,6 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 // one trigger per digest of the signed material a webhook delivery
 // carried.
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
-
-const triggerWebhookReplayKeyColumn = "webhook_replay_key"
 
 // safety: two Postgres openers of an empty database would both create the
 // baseline, so each takes this lock before looking.

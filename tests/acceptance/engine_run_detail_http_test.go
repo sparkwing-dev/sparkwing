@@ -250,7 +250,7 @@ func TestEngineRunDetailRefusesUnrelatedAuthority(t *testing.T) {
 				status, code = 403, apierr.Forbidden
 			case "foreign team":
 				p.Capability.Team = "foreign"
-				status, code = 403, apierr.Forbidden
+				status, code = 404, apierr.NotFound
 			case "foreign run":
 				p.Capability.Binding.RunID, b.snapshot.Binding.Current.RunID = "foreign", "foreign"
 				status, code = 403, apierr.Forbidden

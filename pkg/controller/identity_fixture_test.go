@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"html"
@@ -95,6 +96,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	}
 	srv := controller.New(st, o.logger).WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
+		WithCloudDeployment(true).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
 		WithBillingCheckout(o.checkoutURL, o.checkoutToken).
@@ -102,10 +104,8 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	if o.configure != nil {
 		o.configure(srv)
 	}
-	controller.ConfigureConsoleFixture(srv)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin, srv: srv}
 }
 
@@ -126,13 +126,15 @@ func (f *identityFixture) call(method, path, auth string, body, out any) int {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Idempotency-Key", rand.Text())
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
-	if strings.HasPrefix(path, "/api/v1/operator/") && strings.HasPrefix(auth, "Session ") {
+	if strings.HasPrefix(auth, "Session ") {
 		if err := controller.ConsoleFixtureRequest(f.srv, req, strings.TrimPrefix(auth, "Session ")); err != nil {
 			f.t.Fatal(err)
 		}
+		req.Header.Set("Origin", req.URL.Scheme+"://"+req.URL.Host)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

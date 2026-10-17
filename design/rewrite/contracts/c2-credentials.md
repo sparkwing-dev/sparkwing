@@ -268,8 +268,9 @@ snapshot, checks licensing, absolute lifetime, direct ancestry and the current
 WithOperatorAccounts configuration, then projects CredentialConsole with only
 OperatorConsole. Other routes retain CredentialSession and member grants. The
 session hash, active team, account ID and lifetime are preserved for CSRF.
-BindNone has no tenant relation for console authority, so deployment targets do
-not become limited to the account's active team. Other bindings still use C1.
+Console deployment settings use the explicit operator_settings binding for
+cross-team quota targets. BindNone cannot select a foreign team. Other bindings
+still use C1.
 C1's authority-bearing console mutation transactions remain required. The
 controller's proof projection does not implement those committing rechecks.
 
@@ -974,11 +975,12 @@ opener. Missing or failed decryption refuses acceptance. The controller/store
 tests use the shared validator to refuse decrypted secret identifiers before
 insertion. Native host and generated-expansion evidence remain separate.
 
-C1's audited release method returns confirmed stored SSH/HTTPS credentials.
-GitHub App minting and extra-repository release still need an audited C1
-contract before their runtime can be restored. W2 retains no unaudited App
-mint path. The source Access consumer in W3 and client projection in W9 must
-consume the new credential response with their existing sealed source facts.
+C1's audited release methods return confirmed stored SSH/HTTPS credentials or
+a narrowly scoped GitHub App token. `SourceController.GitHub` supplies the existing
+client through C1's `GitHubSourceProvider` interface. The default server adapter
+uses its configured App client. The App token is returned as `kind: github_app`,
+`host: github.com`, and `secret`. W3's source Access and W9's client consume that
+credential with the checkout facts already present in the seal.
 
 ### Identity linking and local HTTP composition
 
@@ -2880,7 +2882,7 @@ receives Authorized. W1 supplies these methods on Operator. Recheck current
 ancestry, deployment grants or the configured direct-console-session gate inside
 the committing transaction. Never accept an actor from the body. Derive target
 teams from Authorized and resolve team existence inside quota transactions.
-WriteSignUpSettings takes SignUpSettingsChange, preserving omitted patch fields.
+WriteSignUpSettings takes store.SignUpSettingsChange, preserving omitted patch fields.
 It validates and commits all supplied mode/limit changes and their audit together,
 using the store clock. Quota writes preserve allowance and return the committed
 projection. Allowance writes preserve other quota fields. Any failed validation,
@@ -3335,3 +3337,85 @@ private reads, writes and credential selection for other nodes stay refused.
 
 Typed dependency outputs use the existing authorized output route rather than
 reading another job's private row in process-service composition.
+## Credential inventory and debug-view reconciliation
+
+Credential inventory, rotation and revocation revalidate a presented console
+proof with the same transaction-local direct-session and configured-operator
+predicate as issuance. A cached console projection never grants authority after
+configuration, ancestry or session liveness changes.
+
+Job detail returns `controllerwire.DebugJob`. Embedded controllers and tests
+supply its committed snapshot and attempts through the existing
+`EngineController.ReadRunStatus` callback. The default still reads
+`Tenant.ReadRunView`. The projection validates the selected run/team, nonempty
+job identities and current attempt fences before returning public fields.
+No route grants, credential classes or wire fields change.
+
+
+## Operator settings composition reconciliation
+
+Operator implements the five OperatorSettingsWriter methods. Each mutation resolves
+live ancestry and the exact deployment grant, or the current configured direct
+console proof, inside its transaction and rechecks before commit. Existing compute
+and storage setters share their transaction helpers with these authorized writers.
+SignUpSettingsChange lives in store, which owns its atomic patch and provenance.
+
+BindOperatorSettings (`operator_settings`) permits an unbound deployment or
+console credential to select a team only on the two operator quota settings
+routes. BindNone retains its ordinary team boundary. The shared route policy still requires the exact operator
+grant. Run and job selectors keep their bindings, and tenant credentials cannot
+select a foreign team. Relational authorization resolves console proof through the
+same transaction-local owner as issuance and settings writes.
+
+## GitHub completion identity
+
+Completion reads the sealed run request's verified App facts, never trigger
+environment strings. The numeric repository ID must agree with its repository
+key, execution SHA and ref. Delivery needs the installation still bound to the
+same tenant and unsuspended. It mints only the exact repository ID with
+checks:write or statuses:write. `githubapp.Client.RepositoryByID` resolves the
+current name under that restricted token, so a rename or reused old name cannot
+redirect a report. Installation ownership is rechecked after that lookup.
+Invalid committed App facts consume the failed revision once through C1's
+RejectRunEffect. Unavailable provider identity remains due with retry backoff.
+
+The shared completion worker calls the provider synchronously under the
+existing per-run report lock and acknowledges only a successful revision.
+Stale pending and running deliveries cannot regress the persisted phase.
+Timeout conclusions derive from the committed terminal event reason. Summary
+payloads contain aggregate outcomes and the authenticated dashboard link,
+without job identifiers, arguments or private errors. The old queue-only
+Server.Shutdown API and its callers are removed because no reporter goroutine
+remains to drain.
+
+
+## Trusted App origin integration
+
+The verified webhook adapter now calls C1 `AdmitGitHubAppRun` with the selected
+installation and consent generation. C1 supplies `VerifiedAppIntake` only to that
+admission transaction. `Server.ResolveIntake` keeps the normal settings, ceilings
+and retention resolution and uses those trusted delivery/source facts.
+
+The transaction-local `github_app` authority reference is an accountability tag.
+It is not an accepted credential class, token spelling, authentication route or
+new issuance operation. Customer intake cannot supply its proof. Revocation,
+installation moves, consent replacement and partial-delivery replay are checked
+again in the committing transaction. Source credential release remains a separate
+claim-authorized operation.
+
+
+### Integration amendment: App credential provenance
+
+`SourceReleaseRequest.GitHubApp` is trusted provider provenance, set only by
+C1's App release transaction after current installation, subscription and ID
+coverage checks. It exempts App tokens from machine-owner stored-credential
+consent under frozen §2.5. It supplies no grants and bypasses no ancestry,
+repository, audience, binding or liveness check. It is never accepted from a
+source request body. Stored-credential requests leave it false.
+
+The source route keeps the existing response contract. Legacy `token`,
+`repositories`, SHA and checkout-policy fields do not return. Missing source
+credentials use the shared `not_found` error with a remedy. Missing grants or
+bindings use `forbidden`. Runner roots remain claim-only. Current source bodies
+are rejected, including caller-selected extra repositories. No route, flag,
+setting, environment variable or compatibility surface is added.

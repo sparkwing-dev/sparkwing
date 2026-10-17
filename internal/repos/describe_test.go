@@ -93,10 +93,10 @@ func TestDescribeFiltersCredentialsAndMasksDiagnostics(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "https://alice:proxy-private-password@proxy.example")
 	bin, _ := fakeSDK(t, `printf '%s|%s|%s|%s\n' "$AWS_SECRET_ACCESS_KEY" "$GH_TOKEN" "$CUSTOM_API_TOKEN" "$HTTPS_PROXY" >&2; exit 3`)
 	_, err := Describe(t.Context(), pipelineentry.Binary(bin), t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "|||***") {
+	if err == nil || !strings.Contains(err.Error(), "|||https://***@proxy.example") {
 		t.Fatalf("describe did not filter and mask pipeline output: %v", err)
 	}
-	for _, value := range []string{"describe-aws-secret", "describe-gh-secret", "describe-custom-secret", "proxy-private-password"} {
+	for _, value := range []string{"describe-aws-secret", "describe-gh-secret", "describe-custom-secret", "proxy-private-password", "alice"} {
 		if strings.Contains(err.Error(), value) {
 			t.Errorf("credential reached diagnostics: %s", value)
 		}
@@ -180,7 +180,7 @@ func TestDescribeStopsAtTheDeadline(t *testing.T) {
 }
 
 func TestResolverDescribesOverTheProtocol(t *testing.T) {
-	bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"build"},{"name":""},{"name":"deploy"}]}}\n' >&4`)
+	bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"build","args":[]},{"name":"","args":[]},{"name":"deploy","args":[]}]}}\n' >&4`)
 	schemas, err := describePipelines(pipelineentry.Binary(bin), t.TempDir())
 	if err != nil {
 		t.Fatal(err)

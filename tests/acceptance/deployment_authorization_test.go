@@ -1,17 +1,21 @@
 package acceptance_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 var deploymentRequests = []struct {
@@ -40,7 +44,46 @@ func deploymentBoundary(grant capability.Grant) *credentialBoundary {
 	return b
 }
 
+type deploymentWrites struct {
+	seen []capability.Authorized
+}
+
+func (f *deploymentWrites) WriteComputeLimits(_ context.Context, a capability.Authorized, _ map[string]int64) (store.ComputeLimits, error) {
+	f.seen = append(f.seen, a)
+	return store.ComputeLimits{}, nil
+}
+
+func (f *deploymentWrites) WriteSignUpSettings(_ context.Context, a capability.Authorized, _ store.SignUpSettingsChange) error {
+	f.seen = append(f.seen, a)
+	return nil
+}
+
+func (f *deploymentWrites) WriteStorageSettings(_ context.Context, a capability.Authorized, _ store.StorageSettings) error {
+	f.seen = append(f.seen, a)
+	return nil
+}
+
+func (f *deploymentWrites) WriteStorageQuota(_ context.Context, a capability.Authorized, value store.StorageQuota) (store.StorageQuota, error) {
+	f.seen = append(f.seen, a)
+	value.Team = store.Team(a.Target.Team)
+	return value, nil
+}
+
+func (f *deploymentWrites) WriteStorageAllowance(_ context.Context, a capability.Authorized, value int64) (store.StorageQuota, error) {
+	f.seen = append(f.seen, a)
+	return store.StorageQuota{Team: store.Team(a.Target.Team), AllowanceBytes: value}, nil
+}
+
 func TestDeploymentHTTPAuthorization(t *testing.T) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.AsOperator().CreateTeam(t.Context(), "customer"); err != nil {
+		t.Fatal(err)
+	}
+
 	for _, route := range deploymentRequests {
 		for _, name := range []string{"anonymous", "wrong grant", "member", "service", "run-bound operator", "session", "revoked", "expired", "console without csrf"} {
 			if name == "console without csrf" && route.method == "GET" {
@@ -51,6 +94,7 @@ func TestDeploymentHTTPAuthorization(t *testing.T) {
 				p := &b.snapshot.Authorities[0].Principal
 				r := httptest.NewRequest(route.method, route.path, strings.NewReader(`{}`))
 				r.Header.Set("Authorization", "Bearer "+b.raw)
+				r.Header.Set("Content-Type", "application/json")
 				want := apierr.Forbidden
 				switch name {
 				case "anonymous":
@@ -80,9 +124,29 @@ func TestDeploymentHTTPAuthorization(t *testing.T) {
 					r.Header.Del("Authorization")
 					r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
 				}
-				s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
+				writes := &deploymentWrites{}
+				s := controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithOperatorSettingsWriter(writes)
+				if name == "service" && strings.HasSuffix(route.path, "/signups") && route.method == "PUT" {
+					r.Body = io.NopCloser(strings.NewReader(`{"mode":"open"}`))
+				}
 				w := httptest.NewRecorder()
 				s.Handler().ServeHTTP(w, r)
+				if name == "service" {
+					wantWrites := 0
+					if route.method == "PUT" {
+						wantWrites = 1
+					}
+					if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || len(writes.seen) != wantWrites {
+						t.Fatalf("service: HTTP %d %s writes=%d", w.Code, w.Body, len(writes.seen))
+					}
+					if wantWrites > 0 && (writes.seen[0].Principal.Capability.Subject.Kind != capability.SubjectService || len(writes.seen[0].Access.Grants) != 1 || writes.seen[0].Access.Grants[0] != route.grant) {
+						t.Fatal("settings transaction lost service authority")
+					}
+					return
+				}
+				if len(writes.seen) != 0 {
+					t.Fatal("refused authority reached a settings transaction")
+				}
 				var body apierr.Envelope
 				if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
@@ -100,10 +164,14 @@ func TestDeploymentHTTPRemovesLegacyRoutes(t *testing.T) {
 	for _, route := range [][2]string{
 		{"GET", "/api/v1/admin/usage-metrics"},
 		{"PUT", "/api/v1/teams/customer/repos/owner/repo/dispatch"},
-		{"GET", "/api/v1/compute-limits"}, {"PUT", "/api/v1/compute-limits"},
-		{"GET", "/api/v1/signups"}, {"PUT", "/api/v1/signups"},
-		{"GET", "/api/v1/object-store/breaker"}, {"POST", "/api/v1/object-store/reset-breaker"},
-		{"PUT", "/api/v1/storage/settings"}, {"PUT", "/api/v1/storage/quotas/customer"},
+		{"GET", "/api/v1/compute-limits"},
+		{"PUT", "/api/v1/compute-limits"},
+		{"GET", "/api/v1/signups"},
+		{"PUT", "/api/v1/signups"},
+		{"GET", "/api/v1/object-store/breaker"},
+		{"POST", "/api/v1/object-store/reset-breaker"},
+		{"PUT", "/api/v1/storage/settings"},
+		{"PUT", "/api/v1/storage/quotas/customer"},
 		{"PUT", "/api/v1/storage/quotas/customer/allowance"},
 	} {
 		if s.RegisteredRoute(httptest.NewRequest(route[0], route[1], nil)) {

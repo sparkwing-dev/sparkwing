@@ -41,6 +41,7 @@ func (f *githubConnectFake) LinkedGitHubSubject(_ context.Context, a capability.
 	f.seen = a
 	return f.subject, nil
 }
+
 func (f *githubConnectFake) ConsumeGitHubConnect(_ context.Context, a capability.Authorized, nonce string, expires time.Time) error {
 	f.consumes++
 	f.seen = a
@@ -53,6 +54,7 @@ func (f *githubConnectFake) ConsumeGitHubConnect(_ context.Context, a capability
 	f.consumed[nonce] = true
 	return nil
 }
+
 func (f *githubConnectFake) BindAuthorizedGitHubInstallation(_ context.Context, a capability.Authorized, row store.GitHubAppInstallation) (store.GitHubAppInstallation, error) {
 	f.binds++
 	f.seen, f.bound = a, row
@@ -318,10 +320,45 @@ func TestGitHubBrowserConnectionCommitRefusal(t *testing.T) {
 
 func TestGitHubBrowserConnectionRequiresTransaction(t *testing.T) {
 	f := newGitHubBrowserFixture(t)
-	f.s.resolveGitHubConnectWriter = nil
+	f.s.WithGitHubConnectWriter(func(context.Context, store.Team) (GitHubConnectWriter, error) { return nil, nil })
 	w := f.request("POST", "/github/app/connect", url.Values{"csrf_token": {f.csrf}}, nil, nil)
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "policy_missing") || f.providerCalls != 0 {
 		t.Fatalf("missing writer = %d %s", w.Code, w.Body)
+	}
+}
+
+func TestGitHubBrowserConnectionUsesStoreTransactions(t *testing.T) {
+	f := newGitHubBrowserFixture(t)
+	f.s.resolveGitHubConnectWriter = nil
+	w := f.request("POST", "/github/app/connect", url.Values{"csrf_token": {f.csrf}}, nil, nil)
+	if w.Code != http.StatusForbidden || f.providerCalls != 0 {
+		t.Fatalf("unlinked account = %d %s", w.Code, w.Body)
+	}
+	engineSQL(t, f.s.store, `INSERT INTO identities(provider,subject,account_id,created_at) VALUES ('github','42','member',1)`)
+	flow := f.start(t, false)
+	flow.InstallationID = 7
+	query := url.Values{"state": {flow.State}, "code": {"code"}}
+	w = f.request("GET", githubAppCallbackPath+"?"+query.Encode(), nil, &flow, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("callback = %d %s", w.Code, w.Body)
+	}
+	flow = githubBrowserFlowCookie(t, w)
+	w = f.request("GET", githubAppCompletePath, nil, &flow, nil)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("complete = %d %s", w.Code, w.Body)
+	}
+	tenant, err := f.s.store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := tenant.GitHubAppInstallation(t.Context(), 7)
+	if err != nil || bound.Team != "a" || bound.ConnectedBy != "member" || bound.GitHubUserID != 42 {
+		t.Fatalf("committed installation = %+v: %v", bound, err)
+	}
+	calls := f.providerCalls
+	w = f.request("GET", githubAppCompletePath, nil, &flow, nil)
+	if w.Code < 400 || f.providerCalls != calls || f.writer.reads != 0 || f.writer.consumes != 0 || f.writer.binds != 0 {
+		t.Fatalf("replay = %d %s, provider calls %d -> %d, fake %+v", w.Code, w.Body, calls, f.providerCalls, f.writer)
 	}
 }
 

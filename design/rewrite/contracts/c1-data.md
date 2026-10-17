@@ -2777,7 +2777,7 @@ schema version is added.
 | Create | `internal/runspec/contracts.go` |
 | Create | `pkg/storage/state_contract.go` |
 | Create | `pkg/store/claim_contract.go` |
-| Create | `pkg/store/completion_contract.go` |
+| Create | `pkg/store/completion.go` |
 | Create | `pkg/store/concurrency_contract.go` |
 | Create | `pkg/store/maintenance_contract.go` |
 | Create | `pkg/store/node_state.go` |
@@ -2979,7 +2979,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `ControllerRun` | Carries the team and global run ID of a visited controller-owned run. |
 | `Operator.ReconcileControllerRuns` | Resumes settlement and live capacity renewal in bounded pages under the elected controller fence. |
 
-### pkg/store/completion_contract.go
+### pkg/store/completion.go
 
 | Export | Purpose |
 |---|---|
@@ -3194,6 +3194,15 @@ trigger repository columns or issues one read per result.
 
 ## GitHub App administration transactions
 
+Tenant also implements C2 GitHubConnectWriter. Identity reads, nonce consumption
+and installation binding recheck the same live direct owner session, current
+team membership and exact account/team in a store-clock transaction. Binding
+rechecks the linked provider subject, derives the connector and preserves a
+foreign installation's ownership. Nonces commit once before provider redemption.
+Installation creation and update timestamps use nanoseconds. Raw installation
+binding and the unscoped connection nonce API are removed. Test fixtures use
+TestOnlySeedGitHubInstallation, which shares the binding statement.
+
 Tenant implements C2 GitHubAppWriter. All six mutations serialize on the team
 and recheck live authority, ancestry, membership and the selected team.admin
 access before commit. Subscription and automation writes lock and require the
@@ -3210,8 +3219,8 @@ The raw Tenant UnbindGitHubAppInstallation, PutGitHubAppTrigger,
 DeleteGitHubAppTrigger, PutGitHubAppAutomation, DeleteGitHubAppAutomation,
 SetGitHubAppExtraRepos and SetGitHubAppExtraRepoIDs are removed. Trusted provider
 uninstall still uses Operator and its existing transaction helper. Automatic
-schedule/App run admission still needs the committing origin contract described
-in the earlier intake handoff.
+schedule run admission still needs the committing origin contract described
+in the earlier intake handoff. App admission uses the trusted transaction below.
 
 
 ## Run-control transactions and sealed intake rate guards
@@ -3515,7 +3524,10 @@ registry. Multi-replica deployment needs a verified run-affinity or ephemeral
 relay contract before it can support local secrets. This amendment adds no
 relay or stored value. ResupplyHereSecrets accepts matching sealed names and values
 only from the run's live, fenced here owner. It restores a lost registry on its
-authenticated heartbeat. Existing values cannot be changed. Burst job claims and
+authenticated heartbeat. Existing values cannot be changed. After cancellation,
+resupply from the live, fenced here owner is a no-op so reporting renewal and
+drain can finish. It never restores values or permits a secret read. The owner
+and run locks serialize this check with cancellation. Burst job claims and
 secret reads independently restrict eligibility to the sealed here/personal/Cloud
 set. The here owner keeps planning authority. Publish-mode success never updates
 pipeline_success_pins.
@@ -3611,3 +3623,201 @@ retaining failure reasons, masked errors, exit codes and structured failures.
 Publication attempts always store local for executor kind, name and location.
 The caller-supplied executor name cannot alter that provenance. Billing awards
 index (team, requester_account) for account-scoped overflow lookup.
+
+## Profile completion delivery
+
+`Operator.DueProfileFolds(ctx, completionLease, limit)` selects the profile lane
+through the same leased completion reader as `DueRunEffects`. Other due effect
+types cannot starve this lane. It leaves their revisions unchanged.
+
+`Tenant.ApplyProfileFold(ctx, EffectDelivery, map[string]ProfileObservation)`
+returns whether it committed a new fold. It loads the pipeline from the same
+team's terminal run, locks the exact outbox row, applies the complete observation
+batch in stable job order and acknowledges that revision in one transaction.
+Invalid observations, write failures and lease expiry roll everything back.
+Already delivered revisions apply no observations. The lease is rechecked after
+the writes before commit. The profile observation transaction helper is shared
+with `RecordProfileObservation`; no second folding algorithm exists.
+
+The completion implementation lives in `pkg/store/completion.go`. Its former
+contract scaffold is removed. `Server.ReconcileRunEffects(ctx)` consumes the
+profile lane with current tenant handles, retrying failed reads or commits
+through the existing outbox. Corrupt metric reads fail the entire observation
+batch. The HTTP controller calls the reconciler from its existing maintenance loop.
+The elected local runtime calls the same reconciler through
+`localcontroller.Services.Complete func(context.Context) error` on its existing
+maintenance cadence, after readiness and while owning the store. The CLI binds
+that callback to the concrete server. Local completion failures join the
+existing worker shutdown path. GitHub delivery shares the same worker as described below. Metrics and parent
+notification delivery remain unfinished lanes of the same completion outbox.
+
+## GitHub completion delivery
+
+`Operator.DueGitHubChecks` selects the GitHub lane under the existing completion
+lease. `DesiredRunEffect.ObservedAt` is the store-clock observation used for
+retry deadlines. `Reason` is read from the exact run state event, including
+queue_timeout and timeout. The payload carries that committed reason. A late
+acknowledgement still advances only its delivered revision.
+
+`triggers.github_status_fallback` records the per-run commit-status fallback as
+0 or 1. `Tenant.GitHubCommitStatuses` reads it and
+`Tenant.UseGitHubCommitStatuses` commits it before any fallback status is sent.
+It is independent of the positive GitHub check ID and scoped to the same tenant
+and run. A controller replacement continues that mode even if the installation
+has since accepted the checks permission. `ReportGitHubCheck` keeps its existing
+report lock and ID recording transaction. Failed ID persistence is retried by
+adopting the check with this run's external ID.
+
+This adds one column to the final schema. Combined with burst attribution and
+overflow controls, the disposable baseline is version 6. Earlier stores are
+refused. There is no migration or backfill. Native QA needs a fresh version-6 store.
+
+`Server.ReconcileRunEffects` replaces `ReconcileProfileFolds` in both controller
+compositions. It delivers the profile and GitHub lanes under the same lease,
+with each lane receiving its own bounded batch. The in-memory GitHub queue,
+capacity drops, retry sleeps and shutdown drain are removed. Pending, running
+and terminal intents all come from run transitions. Metrics and parent
+notification remain due for their unfinished consumers.
+
+Invalid sealed App completion facts call `Tenant.RejectRunEffect`: the existing
+revision-fenced transaction increments attempts once and consumes only that
+revision. The controller logs that failure once. Transient provider and storage
+errors retain the existing retry backoff. No completion SQL dialect change is made.
+
+
+## Verified GitHub App admission integration
+
+`Tenant.AdmitGitHubAppRun(ctx, GitHubAppAdmission)` is a trusted webhook adapter,
+not a customer route. C2 calls it only after HMAC verification, event binding,
+repository coverage and event/subscription selection. It supplies the exact
+installation snapshot and either the selected subscription or automation grant.
+
+The transaction attaches that proof privately to `storeTx` and calls the existing
+`admitRun`. Its `github_app` authority reference identifies the installation and
+numeric repository for accountability. It is neither a capability nor a session.
+Only that transaction resolves it. Ordinary intake and authentication cannot
+manufacture it, and no bearer is issued for it. `VerifiedAppIntake` exposes the
+proof to the existing C4 settings policy through its transaction resolver.
+
+Every authority check locks and rechecks the installation's team, suspension and
+connection generation, the bound signed event, and the exact subscription or
+consent generation. Admission retains the shared number allocation, rate guards,
+source location, owner unit, first seal and completion intent. Failed validation
+or effects roll all of them back. A retry of the signed body and pipeline returns
+the existing run without spending another number or admission slot.
+
+`github_app_deliveries.admitted_team` is an empty string until the first successful
+admission of that signed body. The same transaction binds it to the tenant.
+Partial deliveries retain that binding even while another pipeline is shed.
+Moving the installation cannot admit the body into a second tenant. The event
+row expires with the existing replay retention. No schema migration is added.
+
+Replay keys use the signed body digest plus pipeline and are selected inside the
+tenant. The processed-body marker still prevents replays across installations
+that move teams. `GitHubCommitRuns` replaces `GitHubCommitTriggers` and reads
+sealed requests in one query by tenant, numeric repository and exact SHA.
+Re-request selection uses those facts rather than removed trigger environment
+columns. OIDC classification uses the event in the seal, so expiry of the replay
+ledger does not erase the identity of a retained or retried run.
+
+`CronSchedule.RepositoryKey` is a read projection of derived identity, separate
+from App installation authority. `ArmCronSchedule` ignores the input key and
+canonicalizes the source using the verified App IDs or `ScheduleRepositoryResolver`
+on its existing intake policy. The controller implements that resolver through
+its shared run-intake identity lookup. Manual GitHub schedules acquire numeric
+identity without acquiring App authority. Manual/App conflicts compare those keys.
+Unresolved GitHub URLs fail before arming, including former names that cannot be
+resolved. The old alias comparison and its GitHub token mint are removed.
+
+Data authority maps a full GitHub branch ref and the App's short default-branch
+name into the same storage ref namespace. Only the exact verified pushed branch
+can receive default-branch trust. Tags, mismatched SHAs and non-default events
+remain untrusted. Generated tests cover these cases through live data authority.
+
+The raw automation-specific and generic trigger insertion APIs are removed.
+Controller schedules reach the same sealed intake through the adapter below.
+
+
+## Integration amendment: audited GitHub source release
+
+`Tenant.ReleaseGitHubSourceCredential(ctx, Authorized, GitHubSourceProvider)`
+returns a `githubapp.Token` only after the existing source-release audit commits.
+The provider interface contains only `InstallationTokenByIDs`, matching the
+existing GitHub client and store test fake. A short transaction resolves and
+validates source authority and consent. Minting runs with no transaction open.
+A second short transaction repeats authority, enrollment, consent and fence
+checks, requires the same installation and approved ID set, and writes the audit.
+GitHub verifies coverage while minting that ID set. Source release never lists
+installation repositories, so the listing's 1,000-repository bound cannot turn
+an authorized source into not_found. Refused coverage returns conflict; other
+mint failures return unavailable. The store derives the repository, ref, SHA, installation and executor from
+its authority chain and request seal. Verified App requests use their recorded
+installation. Typed requests require a current team subscription for their
+numeric repository ID. A live installation belongs to the same team. Every
+requested ID must be covered, and only `contents: read` is minted.
+
+`github_app_extra_repos.repository_id` is a positive source repository ID in the
+disposable baseline schema. Owner writes resolve it from the installation along
+with each extra ID. Release and replacement use this source ID, so neither a
+source nor an extra can transfer its approval to a replacement at the old name.
+Display slugs remain reporting fields. No migration or name-based fallback is
+added. The unused `GitHubAppExtraRepoRefs` reader and legacy `SourceCredential`
+and `SourceSpec` response declarations are removed. Their numeric-ID assertions
+now run through the release transaction and generated rename tests.
+
+The App and stored-credential paths share persisted source authority, fences and
+the audit writer. App tokens do not require machine-owner opt-in. Stored team
+credentials still require verified Cloud enrollment or the machine owner's
+consent. Both paths check the claim profile's Accept rule and require the root
+machine in the same team, except for verified Cloud placement. The App path
+checks authority and lease again after provider I/O. Audit
+failure returns no token. An upstream token minted before a refused audit stays
+unreturned, within the existing external-token revocation residual.
+
+
+## Integration amendment: scheduled origin and final trigger-writer cut
+
+`Tenant.AdmitScheduledRun(ctx, CronSchedule, due)` is the trusted controller-tick
+adapter. The persisted schedule is durable consent for unattended execution.
+Its private transaction authority is `schedule:<id>`, not a capability or session.
+`ArmedBy` remains attribution for the arming operation. It never fabricates a
+live account or bearer. The admission subject is a service attributed to `ArmedBy`, so all of that
+principal's schedules share the per-principal admission counter. The sealed
+authority reference still identifies the exact schedule.
+
+The transaction locks and rechecks the tenant, repository key and location,
+pipeline, effective declaration, arming identity and timestamp, pause and declared
+state. Mutable cursor and fire history do not change execution consent. A pending
+team deletion refuses admission. App-managed schedules also require the current
+same-team, unsuspended installation and repository automation consent. Admission
+rechecks the origin after shared intake effects and number allocation, before
+commit. A changed or removed origin returns no run and rolls back all effects.
+
+`VerifiedScheduleIntake` supplies the persisted source through the existing
+`IntakePolicy` resolver. Ordinary requests cannot manufacture that transaction
+proof. Source identity does not establish a verified App event, default-branch
+trust or automatic pool grants. The shared C4 policy still resolves settings,
+ceilings and retention. Run-now may use a paused schedule, as before.
+
+The shared intake seals the current source, effective arguments and schedule
+origin, allocates the number, writes the owner queue and completion intents,
+and applies run-rate guards. Its exact due key uses the schedule ID and UTC
+RFC3339Nano instant. Repetition returns the original execution. A changed
+execution declaration under the same key conflicts. The sealed authority ID
+traces the run to its schedule instead of a legacy trigger environment column.
+
+`Tenant.CreateTrigger`, `CreateTriggerWithRun`, `FindTriggerByIdempotencyKey`,
+`createTriggerTx`, `Store.createRunTx`, both duplicate-trigger sentinel errors,
+and controller `triggerIntake`, `triggerRows`, `triggerRunInvocation`,
+`triggerReqGit` and `CronIdempotencyKey` are removed. The context-selected
+`WithCreatingPrincipal` API is removed from production. Shared intake derives
+actors from its committing authority. Reporting fixtures seed current-schema
+rows through `teststore`, without acquiring executable authority.
+
+
+Scheduled source release uses the sealed schedule authority ID without inventing
+App event facts. If there is no ordinary subscription, the source transaction
+selects the same tenant, numeric repository, pipeline and live schedule's
+repository automation consent. It locks the installation before locking and
+rechecking that relation. Contents-only minting, exact repository and extra IDs,
+claim fencing and committing audit remain the existing source-release path.

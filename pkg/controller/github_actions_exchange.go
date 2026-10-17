@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githuboidc"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -93,7 +94,7 @@ func (s *Server) actionsProvision(ctx context.Context, team store.Team, claims g
 	if err != nil {
 		return capability.ProvisionSpec{}, actionsExchangeRefusal()
 	}
-	expires := time.Now().UTC().Add(githubRunnerCredentialTTL)
+	expires := time.Now().UTC().Truncate(time.Millisecond).Add(limits.GitHubRunnerCredentialTTL)
 	registration := "github:" + strconv.FormatInt(claims.RepositoryID, 10) + ":" + strconv.FormatInt(claims.RepositoryOwnerID, 10)
 	return capability.ProvisionSpec{
 		Kind: capability.ProvisionActions, Team: string(team), RegistrationID: registration,
@@ -111,6 +112,9 @@ func (s *Server) issueActionsCredential(w http.ResponseWriter, r *http.Request, 
 		return missingEndpointPolicy()
 	}
 	issued, err := s.credentialIssuer.ProvisionCapability(r.Context(), proof.spec)
+	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {
+		return &apierr.Error{Code: apierr.RateLimited, Message: "the team already holds the maximum live GitHub Actions runner credentials"}
+	}
 	if err != nil {
 		return engineLookupError(err)
 	}

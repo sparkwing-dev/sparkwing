@@ -16,7 +16,7 @@ func TestXrepoReportsFlagErrors(t *testing.T) {
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			out, err := cmd.Output()
-			if err == nil || len(out) != 0 || !strings.Contains(stderr.String(), "unknown flag: --bogus") {
+			if err == nil || len(out) != 0 || !strings.Contains(stderr.String(), "unknown flag --bogus") {
 				t.Fatalf("flag error=%v stdout=%q stderr=%q", err, out, stderr.String())
 			}
 		})

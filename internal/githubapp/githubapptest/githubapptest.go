@@ -153,6 +153,7 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", g.appOnly(g.handleMint))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/installation", g.appOnly(g.handleRepoInstallation))
 	mux.HandleFunc("GET /repos/{owner}/{repo}", g.handleRepoMetadata)
+	mux.HandleFunc("GET /repositories/{id}", g.handleRepoByID)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", g.handleContents)
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
@@ -227,6 +228,28 @@ func (g *GitHub) FailInstallationRepositories(n int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.failInstallRepos = n
+}
+
+func (g *GitHub) handleRepoByID(w http.ResponseWriter, r *http.Request) {
+	tok := g.installationToken(r)
+	if tok == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Bad credentials"})
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, repo := range g.insts[tok.installation].Repos {
+		if repo.ID == id && tok.repos[strings.ToLower(repo.FullName)] {
+			writeJSON(w, http.StatusOK, map[string]any{"id": repo.ID, "full_name": repo.FullName, "owner": repo.Owner})
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 }
 
 func (g *GitHub) handleRepoMetadata(w http.ResponseWriter, r *http.Request) {

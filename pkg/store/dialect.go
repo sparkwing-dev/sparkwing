@@ -108,6 +108,8 @@ func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
 
 type storeTx struct {
 	finishedLocalSecrets []localSecretKey
+	appAdmission         *GitHubAppAdmission
+	scheduleAdmission    *scheduleAdmission
 	clockErr             error
 	ctx                  context.Context
 	deletingTeam         Team

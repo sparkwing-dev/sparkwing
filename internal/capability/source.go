@@ -26,6 +26,7 @@ type SourceReleaseRequest struct {
 	RepositoryKey    string
 	CredentialID     string
 	Host             string
+	GitHubApp        bool
 	SSH              bool
 	SSHHostConfirmed bool
 }
@@ -72,7 +73,7 @@ func AuthorizeSourceRelease(request SourceReleaseRequest, now time.Time) (Source
 		!slices.Contains(executor.AuthorizedRepositories, request.RepositoryKey) {
 		return SourceReleaseAudit{}, forbidden(apierr.ReasonRepositoryUnauthorized)
 	}
-	if executor.MachineID == "" || !executor.Cloud && (!executor.OwnerOptedIn || executor.OwnerAccountID == "") {
+	if executor.MachineID == "" || !request.GitHubApp && !executor.Cloud && (!executor.OwnerOptedIn || executor.OwnerAccountID == "") {
 		return SourceReleaseAudit{}, forbidden(apierr.ReasonOwnerOptInRequired)
 	}
 	if request.SSH && !request.SSHHostConfirmed {

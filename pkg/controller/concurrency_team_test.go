@@ -29,7 +29,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 		claimSeq := f.claimRun(f.runnerB, "run-by-b", "")
 
 		leaderB := "leader-b"
-		seedRun(t, f.teamB, leaderB, "build-b")
+		seedRun(t, f.st, f.teamB, leaderB, "build-b")
 		if err := teststore.SeedNode(f.st, ctx, store.Node{RunID: leaderB, NodeID: "lead", Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +85,7 @@ func (f *tenancyFixture) claimRun(auth, runID, extraRunJSON string) int64 {
 	t := f.t
 	t.Helper()
 	ctx := context.Background()
-	if err := f.teamB.CreateTrigger(ctx, store.Trigger{
+	if err := teststore.SeedTrigger(f.st, ctx, f.teamB.Team(), store.Trigger{
 		ID: runID, Pipeline: "build-b", TriggerSource: "api", CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

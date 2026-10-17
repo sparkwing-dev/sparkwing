@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -24,7 +23,6 @@ func TestConfigureGitHubApp(t *testing.T) {
 		t.Fatalf("nothing configured = %v, want the App left off", err)
 	}
 	srv := controller.New(nil, nil)
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	if err := configureGitHubApp(srv, full); err != nil {
 		t.Fatalf("complete configuration = %v", err)
 	}

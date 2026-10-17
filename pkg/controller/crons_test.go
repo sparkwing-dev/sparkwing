@@ -25,12 +25,12 @@ const cronTestRepoURL = "https://github.com/acme/widgets.git"
 const cronTestSHA = "0123456789abcdef0123456789abcdef01234567"
 
 type cronsFixture struct {
-	t      *testing.T
-	url    string
-	store  *store.Store
-	writer string
-	reader string
-	none   string
+	t       *testing.T
+	handler http.Handler
+	store   *store.Store
+	writer  string
+	reader  string
+	none    string
 }
 
 func newCronsFixture(t *testing.T) *cronsFixture {
@@ -50,13 +50,11 @@ func newCronsFixture(t *testing.T) *cronsFixture {
 	if err != nil {
 		t.Fatalf("CreateToken reader: %v", err)
 	}
-	none, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "stranger"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"triggers.read"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
+	none, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "stranger"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	t.Cleanup(srv.Close)
-	return &cronsFixture{t: t, url: srv.URL, store: st, writer: writer, reader: reader, none: none}
+	return &cronsFixture{t: t, handler: controller.New(st, nil).Handler(), store: st, writer: writer, reader: reader, none: none}
 }
 
 // safety: the request and its body's close live in one function, so no caller
@@ -71,18 +69,18 @@ func (f *cronsFixture) call(method, path, token string, body any, want int, out 
 		}
 		reader = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, f.url+path, reader)
+	req, err := http.NewRequestWithContext(context.Background(), method, path, reader)
 	if err != nil {
 		f.t.Fatalf("build request: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", method+":"+path)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		f.t.Fatalf("%s %s: %v", method, path, err)
-	}
+	w := httptest.NewRecorder()
+	f.handler.ServeHTTP(w, req)
+	resp := w.Result()
 	defer func() { _ = resp.Body.Close() }()
 	if want == 0 {
 		return resp.StatusCode
@@ -109,7 +107,7 @@ func (f *cronsFixture) status(method, path, token string, body any) int {
 func (f *cronsFixture) push(body map[string]any) map[string]any {
 	f.t.Helper()
 	var out map[string]any
-	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, &out)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, body, http.StatusOK, &out)
 	return out
 }
 
@@ -128,7 +126,7 @@ func cronPushBody() map[string]any {
 func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *testing.T) {
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
-	const path = "/api/v1/crons/acme%2Fwidgets%2Fnightly"
+	const path = "/api/v1/schedules/acme%2Fwidgets%2Fnightly"
 
 	var launched controllerwire.ScheduleRun
 	f.call(http.MethodPost, path+"/run", f.writer, nil, http.StatusOK, &launched)
@@ -166,32 +164,18 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	}
 }
 
-func TestControllerCrons_ASecondLaunchOfOneDueInstantReachesTheFirstRun(t *testing.T) {
+func TestControllerCrons_RunNowReplaysTheSameRequest(t *testing.T) {
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
-
-	ctx := context.Background()
-	svc := &crons.Service{Store: f.store, Schedules: teststore.ForTeam(t, f.store, store.DefaultTeam)}
-	sched, err := svc.Resolve(ctx, "acme/widgets/nightly")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	const path = "/api/v1/schedules/acme%2Fwidgets%2Fnightly/run"
+	var first, second controllerwire.ScheduleRun
+	f.call(http.MethodPost, path, f.writer, nil, http.StatusOK, &first)
+	f.call(http.MethodPost, path, f.writer, nil, http.StatusOK, &second)
+	if first.RunID == "" || first.Replayed || second.RunID != first.RunID || !second.Replayed {
+		t.Fatalf("schedule replay: first=%+v second=%+v", first, second)
 	}
-	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
-	key := controller.CronIdempotencyKey(sched.ID, due)
-	if key != sched.ID+"@2026-03-01T03:00:00Z" {
-		t.Fatalf("idempotency key = %q", key)
-	}
-	first := "run_first"
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
-		ID: first, Pipeline: sched.Pipeline, CreatedAt: time.Now(), IdempotencyKey: key,
-	}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-	found, err := teststore.ForTeam(t, f.store, store.DefaultTeam).FindTriggerByIdempotencyKey(ctx, sched.Pipeline, key)
-	if err != nil {
-		t.Fatalf("FindTriggerByIdempotencyKey: %v", err)
-	}
-	if found.ID != first {
-		t.Errorf("resolved run = %s, want %s", found.ID, first)
+	runs, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListRuns(t.Context(), store.RunFilter{Limit: 10})
+	if err != nil || len(runs) != 1 || runs[0].ID != first.RunID {
+		t.Fatalf("replayed request persisted %d runs: %v", len(runs), err)
 	}
 }

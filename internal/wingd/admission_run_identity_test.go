@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"testing/quick"
@@ -37,7 +38,10 @@ VALUES ('default','real-run',1,'example','running','{}','request',1,'gh:1','host
 	grant := mustGrantFrame(t, callAndRead(t, peer, func() {
 		d.handleAdmission(parent, &wingwire.AdmissionRequest{RunID: "real-run", SemaphoresOnly: true})
 	}))
+	ordinal := 0
 	if err := quick.Check(func(node string) bool {
+		node = fmt.Sprintf("%d/%s", ordinal, node)
+		ordinal++
 		host, peer := handlerConn(t, d)
 		message := callAndRead(t, peer, func() {
 			d.handleAdmission(host, &wingwire.AdmissionRequest{
@@ -47,6 +51,7 @@ VALUES ('default','real-run',1,'example','running','{}','request',1,'gh:1','host
 		})
 		held, admitted := message.(*wingwire.Grant)
 		if !admitted {
+			t.Logf("admission for node %q: %#v", node, message)
 			return false
 		}
 		d.reattachWait[host.leaseID] = struct{}{}
@@ -56,6 +61,9 @@ VALUES ('default','real-run',1,'example','running','{}','request',1,'gh:1','host
 			d.handleReattach(reconnected, &wingwire.Reattach{LeaseToken: held.LeaseToken, RunID: host.runID})
 		})
 		_, admitted = message.(*wingwire.Grant)
+		if !admitted {
+			t.Logf("reattach for node %q: %#v", node, message)
+		}
 		d.handleRelease(reconnected, &wingwire.Release{LeaseToken: held.LeaseToken})
 		return admitted
 	}, &quick.Config{MaxCount: 24}); err != nil {

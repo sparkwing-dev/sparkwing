@@ -449,6 +449,16 @@ func (c *Client) InstallationRepositories(ctx context.Context, installation int6
 	return out, fmt.Errorf("%w: installation %d", ErrTooManyRepositories, installation)
 }
 
+// RepositoryByID resolves the current name under an already restricted token.
+func (c *Client) RepositoryByID(ctx context.Context, token string, id int64) (Repository, error) {
+	if id <= 0 {
+		return Repository{}, errors.New("githubapp: repository id must be positive")
+	}
+	var repo Repository
+	err := c.getJSON(ctx, "/repositories/"+strconv.FormatInt(id, 10), "token "+token, &repo)
+	return repo, err
+}
+
 // ResolveCommit reads the commit selected by a branch or tag with a token
 // restricted to that repository.
 func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, repo, ref string) (string, error) {
@@ -531,26 +541,6 @@ func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owne
 	}
 	out.Found = true
 	return out, nil
-}
-
-// RepositoryIDThroughAlias reads a GitHub clone URL's owner/name with a token
-// restricted to currentRepo. GitHub may redirect an old repository name to
-// its current name; an unreadable answer is not proof that it is another repo.
-func (c *Client) RepositoryIDThroughAlias(ctx context.Context, installation int64, currentRepo, owner, name string) (int64, error) {
-	tok, err := c.InstallationToken(ctx, installation, []string{currentRepo}, map[string]string{"contents": "read"})
-	if err != nil {
-		return 0, err
-	}
-	var repo struct {
-		ID int64 `json:"id"`
-	}
-	if err := c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name), "Bearer "+tok.Token, &repo); err != nil {
-		return 0, err
-	}
-	if repo.ID <= 0 {
-		return 0, errors.New("githubapp: repository lookup returned no id")
-	}
-	return repo.ID, nil
 }
 
 // hack: GitHub answers a request for ungranted permissions with the same 422 as a

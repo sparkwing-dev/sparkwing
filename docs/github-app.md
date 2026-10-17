@@ -141,7 +141,7 @@ Each run a delivery creates spends one of the team's hourly runs (`--max-runs-pe
 
 The hourly run budget uses store-wide counters shared by controller replicas.
 
-`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source credential route, which serves a run that already exists, keeps GitHub's answer for up to a minute, and an `installation_repositories` delivery drops what it kept. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery answers 502 without withdrawing any schedule except those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
+`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source credential route mints directly against the approved repository IDs, so the listing limit does not limit source releases. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery answers 502 without withdrawing any schedule except those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
 
 ### Pull requests from forks
 
@@ -159,7 +159,15 @@ Source acquisition uses `POST /api/v1/runs/{run}/source-credential` under a
 live claim with `source.read` and the sealed source binding. Repository identity
 comes from intake. A typed repository name cannot grant access to an App's private
 repositories. App issuance checks the current installation and the authorized
-repository IDs, including any owner-approved extra repositories.
+repository IDs, including any owner-approved extra repositories. Both source
+and extra approvals follow numeric IDs through renames. The release audit
+commits before the token is returned in the response's `secret` field. GitHub
+minting runs outside database transactions. A second short transaction rechecks
+the installation, subscription or schedule consent, approved IDs and claim fence.
+GitHub refusing the approved ID set returns 409 and names that set. Other mint
+failures return 503. No token is returned after failed reauthorization or audit.
+App tokens require the executor's repository match and same-team machine
+identity, or verified Cloud placement, but do not require machine-owner opt-in.
 
 Stored team credentials require executor consent as well as repository permission.
 The store records each release before exposing a credential. The source owner
@@ -186,9 +194,9 @@ The check run is created `queued` when the run is dispatched, moves to `in_progr
 
 `details_url` links to the run in the dashboard (`--dashboard-url`) and `external_id` is the run id. A completed check run's summary gives only the outcome, duration, counts of nodes by outcome, and a link to the signed-in Sparkwing console. Node names, errors and logs stay on the run page. The controller records the check run's id with the run, so every later update edits the same check run. Each write holds a per-run lock in the state database, so two controllers sharing it during an upgrade create one check run between them. Before creating a check run the controller looks for one of its own on the commit whose `external_id` is the run id and adopts it, so a create whose record was lost is not repeated. An update behind the run's stored state (queued, then running, then finished) is dropped, so a check run or commit status never moves back and a finished one keeps its conclusion.
 
-The controller writes check runs in the background with an installation token restricted to the run's repository and `checks: write`. GitHub failing a write never fails or delays the run: a write GitHub answers with 429 or a 5xx, or does not answer, is tried up to four times with waits of 0.25, 0.5 and 1 seconds, each failure is logged at warn, and a write that still fails is dropped. The next state of the run is written as usual; when the check run was never created, that write creates it.
+The controller writes check runs in the background with an installation token restricted to the run's numeric repository ID and `checks: write`. It resolves the repository's current name before reporting, so renames keep working. Transient write failures are logged and remain pending for retry across controller restarts. Invalid committed App facts are recorded once and consume that revision without sending a check. GitHub failing a write never fails or delays the run. If the run advances before a report is delivered, the controller may report the newer phase directly. A valid terminal report stays pending until delivered.
 
-An installation whose owner has not yet accepted the Checks permission gets commit statuses instead: `pending`, then `success`, `failure` or `error`, under the context `sparkwing/<pipeline>`, with a token restricted to `statuses: write`. The controller logs this once per installation. A run that started on commit statuses finishes on them, and runs after the owner accepts get check runs.
+An installation whose owner has not yet accepted the Checks permission gets commit statuses instead: `pending`, then `success`, `failure` or `error`, under the context `sparkwing/<pipeline>`, with a token restricted to `statuses: write`. The controller logs this once per installation. A run that started on commit statuses finishes on them, including after a controller restart. New runs after the owner accepts get check runs.
 
 ### Re-running from GitHub
 

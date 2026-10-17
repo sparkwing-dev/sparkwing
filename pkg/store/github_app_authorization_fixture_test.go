@@ -29,7 +29,7 @@ func githubAppAuthorization(t *testing.T, s *store.Store, tenant *store.Tenant) 
 }
 
 func githubExtraIDs(extras []string) map[string]int64 {
-	ids := map[string]int64{}
+	ids := map[string]int64{"acme/app": 701}
 	for _, extra := range extras {
 		extra = strings.ToLower(extra)
 		if ids[extra] == 0 {

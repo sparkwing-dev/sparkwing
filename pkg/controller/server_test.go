@@ -1,436 +1,210 @@
 package controller_test
 
 import (
-	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func newTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup func()) {
-	t.Helper()
-	dir := t.TempDir()
-	s, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	ctrl := controller.New(s, nil).WithDashboard(controller.Dashboard{}).WithSecretsCipher(testCipher(t))
-	srv := httptest.NewServer(ctrl.Handler())
-	return srv.URL, s, func() {
-		srv.Close()
-		_ = s.Close()
-	}
-}
-
 func TestController_Health(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	resp := mustGet(t, base+"/api/v1/health")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("health status=%d want 200", resp.StatusCode)
-	}
+	f := newCronsFixture(t)
 	var body map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	f.call(http.MethodGet, "/api/v1/health", "", nil, http.StatusOK, &body)
 	if body["status"] != "ok" {
 		t.Errorf("status=%q want ok", body["status"])
 	}
 	objectStore, ok := body["object_store"].(map[string]any)
-	if !ok {
-		t.Fatalf("health carries no object_store summary: %#v", body["object_store"])
-	}
-	if objectStore["tripped"] != false {
-		t.Errorf("object_store.tripped=%v want false on a fresh controller", objectStore["tripped"])
+	if !ok || objectStore["tripped"] != false {
+		t.Fatalf("fresh controller object_store=%v", body["object_store"])
 	}
 }
 
 func TestController_HealthHidesDatabaseErrors(t *testing.T) {
-	base, st, cleanup := newTestServer(t)
-	defer cleanup()
-	if err := st.Close(); err != nil {
+	f := newCronsFixture(t)
+	if err := f.store.Close(); err != nil {
 		t.Fatal(err)
-	}
-
-	resp := mustGet(t, base+"/api/v1/health")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("health status=%d, want 503", resp.StatusCode)
 	}
 	var body struct {
 		Status   string   `json:"status"`
 		Problems []string `json:"problems"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
+	f.call(http.MethodGet, "/api/v1/health", "", nil, http.StatusServiceUnavailable, &body)
 	if body.Status != "degraded" || len(body.Problems) != 1 || body.Problems[0] != "db: unavailable" {
 		t.Fatalf("public health exposed database failure details: %+v", body)
 	}
 }
 
 func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
-	base, st, cleanup := newTestServer(t)
-	defer cleanup()
+	f := newCronsFixture(t)
 	for i := range 20 {
-		if err := teststore.SeedRun(st, t.Context(), store.DefaultTeam, store.Run{
+		if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{
 			ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	resp := mustGet(t, base+"/api/v1/health")
-	defer resp.Body.Close()
 	var body struct {
 		Status           string   `json:"status"`
 		Problems         []string `json:"problems"`
 		RecentRunWarning string   `json:"recent_run_warning"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
+	f.call(http.MethodGet, "/api/v1/health", "", nil, http.StatusOK, &body)
 	if body.Status != "ok" || len(body.Problems) != 0 || body.RecentRunWarning != "" {
 		t.Fatalf("public health exposed workload history: %+v", body)
 	}
 }
 
 func TestController_ConcurrencyStateOmitsQueueArrivedAtForImmediateHolder(t *testing.T) {
-	base, st, cleanup := newTestServer(t)
-	defer cleanup()
-
-	seedControllerCapacityHolder(t, st, store.DefaultTeam, "state-immediate-slot", "holder", "holder", "n", 0)
-
-	resp := mustGet(t, base+"/api/v1/concurrency/state-immediate-slot/state")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("state status=%d want 200", resp.StatusCode)
-	}
-	var body struct {
-		Holders []map[string]json.RawMessage `json:"holders"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode state: %v", err)
-	}
-	if len(body.Holders) != 1 {
-		t.Fatalf("holders = %d, want 1", len(body.Holders))
-	}
-	if _, ok := body.Holders[0]["queue_arrived_at"]; ok {
-		t.Fatalf("immediate holder response includes queue_arrived_at: %+v", body.Holders[0])
-	}
+	checkQueueArrival(t, 0)
 }
 
 func TestController_ConcurrencyStateIncludesQueueArrivedAtForPromotedHolder(t *testing.T) {
-	base, st, cleanup := newTestServer(t)
-	defer cleanup()
+	checkQueueArrival(t, time.Now().UnixNano())
+}
 
-	seedControllerCapacityHolder(t, st, store.DefaultTeam, "state-promoted-slot", "waiter", "waiter", "n", time.Now().UnixNano())
+type queueGroupReaderFake struct {
+	controller.ConcurrencyStore
+	tenant *store.Tenant
+	seen   capability.Authorized
+	calls  int
+}
 
-	resp := mustGet(t, base+"/api/v1/concurrency/state-promoted-slot/state")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("state status=%d want 200", resp.StatusCode)
+func (f *queueGroupReaderFake) Team() store.Team { return f.tenant.Team() }
+
+func (f *queueGroupReaderFake) ReadAuthorizedGroup(ctx context.Context, a capability.Authorized, key string) (*store.ConcurrencyState, error) {
+	f.seen = a
+	f.calls++
+	return f.tenant.GetConcurrencyState(ctx, key)
+}
+
+func checkQueueArrival(t *testing.T, arrival int64) {
+	t.Helper()
+	f := newCronsFixture(t)
+	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "ci", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
 	}
+	if err := teststore.SeedNode(f.store, t.Context(), store.Node{RunID: "run", NodeID: "job", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	seedControllerCapacityHolder(t, f.store, store.DefaultTeam, "slot", "holder", "run", "job", arrival)
 	var body struct {
 		Holders []map[string]json.RawMessage `json:"holders"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode state: %v", err)
+	reader := &queueGroupReaderFake{tenant: teststore.ForTeam(t, f.store, store.DefaultTeam)}
+	f.handler = controller.New(f.store, nil).WithConcurrencyStore(func(_ context.Context, team store.Team) (controller.ConcurrencyStore, error) {
+		if team != reader.tenant.Team() {
+			t.Fatalf("resolved foreign tenant %s", team)
+		}
+		return reader, nil
+	}).Handler()
+	f.call(http.MethodGet, "/api/v1/queue/groups/slot", f.reader, nil, http.StatusOK, &body)
+	if reader.calls != 1 || reader.seen.Target.Team != string(store.DefaultTeam) || reader.seen.Target.SlotKey != "slot" || reader.seen.Principal.Capability.Subject.ID != "viewer" {
+		t.Fatalf("queue reader calls=%d authority=%+v", reader.calls, reader.seen)
 	}
 	if len(body.Holders) != 1 {
-		t.Fatalf("holders = %d, want 1", len(body.Holders))
+		t.Fatalf("holders=%d want 1", len(body.Holders))
 	}
-	if _, ok := body.Holders[0]["queue_arrived_at"]; !ok {
-		t.Fatalf("promoted holder response omits queue_arrived_at: %+v", body.Holders[0])
+	got, present := body.Holders[0]["queue_arrived_at"]
+	if present != (arrival != 0) {
+		t.Fatalf("queue_arrived_at=%s present=%v, want %v", got, present, arrival != 0)
 	}
-}
-
-func TestController_RunLifecycle(t *testing.T) {
-	base, st, cleanup := newTestServer(t)
-	defer cleanup()
-
-	run := store.Run{
-		ID:        "run-ctrl-1",
-		Pipeline:  "test",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	mustPostJSON(t, base+"/api/v1/runs", run, http.StatusCreated)
-
-	snapshot := []byte(`{"nodes":[{"id":"a"},{"id":"b"}]}`)
-	mustPostRaw(t, base+"/api/v1/runs/run-ctrl-1/plan", snapshot, http.StatusNoContent)
-
-	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/nodes",
-		store.Node{NodeID: "a", Status: "pending"},
-		http.StatusCreated)
-	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/nodes",
-		store.Node{NodeID: "b", Status: "pending", Deps: []string{"a"}},
-		http.StatusCreated)
-
-	mustPost(t, base+"/api/v1/runs/run-ctrl-1/nodes/a/start", http.StatusNoContent)
-	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/events",
-		map[string]any{"node_id": "a", "kind": "node_started"},
-		http.StatusOK)
-	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/nodes/a/finish",
-		map[string]any{"outcome": "success"},
-		http.StatusNoContent)
-
-	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/finish",
-		map[string]any{"status": "success"},
-		http.StatusNoContent)
-
-	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(context.Background(), "run-ctrl-1")
-	if err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-	if got.Status != "success" {
-		t.Errorf("run status=%q want success", got.Status)
-	}
-	if !bytes.Equal(got.PlanSnapshot, snapshot) {
-		t.Errorf("plan snapshot mismatch:\n got %s\nwant %s", got.PlanSnapshot, snapshot)
-	}
-
-	nodes, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodes(context.Background(), "run-ctrl-1")
-	if err != nil {
-		t.Fatalf("ListNodes: %v", err)
-	}
-	if len(nodes) != 2 {
-		t.Fatalf("nodes=%d want 2", len(nodes))
-	}
-	var bNode *store.Node
-	for _, n := range nodes {
-		if n.NodeID == "b" {
-			bNode = n
-			break
+	if present {
+		var decoded time.Time
+		if err := json.Unmarshal(got, &decoded); err != nil || !decoded.Equal(time.Unix(0, arrival)) {
+			t.Fatalf("queue_arrived_at=%s want %v: %v", got, time.Unix(0, arrival), err)
 		}
 	}
-	if bNode == nil {
-		t.Fatalf("node b not found")
+}
+
+func TestController_GetRunIncludesJobs(t *testing.T) {
+	f := newCronsFixture(t)
+	seedReportRun(t, f, "run-incl", []string{"a", "b"})
+	var first controllerwire.RunDetail
+	f.call(http.MethodGet, "/api/v1/runs/run-incl", f.reader, nil, http.StatusOK, &first)
+	if first.ID != "run-incl" || first.Status != "running" || first.Team != string(store.DefaultTeam) || len(first.Jobs) != 2 || first.Jobs[0].ID != "a" || first.Jobs[1].ID != "b" {
+		t.Fatalf("run detail=%+v", first)
 	}
-	if len(bNode.Deps) != 1 || bNode.Deps[0] != "a" {
-		t.Errorf("node b deps=%v want [a]", bNode.Deps)
+	var second controllerwire.RunDetail
+	f.call(http.MethodGet, "/api/v1/runs/run-incl?include=nodes,secret_values", f.reader, nil, http.StatusOK, &second)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("legacy query changed public status: %+v -> %+v", first, second)
+	}
+	var raw map[string]json.RawMessage
+	f.call(http.MethodGet, "/api/v1/runs/run-incl", f.reader, nil, http.StatusOK, &raw)
+	for _, retired := range []string{"run", "nodes", "plan_snapshot"} {
+		if _, exists := raw[retired]; exists {
+			t.Fatalf("public status contains %q: %s", retired, raw[retired])
+		}
 	}
 }
 
-func TestController_GetRun_IncludeNodes(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	mustPostJSON(t, base+"/api/v1/runs", store.Run{
-		ID: "run-incl", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	}, http.StatusCreated)
-	mustPostJSON(t, base+"/api/v1/runs/run-incl/nodes",
-		store.Node{NodeID: "a", Status: "pending"}, http.StatusCreated)
-	mustPostJSON(t, base+"/api/v1/runs/run-incl/nodes",
-		store.Node{NodeID: "b", Status: "pending", Deps: []string{"a"}},
-		http.StatusCreated)
-
-	resp := mustGet(t, base+"/api/v1/runs/run-incl")
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		t.Fatalf("default get status=%d", resp.StatusCode)
+func TestController_GetRunBeforePlanning(t *testing.T) {
+	f := newCronsFixture(t)
+	seedReportRun(t, f, "run-bare", []string{"a"})
+	var detail controllerwire.RunDetail
+	f.call(http.MethodGet, "/api/v1/runs/run-bare", f.reader, nil, http.StatusOK, &detail)
+	if detail.Engine != nil || len(detail.Jobs) != 1 || detail.Jobs[0].ID != "a" || detail.Attempts == nil || detail.Logs == nil || detail.Notices == nil {
+		t.Fatalf("unplanned detail=%+v", detail)
 	}
-	var raw map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		resp.Body.Close()
-		t.Fatalf("decode default: %v", err)
+	var raw struct {
+		Jobs []map[string]json.RawMessage `json:"jobs"`
 	}
-	resp.Body.Close()
-	if raw["id"] != "run-incl" {
-		t.Errorf("default shape: id=%v want run-incl (run not at top level)", raw["id"])
-	}
-	if _, hasRun := raw["run"]; hasRun {
-		t.Errorf("default shape leaked the {run:...} wrapper: %v", raw)
-	}
-
-	resp = mustGet(t, base+"/api/v1/runs/run-incl?include=nodes")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("include get status=%d", resp.StatusCode)
-	}
-	var wrapped map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
-		t.Fatalf("decode wrapped: %v", err)
-	}
-	run, ok := wrapped["run"].(map[string]any)
-	if !ok {
-		t.Fatalf("wrapped.run missing or wrong type: %v", wrapped)
-	}
-	if run["id"] != "run-incl" {
-		t.Errorf("wrapped.run.id=%v want run-incl", run["id"])
-	}
-	nodes, ok := wrapped["nodes"].([]any)
-	if !ok {
-		t.Fatalf("wrapped.nodes missing or wrong type: %v", wrapped)
-	}
-	if len(nodes) != 2 {
-		t.Errorf("wrapped.nodes len=%d want 2", len(nodes))
+	f.call(http.MethodGet, "/api/v1/runs/run-bare", f.reader, nil, http.StatusOK, &raw)
+	for _, job := range raw.Jobs {
+		if _, exists := job["decorations"]; exists {
+			t.Fatal("unplanned job exposes raw decorations")
+		}
 	}
 }
 
-func TestController_GetRun_IncludeNodes_Decorations(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	mustPostJSON(t, base+"/api/v1/runs", store.Run{
-		ID: "run-deco", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	}, http.StatusCreated)
-
-	snapshot := []byte(`{
-  "nodes": [
-    {"id": "build", "groups": ["ci"],
-     "modifiers": {"retry": 2, "timeout_ms": 30000},
-     "work": {"steps": [{"id": "compile"}]}},
-    {"id": "release", "approval": {"message": "ship?"}},
-    {"id": "rollback", "on_failure_of": "release"},
-    {"id": "expand", "dynamic": true},
-    {"id": "plain"}
-  ]
-}`)
-	mustPostRaw(t, base+"/api/v1/runs/run-deco/plan", snapshot, http.StatusNoContent)
-
-	for _, id := range []string{"build", "release", "rollback", "expand", "plain"} {
-		mustPostJSON(t, base+"/api/v1/runs/run-deco/nodes",
-			store.Node{NodeID: id, Status: "pending"}, http.StatusCreated)
-	}
-
-	resp := mustGet(t, base+"/api/v1/runs/run-deco?include=nodes")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("include get status=%d", resp.StatusCode)
-	}
-	var wrapped struct {
-		Run   map[string]any   `json:"run"`
-		Nodes []map[string]any `json:"nodes"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	byID := map[string]map[string]any{}
-	for _, n := range wrapped.Nodes {
-		byID[n["id"].(string)] = n
-	}
-
-	build := byID["build"]
-	if build == nil {
-		t.Fatal("missing build node")
-	}
-	bd, ok := build["decorations"].(map[string]any)
-	if !ok {
-		t.Fatalf("build.decorations missing: %v", build)
-	}
-	groups, _ := bd["groups"].([]any)
-	if len(groups) != 1 || groups[0] != "ci" {
-		t.Errorf("build.decorations.groups=%v want [ci]", bd["groups"])
-	}
-	mods, _ := bd["modifiers"].(map[string]any)
-	if mods == nil || mods["retry"].(float64) != 2 || mods["timeout_ms"].(float64) != 30000 {
-		t.Errorf("build.decorations.modifiers=%v want retry=2 timeout_ms=30000", bd["modifiers"])
-	}
-	if _, ok := bd["work"].(map[string]any); !ok {
-		t.Errorf("build.decorations.work missing: %v", bd)
-	}
-
-	if rd, ok := byID["release"]["decorations"].(map[string]any); !ok || rd["approval"] != true {
-		t.Errorf("release.decorations.approval=%v want true (entry %v)", rd["approval"], byID["release"])
-	}
-
-	if rd, ok := byID["rollback"]["decorations"].(map[string]any); !ok || rd["on_failure_of"] != "release" {
-		t.Errorf("rollback.decorations.on_failure_of=%v want release", rd["on_failure_of"])
-	}
-
-	if rd, ok := byID["expand"]["decorations"].(map[string]any); !ok || rd["dynamic"] != true {
-		t.Errorf("expand.decorations.dynamic=%v want true", rd["dynamic"])
-	}
-
-	if _, ok := byID["plain"]["decorations"]; ok {
-		t.Errorf("plain node leaked decorations key: %v", byID["plain"])
-	}
-}
-
-func TestController_GetRun_IncludeNodes_NoSnapshot(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	mustPostJSON(t, base+"/api/v1/runs", store.Run{
-		ID: "run-bare", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	}, http.StatusCreated)
-	mustPostJSON(t, base+"/api/v1/runs/run-bare/nodes",
-		store.Node{NodeID: "a", Status: "pending"}, http.StatusCreated)
-
-	resp := mustGet(t, base+"/api/v1/runs/run-bare?include=nodes")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("include get status=%d", resp.StatusCode)
-	}
-	var wrapped struct {
-		Nodes []map[string]any `json:"nodes"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(wrapped.Nodes) != 1 {
-		t.Fatalf("nodes=%d want 1", len(wrapped.Nodes))
-	}
-	if _, ok := wrapped.Nodes[0]["decorations"]; ok {
-		t.Errorf("no-snapshot run leaked decorations key: %v", wrapped.Nodes[0])
-	}
-	if wrapped.Nodes[0]["id"] != "a" {
-		t.Errorf("id=%v want a", wrapped.Nodes[0]["id"])
-	}
-}
-
-func TestController_ListPausesAlias(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	mustPostJSON(t, base+"/api/v1/runs", store.Run{
-		ID: "run-pause", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	}, http.StatusCreated)
-
-	resp := mustGet(t, base+"/api/v1/runs/run-pause/paused")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("paused alias status=%d", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	resp = mustGet(t, base+"/api/v1/runs/run-pause/debug-pauses")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("debug-pauses status=%d", resp.StatusCode)
-	}
-	canonicalBody, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if !bytes.Equal(body, canonicalBody) {
-		t.Errorf("alias body diverges from canonical:\n  alias:    %s\n  canonical: %s",
-			body, canonicalBody)
-	}
-}
-
-func TestController_ValidationErrors(t *testing.T) {
-	base, st, cleanup := newTestServer(t)
-	defer cleanup()
-
-	mustPostJSON(t, base+"/api/v1/runs",
-		map[string]any{"pipeline": "only-pipeline"},
-		http.StatusBadRequest)
-
-	if err := teststore.SeedRun(st, context.Background(), store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+func seedReportRun(t *testing.T, f *cronsFixture, id string, jobs []string) {
+	t.Helper()
+	if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: id, Pipeline: "ci", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	mustPostJSON(t, base+"/api/v1/runs/run-1/finish",
-		map[string]any{},
-		http.StatusBadRequest)
+	for _, job := range jobs {
+		if err := teststore.SeedNode(f.store, t.Context(), store.Node{RunID: id, NodeID: job, Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestControllerPublicHealthHidesWorkloadProperty(t *testing.T) {
+	property := func(value []byte, failed bool) bool {
+		f := newCronsFixture(t)
+		secret := "private-workload-" + hex.EncodeToString(value)
+		status := "running"
+		if failed {
+			status = "failed"
+		}
+		if err := teststore.SeedRun(f.store, t.Context(), store.DefaultTeam, store.Run{ID: "private-run", Pipeline: secret, Status: status, Error: secret, Args: map[string]string{"secret": secret}, StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, r)
+		var body struct {
+			Status string `json:"status"`
+		}
+		return w.Code == http.StatusOK && json.Unmarshal(w.Body.Bytes(), &body) == nil && body.Status == "ok" && !strings.Contains(w.Body.String(), secret) && !strings.Contains(w.Body.String(), "private-run")
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 20}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func mustGet(t *testing.T, url string) *http.Response {
@@ -441,49 +215,6 @@ func mustGet(t *testing.T, url string) *http.Response {
 	}
 	t.Cleanup(func() { resp.Body.Close() })
 	return resp
-}
-
-func mustPost(t *testing.T, url string, wantStatus int) {
-	t.Helper()
-	resp, err := http.Post(url, "application/json", nil)
-	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != wantStatus {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("POST %s: status=%d want %d (body: %s)", url, resp.StatusCode, wantStatus, body)
-	}
-}
-
-func mustPostJSON(t *testing.T, url string, body any, wantStatus int) {
-	t.Helper()
-	buf, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(buf))
-	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != wantStatus {
-		rbody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("POST %s: status=%d want %d (body: %s)", url, resp.StatusCode, wantStatus, rbody)
-	}
-}
-
-func mustPostRaw(t *testing.T, url string, body []byte, wantStatus int) {
-	t.Helper()
-	resp, err := http.Post(url, "application/octet-stream", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != wantStatus {
-		rbody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("POST %s: status=%d want %d (body: %s)", url, resp.StatusCode, wantStatus, rbody)
-	}
 }
 
 func seedControllerCapacityHolder(t *testing.T, s *store.Store, team store.Team, key, holder, run, node string, queueArrival int64) {

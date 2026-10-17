@@ -25,11 +25,14 @@ func setComputeLimit(t *testing.T, f creditsFixture, name string, value int64) {
 
 func seedRunNodeFor(t *testing.T, f creditsFixture, principal, runID, nodeID string) {
 	t.Helper()
-	ctx := store.WithCreatingPrincipal(context.Background(), principal)
+	ctx := context.Background()
 	if err := teststore.SeedRun(f.store, ctx, store.DefaultTeam, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
+	}
+	if _, err := f.store.DB().ExecContext(ctx, `UPDATE runs SET created_principal=? WHERE team=? AND id=?`, principal, store.DefaultTeam, runID); err != nil {
+		t.Fatal(err)
 	}
 	if err := teststore.SeedNode(f.store, ctx, store.Node{
 		RunID: runID, NodeID: nodeID, Status: "pending",
@@ -246,10 +249,10 @@ func TestComputeLimits_CronBelowTheMinimumIntervalIsRefused(t *testing.T) {
 			{"pipeline": "sweep", "cron": "*/5 * * * *"},
 		},
 	}
-	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusTooManyRequests, nil)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, body, http.StatusTooManyRequests, nil)
 
 	body["schedules"] = []map[string]any{{"pipeline": "sweep", "cron": "0 * * * *"}}
-	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, nil)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, body, http.StatusOK, nil)
 }
 
 // safety: a trigger creates the run it names, so the hourly guard has to see
@@ -303,7 +306,7 @@ func TestComputeLimits_CronLaunchesCarryTheArmingPrincipal(t *testing.T) {
 			{"pipeline": "nightly", "cron": "0 3 * * *"},
 		},
 	}
-	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, nil)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, body, http.StatusOK, nil)
 
 	rows, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil {
@@ -333,7 +336,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 			{"pipeline": "nightly", "cron": "0 3 * * *"},
 		},
 	}
-	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, nil)
+	f.call(http.MethodPut, "/api/v1/schedules/repos", f.writer, body, http.StatusOK, nil)
 	rows, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("list schedules = %d rows, %v", len(rows), err)
@@ -351,7 +354,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 		Code  string `json:"code"`
 		Limit string `json:"limit"`
 	}
-	f.call(http.MethodPost, "/api/v1/crons/"+rows[0].ID+"/run", f.writer, nil,
+	f.call(http.MethodPost, "/api/v1/schedules/"+rows[0].ID+"/run", f.writer, nil,
 		http.StatusTooManyRequests, &refusal)
 	if refusal.Code != controller.ComputeLimitRefusedCode ||
 		refusal.Limit != store.ComputeLimitGlobalRunsPerHour {

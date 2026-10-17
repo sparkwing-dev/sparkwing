@@ -17,7 +17,7 @@ func githubMutationFixture(t *testing.T) (*Store, *Tenant, capability.Authorized
 	tenant := &Tenant{s: s, team: "a"}
 	now := time.Unix(1800000000, 123456789).UTC()
 	s.clock = func() time.Time { return now }
-	if _, err := tenant.BindGitHubAppInstallation(t.Context(), GitHubAppInstallation{InstallationID: 7, AccountID: 1, AccountLogin: "acme", AccountType: "Organization"}, now); err != nil {
+	if _, err := tenant.TestOnlySeedGitHubInstallation(t.Context(), GitHubAppInstallation{InstallationID: 7, AccountID: 1, AccountLogin: "acme", AccountType: "Organization"}, now); err != nil {
 		t.Fatal(err)
 	}
 	a := teamAuthorization(t, s, actor, "a", "PUT", "/api/v1/team/github-app/triggers")
@@ -64,7 +64,7 @@ func TestGitHubAppMutationsRequireCurrentAdministrationProperty(t *testing.T) {
 		before := purgeRows(t, s, "a", true)
 		out, put := tenant.PutAuthorizedGitHubTrigger(t.Context(), a, row)
 		auto := tenant.PutAuthorizedGitHubAutomation(t.Context(), a, GitHubAppAutomation{RepositoryID: 701, Repository: "acme/app", InstallationID: 7})
-		extras, extra := tenant.SetAuthorizedGitHubExtraRepos(t.Context(), a, "acme/app", []string{"acme/lib"}, map[string]int64{"acme/lib": 42})
+		extras, extra := tenant.SetAuthorizedGitHubExtraRepos(t.Context(), a, "acme/app", []string{"acme/lib"}, map[string]int64{"acme/app": 701, "acme/lib": 42})
 		del := tenant.DeleteAuthorizedGitHubTrigger(t.Context(), a, 701, "ci")
 		revoke := tenant.DeleteAuthorizedGitHubAutomation(t.Context(), a, 701)
 		unbind := tenant.UnbindAuthorizedGitHubInstallation(t.Context(), a, 7)
@@ -111,7 +111,7 @@ func TestGitHubAppMutationsCommitActorTimeAndConsentGeneration(t *testing.T) {
 	if err := s.inTx(ctx, func(tx *storeTx) error { return tenant.checkGitHubAppAutomationTx(ctx, tx, first) }); !errors.Is(err, ErrGitHubAppAutomationRevoked) {
 		t.Fatalf("old consent=%v", err)
 	}
-	list, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "Acme/App", []string{"acme/lib"}, map[string]int64{"Acme/Lib": 42})
+	list, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "Acme/App", []string{"acme/lib"}, map[string]int64{"acme/app": 701, "Acme/Lib": 42})
 	if err != nil || !reflect.DeepEqual(list, []string{"acme/lib"}) {
 		t.Fatalf("extras=%v: %v", list, err)
 	}
@@ -126,7 +126,7 @@ func TestGitHubAppMutationsCommitActorTimeAndConsentGeneration(t *testing.T) {
 	if rows, err := tenant.GitHubAppTriggers(ctx); err != nil || len(rows) != 0 {
 		t.Fatalf("unbound subscriptions=%+v: %v", rows, err)
 	}
-	if _, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "acme/app", nil, nil); err != nil {
+	if _, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "acme/app", nil, map[string]int64{"acme/app": 701}); err != nil {
 		t.Fatalf("clear after unbind: %v", err)
 	}
 	if rows, err := tenant.GitHubAppAutomations(ctx); err != nil || len(rows) != 0 {
@@ -139,11 +139,11 @@ func TestGitHubAppMutationRefusalsRollBack(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s, tenant, a, _ := githubMutationFixture(t)
 			ctx := t.Context()
-			if _, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "acme/app", []string{"acme/old"}, map[string]int64{"acme/old": 1}); err != nil {
+			if _, err := tenant.SetAuthorizedGitHubExtraRepos(ctx, a, "acme/app", []string{"acme/old"}, map[string]int64{"acme/app": 701, "acme/old": 1}); err != nil {
 				t.Fatal(err)
 			}
 			row := GitHubAppTrigger{RepositoryID: 701, Repository: "acme/app", InstallationID: 7, Pipeline: "ci", Push: true}
-			ids := map[string]int64{"acme/new": 2}
+			ids := map[string]int64{"acme/app": 701, "acme/new": 2}
 			extra := "acme/new"
 			switch mode {
 			case "missing-id":

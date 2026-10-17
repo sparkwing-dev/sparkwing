@@ -1122,3 +1122,22 @@ values shorter than eight bytes and PEM armor patterns for this scan only.
 Masking retains all its patterns. Local publication reuses the private controller's
 45-second request deadline. The second interrupt cancels publication and reports
 local-only history without changing the local execution verdict.
+
+## Verified App event snapshot integration
+
+C4 `AppFacts` adds `Event` and `Action`. They capture the provider event selected
+by the verified webhook adapter. `PullRequest.Merged` is an optional boolean that
+preserves the distinction between an open PR and a closed, unmerged PR.
+`PullRequest.Label` preserves the label that selected a labeled event. These
+facts are sealed with the repository, ref, SHA and default branch. Re-requests
+retain the original event context and use the new signed delivery for replay.
+
+The request's Git ref is the full provider ref, including `refs/heads/`,
+`refs/tags/` or `refs/pull/`. DefaultBranch remains the provider's branch name.
+Public trigger environment columns and invocation-map default-branch fields are
+replaced by typed sealed facts. No arbitrary environment values are added to the
+request. Runtime environment snapshots retain their existing names/digest rule.
+
+Automation discovery reads the current default branch's declarations but cannot
+replace the default branch reported by the signed event. A later default-branch
+change does not remove the original push's default-branch trust.

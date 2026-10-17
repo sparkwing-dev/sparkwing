@@ -38,7 +38,7 @@ func TestGitHubOnboardingCookieSessionUsesTeamRole(t *testing.T) {
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(automationConfig))
 	handler := f.srv.Handler()
 	for _, who := range []signedIn{reader, editor, owner} {
-		for _, path := range []string{"/api/v1/team/github-app/automation", "/api/v1/team/github-app/automation?repository=acme/widgets", "/api/v1/team/github-runners"} {
+		for _, path := range []string{"/api/v1/team/github-app/automation", "/api/v1/team/github-app/automation?repository=acme/widgets", "/api/v1/runners/github"} {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, onboardingCookieRequest(t, f, who, http.MethodGet, path, ""))
 			if rec.Code != http.StatusOK {
@@ -53,9 +53,9 @@ func TestGitHubOnboardingCookieSessionUsesTeamRole(t *testing.T) {
 		want   int
 	}{
 		{http.MethodPut, "/api/v1/team/github-app/automation", `{"repository":"acme/widgets"}`, http.StatusOK},
-		{http.MethodPost, "/api/v1/team/github-runners", `{"repository":"acme/widgets"}`, http.StatusCreated},
+		{http.MethodPost, "/api/v1/runners/github", `{"repository":"acme/widgets"}`, http.StatusCreated},
 		{http.MethodDelete, "/api/v1/team/github-app/automation?repository_id=701", "", http.StatusNoContent},
-		{http.MethodDelete, "/api/v1/team/github-runners/701", "", http.StatusNoContent},
+		{http.MethodDelete, "/api/v1/runners/github/701", "", http.StatusNoContent},
 	} {
 		for _, who := range []signedIn{reader, editor, owner} {
 			rec := httptest.NewRecorder()
@@ -80,9 +80,9 @@ func TestGitHubOnboardingCookieWritesRejectInvalidCSRF(t *testing.T) {
 	handler := f.srv.Handler()
 	for _, mutation := range []struct{ method, path string }{
 		{http.MethodPut, "/api/v1/team/github-app/automation"},
-		{http.MethodPost, "/api/v1/team/github-runners"},
+		{http.MethodPost, "/api/v1/runners/github"},
 		{http.MethodDelete, "/api/v1/team/github-app/automation?repository_id=701"},
-		{http.MethodDelete, "/api/v1/team/github-runners/701"},
+		{http.MethodDelete, "/api/v1/runners/github/701"},
 	} {
 		for name, spoil := range map[string]func(*http.Request){
 			"missing header": func(r *http.Request) { r.Header.Del("X-CSRF-Token") },
@@ -105,7 +105,7 @@ func TestGitHubOnboardingCookieWritesRejectInvalidCSRF(t *testing.T) {
 	var bindings struct {
 		Bindings []any `json:"bindings"`
 	}
-	if code := f.call(http.MethodGet, "/api/v1/team/github-runners", owner.auth, nil, &bindings); code != http.StatusOK || len(bindings.Bindings) != 0 {
+	if code := f.call(http.MethodGet, "/api/v1/runners/github", owner.auth, nil, &bindings); code != http.StatusOK || len(bindings.Bindings) != 0 {
 		t.Fatalf("refused writes granted Actions permission = %d %+v", code, bindings)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestPrefersDocumentationStatesPlacementHold(t *testing.T) {
+func TestPrefersDocumentationStatesEligibility(t *testing.T) {
 	tests := []struct {
 		file     string
 		receiver string
@@ -25,7 +25,7 @@ func TestPrefersDocumentationStatesPlacementHold(t *testing.T) {
 	}
 }
 
-func TestGeneratedPrefersDocumentationStatesPlacementHold(t *testing.T) {
+func TestGeneratedPrefersDocumentationStatesEligibility(t *testing.T) {
 	for _, path := range []string{"../docs/sdk-reference.md", "../pkg/docs/mirror/sdk-reference.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -47,14 +47,14 @@ func TestGeneratedPrefersDocumentationStatesPlacementHold(t *testing.T) {
 	}
 }
 
-func TestSchedulingPrefersDocumentationStatesPlacementHold(t *testing.T) {
+func TestSchedulingPrefersDocumentationStatesEligibility(t *testing.T) {
 	for _, path := range []string{"../docs/scheduling.md", "../pkg/docs/mirror/scheduling.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		text := string(data)
-		start := strings.Index(text, "- **`Prefers`**")
+		start := strings.Index(text, "`Prefers` ranks")
 		if start < 0 {
 			t.Fatalf("%s has no Prefers definition", path)
 		}
@@ -97,7 +97,7 @@ func methodDoc(t *testing.T, path, receiver, method string) string {
 func assertPreferenceContract(t *testing.T, doc string) {
 	t.Helper()
 	doc = strings.Join(strings.Fields(doc), " ")
-	for _, want := range []string{"holds the node back", "advertise"} {
+	for _, want := range []string{"ranks eligible", "requirement", "reservation", "resource bound"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("preference documentation does not contain %q", want)
 		}
@@ -106,7 +106,7 @@ func assertPreferenceContract(t *testing.T, doc string) {
 		"do not affect runner selection",
 		"profile default",
 		"default runner",
-		"biases runner selection",
+		"holds the node back",
 		"dispatch snapshot",
 		"pipeline explain",
 		"renderer",

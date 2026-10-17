@@ -158,7 +158,7 @@ func runHold(args []string) {
 	fmt.Printf("DAEMON %s\n", cl.DaemonVersion())
 	_ = os.Stdout.Sync()
 
-	req := wingwire.AdmissionRequest{RunID: *run}
+	req := wingwire.AdmissionRequest{RunID: wingwire.HolderRef(*run)}
 	if *sem != "" {
 		req.Semaphores = []wingwire.SemaphoreClaim{{
 			Name: *sem, Capacity: 1, Cost: 1,

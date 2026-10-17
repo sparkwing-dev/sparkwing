@@ -152,6 +152,39 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 	}
 }
 
+func TestCompositionCompletesRunsAfterReadinessAndJoinsOnFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		failure := errors.New("completion unavailable")
+		var ready atomic.Bool
+		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
+			services := serviceFixture(b)
+			services.Complete = func(ctx context.Context) error {
+				if !ready.Load() {
+					t.Error("completion ran before readiness")
+				}
+				if err := b.Store.DB().PingContext(ctx); err != nil {
+					t.Error(err)
+				}
+				return failure
+			}
+			return services, nil
+		})
+		if _, err := c.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Ready(); err != nil {
+			t.Fatal(err)
+		}
+		ready.Store(true)
+		if err := c.Run(t.Context(), func(wingd.LocalActivity) error { return nil }); !errors.Is(err, failure) {
+			t.Fatalf("completion failure=%v", err)
+		}
+		if err := c.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestCompositionMaintainsStorageAfterReadinessWhileOwningStore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		maintained := make(chan time.Time, 1)

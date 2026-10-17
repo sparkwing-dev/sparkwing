@@ -144,11 +144,12 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	}
 	state, controller, bearer := burstIntakeController(t, endpoint)
 	published := make(chan struct{})
+	var publishing atomic.Bool
 	var finished sync.Once
 	handler := controller.Handler()
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler.ServeHTTP(w, r)
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/finish") && !strings.Contains(r.URL.Path, "/local-host/") {
+		if publishing.Load() && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/finish") && !strings.Contains(r.URL.Path, "/local-host/") {
 			finished.Do(func() { close(published) })
 		}
 	}))
@@ -192,6 +193,11 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 		writeConfig("cloud")
 		invoke("run", "burst", "-o=json")
 		burstVerifyDefaultCache(t, state, repo)
+		select {
+		case <-published:
+			t.Fatal("cache seed execution was observed as local publication")
+		default:
+		}
 		writeConfig("local")
 		source := strings.Replace(burstIntakePipeline, `if err := os.MkdirAll("modules", 0o700); err != nil { return err }`, `cached, err := os.ReadFile("modules/dependency")
         if err != nil || string(cached) != "cached dependency\n" { return errors.New("profile cache was not restored before the first step") }
@@ -205,6 +211,7 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	if detached {
 		args = append(args, "--sw-detached")
 	}
+	publishing.Store(true)
 	output := invoke(args...)
 	if detached {
 		var handle orchestrator.RunHandle

@@ -181,13 +181,13 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 			if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "launcher-test", CreatedBy: "fixture"}); err != nil {
 				t.Fatal(err)
 			}
-			root := capability.Capability{Prefix: "launcher", Team: "", Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Audience: capability.Controller, Grants: []capability.Grant{capability.ClaimsLaunch}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: nil, IssuedAt: time.Unix(0, 1).UTC()}
+			root := capability.Capability{Prefix: "launcher", Team: "", Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Audience: capability.Controller, Grants: []capability.Grant{capability.ClaimsLaunch}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{"gh:1"}, IssuedAt: time.Unix(0, 1).UTC()}
 			envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: root})
 			if err != nil {
 				t.Fatal(err)
 			}
 			digest := sha256.Sum256([]byte("launcher-secret"))
-			engineSQL(t, server.Store, `INSERT INTO capabilities(digest,prefix,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,'launcher','service','launcher','controller',?,'delegate',1,?,'none',?,?,1,'launcher')`, hex.EncodeToString(digest[:]), []byte(`["claims.launch"]`), envelope, []byte(`[]`), []byte(`null`))
+			engineSQL(t, server.Store, `INSERT INTO capabilities(digest,prefix,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,'launcher','service','launcher','controller',?,'delegate',1,?,'none',?,?,1,'launcher')`, hex.EncodeToString(digest[:]), []byte(`["claims.launch"]`), envelope, []byte(`[]`), []byte(`["gh:1"]`))
 			target := &store.UnitRef{Kind: kind, RunID: "run"}
 			if kind == capability.UnitPlan {
 				engineSQL(t, server.Store, `UPDATE runs SET dispatch='controller'`)

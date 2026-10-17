@@ -65,7 +65,15 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			New(st, nil).foldRunProfiles(t.Context(), tenant, &run)
+			if mode == "unreadable" {
+				if _, err := runProfileObservations(t.Context(), tenant, &run); err == nil {
+					t.Fatal("corrupt metrics did not fail the fold")
+				}
+				if _, err := st.DB().Exec(`UPDATE node_metrics SET memory_bytes=100 WHERE run_id='r' AND node_id='c'`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			foldProfilesForTest(t, tenant, &run)
 			for _, id := range []string{"a"} {
 				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", id)
 				if err != nil {

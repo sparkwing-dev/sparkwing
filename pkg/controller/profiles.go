@@ -66,13 +66,14 @@ func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request, a 
 
 // safety: omit sustained cores because these profiles become hard Kubernetes
 // CPU limits; charging a local-host plateau would throttle spiky pods.
-func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *store.Run) {
+func runProfileObservations(ctx context.Context, t *store.Tenant, run *store.Run) (map[string]store.ProfileObservation, error) {
+	observations := map[string]store.ProfileObservation{}
 	if run == nil || run.Pipeline == "" {
-		return
+		return observations, nil
 	}
 	nodes, err := t.ListNodes(ctx, run.ID)
 	if err != nil {
-		return
+		return nil, err
 	}
 	var runPeakCores float64
 	var runPeakMem int64
@@ -94,7 +95,10 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 			continue
 		}
 		samples, err := t.ListNodeMetrics(ctx, run.ID, n.NodeID)
-		if err != nil || len(samples) == 0 {
+		if err != nil {
+			return nil, err
+		}
+		if len(samples) == 0 {
 			runValid = false
 			continue
 		}
@@ -109,35 +113,30 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 		}
 		runPartial = runPartial || partial
 		measured++
-		if err := t.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
+		observations[n.NodeID] = store.ProfileObservation{
 			Partial:         partial,
 			Duration:        nodeMetricSpan(readings(samples)),
 			PeakCores:       peakCores,
 			PeakMemoryBytes: peakMem,
 			CPUMeasured:     true,
-		}); err != nil {
-			s.logger.Warn("fold node profile", "run_id", run.ID, "node_id", n.NodeID, "err", err)
 		}
-		s.emitNodeDrift(ctx, t, run, n.NodeID)
-		runPeakCores = maxF(runPeakCores, peakCores)
+		runPeakCores = max(runPeakCores, peakCores)
 		if peakMem > runPeakMem {
 			runPeakMem = peakMem
 		}
 	}
 	// safety: worker timestamps do not establish simultaneous resource usage.
 	if measured != 1 || !runValid {
-		return
+		return observations, nil
 	}
-	if err := t.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{
+	observations[""] = store.ProfileObservation{
 		Partial:         runPartial,
 		Duration:        runDuration(run),
 		PeakCores:       runPeakCores,
 		PeakMemoryBytes: runPeakMem,
 		CPUMeasured:     true,
-	}); err != nil {
-		s.logger.Warn("fold run profile", "run_id", run.ID, "err", err)
 	}
-	s.emitNodeDrift(ctx, t, run, "")
+	return observations, nil
 }
 
 func (s *Server) emitNodeDrift(ctx context.Context, t *store.Tenant, run *store.Run, nodeID string) {
@@ -167,7 +166,7 @@ func samplePeaks(samples []store.MetricSample) (float64, int64, bool) {
 		unknown = unknown || s.Kind == store.MetricUnknown
 		if s.Kind == store.MetricInterval {
 			hasCPU = true
-			cores = maxF(cores, float64(s.CPUMillicores)/1000.0)
+			cores = max(cores, float64(s.CPUMillicores)/1000.0)
 		}
 		if s.MemoryBytes > mem {
 			mem = s.MemoryBytes
@@ -202,13 +201,6 @@ func runDuration(run *store.Run) time.Duration {
 		return 0
 	}
 	return d
-}
-
-func maxF(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 type profileObservationReq struct {

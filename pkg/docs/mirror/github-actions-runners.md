@@ -77,4 +77,42 @@ See [team git credentials](git-credentials.md).
 
 Revoking a registration or credential stops later controller operations. It
 cannot recall GitHub tokens, provider sessions or signed URLs already issued.
+## Workflow
+
+Commit this workflow as `.github/workflows/sparkwing.yml`, replacing the team
+and controller URL with your registration values. The runner uses the
+`github-actions` label.
+
+```yaml
+# Runs Sparkwing work for this repository on this repository's GitHub
+# Actions minutes. The controller hands the job only triggers and nodes for this
+# repository, and the job exits once the queue has been empty for --idle-exit.
+name: sparkwing
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  sparkwing:
+    runs-on: ubuntu-latest
+    # The runner credential lives one hour, so the job does too.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sparkwing-runner
+        run: |
+          base=https://github.com/sparkwing-dev/sparkwing/releases/latest/download
+          curl -fsSLO "$base/sparkwing-runner-linux-amd64"
+          curl -fsSLO "$base/SHA256SUMS"
+          grep ' sparkwing-runner-linux-amd64$' SHA256SUMS | sha256sum -c -
+          install -m 0755 sparkwing-runner-linux-amd64 "$RUNNER_TEMP/sparkwing-runner"
+      - name: Run this repository's Sparkwing work
+        run: |
+          "$RUNNER_TEMP/sparkwing-runner" warm --github-actions \
+            --team acme \
+            --controller https://sparkwing.example.com \
+            --idle-exit 2m
+```
 <!-- design:end -->

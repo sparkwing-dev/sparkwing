@@ -240,3 +240,45 @@ func TestLocalSecretsRetryRequiresFreshRequesterResolution(t *testing.T) {
 	}
 	rewriteSchemaCount(t, tenant.s.db, "runs", 1)
 }
+
+func FuzzCancelledHereResupplyNeverRestoresSecrets(f *testing.F) {
+	f.Add([]byte("requester-value"), uint8(0))
+	f.Add([]byte("requester-value"), uint8(1))
+	f.Add([]byte("requester-value"), uint8(2))
+	f.Fuzz(func(t *testing.T, value []byte, attack uint8) {
+		if len(value) > 256 {
+			t.Skip()
+		}
+		s, _, owner := burstHereOwnerFixture(t)
+		tenant, err := s.ForTeam(t.Context(), "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err := tenant.ReadRun(t.Context(), "run")
+		if err != nil {
+			t.Fatal(err)
+		}
+		run.Request.Request.LocalSecretNames = []string{"KEY"}
+		raw, err := json.Marshal(run.Request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,cancel_requested_at=? WHERE team='a' AND id='run'`, raw, s.now().UnixNano())
+		switch attack % 3 {
+		case 1:
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET generation=generation+1 WHERE team='a' AND id='run'`)
+		case 2:
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET lease_expires_at=? WHERE team='a' AND id='run'`, s.now().UnixNano())
+		}
+		err = s.ResupplyHereSecrets(t.Context(), owner.Authority, map[string]string{"KEY": string(value)})
+		if attack%3 == 0 && err != nil {
+			t.Fatalf("cancelled live owner cannot drain: %v", err)
+		}
+		if attack%3 != 0 && err == nil {
+			t.Fatal("lost owner retained resupply authority")
+		}
+		if _, ok := s.localSecrets.Load(localSecretKey{"a", "run"}); ok {
+			t.Fatal("cancelled owner restored secret values")
+		}
+	})
+}

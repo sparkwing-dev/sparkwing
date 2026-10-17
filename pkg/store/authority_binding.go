@@ -26,7 +26,7 @@ func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal
 
 // CheckBinding implements relational authorization within the transaction owning a write.
 func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
-	current, err := tx.ResolveAuthority(ctx, principal.Authority)
+	current, err := resolveProvisionAuthorityTx(ctx, tx, principal.Authority, capability.ProofForConsole(principal))
 	if err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func (tx *storeTx) CheckBinding(ctx context.Context, principal capability.Princi
 		}
 	}
 	c := current.Capability
-	deployment := rule == capability.BindNone && target.Team == "" && target.RunID == "" || rule == capability.BindClaimSelection && launcherClaimant(c)
+	deployment := rule == capability.BindNone && target.RunID == "" && target.NodeID == "" && target.Team == "" || rule == capability.BindOperatorSettings && target.RunID == "" && target.NodeID == "" && (capability.DeploymentAuthority(current) || current.Class == capability.CredentialConsole) || rule == capability.BindClaimSelection && launcherClaimant(c)
 	if c.Audience != capability.Controller || c.Team == "" && !deployment || c.Team != "" && target.Team != "" && c.Team != target.Team {
 		return bindingRefusal()
 	}
@@ -74,6 +74,8 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 	switch rule {
 	case capability.BindNone:
 		allowed = true
+	case capability.BindOperatorSettings:
+		allowed = c.Team == "" && b.Kind == capability.BindingNone && target.RunID == "" && target.NodeID == "" && (capability.DeploymentAuthority(p) || p.Class == capability.CredentialConsole)
 	case capability.BindRun:
 		allowed = b.RunID != "" && b.RunID == target.RunID
 	case capability.BindOwnNode:

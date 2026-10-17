@@ -119,3 +119,15 @@ func (t *Tenant) TestOnlySeedTriggerWithRun(ctx context.Context, v Trigger, r Ru
 }
 
 func (s *Store) defaultTenant() *Tenant { return &Tenant{s: s, team: DefaultTeam} }
+
+type creatingPrincipalKey struct{}
+
+// FixtureWithCreatingPrincipal associates reporting fixtures with a principal.
+func FixtureWithCreatingPrincipal(ctx context.Context, principal string) context.Context {
+	return context.WithValue(ctx, creatingPrincipalKey{}, principal)
+}
+
+func creatingPrincipal(ctx context.Context) string {
+	principal, _ := ctx.Value(creatingPrincipalKey{}).(string)
+	return principal
+}

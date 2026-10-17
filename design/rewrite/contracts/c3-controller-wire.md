@@ -1032,7 +1032,9 @@ SecretDeclaration list and captured environment. Native secret release uses the
 existing live, declared, masked claim path, rechecking sealed burst eligibility.
 The here owner re-supplies values through RenewalRequest.local_secrets on renewal,
 including after restart. Other claimants cannot supply them. Names must match
-the original request and resident values cannot change. Registry loss returns
+the original request and resident values cannot change. A cancelled run ignores
+resupply from its still-live here owner and renews reporting authority for drain.
+It restores no values and grants no secret reads. Registry loss returns
 unavailable until the owner restores values. Retry requires fresh resolution. Cross-process secret delivery
 still needs a Cloud affinity or unpersisted relay contract.
 

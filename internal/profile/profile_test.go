@@ -65,7 +65,6 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		Profiles: map[string]*profile.Profile{
 			"prod": {
 				Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
-				State:      &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
 			},
 		},
 	}
@@ -82,9 +81,6 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	}
 	if prod.ControllerURL() != "https://api.example.dev" || prod.ControllerToken() != "swu_x" {
 		t.Errorf("controller/token: %+v", prod)
-	}
-	if prod.State == nil || prod.State.Type != backends.TypeSQLite {
-		t.Errorf("state: %+v", prod.State)
 	}
 }
 
@@ -131,6 +127,9 @@ func TestDefaultPath_RespectsEnv(t *testing.T) {
 
 func TestDefaultPath_XDG(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", "")
+	if err := os.Unsetenv("SPARKWING_CONFIG"); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
 	got, err := profile.DefaultPath()
 	if err != nil || got != filepath.Join("/tmp/xdg", "sparkwing", "config.yaml") {
@@ -166,13 +165,13 @@ func TestLoad_RefusesRemovedKeys(t *testing.T) {
 		"mirror_local": "profiles:\n  prod:\n    mirror_local: false\n",
 		"logs":         "profiles:\n  prod:\n    logs: {type: controller}\n",
 		"cache":        "profiles:\n  prod:\n    cache: {type: filesystem, path: /tmp/c}\n",
-		"batch_bytes":  "profiles:\n  prod:\n    state: {type: sqlite, batch_bytes: 1024}\n",
+		"state":        "profiles:\n  prod:\n    state: {type: sqlite, batch_bytes: 1024}\n",
 	} {
 		path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := profile.Load(path); err == nil || !strings.Contains(err.Error(), "field "+key+" not found") {
+		if _, err := profile.Load(path); err == nil || !strings.Contains(err.Error(), "profiles.prod."+key) {
 			t.Errorf("Load = %v, want %s refused as an unknown field", err, key)
 		}
 	}
@@ -187,7 +186,7 @@ func TestSurfaces_NilSafe(t *testing.T) {
 
 func TestSaveRewritesOnlyTheProfilesSection(t *testing.T) {
 	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
-	before := "# this machine\nadmission:\n  budget: 50%,8gb # leave the desktop room\nprofiles:\n  old: {}\n"
+	before := "# this machine\nadmission:\n  budget: 50%,8gb # leave the desktop room\nprofiles:\n  old: {controller: {url: https://old.example}}\n"
 	if err := fssecure.WriteFile(path, []byte(before)); err != nil {
 		t.Fatal(err)
 	}

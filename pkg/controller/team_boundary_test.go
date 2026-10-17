@@ -121,7 +121,6 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	f := &tenancyFixture{t: t, srv: srv, url: ts.URL, st: st}
 
 	alice, teamA := signUp(t, st, "alice")
@@ -145,7 +144,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	f.runnerB = "Bearer " + raw
 
 	f.runA = "run-team-a"
-	seedRun(t, f.teamA, f.runA, "build-a")
+	seedRun(t, f.st, f.teamA, f.runA, "build-a")
 	if err := teststore.SeedNode(st, ctx, store.Node{RunID: f.runA, NodeID: "n1", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +153,7 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	}
 	seedControllerCapacityHolder(t, st, f.teamA.Team(), "deploy", "holder-a", f.runA, "n1", 0)
 	f.victim = "victim-run"
-	seedRun(t, forTeam(t, st, store.DefaultTeam), f.victim, "build-default")
+	seedRun(t, st, forTeam(t, st, store.DefaultTeam), f.victim, "build-default")
 	return f
 }
 
@@ -205,10 +204,10 @@ func (f *tenancyFixture) member(owner store.Account, name string, role store.Rol
 	return session(f.t, f.st, acct, f.teamA.Team())
 }
 
-func seedRun(t *testing.T, tn *store.Tenant, id, pipeline string) {
+func seedRun(t *testing.T, st *store.Store, tn *store.Tenant, id, pipeline string) {
 	t.Helper()
 	now := time.Now()
-	if err := tn.CreateTriggerWithRun(context.Background(),
+	if err := teststore.SeedTriggerWithRun(st, context.Background(), tn.Team(),
 		store.Trigger{ID: id, Pipeline: pipeline, TriggerSource: "api", CreatedAt: now},
 		store.Run{ID: id, Pipeline: pipeline, Status: "running", CreatedAt: now, StartedAt: now},
 	); err != nil {
@@ -345,7 +344,7 @@ func cancelRequests(t *testing.T, st *store.Store) int {
 func TestTeamBoundary_ARunnerCreatesItsRunInItsOwnTeam(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		ctx := context.Background()
-		if err := f.teamB.CreateTrigger(ctx, store.Trigger{
+		if err := teststore.SeedTrigger(f.st, ctx, f.teamB.Team(), store.Trigger{
 			ID: "run-by-b", Pipeline: "build-b", TriggerSource: "api", CreatedAt: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
@@ -643,7 +642,7 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 		ctx := context.Background()
 		now := time.Now()
 		const runB = "run-team-b"
-		if err := f.teamB.CreateTriggerWithRun(ctx,
+		if err := teststore.SeedTriggerWithRun(f.st, ctx, f.teamB.Team(),
 			store.Trigger{ID: runB, Pipeline: "build-b", TriggerSource: "api", CreatedAt: now},
 			store.Run{ID: runB, Pipeline: "build-b", Status: "pending", CreatedAt: now, StartedAt: now},
 		); err != nil {

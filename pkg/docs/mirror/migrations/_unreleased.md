@@ -230,8 +230,7 @@ tenant with `ForTeam(ctx, team)` and call its existing method. Local consumers
 select `DefaultTeam` and handle the selection error.
 
 - `CountRuns`, `DeleteRun`, `ListNodeSteps` and `ListNodeMetrics`.
-- `ListTriggers`, `GetTrigger`, `FindTriggerByIdempotencyKey`,
-  `GetRunAncestorPipelines` and `ListPendingTriggersForParent`.
+- `ListTriggers`, `GetTrigger`, `GetRunAncestorPipelines` and `ListPendingTriggersForParent`.
 - `ListApprovalsForRun`, `ListPendingApprovals` and `ListDebugPauses`.
 - `FinishNodeWithOutputRef`, `NodeSettlement`, `HeartbeatTrigger` and `FinishTrigger`.
 
@@ -2665,3 +2664,14 @@ encryption and file-named credentials Secrets before startup. See the
 [chart README](../../charts/sparkwing-full/README.md) for SSM mappings and the
 team-node, admission API and network prerequisites. Existing pool deployments
 keep `runner.enabled=true` and explicitly pin their runner image.
+
+
+## Sealed controller schedule intake
+
+`Tenant.CreateTrigger`, `CreateTriggerWithRun` and `FindTriggerByIdempotencyKey`
+are removed. Controller schedules use `Tenant.AdmitScheduledRun`, which checks
+the persisted schedule and current consent inside the shared intake transaction.
+The duplicate-trigger sentinel errors, `controller.CronIdempotencyKey` and
+`store.WithCreatingPrincipal` are removed. Ordinary run intake derives its
+principal from live authority. The sealed request's authority ID identifies a
+scheduled run's cadence without the legacy trigger environment column.

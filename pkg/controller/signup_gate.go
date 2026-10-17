@@ -248,28 +248,12 @@ func (s *Server) handleSignUpStatus(w http.ResponseWriter, r *http.Request, _ ca
 	return nil
 }
 
-// SignUpSettingsChange preserves omitted fields for one atomic settings transaction.
-type SignUpSettingsChange struct {
-	Mode                 *string `json:"mode"`
-	Reason               string  `json:"reason"`
-	HourlyLimit          *int    `json:"hourly_limit"`
-	DailyLimit           *int    `json:"daily_limit"`
-	HourlyWarn           *int    `json:"hourly_warn"`
-	GitHubMinAccountDays *int    `json:"github_min_account_days"`
-	FreeTeamMembers      *int    `json:"free_team_members"`
-}
-
-func (req SignUpSettingsChange) limitsChanged() bool {
-	return req.HourlyLimit != nil || req.DailyLimit != nil || req.HourlyWarn != nil || req.GitHubMinAccountDays != nil ||
-		req.FreeTeamMembers != nil
-}
-
 func (s *Server) handleSetSignUp(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	var req SignUpSettingsChange
+	var req store.SignUpSettingsChange
 	if err := decodeJSON(r, &req); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid signup settings"}
 	}
-	if req.Mode == nil && !req.limitsChanged() {
+	if req.Mode == nil && !req.LimitsChanged() {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "name a mode or at least one limit to change"}
 	}
 	ctx, now := r.Context(), time.Now().UTC()

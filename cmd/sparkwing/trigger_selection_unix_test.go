@@ -18,6 +18,7 @@ func selectedRevisionGit(t *testing.T) string {
 	t.Helper()
 	root, bin := t.TempDir(), t.TempDir()
 	script := `#!/bin/sh
+while [ "$1" = -c ]; do shift 2; done
 if [ "$1" = -C ]; then shift 2; fi
 case "$*" in
   'rev-parse --show-toplevel') printf '%s\n' '` + root + `' ;;

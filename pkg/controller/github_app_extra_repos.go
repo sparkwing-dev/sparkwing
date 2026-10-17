@@ -64,13 +64,9 @@ func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Req
 	if len(req.ExtraRepos) > store.MaxGitHubAppExtraRepos {
 		return githubAppRequestError(http.StatusBadRequest, fmt.Errorf("at most %d extra repositories per repository", store.MaxGitHubAppExtraRepos))
 	}
-	var ids map[string]int64
-	if len(req.ExtraRepos) > 0 {
-		var status int
-		var err error
-		if ids, status, err = s.extraReposCovered(r.Context(), t, repo, req.ExtraRepos); err != nil {
-			return githubAppRequestError(status, err)
-		}
+	ids, status, err := s.extraReposCovered(r.Context(), t, repo, req.ExtraRepos)
+	if err != nil {
+		return githubAppRequestError(status, err)
 	}
 	writer, err := s.githubAppWriter(r, a)
 	if err != nil {
@@ -119,7 +115,7 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 		return nil, http.StatusBadGateway, fmt.Errorf("GitHub installation repositories: %w", err)
 	}
 	ids := map[string]int64{}
-	for _, raw := range extras {
+	for _, raw := range append([]string{repo.Slug()}, extras...) {
 		for _, l := range listed {
 			if strings.EqualFold(l.FullName, raw) {
 				ids[strings.ToLower(raw)] = l.ID

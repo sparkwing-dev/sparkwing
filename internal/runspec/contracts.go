@@ -114,20 +114,24 @@ type Actor struct {
 
 // safety: PullRequest keeps base and head facts so intake can refuse forks before award.
 type PullRequest struct {
-	Number   int64   `json:"number"`
-	Action   string  `json:"action"`
-	BaseRepo RepoKey `json:"base_repo"`
-	HeadRepo RepoKey `json:"head_repo"`
-	BaseRef  string  `json:"base_ref"`
-	HeadRef  string  `json:"head_ref"`
-	BaseSHA  string  `json:"base_sha"`
-	HeadSHA  string  `json:"head_sha"`
-	Fork     bool    `json:"fork"`
+	Label    string         `json:"label,omitempty"`
+	Merged   Optional[bool] `json:"merged"`
+	Number   int64          `json:"number"`
+	Action   string         `json:"action"`
+	BaseRepo RepoKey        `json:"base_repo"`
+	HeadRepo RepoKey        `json:"head_repo"`
+	BaseRef  string         `json:"base_ref"`
+	HeadRef  string         `json:"head_ref"`
+	BaseSHA  string         `json:"base_sha"`
+	HeadSHA  string         `json:"head_sha"`
+	Fork     bool           `json:"fork"`
 }
 
 // safety: AppFacts is server-populated only after HMAC verification and replay-key dedup.
 // No current-head lookup changes these facts, including on a retry of an older SHA.
 type AppFacts struct {
+	Event             string    `json:"event,omitempty"`
+	Action            string    `json:"action,omitempty"`
 	DeliveryKey       string    `json:"delivery_key"`
 	InstallationID    int64     `json:"installation_id"`
 	RepositoryID      int64     `json:"repository_id"`

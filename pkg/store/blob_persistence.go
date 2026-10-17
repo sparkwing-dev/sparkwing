@@ -121,7 +121,10 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		facts.Scope.Verified = true
 		facts.AppDeliveryKey = app.DeliveryKey
 		facts.DefaultBranch = app.DefaultBranch
-		facts.DefaultBranchVerified = app.DefaultBranchPush && app.Ref == app.DefaultBranch
+		if strings.HasPrefix(app.Ref, "refs/heads/") {
+			facts.DefaultBranch = "refs/heads/" + app.DefaultBranch
+		}
+		facts.DefaultBranchVerified = app.DefaultBranchPush && app.Ref == facts.DefaultBranch
 		if sealed.Request.PullRequest.Set && sealed.Request.PullRequest.Value.BaseRepo == a.authority.Repo {
 			facts.PullRequestBase = runspec.Optional[string]{Set: true, Value: sealed.Request.PullRequest.Value.BaseRef}
 		}

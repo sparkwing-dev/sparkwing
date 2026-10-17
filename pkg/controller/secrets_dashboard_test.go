@@ -1,13 +1,13 @@
 package controller_test
 
 import (
-	"bytes"
-	"context"
+	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -25,237 +25,250 @@ type listedSecret struct {
 	Shared   bool   `json:"shared"`
 }
 
-func listSecretsAs(t *testing.T, f *tenancyFixture, auth string) (int, map[string]listedSecret, string) {
+func listSecretsAs(t *testing.T, f *browserFixture, private ...string) map[string]listedSecret {
 	t.Helper()
-	code, body := f.do("GET", "/api/v1/secrets", auth, nil)
-	if code != http.StatusOK {
-		return code, nil, body
+	code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets", "", nil)
+	for _, value := range private {
+		if strings.Contains(body, value) {
+			t.Fatal("secret list disclosed a masked value")
+		}
 	}
-	var resp struct {
+	var response struct {
 		Secrets []listedSecret `json:"secrets"`
 	}
-	if err := json.Unmarshal([]byte(body), &resp); err != nil {
-		t.Fatalf("decode list: %v: %s", err, body)
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &response) != nil {
+		t.Fatalf("list: HTTP %d %s", code, body)
 	}
-	out := map[string]listedSecret{}
-	for _, s := range resp.Secrets {
-		out[s.Name] = s
+	out := make(map[string]listedSecret)
+	for _, row := range response.Secrets {
+		out[row.Name] = row
 	}
-	return code, out, body
+	return out
 }
 
-// The dashboard's rules: a masked secret is write-only for every browser
-// session, owners included, while an unmasked variable is plain config each
-// member reads and only an owner writes.
+func secretMember(t *testing.T, f *browserFixture, id string, role store.Role) *browserFixture {
+	t.Helper()
+	if _, err := f.st.DB().ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1)`, id, id+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.st.DB().ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default',?,?,1)`, id, role); err != nil {
+		t.Fatal(err)
+	}
+	raw, csrf, _, err := f.st.CreateAccountSession(t.Context(), store.Account{ID: id, Email: id + "@example.test"}, store.DefaultTeam, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &browserFixture{t: t, st: f.st, h: f.h, sessID: raw, csrf: csrf}
+}
+
 func TestSecrets_DashboardSessionsWriteSecretsAndReadVariables(t *testing.T) {
-	f := newTenancyFixture(t, openSQLiteStore(t))
-	masked, unmasked := true, false
+	f := newBrowserFixture(t, nil)
+	editor, reader := secretMember(t, f, "editor", store.RoleEditor), secretMember(t, f, "reader", store.RoleReader)
 	for _, row := range []map[string]any{
-		{"name": "DEPLOY_KEY", "value": "hunter2", "shared": true, "masked": masked},
-		{"name": "REGION", "value": "us-west-2", "shared": true, "masked": unmasked},
+		{"name": "DEPLOY_KEY", "value": "hunter2", "shared": true, "masked": true},
+		{"name": "REGION", "value": "us-west-2", "shared": true, "masked": false},
 		{"name": "WEB_TOKEN", "value": "line one\nline two", "pipeline": "deploy-web"},
 	} {
-		if code, body := f.do("POST", "/api/v1/secrets", f.ownerA, row); code != http.StatusNoContent {
-			t.Fatalf("owner POST %v = %d: %s", row["name"], code, body)
+		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", "", row); code != http.StatusNoContent {
+			t.Fatalf("write %v: HTTP %d %s", row["name"], code, body)
 		}
 	}
-
-	for _, who := range []struct{ name, auth string }{
-		{"owner", f.ownerA}, {"editor", f.editorA}, {"reader", f.readerA},
+	for _, who := range []*browserFixture{f, editor, reader} {
+		listed := listSecretsAs(t, who, "hunter2", "line one")
+		if listed["DEPLOY_KEY"].Value != "" || listed["WEB_TOKEN"].Value != "" || !listed["DEPLOY_KEY"].Masked || !listed["WEB_TOKEN"].Masked || listed["WEB_TOKEN"].Pipeline != "deploy-web" || listed["REGION"].Value != "us-west-2" || listed["REGION"].Masked {
+			t.Fatalf("secret list=%+v", listed)
+		}
+	}
+	for _, tc := range []struct{ path, private string }{
+		{"/api/v1/secrets/DEPLOY_KEY", "hunter2"},
+		{"/api/v1/secrets/WEB_TOKEN?pipeline=deploy-web", "line one"},
 	} {
-		code, listed, body := listSecretsAs(t, f, who.auth)
-		if code != http.StatusOK {
-			t.Fatalf("%s list = %d: %s", who.name, code, body)
-		}
-		if strings.Contains(body, "hunter2") || strings.Contains(body, "line one") {
-			t.Errorf("%s list carries a masked value: %s", who.name, body)
-		}
-		if got := listed["REGION"]; got.Value != "us-west-2" || got.Masked {
-			t.Errorf("%s list REGION = %+v, want the variable's value", who.name, got)
-		}
-		if got := listed["WEB_TOKEN"]; got.Pipeline != "deploy-web" || !got.Masked {
-			t.Errorf("%s list WEB_TOKEN = %+v, want masked and scoped to deploy-web", who.name, got)
+		code, body, _ := secretsRequest(t, f, "GET", tc.path, "", nil)
+		if code != http.StatusForbidden || strings.Contains(body, tc.private) || !strings.Contains(body, `"code":"forbidden"`) {
+			t.Fatalf("owner read: HTTP %d %s", code, body)
 		}
 	}
-
-	// safety: the owner who wrote DEPLOY_KEY is the negative control, so owning it is shown not to read it back.
-	code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil)
-	if code != http.StatusForbidden || strings.Contains(body, "hunter2") || !strings.Contains(body, "write_only") {
-		t.Errorf("owner session GET masked secret = %d: %s, want 403 write_only", code, body)
+	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/REGION", "", nil); code != http.StatusOK || !strings.Contains(body, "us-west-2") {
+		t.Fatalf("variable read: HTTP %d %s", code, body)
 	}
-	code, body = f.do("GET", "/api/v1/secrets/WEB_TOKEN?pipeline=deploy-web", f.ownerA, nil)
-	if code != http.StatusForbidden || strings.Contains(body, "line one") {
-		t.Errorf("owner session GET pipeline secret = %d: %s, want 403", code, body)
-	}
-	code, body = f.do("GET", "/api/v1/secrets/REGION", f.ownerA, nil)
-	if code != http.StatusOK || !strings.Contains(body, "us-west-2") {
-		t.Errorf("owner session GET variable = %d: %s, want its value", code, body)
-	}
-
-	for _, who := range []struct{ name, auth string }{
-		{"editor", f.editorA}, {"reader", f.readerA},
-	} {
-		if code, body := f.do("POST", "/api/v1/secrets", who.auth,
-			map[string]any{"name": "REGION", "value": "eu-west-1", "shared": true, "masked": unmasked}); code != http.StatusForbidden {
-			t.Errorf("%s POST = %d want 403: %s", who.name, code, body)
+	for _, who := range []*browserFixture{editor, reader} {
+		if code, body, _ := secretsRequest(t, who, "POST", "/api/v1/secrets", "", map[string]any{"name": "REGION", "value": "eu-west-1", "shared": true, "masked": false}); code != http.StatusForbidden {
+			t.Fatalf("member write: HTTP %d %s", code, body)
 		}
-		if code, body := f.do("DELETE", "/api/v1/secrets/DEPLOY_KEY", who.auth, nil); code != http.StatusForbidden {
-			t.Errorf("%s DELETE = %d want 403: %s", who.name, code, body)
+		if code, body, _ := secretsRequest(t, who, "DELETE", "/api/v1/secrets/DEPLOY_KEY", "", nil); code != http.StatusForbidden {
+			t.Fatalf("member delete: HTTP %d %s", code, body)
 		}
 	}
-	if _, listed, _ := listSecretsAs(t, f, f.ownerA); listed["REGION"].Value != "us-west-2" || listed["DEPLOY_KEY"].Name == "" {
-		t.Errorf("a refused write changed team A's rows: %+v", listed)
+	listed := listSecretsAs(t, f)
+	if listed["REGION"].Value != "us-west-2" || listed["DEPLOY_KEY"].Name != "DEPLOY_KEY" {
+		t.Fatalf("refused writes changed rows: %+v", listed)
 	}
-
-	if code, body := f.do("DELETE", "/api/v1/secrets/WEB_TOKEN?pipeline=deploy-web", f.ownerA, nil); code != http.StatusNoContent {
-		t.Fatalf("owner DELETE = %d: %s", code, body)
+	if code, body, _ := secretsRequest(t, f, "DELETE", "/api/v1/secrets/WEB_TOKEN?pipeline=deploy-web", "", nil); code != http.StatusNoContent {
+		t.Fatalf("owner delete: HTTP %d %s", code, body)
 	}
-	if _, listed, _ := listSecretsAs(t, f, f.ownerA); listed["WEB_TOKEN"].Name != "" {
-		t.Errorf("WEB_TOKEN still listed after delete")
+	if _, exists := listSecretsAs(t, f)["WEB_TOKEN"]; exists {
+		t.Fatal("deleted secret remains listed")
 	}
 }
 
-// A variable is sealed at rest like a secret, so the list opens its envelope
-// to show the value.
 func TestSecrets_ListOpensAVariablesEnvelope(t *testing.T) {
-	key, _ := secrets.GenerateKey()
-	c, _ := secrets.NewCipher(key)
-	srv, st := newSecretsTestServer(t, c)
-	for _, row := range []map[string]any{
-		{"name": "REGION", "value": "us-west-2", "masked": false},
-		{"name": "TOKEN", "value": "supersecret"},
+	f := newBrowserFixture(t, nil)
+	for _, row := range []string{
+		`{"name":"REGION","value":"us-west-2","masked":false}`,
+		`{"name":"TOKEN","value":"supersecret"}`,
 	} {
-		resp := postSecretJSON(t, srv.URL+"/api/v1/secrets", row)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusNoContent {
-			t.Fatalf("POST %v = %d", row["name"], resp.StatusCode)
+		w := f.serve(f.cookieRequest(http.MethodPost, "/api/v1/secrets", row))
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("write secret: HTTP %d %s", w.Code, w.Body)
 		}
 	}
-	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("REGION", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !secrets.IsEncrypted(row.Value) {
-		t.Fatalf("the variable is stored in the clear: %q", row.Value)
-	}
-	resp, err := http.Get(srv.URL + "/api/v1/secrets")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), `"value":"us-west-2"`) || strings.Contains(string(body), "supersecret") {
-		t.Errorf("list = %s, want the variable's plaintext and no secret value", body)
-	}
-}
-
-func secretsRequest(t *testing.T, f *tenancyFixture, method, path, auth string, body any) (int, string, http.Header) {
-	t.Helper()
-	var rd io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
+	for _, name := range []string{"REGION", "TOKEN"} {
+		row, err := teststore.ForTeam(t, f.st, store.DefaultTeam).GetSecretRow(name, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		rd = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(context.Background(), method, f.url+path, rd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Authorization", auth)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("%s %s: %v", method, path, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(raw), resp.Header
-}
-
-// A team owner's bearer manages rows like its session does and reads no
-// masked value back; the operator's admin bearer still does, which is what
-// `sparkwing secret get --profile` runs on.
-func TestSecrets_MaskedValuesReachOnlyTheOperatorBearer(t *testing.T) {
-	f := newTenancyFixture(t, openSQLiteStore(t))
-	now := time.Now().UTC()
-	ownerRaw, _, err := teststore.ProvisionCredential(context.Background(), f.st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(f.teamA.Team()), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "a-owner"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.read", "team.admin"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ownerToken := "Bearer " + ownerRaw
-	adminRaw, _, err := teststore.ProvisionCredential(context.Background(), f.st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "ops"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	adminToken := "Bearer " + adminRaw
-	unmasked := false
-	for _, row := range []map[string]any{
-		{"name": "DEPLOY_KEY", "value": "hunter2", "shared": true},
-		{"name": "REGION", "value": "us-west-2", "shared": true, "masked": unmasked},
-	} {
-		if code, _, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", ownerToken, row); code != http.StatusNoContent {
-			t.Fatalf("owner bearer POST %v = %d", row["name"], code)
+		if !secrets.IsEncrypted(row.Value) || !secrets.IsBound(row.Value) {
+			t.Fatalf("%s stored without a bound envelope: %q", name, row.Value)
 		}
 	}
-	code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/DEPLOY_KEY", ownerToken, nil)
-	if code != http.StatusForbidden || !strings.Contains(body, "write_only") || strings.Contains(body, "hunter2") {
-		t.Errorf("team owner bearer GET masked secret = %d: %s, want 403 write_only", code, body)
+	w := f.serve(f.cookieRequest(http.MethodGet, "/api/v1/secrets", ""))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"value":"us-west-2"`) || strings.Contains(w.Body.String(), "supersecret") {
+		t.Fatalf("list: HTTP %d %s", w.Code, w.Body)
 	}
-	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/REGION", ownerToken, nil); code != http.StatusOK || !strings.Contains(body, "us-west-2") {
-		t.Errorf("team owner bearer GET variable = %d: %s", code, body)
-	}
+}
 
-	if code, _, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", adminToken,
-		map[string]any{"name": "OPS_KEY", "value": "ops-value", "shared": true}); code != http.StatusNoContent {
-		t.Fatalf("operator POST = %d", code)
+func secretsRequest(t *testing.T, f *browserFixture, method, path, auth string, body any) (int, string, http.Header) {
+	t.Helper()
+	var encoded string
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded = string(data)
 	}
-	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/OPS_KEY", adminToken, nil); code != http.StatusOK || !strings.Contains(body, "ops-value") {
-		t.Errorf("operator bearer GET masked secret = %d: %s, want its value", code, body)
+	r := f.cookieRequest(method, path, encoded)
+	if auth != "" {
+		r.Header.Set("Authorization", auth)
+	}
+	w := f.serve(r)
+	return w.Code, w.Body.String(), w.Header()
+}
+
+func TestSecrets_MaskedValuesStayWriteOnlyForMembersAndDeploymentCredentials(t *testing.T) {
+	f := newBrowserFixture(t, nil)
+	owner := "Bearer " + f.token
+	for _, row := range []map[string]any{
+		{"name": "DEPLOY_KEY", "value": "hunter2", "shared": true},
+		{"name": "REGION", "value": "us-west-2", "shared": true, "masked": false},
+	} {
+		if code, body, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", owner, row); code != http.StatusNoContent {
+			t.Fatalf("owner bearer write: HTTP %d %s", code, body)
+		}
+	}
+	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/DEPLOY_KEY", owner, nil); code != http.StatusForbidden || !strings.Contains(body, `"code":"forbidden"`) || strings.Contains(body, "hunter2") {
+		t.Fatalf("owner bearer masked read: HTTP %d %s", code, body)
+	}
+	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/REGION", owner, nil); code != http.StatusOK || !strings.Contains(body, "us-west-2") {
+		t.Fatalf("owner bearer variable read: HTTP %d %s", code, body)
+	}
+	raw, _, err := teststore.ProvisionCredential(t.Context(), f.st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "ops"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method, path string
+		body         any
+	}{
+		{"GET", "/api/v1/secrets/DEPLOY_KEY", nil},
+		{"GET", "/api/v1/secrets/REGION", nil},
+		{"POST", "/api/v1/secrets", map[string]any{"name": "OPS_KEY", "value": "ops-value", "shared": true}},
+	} {
+		code, body, _ := secretsRequest(t, f, tc.method, tc.path, "Bearer "+raw, tc.body)
+		if code != http.StatusForbidden || strings.Contains(body, "hunter2") || strings.Contains(body, "us-west-2") || strings.Contains(body, "ops-value") {
+			t.Fatalf("deployment credential: HTTP %d %s", code, body)
+		}
+	}
+	if _, exists := listSecretsAs(t, f)["OPS_KEY"]; exists {
+		t.Fatal("deployment credential wrote a tenant secret")
 	}
 }
 
 func TestSecrets_EveryResponseIsNoStore(t *testing.T) {
-	f := newTenancyFixture(t, openSQLiteStore(t))
-	for _, req := range []struct {
-		method, path string
-		body         any
+	f := newBrowserFixture(t, nil)
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
 	}{
-		{"POST", "/api/v1/secrets", map[string]any{"name": "DEPLOY_KEY", "value": "v", "shared": true}},
-		{"GET", "/api/v1/secrets", nil},
-		{"GET", "/api/v1/secrets/DEPLOY_KEY", nil},
-		{"DELETE", "/api/v1/secrets/DEPLOY_KEY", nil},
-		{"DELETE", "/api/v1/secrets/DEPLOY_KEY", nil},
+		{"POST", "/api/v1/secrets", `{"name":"DEPLOY_KEY","value":"private-key","shared":true}`, http.StatusNoContent},
+		{"GET", "/api/v1/secrets", "", http.StatusOK},
+		{"GET", "/api/v1/secrets/DEPLOY_KEY", "", http.StatusForbidden},
+		{"DELETE", "/api/v1/secrets/DEPLOY_KEY", "", http.StatusNoContent},
+		{"DELETE", "/api/v1/secrets/DEPLOY_KEY", "", http.StatusNotFound},
 	} {
-		code, _, h := secretsRequest(t, f, req.method, req.path, f.ownerA, req.body)
-		if h.Get("Cache-Control") != "no-store" || h.Get("Pragma") != "no-cache" {
-			t.Errorf("%s %s = %d with Cache-Control %q, Pragma %q", req.method, req.path, code,
-				h.Get("Cache-Control"), h.Get("Pragma"))
+		w := f.serve(f.cookieRequest(tc.method, tc.path, tc.body))
+		if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Pragma") != "no-cache" || strings.Contains(w.Body.String(), "private-key") {
+			t.Fatalf("%s %s: HTTP %d %s, cache=%q pragma=%q", tc.method, tc.path, w.Code, w.Body, w.Header().Get("Cache-Control"), w.Header().Get("Pragma"))
 		}
 	}
 }
 
 func TestAuthenticatedResponsesAreNoStoreAndPublicOnesAreNot(t *testing.T) {
-	f := newTenancyFixture(t, openSQLiteStore(t))
-	for _, req := range []struct {
-		method, path string
-		body         any
+	f := newBrowserFixture(t, nil)
+	if err := teststore.SeedRun(f.st, t.Context(), store.DefaultTeam, store.Run{ID: "run", Pipeline: "ci", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := teststore.SeedNode(f.st, t.Context(), store.Node{RunID: "run", NodeID: "job", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
 	}{
-		{"POST", "/api/v1/team/tokens", map[string]any{"scopes": []string{"runs.read"}}},
-		{"GET", "/api/v1/runs/" + f.runA, nil},
-		{"GET", "/api/v1/runs/" + f.runA + "/nodes", nil},
+		{"POST", "/api/v1/tokens", `{"grants":["runs.read"]}`, http.StatusCreated},
+		{"GET", "/api/v1/runs/run", "", http.StatusOK},
+		{"GET", "/api/v1/runs/run/jobs/job", "", http.StatusOK},
 	} {
-		code, _, h := secretsRequest(t, f, req.method, req.path, f.ownerA, req.body)
-		if code >= 300 || h.Get("Cache-Control") != "no-store" {
-			t.Errorf("%s %s = %d with Cache-Control %q", req.method, req.path, code, h.Get("Cache-Control"))
+		w := f.serve(f.cookieRequest(tc.method, tc.path, tc.body))
+		if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s %s: HTTP %d %s cache=%q", tc.method, tc.path, w.Code, w.Body, w.Header().Get("Cache-Control"))
 		}
 	}
-	for _, path := range []string{"/.well-known/jwks.json", "/api/v1/health"} {
-		if _, _, h := secretsRequest(t, f, "GET", path, "", nil); h.Get("Cache-Control") == "no-store" {
-			t.Errorf("public GET %s carries Cache-Control: no-store", path)
+	for path, want := range map[string]int{"/.well-known/jwks.json": http.StatusNotFound, "/api/v1/health": http.StatusOK} {
+		w := f.serve(httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != want || w.Header().Get("Cache-Control") == "no-store" {
+			t.Fatalf("public GET %s: HTTP %d %s cache=%q", path, w.Code, w.Body, w.Header().Get("Cache-Control"))
 		}
+	}
+}
+
+func TestSecretsDashboardMaskedValuesProperty(t *testing.T) {
+	property := func(value []byte, shared bool, role uint8) bool {
+		owner := newBrowserFixture(t, nil)
+		viewer := owner
+		if role%3 == 1 {
+			viewer = secretMember(t, owner, "viewer", store.RoleEditor)
+		}
+		if role%3 == 2 {
+			viewer = secretMember(t, owner, "viewer", store.RoleReader)
+		}
+		private := "private-secret-" + hex.EncodeToString(value)
+		pipeline, path := "", "/api/v1/secrets/PROP_TOKEN"
+		if !shared {
+			pipeline, path = "deploy", path+"?pipeline=deploy"
+		}
+		code, body, _ := secretsRequest(t, owner, "POST", "/api/v1/secrets", "", map[string]any{"name": "PROP_TOKEN", "value": private, "shared": shared, "pipeline": pipeline})
+		if code != http.StatusNoContent {
+			t.Fatalf("write: HTTP %d %s", code, body)
+		}
+		listed := listSecretsAs(t, viewer, private)
+		if listed["PROP_TOKEN"].Name != "PROP_TOKEN" || !listed["PROP_TOKEN"].Masked || listed["PROP_TOKEN"].Value != "" {
+			return false
+		}
+		code, body, _ = secretsRequest(t, viewer, "GET", path, "", nil)
+		return code == http.StatusForbidden && !strings.Contains(body, private) && !strings.Contains(owner.logs.String(), private)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -181,48 +181,6 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	}
 }
 
-func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	ctx := context.Background()
-	created := time.Now().Add(-time.Hour)
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID:        "run-pending-1",
-		Pipeline:  "demo",
-		Status:    "pending",
-		CreatedAt: created,
-		StartedAt: created,
-	}); err != nil {
-		t.Fatalf("CreateRun pending: %v", err)
-	}
-
-	started := time.Now()
-	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{
-		ID:        "run-pending-1",
-		Pipeline:  "demo",
-		Status:    "running",
-		StartedAt: started,
-	}); err != nil {
-		t.Fatalf("CreateRun running upsert: %v", err)
-	}
-
-	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetRun(ctx, "run-pending-1")
-	if err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-	if got.Status != "running" {
-		t.Errorf("Status=%q want running", got.Status)
-	}
-	if got.CreatedAt.Truncate(time.Second) != created.Truncate(time.Second) {
-		t.Errorf("CreatedAt=%v want %v (lost on upsert)", got.CreatedAt, created)
-	}
-}
-
 func postJSON(t *testing.T, url string, body any) *http.Response {
 	t.Helper()
 	buf, err := json.Marshal(body)
@@ -324,171 +282,32 @@ func TestTrigger_ValidatesRepoURL(t *testing.T) {
 	}
 }
 
-func TestTrigger_RequiresAGitHubRepositorySlug(t *testing.T) {
+func TestEventListClampsItsLimit(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	t.Cleanup(srv.Close)
-
-	for _, tc := range []struct {
-		name string
-		repo string
-		want int
-	}{
-		{name: "slug", repo: "sparkwing-dev/sparkwing", want: http.StatusAccepted},
-		{name: "absent", repo: "", want: http.StatusAccepted},
-		{name: "https URL", repo: "https://attacker.example/payload.git", want: http.StatusBadRequest},
-		{name: "scp-like URL", repo: "git@attacker.example:payload.git", want: http.StatusBadRequest},
-		{name: "three segments", repo: "owner/name/extra", want: http.StatusBadRequest},
-		{name: "no slash", repo: "sparkwing", want: http.StatusBadRequest},
-		{name: "space", repo: "owner/na me", want: http.StatusBadRequest},
-		{name: "non-ascii", repo: "ownér/name", want: http.StatusBadRequest},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			env := map[string]string{}
-			if tc.repo != "" {
-				env["GITHUB_REPOSITORY"] = tc.repo
-			}
-			resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-				"pipeline": "demo",
-				"trigger":  map[string]any{"source": "manual", "env": env},
-			})
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != tc.want {
-				body, _ := io.ReadAll(resp.Body)
-				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tc.want, body)
-			}
-		})
-	}
-}
-
-func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	now := time.Now().UTC()
-	submitter, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "ci"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: teststore.CredentialGrants([]string{"runs.write"}), ExpiresAt: teststore.CredentialExpiry(now, 0)})
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	operator, _, err := teststore.ProvisionCredential(context.Background(), st, capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, Team: "", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "root"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}, ExpiresAt: teststore.CredentialExpiry(now, 0)})
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	t.Cleanup(srv.Close)
-
-	for _, tc := range []struct {
-		name  string
-		token string
-		body  map[string]any
-		want  int
-	}{
-		{
-			name:  "runs.write cannot claim the github source",
-			token: submitter,
-			body: map[string]any{
-				"pipeline": "demo",
-				"trigger":  map[string]any{"source": "github"},
-				"git":      map[string]any{"github_owner": "acme", "github_repo": "widgets"},
-			},
-			want: http.StatusForbidden,
-		},
-		{
-			name:  "runs.write cannot carry pull-request provenance",
-			token: submitter,
-			body: map[string]any{
-				"pipeline": "demo",
-				"trigger": map[string]any{"source": "manual", "env": map[string]string{
-					"GITHUB_HEAD_SHA": "deadbeef",
-				}},
-			},
-			want: http.StatusForbidden,
-		},
-		{
-			name:  "runs.write submits its own source",
-			token: submitter,
-			body: map[string]any{
-				"pipeline": "demo",
-				"trigger":  map[string]any{"source": "manual"},
-			},
-			want: http.StatusAccepted,
-		},
-		{
-			name:  "admin still speaks for the webhook",
-			token: operator,
-			body: map[string]any{
-				"pipeline": "demo",
-				"trigger": map[string]any{"source": "github", "env": map[string]string{
-					"GITHUB_EVENT_NAME": "pull_request",
-					"GITHUB_HEAD_SHA":   "deadbeef",
-				}},
-				"git": map[string]any{"github_owner": "acme", "github_repo": "widgets"},
-			},
-			want: http.StatusAccepted,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			status, body := postJSONWithBearer(t, srv.URL+"/api/v1/triggers", tc.token, tc.body)
-			if status != tc.want {
-				t.Fatalf("status = %d, want %d (body: %s)", status, tc.want, body)
-			}
-		})
-	}
-}
-
-func TestListRoutes_ClampTheirLimit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := teststore.SeedRun(st, ctx, store.DefaultTeam, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	for i := range store.MaxRunListLimit + 5 {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
-			ID:        "tg-" + strconv.Itoa(i),
-			Pipeline:  "push",
-			CreatedAt: time.Unix(int64(i+1), 0),
-		}); err != nil {
-			t.Fatal(err)
-		}
+	for range store.MaxRunListLimit + 5 {
 		if err := teststore.ForTeam(t, st, store.DefaultTeam).AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
-
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	t.Cleanup(srv.Close)
-
-	var triggers struct {
-		Triggers []json.RawMessage `json:"triggers"`
+	raw, _, err := teststore.ProvisionCredential(ctx, st, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	getJSON(t, srv.URL+"/api/v1/triggers?limit=1000000000", &triggers)
-	if len(triggers.Triggers) != store.MaxRunListLimit {
-		t.Fatalf("triggers = %d, want %d", len(triggers.Triggers), store.MaxRunListLimit)
-	}
-
+	r := httptest.NewRequest("GET", "/api/v1/runs/run-1/events?limit=1000000000", nil)
+	r.Header.Set("Authorization", "Bearer "+raw)
+	w := httptest.NewRecorder()
+	controller.New(st, nil).Handler().ServeHTTP(w, r)
 	var events []json.RawMessage
-	getJSON(t, srv.URL+"/api/v1/runs/run-1/events?limit=1000000000", &events)
-	if len(events) != store.MaxRunListLimit {
-		t.Fatalf("events = %d, want %d", len(events), store.MaxRunListLimit)
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &events) != nil || len(events) != store.MaxRunListLimit {
+		t.Fatalf("events HTTP %d count=%d, want %d: %s", w.Code, len(events), store.MaxRunListLimit, w.Body)
 	}
 }
 

@@ -58,7 +58,7 @@ func TestFloodPolicy_ATeamsTokensShareOneCap(t *testing.T) {
 	if code := trigger(tokens[0], 1); code != http.StatusAccepted {
 		t.Fatalf("first trigger = %d", code)
 	}
-	seedRun(t, acme, "run-acme", "build")
+	seedRun(t, st, acme, "run-acme", "build")
 	if code, body := f.do("POST", "/api/v1/runs/run-acme/retry", tokens[1], nil); code/100 != 2 {
 		t.Fatalf("retry inside the cap = %d: %s", code, body)
 	}
@@ -102,7 +102,7 @@ func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
 		auth[team] = "Bearer " + raw
 		if team == "acme" {
 			for _, id := range []string{"run-backlog-1", "run-backlog-2"} {
-				if err := tenant.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "build", CreatedAt: now}); err != nil {
+				if err := teststore.SeedTrigger(st, ctx, tenant.Team(), store.Trigger{ID: id, Pipeline: "build", CreatedAt: now}); err != nil {
 					t.Fatal(err)
 				}
 			}

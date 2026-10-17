@@ -104,7 +104,10 @@ func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.Au
 			return bindingRefusal()
 		}
 		tenant := &Tenant{s: s, team: Team(c.Team)}
-		if err := tenant.secretClaimFenceTx(ctx, tx, c); err != nil {
+		if err := lockClaimOwnerTx(ctx, tx, tenant.team, UnitRef{Kind: c.Unit, RunID: c.Binding.RunID}); err != nil {
+			return err
+		}
+		if err := lockStateRunTx(ctx, tx, tenant.team, c.Binding.RunID); err != nil {
 			return err
 		}
 		run, err := readRunTx(ctx, tx, tenant.team, c.Binding.RunID)
@@ -115,6 +118,12 @@ func (s *Store) ResupplyHereSecrets(ctx context.Context, authority capability.Au
 			return bindingRefusal()
 		}
 		if err := validateLocalSecrets(run.Request.Request.LocalSecretNames, values); err != nil {
+			return err
+		}
+		if run.CancelRequestedAt != nil {
+			return nil
+		}
+		if err := tenant.secretClaimFenceTx(ctx, tx, c); err != nil {
 			return err
 		}
 		key = localSecretKey{tenant.team, run.ID}

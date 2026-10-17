@@ -15,7 +15,6 @@ import (
 )
 
 func TestObjectStoreBreaker_RouteReportsEveryClass(t *testing.T) {
-
 	resp := breakerRequest(t, http.MethodGet, true)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -49,7 +48,6 @@ func TestObjectStoreBreaker_RouteReportsEveryClass(t *testing.T) {
 }
 
 func TestObjectStoreResetBreaker_ClearsNothingWhenNothingTripped(t *testing.T) {
-
 	resp := breakerRequest(t, http.MethodPost, true)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -71,7 +69,6 @@ func TestObjectStoreResetBreaker_ClearsNothingWhenNothingTripped(t *testing.T) {
 }
 
 func TestObjectStoreResetBreaker_NeedsOperatorAuthority(t *testing.T) {
-
 	resp := breakerRequest(t, http.MethodPost, false)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -80,18 +77,13 @@ func TestObjectStoreResetBreaker_NeedsOperatorAuthority(t *testing.T) {
 }
 
 func TestObjectStoreHealth_NamesTrippedClassesWithoutTheirLimits(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
+	f := newCronsFixture(t)
 
-	resp := mustGet(t, base+"/api/v1/health")
-	defer resp.Body.Close()
 	var body struct {
 		ObjectStore map[string]any `json:"object_store"`
 		Problems    []string       `json:"problems"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	f.call(http.MethodGet, "/api/v1/health", "", nil, http.StatusOK, &body)
 	if body.ObjectStore["tripped"] != false {
 		t.Fatalf("a fresh controller reports tripped=%v", body.ObjectStore["tripped"])
 	}
@@ -106,10 +98,8 @@ func TestObjectStoreHealth_NamesTrippedClassesWithoutTheirLimits(t *testing.T) {
 }
 
 func TestMetrics_ObjectStoreBudgetIsExported(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	body := scrape(t, base)
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
+	body := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
 	for _, want := range []string{
 		`sparkwing_object_store_requests_total{class="put",outcome="allowed"}`,
 		`sparkwing_object_store_requests_total{class="get",outcome="refused"}`,
@@ -133,7 +123,6 @@ func freezeBucket(t *testing.T, limit objectguard.CeilingLimit, bytes, objects i
 }
 
 func TestObjectStoreBreaker_ReportsAnUnlimitedCeilingByDefault(t *testing.T) {
-
 	resp := breakerRequest(t, http.MethodGet, true)
 	defer resp.Body.Close()
 	var body struct {
@@ -211,7 +200,6 @@ func TestObjectStoreResetBreaker_ThawsAFrozenCeiling(t *testing.T) {
 }
 
 func TestObjectStoreResetBreaker_RefusesAThawNothingWouldEnd(t *testing.T) {
-
 	limiter := objectguard.Shared()
 	ceiling := limiter.Ceiling()
 	t.Cleanup(func() { ceiling.Configure(objectguard.CeilingConfig{}) })
@@ -229,20 +217,15 @@ func TestObjectStoreResetBreaker_RefusesAThawNothingWouldEnd(t *testing.T) {
 }
 
 func TestObjectStoreHealth_ReportsAFrozenCeilingWithoutItsTotals(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
+	f := newCronsFixture(t)
 	freezeBucket(t, objectguard.CeilingLimit{MaxBytes: 1000}, 999999, 7)
 
-	resp := mustGet(t, base+"/api/v1/health")
-	defer resp.Body.Close()
 	var body struct {
 		Status      string         `json:"status"`
 		ObjectStore map[string]any `json:"object_store"`
 		Problems    []string       `json:"problems"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	f.call(http.MethodGet, "/api/v1/health", "", nil, http.StatusOK, &body)
 	ceiling, ok := body.ObjectStore["ceiling"].(map[string]any)
 	if !ok {
 		t.Fatalf("health carries no ceiling summary: %v", body.ObjectStore)
@@ -268,11 +251,10 @@ func TestObjectStoreHealth_ReportsAFrozenCeilingWithoutItsTotals(t *testing.T) {
 }
 
 func TestMetrics_BucketCeilingIsExported(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
 	freezeBucket(t, objectguard.CeilingLimit{MaxBytes: 1000, MaxObjects: 50}, 4096, 12)
 
-	body := scrape(t, base)
+	body := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
 	for _, want := range []string{
 		"sparkwing_object_store_bucket_bytes 4096",
 		"sparkwing_object_store_bucket_objects 12",
@@ -288,8 +270,7 @@ func TestMetrics_BucketCeilingIsExported(t *testing.T) {
 }
 
 func TestMetrics_BucketCeilingReportsAnIncompleteMeasurement(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
 	ceiling := freezeBucket(t, objectguard.CeilingLimit{MaxBytes: 1000}, 4096, 12)
 
 	if err := ceiling.ReconcileWith(t.Context(), func(context.Context) (objectguard.Usage, error) {
@@ -297,7 +278,7 @@ func TestMetrics_BucketCeilingReportsAnIncompleteMeasurement(t *testing.T) {
 	}); err == nil {
 		t.Fatal("a partial measurement was folded in")
 	}
-	if !strings.Contains(scrape(t, base), "sparkwing_object_store_bucket_ceiling_measurement_incomplete 1") {
+	if !strings.Contains(metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String(), "sparkwing_object_store_bucket_ceiling_measurement_incomplete 1") {
 		t.Error("metrics do not report the discarded measurement")
 	}
 }

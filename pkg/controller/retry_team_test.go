@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A retry_of pointer that already crosses teams, whichever way it points, is
@@ -18,7 +19,7 @@ func TestTeamBoundary_AttemptsNeverFollowAPointerIntoAnotherTeam(t *testing.T) {
 		now := time.Now()
 		seedRetry := func(tn *store.Tenant, id, retryOf string) {
 			t.Helper()
-			if err := tn.CreateTriggerWithRun(ctx,
+			if err := teststore.SeedTriggerWithRun(f.st, ctx, tn.Team(),
 				store.Trigger{ID: id, Pipeline: "p", TriggerSource: "api", RetryOf: retryOf, CreatedAt: now},
 				store.Run{ID: id, Pipeline: "p", Status: "running", RetryOf: retryOf, CreatedAt: now, StartedAt: now},
 			); err != nil {
@@ -26,7 +27,7 @@ func TestTeamBoundary_AttemptsNeverFollowAPointerIntoAnotherTeam(t *testing.T) {
 			}
 		}
 		seedRetry(f.teamB, "b-retries-a", f.runA)
-		seedRun(t, f.teamB, "b-root", "p")
+		seedRun(t, f.st, f.teamB, "b-root", "p")
 		seedRetry(f.teamA, "a-retries-b", "b-root")
 
 		for _, tc := range []struct{ asked, leaked string }{

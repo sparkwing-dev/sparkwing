@@ -148,7 +148,7 @@ func managementAuthorityTx(ctx context.Context, tx *storeTx, team Team, a capabi
 	if selected < 0 {
 		return capability.Principal{}, bindingRefusal()
 	}
-	p, err := tx.ResolveAuthority(ctx, a.Principal.Authority)
+	p, err := resolveProvisionAuthorityTx(ctx, tx, a.Principal.Authority, capability.ProofForConsole(a.Principal))
 	if err != nil {
 		return capability.Principal{}, err
 	}

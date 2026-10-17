@@ -124,3 +124,10 @@ func parseIntakeRemote(remote string) (*url.URL, error) {
 	}
 	return parsed, nil
 }
+
+// ResolveScheduleRepository uses the same server-owned source identity lookup as run intake.
+func (s *Server) ResolveScheduleRepository(ctx context.Context, team store.Team, remote string) (runspec.Repository, error) {
+	request := runspec.Request{Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: remote}}}
+	err := s.resolveIntakeSource(ctx, string(team), &request)
+	return request.Git.Repository, err
+}

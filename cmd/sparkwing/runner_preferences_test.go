@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -106,6 +107,32 @@ func TestRunnerRemovalRefusesPublicCredentialBeforeStoppingOrRevoking(t *testing
 	}
 	if len(*f.calls) != 0 || f.tokens[0].RevokedAt != nil {
 		t.Fatal("credential refusal stopped the service or revoked authority")
+	}
+}
+
+func TestRunnerRemovalUnsafeModesCannotStopOrRevokeProperty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes")
+	}
+	f := newRunnersFixture(t)
+	if err := f.run([]string{"add", "--profile", "prod", "--runner", "desktop", "--config", f.config, "--no-service"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := userconfig.ReadConfig(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(*cfg.Runner.CredentialsDir, "agent-token")
+	property := func(bits uint8) bool {
+		mode := os.FileMode(0o600 | 1<<uint(bits%6))
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		err := f.run([]string{"remove", "--profile", "prod", "--config", f.config})
+		return err != nil && len(*f.calls) == 0 && f.tokens[0].RevokedAt == nil
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+		t.Fatal(err)
 	}
 }
 

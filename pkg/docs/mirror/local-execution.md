@@ -430,7 +430,8 @@ pipelines:
 
 Cloud owns the run record. The invoking CLI hosts its scheduler, streams logs
 and requests cancellation on Ctrl-C. The first interrupt keeps the owner alive
-until local and remote jobs finish cancelling. A second interrupt stops hosting.
+until local and remote jobs finish cancelling. Secret reads remain refused
+during this drain. A second interrupt stops hosting.
 Nodes use the existing claim, lease and
 fencing rules. The local controller supplies this machine's admission only.
 Other machines register as runners with Cloud. `sparkwing runners add --runner NAME

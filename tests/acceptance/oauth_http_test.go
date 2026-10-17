@@ -222,7 +222,7 @@ func TestOAuthHTTPProofProperty(t *testing.T) {
 }
 
 func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
-	for _, state := range []string{"rejected", "unavailable", "unverified", "redirect", "license", "missing store", "missing key", "roleless session"} {
+	for _, state := range []string{"rejected", "unavailable", "unverified", "redirect", "license", "missing store", "missing key"} {
 		t.Run(state, func(t *testing.T) {
 			f := newOAuthHTTP(t)
 			code := apierr.Unavailable
@@ -249,13 +249,6 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 				}
 			case "missing key":
 				f.server.WithSecretsCipher(nil)
-			case "roleless session":
-				for _, query := range []string{`DELETE FROM memberships`, `UPDATE accounts SET active_team='',waitlisted_at=1,waitlist_reason='manual'`} {
-					if _, err := f.store.DB().ExecContext(t.Context(), query); err != nil {
-						t.Fatal(err)
-					}
-				}
-				code = apierr.Forbidden
 			}
 			w := f.callback(url.Values{"state": {f.oauthState}, "code": {f.provider.code}}, f.flow)
 			assertEngineError(t, w, apierr.Status(code), code)
@@ -263,6 +256,34 @@ func TestOAuthHTTPProviderAndStoreRefusals(t *testing.T) {
 				t.Fatalf("HTTP %d %s logs=%s", w.Code, w.Body.String(), f.logs.String())
 			}
 		})
+	}
+}
+
+func TestOAuthHTTPWaitlistedSessionHasNoTeamAuthority(t *testing.T) {
+	f := newOAuthHTTP(t)
+	for _, query := range []string{`DELETE FROM memberships`, `UPDATE accounts SET active_team='',waitlisted_at=1,waitlist_reason='manual'`} {
+		if _, err := f.store.DB().ExecContext(t.Context(), query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := f.callback(url.Values{"state": {f.oauthState}, "code": {f.provider.code}}, f.flow)
+	cookie := oauthCookie(w, "__Host-sw_session")
+	if w.Code != 200 || cookie == nil || cookie.Value == "" || w.Header().Get("Cache-Control") != "no-store" || strings.Contains(w.Body.String(), "private-") || strings.Contains(f.logs.String(), "private-") || strings.Contains(f.logs.String(), cookie.Value) {
+		t.Fatalf("HTTP %d %s logs=%s", w.Code, w.Body, f.logs)
+	}
+	session, err := f.store.LookupSession(t.Context(), cookie.Value)
+	if err != nil || session.Team != "" || len(session.Scopes) != 0 {
+		t.Fatalf("waitlisted session gained authority: %+v %v", session, err)
+	}
+	for _, path := range []string{"/api/v1/runs", "/api/v1/tokens", "/api/v1/operator/teams"} {
+		r := httptest.NewRequest("GET", oauthOrigin+path, nil)
+		r.Header.Set("Authorization", "Session "+cookie.Value)
+		denied := httptest.NewRecorder()
+		f.handler.ServeHTTP(denied, r)
+		assertEngineError(t, denied, 403, apierr.Forbidden)
+		if strings.Contains(denied.Body.String(), cookie.Value) {
+			t.Fatal("refusal disclosed session")
+		}
 	}
 }
 

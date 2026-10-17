@@ -32,7 +32,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 				t.Fatal(err)
 			}
 			issued, err := server.Store.DelegateCapability(t.Context(), capability.DelegateSpec{
-				Parent: principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone},
+				Parent: principal.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.TriggersClaim}, Binding: principal.Capability.Binding, Repositories: principal.Capability.Repositories,
 			})
 			if err != nil {
 				t.Fatal(err)

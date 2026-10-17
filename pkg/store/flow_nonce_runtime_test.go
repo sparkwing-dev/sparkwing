@@ -41,7 +41,7 @@ func TestFlowNoncesAreOneUseAndKindScopedProperty(t *testing.T) {
 				return s.ConsumeIdentityLinkState(t.Context(), n, e, at)
 			},
 			func(n string, e, at time.Time) (bool, error) {
-				return s.ConsumeGitHubAppConnectState(t.Context(), n, e, at)
+				return s.consumeFlowNonce(t.Context(), "github_app_connect", n, e)
 			},
 		} {
 			if ok, err := consume(nonce, expires, now); err != nil || !ok {

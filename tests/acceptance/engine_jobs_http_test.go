@@ -23,17 +23,23 @@ import (
 type jobViewTransactions struct {
 	snapshotTransactions
 	nodeReads int
-	nodeRef   store.NodeRef
+	nodeRun   string
 }
 
-func (f *jobViewTransactions) ReadNode(_ context.Context, ref store.NodeRef) (store.NodeRow, error) {
+func (f *jobViewTransactions) ReadStatus(_ context.Context, team store.Team, run string) (controller.RunStatusFacts, error) {
 	f.nodeReads++
-	f.nodeRef = ref
-	return f.node, f.readErr
+	f.nodeRun = run
+	if team != "team" {
+		return controller.RunStatusFacts{}, errors.New("unexpected tenant")
+	}
+	snapshot := f.snapshot
+	snapshot.Nodes = []store.NodeRow{f.node}
+	return controller.RunStatusFacts{Snapshot: snapshot}, f.readErr
 }
 
 func jobViewFixture(b *credentialBoundary) *jobViewTransactions {
 	f := &jobViewTransactions{snapshotTransactions: *snapshotFixture(b)}
+	f.snapshot.Run.Number = 1
 	f.node = store.NodeRow{
 		Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusRunning,
 		Generation: 4, Attempt: 2, StateSeq: 9, Expansion: store.ExpansionExpected,
@@ -47,6 +53,7 @@ func jobViewFixture(b *credentialBoundary) *jobViewTransactions {
 func jobViewServer(t *testing.T, b *credentialBoundary, f *jobViewTransactions) http.Handler {
 	t.Helper()
 	e := fakeEngine(t, &f.engineTransactions)
+	e.ReadRunStatus = f.ReadStatus
 	e.ResolveTenant = func(_ context.Context, team store.Team) (controller.RunTransactions, error) {
 		if team != "team" {
 			t.Fatalf("tenant = %q", team)
@@ -101,9 +108,9 @@ func TestEngineJobsHTTP(t *testing.T) {
 						t.Fatalf("list=%s reads=%d nodeReads=%d", w.Body.String(), f.reads, f.nodeReads)
 					}
 				} else {
-					var got controllerwire.JobDetail
-					if json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got, want) || f.reads != 0 || f.nodeReads != 1 || f.nodeRef != f.node.Ref {
-						t.Fatalf("detail=%s reads=%d nodeReads=%d ref=%+v", w.Body.String(), f.reads, f.nodeReads, f.nodeRef)
+					var got controllerwire.DebugJob
+					if json.Unmarshal(w.Body.Bytes(), &got) != nil || !reflect.DeepEqual(got.Job, want) || got.RunID != "run" || got.Number != f.snapshot.Run.Number || got.Execution != nil || f.reads != 0 || f.nodeReads != 1 || f.nodeRun != f.node.Ref.RunID {
+						t.Fatalf("detail=%s reads=%d nodeReads=%d ref=%+v", w.Body.String(), f.reads, f.nodeReads, f.nodeRun)
 					}
 				}
 				if b.bindingTarget.Team != "team" || b.bindingTarget.RunID != "run" || f.projections != 0 || f.writes != 0 {
@@ -173,7 +180,7 @@ func TestEngineJobsHTTPRefusals(t *testing.T) {
 					status, code = 403, apierr.Forbidden
 				case "foreign team":
 					b.snapshot.Authorities[0].Principal.Capability.Team = "other"
-					status, code = 403, apierr.Forbidden
+					status, code = 404, apierr.NotFound
 				case "relational refusal":
 					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "wrong resource"}
 					status, code = 403, apierr.Forbidden
