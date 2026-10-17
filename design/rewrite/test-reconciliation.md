@@ -744,3 +744,29 @@ scratch is removed after checks, and the shared build cache is retained.
 - W1 Opus rulings 4, 5, 7 and 8: operator_settings is confined to quota targets; BindNone refuses cross-team selection. Schedule identity comes from source resolution and verified IDs, attribution uses ArmedBy, and invalid completion facts consume only their failed revision once. Transient completion retries remain. Completion SQL is unchanged under ruling 9.
 - W1 Opus verification: 126 controller groups pass (38.677s); focused store tests pass (18.507s), focused race passes (141.544s), HTTP source acceptance and store schedule/declared-repository boundary checks pass. Build, scoped vet, commentcheck, full capability/crons/docs suites and docs drift checks pass. HTTP component checks use temporary net.Pipe transport; native verdict is unavailable because the latest lead report has only its header and opening fence.
 - W1 Opus volume: production +42 (128 added, 86 deleted), store +30; cumulative store -2421 versus main, 1829 over budget. C1/C2 changes and remaining integration evidence are recorded in w1-test-reconciliation-a-progress.md. No tests deleted or skipped. No Git writes. STATUS remains CONTINUE pending lead native evidence and the inherited budget reduction.
+
+
+## W1 native session-2 reconciliation
+
+- C W1: migrate the wingd process fixture's admission participant to HolderRef.
+  Reproduced its compile failure first. The direct child-build/cleanup test passes.
+- C W1: identity fixtures use real authentication and explicit Cloud deployment
+  instead of the obsolete injected console authenticator. Safe cookie reads reach
+  the verifier even after session deletion. Operator, signup, deletion and billing
+  tests retain real store, consent, hold and audit behavior.
+- C W1: retired financial routes expect 404, trust attribution uses account ID,
+  and dispute release preserves revoked trust. Remove the stale dollar-limit
+  assertion that had become an explicit trust grant after the pricing cut.
+- B W1: the absent-team trust regression ran red at 500. Map the existing store
+  not-found error through the shared engine error adapter, returning 404.
+- A/C W1: port the two remaining selected trigger tests to /runs. Remove 123
+  lines of retired request fixtures. Current HTTP intake validates GitHub source
+  slugs and generated App/default-branch injection attempts against real SQLite.
+  No legacy route or authority widening is restored.
+- Evidence: 61 controller groups and 100 tests/subtests pass without skips through
+  component transport. Direct fixture, intake, schedule-boundary and focused race
+  checks pass. Focused store checks, build, vet and commentcheck pass.
+- B OPEN: the concrete schedule writer still returns policy_missing in the
+  enabled schedule-cap test. W1b owns that adapter under the latest lead ruling.
+  The latest lead native file also retains bin local api.sock and wingd process
+  failures. No new native verdict or acceptance cell is claimed.

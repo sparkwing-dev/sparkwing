@@ -1,6 +1,116 @@
 # W1 test reconciliation-a progress
 
-## Current continuation: integration merge reconciliation
+## Current continuation: session-2 native failures
+
+Read the lead's latest native result first. It reports passing store, capability,
+controller-command, web, client, journal and localcontroller packages, and failures
+in wingd, bin and controller. Opus rulings 1-8 remain implemented. Ruling 9 leaves
+PostgreSQL completion SQL to the lead. No completed review fix was repeated.
+The amendments and handoffs audit found no new unfinished W1 reconciliation
+assignment. The latest lead decision assigns concrete ScheduleWriter,
+ScheduledRunWriter and ConcurrencyStore integration to W1b in env 1088.
+
+### Implemented and ported
+
+- Reproduced TestBuildFixtureProcessRemovesTemporaryDirectory's fixture build
+  failure, then migrated testdata/testprog's AdmissionRequest.RunID to HolderRef.
+  Its subprocess build and temporary-directory cleanup now pass without sockets.
+  This is the only caller migration outside controller tests.
+- Reproduced the operator fixture's /me 403 through temporary net.Pipe transport.
+  Removed its injected obsolete console authenticator. Identity fixtures now use
+  real authentication, authority binding, console policy and SQLite transactions.
+  They explicitly select Cloud mode because their deployment-bearer settings
+  tests require it. The cookie helper sends safe reads without a store precheck,
+  so a deleted session reaches the real HTTP verifier and returns 401.
+- The enabled operator tests then exposed stale assertions. Retired financial
+  routes return 404. Trust audit attribution uses the operator account ID.
+  Removed the old dollar-limit assertion, whose request had already been changed
+  into an explicit trust grant. The retained test now proves that freeze and
+  dispute-release operations preserve revoked trust, plus the existing hold and
+  audit assertions.
+- TestBillingTrust_OperatorGrantsAndRevokes reached a real production defect:
+  an absent team's trust update returned 500. The handler now maps the store
+  error through engineLookupError, returning the existing 404/not_found contract.
+  The existing test ran red before the one-line production fix.
+- Ported TestTrigger_RequiresAGitHubRepositorySlug and
+  TestTrigger_ReservesGitHubProvenanceForTheWebhook from the removed /triggers
+  request to real /runs intake in intake_source_test.go. Their old requests ran
+  red first. Valid HTTPS and SSH GitHub sources resolve numeric identity through
+  the fake provider. Invalid owner/repository paths fail before provider I/O.
+  Invariant: manual intake cannot attach verified App or default-branch facts.
+  Generated payloads prove those assertions are stripped from committed manual
+  requests, while a caller claiming App origin is refused. Real HTTP policy,
+  member issuance, request sealing and SQLite admission run without sockets.
+  The existing verified-webhook suites retain the trusted positive path.
+
+### Verification
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and at most -p 4. GOTMPDIR and TMPDIR
+are beneath /tmp/sw-astra-W1.
+
+- Whole-repository `go build -p 4 ./...` passes.
+- `go vet -p 4 ./pkg/controller ./internal/wingd
+  ./internal/wingd/testdata/testprog` passes.
+- The process-fixture cleanup test passes directly, 0.491s, after its reproduced
+  build failure.
+- Both migrated trigger tests pass directly, 0.286s.
+- Controller selection: 61 top-level groups, 100 tests including subtests,
+  zero failures or skips, 13.727s. Selection:
+  `^(TestOperator|TestAdminTokenReachesNoOperatorPower|TestSignUp|TestYoungGitHubAccounts|TestBillingTrust|TestServerPolicy|TestTrigger_(RequiresAGitHubRepositorySlug|ReservesGitHubProvenanceForTheWebhook)|TestGitHubCompletion|TestGitHubBrowserConnection|TestIntakeSource)`.
+  Socket-based fixtures use a temporary standard-library httptest net.Pipe
+  overlay. The real default router/authenticator/store run. This is component
+  evidence, not native socket proof.
+- Controller source-credential and claim-source selections pass through component
+  transport, 6.349s, including renamed extra-consent clearing and an App source
+  beyond the repository-listing limit.
+- Focused store source release, executor, live consent, schedule attribution,
+  derived repository identity and deployment binding tests pass, 10.792s.
+- Focused direct race tests pass, 4.085s: the two migrated trigger tests,
+  default GitHub connection/store transactions and sealed schedule intake.
+- Schedule HTTP contract tests with the existing writer fake, and real sealed
+  cron-launcher intake, pass directly, 0.320s. No fake proves concrete schedule
+  administration complete.
+- The acceptance TestPortDestinations inventory check passes, 0.029s.
+- Commentcheck against main is clean across 2,691 files. Formatting, whitespace
+  and scoped vet pass. No source skip or skip widening was added.
+
+### Remaining integrations and volume
+
+A fresh recorder-based run of
+TestComputeLimits_CronBelowTheMinimumIntervalIsRefused still fails with
+500/policy_missing at PUT /api/v1/schedules/repos. This is the concrete schedule
+adapter assigned to W1b, not a fixture error. Its assertions remain enabled.
+The lead's bin failure is TestInstallToGreenBuildUsesPublicScaffoldAndCandidateSDK:
+its admitted local run loses api.sock before posting the plan. That real local
+integration remains with W9, the assigned local integrator. The process election,
+daemon restart and other socket-dependent wingd cases need the lead's native run.
+Live GitHub, PostgreSQL completion SQL and lock behavior, real runner execution
+and real-repository QA remain lead evidence.
+
+No acceptance matrix cell was newly enabled or claimed. Two existing tests were
+ported to current intake. Removed 123 lines of retired trigger-test bodies and
+the stale dollar-limit assertions. No production file or production API was
+deleted. Production delta this session is +1/-1, net zero. Store production is
+unchanged: cumulative +23,788/-26,136, net -2,348 versus main, 1,902 over the
+combined -4,250 budget under the lead's exclusions. The inherited reduction
+remains open. This session adds no production mechanism, setting, cache, limit,
+environment variable or contract. No contract change is needed or made.
+
+Shared files touched: internal/wingd/testdata/testprog/main.go;
+pkg/controller/billing_trust.go, console_fixture_test.go,
+identity_fixture_test.go, intake_source_test.go, operator_test.go,
+team_billing_test.go and trigger_test.go. This report, the reconciliation ledger
+and the test-port inventory record the changes. Lead-owned amendments and
+handoffs are untouched. No Git writes ran. The common Git config has no local
+user identity or core.worktree overrides.
+
+Completion is not claimed: the lead's latest native file still contains FAIL,
+and the store budget remains over target. The lead must commit, rerun natively
+and decide the verdict. Scratch is removed at session end and /tmp/sw-gocache
+is retained.
+
+## Previous continuation: integration merge reconciliation
 
 Resolved both conflicting working files before further implementation.
 `pkg/store/store.go` keeps the integration branch's pinned-clock safety annotation.

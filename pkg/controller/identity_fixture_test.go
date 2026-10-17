@@ -96,6 +96,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	}
 	srv := controller.New(st, o.logger).WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
+		WithCloudDeployment(true).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
 		WithBillingCheckout(o.checkoutURL, o.checkoutToken).
@@ -103,7 +104,6 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	if o.configure != nil {
 		o.configure(srv)
 	}
-	controller.ConfigureConsoleFixture(srv)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin, srv: srv}

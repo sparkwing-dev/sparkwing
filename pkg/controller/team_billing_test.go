@@ -334,7 +334,7 @@ func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
 	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "revoked", "reason": "chargeback"}, &got); code != http.StatusOK {
 		t.Fatalf("revoke = %d", code)
 	}
-	if got.Trust != "revoked" || got.Trusted || got.TrustReason != "chargeback" || got.TrustBy != "korey@example.com" || got.Standing != "Held" {
+	if got.Trust != "revoked" || got.Trusted || got.TrustReason != "chargeback" || got.TrustBy != operator.id || got.Standing != "Held" {
 		t.Errorf("after revoke = %+v", got)
 	}
 	var team operatorTeam

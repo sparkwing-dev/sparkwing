@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -239,6 +240,103 @@ func TestSourceUploadNameScopeNeverTrustsCallerDisplayProperty(t *testing.T) {
 		}
 		return sourceUploadHTTP(h, restricted.Raw, "POST", "/api/v1/data/source", string(body)).Code == 403
 	}, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTrigger_RequiresAGitHubRepositorySlug(t *testing.T) {
+	s, _, input, raw := sourceUploadFixture(t)
+	original := http.DefaultTransport
+	calls := 0
+	http.DefaultTransport = intakeGitHubTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.String() != "https://api.github.com/repos/sparkwing-dev/sparkwing" {
+			t.Fatalf("unexpected identity lookup: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":42}`))}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = original })
+	h := s.Handler()
+	for i, tc := range []struct {
+		name, remote string
+		want         int
+	}{
+		{"https", "https://github.com/sparkwing-dev/sparkwing.git", 201},
+		{"ssh", "git@github.com:sparkwing-dev/sparkwing.git", 201},
+		{"absent", "https://github.com", 400},
+		{"https URL as slug", "https://github.com/https://attacker.example/payload.git", 400},
+		{"scp URL as slug", "https://github.com/git@attacker.example:payload.git", 400},
+		{"three segments", "https://github.com/owner/name/extra", 400},
+		{"no slash", "https://github.com/sparkwing", 400},
+		{"space", "https://github.com/owner/na me", 400},
+		{"non-ascii", "https://github.com/ownér/name", 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := input
+			request.Git.Repository = runspec.Repository{}
+			request.Source.Location.RemoteURL = tc.remote
+			body, err := json.Marshal(controllerwire.CreateRunRequest{IdempotencyKey: fmt.Sprintf("slug-%d", i), Request: request})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := calls
+			w := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs", string(body), tc.want)
+			if tc.want == 201 {
+				var created controllerwire.CreateRunResponse
+				if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+					t.Fatal(err)
+				}
+				if created.Request.Request.Git.Repository.Key != "gh:42" || created.Request.Request.Git.App.Set || calls <= before {
+					t.Fatalf("unverified repository: %+v, calls=%d", created.Request.Request.Git, calls-before)
+				}
+			} else if calls != before {
+				t.Fatal("malformed source reached GitHub")
+			}
+		})
+	}
+}
+
+func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
+	s, options, input, raw := sourceUploadFixture(t)
+	c, err := client.NewEngineClient(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	iteration := 0
+	property := func(data string, appOrigin bool) bool {
+		iteration++
+		request := input
+		request.Git.Repository.Display = data
+		request.Git.App = runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{
+			Event: "push", DeliveryKey: data, InstallationID: 7, RepositoryID: 42,
+			Ref: "refs/heads/main", SHA: input.Git.SHA, DefaultBranch: data,
+			DefaultBranchPush: true, VerifiedAt: time.Now().UTC(),
+		}}
+		request.Git.DefaultBranch = runspec.Optional[string]{Set: true, Value: data}
+		body := controllerwire.CreateRunRequest{IdempotencyKey: fmt.Sprintf("provenance-%d", iteration), Request: request}
+		if appOrigin {
+			body.Request.Origin = runspec.OriginApp
+			payload, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("POST", "/api/v1/runs", strings.NewReader(string(payload)))
+			r.Header.Set("Authorization", "Bearer "+raw)
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			return w.Code == http.StatusForbidden
+		}
+		created, err := c.CreateRun(t.Context(), body)
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		got := created.Request.Request
+		return !got.Git.App.Set && !got.Git.DefaultBranch.Set && got.Origin == runspec.OriginTrigger && got.Git.Repository.Key == input.Git.Repository.Key
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
 	}
 }
