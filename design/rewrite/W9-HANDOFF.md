@@ -1,6 +1,13 @@
 # W9 continuation: local integration and runner transport
 
-Latest continuation: [W9-BURST-CANCELLATION-PROFILE-CONTINUATION.md](W9-BURST-CANCELLATION-PROFILE-CONTINUATION.md).
+Latest continuation: [W9-BURST-DETACHED-DIAGNOSTICS.md](W9-BURST-DETACHED-DIAGNOSTICS.md).
+The lead's latest native run passes attached profile-cache execution and both
+publication modes. Detached profile-cache execution still hangs in log following.
+Its cause is unproven. Background host errors now reach the controller log, and
+native failures include controller status, run status and that log. The harness
+must rerun the native family before completion can be claimed.
+
+Earlier continuation: [W9-BURST-CANCELLATION-PROFILE-CONTINUATION.md](W9-BURST-CANCELLATION-PROFILE-CONTINUATION.md).
 It fixes owner cancellation proof ordinals, avoids repeating persisted remote
 cancellation, and corrects the profile-cache native fixture's Git metadata.
 Profile credentials and attached/detached publication are implemented. The lead's
@@ -24,9 +31,9 @@ Earlier reports below describe their own bases. Their superseded missing-owner,
 here, source, local-cache and SDK replacement statements are not new blockers.
 Cross-profile remote cache credentials and one-way publication under A1-50 are
 implemented and covered through real router, store and signed-byte component
-tests. Attached and detached publication passed the lead's native run. Profile
-cache execution awaits the corrected fixture's native rerun. Full native and
-deployed acceptance remains lead work under A1-53.
+tests. Attached and detached publication and attached profile-cache execution
+passed the lead's native run. Detached profile-cache completion remains open.
+Full native and deployed acceptance remains lead work under A1-53.
 
 The next continuation fixes background queue service binding and log finalization.
 See [W9-QUEUE-CONTINUATION.md](W9-QUEUE-CONTINUATION.md) for its evidence and scope.

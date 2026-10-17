@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -166,6 +167,12 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	}
 	writeConfig("local")
 	offlineStopDaemon(t, home)
+	handleFile := filepath.Join(t.TempDir(), "local-run.json")
+	t.Cleanup(func() {
+		if t.Failed() {
+			burstLocalDiagnostics(t, home, handleFile)
+		}
+	})
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	invoke := func(args ...string) []byte {
@@ -193,7 +200,6 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 		args = append(args, "--sw-cache-from", "cloud")
 		wantRuns++
 	}
-	handleFile := filepath.Join(t.TempDir(), "local-run.json")
 	args = append(args, "--sw-run-handle-file", handleFile)
 	if detached {
 		args = append(args, "--sw-detached")
@@ -230,6 +236,36 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	snapshot, err := tenant.ReadSnapshot(ctx, page.Runs[0].ID)
 	if err != nil || snapshot.Run.Owner != nil || snapshot.Run.Request.Request.Mode != "publish" || len(snapshot.Nodes) != 2 || snapshot.Nodes[0].ManifestRecord == nil {
 		t.Fatalf("publication lost local result graph: %+v %v", snapshot, err)
+	}
+}
+
+func burstLocalDiagnostics(t *testing.T, home, handleFile string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	status, err := wingdclient.QueryLocalController(ctx, home)
+	cancel()
+	t.Logf("local controller at failure: %+v: %v", status, err)
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var handle orchestrator.RunHandle
+	if body, err := os.ReadFile(handleFile); err == nil && json.Unmarshal(body, &handle) == nil && handle.RunID != "" {
+		socket, err := wingd.APISocketPath(home)
+		if err == nil {
+			transport := wingdclient.NewAPIClient(socket)
+			defer transport.CloseIdleConnections()
+			reader, err := client.NewRunReader(client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: transport})
+			if err == nil {
+				detail, err := reader.ReadRun(ctx, handle.RunID)
+				t.Logf("local run at failure: %+v: %v", detail, err)
+			}
+		}
+	}
+	if path, err := wingd.LogPath(home); err == nil {
+		body, err := os.ReadFile(path)
+		if len(body) > 16<<10 {
+			body = body[len(body)-(16<<10):]
+		}
+		t.Logf("local controller stderr at failure: %v\n%s", err, body)
 	}
 }
 

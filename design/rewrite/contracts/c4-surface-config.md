@@ -1092,3 +1092,6 @@ history is exported through verified peer authentication. Publication failure
 warns without changing the local verdict. The background local host publishes
 on cleanup. Historical generated topology is flattened to explicit dependencies;
 closure generation does not run during import.
+
+The background queue reports host errors to the local controller's logger when
+hosting returns. Error reporting does not wait for controller shutdown.

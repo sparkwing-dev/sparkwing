@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -167,8 +168,9 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ loca
 		},
 		Maintain: server.MaintainStorage,
 		Runner: runners.StoreRunnerConfig{
-			Bearer: claimant.Bearer,
-			Loop:   runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
+			Bearer:  claimant.Bearer,
+			Loop:    runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
+			OnError: func(err error) { slog.Error("local run host failed", "err", err) },
 			RequestCapacity: func(context.Context) (match.Resources, match.Resources, error) {
 				resources := match.Resources{Cores: float64(runtime.NumCPU())}
 				return resources, resources, nil
