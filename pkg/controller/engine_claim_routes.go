@@ -20,10 +20,10 @@ func (s *Server) claimEndpoints() []Endpoint {
 		{Method: "POST", Pattern: "/api/v1/runners/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
 		{Method: "POST", Pattern: "/api/v1/launcher/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
 		{Method: "POST", Pattern: "/api/v1/launcher/sync", Authentication: capability.AuthCapability, Decode: launcherSyncTarget, Handle: e.handleSyncLauncher},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, Handle: s.claimHandler(e)},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/claim", Authentication: capability.AuthCapability, Decode: e.claimTarget, ResolveTarget: e.resolveRunSelector, Handle: s.claimHandler(e)},
 		{Method: "POST", Pattern: "/api/v1/claims/exchange", Authentication: capability.AuthCapability, Decode: authorityTarget, ResolveTarget: ownUnitTarget, Handle: e.handleExchange},
 		{Method: "POST", Pattern: "/api/v1/claims/{claim}/heartbeat", Authentication: capability.AuthCapability, Decode: claimIDTarget, ResolveTarget: ownUnitTarget, Handle: e.handleRenewal},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/reconcile", Authentication: capability.AuthCapability, Decode: e.runTarget, Handle: func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/reconcile", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 			ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
 			return e.handleReconcile(w, r.WithContext(ctx), a)
 		}},
@@ -50,20 +50,12 @@ func ownUnitTarget(_ context.Context, p capability.Principal, target capability.
 }
 
 func (s *EngineController) claimTarget(r *http.Request) (capability.RequestEvidence, error) {
-	var evidence capability.RequestEvidence
+	evidence, _ := runSelectorTarget(r)
 	body, err := decodeClaimRequest(r)
 	if err != nil {
 		return evidence, err
 	}
 	evidence.Target = capability.Target{RunID: body.RunID, NodeID: body.JobID, ClaimKinds: slices.Clone(body.Kinds)}
-	if r.PathValue("run") != "" {
-		selected, err := s.runTarget(r)
-		if err != nil {
-			return evidence, err
-		}
-		selected.Target.ClaimKinds = evidence.Target.ClaimKinds
-		return selected, nil
-	}
 	return evidence, nil
 }
 

@@ -51,3 +51,24 @@ func (s *EngineController) resolveRunSelector(ctx context.Context, principal cap
 	target.RunID = views[0].Snapshot.Run.ID
 	return target, nil
 }
+
+func (s *EngineController) resolveExpansionTarget(ctx context.Context, principal capability.Principal, target capability.Target) (capability.Target, error) {
+	target, err := s.resolveRunSelector(ctx, principal, target)
+	if err != nil {
+		return target, err
+	}
+	tenant, err := s.runTransactions(ctx, target.Team)
+	if err != nil {
+		return target, err
+	}
+	ref := store.NodeRef{RunID: target.RunID, NodeID: target.NodeID}
+	node, err := tenant.ReadNode(ctx, ref)
+	if err != nil {
+		return target, engineLookupError(err)
+	}
+	if node.Ref != ref || node.Generation <= 0 {
+		return target, missingEndpointPolicy()
+	}
+	target.UnitSourceNodeID, target.UnitSourceGeneration = node.Ref.NodeID, node.Generation
+	return target, nil
+}

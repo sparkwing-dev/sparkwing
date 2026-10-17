@@ -19,8 +19,8 @@ func (s *Server) missingOperationEndpoints() []Endpoint {
 		{Method: "DELETE", Pattern: "/api/v1/runners/{runner}", Decode: authorityTarget, Handle: s.handleDeleteRunner},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/attempts", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobAttempts},
 		{Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobSteps},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/activity", Decode: e.runTarget, Handle: s.handleJobActivity},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/claim", Decode: e.claimTarget, Handle: s.claimHandler(e)},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/activity", Decode: runSelectorTarget, ResolveTarget: e.resolveRunSelector, Handle: s.handleJobActivity},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/claim", Decode: e.claimTarget, ResolveTarget: e.resolveRunSelector, Handle: s.claimHandler(e)},
 	}
 	endpoints = append(endpoints, s.logSubmissionEndpoints(e)...)
 	endpoints = append(endpoints, s.poolEndpoints()...)

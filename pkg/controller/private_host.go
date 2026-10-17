@@ -15,18 +15,18 @@ import (
 func (s *Server) localHostEndpoints() []Endpoint {
 	engine := &EngineController{Store: s.store}
 	return []Endpoint{
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/data-authority", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostDataAuthority},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostDataAuthority},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/snapshot", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localNodeSnapshot},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/authentication", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostAuthentication},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/binding", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostBinding},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/snapshot", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostSnapshot},
-		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostNode},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/transition", Authentication: capability.AuthCapability, Decode: engine.runResultTarget, Handle: s.localHostRunTransition},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/finish", Authentication: capability.AuthCapability, Decode: engine.runResultTarget, Handle: s.localHostFinish},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/transition", Authentication: capability.AuthCapability, Decode: engine.runResultTarget, Handle: s.localHostNodeTransition},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/authentication", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostAuthentication},
-		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/binding", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.localHostBinding},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/data-authority", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostDataAuthority},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/data-authority", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostDataAuthority},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/snapshot", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localNodeSnapshot},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/authentication", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostAuthentication},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/binding", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostBinding},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/snapshot", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostSnapshot},
+		{Method: "GET", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostNode},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/transition", Authentication: capability.AuthCapability, Decode: engine.runResultTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostRunTransition},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/finish", Authentication: capability.AuthCapability, Decode: engine.runResultTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostFinish},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/nodes/{job}/transition", Authentication: capability.AuthCapability, Decode: engine.runResultTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostNodeTransition},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/authentication", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostAuthentication},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/local-host/binding", Authentication: capability.AuthCapability, Decode: runSelectorTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.localHostBinding},
 	}
 }
 
