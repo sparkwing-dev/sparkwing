@@ -3,6 +3,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -14,6 +15,7 @@ func TestRepositoryPlanAdapterUsesCurrentSelector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	runSnapshotGit(t, filepath.Dir(dir), "init", "--quiet")
 	writeSDKFixture(t, dir, `package main
 import (
  "context"
