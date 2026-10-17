@@ -137,7 +137,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	defer timer.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
 	active := make(map[capability.LeaseRef]struct{})
-	idleSince, pollAt := time.Now(), time.Time{}
+	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
 	claimed := 0
 	var hostErr error
 	finish := func(result unitResult) {
@@ -207,7 +207,11 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if claims.Err() != nil || (l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims) || l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0) == 0 {
 			return nil, nil
 		}
-		if pending == nil && len(active) < l.Config.MaxConcurrent && !pollAt.After(time.Now()) {
+		nextClaim := pollAt
+		if backoffUntil.After(nextClaim) {
+			nextClaim = backoffUntil
+		}
+		if pending == nil && len(active) < l.Config.MaxConcurrent && !nextClaim.After(time.Now()) {
 			if stop, err := l.checkPolicy(claims); stop {
 				return err, nil
 			}
@@ -223,8 +227,8 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}()
 		}
 		wait := limits.VersionIndexRefresh
-		if pending == nil && pollAt.After(time.Now()) {
-			wait = min(wait, time.Until(pollAt))
+		if pending == nil && nextClaim.After(time.Now()) {
+			wait = min(wait, time.Until(nextClaim))
 		}
 		timer.Reset(l.lifecycleWait(wait, idleSince, len(active) == 0))
 		select {
@@ -242,7 +246,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			default:
 			}
 			if delay, ok := apierr.RetryDelay(outcome.err); ok {
-				pollAt = time.Now().Add(max(delay, l.Config.PollInterval))
+				backoffUntil = time.Now().Add(max(delay, l.Config.PollInterval))
 				continue
 			}
 			if outcome.err != nil {

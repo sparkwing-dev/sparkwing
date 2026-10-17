@@ -460,6 +460,45 @@ func TestLoopWaitsOutAControllerRetryAfter(t *testing.T) {
 	})
 }
 
+func TestLoopHostCompletionKeepsServerBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		var refusedAt time.Time
+		calls := 0
+		loop := &Loop{
+			Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, PollInterval: time.Second}, CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				calls++
+				switch calls {
+				case 1:
+					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
+				case 2:
+					refusedAt = time.Now()
+					return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(60000)}}
+				}
+				if waited := time.Since(refusedAt); waited < time.Minute {
+					t.Errorf("claimed %v after a 60s refusal", waited)
+				}
+				cancel()
+				return controllerwire.ClaimResponse{}, nil
+			}),
+			Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
+				timer := time.NewTimer(2 * time.Second)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+				}
+				return nil
+			}),
+		}
+		if err := loop.Run(ctx); !errors.Is(err, context.Canceled) || calls != 3 {
+			t.Fatalf("calls=%d err=%v", calls, err)
+		}
+	})
+}
+
 func TestLoopRefusesAwardOutsideRequestedSelection(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
