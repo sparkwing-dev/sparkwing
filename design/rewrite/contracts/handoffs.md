@@ -693,3 +693,11 @@ Korey approved dropping the launcher's dependency on Kubernetes admission polici
 - examples/cloud.yaml starts as written: /data ownership via fsGroup or securityContext.
 - Show the trusted-proxy CIDRs value in the Cloud example.
 Assigned to W8 (env 1086).
+
+## 2026-10-17 09:55 lead decision (Korey approved): machine registration
+
+- Shared team runners, which can run any member's jobs, always require a team admin to register, mint tokens for or revoke. No setting changes this.
+- Personal machines are governed by a team setting, `members_can_add_machines`, which defaults to ON. When it is on, any member can mint an enrollment token for their own personal machine. That machine claims only its owner's work, the burst rule that already exists. When it is off, only admins can register personal machines.
+- Only team admins and owners can change the setting, and changes are audited. Turning it off does not revoke machines already registered; admins revoke them explicitly.
+- CLI and console: the setting appears in team settings. `sparkwing runners add --personal` (or the existing personal enrollment path) works for members when the setting allows it, and refuses with a clear message naming the setting when it does not.
+Assigned to W2 (env 1080), with W9's CLI surface under integration authority.
