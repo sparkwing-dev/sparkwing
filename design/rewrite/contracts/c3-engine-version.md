@@ -64,9 +64,10 @@ Selected-engine Go installation hashes the captured build environment with
 compilation cannot add graph inputs or make an otherwise usable cache entry fail.
 The generated workspace-mutation test covers this boundary.
 
-Go installation and the CLI use `bincache.MaterializePipeline` to populate
-effective checksums before hashing and preserve sparks overlays. The selected
-engine copies the executable into the caller's private `ExecutableDirectory`
+Go installation and the CLI use `bincache.MaterializePipeline` to lease an
+existing local binary before invoking Go. A cache miss populates effective
+checksums, then recomputes the key before publication, preserving sparks overlays.
+The selected engine copies the executable into the caller's private `ExecutableDirectory`
 while retaining the cache lease. `SDKCommand.Close` removes that private copy
 after execution. `source.Entry.Close`, upgrade verification and cache warm join
 that cleanup. `CachedExecutable` identifies the durable cache entry for cache
@@ -74,8 +75,8 @@ warm reports. It does not authorize execution after the lease is released.
 Real Go fixtures cover missing checksums, overlays, undeclared SDK replacement refusal and
 execution after cache pruning. Native platform evidence remains separate.
 
-Dependency preparation runs `go list -deps` for the pipeline package, using
-the same workspace selection as compilation. Covering workspaces remain active.
+On a cache miss, dependency preparation runs `go list -deps` for the pipeline
+package, using the same workspace selection as compilation. Covering workspaces remain active.
 Unrelated workspaces are disabled for preparation. Outside a covering workspace,
 it uses `-mod=mod` and the effective modfile to prepare imported package
 checksums before computing the cache key. It no longer

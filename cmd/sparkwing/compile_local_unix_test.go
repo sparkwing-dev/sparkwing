@@ -58,6 +58,9 @@ exit 1
 		if readErr != nil || releaseErr != nil || source != wantSource || string(data) != "#!/bin/sh\nexit 0\n" {
 			t.Fatalf("local materialization: source=%s data=%q errors=%v,%v", source, data, readErr, releaseErr)
 		}
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	builds, err := os.ReadFile(buildLog)
 	if err != nil || string(builds) != "build\n" || calls != 0 {

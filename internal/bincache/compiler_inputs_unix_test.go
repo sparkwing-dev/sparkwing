@@ -45,6 +45,9 @@ func TestGoCommandsRequireExplicitInputs(t *testing.T) {
 		if err := RunGo(t.Context(), t.TempDir(), nil, options); err == nil {
 			t.Fatal("Go command inferred missing inputs")
 		}
+		if _, _, err := MaterializePipeline(t.Context(), t.TempDir(), options); err == nil {
+			t.Fatal("materialization inferred missing inputs")
+		}
 	}
 	options := CompileOptions{Environment: []string{"PATH=" + t.TempDir()}, Diagnostics: io.Discard}
 	if err := CompilePipeline(t.Context(), t.TempDir(), "unused", options); err == nil || !strings.Contains(err.Error(), "Go 1.26+") {

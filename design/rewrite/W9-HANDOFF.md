@@ -1,6 +1,13 @@
-# W9 continuation: burst review rulings
+# W9 continuation: cached local dependency preparation
 
-Latest continuation: [W9-BURST-REVIEW-RULINGS.md](W9-BURST-REVIEW-RULINGS.md).
+Latest continuation: [W9-CACHED-LOCAL-DEPENDENCIES.md](W9-CACHED-LOCAL-DEPENDENCIES.md).
+Matching local binaries are leased before invoking Go. Cold preparation retains
+checksum and workspace behavior. The toolchain fixture verifies its override
+during preparation and compilation. Build, vet, focused tests and source/doc
+guards pass. Full CLI/bin and tagged burst verification needs the lead's sockets
+and network. The supplied native report is green for the prior committed state.
+
+Previous continuation: [W9-BURST-REVIEW-RULINGS.md](W9-BURST-REVIEW-RULINGS.md).
 B1 and S1-S5 are implemented with failing-before-fix regressions. Real routed CLI,
 HTTP and SQLite proofs cover hostile repository settings and excluded claimants.
 Here owner renewal restores volatile requester secrets after controller restart.

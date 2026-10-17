@@ -26,6 +26,8 @@ unlock.
 
 - **controller:** Apply configured flood caps and queue shedding to sealed run submissions and retries
   Content deduplication replays one committed run without returning its one-time here bearer again.
+- **run:** Reuse local pipeline binaries before resolving Go dependencies, so
+  cache hits do not require a working Go compiler.
 
 - **run:** Keep artifact input selectors separate from execution rows so
   registered machines can start dependent jobs. Profile cache reads honor caller
